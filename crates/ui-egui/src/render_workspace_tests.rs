@@ -1951,7 +1951,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     assert!(class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
     assert!(!class_vertices(&gpu, crate::gpu::TriClass::Glass).is_empty());
     let color = |v: &[u8]| {
-        let i = v.get(crate::gpu::TRI_SIZE - 4..).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
+        let i = v.get(24..28).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
         gpu.palette.get(crate::gpu::PaletteIndex(i))
     };
     assert!(
@@ -1987,7 +1987,7 @@ fn product_appearance_edits_keep_the_blocks_vertices() {
     let vertices = plain.blocks[0].bytes.vertices.clone();
     let first_colour = |gpu: &GpuScene, class| {
         let v = class_vertices(gpu, class);
-        let i = v.get(crate::gpu::TRI_SIZE - 4..crate::gpu::TRI_SIZE).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
+        let i = v.get(24..28).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
         gpu.palette.get(crate::gpu::PaletteIndex(i))
     };
     s.execute("appearance.assign", &json!({"bodies":["Part"],"color":"#336699"})).unwrap();

@@ -34,12 +34,15 @@ pub struct SceneMesh {
     pub closed: bool,
     /// The hatch of its cut face when the scene hatches by part ([`Scene::part_hatch`]).
     pub hatch: Hatch,
+    /// A value at each of the mesh's positions, in order (a measured curvature, say), that
+    /// [`crate::AnalysisMode::Values`] colours the body by; `None` for a body without.
+    pub values: Option<Arc<Vec<f32>>>,
 }
 
 impl SceneMesh {
     /// A solid body in `color`, with no face of its own look.
     pub fn solid(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
-        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0) }
+        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0), values: None }
     }
 
     /// Is the body drawn see-through? (Its opacity is below [`SEE_THROUGH`].)
