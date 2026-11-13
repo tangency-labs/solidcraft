@@ -1898,7 +1898,7 @@ impl SolveApp {
         if drawing_workspace::active(self)
             && !id.starts_with("drawing.")
             && !matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata" | "document.metadata.set" | "view.layout")
-            && !matches!(id, "view.fit" | "view.home" | "view.tool")
+            && !matches!(id, "view.fit" | "view.home" | "view.tool" | "view.tool.zoom")
         {
             self.set_status(self.tr_label("Return to Design to use this command.").to_string(), true);
             return;

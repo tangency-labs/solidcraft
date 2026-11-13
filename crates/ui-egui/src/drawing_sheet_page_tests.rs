@@ -133,6 +133,7 @@ fn fit_sheet_shows_the_whole_sheet_and_zoom_stays_in_range() {
     for _ in 0..80 {
         h.app.synthetic.push(egui::Event::PointerMoved(centre));
         h.app.synthetic.push(egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(0.0, 400.0),
             modifiers: egui::Modifiers::NONE,

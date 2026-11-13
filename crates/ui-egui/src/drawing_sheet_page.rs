@@ -34,7 +34,7 @@ use solidcraft_engine::geom::paper::text::TextRun;
 use solidcraft_engine::geom::paper::{Dashes, Item, ObjectKind, Scene};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::geom::{Aabb2, Region2Geom, Seg2Geom};
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
 use crate::ui_kit::{self, Container, Surface};
@@ -557,7 +557,7 @@ fn zoom_card(app: &mut SolveApp, ui: &mut egui::Ui, canvas: Rect, zoom: f64) {
     let position = pos2(area.right() - size.x - t.space_8, area.bottom() - size.y - t.space_8).max(area.min);
     let mut percent = shown_percent(zoom);
     let mut chosen = None;
-    let card = container.area(egui::Id::new("sc_sheet_zoom")).fixed_pos(position).show(ui.ctx(), |ui| {
+    let card = container.area(ui.make_persistent_id("sc_sheet_zoom")).fixed_pos(position).show(ui.ctx(), |ui| {
         container.show_frame(ui, frame, area, |ui| {
             ui.horizontal(|ui| {
                 let field = ui_kit::number_field(ui, &mut percent, 5.0..=3200.0, 1.0, " %").on_hover_text(app.tr("ui.sheet_page.zoom"));
