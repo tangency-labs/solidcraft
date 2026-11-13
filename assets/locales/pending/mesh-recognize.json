@@ -1,34 +1,50 @@
 {
   "ar": {
     "cmd.mesh.rebuild": "إعادة بناء الشبكة كميزات",
-    "cmd.mesh.recognize": "التعرف على الشبكة"
+    "cmd.mesh.recognize": "التعرف على الشبكة",
+    "help.mesh.rebuild": "يعيد بناء جسم شبكي موشوري كميزات عادية: رسم تخطيطي وبثق والثقوب والنتوءات التي تمثلها أسطواناته. استخدمه لتحويل لوح أو حامل مستورد إلى قطعة يمكنك تغييرها بأبعادها.",
+    "help.mesh.recognize": "يقرأ جسمًا شبكيًا بوصفه الأسطح التي يمثلها، من مستويات وأسطوانات ومخاريط وكرات وحلقات، ويذكر كل واحد منها دون تغيير أي شيء. استخدمه لترى مما يتكوّن مسح ضوئي أو ملف STL قبل إعادة بنائه."
   },
   "de": {
     "cmd.mesh.rebuild": "Netz als Funktionen neu aufbauen",
-    "cmd.mesh.recognize": "Netz erkennen"
+    "cmd.mesh.recognize": "Netz erkennen",
+    "help.mesh.rebuild": "Baut einen prismatischen Netzkörper wieder als gewöhnliche Features auf: eine Skizze, eine Extrusion und die Bohrungen und Augen, für die seine Zylinder stehen. Damit wird aus einer importierten Platte oder Konsole ein Teil, das Sie über seine Maße ändern.",
+    "help.mesh.recognize": "Liest einen Netzkörper als die Flächen, für die er steht: Ebenen, Zylinder, Kegel, Kugeln und Tori, jede einzeln gemeldet und nichts verändert. Damit sehen Sie, woraus ein Scan oder eine STL besteht, bevor Sie sie nachbauen."
   },
   "en": {
     "cmd.mesh.rebuild": "Rebuild Mesh as Features",
-    "cmd.mesh.recognize": "Recognize Mesh"
+    "cmd.mesh.recognize": "Recognize Mesh",
+    "help.mesh.rebuild": "Builds a prismatic mesh body again as ordinary features: a sketch, an extrusion, and the holes and bosses its cylinders stand for. Use it to turn an imported plate or bracket into a part you can change by its dimensions.",
+    "help.mesh.recognize": "Reads a mesh body as the surfaces it stands for, planes, cylinders, cones, spheres and tori, and reports each one without changing anything. Use it to see what a scan or an STL is made of before rebuilding it."
   },
   "he": {
     "cmd.mesh.rebuild": "בנייה מחדש של רשת משולשים כפיצ'רים",
-    "cmd.mesh.recognize": "זיהוי רשת משולשים"
+    "cmd.mesh.recognize": "זיהוי רשת משולשים",
+    "help.mesh.rebuild": "בונה מחדש גוף רשת מנסרתי כתכונות רגילות: סקיצה, משיכה, והחורים והבליטות שהגלילים שלו מייצגים. מתאים להפיכת לוח או תושבת שיובאו לחלק שאפשר לשנות לפי מידותיו.",
+    "help.mesh.recognize": "קורא גוף רשת כמשטחים שהוא מייצג, מישורים, גלילים, חרוטים, כדורים וטורוסים, ומדווח על כל אחד מהם בלי לשנות דבר. מתאים לראות ממה עשויים סריקה או קובץ STL לפני בנייתם מחדש."
   },
   "ja": {
     "cmd.mesh.rebuild": "メッシュをフィーチャーとして再構築",
-    "cmd.mesh.recognize": "メッシュを認識"
+    "cmd.mesh.recognize": "メッシュを認識",
+    "help.mesh.rebuild": "角柱状のメッシュボディを、通常のフィーチャとして作り直します。スケッチと押し出し、そして円柱が表す穴とボスになります。読み込んだプレートやブラケットを、寸法で変更できる部品にするときに使います。",
+    "help.mesh.recognize": "メッシュボディを、それが表す面、つまり平面、円柱、円錐、球、トーラスとして読み取り、何も変更せずにそれぞれを報告します。スキャンやSTLが何でできているかを、作り直す前に確かめるときに使います。"
   },
   "ko": {
     "cmd.mesh.rebuild": "메쉬를 피처로 재구축",
-    "cmd.mesh.recognize": "메쉬 인식"
+    "cmd.mesh.recognize": "메쉬 인식",
+    "help.mesh.rebuild": "각기둥 모양의 메시 본체를 보통의 피처로 다시 만듭니다. 스케치와 돌출, 그리고 원기둥이 나타내는 구멍과 보스입니다. 가져온 판이나 브래킷을 치수로 바꿀 수 있는 부품으로 만들 때 사용합니다.",
+    "help.mesh.recognize": "메시 본체를 그것이 나타내는 면, 곧 평면, 원기둥, 원뿔, 구, 토러스로 읽어 아무것도 바꾸지 않고 각각을 보고합니다. 스캔이나 STL이 무엇으로 이루어졌는지 다시 만들기 전에 볼 때 사용합니다."
   },
   "vi": {
     "cmd.mesh.rebuild": "Dựng lại lưới thành các tính năng",
-    "cmd.mesh.recognize": "Nhận dạng lưới"
+    "cmd.mesh.recognize": "Nhận dạng lưới",
+    "help.mesh.rebuild": "Dựng lại một thân lưới dạng lăng trụ thành các đặc trưng thông thường: một phác thảo, một lần đùn, cùng các lỗ và bệ mà các mặt trụ của nó đại diện. Dùng để biến tấm hay giá đỡ đã nhập thành chi tiết sửa được theo kích thước.",
+    "help.mesh.recognize": "Đọc một thân lưới thành các mặt mà nó đại diện, gồm mặt phẳng, trụ, nón, cầu và xuyến, rồi báo cáo từng mặt mà không thay đổi gì. Dùng để xem một bản quét hay tệp STL gồm những gì trước khi dựng lại."
   },
   "zh": {
     "cmd.mesh.rebuild": "将网格重建为特征",
-    "cmd.mesh.recognize": "识别网格"
+    "cmd.mesh.recognize": "识别网格",
+    "help.mesh.rebuild": "把棱柱形网格实体重新构建为普通特征：一个草图、一次拉伸，以及其圆柱所代表的孔和凸台。用于把导入的板件或支架变成可以按尺寸修改的零件。",
+    "help.mesh.recognize": "将网格实体读取为它所代表的曲面，即平面、圆柱、圆锥、球和圆环，并逐一报告，不做任何更改。用于在重建扫描件或 STL 之前查看其构成。"
   }
 }
