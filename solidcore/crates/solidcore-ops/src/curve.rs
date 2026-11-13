@@ -17,11 +17,11 @@ use solidcore::curve::curve::Curve as KCurve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::from_parameters::{from_parameters, EdgeCurve};
 use solidcore::error::geom::GeomFailure;
-use solidcore::nurbs::crv_adv::p1::{Continuity, CurveEnd};
-use solidcore::nurbs::crv_geom::ToleranceKind;
 use solidcore::geom::certified::Verdict;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
+use solidcore::nurbs::crv_adv::p1::{Continuity, CurveEnd};
+use solidcore::nurbs::crv_geom::ToleranceKind;
 use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::knots::{clamped_uniform, MAX_DEGREE};
 use solidcore::nurbs::math::{MatrixType, RealMatrix};
@@ -377,8 +377,9 @@ fn through(points: [[f64; 3]; 3], closed: bool) -> Result<Curve> {
     if !points.iter().all(|p| coord_ok(p)) || a == b || b == c || c == a {
         return Err(Error::Argument);
     }
-    let made = run("curve::circle_through", |k| {
-        match Ellipse::circle_from_3_points(k, point(a), point(b), point(c), 3, closed) {
+    let made = run(
+        "curve::circle_through",
+        |k| match Ellipse::circle_from_3_points(k, point(a), point(b), point(c), 3, closed) {
             Ok(circle) => exact_record(k, &KCurve::from(circle)),
             Err(e)
                 if matches!(
@@ -389,8 +390,8 @@ fn through(points: [[f64; 3]; 3], closed: bool) -> Result<Curve> {
                 Ok(Err(Error::Argument))
             }
             Err(e) => Err(e),
-        }
-    })??;
+        },
+    )??;
     on_unit(&made)
 }
 
@@ -1019,7 +1020,11 @@ mod tests {
 
     /// The distance from `a` to `b`.
     fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
-        a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt()
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y) * (x - y))
+            .sum::<f64>()
+            .sqrt()
     }
 
     /// `c`'s degree, control point count and knots, for a rational spline.
@@ -1036,7 +1041,10 @@ mod tests {
         for i in 0..=256 {
             let p = at(c, f64::from(i) / 256.0);
             let r = dist(p, centre);
-            assert!((r - radius).abs() <= tol, "at {i}: radius {r}, not {radius}");
+            assert!(
+                (r - radius).abs() <= tol,
+                "at {i}: radius {r}, not {radius}"
+            );
             let off: f64 = (0..3).map(|j| (p[j] - centre[j]) * normal[j]).sum();
             assert!(off.abs() <= tol, "at {i}: {off} off the plane");
         }
@@ -1083,7 +1091,10 @@ mod tests {
         assert_eq!(circle(o, z, [0.0, 0.0, -3.0], 1.0), Err(Error::Argument));
         // the reference is not projected into the plane
         assert_eq!(circle(o, z, [1.0, 0.0, 1.0], 1.0), Err(Error::Argument));
-        assert_eq!(circle([f64::NAN, 0.0, 0.0], z, x, 1.0), Err(Error::Argument));
+        assert_eq!(
+            circle([f64::NAN, 0.0, 0.0], z, x, 1.0),
+            Err(Error::Argument)
+        );
     }
 
     #[test]
@@ -1126,8 +1137,14 @@ mod tests {
         assert!(dist(at(&most, 0.0), east) < 1e-11);
         assert!(dist(at(&most, 1.0), south) < 1e-11);
         let samples: Vec<[f64; 3]> = (0..=256).map(|i| at(&most, f64::from(i) / 256.0)).collect();
-        assert!(samples.iter().any(|p| dist(*p, west) < 0.5), "through the west");
-        assert!(samples.iter().all(|p| p[0] < 1e-11 || p[1] > -1e-11), "not the south-east");
+        assert!(
+            samples.iter().any(|p| dist(*p, west) < 0.5),
+            "through the west"
+        );
+        assert!(
+            samples.iter().all(|p| p[0] < 1e-11 || p[1] > -1e-11),
+            "not the south-east"
+        );
     }
 
     #[test]
@@ -1257,7 +1274,10 @@ mod tests {
         let [_, hi] = domain(&more);
         for i in 0..=20 {
             let p = at(&more, 1.0 + (hi - 1.0) * f64::from(i) / 20.0);
-            assert!((dist(p, [0.0; 3]) - 10.0).abs() < 1e-9, "{p:?} off the circle");
+            assert!(
+                (dist(p, [0.0; 3]) - 10.0).abs() < 1e-9,
+                "{p:?} off the circle"
+            );
         }
     }
 
@@ -1280,7 +1300,12 @@ mod tests {
         ring.push(SQUARE[0]);
         let clamped_ring = cv_curve(&ring, 3).unwrap();
         assert_eq!(
-            extend_curve(&clamped_ring, CurveEndAt::Start, 1.0, CurveExtension::Linear),
+            extend_curve(
+                &clamped_ring,
+                CurveEndAt::Start,
+                1.0,
+                CurveExtension::Linear
+            ),
             Err(Error::Argument)
         );
         let line = Curve::Line {

@@ -162,7 +162,9 @@ pub fn edge_as_curve(
     let e = order::edge(order, edge)?;
     let trimmed = with_body("curve_fit::edge_as_curve", body, |k, b| {
         let Some(curve) = create_trimmed_nurbs_curve(k, b, e)? else {
-            return Ok(Err(Error::Unsupported("an edge whose curve has no B-spline form")));
+            return Ok(Err(Error::Unsupported(
+                "an edge whose curve has no B-spline form",
+            )));
         };
         let made = kernel_record(k, &curve, &curve.natural_interval())?;
         Ok(match solidcore_convert::record_curve(made.curve) {
@@ -579,13 +581,19 @@ mod tests {
         for i in 0..=200 {
             let p = at(&fit, f64::from(i) / 200.0);
             assert!(p[2].abs() <= allowed, "{p:?} off the sheet");
-            assert!((-allowed..=20.0 + allowed).contains(&p[0]), "{p:?} past the sheet");
+            assert!(
+                (-allowed..=20.0 + allowed).contains(&p[0]),
+                "{p:?} past the sheet"
+            );
             assert!((p[1] - wave_y(p[0])).abs() <= allowed, "{p:?} off the wave");
         }
         // from one side of the sheet to the other
         let (a, b) = (at(&fit, 0.0)[0], at(&fit, 1.0)[0]);
         let (lo, hi) = (a.min(b), a.max(b));
-        assert!(lo.abs() <= allowed && (hi - 20.0).abs() <= allowed, "{a} {b}");
+        assert!(
+            lo.abs() <= allowed && (hi - 20.0).abs() <= allowed,
+            "{a} {b}"
+        );
         // a quadratic of one span is no cubic wave
         assert!(matches!(
             edge_as_curve(&cut, &order, edge, 2, 1, 1e-9),

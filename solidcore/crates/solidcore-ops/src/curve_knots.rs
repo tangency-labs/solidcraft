@@ -487,7 +487,10 @@ mod tests {
         assert_eq!(p1[p1.len() - 1], WAVE[5]);
         let (m0, m1) = (p0[p0.len() - 1], p1[0]);
         assert!(m0.iter().zip(m1).all(|(a, b)| (a - b).abs() < 1e-12));
-        assert!(m0.iter().zip(at(&c, 0.4)).all(|(a, b)| (a - b).abs() < 1e-12));
+        assert!(m0
+            .iter()
+            .zip(at(&c, 0.4))
+            .all(|(a, b)| (a - b).abs() < 1e-12));
 
         // at an interior knot (1/3 for six points' cubic)
         let knot = parts(&c).0[4];
