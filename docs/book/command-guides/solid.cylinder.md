@@ -1,4 +1,4 @@
-Make a cylinder from a diameter and a height: a round blank, a pin, or a boss standing on a face. Stand it on a face and locate it from two edges, the way a print dimensions it, and it can join the part or cut into it.
+Make a cylinder from a diameter and a height: a round blank, a pin, or a boss standing on a face. Stand it on a face and locate it from two edges, the way a print dimensions it, and it can join the part. A cylinder on a face grows outward, so Cut only removes material where the cylinder overlaps the part; to cut into the part, leave Face empty and set the base below the face with X, Y and Z.
 
 #### Before you start
 
@@ -14,8 +14,8 @@ Make a cylinder from a diameter and a height: a round blank, a pin, or a boss st
 | Reference 1 and Distance 1 | An edge of the face, and how far the cylinder's center is from it. | The left edge, 0.75 in. |
 | Reference 2 and Distance 2 | A second edge, and how far the center is from it. | The front edge, 0.75 in. |
 | Size | Whether you type a Diameter or a Radius. | Diameter, to match the print. |
-| Diameter | The cylinder's diameter (or Radius, if Size is set to Radius). It starts at 20 mm. | 0.500 in for a boss. |
-| Height | How long the cylinder is, from the face out. It starts at 20 mm. | 0.25 in. |
+| Diameter | The cylinder's diameter (or Radius, if Size is set to Radius). It starts at 20 in the design's unit. | 0.500 in for a boss. |
+| Height | How long the cylinder is, from the face out. It starts at 20 in the design's unit. | 0.25 in. |
 | Placement, X, Y, Z | With no face picked, where the center of the cylinder's base goes. | 0, 0, 0 to start a round blank at the origin. |
 | Operation | It starts at New Body. New Body makes a separate body. Join adds it to the part. Cut takes it out of the part. Intersect keeps only the material inside both. | Join for a boss. New Body for a round blank or a pin. |
 
