@@ -2564,16 +2564,37 @@ mod tests {
             assert!(bytes.starts_with(signature), "{cmd}");
         }
         // The triangles `file.export` writes (the 80-byte header holds the file's name), 84 + 50
-        // bytes each. A planar face is exact for any triangulation of its outline, so the mesher
-        // gives each of the box's six faces two triangles (kernel test `a_box_is_two_triangles_a_face`).
+        // bytes each, as many as the OBJ export's. The 20 x 10 x 5 box is meshed on the mesh path,
+        // shaped to the smallest angle, so its faces take nodes inside them (it was two triangles a
+        // face on the display path, kernel test `a_box_is_two_triangles_a_face`). Whatever their
+        // number: the OBJ's welded mesh is a sphere's (f = 2v - 4), no triangle is sharper than
+        // the smallest angle, and the STL's area and volume are the box's to f32 rounding.
         s.execute("file.export", &json!({"path": at("box.stl")})).unwrap();
         assert_eq!(std::fs::read(at("StlBinary.txt")).unwrap()[80..], std::fs::read(at("box.stl")).unwrap()[80..]);
-        let triangles = 6 * 2;
+        let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
+        let triangles = obj.lines().filter(|l| l.starts_with("f ")).count();
+        let vertices = obj.lines().filter(|l| l.starts_with("v ")).count();
+        assert_eq!(triangles, 2 * vertices - 4, "{obj}");
         let stl = std::fs::read(at("box.stl")).unwrap();
         assert_eq!(u32::from_le_bytes([stl[80], stl[81], stl[82], stl[83]]), u32::try_from(triangles).unwrap());
         assert_eq!(stl.len(), 84 + 50 * triangles);
-        let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
-        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), triangles, "{obj}");
+        use solidcraft_geom::prelude::*;
+        let (mut area, mut volume) = (0.0f64, 0.0f64);
+        for t in solidcraft_io::read_stl(&stl).unwrap() {
+            let p = |k: usize| solidcore_record::Vec3::new(t[k][0] as f64, t[k][1] as f64, t[k][2] as f64);
+            let (a, b, c) = (p(0), p(1), p(2));
+            let corner = |a: solidcore_record::Vec3, b: solidcore_record::Vec3, c: solidcore_record::Vec3| {
+                (b - a).cross(c - a).len().atan2((b - a).dot(c - a)).to_degrees()
+            };
+            let smallest = corner(a, b, c).min(corner(b, c, a)).min(corner(c, a, b));
+            // f32 coordinates move a corner by well under 1e-3 degrees on sides of a millimetre.
+            assert!(smallest >= solidcraft_kernel::MESH_MIN_ANGLE - 1e-3, "{smallest}°");
+            area += (b - a).cross(c - a).len() / 2.0;
+            volume += a.dot(b.cross(c)) / 6.0;
+        }
+        // f32 rounding of coordinates up to 20 mm (under 1e-6 mm each) over 700 mm² of faces.
+        assert!((area - 700.0).abs() < 1e-3, "{area}");
+        assert!((volume - 1000.0).abs() < 1e-3, "{volume}");
         let r = s.execute("file.export_urdf", &json!({"path": at("robot.urdf")})).unwrap();
         assert_eq!(r["format"], "Urdf");
         assert!(std::fs::read_to_string(at("robot.urdf")).unwrap().contains("<robot"));

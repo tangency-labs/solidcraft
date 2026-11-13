@@ -1494,8 +1494,12 @@ mod tests {
     }
 
     /// OBJ shares the vertices faces meet at and keeps the body name as written, spaces included.
-    /// The 10 × 20 × 30 box meshes as two triangles a face (a flat face needs no interior
-    /// nodes), 12 triangles on its 8 corners (unwelded, 36), and one normal per face.
+    /// The 10 × 20 × 30 box is meshed on the mesh path, shaped to the smallest angle, so its
+    /// faces take nodes inside them (it was 8 vertices and 12 triangles, two a face, on the
+    /// display path). Whatever their number: the welded mesh is closed (every side in two
+    /// triangles, run opposite ways) and a sphere's (f = 2v - 4), each triangle keeps the angle,
+    /// its area and volume are the box's (its faces are flat, so exactly, to rounding), and it has
+    /// one normal per face.
     #[test]
     fn obj_export_is_welded_and_keeps_names() {
         let (_, m) = model();
@@ -1506,10 +1510,44 @@ mod tests {
         let o = String::from_utf8(export(&st, &[], Format::Obj, "t").unwrap()).unwrap();
         let count = |p: &str| o.lines().filter(|l| l.starts_with(p)).count();
         assert!(o.contains("\no Red Block\n"), "{o}");
-        assert_eq!((count("v "), count("vn "), count("f ")), (8, 6, 12), "{o}");
-        let ids: Vec<usize> =
-            o.lines().filter(|l| l.starts_with("f ")).flat_map(|l| l.split([' ', '/']).skip(1)).filter_map(|x| x.parse().ok()).collect();
-        assert!(ids.iter().all(|i| (1..=8).contains(i)));
+        let (v, f) = (count("v "), count("f "));
+        assert_eq!(count("vn "), 6, "{o}");
+        assert_eq!(f, 2 * v - 4, "closed and of genus 0: {v} vertices, {f} triangles");
+        let points: Vec<Vec3> = o
+            .lines()
+            .filter_map(|l| l.strip_prefix("v "))
+            .map(|l| {
+                let x: Vec<f64> = l.split(' ').map(|x| x.parse().unwrap()).collect();
+                Vec3::new(x[0], x[1], x[2])
+            })
+            .collect();
+        let tris: Vec<[usize; 3]> = o
+            .lines()
+            .filter_map(|l| l.strip_prefix("f "))
+            .map(|l| {
+                let ids: Vec<usize> = l.split(' ').map(|c| c.split('/').next().unwrap().parse().unwrap()).collect();
+                [ids[0], ids[1], ids[2]]
+            })
+            .collect();
+        assert!(tris.iter().flatten().all(|i| (1..=v).contains(i)));
+        let mut sides = std::collections::BTreeMap::<(usize, usize), i32>::new();
+        for t in &tris {
+            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                *sides.entry((a.min(b), a.max(b))).or_default() += if a < b { 1 } else { -1 };
+            }
+        }
+        assert!(sides.values().all(|n| *n == 0), "every side is run once each way");
+        let corner = |a: Vec3, b: Vec3, c: Vec3| (b - a).cross(c - a).len().atan2((b - a).dot(c - a)).to_degrees();
+        let (mut area, mut volume) = (0.0, 0.0);
+        for t in &tris {
+            let [a, b, c] = t.map(|i| points[i - 1]);
+            let smallest = corner(a, b, c).min(corner(b, c, a)).min(corner(c, a, b));
+            assert!(smallest >= solidcraft_kernel::MESH_MIN_ANGLE - 1e-6, "{smallest}°");
+            area += (b - a).cross(c - a).len() / 2.0;
+            volume += a.dot(b.cross(c)) / 6.0;
+        }
+        assert!((area - 2200.0).abs() < 1e-9 * 2200.0, "{area}");
+        assert!((volume - 6000.0).abs() < 1e-9 * 6000.0, "{volume}");
     }
 
     /// The OBJ export carries the colours of the bodies: the mesh file names the material
