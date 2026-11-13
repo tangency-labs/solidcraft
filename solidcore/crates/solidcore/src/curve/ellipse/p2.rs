@@ -75,6 +75,15 @@
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
 //!   converter (status ignored); the port calls [`Ellipse::set_up_polar_conversion`]
 //!   at those points. The other notifications only drop caches and are omitted.
+//! - **Two crossings stay two.** `IntersectWithLine` and `IntersectWithEllipse` find
+//!   their candidate points with `smgu_LineCoPlanarCircleIntersect` at ten times the
+//!   intersection tolerance, which upstream also uses to merge the line's two
+//!   crossings into one: crossings up to ten tolerances apart became a single point
+//!   mid-chord, off the circle, and both were lost. The port keeps the ten-fold band for
+//!   finding the line and merges the crossings only when the merged point lies on the
+//!   circle within the intersection tolerance ([`line_coplanar_circle_intersect_distinct`]). Where upstream would have merged
+//!   them, a solution of the second crossing that repeats one of the first (both
+//!   dropped onto the end of a short arc) is not added again.
 //! - **Co-port.** The geometric constructor belongs to unit `curve.ellipse_p1`; it is
 //!   ported here because every method of this unit needs an ellipse with its NURB
 //!   (made by `MakeNurb`, `p1`).
@@ -112,8 +121,9 @@ use crate::geom::assert_array::labels::POLAR_CONVERSION_TYPE;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{
-    circle_coplanar_circle_intersect, line_coplanar_circle_intersect, line_plane_intersect,
-    point_project_to_plane, transform_point_to_start_plane, vector_project_to_plane, CircleCircle,
+    circle_coplanar_circle_intersect, line_coplanar_circle_intersect_distinct,
+    line_plane_intersect, point_project_to_plane, transform_point_to_start_plane,
+    vector_project_to_plane, CircleCircle,
 };
 use crate::geom::geom_utility::p2::{intersect_two_planes, PlanesIntersection};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -1633,6 +1643,9 @@ impl Ellipse {
         let other_center = other.position.origin();
 
         let mut intersection_points: Vec<Point3> = Vec::new();
+        // Two crossings upstream would have merged into one (see the module docs):
+        // the second one may not add a solution the first already gave.
+        let mut merged_upstream = false;
 
         // Check for coplanar circles: use the sine of the angle, not the cosine.
         let cross = this_normal.cross(other_normal);
@@ -1710,13 +1723,14 @@ impl Ellipse {
                 };
 
             // intersect circle with line of intersections
-            let line_params = line_coplanar_circle_intersect(
+            let line_params = line_coplanar_circle_intersect_distinct(
                 line_pnt,
                 line_vec,
                 this_center,
                 this_normal,
                 self.x_radius(),
                 tol * 10.0,
+                tol,
             )?;
 
             // no intersections
@@ -1730,6 +1744,7 @@ impl Ellipse {
                 // get the 3d intersection point
                 intersection_points.push(line_pnt + *p * line_vec);
             }
+            merged_upstream = crossings_merged_upstream(&intersection_points, tol);
         }
 
         // Drop point onto each curve to get the intersection point.
@@ -1740,7 +1755,11 @@ impl Ellipse {
         sol.num_variables = 2;
         sol.solution_type = SolutionType::SingleValue;
 
-        for ip in &intersection_points {
+        let mut first_candidate_end = 0;
+        for (candidate, ip) in intersection_points.iter().enumerate() {
+            if candidate == 1 {
+                first_candidate_end = out.solutions.len();
+            }
             let solutions1: Vec<Solution<O>> =
                 ellipse_global_point_solve(k, self, interval, *ip, tol * 10.0)?;
 
@@ -1801,7 +1820,15 @@ impl Ellipse {
                     }
 
                     // All refined if necessary; see about using this result.
-                    if dist <= tol + scaled_zero {
+                    if dist <= tol + scaled_zero
+                        && !(merged_upstream
+                            && candidate == 1
+                            && self.repeats_solution(
+                                out.solutions.get(..first_candidate_end).unwrap_or(&[]),
+                                sol.start.parameters[0],
+                                tol,
+                            )?)
+                    {
                         sol.start.solution_value = dist;
                         out.solutions.push(sol);
                     }
@@ -1856,6 +1883,9 @@ impl Ellipse {
         let line_vec = line.line_vector() * line.line_scale();
 
         let mut intersection_points: Vec<Point3> = Vec::new();
+        // Two crossings upstream would have merged into one (see the module docs):
+        // the second one may not add a solution the first already gave.
+        let mut merged_upstream = false;
         let mut may_need_refinement = false;
 
         // Check to see if circles and line are somewhat on the same plane.
@@ -1888,13 +1918,14 @@ impl Ellipse {
             }
 
             // Intersect the projected line with the ellipse.
-            let line_params = line_coplanar_circle_intersect(
+            let line_params = line_coplanar_circle_intersect_distinct(
                 line_plane_pnt,
                 line_plane_vec,
                 this_center,
                 this_normal,
                 self.x_radius(),
                 tol * 10.0,
+                tol,
             )?;
             if line_params.is_empty() {
                 out.needs_more_intersections = false;
@@ -1903,6 +1934,7 @@ impl Ellipse {
             for p in &line_params {
                 intersection_points.push(line_plane_pnt + *p * line_plane_vec);
             }
+            merged_upstream = crossings_merged_upstream(&intersection_points, tol);
         }
 
         // Drop point onto each curve to get the intersection point.
@@ -1913,7 +1945,11 @@ impl Ellipse {
         sol.num_variables = 2;
         sol.solution_type = SolutionType::SingleValue;
 
-        for ip in &intersection_points {
+        let mut first_candidate_end = 0;
+        for (candidate, ip) in intersection_points.iter().enumerate() {
+            if candidate == 1 {
+                first_candidate_end = out.solutions.len();
+            }
             // (a failing status returns SM_SUCCESS upstream; Unported propagates)
             let solutions2: Vec<Solution<O>> =
                 match line_global_point_solve(line, other_interval, *ip, tol * 10.0) {
@@ -1974,7 +2010,15 @@ impl Ellipse {
                         }
                     }
 
-                    if dist <= tol + scaled_zero {
+                    if dist <= tol + scaled_zero
+                        && !(merged_upstream
+                            && candidate == 1
+                            && self.repeats_solution(
+                                out.solutions.get(..first_candidate_end).unwrap_or(&[]),
+                                sol.start.parameters[0],
+                                tol,
+                            )?)
+                    {
                         sol.start.solution_value = dist;
                         out.solutions.push(sol);
                     }
@@ -1984,6 +2028,19 @@ impl Ellipse {
 
         out.needs_more_intersections = false;
         Ok(out)
+    }
+
+    /// Whether the point at `t` on this ellipse lies within `tol` of the ellipse point
+    /// of one of the `earlier` solutions (not upstream: see the module docs, "Two
+    /// crossings stay two").
+    fn repeats_solution<O>(&self, earlier: &[Solution<O>], t: f64, tol: f64) -> Result<bool> {
+        let p = self.base.evaluate_point(t)?;
+        for s in earlier {
+            if self.base.evaluate_point(s.start.parameters[0])?.distance(p) <= tol {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     // ---- edits ------------------------------------------------------------------------
@@ -2329,6 +2386,15 @@ pub(crate) fn set_up_polar_conversion(
     // all done - conversion tables are set up
     pc.possible = true;
     Ok(())
+}
+
+/// Whether the two candidate crossings are close enough that upstream's merge (ten
+/// times the intersection tolerance) would have made them one point.
+fn crossings_merged_upstream(points: &[Point3], tol: f64) -> bool {
+    match points {
+        [a, b] => a.distance(*b) <= tol * 10.0,
+        _ => false,
+    }
 }
 
 #[cfg(test)]

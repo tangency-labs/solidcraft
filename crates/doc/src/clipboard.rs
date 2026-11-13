@@ -317,7 +317,7 @@ impl crate::Feature {
                 }
                 for link in &mut sketch.links {
                     remap_link(&mut link.source, ids, names, bodies, 0);
-                    for n in link.face_name.iter_mut().chain(&mut link.edge_name) {
+                    for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name) {
                         *n = remap_topology(n, ids, bodies);
                     }
                 }

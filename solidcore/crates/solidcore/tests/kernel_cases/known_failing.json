@@ -1,5 +1,17 @@
 [
   {
+    "case": "booleans/3012-filleted-boxes-1e-4-apart-cut",
+    "issue": "tangency-labs/solidcraft#15669",
+    "reason": "the two 1e-4 wide faces of the sliver (y=0 and y=30) are absorbed into the tolerance of their edges (4e-5 and 5e-5 for a body at 1e-5): 8 faces, 18 edges, 12 vertices instead of 10, 24, 16",
+    "fails": "faces 8 (rig 10), edges 18 (rig 24), vertices 12 (rig 16)"
+  },
+  {
+    "case": "booleans/3012-filleted-boxes-1e-4-apart-cut-reversed",
+    "issue": "tangency-labs/solidcraft#15669",
+    "reason": "the two 1e-4 wide faces of the sliver (y=0 and y=30) are absorbed into the tolerance of their edges (4e-5 and 5e-5 for a body at 1e-5): 8 faces, 18 edges, 12 vertices instead of 10, 24, 16",
+    "fails": "faces 8 (rig 10), edges 18 (rig 24), vertices 12 (rig 16)"
+  },
+  {
     "case": "fillets/12342-round-wall-and-ledge-edges-r5-refused",
     "issue": "solidcore#2845",
     "reason": "status 1001 instead of the refusal naming the size that fits"

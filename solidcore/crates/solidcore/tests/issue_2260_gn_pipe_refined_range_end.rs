@@ -236,7 +236,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "taper_tangent_corner_planes",
     "temporary_radius_setup_errors",
     "thicken_planar_side_walls",
-    "topology_failed_evaluations_propagate",
     "torus_check_reads_v_interval",
     "torus_check_spindle_apex",
     "torus_iso_circle_axis_from_midpoint",

@@ -2466,8 +2466,8 @@ fn boxes_meet(a: &Aabb3, b: &Aabb3, pad: f64) -> bool {
 
 #[cfg(test)]
 thread_local! {
-    /// Planar face lookups (each tessellates the body) and triangles the snap looked at, on this
-    /// thread: tests bound the work of a pick with them.
+    /// Planar face lookups that measured a body's mesh, and triangles the snap looked at, on
+    /// this thread: tests bound the work of a pick with them.
     static SNAP_WORK: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
 }
 
@@ -2500,15 +2500,62 @@ mod face_snap_tests {
         for _ in 0..5 {
             assert_eq!(planar_face(&s, &body, face), Some(first));
         }
-        assert_eq!(take_snap_work().0, 1, "the same model state looks the face up once");
+        assert_eq!(take_snap_work().0, 0, "a plane is planar by its surface: nothing is meshed");
         assert!((first.0.z - 20.0).abs() < 1e-9 && (first.1 - Vec3::Z).len() < 1e-9, "{first:?}");
 
         // A changed model is looked at again.
         s.execute("solid.box", &json!({"length":10,"width":10,"height":50,"operation":"join"})).unwrap();
         let (body, face) = top(&s);
         let again = planar_face(&s, &body, face).expect("the new top face is planar");
-        assert_eq!(take_snap_work().0, 1);
+        assert_eq!(take_snap_work().0, 0);
         assert!((again.0.z - 50.0).abs() < 1e-9, "{again:?}");
+    }
+
+    /// Hovering the faces of a body while New Sketch waits for a plane does not tessellate the
+    /// body once per face: planes and flat B-spline faces are planar by their surfaces, curved
+    /// ones are not. Before, each face not among the last 8 looked up meshed the whole body,
+    /// seconds a face for a large imported body with many B-spline faces. Every face the mesh
+    /// takes as planar is still taken, with the same normal.
+    #[test]
+    fn hovering_many_faces_for_a_sketch_plane_does_not_tessellate_per_face() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, z, [x, y]) in [("S0", 0, [10, 6]), ("S1", 10, [8, 5]), ("S2", 20, [6, 4])] {
+            h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0": [-x, -y], "p1": [x, y]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("solid.loft", json!({"sections": [{"sketch": "S0"}, {"sketch": "S1"}, {"sketch": "S2"}], "body_name": "L3"})).unwrap();
+        h.app.run("solid.cylinder", json!({"base": [0, 0, 20], "radius": 2, "height": 5, "operation": "join"})).unwrap();
+        h.app.run("solid.cylinder", json!({"base": [4, 0, -1], "radius": 1, "height": 30, "operation": "cut"})).unwrap();
+        let faces = h.app.session.world_state().unwrap().body("L3").unwrap().body.faces(1e-3).unwrap();
+        assert!(faces.len() > 8, "more faces than the old cache held: {}", faces.len());
+        let curved = faces.iter().filter(|f| f.plane_normal.is_none()).count();
+        assert_eq!(curved, 2, "the boss's wall and the hole's wall");
+
+        h.app.start("sketch.create");
+        take_snap_work();
+        let d = h.app.dialog.as_ref().unwrap();
+        for _ in 0..2 {
+            for f in &faces {
+                let hit = Hit::Face { body: "L3".into(), index: f.index, point: f.centroid };
+                let picked = d.candidate_on(&h.app.session, &hit, None);
+                assert_eq!(picked.is_some(), f.plane_normal.is_some(), "face {} ({:?})", f.index, f.centroid);
+            }
+        }
+        let tessellations = take_snap_work().0;
+        assert!(tessellations <= 1, "{tessellations} tessellations for {} faces hovered twice", faces.len());
+
+        for f in &faces {
+            let exact = planar_face(&h.app.session, "L3", f.index);
+            match (f.plane_normal, exact) {
+                (Some(mesh), Some((origin, normal))) => {
+                    assert!(normal.dot(mesh) > 1.0 - 1e-9, "face {}: {normal:?} vs the mesh's {mesh:?}", f.index);
+                    assert!((f.centroid - origin).dot(normal).abs() < 1e-6, "face {}: the centroid is on its plane", f.index);
+                }
+                (None, None) => {}
+                (mesh, exact) => panic!("face {}: the mesh says {mesh:?}, the lookup {exact:?}", f.index),
+            }
+        }
     }
 
     #[test]
@@ -2609,33 +2656,62 @@ fn sketch_curve_edge(s: &Session, sel: &Sel) -> Option<Sel> {
     best.map(|(_, e)| e)
 }
 
+/// The plane of planar face `face` of `body`: a point on it and its normal, out of the material.
+/// Planes and B-spline faces go by their exact surfaces ([`Body::planar_face`]), and a cylinder,
+/// sphere or torus is curved, so hovering the faces of a large imported body tessellates nothing.
+/// Only a mesh body's face, or a surface of another kind, is judged by the mesh, measured once
+/// per body geometry ([`ModelBody::joint_faces`]).
+///
+/// [`Body::planar_face`]: solidcraft_engine::kernel::Body::planar_face
+/// [`ModelBody::joint_faces`]: solidcraft_engine::doc::ModelBody::joint_faces
 pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)> {
     let st = crate::open_meshing::session_world(s);
+    let key = (body.to_string(), face);
     let known = FACE_PLANES.with(|c| {
         let c = c.borrow();
-        c.0.as_ref().filter(|k| std::sync::Arc::ptr_eq(k, &st)).and_then(|_| c.1.iter().find(|(b, f, _)| b == body && *f == face).map(|x| x.2))
+        c.0.as_ref().filter(|k| std::sync::Arc::ptr_eq(k, &st)).and_then(|_| c.1.get(&key).copied())
     });
     if let Some(found) = known {
         return found;
     }
-    #[cfg(test)]
-    SNAP_WORK.with(|w| w.set((w.get().0 + 1, w.get().1)));
-    let found = st.body(body).and_then(|b| {
-        let tol = (b.body.size() * 1e-3).max(1e-3);
-        let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == face)?;
-        Some((f.centroid, f.plane_normal?))
-    });
+    let found = st.body(body).and_then(|b| face_plane(b, face));
     FACE_PLANES.with(|c| {
         let mut c = c.borrow_mut();
         if !c.0.as_ref().is_some_and(|k| std::sync::Arc::ptr_eq(k, &st)) {
-            *c = (Some(st.clone()), Vec::new());
+            *c = (Some(st.clone()), std::collections::HashMap::new());
         }
-        if c.1.len() >= 8 {
-            c.1.remove(0);
-        }
-        c.1.push((body.to_string(), face, found));
+        c.1.insert(key, found);
     });
     found
+}
+
+/// [`planar_face`] of one body, without the cache.
+fn face_plane(b: &solidcraft_engine::doc::ModelBody, face: usize) -> Option<(Vec3, Vec3)> {
+    use solidcore_record::brep::Surface;
+    if let Some(plane) = b.body.planar_face(face) {
+        return Some((plane.origin, plane.normal()));
+    }
+    let surface = if b.body.is_mesh() { None } else { b.body.record().faces.get(face).map(|f| &f.surface) };
+    match surface {
+        // Exact: a plane the kernel turned down is degenerate, and a B-spline face is flat
+        // only when the kernel finds it so.
+        Some(
+            Surface::Plane { .. }
+            | Surface::PlaneThrough { .. }
+            | Surface::Spline { .. }
+            | Surface::RationalSpline { .. }
+            | Surface::Cylinder { .. }
+            | Surface::Sphere { .. }
+            | Surface::Torus { .. },
+        ) => None,
+        _ => {
+            #[cfg(test)]
+            SNAP_WORK.with(|w| w.set((w.get().0 + 1, w.get().1)));
+            let faces = b.joint_faces().ok()?;
+            let f = faces.iter().find(|f| f.index == face)?;
+            Some((f.centroid, f.plane_normal?))
+        }
+    }
 }
 
 /// The fillet or chamfer feature whose blend a body face is (a piece or copy of one too).
@@ -2650,13 +2726,14 @@ pub fn blend_feature(s: &Session, body: &str, face: usize) -> Option<u64> {
 }
 
 thread_local! {
-    /// The planar faces looked up last, with the model state they were found in (kept, so the
-    /// pointer stays its own). Each lookup tessellates the whole body, about 0.1 s for an
-    /// imported part of a few million triangles, and an open Section Analysis on a face asks
-    /// for its plane several times a frame.
+    /// The faces looked up in one model state, with that state (kept, so the pointer stays its
+    /// own). A B-spline face's flatness is a kernel query, and an open Section Analysis on a
+    /// face asks for its plane several times a frame.
     #[allow(clippy::type_complexity)]
-    static FACE_PLANES: std::cell::RefCell<(Option<std::sync::Arc<solidcraft_engine::doc::ModelState>>, Vec<(String, usize, Option<(Vec3, Vec3)>)>)> =
-        const { std::cell::RefCell::new((None, Vec::new())) };
+    static FACE_PLANES: std::cell::RefCell<(
+        Option<std::sync::Arc<solidcraft_engine::doc::ModelState>>,
+        std::collections::HashMap<(String, usize), Option<(Vec3, Vec3)>>,
+    )> = std::cell::RefCell::new((None, std::collections::HashMap::new()));
 }
 
 /// A plane input as a command parameter: an origin/construction plane name or a face plane.
@@ -3910,12 +3987,6 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
     app.session.feature_edit_sketch = edited.or(started_from);
 }
 
-/// Does this dialog dock as a card (at the view's edge or in the left column)? A delete
-/// confirmation is a centred prompt instead.
-pub(crate) fn docks(d: &Dialog) -> bool {
-    !matches!(d.kind, Kind::ConfirmDelete { .. })
-}
-
 /// The width a dialog's card asks for: the managers' wider form, a study's table, or a card.
 pub(crate) fn card_width(d: &Dialog) -> f32 {
     let t = Tokens::get();
@@ -3949,7 +4020,6 @@ pub(crate) fn corner_confirms(d: &Dialog) -> bool {
 /// Show the active dialog (if any), docked flush to an edge of the viewport just below the axis
 /// view, sized to its content. The right edge is its place, except while a sketch is open: the
 /// Sketch Palette keeps the right there, and the dialog takes the left so both stay on screen.
-/// With Dialogs › In the left column it holds the left column instead (`dialog_column`).
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let escape_routed_here = !crate::viewport_status::enabled(app) || app.escape_owner.is_none_or(|owner| owner == crate::EscapeOwner::Dialog);
     // A click in the view's corner is for the dialog open this frame, or for none.
@@ -4004,31 +4074,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Physical materials: the library's, then the design's own (material.create).
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
-    // In Classic, a dialog starts on the left when the Sketch Palette occupies the right.
-    // Shared-panel workspaces keep the existing editor card floating at the right.
-    let column = crate::dialog_column::place(app, ctx, &d);
-    let side = crate::shell::floating_editor_side(
-        app,
-        column.is_some() || (crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx)),
-    );
-    let top = crate::shell::panel_top(app, vp, vp.bottom(), side);
+    let placement = crate::shell::editor_space(app, vp);
+    let side = crate::frame::Side::Right;
+    let top = crate::shell::panel_top(app, placement, placement.bottom(), side);
     // Empty/hostile viewport geometry cannot provide a safe window rectangle.
     if !vp.is_finite() || !vp.is_positive() {
         app.dialog = Some(d);
         return;
     }
-    // Command dialogs share the last dragged offset on this side until the application
-    // exits, kept inside the viewport. In the left column a dialog stays in its place.
-    let (drag_key, moved, docked, drag_bounds, anchor) = if let Some(column) = column {
-        crate::scenario::publish_rect("dialog:column", column);
-        ("", egui::Vec2::ZERO, column.min, crate::dialog_column::bounds(app, column, vp), column.min)
-    } else {
-        let drag_key = side.dialog_offset_key();
-        let moved = crate::frame::dock_offset(ctx, drag_key);
-        let docked = egui::pos2(side.anchor_x(vp), top);
-        let drag_bounds = crate::shell::tool_drag_rect(app, vp);
-        (drag_key, moved, docked, drag_bounds, crate::frame::offset_anchor(docked, moved, drag_bounds, side))
-    };
+    let drag_key = side.dialog_offset_key();
+    let moved = crate::frame::dock_offset(ctx, drag_key);
+    let docked = egui::pos2(side.anchor_x(placement), top);
+    let drag_bounds = crate::shell::tool_drag_rect(app, vp);
+    let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let mut keep = true;
     let mut ok = false;
     let mut applied = false;
@@ -4037,7 +4095,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut cancel = false;
     let mut enter = false;
     let mut value_fields = Vec::new();
-    let wide = matches!(&d.kind, Kind::Motion(k) if k.wide());
 
     let raw_title = title_of(&d);
     let heading =
@@ -4077,15 +4134,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title_of(&d))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
-    let panel = if let Some(column) = column {
-        panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })
-    } else if wide && side == crate::frame::Side::Left {
-        let available = crate::sketch_palette::room_left_of(app, ctx, vp);
-        panel.width(card_width(&d).min(available))
-    } else if manager {
-        panel.width(card_width(&d))
+    let max_width = (docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W);
+    let panel = if manager {
+        panel.width(card_width(&d).min(max_width))
     } else {
-        panel.width(card_width(&d) + label_grow).grow_label(grow_key)
+        panel.width((card_width(&d) + label_grow).min(max_width)).grow_label(grow_key)
     };
     let reset_scroll = d.reset_scroll;
     let panel =
@@ -4093,7 +4146,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
-    let host = app.universal_panel_host_enabled();
     let mut painted = false;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
@@ -4112,7 +4164,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
         ok = action == crate::ui_kit::Action::Ok;
         cancel = closed || action == crate::ui_kit::Action::Cancel;
-        app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window").filter(|_| !host || painted);
+        app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window").filter(|_| painted);
     } else {
         let response = window.open(&mut keep).show(ctx, |ui| {
             painted = ui.is_visible() && !ui.is_sizing_pass();
@@ -4177,7 +4229,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         });
-        app.viewport.dialog_rect = response.filter(|_| !host || painted).map(|r| r.response.rect);
+        app.viewport.dialog_rect = response.filter(|_| painted).map(|r| r.response.rect);
         // OK and Cancel in the view's corner do what the dialog's own do (#6709).
         if app.issue_report.draft.is_none() {
             match corner {
@@ -5067,7 +5119,7 @@ fn look_at_sketch_from(app: &mut SolveApp, again: bool) {
     if let Some(ss) = app.session.active_sketch.and_then(|id| st.sketch(id)) {
         let n = facing(app, ss.plane.normal(), again);
         let to = square_sketch_axes(app.cam.looking_from(n), ss.plane.x, ss.plane.y);
-        if app.universal_panel_host_enabled() && again {
+        if again {
             let bounds = ss.sketch.bounds().map(|(lo, hi)| {
                 let mut bounds = Aabb3::default();
                 for point in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {

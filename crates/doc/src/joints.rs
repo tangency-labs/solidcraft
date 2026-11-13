@@ -1108,7 +1108,7 @@ fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -
     }
     let (_, b, f, n) = best.ok_or_else(|| DocError::Invalid("joint origin: no planar face there".into()))?;
     // The face's middle: its outline's on a face with holes.
-    let c = face::outline_centre(&b.mesh(), f.index, f.centroid, n).unwrap_or(f.centroid);
+    let c = face::outline_centre(&b.body, f.index, f.centroid, n).unwrap_or(f.centroid);
     Ok(match doc.model_body_offset(b) {
         Some(m) => (apply_point(m, c), apply_vector(m, n)),
         None => (c, n),

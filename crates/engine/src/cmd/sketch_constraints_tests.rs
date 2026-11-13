@@ -509,6 +509,32 @@ fn drawing_at_a_curve_crossing_keeps_the_point_on_both() {
     assert!(st.y > 0.0, "the upper crossing: {st:?}");
 }
 
+/// #15387: `sketch.point` at a curve crossing (`"x:<a>+<b>:x,y"`) holds the point on both curves
+/// with `PointOnCurve` constraints, so moving one curve slides the point along the other rather
+/// than leaving it behind.
+#[test]
+fn a_point_at_a_curve_crossing_is_held_on_both() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 20]], "infer": false}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 20], [20, 0]], "infer": false}))["curves"])[0].clone();
+    let p = run(&mut s, "sketch.point", json!({"point": format!("x:{a}+{b}:10.2,9.8")}))["point"].as_str().unwrap().to_string();
+    let sk = sketch(&s);
+    let pi = sk.resolve_point(&p).unwrap();
+    let (ia, ib) = (sk.curve_index(&a).unwrap(), sk.curve_index(&b).unwrap());
+    assert!(sk.point(pi).unwrap().dist(Vec2::new(10.0, 10.0)) < 1e-9);
+    for ci in [ia, ib] {
+        assert!(sk.constraints.iter().any(|k| matches!(k.kind, crate::sketch::ConstraintKind::PointOnCurve { p: q, c } if q == pi && c == ci)));
+    }
+    // Move one line's end: the point stays on both lines at their new crossing.
+    run(&mut s, "sketch.constraint.fix", json!({"entity": b}));
+    run(&mut s, "sketch.move_point", json!({"point": format!("{a}.end"), "to": [20, 10]}));
+    let sk = sketch(&s);
+    let at = sk.point(sk.resolve_point(&p).unwrap()).unwrap();
+    let want = Vec2::new(40.0 / 3.0, 20.0 / 3.0);
+    assert!(at.dist(want) < 1e-6, "at {at:?}, expected {want:?}");
+    assert!(sk.shape(ia).unwrap().dist(at) < 1e-6 && sk.shape(ib).unwrap().dist(at) < 1e-6);
+}
+
 #[test]
 fn drawing_at_an_infinite_line_crossing_keeps_the_point_on_both() {
     let mut s = new_sketch();

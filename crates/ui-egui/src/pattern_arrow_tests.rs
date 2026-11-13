@@ -30,9 +30,8 @@ fn a_sketch_pattern_drags_its_second_spacing_square_to_the_first() {
         {"click": {"sketch": [5, 0]}}
     ]))
     .unwrap();
-    // Keep both arrows in the exposed viewport beside the left dialog. The full-bleed
-    // projection otherwise puts Spacing 2 under the dialog's top edge.
-    h.call("ui.camera", json!({"target":[-30,0,0]}));
+    // Keep both arrows in the exposed canvas to the left of the floating editor.
+    h.call("ui.camera", json!({"target":[15,0,0]}));
     h.settle();
     let (Some(a1), Some(a2)) = (handle_at("arrow"), handle_at("arrow2")) else {
         panic!("both arrows: {:?} {:?}", handle_at("arrow"), handle_at("arrow2"));

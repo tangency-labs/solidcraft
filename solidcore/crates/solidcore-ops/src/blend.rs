@@ -1150,7 +1150,7 @@ fn overflow_first(
 pub fn failure(e: &SolidError) -> Option<Error> {
     let b = e.blend_failure().filter(|b| b.replaces_upstream_status())?;
     Some(Error::BlendFailed {
-        class: b.kind(),
+        class: b.class(),
         status: e.sm_status().unwrap_or(solidcore::error::SM_ERR),
         phrase: b.to_string(),
     })

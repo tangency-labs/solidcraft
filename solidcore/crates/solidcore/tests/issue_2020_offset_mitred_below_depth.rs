@@ -334,7 +334,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.stitch_solid_nests_cavities = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
-    k.fixes.topology_failed_evaluations_propagate = true;
     k.fixes.torus_check_reads_v_interval = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;

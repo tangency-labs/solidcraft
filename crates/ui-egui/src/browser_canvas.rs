@@ -11,7 +11,6 @@ use solidcraft_engine::doc::canvas::Canvas;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::browser::panel_pos;
 use crate::ui_kit;
 use crate::viewport::Proj;
 use solidcraft_theme::Tokens;
@@ -32,7 +31,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         "browser.edit_canvas_title"
     };
     let title = solidcraft_ui_text::format(title_id, &[("name", &c.name)]);
-    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx).unwrap_or_else(|| (egui::Align2::LEFT_TOP, panel_pos(app)));
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
     let (picks, straighten, name) = (m.picks_points(), m.straighten, c.id);
     let (ok, cancel) = if straighten {
         (solidcraft_ui_text::tr("ui.straighten"), solidcraft_ui_text::tr("ui.cancel"))

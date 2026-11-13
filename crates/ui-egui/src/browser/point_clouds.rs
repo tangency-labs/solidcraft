@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::doc::point_cloud::{COORDINATES, ColorBy, Filter, Keep, MAX_FILTERS, Names, PLAIN, PointCloud, UNITS, byte, label_color};
 use solidcraft_engine::view::POINT_CLOUDS_FOLDER;
 
-use super::{Actions, Row, draw_row, is_open, panel_pos, rows_start_open, toggle, toggle_folder};
+use super::{Actions, Row, draw_row, is_open, rows_start_open, toggle, toggle_folder};
 use crate::SolveApp;
 use crate::context_menu::Target;
 use crate::ui_kit;
@@ -296,7 +296,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         _ => Paint::One,
     };
     let changes_of = c.colored_property().filter(|n| c.complex.integer(n)).map(str::to_string);
-    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx).unwrap_or_else(|| (egui::Align2::LEFT_TOP, panel_pos(app)));
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_point_cloud_panel"), "point", &title)
         .placed(pivot, at)
         .fields()
