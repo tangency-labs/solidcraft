@@ -853,14 +853,22 @@ pub(super) fn cap_disk_parameters(
 }
 
 /// How far a periodic thread operation extends each face's surface
-/// ([`operation_reach`]): one common length, and an end cap's own longer margin
-/// where its stored support stops short of the thread's radial disk.
+/// ([`operation_reach`]): one common length, an end cap's own longer margin
+/// where its stored support stops short of the thread's radial disk, and the turns
+/// a screw wall's support is continued by where its stored turns stop short of the
+/// meetings at the caps.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ThreadReach {
     /// The certified reach every surface is extended by.
     pub reach: f64,
     /// The end caps that need more, each with its margin (at least `reach`).
     pub caps: Vec<(FaceId, f64)>,
+    /// The angle, radians, a screw wall's support is continued past its stations by,
+    /// beyond `reach`: how far the moved sections' meetings with the caps lie past the
+    /// turns the walls' stored supports cover. A screw wall is the same surface along its
+    /// turns, so it is continued along them by this angle, not by a length that would
+    /// carry its profile as far.
+    pub turns: f64,
 }
 
 impl ThreadReach {
@@ -1105,6 +1113,7 @@ pub(crate) fn operation_reach(
         return Err(bad("thread endcaps are not proved disjoint"));
     };
     let mut reach = 0.0_f64;
+    let mut turns = 0.0_f64;
     let mut displacement = 0.0_f64;
     // A full circular cylinder has no angular support end. At fixed world
     // azimuth, each boundary helix's height changes by G_lambda, so this bound
@@ -1226,8 +1235,7 @@ pub(crate) fn operation_reach(
             .hi
             .max((Ivl::from(angles.hi) - Ivl::from(end)).hi)
             .max(0.0);
-        reach = reach
-            .max((Ivl::from(flank.section.speed_upper_bounds(source)?[1]) * Ivl::from(extra)).hi);
+        turns = turns.max(extra);
     }
     for radius in radii {
         displacement = displacement.max(radius.rate.mag());
@@ -1272,5 +1280,8 @@ pub(crate) fn operation_reach(
             )
         })
         .collect();
-    Ok(Some(ThreadReach { reach, caps }))
+    if !turns.is_finite() {
+        return Err(bad("thread support turns are not finite"));
+    }
+    Ok(Some(ThreadReach { reach, caps, turns }))
 }

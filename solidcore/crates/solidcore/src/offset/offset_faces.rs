@@ -1886,7 +1886,7 @@ mod tests {
         let sweep = target.procedural_sweep().unwrap();
         let continued = sweep
             .definition()
-            .extended_for_offset(sweep.net(), 0.2, 1e-4)
+            .extended_for_offset(sweep.net(), 0.2, 0.0, 1e-4)
             .unwrap();
         let domain = continued.natural_uv_domain_with_nurb(&k).unwrap();
         let mut b = p3::new_brep(
