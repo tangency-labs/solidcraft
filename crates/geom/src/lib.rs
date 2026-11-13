@@ -38,6 +38,7 @@ pub mod mesh_distance;
 pub mod network;
 pub mod paper;
 pub mod pixel_grid;
+pub mod plain_text;
 mod plane;
 mod profile;
 pub mod revision;
@@ -45,6 +46,7 @@ pub mod section;
 pub mod simplify;
 pub mod spline_space;
 pub mod stderr;
+pub mod surface_texture;
 pub mod table;
 /// The plan evaluator, now the kernel's (`solidcore::eval::plan`), and the display plan, now
 /// solidcore-tess's (RFC 0003, item 1.1), under their old path.
