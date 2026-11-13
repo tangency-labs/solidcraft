@@ -438,6 +438,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         let text = solidcraft_ui_text::format("ui.sheet_page.working", &[("count", &waiting.max(1).to_string())]);
         hint(&painter, free_area(app, canvas), &text);
     }
+    let area = free_area(app, canvas);
+    if paint_offscreen_arrow(ui, &painter, area, sheet_rect, &t) {
+        let page = &mut app.drawing_workspace.page;
+        let offset = area.center() - canvas.center();
+        page.cam.target.x = size.x * 0.5 - f64::from(offset.x) / at.scale;
+        page.cam.target.y = size.y * 0.5 + f64::from(offset.y) / at.scale;
+        page.fitted_on = None;
+        ui.ctx().request_repaint();
+    }
     crate::navigation_bar_view::show(app, ui, canvas);
     let encode = solidcraft_engine::doc::ids::encode;
     let paper_mm = at.visible(canvas);
@@ -460,6 +469,40 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         "error": app.drawing_workspace.page.marks.as_ref().and_then(|m| m.error.clone()),
     }));
     true
+}
+
+/// Intersect the ray towards the paper's centre with the usable viewport edge. Inset the
+/// arrow's centre enough to keep the whole arrow inside the viewport.
+fn offscreen_arrow(area: Rect, sheet: Rect, margin: f32) -> Option<(Pos2, egui::Vec2)> {
+    let inset = area.shrink(margin);
+    if !inset.is_positive() || !sheet.is_finite() || !sheet.is_positive() || area.intersects(sheet) {
+        return None;
+    }
+    let centre = inset.center();
+    let toward = sheet.center() - centre;
+    let distance = (inset.width() * 0.5 / toward.x.abs()).min(inset.height() * 0.5 / toward.y.abs());
+    Some((centre + toward * distance, toward.normalized()))
+}
+
+fn paint_offscreen_arrow(ui: &mut egui::Ui, painter: &egui::Painter, area: Rect, sheet: Rect, t: &Tokens) -> bool {
+    let diameter = t.space_24 * 2.5;
+    let Some((centre, direction)) = offscreen_arrow(area, sheet, diameter * 0.5 + t.space_8) else { return false };
+    let rect = Rect::from_center_size(centre, egui::Vec2::splat(diameter));
+    let response = ui.interact(rect, ui.make_persistent_id("sheet:offscreen_arrow"), Sense::click());
+    let label = solidcraft_ui_text::tr("ui.drawing_offscreen.recenter");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    let clicked = response.clicked();
+
+    let normal = egui::vec2(-direction.y, direction.x);
+    let tip = centre + direction * t.space_16;
+    let head = tip - direction * t.space_12;
+    let stroke = Stroke::new(t.space_2, if response.hovered() { t.accent } else { t.text });
+    painter.line_segment([centre - direction * t.space_16, tip], stroke);
+    painter.line_segment([head + normal * t.space_8, tip], stroke);
+    painter.line_segment([tip, head - normal * t.space_8], stroke);
+    crate::ui_kit::BackingTooltipExt::backing_on_hover_text(response.on_hover_cursor(egui::CursorIcon::PointingHand), label);
+    crate::scenario::publish_rect("sheet:offscreen_arrow", rect);
+    clicked
 }
 
 /// Whether the hovered object shows its boundary: a view only while the pointer is near its edge,
