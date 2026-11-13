@@ -757,6 +757,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         stopped: None,
         mirror_meets: None,
         placed: None,
+        centrelines: Vec::new(),
     }
 }
 
