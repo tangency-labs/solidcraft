@@ -6,7 +6,9 @@ use super::{
 };
 use crate::BackingTooltipExt as _;
 use crate::{Container, Surface};
-use egui::{Response, RichText, Ui, vec2};
+#[cfg(not(target_arch = "wasm32"))]
+use egui::ViewportCommand;
+use egui::{CursorIcon, Pos2, Response, RichText, Ui, vec2};
 use solidcraft_theme::Tokens;
 use std::sync::Arc;
 
@@ -254,29 +256,45 @@ pub fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
     text + &literal.unit
 }
 
-/// An ongoing label drag: the value and pointer x it is measured from, and the speed in use.
+/// An ongoing label drag: the value, starting screen position, accumulated horizontal drag distance, speed in use, and pending warp compensation.
 #[derive(Clone)]
 struct Scrub {
     anchor: f64,
-    origin: f32,
+    start_pos: Pos2,
+    accumulated: f32,
     step: f64,
+    warp_jump: Option<f32>,
+}
+
+fn end_scrub(ui: &Ui, id: egui::Id, state: &Scrub) {
+    #[cfg(not(target_arch = "wasm32"))]
+    ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(state.start_pos));
+    #[cfg(target_arch = "wasm32")]
+    let _ = (ui, state);
+    ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
 }
 
 /// Dragging a row's label sideways changes the literal value in its field: Shift for a tenth of
 /// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
 /// follow, and the dialog's OK still makes the one command (and the one undo step). A field
-/// holding an expression or a parameter is left alone. Returns whether the text changed.
+/// holding an expression or a parameter is left alone. While dragging on desktop, the cursor
+/// is wrapped within the label and returned to its starting position on release (#12861). Returns whether the text changed.
 pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
     let id = label.id.with("sc_scrub");
+    let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
     let Some(now) = expressions(ui.ctx()).and_then(|e| literal(e.as_ref(), value)).filter(|_| ui.is_enabled()) else {
-        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        if let Some(state) = base {
+            end_scrub(ui, id, &state);
+        }
         return false;
     };
     if label.hovered() || label.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
     if !label.dragged() {
-        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        if let Some(state) = base {
+            end_scrub(ui, id, &state);
+        }
         return false;
     }
     let factor = ui.input(|i| {
@@ -288,19 +306,56 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
             1.0
         }
     });
-    // Measured from where the pointer is, not summed per frame, so no frame's jump is lost or doubled.
-    let (Some(x), Some(pressed)) = ui.input(|i| (i.pointer.latest_pos().map(|p| p.x), i.pointer.press_origin().map(|p| p.x))) else {
-        return false;
+
+    let raw_delta_x = ui.input(|i| {
+        let d = i.pointer.delta().x;
+        if d != 0.0 { d } else { i.pointer.motion().map(|m| m.x / i.pixels_per_point()).unwrap_or(0.0) }
+    });
+    let raw_delta_x = if raw_delta_x.is_finite() { raw_delta_x } else { 0.0 };
+
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+    let mut state = match base {
+        Some(mut state) => {
+            // Deduct the artificial warp delta if the cursor reposition arrived from the OS this frame.
+            let delta_x = match state.warp_jump.take() {
+                Some(jump) if (raw_delta_x - jump).abs() < jump.abs() * 0.75 => raw_delta_x - jump,
+                _ => raw_delta_x,
+            };
+            if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 {
+                state.accumulated += delta_x;
+                state
+            } else {
+                // A changed modifier starts over accumulating from the current value at the new speed.
+                Scrub { anchor: now.number, start_pos: state.start_pos, accumulated: 0.0, step: scrub_step(now.number) * factor, warp_jump: None }
+            }
+        }
+        None => {
+            let start_pos = ui.input(|i| i.pointer.press_origin().or_else(|| i.pointer.latest_pos())).unwrap_or_else(|| label.rect.center());
+            Scrub { anchor: now.number, start_pos, accumulated: 0.0, step: scrub_step(now.number) * factor, warp_jump: None }
+        }
     };
-    let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
-    // A new drag starts from where it was pressed; a changed modifier starts over from here.
-    let state = match base {
-        Some(state) if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 => state,
-        Some(_) => Scrub { anchor: now.number, origin: x, step: scrub_step(now.number) * factor },
-        None => Scrub { anchor: now.number, origin: pressed, step: scrub_step(now.number) * factor },
-    };
-    let points = x - state.origin;
-    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step), state.step, &now);
+
+    // If the cursor leaves the label's bounding box on native desktop, wrap it to the opposite edge
+    // so it stays within the label and never hovers over other objects.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+        && !label.rect.contains(pos)
+    {
+        let target_x = if pos.x > label.rect.right() {
+            label.rect.left() + 1.0
+        } else if pos.x < label.rect.left() {
+            label.rect.right() - 1.0
+        } else {
+            pos.x
+        };
+        let target_y = pos.y.clamp(label.rect.top() + 1.0, label.rect.bottom() - 1.0);
+        let target = egui::pos2(target_x, target_y);
+        let jump = target.x - pos.x;
+        ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(target));
+        state.warp_jump = Some(jump);
+    }
+
+    let text = scrub_text(scrubbed(state.anchor, state.accumulated, state.step), state.step, &now);
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
     if text == *value {
         return false;

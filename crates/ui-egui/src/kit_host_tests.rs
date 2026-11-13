@@ -464,7 +464,7 @@ mod fields {
 
     #[test]
     fn dragging_a_value_rows_label_changes_its_literal_and_leaves_expressions_alone() {
-        fn frame(ctx: &egui::Context, events: Vec<egui::Event>, modifiers: egui::Modifiers, values: &mut [String; 2]) {
+        fn frame(ctx: &egui::Context, events: Vec<egui::Event>, modifiers: egui::Modifiers, values: &mut [String; 2]) -> egui::FullOutput {
             registry::clear_handles();
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
@@ -479,18 +479,36 @@ mod fields {
                     expr_row(ui, "Distance", distance);
                     expr_row(ui, "Offset", offset);
                 });
-            });
+            })
         }
         fn drag(ctx: &egui::Context, row: &str, dx: f32, modifiers: egui::Modifiers, values: &mut [String; 2]) {
             let start = registry::rect_of(&format!("dialog:label:{row}")).unwrap().center();
             let end = start + egui::vec2(dx, 0.0);
             let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers };
-            frame(ctx, vec![egui::Event::PointerMoved(start), button(start, true)], modifiers, values);
-            for step in 1..=4 {
-                frame(ctx, vec![egui::Event::PointerMoved(start + egui::vec2(dx * step as f32 / 4.0, 0.0))], modifiers, values);
+            let start_out = frame(ctx, vec![egui::Event::PointerMoved(start), button(start, true)], modifiers, values);
+            if row == "Distance" {
+                assert_eq!(start_out.platform_output.cursor_icon, egui::CursorIcon::ResizeHorizontal, "cursor shows resize icon while scrubbing");
+                let cmds = start_out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| &v.commands);
+                assert!(!cmds.is_some_and(|c| c.contains(&egui::ViewportCommand::CursorVisible(false))), "cursor is not hidden");
             }
-            frame(ctx, vec![button(end, false)], modifiers, values);
-            frame(ctx, vec![], modifiers, values);
+            for step in 1..=4 {
+                let out = frame(ctx, vec![egui::Event::PointerMoved(start + egui::vec2(dx * step as f32 / 4.0, 0.0))], modifiers, values);
+                if row == "Distance" {
+                    assert_eq!(out.platform_output.cursor_icon, egui::CursorIcon::ResizeHorizontal, "cursor stays visible as resize icon");
+                }
+            }
+            let release = frame(ctx, vec![button(end, false)], modifiers, values);
+            let after = frame(ctx, vec![], modifiers, values);
+            if row == "Distance" {
+                let mut end_cmds = Vec::new();
+                if let Some(c) = release.viewport_output.get(&egui::ViewportId::ROOT) {
+                    end_cmds.extend(c.commands.clone());
+                }
+                if let Some(c) = after.viewport_output.get(&egui::ViewportId::ROOT) {
+                    end_cmds.extend(c.commands.clone());
+                }
+                assert!(end_cmds.contains(&egui::ViewportCommand::CursorPosition(start)), "cursor returned to start on release");
+            }
         }
         let ctx = crate::ui_kit::test_support::context();
         crate::params_dialog::install_expressions(&ctx);
