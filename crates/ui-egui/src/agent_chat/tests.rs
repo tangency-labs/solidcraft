@@ -3699,6 +3699,11 @@ fn an_agents_markdown_is_drawn_as_blocks() {
     h.frames(3);
     assert!(h.widget("Copy").is_some(), "the code block has its Copy button");
     assert!(h.widget("↗ example.com").is_some(), "the link is a button that names where it goes");
+    // A table is drawn as a table: its cells show, not the `|---|` line.
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "| Part | Mass |\n|---|---|\n| Gearbox | 12 kg |".into() });
+    h.frames(3);
+    assert!(h.widget("Gearbox").is_some(), "a cell of the table is drawn");
+    assert!(h.widget("|---|---|").is_none(), "the line under the header is not shown");
     // A hostile reply draws too (no panic, bounded work).
     h.app.agent_chat.items.push(Item::Agent { thought: false, text: "*".repeat(50_000) + &"[".repeat(5_000) + &"`a".repeat(5_000) });
     h.frames(3);

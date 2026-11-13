@@ -10,6 +10,8 @@ pub const MAX_INPUT: usize = 256 * 1024;
 pub const MAX_BLOCKS: usize = 4000;
 /// Longest link target kept.
 const MAX_URL: usize = 2048;
+/// Most columns drawn as a table; a wider one stays preformatted.
+const MAX_COLUMNS: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Span {
@@ -41,7 +43,14 @@ pub enum Block {
         items: Vec<Vec<Span>>,
     },
     Quote(Vec<Span>),
-    /// Preformatted text (tables).
+    /// A `|` table: its header cells, its rows (each as wide as the header), and its Markdown as
+    /// written, which is what copying takes.
+    Table {
+        header: Vec<Vec<Span>>,
+        rows: Vec<Vec<Vec<Span>>>,
+        source: String,
+    },
+    /// Preformatted text (a `|` table that is not well formed).
     Pre(String),
     Rule,
 }
@@ -101,7 +110,7 @@ pub fn parse(src: &str) -> Vec<Block> {
                 rows.push(lines[i].trim_end());
                 i += 1;
             }
-            out.push(Block::Pre(rows.join("\n")));
+            out.push(table(&rows).unwrap_or_else(|| Block::Pre(rows.join("\n"))));
             continue;
         }
         if let Some(rest) = t.strip_prefix('>') {
@@ -148,6 +157,52 @@ pub fn parse(src: &str) -> Vec<Block> {
     }
     flush!();
     out
+}
+
+/// The lines of a `|` table as a [`Block::Table`]; `None` when the second line is not the
+/// `|---|---|` line under the header, or the columns do not count 1 to [`MAX_COLUMNS`].
+fn table(lines: &[&str]) -> Option<Block> {
+    let header = cells(lines.first()?);
+    let columns = header.len();
+    let rule = cells(lines.get(1)?);
+    if !(1..=MAX_COLUMNS).contains(&columns) || rule.len() != columns || !rule.iter().all(|c| is_rule_cell(c)) {
+        return None;
+    }
+    let row = |line: &&str| {
+        let mut row: Vec<Vec<Span>> = cells(line).iter().map(|c| spans(c)).collect();
+        row.resize(columns, Vec::new());
+        row
+    };
+    Some(Block::Table { header: header.iter().map(|c| spans(c)).collect(), rows: lines[2..].iter().map(row).collect(), source: lines.join("\n") })
+}
+
+/// The cells of a table row, without the outer `|`; `\|` is a `|` inside a cell.
+fn cells(line: &str) -> Vec<String> {
+    let line = line.trim();
+    let line = line.strip_prefix('|').unwrap_or(line);
+    let (mut out, mut cell) = (Vec::new(), String::new());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'|') => {
+                chars.next();
+                cell.push('|');
+            }
+            '|' => out.push(std::mem::take(&mut cell).trim().to_string()),
+            _ => cell.push(c),
+        }
+    }
+    // The text after the last `|` is a cell only if there is any.
+    if !cell.trim().is_empty() {
+        out.push(cell.trim().to_string());
+    }
+    out
+}
+
+/// A cell of the `|---|:--:|` line: dashes, with a `:` at either end for alignment.
+fn is_rule_cell(c: &str) -> bool {
+    let dashes = c.trim_start_matches(':').trim_end_matches(':');
+    !dashes.is_empty() && dashes.chars().all(|d| d == '-')
 }
 
 fn cut(s: &str, max: usize) -> &str {
@@ -335,8 +390,36 @@ mod tests {
         assert_eq!(b[4], Block::Quote(vec![t("quoted")]));
         assert_eq!(b[5], Block::Rule);
         assert_eq!(b[6], Block::Code { lang: "rust".into(), text: "let x = 1;".into() });
-        assert!(matches!(&b[7], Block::Pre(s) if s.lines().count() == 3));
+        assert_eq!(
+            b[7],
+            Block::Table {
+                header: vec![vec![t("a")], vec![t("b")]],
+                rows: vec![vec![vec![t("1")], vec![t("2")]]],
+                source: "| a | b |\n|---|---|\n| 1 | 2 |".into(),
+            }
+        );
         assert_eq!(b.len(), 8);
+    }
+
+    #[test]
+    fn a_table_has_cells_of_spans_and_rows_as_wide_as_its_header() {
+        let b = parse("| Name | Note |\n|:--|--:|\n| **x** | a \\| b |\n| short |\n| p | q | extra |");
+        let Block::Table { header, rows, .. } = &b[0] else { panic!("a table: {b:?}") };
+        assert_eq!(header, &vec![vec![t("Name")], vec![t("Note")]]);
+        assert_eq!(rows[0], vec![vec![Span::Bold("x".into())], vec![t("a | b")]]);
+        assert_eq!(rows[1], vec![vec![t("short")], vec![]], "a short row is filled up");
+        assert_eq!(rows[2], vec![vec![t("p")], vec![t("q")]], "a long row loses what is past the header");
+    }
+
+    #[test]
+    fn a_table_that_is_not_well_formed_stays_preformatted() {
+        // No `|---|` line under the header.
+        assert!(matches!(&parse("| a | b |\n| 1 | 2 |")[0], Block::Pre(_)));
+        // The `|---|` line has another number of columns.
+        assert!(matches!(&parse("| a | b |\n|---|\n| 1 | 2 |")[0], Block::Pre(_)));
+        // Too many columns.
+        let wide = format!("{0}\n{1}", "| a ".repeat(MAX_COLUMNS + 1) + "|", "|---".repeat(MAX_COLUMNS + 1) + "|");
+        assert!(matches!(&parse(&wide)[0], Block::Pre(_)));
     }
 
     #[test]
