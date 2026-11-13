@@ -4691,7 +4691,7 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
             *hook = *fresh;
         }
         // The points an edit loaded belonged to that edit, and the tubes picked to that dialog.
-        // Ghost Frame Members is ticked whenever the dialog opens.
+        // Ghost Frame Members is unticked whenever the dialog opens.
         (Kind::Frame(previous), Kind::Frame(fresh)) => {
             previous.whole = fresh.whole;
             previous.path.clone_from(&fresh.path);

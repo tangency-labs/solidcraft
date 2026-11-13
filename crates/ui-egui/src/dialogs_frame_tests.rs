@@ -555,29 +555,37 @@ fn frame_dialog(app: &mut SolveApp) -> Dialog {
     app.dialog.clone().unwrap()
 }
 
+/// The Frame Member dialog with Ghost Frame Members ticked.
+fn ghosted_frame_dialog(app: &mut SolveApp) -> Dialog {
+    app.start("frame.member");
+    member(app.dialog.as_mut().unwrap()).ghost = true;
+    app.dialog.clone().unwrap()
+}
+
 #[test]
-fn ghosting_is_on_when_the_dialog_opens() {
+fn ghosting_is_off_when_the_dialog_opens() {
     let mut app = railed_box();
     let st = crate::open_meshing::shown_world(&app);
     let (rail, boxed) = (model_body(&st, "Rail"), model_body(&st, "Box"));
     assert!(!crate::viewport::frame_ghosted(&app, &rail), "no dialog: nothing is ghosted");
     let mut d = frame_dialog(&mut app);
-    assert!(member(&mut d).ghost);
+    assert!(!member(&mut d).ghost);
+    assert!(!crate::viewport::frame_ghosted(&app, &rail), "unticked: nothing is ghosted");
+    member(app.dialog.as_mut().unwrap()).ghost = true;
     assert!(crate::viewport::frame_ghosted(&app, &rail));
     assert!(!crate::viewport::frame_ghosted(&app, &boxed), "only frame members are");
-    // Not remembered: ticked again whenever the dialog opens, Edit Feature's too.
-    member(app.dialog.as_mut().unwrap()).ghost = false;
+    // Not remembered: unticked again whenever the dialog opens, Edit Feature's too.
     crate::dialogs::cancel(&mut app);
-    assert!(member(&mut frame_dialog(&mut app)).ghost);
+    assert!(!member(&mut frame_dialog(&mut app)).ghost);
     crate::dialogs::cancel(&mut app);
     let f = app.session.doc.features.last().unwrap().id;
-    assert!(member(&mut edit_dialog(&app, f, None).unwrap()).ghost);
+    assert!(!member(&mut edit_dialog(&app, f, None).unwrap()).ghost);
 }
 
 #[test]
 fn a_click_on_a_ghosted_members_face_goes_through_to_what_is_behind() {
     let mut app = railed_box();
-    frame_dialog(&mut app);
+    ghosted_frame_dialog(&mut app);
     assert_eq!(face_under_centre(&app), "Box", "the mouse picks the box's top through the rail");
     let r = crate::view_pick::pick_command(&mut app, &json!({"frame": "model", "pixels": [[480, 300]]})).unwrap();
     let hit = &r["hits"][0];
@@ -588,7 +596,7 @@ fn a_click_on_a_ghosted_members_face_goes_through_to_what_is_behind() {
 #[test]
 fn a_ghosted_members_vertex_and_centreline_end_can_be_picked() {
     let mut app = railed_box();
-    frame_dialog(&mut app);
+    ghosted_frame_dialog(&mut app);
     let proj = model_proj(&app);
     let at = |p: Vec3| proj.to_screen(p).unwrap();
     // A corner of the tube's start (rounded: its vertices sit where the sides meet the arcs).
@@ -628,7 +636,7 @@ fn picking_a_centreline_end_stores_the_point_it_is_built_on() {
     let pair_a = serde_json::to_value(&pairs[0].a).unwrap();
     let solidcraft_engine::sketch::CurveKind::Line { a, .. } = l0.kind else { panic!() };
     let start = app.session.doc.sketch(base).unwrap().points[a].id.clone();
-    let mut d = frame_dialog(&mut app);
+    let mut d = ghosted_frame_dialog(&mut app);
     let ends = super::member_ends(&app);
     let end_of = |line: &str, end: usize| {
         ends.iter().find(|h| matches!(h, crate::viewport::Hit::MemberEnd { line: l, end: e, .. } if l == line && *e == end)).unwrap().clone()
@@ -646,7 +654,7 @@ fn picking_a_centreline_end_stores_the_point_it_is_built_on() {
 #[test]
 fn this_frame_members_tubes_are_tinted_apart_from_other_frame_members() {
     let mut app = railed_box();
-    let mut d = frame_dialog(&mut app);
+    let mut d = ghosted_frame_dialog(&mut app);
     pick_all(&app, &mut d, &[corner(0., 0., 400.), corner(600., 0., 400.)]);
     app.dialog = Some(d.clone());
     let colors = crate::preview::colors(&app);
@@ -697,7 +705,7 @@ fn end_caps_are_ghosted_with_members() {
     let st = crate::open_meshing::shown_world(&app);
     let cap = st.bodies.iter().find(|b| b.name != "Post").unwrap().name.clone();
     assert_eq!(drawn(&app, &cap)[3], 255);
-    frame_dialog(&mut app);
+    ghosted_frame_dialog(&mut app);
     assert!(crate::viewport::frame_ghosted(&app, &model_body(&st, &cap)));
     assert!(drawn(&app, &cap)[3] < 255 && drawn(&app, "Post")[3] < 255);
 }
@@ -913,7 +921,7 @@ fn the_pick_cache_follows_the_previews_centrelines_and_ghosting() {
     app.preview.busy = false;
     assert!(tube_hit(&mut app));
     let mut app = railed_box();
-    frame_dialog(&mut app);
+    ghosted_frame_dialog(&mut app);
     let proj = model_proj(&app);
     let first_face = |app: &mut SolveApp| {
         crate::viewport::pick_cached(app, &proj, egui::pos2(480.0, 300.0)).into_iter().find_map(|h| match h {

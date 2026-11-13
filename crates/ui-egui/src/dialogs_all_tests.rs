@@ -1831,7 +1831,7 @@ fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
     assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &missing), "Sketch999 · profile 1");
 }
 
-/// Frame Member remembers its values, but opens with Ghost Frame Members ticked and no tubes
+/// Frame Member remembers its values, but opens with Ghost Frame Members unticked and no tubes
 /// picked for Remove Tube (#15705).
 #[test]
 fn frame_member_dialog_recalls_values_but_not_ghosting_or_picked_tubes() {
@@ -1840,12 +1840,12 @@ fn frame_member_dialog_recalls_values_but_not_ghosting_or_picked_tubes() {
     let mut d = Dialog::for_command(&h.app, "frame.member").unwrap();
     let Kind::Frame(m) = &mut d.kind else { panic!("not the Frame Member dialog") };
     m.mirror = true;
-    m.ghost = false;
+    m.ghost = true;
     m.picked_tubes = vec!["pair1".into()];
     remember(&mut h.app, &d);
     let recalled = Dialog::for_command(&h.app, "frame.member").unwrap();
     let Kind::Frame(m) = &recalled.kind else { panic!("not the Frame Member dialog") };
     assert!(m.mirror, "values are remembered");
-    assert!(m.ghost, "ticked whenever the dialog opens");
+    assert!(!m.ghost, "unticked whenever the dialog opens");
     assert!(m.picked_tubes.is_empty());
 }
