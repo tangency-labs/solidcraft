@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use solidcore_record::Vec3;
 
+use crate::environment::Environment;
 use crate::pbr;
 
 mod ao;
@@ -1233,7 +1234,9 @@ pub struct Frame {
     /// cut body whose palette entries carry a hatch ([`Palette::set_hatch`]) is tinted toward.
     pub hatch: [[f32; 3]; solidcraft_viewport::hatch::HATCH_COLOURS],
     /// The world's up direction and 1 to shade in linear light with a sky fill that follows it
-    /// (#7974); 0 shades as before.
+    /// (#7974); 0 shades as before. Plus 2: opaque faces get their material finish (a palette
+    /// entry's PBR material, else a satin one) in a studio around that up direction. Zero (the
+    /// product preview, captures): lit as before.
     pub sky: [f32; 4],
     /// Bodies being dragged (a component's Move triad), drawn moved; `None`: none.
     pub moving: Option<MovingLayer>,
@@ -1860,14 +1863,7 @@ fn palette_rows(palette: &Palette) -> u32 {
 }
 
 impl PaletteGpu {
-    fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        uniform: &wgpu::Buffer,
-        bgl: &wgpu::BindGroupLayout,
-        palette: Arc<Palette>,
-        written: &mut u64,
-    ) -> PaletteGpu {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, uniform: &wgpu::Buffer, bgl: &Group0, palette: Arc<Palette>, written: &mut u64) -> PaletteGpu {
         let rows = palette_rows(&palette);
         let texture = palette_texture(device, rows);
         let bytes = palette_bytes(&palette, 0, rows);
@@ -1883,13 +1879,18 @@ impl PaletteGpu {
         let materials = material_texture(device, material_rows);
         write_materials(queue, &materials, palette.materials(), 0, material_rows, written);
         let material_view = materials.create_view(&Default::default());
+        let [e3, e4, e5, e6] = bgl.environment.entries();
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_palette"),
-            layout: bgl,
+            layout: &bgl.layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&material_view) },
+                e3,
+                e4,
+                e5,
+                e6,
             ],
         });
         PaletteGpu { palette, _texture: texture, materials, material_rows, bind, rows }
@@ -1897,15 +1898,7 @@ impl PaletteGpu {
 
     /// Bring the texture up to `palette`, writing only the rows whose entries changed (or the
     /// whole texture when it must grow). The bind group is rebuilt only then.
-    fn update(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        uniform: &wgpu::Buffer,
-        bgl: &wgpu::BindGroupLayout,
-        palette: Arc<Palette>,
-        written: &mut u64,
-    ) {
+    fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, uniform: &wgpu::Buffer, bgl: &Group0, palette: Arc<Palette>, written: &mut u64) {
         if Arc::ptr_eq(&self.palette, &palette) {
             return;
         }
@@ -2042,7 +2035,7 @@ impl Batches {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         uniform: &wgpu::Buffer,
-        bgl: &wgpu::BindGroupLayout,
+        bgl: &Group0,
         key: u64,
         slot: &SceneSlot,
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
@@ -2061,7 +2054,7 @@ impl Batches {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         uniform: &wgpu::Buffer,
-        bgl: &wgpu::BindGroupLayout,
+        bgl: &Group0,
         key: u64,
         slot: &SceneSlot,
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
@@ -2506,7 +2499,7 @@ pub struct Renderer {
     guide_line: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     /// The layout of group 0 (the uniform and a palette), for per-scene bind groups.
-    uniform_bgl: wgpu::BindGroupLayout,
+    uniform_bgl: Group0,
     /// Group 0 with a one-entry palette: draws that do not read colours (images, AO, depth).
     bind: wgpu::BindGroup,
     linear_out: bool,
@@ -2752,6 +2745,13 @@ fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu
 
 pub const SHADER: &str = include_str!("../shaders/viewport.wgsl");
 
+/// The layout of group 0 (the uniform, a palette and its materials, the studio) with the studio
+/// every group-0 bind group carries.
+pub(crate) struct Group0 {
+    pub layout: wgpu::BindGroupLayout,
+    pub environment: Environment,
+}
+
 fn tri_layout() -> wgpu::VertexBufferLayout<'static> {
     const A: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32, 3 => Uint32];
     wgpu::VertexBufferLayout { array_stride: TRI_SIZE as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &A }
@@ -2915,6 +2915,7 @@ impl Renderer {
         let source = format!("{SHADER}\n{}", pbr::SOURCE);
         let module =
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("sc_viewport"), source: wgpu::ShaderSource::Wgsl(source.into()) });
+        let studio_layout = Environment::layout_entries();
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_viewport"),
             entries: &[
@@ -2946,8 +2947,14 @@ impl Renderer {
                     },
                     count: None,
                 },
+                // The studio finished faces are lit by (`Environment`).
+                studio_layout[0],
+                studio_layout[1],
+                studio_layout[2],
+                studio_layout[3],
             ],
         });
+        let environment = Environment::new(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sc_viewport"),
             bind_group_layouts: &[Some(&bgl)],
@@ -2963,6 +2970,7 @@ impl Renderer {
         let dummy_view = dummy_palette.create_view(&Default::default());
         let dummy_materials = material_texture(device, 1);
         let dummy_material_view = dummy_materials.create_view(&Default::default());
+        let [e3, e4, e5, e6] = environment.entries();
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_viewport"),
             layout: &bgl,
@@ -2970,6 +2978,10 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&dummy_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&dummy_material_view) },
+                e3,
+                e4,
+                e5,
+                e6,
             ],
         });
         let moving_uniform = device.create_buffer(&wgpu::BufferDescriptor {
@@ -2980,6 +2992,7 @@ impl Renderer {
         });
         // The layer's stand-in for draws that read no colours, like `bind` (a scene with a palette
         // binds its own, with `moving_uniform`).
+        let [e3, e4, e5, e6] = environment.entries();
         let moving_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_viewport_moving"),
             layout: &bgl,
@@ -2987,6 +3000,10 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 0, resource: moving_uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&dummy_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&dummy_material_view) },
+                e3,
+                e4,
+                e5,
+                e6,
             ],
         });
         let reversed = t.reversed_depth();
@@ -3460,6 +3477,7 @@ impl Renderer {
             let oit = jobs.spawn(oit);
             let blits = jobs.spawn(blits);
             let resets = jobs.spawn(resets);
+            let studio = jobs.spawn(crate::environment::tables);
             let (tri, tri_marks, tri_planned, planned_marks, tri_instanced, instanced_marks) = tris.join();
             let (tri_cap, planned_cap, instanced_cap) = caps.join();
             let (tri_instanced_flat, flat_marks) = flat.join();
@@ -3483,6 +3501,7 @@ impl Renderer {
             let (depth_reset, section_stencil) = resets.join();
             let (pbr, pbr_palette, pbr_instanced) = pbr.join();
             let oit = oit.join();
+            environment.set(studio.join());
             Renderer {
                 product_depth: None,
                 product_highlights: false,
@@ -3560,7 +3579,7 @@ impl Renderer {
                 guide_trans: guide_trans.join(),
                 guide_line,
                 uniform,
-                uniform_bgl: bgl.clone(),
+                uniform_bgl: Group0 { layout: bgl.clone(), environment: environment.clone() },
                 bind,
                 linear_out: t.format.is_srgb(),
                 model: Batches::default(),
@@ -3966,6 +3985,7 @@ impl Renderer {
             let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
             res.moving.take_sharing(device, queue, &res.moving_uniform, &res.uniform_bgl, mv.key, &mv.slot, tess, oit, Some(&mut res.model));
         }
+        res.uniform_bgl.environment.upload(queue);
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
         res.model.take_sharing(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, tess, oit, Some(&mut res.moving));
         match &cb.moving {

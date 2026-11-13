@@ -745,15 +745,14 @@ fn supersampling(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 
 
 /// Ambient occlusion samples per pixel this frame (#7165): the full count once the view has held
 /// still for a moment, fewer while it moves, so orbiting with AO on stays quick.
-/// The shader's sky (#7974): the world's up direction, and 1 to shade in linear light with a sky
-/// fill (Preferences › Graphics), else zero.
-pub(crate) fn sky_uniform(on: bool, up: solidcraft_viewport::UpAxis) -> [f32; 4] {
-    if !on {
-        return [0.0; 4];
-    }
+/// The shader's sky: the world's up direction, then its switches (Preferences › Graphics): 1 to
+/// shade dark parts in linear light with a sky fill (#7974), plus 2 to give opaque faces their
+/// material finish in a studio around that up direction.
+pub(crate) fn sky_uniform(dark_parts: bool, finish: bool, up: solidcraft_viewport::UpAxis) -> [f32; 4] {
+    let w = f32::from(u8::from(dark_parts) + 2 * u8::from(finish));
     match up {
-        solidcraft_viewport::UpAxis::Z => [0.0, 0.0, 1.0, 1.0],
-        solidcraft_viewport::UpAxis::Y => [0.0, 1.0, 0.0, 1.0],
+        solidcraft_viewport::UpAxis::Z => [0.0, 0.0, 1.0, w],
+        solidcraft_viewport::UpAxis::Y => [0.0, 1.0, 0.0, w],
     }
 }
 
@@ -979,6 +978,8 @@ struct ResolvedAppearance {
     body: Option<Color32>,
     opacity: f64,
     face_looks: std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look>,
+    /// The body look's PBR finish (metallic, roughness), if it has one.
+    pbr: Option<solidcraft_engine::doc::pbr_appearance::PbrParameters>,
 }
 
 /// [`ViewportState::appearance`]: resolved bodies by name, with their geometry key and the
@@ -1065,6 +1066,7 @@ fn resolve_appearance(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> 
         body: body_color(&s.doc, b),
         opacity: s.doc.model_body_opacity(b),
         face_looks: if s.colored_components.is_none() { s.doc.face_colors(b).into_iter().collect() } else { Default::default() },
+        pbr: s.doc.model_body_look(b).and_then(|l| l.pbr),
     }
 }
 
@@ -1755,6 +1757,12 @@ fn body_scene(
         set_palette_color(&mut arena, &mut sc.palette, slots.body, col);
         // Appearances: the body's opacity, and faces with looks of their own.
         let opacity = resolved.opacity;
+        // PBR finishes (metallic, roughness) for opaque bodies and faces in their own colours
+        // (shown when Preferences › Graphics says so, `sky_uniform`).
+        let finishes = !faded;
+        let body_pbr = resolved.pbr.filter(|_| finishes && resolved.component.is_none() && opacity >= 0.999);
+        arena.set_material(slots.body, finish(base, body_pbr));
+        arena.set_material(slots.instance, finish(base, body_pbr));
         let face_looks = &resolved.face_looks;
         let faces = b.body.face_count();
         let mut face_colors = Vec::with_capacity(faces);
@@ -1774,6 +1782,8 @@ fn body_scene(
             };
             let slot = slots.face(f);
             set_palette_color(&mut arena, &mut sc.palette, slot, rgba);
+            let pbr = look.map_or(body_pbr, |l| l.pbr.filter(|_| finishes && opacity >= 0.999));
+            arena.set_material(slot, finish(color, pbr));
             face_colors.push(slot);
             face_classes.push(class);
         }
@@ -1854,7 +1864,26 @@ fn body_scene(
         appearance.keys.retain(|name, _| names.contains(name.as_str()));
     }
     sc.instanced = instances.finish(app, whole);
+    // The finishes set above, into the scene's palette (a design with none leaves it as it is).
+    let materials = arena.materials();
+    if materials.as_slice() != sc.palette.materials() {
+        let palette = std::sync::Arc::make_mut(&mut sc.palette);
+        *palette = std::mem::take(palette).with_materials(materials);
+    }
     (sc, made)
+}
+
+/// A palette slot's PBR finish in colour `color` (sRGB): the look's metallic, roughness and IOR,
+/// or none.
+fn finish(color: Color32, pbr: Option<solidcraft_engine::doc::pbr_appearance::PbrParameters>) -> crate::gpu::Material {
+    pbr.map_or_else(crate::gpu::Material::default, |p| crate::gpu::Material {
+        base: [color.r(), color.g(), color.b()].map(|c| solidcraft_color::srgb::decode8(c) as f32),
+        metallic: p.metallic() as f32,
+        roughness: p.roughness() as f32,
+        ior: p.dielectric_ior() as f32,
+        pbr: true,
+        two_sided: false,
+    })
 }
 
 /// The colour of a measured seam whose highest order met is `order`, from the theme's
@@ -4734,7 +4763,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // The key first: it reads the arena (`scene_key`), which is held below.
     let key = highlight_geometry_key(app);
     let body_slots = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
-    let mut sc = GpuScene::with_palette(crate::gpu::Palette::with_stable(body_slots.entries()));
+    let mut sc = GpuScene::with_palette(crate::gpu::Palette::with_stable(body_slots.entries()).with_materials(body_slots.materials()));
     let st = crate::open_meshing::shown_world(app);
     let s = &app.session;
     let active_bodies = active_body_names(app);
@@ -5652,7 +5681,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let [r, g, b, _] = c.to_normalized_gamma_f32();
                 [r, g, b]
             }),
-            sky: sky_uniform(app.preferences.dark_parts_shading, proj.cam.up),
+            sky: sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, proj.cam.up),
             moving,
         });
         crate::blur::viewport(&painter, rect, cb, rect, [t.viewport_top, t.viewport_bottom]);
