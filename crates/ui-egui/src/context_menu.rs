@@ -296,7 +296,8 @@ fn body_feature(app: &SolveApp, body: &str) -> Option<u64> {
     crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature)
 }
 
-/// Remove Tube ("Remove N Tubes") when every one of `bodies` is a member of one Frame Member.
+/// Remove Tube ("Remove N Tubes") when every one of `bodies` is a member of one Frame Member; off
+/// while any of them is locked (`frame.remove_member` doesn't look at locks).
 fn remove_tube_item(app: &SolveApp, bodies: &[String]) -> Option<Item> {
     if bodies.len() > solidcraft_engine::doc::frame::MAX_MEMBERS {
         return None;
@@ -314,7 +315,8 @@ fn remove_tube_item(app: &SolveApp, bodies: &[String]) -> Option<Item> {
         })
         .collect::<Option<Vec<_>>>()?;
     let label = crate::dialogs_frame::remove_tubes_label(members.len());
-    Some(cmd(app, "frame.remove_member", &label).with(json!({ "members": members })))
+    let locked = bodies.iter().any(|b| app.session.visibility.locked_bodies.contains(b));
+    Some(cmd(app, "frame.remove_member", &label).with(json!({ "members": members })).on(!locked))
 }
 
 /// Bodies in a component and its subcomponents.
@@ -379,8 +381,9 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                     }
                 }
                 // Remove N Tubes, when the selection is all members of this Frame Member.
+                // With a locked one among them, the row keeps Remove Tube for its own tube.
                 if let Some(item) = v.iter_mut().find(|i| i.id == "frame.remove_member")
-                    && let Some(all) = remove_tube_item(app, &selected)
+                    && let Some(all) = remove_tube_item(app, &selected).filter(|all| all.enabled)
                 {
                     item.label = all.label;
                     item.params = all.params;
@@ -712,6 +715,16 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
+        // A right-click on a tube selects a face: Remove Tube for the faces' members.
+        let mut bodies: Vec<String> = Vec::new();
+        for s in sel {
+            if let Sel::Face { body, .. } = s
+                && !bodies.contains(body)
+            {
+                bodies.push(body.clone());
+            }
+        }
+        v.extend(remove_tube_item(app, &bodies));
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face })));
@@ -3777,6 +3790,36 @@ mod tests {
         assert!(remove_tube(&items(&h.app, &Target::Viewport)).is_none(), "a member with a plain body");
         select_bodies(&mut h, &[&rails[0], &posts[0]]);
         assert!(remove_tube(&items(&h.app, &Target::Viewport)).is_none(), "members of two Frame Members");
+    }
+
+    /// A right-click on a tube selects its face (the default filter): that menu offers Remove
+    /// Tube for the face's member too.
+    #[test]
+    fn a_member_face_has_remove_tube() {
+        let mut h = framed();
+        let (rail, bodies) = made_by(&h, "Rail");
+        let face = |body: &str| Sel::Face { body: body.into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 0.0) };
+        h.app.session.selection = vec![face(&bodies[1]), face(&bodies[1]), face(&bodies[2])];
+        let item = remove_tube(&items(&h.app, &Target::Viewport)).cloned().expect("the face menu offers Remove Tube");
+        assert_eq!(item.label, "Remove 2 Tubes");
+        let members: Vec<Value> = [&bodies[1], &bodies[2]].iter().map(|b| json!({"feature": rail, "line": line_of(&h, rail, b)})).collect();
+        assert_eq!(item.params, Some(json!({ "members": members })));
+        h.app.session.selection = vec![face("Box")];
+        assert!(remove_tube(&items(&h.app, &Target::Viewport)).is_none(), "a plain body's face");
+    }
+
+    /// A locked tube is never taken out from a menu: Remove Tube is off while any selected member
+    /// is locked, and a Browser row in such a selection offers its own tube alone.
+    #[test]
+    fn a_locked_member_is_not_removed_from_a_menu() {
+        let mut h = framed();
+        let (rail, bodies) = made_by(&h, "Rail");
+        h.app.session.visibility.locked_bodies.push(bodies[0].clone());
+        select_bodies(&mut h, &[&bodies[0], &bodies[3]]);
+        assert!(!remove_tube(&items(&h.app, &Target::Viewport)).unwrap().enabled, "the viewport's");
+        let item = remove_tube(&items(&h.app, &Target::Body { name: bodies[3].clone() })).cloned().unwrap();
+        assert!(item.enabled);
+        assert_eq!(item.params, Some(json!({"members": [{"feature": rail, "line": line_of(&h, rail, &bodies[3])}]})), "the row's own tube");
     }
 }
 
