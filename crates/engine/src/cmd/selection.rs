@@ -10,20 +10,29 @@ use solidcraft_geom::prelude::*;
 use super::CommandSpec;
 use super::measure_sel::{resolve, sketch_of};
 use crate::params::bad;
+use crate::schema::selection::{MAX_DETAIL, SelectionGetParams, SelectionGetResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.get", "Get Selection", selection_get).icon("select").noundo().params(
-    "detail?: bool (default true: resolve each item's geometry) → {count, items: [{kind (= type: body|face|edge|vertex|feature|sketch_curve|\
-     sketch_point|sketch_midpoint|sketch_constraint|profile|plane|axis|construction_point|occurrence…), the selection's own fields as select.set takes them (body, index, point, \
-     id, sketch, path…), and with detail: face: name (persistent face name), name_exact, surface ({type: plane|cylinder|cone|sphere|torus|\
-     other, normal/point, origin/axis/radius…}), area_mm2, planar; edge: name (persistent edge name), curve (line|circle|arc|other), \
-     length_mm, start, end, center/axis/radius for round edges; body: volume_mm3, feature, visible; any body item: component {id, name} \
-     and occurrence_path in an assembly; sketch items: sketch (its id, as select.set takes it), sketch_name, entity (line|circle|arc|point|midpoint|…), position for points and midpoints}]}; read-only, [] when nothing is \
-     selected",
-)];
+pub static COMMANDS: &[CommandSpec] =
+    &[CommandSpec::new("selection.get", "Get Selection", crate::checked!("selection.get", selection_get)).icon("select").noundo().contract(&SELECTION_GET_CONTRACT).output(output_schema_for::<SelectionGetResult>).params(
+        "detail?: bool (default true: resolve each item's geometry) → {count, items: [{kind (= type: body|face|edge|vertex|feature|sketch_curve|\
+         sketch_point|sketch_midpoint|sketch_constraint|profile|plane|axis|construction_point|occurrence…), the selection's own fields as select.set takes them (body, index, point, \
+         id, sketch, path…), and with detail: face: name (persistent face name), name_exact, surface ({type: plane|cylinder|cone|sphere|torus|\
+         other, normal/point, origin/axis/radius…}), area_mm2, planar; edge: name (persistent edge name), curve (line|circle|arc|other), \
+         length_mm, start, end, center/axis/radius for round edges; body: volume_mm3, feature, visible; any body item: component {id, name} \
+         and occurrence_path in an assembly; sketch items: sketch (its id, as select.set takes it), sketch_name, entity (line|circle|arc|point|midpoint|…), \
+         position for points and midpoints}]}; read-only, [] when nothing is selected",
+    )];
 
-/// Items resolved in full; the rest of a huge selection is listed by identity only.
-const MAX_DETAIL: usize = 500;
+/// `selection.get`'s contract: the parameters its published schema describes.
+const SELECTION_GET_CONTRACT: TypedContract<SelectionGetParams> = TypedContract::new();
+
+/// A reply as JSON: the command builds it from the type its output schema describes, so the two
+/// can't drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
 
 fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.get";
@@ -33,8 +42,9 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`detail` must be true or false")),
     };
     let s: &Session = s;
+    let over = s.selection.len() > MAX_DETAIL;
     let mut ctx = Context::new(s)?;
-    let items: Vec<Value> = s
+    let items: Vec<Map<String, Value>> = s
         .selection
         .iter()
         .enumerate()
@@ -43,14 +53,11 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
             if detail && i < MAX_DETAIL {
                 ctx.add_detail(sel, &mut v);
             }
-            Value::Object(v)
+            v
         })
         .collect();
-    let mut out = json!({"count": items.len(), "items": items});
-    if detail && s.selection.len() > MAX_DETAIL {
-        out["detail_limit"] = json!(MAX_DETAIL);
-    }
-    Ok(out)
+    let count = items.len();
+    reply(cmd, SelectionGetResult { count, items, detail_limit: (detail && over).then_some(MAX_DETAIL), param_warnings: Vec::new() })
 }
 
 /// The selection item as `select.set` takes it, with `kind` naming what it is.
