@@ -1551,3 +1551,189 @@ fn restarting_a_closed_curve_preserves_both_pieces() {
     };
     assert!(restart_curve(&near_closed, 1.).is_err());
 }
+
+/// A reader-style rational spline: the two seam coefficients are formed as p*w.
+fn weighted_decimal_seam(endpoint: [f64; 3], weight: f64) -> Curve {
+    let [x, y, z] = endpoint;
+    Curve::RationalSpline {
+        knots: vec![2., 2., 2., 5., 5., 8., 8., 8.],
+        homogeneous: vec![
+            [x * weight, y * weight, z * weight, weight],
+            [3., 6., 0., 3.],
+            [4., 0., 0., 2.],
+            [1., -2., 0., 1.],
+            [x, y, z, 1.],
+        ],
+    }
+}
+
+#[test]
+fn restarting_a_decimal_seam_accepts_only_endpoint_rounding() {
+    assert_ne!(0.1_f64 * 3. / 3., 0.1);
+    for endpoint in [
+        [0.1, -0.2, 0.3],
+        [0.1, -0.2, 0.0],
+        [1e8, 0.1, 1e-8],
+        [1e-100, -2e-100, 3e-100],
+    ] {
+        let curve = weighted_decimal_seam(endpoint, 3.);
+        let original = CurveEval::new(&curve).unwrap();
+        for start in [4.25, 5.] {
+            let rotated = restart_curve(&curve, start).unwrap();
+            let eval = CurveEval::new(&rotated).unwrap();
+            for i in 0..=128 {
+                let t = start + 6. * f64::from(i) / 128.;
+                let old_t = if t >= 8. { t - 6. } else { t };
+                let expected = original.point(old_t).unwrap();
+                assert!(eval.point(t).unwrap().dist(expected) <= 1e-12 * (1. + expected.len()));
+            }
+        }
+        let Curve::RationalSpline {
+            mut homogeneous,
+            knots,
+        } = curve
+        else {
+            panic!()
+        };
+        // A small y gap must not be hidden by a large x coordinate or an absolute floor.
+        homogeneous.last_mut().unwrap()[1] += endpoint[1].abs() * f64::EPSILON * 64.;
+        assert!(restart_curve(&Curve::RationalSpline { knots, homogeneous }, 4.25).is_err());
+    }
+    for bad in [f64::INFINITY, f64::NAN, f64::MAX] {
+        let curve = Curve::RationalSpline {
+            knots: vec![0., 0., 1., 2., 2.],
+            homogeneous: vec![[bad, 0., 0., 0.5], [1., 1., 0., 1.], [bad, 0., 0., 0.5]],
+        };
+        assert!(restart_curve(&curve, 0.5).is_err());
+    }
+}
+
+#[test]
+fn restarting_weighted_seams_encloses_random_coordinate_rounding() {
+    // Deterministic random mantissas of both signs, all bounded away from zero.
+    let mut state = 0x6a09_e667_f3bc_c909_u64;
+    let mut coordinate = || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let magnitude = f64::from_bits(0x3ff0_0000_0000_0000 | (state >> 12)) - 0.75;
+        if state & 1 == 0 {
+            magnitude
+        } else {
+            -magnitude
+        }
+    };
+    let mut unequal_quotients = [0; 2];
+    for scale in [1e-100, 1., 1e100] {
+        for _ in 0..64 {
+            let endpoint = [
+                coordinate() * scale,
+                coordinate() * scale,
+                coordinate() * scale,
+            ];
+            // The exact STEP quarter-circle seam weight is 0.7071067811865476.
+            for (which, weight) in [std::f64::consts::FRAC_1_SQRT_2, 3.]
+                .into_iter()
+                .enumerate()
+            {
+                unequal_quotients[which] +=
+                    usize::from(endpoint.iter().any(|x| x * weight / weight != *x));
+                let curve = weighted_decimal_seam(endpoint, weight);
+                let original = CurveEval::new(&curve).unwrap();
+                for start in [4.25, 5.] {
+                    let restarted = restart_curve(&curve, start).unwrap();
+                    let eval = CurveEval::new(&restarted).unwrap();
+                    for i in 0..=16 {
+                        let t = start + 6. * f64::from(i) / 16.;
+                        let old_t = if t >= 8. { t - 6. } else { t };
+                        let expected = original.point(old_t).unwrap();
+                        assert!(
+                            eval.point(t).unwrap().dist(expected)
+                                <= 1e-12 * expected.len().max(scale),
+                            "{endpoint:?}, weight {weight}, t {t}"
+                        );
+                    }
+                }
+                // Each axis is checked on its own, only a few ulps from closure.
+                for axis in 0..3 {
+                    let Curve::RationalSpline {
+                        knots,
+                        mut homogeneous,
+                    } = curve.clone()
+                    else {
+                        panic!()
+                    };
+                    homogeneous.last_mut().unwrap()[axis] +=
+                        endpoint[axis].abs() * f64::EPSILON * 64.;
+                    assert!(
+                        restart_curve(&Curve::RationalSpline { knots, homogeneous }, 4.25).is_err(),
+                        "{endpoint:?}, weight {weight}, axis {axis}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        unequal_quotients.iter().all(|count| *count > 0),
+        "exercise unequal divisions of matching source endpoints"
+    );
+}
+
+#[test]
+fn restarting_a_curve_returns_typed_errors_with_its_operation() {
+    use crate::SolidError;
+    let operation = "eval::pcurve::restart_curve";
+    let unsupported = Curve::Line {
+        start: [0.; 3],
+        end: [1.; 3],
+    };
+    let error = restart_curve(&unsupported, 0.5).unwrap_err();
+    assert_eq!(error.operation(), operation);
+    assert!(matches!(
+        error,
+        SolidError::Unsupported {
+            reason: "only splines and polylines can be restarted",
+            ..
+        }
+    ));
+
+    let closed = Curve::Polyline {
+        points: vec![[0.; 3], [1.; 3], [0.; 3]],
+    };
+    let error = restart_curve(&closed, 0.).unwrap_err();
+    assert_eq!(error.operation(), operation);
+    assert!(matches!(
+        error,
+        SolidError::InvalidInput {
+            reason: "spline restart outside the open domain",
+            ..
+        }
+    ));
+
+    let malformed = Curve::Spline {
+        knots: vec![0., 1.],
+        points: vec![[0.; 3], [1.; 3]],
+    };
+    let error = restart_curve(&malformed, 0.5).unwrap_err();
+    assert_eq!(error.operation(), operation);
+    assert!(matches!(
+        error,
+        SolidError::InvalidInput {
+            reason: "spline degree",
+            ..
+        }
+    ));
+
+    let open = Curve::Polyline {
+        points: vec![[0.; 3], [1.; 3], [2.; 3]],
+    };
+    let error = restart_curve(&open, 0.5).unwrap_err();
+    assert_eq!(error.operation(), operation);
+    assert!(matches!(
+        error,
+        SolidError::InvalidInput {
+            reason: "spline seam endpoints do not coincide",
+            ..
+        }
+    ));
+}

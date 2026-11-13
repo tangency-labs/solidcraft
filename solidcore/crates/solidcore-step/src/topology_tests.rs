@@ -2232,3 +2232,13 @@ fn a_walk_past_the_start_covers_the_gap_found_before_it() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn restarted_curve_errors_keep_their_step_messages() {
+    let line = BCurve::Line { start: [0.; 3], end: [1.; 3] };
+    assert_eq!(crate::kernel::restart_curve(&line, 0.5).unwrap_err(), "only splines and polylines can be restarted");
+    let closed = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [0.; 3]] };
+    assert_eq!(crate::kernel::restart_curve(&closed, 0.).unwrap_err(), "spline restart outside the open domain");
+    let open = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [2.; 3]] };
+    assert_eq!(crate::kernel::restart_curve(&open, 0.5).unwrap_err(), "spline seam endpoints do not coincide");
+}
