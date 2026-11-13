@@ -1182,7 +1182,7 @@ mod tests {
             }
             h.run(&json!([
                 {"call":"engine.execute","params":{"command":"solid.box","params":{"length":10,"width":10,"height":10,"body_name":"Block"}}},
-                {"start":"config.table"}, {"widget":"Add Column"}
+                {"start":"config.table"}, {"widget":"Add column"}
             ]))
             .unwrap();
             if component {
@@ -1217,7 +1217,7 @@ mod tests {
             {"call":"engine.execute","params":{"command":"sketch.circle.center","params":{"center":[0,0],"radius":9.999,"id":"inner"}}},
             {"call":"engine.execute","params":{"command":"sketch.finish","params":{}}},
             {"call":"engine.execute","params":{"command":"solid.extrude","params":{"distance":10,"profiles":[{"point":[9.9995,0]}],"body_name":"Ring"}}},
-            {"start":"config.table"},{"widget":"Add Column"},{"widget":"Face Appearance"},{"widget":"Faces on Ring"}
+            {"start":"config.table"},{"widget":"Add column"},{"widget":"Face Appearance"},{"widget":"Faces on Ring"}
         ]))
         .unwrap();
         assert!(h.widget("side:outer").is_some());
@@ -1285,7 +1285,7 @@ mod tests {
                 ]))
                 .unwrap();
             harness.frames(4);
-            for label in ["Configuration", "Active", "Apply", "Add configuration", "Add Column"] {
+            for label in ["Configuration", "Active", "Apply", "Add configuration", "Add column"] {
                 assert_single_line(&harness, label);
             }
             crate::scenario::check(&mut harness, &json!({"windows_fit":{"max_width":Tokens::get().form_card_width * 3.0}})).unwrap();
