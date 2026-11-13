@@ -2742,6 +2742,36 @@ fn compact_sketch_replies_count_spline_poles() {
     assert_eq!(rectangle["created"]["points"].as_array().map(Vec::len), Some(4), "{rectangle}");
 }
 
+/// #15864: a compact `sketch.move_points` reply counts the moves and lists only the ones that
+/// missed their targets; the full reply still lists every move.
+#[test]
+fn compact_move_points_reply_lists_only_missed_moves() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY", "name": "A"}}));
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "sketch.spline.fit_point", "params": {"points": [[10, 0], [0, 10], [-10, 0], [0, -10]], "periodic": true}}),
+    );
+    let moves =
+        json!([{"point": "p1", "to": [12, 0]}, {"point": "p2", "to": [0, 12]}, {"point": "p3", "to": [-12, 0]}, {"point": "p4", "to": [0, -12]}]);
+    let full = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": moves}}));
+    assert_eq!(full["moved"].as_array().map(Vec::len), Some(4), "{full}");
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": moves}, "verbose": false}));
+    assert_eq!((&compact["moved_count"], &compact["reached"]), (&json!(4), &json!(true)), "{compact}");
+    assert!(compact.get("moved").is_none() && compact.get("not_reached").is_none() && compact.get("created").is_none(), "{compact}");
+    assert!(compact.to_string().len() * 3 < full.to_string().len(), "compact is far smaller: {compact}");
+    // A point held by a fixed constraint cannot reach its target: only that move is listed.
+    tool(&mut s, "execute", json!({"command": "sketch.constraint.fix", "params": {"entities": ["p1"]}}));
+    let held = json!([{"point": "p1", "to": [20, 0]}, {"point": "p2", "to": [0, 14]}]);
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": held}, "verbose": false}));
+    assert_eq!((&compact["moved_count"], &compact["reached"]), (&json!(2), &json!(false)), "{compact}");
+    let missed = compact["not_reached"].as_array().cloned().unwrap_or_default();
+    assert_eq!(missed.len(), 1, "{compact}");
+    assert_eq!((&missed[0]["point"], &missed[0]["to"]), (&json!("p1"), &json!([20.0, 0.0])), "{compact}");
+    assert!(missed[0]["at"].is_array() && missed[0].get("reached").is_none(), "{compact}");
+}
+
 /// A connected app sees exactly one engine call; no inventory inspection is needed.
 #[test]
 fn compact_execute_uses_one_backend_call_and_keeps_removed_bodies() {

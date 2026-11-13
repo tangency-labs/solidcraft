@@ -15376,8 +15376,12 @@ fn host_result_controls_shield_wheel_and_comparison_divider_keeps_capture() {
     assert_eq!(h.app.cam, product);
     assert_eq!(h.app.render_workspace.view.result_camera, image);
     let canvas = h.app.viewport.rect.unwrap();
-    let start = crate::scenario::rect_of("render:compare:handle").unwrap().center();
-    assert!(!controls.contains(start));
+    let handle = crate::scenario::rect_of("render:compare:divider").unwrap();
+    let start = [0.5, 0.25, 0.75]
+        .into_iter()
+        .map(|y| egui::pos2(handle.center().x, handle.top() + handle.height() * y))
+        .find(|&point| !controls.contains(point) && !crate::shell::covered(&h.app, point))
+        .expect("an exposed comparison handle");
     h.frame_with(vec![
         Event::ModifiersChanged(Modifiers::ALT),
         Event::PointerMoved(start),
@@ -15432,7 +15436,11 @@ fn host_panel_capture_blocks_result_navigation_through_release() {
                 .center();
             let canvas = h.app.viewport.rect.unwrap();
             // Below this content-sized side card and away from the comparison divider.
-            let end = egui::pos2(canvas.center().x + 80.0, canvas.center().y + 80.0);
+            let end = [0.55, 0.65, 0.75]
+                .into_iter()
+                .map(|x| egui::pos2(canvas.left() + canvas.width() * x, canvas.center().y + 80.0))
+                .find(|&point| !crate::shell::covered(&h.app, point) && !h.app.viewport.layout.as_ref().unwrap().navigation.contains(point))
+                .expect("exposed canvas beside the comparison divider");
             assert!(!crate::shell::covered(&h.app, end));
             assert!(!h.app.viewport.layout.as_ref().unwrap().navigation.contains(end));
             h.frame_with(vec![Event::PointerMoved(start)]);

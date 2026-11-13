@@ -400,6 +400,19 @@ fn read_session(
     Ok(s)
 }
 
+/// `run --save FILE` over a design another SolidCraft has open (a fresh lock beside it, #16199):
+/// the save goes ahead as before, and stderr says who has it open, since that app goes on
+/// showing the design it opened and its next `file.save` is refused.
+fn warn_if_open_elsewhere(path: &str) {
+    use solidcraft_engine::io::design_lock;
+    if let Some(lock) = design_lock::held_elsewhere(std::path::Path::new(path), design_lock::now_secs()) {
+        eprintln!(
+            "{path}: warning: open in SolidCraft {} by {} on {}; saved all the same, and that window still shows the design it opened",
+            lock.app, lock.user, lock.host
+        );
+    }
+}
+
 /// Run `script`, read from `path`, on `s`. At the warn level each step's `param_warnings` go to
 /// stderr as the step completes, even when a later step fails (stdout stays the caller's).
 fn run_script_warning(s: &mut Session, path: &str, script: &Value) -> Result<Vec<Value>, String> {
@@ -556,6 +569,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         s.execute("file.export", &params).map_err(|e| e.to_string())?;
     }
     if let Some(p) = flag(args, "--save") {
+        warn_if_open_elsewhere(p);
         s.execute("file.save_as", &json!({"path": p})).map_err(|e| e.to_string())?;
     }
     if let Some(results) = results {
@@ -750,6 +764,12 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         &["--no-grid", "--no-axes"],
         true,
     )?;
+    // A snapshot writes one picture. Only the body and tool options take several values.
+    for option in ["--in", "--out", "--width", "--height", "--view", "--camera", "--section", "--quality"] {
+        if args.iter().filter(|a| a.as_str() == option).count() > 1 {
+            return Err(format!("snapshot: {option} may be given only once; use a separate call for each picture"));
+        }
+    }
     if positional(args).is_none() && flag(args, "--in").is_none() {
         return Err(usage());
     }

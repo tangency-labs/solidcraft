@@ -4030,12 +4030,30 @@ pub(crate) fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String 
     }
 }
 
-/// The k-th body of a body pattern: its stored name, else a copy of `source`. Once `body.rename`
-/// has stored this feature's names, a copy beyond them (the count was raised) is numbered after
-/// the highest stored `source (n)`, so it never takes a number freed by a rename (#372).
-/// Features without stored names keep the first free `source (n)`.
-fn pattern_copy_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> String {
-    if f.body_names.get(k).is_some_and(|name| !name.trim().is_empty()) {
+/// Where in a body Pattern's `body_names` the name of copy `k` of source `s` is kept, for a
+/// pattern of `sources` bodies with `copies` copies each. The names are kept source by source,
+/// and the session keeps one name for every copy of a pattern of several bodies
+/// (`Session::pin_body_names`), so the stored names split evenly into the copies each source had
+/// when they were stored. When the count changes, a copy keeps the name stored for its own source
+/// and number, and a new copy has none (#12114). Names that don't split evenly (stored before
+/// every copy was named), and names of a design saved before then (`in_order`, see
+/// `Feature::pattern_names_in_order`), are read in the order the copies are made.
+fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: usize, in_order: bool) -> Option<usize> {
+    if !in_order && sources > 1 && stored > 0 && stored.is_multiple_of(sources) {
+        let per = stored / sources;
+        return (k < per).then(|| s.saturating_mul(per).saturating_add(k));
+    }
+    s.checked_mul(copies)?.checked_add(k)
+}
+
+/// A copy of a body pattern at `slot` of its stored names: its stored name, else a copy of
+/// `source`. Once `body.rename` has stored this feature's names, a copy beyond them (the count
+/// was raised) is numbered after the highest stored `source (n)`, so it never takes a number
+/// freed by a rename (#372). Features without stored names keep the first free `source (n)`.
+fn pattern_copy_name(state: &ModelState, f: &Feature, slot: Option<usize>, source: &str) -> String {
+    if let Some(k) = slot
+        && f.body_names.get(k).is_some_and(|name| !name.trim().is_empty())
+    {
         return copy_body_name(state, f, k, source);
     }
     let base = if source.trim().is_empty() { "Body" } else { source.trim() };
@@ -4709,6 +4727,7 @@ fn apply_traced_with(
                             *mb = mb.remade(b);
                         }
                     }
+                    None if op == Operation::Cut && !more::tools_may_cover(&target.body, tools) => return Err(more::failed_cut(&target.name)),
                     None => remove.push(ti),
                 }
             }
@@ -9838,8 +9857,7 @@ fn eval_feature(
             }
             // Bodies: each copy is a new body named after its source.
             let here = doc.component_transform(f.component);
-            let mut output = 0;
-            for n in bodies {
+            for (s, n) in bodies.iter().enumerate() {
                 let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 // A body of another component is held in that component's frame, the pattern's
                 // transforms in this feature's: each copy is moved as the pattern moves it in the
@@ -9859,7 +9877,8 @@ fn eval_feature(
                         None => *m,
                     };
                     let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
-                    let name = pattern_copy_name(st, f, output, &mb.name);
+                    let slot = pattern_name_slot(f.body_names.len(), bodies.len(), mats.len(), s, k, f.pattern_names_in_order);
+                    let name = pattern_copy_name(st, f, slot, &mb.name);
                     copy_sheet(st, &mb.name, &name, &local);
                     let mut body = ModelBody::traced_new(name, copy, f.id);
                     if owner.is_some() {
@@ -9868,7 +9887,6 @@ fn eval_feature(
                         body.transferred = true;
                     }
                     st.bodies.push(body);
-                    output += 1;
                 }
             }
             Ok(())

@@ -5321,6 +5321,158 @@ fn pattern_copies_added_after_a_rename_keep_their_numbers() {
     assert_eq!(names(&s), ["X", "Second"]);
 }
 
+/// What a body of the #12114 tests is and where: the box is 10 mm across, the post 6 mm; and its
+/// centre in x.
+fn pattern_box_or_post(s: &mut Session, body: &str) -> (&'static str, f64) {
+    let m = run(s, "inspect.measure", json!({"bodies": [body]}));
+    let bbox = &m["bodies"][0]["bbox"];
+    let (min, max) = (bbox["min"][0].as_f64().unwrap_or(f64::NAN), bbox["max"][0].as_f64().unwrap_or(f64::NAN));
+    (if max - min > 8.0 { "box" } else { "post" }, ((min + max) / 2.0).round())
+}
+
+/// A pattern of two bodies keeps each copy's name with its own source and place when the count
+/// goes up or down, through undo, reopening and a change to the bodies it copies (#12114).
+#[test]
+fn pattern_copies_of_several_bodies_keep_their_names_when_the_count_changes() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    let shape = pattern_box_or_post;
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "2", "unit": ""}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 30, "name": "Pat"}));
+    run(&mut s, "body.rename", json!({"body": "Post (2)", "name": "Lens"}));
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Lens"]);
+
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
+    // The new post copies are numbered as a single body's are (#372); what matters here is that
+    // every name stays with its own source and place.
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Base (4)", "Lens", "Post (2)", "Post (3)"]);
+    let expect = [("Base (2)", ("box", 30.0)), ("Base (4)", ("box", 90.0)), ("Lens", ("post", 30.0)), ("Post (3)", ("post", 90.0))];
+    for (body, want) in expect {
+        assert_eq!(shape(&mut s, body), want, "{body}");
+    }
+
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "3"}));
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Lens", "Post (2)"]);
+    assert_eq!(shape(&mut s, "Lens"), ("post", 30.0));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Base (4)", "Lens", "Post (2)", "Post (3)"]);
+    run(&mut s, "edit.redo", json!({}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(names(&reopened), ["Base", "Post", "Base (2)", "Base (3)", "Lens", "Post (2)"]);
+
+    // Copying only the post now: the post's copies keep their names.
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"]}}));
+    assert_eq!(names(&s), ["Base", "Post", "Lens", "Post (2)"]);
+    assert_eq!(shape(&mut s, "Lens"), ("post", 30.0));
+    assert_eq!(shape(&mut s, "Post (2)"), ("post", 60.0));
+}
+
+/// A design saved before #12114 whose two-body Pattern went from count 4 to 3 kept all six names
+/// and read them in the order its copies were made, so the post at x = 30 was `Base (4)`. It
+/// opens with the names it was saved with, and from then on a count change keeps each name with
+/// its copy.
+#[test]
+fn an_older_pattern_of_several_bodies_opens_with_the_names_it_was_saved_with() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    let shape = pattern_box_or_post;
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "3", "unit": ""}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 30, "name": "Pat"}));
+    // The file as an older build saved it: without this change, and with the names it stored.
+    let mut file: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    if let Some(pending) = file["format_pending"].as_array_mut() {
+        pending.retain(|change| change != "pattern-names-by-source");
+    }
+    let pattern = file["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == "Pat").unwrap();
+    pattern["body_names"] = json!(["Base (2)", "Base (3)", "Base (4)", "Post (2)", "Post (3)", "Post (4)"]);
+    let doc = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
+    assert!(doc.features.iter().any(|f| f.name == "Pat" && f.pattern_names_in_order));
+
+    let mut s = Session::opened_at(doc, None, None);
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Base (4)", "Post (2)"]);
+    assert_eq!(shape(&mut s, "Base (4)"), ("post", 30.0));
+    assert_eq!(shape(&mut s, "Post (2)"), ("post", 60.0));
+    // Opening stored the names as the copies have them, to be read source by source.
+    let pattern = s.doc.features.iter().find(|f| f.name == "Pat").unwrap();
+    assert!(!pattern.pattern_names_in_order);
+    assert_eq!(pattern.body_names, ["Base (2)", "Base (3)", "Base (4)", "Post (2)"]);
+
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
+    assert_eq!(shape(&mut s, "Base (3)"), ("box", 60.0));
+    assert_eq!(shape(&mut s, "Base (4)"), ("post", 30.0));
+    assert_eq!(shape(&mut s, "Post (2)"), ("post", 60.0));
+    assert_eq!(names(&s).len(), 8);
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "2"}));
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (4)"]);
+    assert_eq!(shape(&mut s, "Base (4)"), ("post", 30.0));
+}
+
+/// A design made in memory whose two-body Pattern stored only some of its copies' names: the
+/// first command changes the bodies it copies, before any command stored the names. The copies
+/// it still makes keep their own names, not the names of the source it no longer copies (#12114).
+#[test]
+fn a_pattern_edited_before_its_names_were_stored_keeps_each_name_with_its_source() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    let shape = pattern_box_or_post;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 30, "name": "Pat"}));
+    let mut doc = (*s.doc).clone();
+    if let Some(f) = doc.features.iter_mut().find(|f| f.name == "Pat") {
+        f.body_names = ["Base (2)", "Base (3)", "Lens"].map(String::from).to_vec();
+    }
+    let mut s = Session::new(doc);
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Lens", "Post (2)"]);
+
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"]}}));
+    assert_eq!(names(&s), ["Base", "Post", "Lens", "Post (2)"]);
+    assert_eq!(shape(&mut s, "Lens"), ("post", 30.0));
+    assert_eq!(shape(&mut s, "Post (2)"), ("post", 60.0));
+}
+
+/// Names an edit gives a Pattern of two bodies name its copies in the order they are made, as
+/// before #12114: a shorter list names the first copies, and the names stay through the store
+/// that follows the edit and through reopening.
+#[test]
+fn names_an_edit_gives_a_pattern_of_two_bodies_name_its_copies_in_order() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    let shape = pattern_box_or_post;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 30, "name": "Pat"}));
+
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"body_names": ["Custom"]}}));
+    assert_eq!(shape(&mut s, "Custom"), ("box", 30.0), "{:?}", names(&s));
+
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"body_names": ["Left", "Right"]}}));
+    assert_eq!(shape(&mut s, "Left"), ("box", 30.0), "{:?}", names(&s));
+    assert_eq!(shape(&mut s, "Right"), ("box", 60.0), "{:?}", names(&s));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(names(&reopened), names(&s));
+
+    // Names given with a change to the bodies are the new copies' names, in order, even when one
+    // source is left: they are not moved by source as the stored names are.
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"], "body_names": ["Left", "Right"]}}));
+    assert_eq!(shape(&mut s, "Left"), ("post", 30.0), "{:?}", names(&s));
+    assert_eq!(shape(&mut s, "Right"), ("post", 60.0), "{:?}", names(&s));
+
+    // Names given that are the very names stored are still given: read in order, not moved.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30, "name": "Pat"}));
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"body_names": ["Left", "Right"]}}));
+    assert_eq!(s.doc.find_feature("Pat").map(|f| f.body_names.clone()), Some(vec!["Left".to_string(), "Right".to_string()]));
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"], "body_names": ["Left", "Right"]}}));
+    assert_eq!(shape(&mut s, "Left"), ("post", 30.0), "{:?}", names(&s));
+}
+
 /// A sketch side drawn as two collinear lines extrudes into one flat face, not two with an edge
 /// between them (#1788); the face is named from the first line and answers to the second.
 #[test]

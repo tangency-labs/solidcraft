@@ -169,6 +169,7 @@ pub struct ViewportState {
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
     pub(crate) sketch_slot: SceneSlot,
     sketch_key: u64,
+    wireframe: crate::wireframe_silhouettes::Outlines,
     physical_scale: f32,
     pub(crate) display: std::sync::Mutex<crate::sketch_display::DisplayCache>,
     pub(crate) hl_slot: SceneSlot,
@@ -644,6 +645,7 @@ fn base_scene_key(app: &SolveApp) -> u64 {
 fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     scene_key(app).hash(&mut h);
+    app.viewport.wireframe.generation().hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
     // The grid this scene draws follows the view when the preference says so (#1470): turning it
     // on or off redraws even while the camera holds still.
@@ -1917,6 +1919,7 @@ pub(crate) fn seam_width(order: Option<solidcraft_engine::kernel::Continuity>) -
 
 /// Rebuild the sketch scene when what it shows has changed.
 pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
+    refresh_wireframe(app, proj);
     let sk = sketch_scene_key(app, proj);
     if sk != app.viewport.sketch_key {
         let scene = build_sketch_scene(app, proj);
@@ -1925,6 +1928,36 @@ pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
         }
         app.viewport.sketch_key = sk;
     }
+}
+
+/// The camera changes only silhouette classification, never the body's mesh or GPU blocks.
+fn refresh_wireframe(app: &mut SolveApp, proj: &Proj) {
+    let mut outlines = std::mem::take(&mut app.viewport.wireframe);
+    if app.ui.visual_style != 2 {
+        if outlines.model().is_some() {
+            outlines.set_model(None, 0);
+        }
+        if outlines.busy() {
+            outlines.advance(&proj.cam, crate::wireframe_silhouettes::WORK_PER_FRAME, |_| None);
+        }
+    } else {
+        let key = scene_key(app);
+        let st = crate::open_meshing::shown_world(app);
+        if outlines.model() != Some(key) {
+            outlines.set_model(Some(key), st.bodies.len());
+        }
+        outlines.advance(&proj.cam, crate::wireframe_silhouettes::WORK_PER_FRAME, |index| {
+            let body = st.bodies.get(index)?;
+            if !app.body_visible(&body.name) || app.preview.effective_replaced().contains(&body.name) {
+                return None;
+            }
+            // The model scene already requested these display meshes. Reuse placements'
+            // shared triangles instead of materializing a moved copy during each drag.
+            let (mesh, placement) = shared_mesh(app, body).unwrap_or_else(|| (drawn_mesh(app, body), solidcraft_engine::doc::IDENTITY));
+            crate::wireframe_silhouettes::Source::new(mesh, placement)
+        });
+    }
+    app.viewport.wireframe = outlines;
 }
 
 /// View-dependent geometry: grid, sketch feedback and the ground shadow's visibility.
@@ -1942,6 +1975,12 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     {
         // A hidden shadow must not keep an earlier document's whole model alive.
         *cache = None;
+    }
+    if app.ui.visual_style == 2 {
+        let color = sc.color(c4(tk.text));
+        for [a, b] in app.viewport.wireframe.segments() {
+            sc.line(a.to_f32(), b.to_f32(), color, 1.3, false);
+        }
     }
     let mut fill_budget = 131_072;
     // The open sketch's plane in the model this frame shows.
@@ -5721,6 +5760,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::frame_watch::step(app, "model scene");
         }
         refresh_sketch_scene(app, &proj);
+        if app.viewport.wireframe.busy() {
+            ui.ctx().request_repaint();
+        }
         let hk = highlight_key_with_projection(app, || proj);
         if hk != app.viewport.hl_key {
             let hl = build_highlight_with_projection(app, || proj);
@@ -11391,11 +11433,14 @@ mod tests {
     #[test]
     fn the_lit_face_does_not_change_while_the_view_is_rotated() {
         let mut h = crate::scenario::Harness::new();
-        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200}}));
-        h.app.cam =
-            Camera { target: Vec3::new(200.0, 200.0, 100.0), yaw: 0.6, pitch: 0.9, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default() };
+        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200, "corner": [-200,-200,-100]}}));
+        h.app.set_origin_shown(false);
+        h.app.cam = Camera { target: Vec3::ZERO, yaw: 0.3, pitch: 0.15, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default() };
         h.frames(3);
-        let at = face_pixel(&h);
+        // A low orbit through the box centre crosses side faces without
+        // tracking a point on the top face as the camera turns.
+        let at = projection(&h.app, h.app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
         h.call("ui.move", json!({"x": at.x, "y": at.y}));
         h.frames(2);
         let lit = face_of(&h.app.viewport.hover);
@@ -11411,8 +11456,8 @@ mod tests {
         };
         h.frame_with(vec![rotate(egui::TouchPhase::Start, egui::vec2(40.0, 0.0))]);
         let mut picked = Vec::new();
-        for step in 1..=4 {
-            h.frame_with(vec![rotate(egui::TouchPhase::Move, egui::vec2(40.0 * step as f32, 0.0))]);
+        for step in 1..=12 {
+            h.frame_with(vec![rotate(egui::TouchPhase::Move, egui::vec2(80.0, 0.0))]);
             assert_eq!(
                 face_of(&h.app.viewport.hover),
                 lit,
@@ -11546,7 +11591,7 @@ mod tests {
         for y in 2..18 {
             for x in 2..18 {
                 let at = rect.min + egui::vec2(rect.width() * x as f32 / 20.0, rect.height() * y as f32 / 20.0);
-                if crate::viewport::pick(&h.app, &proj, at).iter().any(|hit| matches!(hit, crate::viewport::Hit::Face { .. })) {
+                if matches!(candidate(&h.app, &pick(&h.app, &proj, at)), Some((Hit::Face { .. }, _))) {
                     return at;
                 }
             }
