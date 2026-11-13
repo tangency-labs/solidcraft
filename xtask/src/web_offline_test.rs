@@ -177,10 +177,23 @@ fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
     expect(cdp, 0, "a move with no buttons after a lost release")?;
     mouse(cdp, "mouseReleased", (x + 10.0, y), "right", 0)?;
     // The focus moves inside the page with a button held, as when a value box takes the keyboard
-    // while its manipulator is dragged (#16209): the canvas's blur is heard on the window too.
+    // while its manipulator is dragged (#16209): eframe gives it to its hidden text input, the
+    // canvas's next sibling, and back to the canvas, and the window hears each blur too.
+    let focus = |cdp: &mut Cdp, to: &str| -> Result<(), String> {
+        let js = format!(
+            "(() => {{ const c = document.getElementById('solidcraft_canvas'), t = c && c.nextElementSibling; if (!t || t.tagName !== 'INPUT') return 'no hidden text input after the canvas'; const e = {to}; e.focus(); return document.activeElement === e ? 'ok' : 'the focus did not move to ' + e.tagName; }})()"
+        );
+        match cdp.eval(&js)? {
+            Value::String(s) if s == "ok" => Ok(()),
+            v => Err(format!("web-api-test: {v}")),
+        }
+    };
+    focus(cdp, "c")?;
     mouse(cdp, "mousePressed", c, "middle", 4)?;
-    cdp.eval("document.getElementById('solidcraft_canvas').dispatchEvent(new FocusEvent('blur'))")?;
-    expect(cdp, 4, "the focus moved inside the page")?;
+    focus(cdp, "t")?;
+    expect(cdp, 4, "the focus moved to the hidden text input")?;
+    focus(cdp, "c")?;
+    expect(cdp, 4, "the focus came back to the canvas")?;
     mouse(cdp, "mouseReleased", c, "middle", 0)?;
     expect(cdp, 0, "let go after the focus moved inside the page")?;
     // The window loses focus with a button held.
