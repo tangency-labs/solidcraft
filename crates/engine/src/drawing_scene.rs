@@ -912,6 +912,17 @@ fn assemble<D: Borrow<Drawn>>(
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
     let layout = record.border.as_ref().map(|border| border.layout(&record.sheet)).transpose().map_err(|e| bad(CMD, e.to_string()))?;
     let mut border = layout.as_ref().map_or_else(Vec::new, |layout| layout.paper(record.id));
+    // The sheet format's line work goes with the border: under the views, one object with it.
+    if !record.format.strokes.is_empty() {
+        let thin = LineKind::Thin.width_mm(record.line_group.unwrap_or_default());
+        let items = record.format.strokes.iter().map(|s| Item::Stroke {
+            path: s.path.clone(),
+            closed: s.closed,
+            width_mm: s.width_mm.unwrap_or(thin),
+            pattern: None,
+        });
+        border.push(Group { object: record.id, kind: ObjectKind::DrawingBorder, items: items.collect() });
+    }
     // The block sits on the border. It joins with the border (its text's fonts too), so no view takes
     // its records, and its band paints it over the views.
     let (block, fonts) = match (&record.title_block, &layout) {
@@ -921,6 +932,11 @@ fn assemble<D: Borrow<Drawn>>(
             group.items.splice(0..0, logos.iter().cloned());
             group.items.extend(text.runs.iter().cloned().map(Item::Text));
             (Some(group), text.fonts.clone())
+        }
+        // No block: the sheet format's text, if any, is painted alone where the block would be.
+        _ if !text.runs.is_empty() => {
+            let items = text.runs.iter().cloned().map(Item::Text).collect();
+            (Some(Group { object: record.id, kind: ObjectKind::DrawingBorder, items }), text.fonts.clone())
         }
         _ => (None, Vec::new()),
     };
@@ -1019,13 +1035,19 @@ fn cell_texts(s: &Session, d: &Drawing, sheet: u64) -> Vec<CellText> {
 /// font and language: nothing without a block. Also whether a text waits for a font to fall back
 /// to, which only the window's sheet leaves to the search's thread (`wait` false).
 fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText], wait: bool) -> Result<(Set, bool)> {
-    Ok(match (&record.title_block, record.title_block_layout().map_err(|e| bad(CMD, e.to_string()))?) {
+    let fonts = PaperFonts::new(&lettering.font, &lettering.language, wait);
+    let (mut set, pending) = match (&record.title_block, record.title_block_layout().map_err(|e| bad(CMD, e.to_string()))?) {
         (Some(block), Some(placed)) => {
-            let laid = title_block_text::lay(block, &placed, &PaperFonts::new(&lettering.font, &lettering.language, wait), cells);
+            let laid = title_block_text::lay(block, &placed, &fonts, cells);
             (laid.set(), laid.pending)
         }
         _ => (Set::default(), false),
-    })
+    };
+    // The sheet format's fixed text after the block's: painted with it, on top of the views.
+    let (runs, format_fonts, format_pending) = crate::drawing_note_paper::format_texts(&record.format.texts, &fonts);
+    set.runs.extend(runs);
+    set.fonts.extend(format_fonts);
+    Ok((set, pending || format_pending))
 }
 
 /// Sheet `sheet` of `d`.

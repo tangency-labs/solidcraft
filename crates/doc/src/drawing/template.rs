@@ -174,7 +174,7 @@ pub fn apply(drawing: &Drawing, template: &Drawing, id_source: &mut IdSource) ->
         let Some(from) = template.sheets.get(at).or(template.sheets.last()) else { continue };
         let block = from.title_block.as_ref().map(|block| with_logos(block, &logos));
         let Some(sheet) = d.sheets.get_mut(at) else { continue };
-        let paper = sheet.sheet != from.sheet;
+        let paper = sheet.sheet != from.sheet || sheet.format != from.format;
         let (border, title_block) = (sheet.border != from.border, sheet.title_block != block);
         // A sheet's typed text is always its own block's ([`Drawing::validate`]), so the same block loses none.
         if !(paper || border || title_block) {
@@ -183,6 +183,7 @@ pub fn apply(drawing: &Drawing, template: &Drawing, id_source: &mut IdSource) ->
         let sheet = Arc::make_mut(sheet);
         sheet.sheet = from.sheet;
         sheet.border = from.border;
+        sheet.format = from.format.clone();
         let lost = sheet.set_title_block(block);
         changed.push(Restyled { sheet: sheet.id, paper, border, title_block, lost });
     }

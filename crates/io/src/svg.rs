@@ -169,6 +169,8 @@ fn length_mm(s: &str) -> Option<f64> {
 
 struct Out {
     g: Vec<Geom2>,
+    /// The texts marked as fields: each one's place in `g` and its field's name.
+    fields: Vec<(usize, String)>,
 }
 
 impl Out {
@@ -471,6 +473,13 @@ pub fn svg_sheet(text: &str) -> Option<(Vec2, Vec2)> {
 
 /// Read the geometry of an SVG document (millimetres, y up). `scale` multiplies the result.
 pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
+    read_svg_with_fields(text).map(|(g, _)| g)
+}
+
+/// [`read_svg`], with the texts a template marks as fields that fill in: each one's place in the
+/// geometry and its field's name, from a `data-field` attribute or FreeCAD's documented
+/// `freecad:editable` (`freecad:EditableText` in older files) on the `text` element.
+pub fn read_svg_with_fields(text: &str) -> Result<(Vec<Geom2>, Vec<(usize, String)>)> {
     if text.len() > MAX_DRAWING_BYTES {
         return Err(IoError::Invalid("the SVG file is too large".into()));
     }
@@ -478,9 +487,9 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
     rd.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut stack: Vec<Tf> = Vec::new();
-    let mut out = Out { g: Vec::new() };
+    let mut out = Out { g: Vec::new(), fields: Vec::new() };
     let mut root: Option<Tf> = None;
-    let mut pending_text: Option<(Tf, Vec2, f64)> = None;
+    let mut pending_text: Option<(Tf, Vec2, f64, Option<String>)> = None;
     // The depth of the element whose contents are not drawn (#11039), while inside one.
     let mut skip_from: Option<usize> = None;
     loop {
@@ -497,12 +506,15 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
                 continue;
             }
             Event::Text(tx) => {
-                if let Some((tf, at, h)) = pending_text.take() {
+                if let Some((tf, at, h, field)) = pending_text.take() {
                     let s = String::from_utf8_lossy(tx.as_ref()).trim().to_string();
                     if !s.is_empty() {
                         let k = tf.uniform().unwrap_or(1.0);
                         let dir = tf.vec(Vec2::X);
                         out.push(Geom2::Text { text: s, at: tf.apply(at), height: h * 0.7 * k, angle: dir.angle() })?;
+                        if let Some(field) = field {
+                            out.fields.push((out.g.len() - 1, field));
+                        }
                     }
                 }
                 buf.clear();
@@ -579,7 +591,12 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
             }
             "text" => {
                 let size = attr(&a, "font-size").map(numbers).and_then(|v| v.first().copied()).unwrap_or(16.0);
-                pending_text = Some((tf, Vec2::new(num_attr(&a, "x"), num_attr(&a, "y")), size));
+                let field = ["data-field", "editable", "EditableText"]
+                    .iter()
+                    .find_map(|key| attr(&a, key))
+                    .map(|name| name.trim().chars().take(MAX_FIELD_CHARS).collect::<String>())
+                    .filter(|name| !name.is_empty());
+                pending_text = Some((tf, Vec2::new(num_attr(&a, "x"), num_attr(&a, "y")), size, field));
             }
             _ => {}
         }
@@ -591,8 +608,11 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
         }
         buf.clear();
     }
-    Ok(out.g)
+    Ok((out.g, out.fields))
 }
+
+/// The most characters of a field's name a template's text keeps.
+const MAX_FIELD_CHARS: usize = 64;
 
 /// The text of an SVG file's bytes: a UTF-8 byte-order mark is dropped and UTF-16 files (with
 /// their mark, as some Windows tools write them) are decoded. A gzip-compressed file (`.svgz`

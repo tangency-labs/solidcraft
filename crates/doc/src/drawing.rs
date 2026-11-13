@@ -72,6 +72,7 @@ pub mod dimension;
 pub mod fields;
 pub mod image;
 pub mod note;
+pub mod sheet_format;
 pub mod table;
 pub mod template;
 pub mod view;
@@ -308,6 +309,9 @@ pub struct Sheet {
     /// Its own line group: none follows the drawing's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_group: Option<LineGroup>,
+    /// Line work and fixed text drawn under its views, as an imported template brings them.
+    #[serde(default, skip_serializing_if = "sheet_format::SheetFormat::is_empty")]
+    pub format: sheet_format::SheetFormat,
 }
 
 /// A component of one of the drawing's designs.
@@ -428,6 +432,7 @@ impl Drawing {
             documents: None,
             excluded: Excluded::default(),
             line_group: None,
+            format: sheet_format::SheetFormat::default(),
         };
         let drawing = Drawing {
             format: DRAWING.format_string(DRAWING.current()),
@@ -707,6 +712,7 @@ impl Drawing {
         let texts = sheet.title_block_overrides.values().map(String::as_str);
         solidcraft_geom::cell::check_text(texts).map_err(|e| DocError::Invalid(e.to_string()))?;
         require((MIN_DPI..=MAX_DPI).contains(&sheet.dpi), || format!("its pictures are {MIN_DPI} to {MAX_DPI} dpi"))?;
+        sheet.format.check()?;
         match sheet.documents {
             Some(SheetComponent { source, .. }) => {
                 let named = || format!("it documents source {}, which the drawing doesn't have", ids::encode(source));

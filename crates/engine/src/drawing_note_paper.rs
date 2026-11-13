@@ -8,8 +8,11 @@
 
 use solidcore_record::Vec2;
 use solidcraft_doc::drawing::note::Note;
+use solidcraft_doc::drawing::sheet_format::FormatText;
 use solidcraft_geom::paper::annotate::{LANDING_PER_LINE_WIDTH, Leader};
+use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::PaperFonts;
 
 use crate::drawing_dimension_paper::{ARROW, Layout, OnPaper, TEXT_MM, Text, placed};
@@ -42,6 +45,25 @@ pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, letterin
         pending: text.pending,
         layout: Layout::default(),
     }
+}
+
+/// A sheet format's fixed texts ([`FormatText`]), each set in `lettering` at its own height with
+/// its baseline starting at its place, turned as it says: their runs, the fonts they use, and whether
+/// one waits for a font to fall back to. One that can't be set is left out.
+pub fn format_texts(texts: &[FormatText], lettering: &PaperFonts) -> (Vec<TextRun>, Vec<Font>, bool) {
+    let (mut runs, mut fonts, mut pending) = (Vec::new(), Vec::new(), false);
+    for one in texts {
+        let set = Text::set(Some(&one.text), one.cap_mm, lettering);
+        pending |= set.pending;
+        let dir = Vec2::new(one.angle_deg.to_radians().cos(), one.angle_deg.to_radians().sin());
+        let centre = Vec2::new(one.at[0], one.at[1]) + dir * set.half.x - dir.perp() * (set.half.y - one.cap_mm);
+        runs.extend(placed(set.runs, set.half, one.cap_mm, centre, dir).filter_map(|item| match item {
+            Item::Text(run) => Some(run),
+            _ => None,
+        }));
+        fonts.extend(set.fonts);
+    }
+    (runs, fonts, pending)
 }
 
 /// A leader from `tip` to the text `half` in size round `centre`. From beside the text it ends with a

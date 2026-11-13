@@ -1,7 +1,6 @@
 use solidcraft_doc::drawing::note::Anchor;
 use solidcraft_geom::cell::{Content, Part};
 use solidcraft_geom::paper::text::TextRun;
-use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{TextMetrics, TextStyle, font_data};
 
 use super::*;

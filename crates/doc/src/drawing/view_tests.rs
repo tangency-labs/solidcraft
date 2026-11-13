@@ -496,6 +496,7 @@ fn the_views_rules_are_kept_on_reading() {
         documents: None,
         excluded: Excluded::default(),
         line_group: None,
+        format: Default::default(),
     }));
     let other_id = ids::encode(other);
     assert_eq!(
