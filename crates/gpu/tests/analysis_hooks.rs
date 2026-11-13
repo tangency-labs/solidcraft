@@ -51,15 +51,36 @@ fn sphere() -> Mesh {
     Mesh { positions, normals, triangles, tri_face, ..Default::default() }
 }
 
-/// `mesh` (with `values` at its positions) shaded by `mode`, seen from the front, 40 mm high on
-/// 200 px.
+/// The design's radius the pictures are framed for.
+const RADIUS: f64 = 40.0;
+
+/// The front view the pictures are taken from.
+fn camera() -> Camera {
+    let mut cam = Camera { distance: 62.5, fov: 0.0, ..Default::default() };
+    cam.set_view(StandardView::Front);
+    cam
+}
+
+/// Where world point `p` lands in the picture, in pixels (the camera's own projection: the
+/// tests find what they look at where it is drawn, not by an assumed framing).
+fn screen(p: Vec3) -> (f64, f64) {
+    let (x, y, _) = camera().to_screen(p, f64::from(SIDE), f64::from(SIDE), RADIUS).unwrap();
+    (x, y)
+}
+
+/// The sphere's centre and radius in the picture, in pixels.
+fn disc() -> (f64, f64, f64) {
+    let (cx, cy) = screen(Vec3::new(0.0, 0.0, 0.0));
+    let (rx, _) = screen(Vec3::new(15.0, 0.0, 0.0));
+    (cx, cy, (rx - cx).abs())
+}
+
+/// `mesh` (with `values` at its positions) shaded by `mode`, seen from the front.
 fn picture(c: &Capturer, mesh: Mesh, values: Option<Vec<f32>>, mode: AnalysisMode) -> Vec<u8> {
     let body = SceneMesh { values: values.map(Arc::new), ..SceneMesh::solid(Arc::new(mesh), Rgb(160, 165, 175)) };
     let scene =
-        Scene { meshes: vec![body], radius: 40.0, analysis: Some(SceneAnalysis { mode, colors: AnalysisColors::DEFAULT }), ..Default::default() };
-    let mut cam = Camera { distance: 62.5, fov: 0.0, ..Default::default() };
-    cam.set_view(StandardView::Front);
-    c.rgba(&scene, &cam, SIDE, SIDE).unwrap()
+        Scene { meshes: vec![body], radius: RADIUS, analysis: Some(SceneAnalysis { mode, colors: AnalysisColors::DEFAULT }), ..Default::default() };
+    c.rgba(&scene, &camera(), SIDE, SIDE).unwrap()
 }
 
 fn pixel(img: &[u8], x: u32, y: u32) -> [u8; 4] {
@@ -78,12 +99,16 @@ fn shade(p: [u8; 4]) -> Option<u8> {
     }
 }
 
-/// How often the stripes change along the middle row (`across`) or column, within the sphere.
+/// How often the stripes change along the sphere's middle row (`across`) or column, within it.
 fn changes(img: &[u8], across: bool) -> usize {
+    let (cx, cy, r) = disc();
+    let reach = 0.9 * r;
     let mut last = None;
     let mut count = 0;
-    for k in 40..160 {
-        let p = if across { pixel(img, k, SIDE / 2) } else { pixel(img, SIDE / 2, k) };
+    for k in 0..(2.0 * reach) as u32 {
+        let at = f64::from(k) - reach;
+        let (x, y) = if across { (cx + at, cy) } else { (cx, cy + at) };
+        let p = pixel(img, x.round() as u32, y.round() as u32);
         if let Some(s) = shade(p) {
             if last.is_some_and(|l| l != s) {
                 count += 1;
@@ -115,9 +140,21 @@ fn the_bars_direction_turns_the_stripes() {
 #[test]
 fn the_white_share_widens_the_white_stripes() {
     let Some(c) = capturer() else { return };
+    // White pixels on the sphere only: the background is no stripe (its light part counted
+    // as white before).
+    let (cx, cy, r) = disc();
     let white = |width: f64| {
         let img = picture(c, sphere(), None, zebra(Vec3::new(0.0, 0.0, 1.0), width));
-        img.as_chunks::<4>().0.iter().filter(|p| shade(**p) == Some(1)).count()
+        let mut count = 0;
+        for y in 0..SIDE {
+            for x in 0..SIDE {
+                let (dx, dy) = (f64::from(x) - cx, f64::from(y) - cy);
+                if dx * dx + dy * dy < 0.81 * r * r && shade(pixel(&img, x, y)) == Some(1) {
+                    count += 1;
+                }
+            }
+        }
+        count
     };
     let (narrow, wide) = (white(0.2), white(0.8));
     assert!(wide > 2 * narrow, "white pixels: {narrow} at 0.2, {wide} at 0.8");
@@ -139,7 +176,13 @@ fn values_ramp_through_the_curvature_colours() {
     let img = picture(c, quad, Some(vec![-1.0, 1.0, 1.0, -1.0]), AnalysisMode::Values { low: -1.0, high: 1.0 });
     let [flat, middle, tight] = AnalysisColors::DEFAULT.curvature.map(|c| c.map(|v| (v * 255.0).round() as u8));
     let near = |p: [u8; 4], c: [u8; 3]| (0..3).all(|k| (i32::from(p[k]) - i32::from(c[k])).abs() < 60);
-    let (left, mid, right) = (pixel(&img, 30, SIDE / 2), pixel(&img, SIDE / 2, SIDE / 2), pixel(&img, 170, SIDE / 2));
+    // A tenth of the way in from each side (values -0.8 and 0.8: a tenth of the ramp from its
+    // ends), and the middle, where the camera draws them.
+    let at = |x: f64| {
+        let (px, py) = screen(Vec3::new(x, 0.0, 0.0));
+        pixel(&img, px.round() as u32, py.round() as u32)
+    };
+    let (left, mid, right) = (at(-12.0), at(0.0), at(12.0));
     assert!(near(left, flat), "left {left:?}, flat {flat:?}");
     assert!(near(mid, middle), "middle {mid:?}, {middle:?}");
     assert!(near(right, tight), "right {right:?}, tight {tight:?}");

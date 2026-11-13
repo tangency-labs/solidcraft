@@ -2041,7 +2041,7 @@ fn reordered_face_looks_rebuild_the_block() {
 }
 
 /// A PBR material edit (metallic, roughness, IOR) rewrites the palette's material table and
-/// keeps every vertex; the PBR triangles are the block's PBR runs, 28 bytes a vertex.
+/// keeps every vertex; the PBR triangles are the block's PBR runs, `TRI_SIZE` bytes a vertex.
 #[test]
 fn product_material_edits_keep_the_blocks_vertices() {
     let mut s = Session::default();
@@ -8200,7 +8200,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
     let scene = ProductScene {
         meshes: vec![ProductMesh {
             name: "Synthetic assembly".into(),
-            // 2^21 PBR triangles in the blocks, 28 bytes a vertex: 168 MiB.
+            // 2^21 PBR triangles in the blocks, `TRI_SIZE` (32) bytes a vertex: 192 MiB.
             mesh: Arc::new(Mesh { triangles: vec![[0; 3]; 1 << 21], ..Default::default() }),
             color: [128; 3],
             opacity: 1.0,
@@ -8211,7 +8211,8 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
         bounds: Aabb3::EMPTY,
     };
     let error = gpu_scene_cached(&scene, &[], WEB_GEOMETRY_BYTES, &mut ProductCache::default()).err().unwrap();
-    assert!(error.contains("168.0 MiB"), "{error}");
+    let needed = ((1usize << 21) * 3 * crate::gpu::TRI_SIZE) >> 20;
+    assert!(error.contains(&format!("{needed}.0 MiB")), "{error}");
     assert!(error.contains("128.0 MiB"), "{error}");
     assert!(error.contains("Hide bodies in Design"), "{error}");
     let refused = upload_refusal(144 << 20, "Out of Memory");

@@ -14941,7 +14941,7 @@ mod grid_plane_tests {
         assert!(app.picking_sketch_plane());
         assert_eq!(origin_planes(&app).len(), 3, "every origin plane is offered");
         let sc = build_highlight(&app);
-        assert_eq!(sc.xray.len(), 3 * 6 * (6 * 4 + 4), "each plane's two triangles are drawn through the model");
+        assert_eq!(sc.xray.len(), 3 * 6 * crate::gpu::TRI_SIZE, "each plane's two triangles are drawn through the model");
         assert!(sc.guide_trans.is_empty());
         app.dialog = None;
         assert!(origin_planes(&app).is_empty());
