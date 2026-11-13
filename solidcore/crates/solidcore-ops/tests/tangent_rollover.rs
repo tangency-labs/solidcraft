@@ -471,7 +471,7 @@ fn a_round_past_a_side_running_into_a_boss_rolls_onto_the_boss() {
     // Past r = 3217 / 86 (37.41) the ball's contact on y = -65 lies past that face's end at
     // x = 0 ((18 + r)^2 - (r - 25)^2 = 86 r - 301 > 54^2): no ball fits, and it is refused as a
     // rail leaving its face.
-    for r in [38.0, 40.0] {
+    for r in [38.0_f64, 40.0] {
         let cx = -54.0 + ((18.0 + r).powi(2) - (r - 25.0).powi(2)).sqrt();
         assert!(cx > 0.0, "r {r}: the contact {cx} lies past x = 0");
         let b = arm_and_boss();
