@@ -14,7 +14,7 @@
   {
     "case": "fillets/12342-round-wall-and-ledge-edges-r5-refused",
     "issue": "tangency-labs/solidcraft#13757",
-    "reason": "status 1001: the wall's End corner now builds its cap edge, and the trim at the creases then refuses the pair (the wall's overflow and the ledge's round) as taking off nothing or everything; the wall's round alone builds its overflow"
+    "reason": "status 1001: the wall's End corner now builds its cap edge (the wall's round alone builds its overflow), but the end-section rule in end_sections_fit.rs (#14022) judges the ledge round's End at (23, 20, -40) as overflowing: its rail runs past the side edge's far end P = (20, 20, -40), where the wall stands on the ledge top. The wall's own round takes that material off, so nothing is undercut; with the End left open, the trim at the creases takes off all 16 faces and refuses. The rule should count the face standing at P only where it survives the operation's other blends"
   },
   {
     "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
