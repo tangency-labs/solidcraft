@@ -128,7 +128,11 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
             }
         }
     };
-    let r = node_row(rows, Spec { key: &key, ..Default::default() }, Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() });
+    let r = node_row(
+        rows,
+        Spec { key: &key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, &key, compact);
     }

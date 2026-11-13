@@ -1990,7 +1990,11 @@ fn occurrence_rows_inner(
 fn doc_settings(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize) {
     let key = "docsettings";
     let open = is_open(app, key, false);
-    let r = node_row(rows, Spec { key, ..Default::default() }, Row { depth, fold: Some(open), icon: "settings", label: "Document Settings", ..Default::default() });
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "settings", label: "Document Settings", ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, key, false);
     }
@@ -1998,7 +2002,8 @@ fn doc_settings(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize) {
         return;
     }
     let units = format!("Units: {}", app.session.doc.units);
-    let r = node_row(rows, Spec { key: "units", ..Default::default() }, Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
+    let r =
+        node_row(rows, Spec { key: "units", ..Default::default() }, Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
     if let Some(p) = r.secondary {
         crate::context_menu::open_for(app, p, Target::Units);
     } else if r.clicked
@@ -2012,7 +2017,9 @@ fn doc_settings(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize) {
         crate::prefs::unit_scale(&app.session.doc.units).1,
         format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
     );
-    if node_row(rows, Spec { key: "precision", ..Default::default() }, Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
+    if node_row(rows, Spec { key: "precision", ..Default::default() }, Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() })
+        .clicked
+    {
         if app.prefs_window.shell.open {
             crate::prefs_window::close(app, true);
         } else {
@@ -2020,7 +2027,9 @@ fn doc_settings(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize) {
         }
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());
-    if node_row(rows, Spec { key: "params", ..Default::default() }, Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
+    if node_row(rows, Spec { key: "params", ..Default::default() }, Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() })
+        .clicked
+    {
         if app.params.is_some() {
             app.params = None;
         } else {
@@ -2196,7 +2205,11 @@ pub const STANDARD_VIEWS: [(&str, &str); 4] = [("Top", "top"), ("Front", "front"
 fn named_view_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions) {
     let key = "namedviews";
     let open = is_open(app, key, false);
-    let r = node_row(rows, Spec { key, ..Default::default() }, Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() });
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, key, false);
     }
@@ -3058,19 +3071,12 @@ fn folder_level(
         };
         let accept = |d: &Dragged, zone: Zone| {
             same_document(app, d)
-                && item_drag(d).is_some_and(|d| {
-                    d.comp == comp && d.folder == fstatic && fits(d, if zone == Zone::Before { level_of - 1 } else { level_of })
-                })
+                && item_drag(d)
+                    .is_some_and(|d| d.comp == comp && d.folder == fstatic && fits(d, if zone == Zone::Before { level_of - 1 } else { level_of }))
         };
         let r = node_row(
             rows,
-            Spec {
-                key: gkey,
-                drag: Some(DRAG_ITEMS),
-                drops: panel::Drops { before: true, into: true },
-                accept: Some(&accept),
-                ..Default::default()
-            },
+            Spec { key: gkey, drag: Some(DRAG_ITEMS), drops: panel::Drops { before: true, into: true }, accept: Some(&accept), ..Default::default() },
             Row {
                 depth,
                 fold: Some(gopen),
@@ -3116,7 +3122,9 @@ fn folder_level(
             acts.drop_from(
                 source,
                 match (zone, holder) {
-                    (Zone::Into, _) => DropAction::Move { comp, folder: fstatic, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(id), before: None },
+                    (Zone::Into, _) => {
+                        DropAction::Move { comp, folder: fstatic, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(id), before: None }
+                    }
                     (Zone::Before, Some(h)) => DropAction::Move {
                         comp,
                         folder: fstatic,
@@ -3267,13 +3275,7 @@ fn entry_row(
     };
     let r = node_row(
         rows,
-        Spec {
-            key: &e.row_key,
-            item: true,
-            drag: Some(DRAG_ITEMS),
-            drops: panel::Drops { before: true, into: false },
-            accept: Some(&accept),
-        },
+        Spec { key: &e.row_key, item: true, drag: Some(DRAG_ITEMS), drops: panel::Drops { before: true, into: false }, accept: Some(&accept) },
         Row {
             depth,
             fold: pattern_key.map(|_| patterns_open).or(built_key.as_ref().map(|_| built_open)),
@@ -3404,7 +3406,13 @@ fn entry_row(
             source,
             match group {
                 Some(g) => DropAction::Move { comp, folder, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(g), before: Some(before) },
-                None => DropAction::Order { comp, folder, order: order_before(top, &d.entries(), Some(&before)), keys: d.keys.clone(), groups: d.groups.clone() },
+                None => DropAction::Order {
+                    comp,
+                    folder,
+                    order: order_before(top, &d.entries(), Some(&before)),
+                    keys: d.keys.clone(),
+                    groups: d.groups.clone(),
+                },
             },
         );
     }
