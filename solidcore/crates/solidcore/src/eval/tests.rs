@@ -1524,3 +1524,311 @@ fn a_whole_turn_a_rounding_short_of_a_quarter_line_has_its_form_from_it() {
         assert_eq!(domain[0], [q, q + 4.0], "seam at {start}");
     }
 }
+
+/// A saved screw wall whose record states a smaller bound than its net's certified one is
+/// answered with the certified bound: the collapse test widens by what the definition
+/// proves, never by what the record claims.
+#[test]
+fn a_saved_screw_collapse_uses_its_certified_bound_not_the_stated_one() {
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+    let profile =
+        BSplineCurve::create_line_segment(3, Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 1.0))
+            .unwrap();
+    let motion = ScrewMotion::new(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), 1.5, None).unwrap();
+    let stations = [0.0, 0.3, 0.6];
+    let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+    let definition = ProceduralSweep::create(&profile, motion, &stations, 0.15).unwrap();
+    let mut record = definition.to_record(&net).unwrap();
+    let honest = SurfaceEval::new(&Surface::ProceduralSweep(Box::new(record.clone()))).unwrap();
+    let SurfaceEval::ProceduralSweep(honest) = &honest else {
+        panic!("a procedural sweep")
+    };
+    let certified = honest.certified_bound();
+    assert!(certified > 0.0 && certified.is_finite());
+    // the record claims a net twice as close as certified
+    record.bound = 0.5 * certified;
+    let claimed = SurfaceEval::new(&Surface::ProceduralSweep(Box::new(record.clone()))).unwrap();
+    let rebuilt = ProceduralSweep::from_record(&record).unwrap();
+    let live = rebuilt.procedural_sweep().unwrap().bound();
+    assert!(live > record.bound);
+    let SurfaceEval::ProceduralSweep(saved) = &claimed else {
+        panic!("a procedural sweep")
+    };
+    assert_eq!(saved.certified_bound().to_bits(), live.to_bits());
+    for q in [[0.0, 0.0], [0.37, 0.11], [1.0, 0.6]] {
+        assert_eq!(
+            claimed.collapse(q, 1e-9).unwrap(),
+            Collapse::Neither,
+            "{q:?}"
+        );
+    }
+}
+
+#[test]
+fn a_saved_screw_keeps_exact_evaluation_projection_and_its_display_net() {
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+    let profile =
+        BSplineCurve::create_line_segment(3, Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 1.0))
+            .unwrap();
+    let motion = ScrewMotion::new(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), 1.5, None).unwrap();
+    let stations = [0.0, 0.3, 0.6];
+    let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+    let definition = ProceduralSweep::create(&profile, motion, &stations, 0.15).unwrap();
+    let record = definition.to_record(&net).unwrap();
+    let evaluator = SurfaceEval::new(&Surface::ProceduralSweep(Box::new(record.clone()))).unwrap();
+    let uv = [0.37, 0.11];
+    // A screw wall whose profile stays off the axis collapses nowhere: its net, widened by the
+    // certified bound, rules a collapse out (no refusal).
+    for q in [[0.0, 0.0], uv, [1.0, 0.6]] {
+        assert_eq!(
+            evaluator.collapse(q, 1e-9).unwrap(),
+            Collapse::Neither,
+            "{q:?}"
+        );
+    }
+    let exact = definition
+        .evaluate_definition_point(crate::math::Point2::new(uv[0], uv[1]))
+        .unwrap();
+    assert!(close(evaluator.point(uv).unwrap(), exact, 1e-13));
+    let SurfaceEval::ProceduralSweep(saved) = &evaluator else {
+        panic!("a procedural sweep")
+    };
+    let approximate = saved.approximation().derivs(uv[0], uv[1]).unwrap().0;
+    assert!((approximate - exact).length() > 1e-9);
+    let projected = evaluator.project(exact, None, 1e-10).unwrap();
+    assert!((projected[0] - uv[0]).abs() < 1e-8 && (projected[1] - uv[1]).abs() < 1e-8);
+    let second = evaluator.second(uv[0], uv[1]).unwrap();
+    let expected = definition
+        .evaluate_definition(crate::math::Point2::new(uv[0], uv[1]), 2, 2)
+        .unwrap();
+    assert_eq!(second, (expected[2][0], expected[1][1], expected[0][2]));
+    let mut restored = ProceduralSweep::from_record(&record).unwrap();
+    let domain = net.natural_uv_domain();
+    let kernel = crate::Kernel::default();
+    let written = crate::surface::face_surface::record_face(&kernel, &restored, &domain).unwrap();
+    assert!(matches!(&written.surface, Surface::ProceduralSweep(_)));
+    assert!(written.nurbs.is_none());
+    let (rebuilt, _) =
+        crate::surface::from_parameters::from_parameters(&kernel, &written.surface, written.domain)
+            .unwrap();
+    assert!(rebuilt.procedural_sweep().is_some());
+    assert!(close(
+        rebuilt
+            .procedural_sweep()
+            .unwrap()
+            .definition()
+            .evaluate_definition_point(crate::math::Point2::new(uv[0], uv[1]))
+            .unwrap(),
+        exact,
+        1e-13
+    ));
+    // Reversing a saved face must preserve the exact definition map as well as its net.
+    restored
+        .reverse(&kernel, crate::nurbs::b_spline_surface::SurfParamType::U)
+        .unwrap();
+    let reversed = crate::surface::face_surface::record_face(&kernel, &restored, &domain).unwrap();
+    let eval = SurfaceEval::new(&reversed.surface).unwrap();
+    assert!(close(
+        eval.point([1.0 - uv[0], uv[1]]).unwrap(),
+        exact,
+        1e-13
+    ));
+}
+
+#[test]
+fn exact_surface_curve_plain_evaluator_matches_starting_face_side_and_clamps() {
+    use crate::curve::crv_on_surf::CrvOnSurf;
+    use crate::surface::procedural_sweep::ScrewMotion;
+    use crate::sweep::screw::screw_net;
+
+    use crate::curve::curve::Curve;
+    use crate::kernel::Kernel;
+    use crate::math::{Point2, Point3, Vec3};
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::b_spline_surface::SurfParamType;
+    use crate::surface::procedural_sweep::ProceduralSweep;
+
+    let k = Kernel::default();
+    let profile = BSplineCurve::create_line_segment(
+        3,
+        Point3::new(2.0, 0.0, 0.0),
+        Point3::new(3.0, 0.0, 1.0),
+    )
+    .unwrap();
+    let motion = ScrewMotion::new(Point3::ZERO, Vec3::Z, 2.5, None).unwrap();
+    let stations = [0.0, 0.25, 1.0];
+    let net = screw_net(&profile, &motion, &stations).unwrap();
+    let definition = ProceduralSweep::create(&profile, motion, &stations, 0.375).unwrap();
+    let mut surface = definition.certify_on_net(&net).unwrap();
+    surface.reverse(&k, SurfParamType::V).unwrap();
+    let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+    let curve = Curve::from(
+        CrvOnSurf::from_uv_line(
+            &k,
+            Point2::new(0.5, -1.0),
+            Point2::new(0.5, 1.0),
+            surface,
+            Some(domain),
+            3,
+        )
+        .unwrap(),
+    );
+    let record =
+        crate::curve::from_parameters::record_of(&k, &curve, &curve.natural_interval()).unwrap();
+    let eval = CurveEval::new(&record.curve).unwrap();
+    // 0.875 reaches the joint at face v=0.75, mapping to definition t=0.25.
+    // 0.25 is outside the owner's v support while still inside the UV line's t range.
+    for t in [0.25, 0.5, 0.875, 1.0] {
+        let native = curve.evaluate(&k, t, 1, true, false).unwrap();
+        let (point, derivative) = eval.derivs(t).unwrap();
+        assert!((point - native[0]).length() <= 1e-11 * (1.0 + native[0].length()));
+        assert!(
+            (derivative - native[1]).length() <= 1e-11 * (1.0 + native[1].length()),
+            "t={t}, portable={derivative:?}, native={:?}",
+            native[1]
+        );
+    }
+
+    // A UV knot lands on the unequal screw station. Exercise both map signs
+    // and swapping, including the native endpoint jets outside the S support.
+    for reverse_u in [false, true] {
+        for reverse_v in [false, true] {
+            for swapped in [false, true] {
+                let mut surface = definition.certify_on_net(&net).unwrap();
+                if reverse_u {
+                    surface.reverse(&k, SurfParamType::U).unwrap();
+                }
+                if reverse_v {
+                    surface.reverse(&k, SurfParamType::V).unwrap();
+                }
+                if swapped {
+                    surface.swap_uv(&k).unwrap();
+                }
+                let face_uv = |w: f64, t: f64| {
+                    let u = if reverse_u { 1.0 - w } else { w };
+                    let v = if reverse_v { 1.0 - t } else { t };
+                    if swapped {
+                        Point2::new(v, u)
+                    } else {
+                        Point2::new(u, v)
+                    }
+                };
+                let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+                let face_record =
+                    crate::surface::face_surface::record_face(&k, &surface, &domain).unwrap();
+                let plain_surface = SurfaceEval::new(&face_record.surface).unwrap();
+                let q = face_uv(0.5, 0.25);
+                let default = plain_surface.partials(q.x, q.y).unwrap();
+                let expected_default = surface
+                    .procedural_sweep()
+                    .unwrap()
+                    .definition()
+                    .evaluate_definition(q, 2, 2)
+                    .unwrap();
+                for i in 0..=2 {
+                    for j in 0..=2 - i {
+                        assert_eq!(default[i][j], expected_default[i][j]);
+                    }
+                }
+                let points = [face_uv(-0.25, -0.25), q, face_uv(1.25, 1.25)].map(|p| {
+                    crate::nurbs::math::CPoint::new(p.x, p.y, 0.0, crate::nurbs::math::NOW)
+                });
+                let uv = BSplineCurve::from_data(2, 2, 4, 1, &points, &[0.0, 0.0, 0.5, 1.0, 1.0])
+                    .unwrap();
+                let curve = Curve::from(
+                    CrvOnSurf::new(&k, Curve::from(uv), surface, Some(domain), 3).unwrap(),
+                );
+                let record =
+                    crate::curve::from_parameters::record_of(&k, &curve, &curve.natural_interval())
+                        .unwrap();
+                let eval = CurveEval::new(&record.curve).unwrap();
+                let starting = curve.evaluate(&k, 0.5, 1, true, false).unwrap();
+                let ending = curve.evaluate(&k, 0.5, 1, false, false).unwrap();
+                assert!((starting[1] - ending[1]).length() > 1e-3);
+                for t in [0.0, 0.125, 0.375, 0.5, 0.625, 0.875, 1.0] {
+                    let native = curve.evaluate(&k, t, 2, true, false).unwrap();
+                    let (p, d) = eval.derivs(t).unwrap();
+                    assert!(close(p, native[0], 1e-11));
+                    assert!(
+                        close(d, native[1], 1e-11),
+                        "map=({reverse_u},{reverse_v},{swapped}), t={t}"
+                    );
+                    let speed2 = native[1].len2();
+                    let tangent = native[1] / speed2.sqrt();
+                    let curvature = (native[2] - tangent * native[2].dot(tangent)) / speed2;
+                    let jet = eval.jet(t).unwrap();
+                    assert!(close(jet.tangent, tangent, 1e-11));
+                    assert!(close(jet.curvature, curvature, 1e-11));
+                }
+                // Outside the UV spline's own interval the portable API refuses;
+                // no extrapolation or ROI clamping is silently substituted.
+                assert!(eval.point(-0.1).is_none());
+                assert!(eval.derivs(1.1).is_none());
+            }
+        }
+    }
+
+    // Fifty-two edge evaluators keep two owner allocations, as in the actual
+    // thread result. Cloning an evaluator also shares its immutable owner.
+    let geometry::Curve::OnSurface {
+        surface,
+        uv_curve,
+        domain,
+    } = &record.curve
+    else {
+        panic!("exact surface curve");
+    };
+    let Surface::ProceduralSweep(owner_record) = surface.as_ref() else {
+        panic!("screw owner");
+    };
+    let owners = [
+        std::sync::Arc::new(ProceduralSweep::from_record(owner_record).unwrap()),
+        std::sync::Arc::new(ProceduralSweep::from_record(owner_record).unwrap()),
+    ];
+    let shared: Vec<_> = (0..52)
+        .map(|i| {
+            CurveEval::on_screw_surface(std::sync::Arc::clone(&owners[i % 2]), uv_curve, *domain)
+                .unwrap()
+        })
+        .collect();
+    for owner in &owners {
+        assert_eq!(std::sync::Arc::strong_count(owner), 27);
+    }
+    let copy = shared[0].clone();
+    assert_eq!(copy, shared[0]);
+    assert_eq!(std::sync::Arc::strong_count(&owners[0]), 28);
+    assert!(close(
+        copy.point(0.875).unwrap(),
+        curve.evaluate(&k, 0.875, 0, true, false).unwrap()[0],
+        1e-11
+    ));
+
+    // Invalid UV data must be refused before trying to certify an invalid owner.
+    let mut malformed = record.curve.clone();
+    let geometry::Curve::OnSurface {
+        surface, uv_curve, ..
+    } = &mut malformed
+    else {
+        panic!("exact surface curve");
+    };
+    let Surface::ProceduralSweep(owner) = surface.as_mut() else {
+        panic!("screw owner")
+    };
+    owner.net.points.clear();
+    *uv_curve = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[f64::NAN, 0.0], [1.0, 1.0]],
+    };
+    assert!(
+        matches!(CurveEval::new(&malformed), Err(EvalError::Invalid(reason)) if reason.starts_with("UV spline"))
+    );
+    let geometry::Curve::OnSurface { domain, .. } = &mut malformed else {
+        panic!("exact surface curve")
+    };
+    *domain = [[1.0, 0.0], [0.0, 1.0]];
+    assert!(
+        matches!(CurveEval::new(&malformed), Err(EvalError::Invalid(reason)) if reason == "curve surface domain")
+    );
+}

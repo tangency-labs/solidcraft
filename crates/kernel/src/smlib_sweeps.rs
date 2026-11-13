@@ -118,6 +118,7 @@ pub(crate) fn refuse(what: &str) -> KernelError {
 mod imp {
     use std::collections::BTreeSet;
 
+    use solidcore_ops::sweep::{Curve as OpsCurve, ScrewFaces};
     use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use solidcraft_smlib::{Brep, CheckLevel};
 
@@ -469,7 +470,9 @@ mod imp {
         let on = |f: &solidcore_record::brep::Face, pl: &Plane| {
             flat(f).is_some_and(|(o, n)| n.dot(pl.normal()).abs() >= 1.0 - 1e-9 && pl.height(o).abs() <= tol)
         };
-        // The edges in the start plane: their ends and middle on it.
+        let ops = || body.ops_body().ok_or_else(|| KernelError::Failed("sweep history: the body is no SMLib body".into()));
+        // The edges in the start plane: their ends and middle on it. An edge on a procedural sweep
+        // (a screw wall's) is evaluated by the kernel (`curve` None), exactly.
         let mut base = Vec::new();
         for (i, e) in r.edges.iter().enumerate() {
             let (Some(a), Some(b)) = (vertex(e.vertices[0]), vertex(e.vertices[1])) else { continue };
@@ -479,9 +482,17 @@ mod imp {
             if start.height(a).abs() > reach || start.height(b).abs() > reach {
                 continue;
             }
-            let curve = CurveEval::new(e.parameters()).map_err(|err| KernelError::Failed(format!("extrude history: edge {i}: {err}")))?;
-            let [t0, t1] = e.interval;
-            let mid = curve.point(0.5 * (t0 + t1)).ok_or_else(|| KernelError::Failed(format!("extrude history: edge {i} has no middle")))?;
+            let on_sweep = matches!(e.parameters(), RecordCurve::OnSurface { .. } | RecordCurve::OnSurfaceRef { .. });
+            let (curve, mid) = if on_sweep {
+                let (ops, order) = ops()?;
+                let mid = ops.edge_middle(order, i).map_err(|err| KernelError::Failed(format!("extrude history: edge {i}: {err}")))?;
+                (None, crate::body::v3(mid))
+            } else {
+                let curve = CurveEval::new(e.parameters()).map_err(|err| KernelError::Failed(format!("extrude history: edge {i}: {err}")))?;
+                let [t0, t1] = e.interval;
+                let mid = curve.point(0.5 * (t0 + t1)).ok_or_else(|| KernelError::Failed(format!("extrude history: edge {i} has no middle")))?;
+                (Some(curve), mid)
+            };
             if start.height(mid).abs() > reach {
                 continue;
             }
@@ -514,6 +525,13 @@ mod imp {
                 .iter()
                 .filter(|(.., bounds)| bounds.contains(s.at))
                 .map(|(i, curve, interval, [a, b], samples, reach, _)| {
+                    let Some(curve) = curve else {
+                        let along = ops()
+                            .ok()
+                            .and_then(|(ops, order)| ops.edge_closest_point(order, *i, p(s.at)).ok().flatten())
+                            .map_or(f64::INFINITY, |c| c.distance);
+                        return (*i, along.min(s.at.dist(*a)).min(s.at.dist(*b)), *reach);
+                    };
                     let Some(samples) = samples else { return (*i, s.at.dist_to_segment(*a, *b), *reach) };
                     let along = crate::surfaces::nearest_parameter_in(curve, *interval, s.at, *samples).map_or(f64::INFINITY, |(_, d)| d);
                     (*i, along.min(s.at.dist(*a)).min(s.at.dist(*b)), *reach)
@@ -527,7 +545,6 @@ mod imp {
         let n = r.faces.len();
         // How far a point may lie off a face SMLib made to its own tolerance.
         let reach = r.edges.iter().map(|e| e.tolerance).fold(tol, f64::max);
-        let ops = || body.ops_body().ok_or_else(|| KernelError::Failed("sweep history: the body is no SMLib body".into()));
         let points = |seeds: &[Seed]| seeds.iter().map(|s| p(s.at)).collect::<Vec<_>>();
         // A face in the start plane is the start cap where a profile point lies on it: on its edges
         // (an extrusion's), or inside it (a screw's start section, SMLib's approximation of the profile).
@@ -1986,19 +2003,17 @@ mod imp {
     }
 
     /// The profile `pieces` on `plane` carried by a screw motion about the axis through `origin`
-    /// along `axis`: `turns` right-handed turns, rising `pitch` per turn.
+    /// along `axis`: `turns` right-handed turns, rising `pitch` per turn, the kernel's screw sweep
+    /// (each wall keeps its exact definition). Each spline wall comes in faces of half a turn
+    /// where the cylinder walls do: a coil's faces, as its saved references name them.
     pub(crate) fn screw(plane: &Plane, pieces: &[Piece], origin: Vec3, axis: Vec3, pitch: f64, turns: f64) -> Result<Body> {
-        let c = curves(plane, pieces)?;
-        // Walls within a ten-thousandth of the pitch of the true screw surfaces.
-        let tolerance = (pitch.abs() * 1e-4).clamp(1e-6, 1e-2);
-        let brep = Brep::screw_sweep(&c, p(origin), p(axis), pitch, turns, tolerance).map_err(|e| failed("screw sweep", e))?;
-        let body = body_of(brep, "screw sweep")?;
-        let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
-        with_history(body, &roles, pieces)
+        screw_sweep(plane, pieces, (origin, axis), pitch, turns, None, ScrewFaces::HalfTurns)
     }
 
     /// [`screw`] with the profile moved `offset(t)` mm off the axis at turn t (negative: towards
     /// it), piecewise linear through `law`'s (turn, offset) pairs: a groove fading over a runout.
+    /// `continuous_flanks`: each spline wall (a thread's flank) is one face over all its turns;
+    /// otherwise it comes in the half-turn faces older designs name.
     pub(crate) fn screw_radial(
         plane: &Plane,
         pieces: &[Piece],
@@ -2009,15 +2024,39 @@ mod imp {
         law: &[(f64, f64)],
         continuous_flanks: bool,
     ) -> Result<Body> {
-        let c = curves(plane, pieces)?;
+        let faces = if continuous_flanks { ScrewFaces::Joined } else { ScrewFaces::HalfTurns };
+        screw_sweep(plane, pieces, (origin, axis), pitch, turns, (!law.is_empty()).then_some(law), faces)
+    }
+
+    /// The screw sweep of [`screw`] and [`screw_radial`] through solidcore-ops, its walls within a
+    /// ten-thousandth of the pitch of the true screw surfaces.
+    fn screw_sweep(
+        plane: &Plane,
+        pieces: &[Piece],
+        (origin, axis): (Vec3, Vec3),
+        pitch: f64,
+        turns: f64,
+        law: Option<&[(f64, f64)]>,
+        faces: ScrewFaces,
+    ) -> Result<Body> {
+        let c: Vec<OpsCurve> = curves(plane, pieces)?.into_iter().map(ops_curve).collect();
         let tolerance = (pitch.abs() * 1e-4).clamp(1e-6, 1e-2);
-        let options =
-            solidcraft_smlib::sweeps::ScrewSweepOptions { law: (!law.is_empty()).then_some(law), join_spline_walls: continuous_flanks, tolerance };
-        let brep =
-            Brep::screw_sweep_with_options(&c, p(origin), p(axis), pitch, turns, options).map_err(|e| failed("screw sweep with a radial law", e))?;
-        let body = body_of(brep, "screw sweep")?;
+        let what = if law.is_some() { "screw sweep with a radial law" } else { "screw sweep" };
+        let made =
+            solidcore_ops::sweep::screw_sweep_with_faces(&c, p(origin), p(axis), pitch, turns, law, tolerance, faces).map_err(|e| failed(what, e))?;
+        let (record, _) = made.to_record().map_err(|e| failed(what, e))?;
+        let body = body_from_record(&record, "screw sweep")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
         with_history(body, &roles, pieces)
+    }
+
+    /// SMLib's curve as solidcore-ops' (the same curve).
+    fn ops_curve(c: Curve) -> OpsCurve {
+        match c {
+            Curve::Line { start, end } => OpsCurve::Line { start, end },
+            Curve::Arc { center, axis, reference, radius, start, end } => OpsCurve::Arc { center, axis, reference, radius, start, end },
+            Curve::Nurbs { degree, points, knots } => OpsCurve::Nurbs { degree, points, knots },
+        }
     }
 }
 

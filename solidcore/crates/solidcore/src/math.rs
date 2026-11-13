@@ -97,6 +97,20 @@ pub fn min2(a: f64, b: f64) -> f64 {
     }
 }
 
+/// `x` limited to `[lo, hi]`: `f64::clamp` without its panic on `lo > hi` or a NaN bound. For
+/// `lo <= hi` it is `clamp`'s value; a NaN `x` stays NaN, so a bad input is not moved silently
+/// onto a bound.
+#[must_use]
+pub fn clamp_between(x: f64, lo: f64, hi: f64) -> f64 {
+    if x < lo {
+        lo
+    } else if x > hi {
+        hi
+    } else {
+        x
+    }
+}
+
 /// `smos_3Max(a, b, c)`, with upstream's comparison order.
 #[must_use]
 pub fn max3(a: f64, b: f64, c: f64) -> f64 {
@@ -667,6 +681,25 @@ mod tests {
             Point3::ZERO,
             Vec3::new(f64::NAN, 1.0, 0.0)
         )));
+    }
+
+    #[test]
+    fn clamp_between_is_clamp_without_its_panics() {
+        for (x, lo, hi) in [
+            (0.5, 0.0, 1.0),
+            (-1.0, 0.0, 1.0),
+            (2.0, 0.0, 1.0),
+            (-0.0, 0.0, 1.0),
+        ] {
+            assert_eq!(
+                clamp_between(x, lo, hi).to_bits(),
+                x.clamp(lo, hi).to_bits()
+            );
+        }
+        assert!(clamp_between(f64::NAN, 0.0, 1.0).is_nan());
+        // `clamp` would panic on these bounds.
+        assert_eq!(clamp_between(0.5, 1.0, 0.0), 1.0);
+        assert_eq!(clamp_between(0.5, f64::NAN, 1.0), 0.5);
     }
 
     #[test]

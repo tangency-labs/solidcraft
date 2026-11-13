@@ -31,7 +31,7 @@ use solidcore::surface::procedural_blend::NetScope;
 use solidcore::surface::procedural_sweep::{ProceduralSweep, MAX_HALF_ANGLE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::sweep::screw::{
-    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body,
+    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body, ScrewFaces,
 };
 use solidcore::topology::brep::{p1, p2};
 use solidcore::topology::face;
@@ -323,21 +323,33 @@ fn body_variants_stop_before_the_solid_check() {
     let mut k = Kernel::default();
     let c = coil().curves();
     let checked = screw_sweep(&mut k, &c, O, Z, 1.5, 2.0, 1.5e-4).unwrap();
-    let body = screw_sweep_body(&mut k, &c, O, Z, 1.5, 2.0, 1.5e-4).unwrap();
+    let body = screw_sweep_body(&mut k, &c, O, Z, 1.5, 2.0, 1.5e-4, ScrewFaces::Joined).unwrap();
     assert!(p2::is_manifold_solid(&body).unwrap());
     assert_eq!(
         p1::faces(&body, None).unwrap().len(),
         p1::faces(&checked, None).unwrap().len()
     );
     let law = [(0.0, -0.2), (2.0, 0.0)];
-    let body = screw_sweep_radial_body(&mut k, &c, O, Z, 1.5, 2.0, &law, 1.5e-4).unwrap();
+    let body =
+        screw_sweep_radial_body(&mut k, &c, O, Z, 1.5, 2.0, &law, 1.5e-4, ScrewFaces::Joined)
+            .unwrap();
     assert!(p2::is_manifold_solid(&body).unwrap());
     assert!(matches!(
-        screw_sweep_body(&mut k, &c, O, Z, 0.0, 2.0, 1.5e-4),
+        screw_sweep_body(&mut k, &c, O, Z, 0.0, 2.0, 1.5e-4, ScrewFaces::Joined),
         Err(SolidError::InvalidInput { .. })
     ));
     assert!(matches!(
-        screw_sweep_radial_body(&mut k, &c, O, Z, 1.5, 2.0, &[(3.0, 0.0)], 1.5e-4),
+        screw_sweep_radial_body(
+            &mut k,
+            &c,
+            O,
+            Z,
+            1.5,
+            2.0,
+            &[(3.0, 0.0)],
+            1.5e-4,
+            ScrewFaces::Joined
+        ),
         Err(SolidError::InvalidInput { .. })
     ));
 }
@@ -431,7 +443,7 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
     for span in d.stations().windows(2) {
         for s in [-0.93, -r, -0.31, 0.0, 0.17, r, 0.88] {
             let t = span[0] + 0.5 * (s + 1.0) * (span[1] - span[0]);
-            let theta = arc_angle(span[0], span[1], d.half_angle(), t);
+            let theta = arc_angle(span[0], span[1], 0.5 * (span[1] - span[0]), t);
             assert_eq!(d.turn_at(t).0, theta);
             for a in [0.13, 0.5, 0.87] {
                 let w = profile.min() + a * (profile.max() - profile.min());
@@ -468,8 +480,8 @@ fn issue_2572_m10_groove_walls_are_their_definitions() {
     let tol = p * 1e-4;
     let b = screw_sweep(&mut k, &m10_groove(p).curves(), O, Z, p, turns, tol).unwrap();
     let walls = walls(&b);
-    // the two flanks, in half-turn pieces (the groove's axial lines make cylinders)
-    assert!(walls.len() >= 12, "{} walls", walls.len());
+    // Cylinder seams split only the analytic axial walls, not the two flanks.
+    assert_eq!(walls.len(), 2, "one multi-turn definition per flank");
     let mut bounds = Vec::new();
     for wall in &walls {
         let c = check_wall(wall, p, &[]);
@@ -485,6 +497,111 @@ fn issue_2572_m10_groove_walls_are_their_definitions() {
         bounds.push(c.bound);
     }
     println!("M10x1.5 groove walls: bounds {bounds:?}");
+}
+
+#[test]
+fn continuous_screw_walls_keep_their_definition_on_a_partial_last_turn() {
+    let mut k = Kernel::default();
+    let pitch = 2.5;
+    let turns = 3.271;
+    let tolerance = pitch * 1e-4;
+    let body = screw_sweep(
+        &mut k,
+        &m10_groove(pitch).curves(),
+        O,
+        Z,
+        pitch,
+        turns,
+        tolerance,
+    )
+    .unwrap();
+    let flanks = walls(&body);
+    assert_eq!(flanks.len(), 2);
+    for flank in flanks {
+        let def = flank.procedural_sweep().unwrap().definition();
+        assert_eq!(def.stations().first(), Some(&0.0));
+        assert_eq!(def.stations().last(), Some(&(turns * 2.0 * PI)));
+        let checked = check_wall(&flank, pitch, &[]);
+        assert!(checked.bound <= tolerance);
+    }
+}
+
+/// The half-turn layout keeps the fork's faces: an M10 groove of 3.271 turns has its two
+/// flanks in the same seven pieces as its two cylinder walls (six half turns, the last up
+/// to an eighth longer), each piece a definition over its own stations, the pieces of a
+/// flank meeting end to end; the joined layout has one face per flank. Both are the same
+/// solid.
+#[test]
+fn half_turn_screw_faces_keep_the_forks_layout_with_their_definitions() {
+    let mut k = Kernel::default();
+    let pitch = 2.5;
+    let turns = 3.271;
+    let tolerance = pitch * 1e-4;
+    let profile = m10_groove(pitch).curves();
+    let mut joined = screw_sweep_body(
+        &mut k,
+        &profile,
+        O,
+        Z,
+        pitch,
+        turns,
+        tolerance,
+        ScrewFaces::Joined,
+    )
+    .unwrap();
+    let mut halves = screw_sweep_body(
+        &mut k,
+        &profile,
+        O,
+        Z,
+        pitch,
+        turns,
+        tolerance,
+        ScrewFaces::HalfTurns,
+    )
+    .unwrap();
+    assert!(p2::is_manifold_solid(&halves).unwrap());
+    let cylinders = |b: &Brep| {
+        p1::faces(b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| {
+                matches!(
+                    face::p2::surface(b, f).unwrap().unwrap().kind(),
+                    SurfaceKind::Cone(c) if c.is_cylinder()
+                )
+            })
+            .count()
+    };
+    assert_eq!(walls(&joined).len(), 2);
+    assert_eq!(cylinders(&joined), 14);
+    let pieces = walls(&halves);
+    assert_eq!(pieces.len(), 14);
+    assert_eq!(cylinders(&halves), 14);
+    // Each flank's pieces cover its turns end to end, each certified on its own stations.
+    let mut spans: Vec<(f64, f64)> = pieces
+        .iter()
+        .map(|w| {
+            let def = w.procedural_sweep().unwrap().definition();
+            assert!(check_wall(w, pitch, &[]).bound <= tolerance);
+            (
+                *def.stations().first().unwrap(),
+                *def.stations().last().unwrap(),
+            )
+        })
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    for pair in spans.chunks(2) {
+        assert_eq!(pair[0], pair[1], "both flanks are cut at the same stations");
+    }
+    let firsts: Vec<_> = spans.iter().step_by(2).collect();
+    assert_eq!(firsts.first().unwrap().0, 0.0);
+    assert_eq!(firsts.last().unwrap().1, turns * 2.0 * PI);
+    for w in firsts.windows(2) {
+        assert_eq!(w[0].1, w[1].0);
+    }
+    let (a, b) = (volume(&k, &mut joined), volume(&k, &mut halves));
+    assert!((a - b).abs() <= 1e-6 * a, "joined {a}, half turns {b}");
 }
 
 /// A caller reads through the net at a tolerance of at least the bound, and through the
@@ -508,14 +625,18 @@ fn issue_2572_net_scope_reads_the_net_at_or_above_the_bound() {
     let def = sweep.definition().evaluate_definition_point(uv).unwrap();
     assert_ne!(net, def);
     assert_eq!(sweep.evaluate_point(&k, uv).unwrap(), def);
+    assert_eq!(wall.evaluate_point(&k, uv).unwrap(), def);
     {
         let _at = NetScope::within(&k, bound);
         assert_eq!(sweep.evaluate_point(&k, uv).unwrap(), net);
+        assert_eq!(wall.evaluate_point(&k, uv).unwrap(), net);
         let _below = NetScope::within(&k, 0.5 * bound);
         assert_eq!(sweep.evaluate_point(&k, uv).unwrap(), def);
+        assert_eq!(wall.evaluate_point(&k, uv).unwrap(), def);
     }
     let _any = NetScope::new(&k);
     assert_eq!(sweep.evaluate_point(&k, uv).unwrap(), net);
+    assert_eq!(wall.evaluate_point(&k, uv).unwrap(), net);
     // the definition's partials are those of its points
     let _exact = NetScope::exact(&k);
     let d = sweep.evaluate(&k, uv, 1, 1).unwrap();
@@ -796,4 +917,295 @@ fn issue_2572_every_wall_is_a_definition_or_in_the_ledger() {
         fixed.is_empty(),
         "listed kinds no case makes bare any more (fixed? delete their ledger files): {fixed:?}"
     );
+}
+
+/// Offset checks use the original exact surface normal, independently of the
+/// offset generator and its approximation. Parameter edits change that normal.
+#[test]
+fn screw_normal_offsets_keep_distance_certification_and_source_after_edits() {
+    let mut k = Kernel::default();
+    let pitch = 2.5;
+    let Meridian::Polygon(mut polygon) = m10_groove(pitch) else {
+        unreachable!()
+    };
+    for p in &mut polygon {
+        p.0 += 5.0;
+    }
+    let body = screw_sweep(
+        &mut k,
+        &Meridian::Polygon(polygon).curves(),
+        O,
+        Z,
+        pitch,
+        1.271,
+        1e-5,
+    )
+    .unwrap();
+    for original in walls(&body) {
+        for edit in 0..5 {
+            let mut source = original.copy(&k).unwrap();
+            match edit {
+                1 => source.reverse(&k, SurfParamType::U).unwrap(),
+                2 => source.reverse(&k, SurfParamType::V).unwrap(),
+                3 => source.swap_uv(&k).unwrap(),
+                4 => source
+                    .reparameterize(
+                        &k,
+                        &solidcore::geom::extent2d::Extent2d::from_bounds(-1.0, 3.0, 2.0, 9.0),
+                    )
+                    .unwrap(),
+                _ => {}
+            }
+            let input = source.procedural_sweep().unwrap();
+            let domain = input.net().natural_uv_domain();
+            for distance in [-0.1, 0.1] {
+                let result = input
+                    .definition()
+                    .normal_offset(input.net(), distance, 1e-4)
+                    .unwrap_or_else(|e| panic!("edit {edit}, distance {distance}: {e:?}"));
+                let output = result.procedural_sweep().unwrap();
+                assert!(output.bound() <= 1e-4);
+                let record = output.definition().to_record(output.net()).unwrap();
+                let restored = ProceduralSweep::from_record(&record).unwrap();
+                let restored = restored.procedural_sweep().unwrap();
+                for i in 1..9 {
+                    for j in 1..9 {
+                        let uv = Point2::new(
+                            domain.u_min() + (domain.u_max() - domain.u_min()) * f64::from(i) / 9.0,
+                            domain.v_min() + (domain.v_max() - domain.v_min()) * f64::from(j) / 9.0,
+                        );
+                        let first = input.definition().evaluate_definition(uv, 1, 1).unwrap();
+                        let n = first[1][0].cross(first[0][1]);
+                        let expected = first[0][0] + n * (distance / n.length());
+                        let exact = output.definition().evaluate_definition_point(uv).unwrap();
+                        assert!(
+                            (exact - expected).length() < 2e-12,
+                            "edit {edit}, d {distance}"
+                        );
+                        let net = output.net().evaluate_point(uv).unwrap();
+                        assert!((exact - net).length() <= output.bound());
+                        assert_eq!(
+                            exact,
+                            restored.definition().evaluate_definition_point(uv).unwrap()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn screw_offset_derivatives_through_four_are_derivatives_of_the_exact_wall() {
+    let mut k = Kernel::default();
+    let body = screw_sweep(&mut k, &m10_groove(2.5).curves(), O, Z, 2.5, 1.271, 1e-5).unwrap();
+    let wall = walls(&body).remove(0);
+    let source = wall.procedural_sweep().unwrap();
+    let offset = source
+        .definition()
+        .normal_offset(source.net(), 0.1, 1e-4)
+        .unwrap();
+    let d = offset.procedural_sweep().unwrap().definition();
+    let profile = d.profile().natural_interval();
+    let uv = face_uv(
+        d,
+        profile.min() + 0.37 * (profile.max() - profile.min()),
+        0.63 * d.stations()[0] + 0.37 * d.stations()[1],
+    );
+    let exact = d.evaluate_definition(uv, 4, 4).unwrap();
+    for axis in 0..2 {
+        let h = 1e-5;
+        let shift = if axis == 0 {
+            Point2::new(h, 0.0)
+        } else {
+            Point2::new(0.0, h)
+        };
+        let before = d.evaluate_definition(uv - shift, 4, 4).unwrap();
+        let after = d.evaluate_definition(uv + shift, 4, 4).unwrap();
+        for i in 0..4 {
+            for j in 0..4 {
+                let finite = (after[i][j] - before[i][j]) * (0.5 / h);
+                let next = if axis == 0 {
+                    exact[i + 1][j]
+                } else {
+                    exact[i][j + 1]
+                };
+                assert!(
+                    (finite - next).length() < 2e-6 * next.length().max(1.0),
+                    "axis {axis}, derivative ({i},{j}): {finite:?} != {next:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn offset_screw_sections_intersect_in_a_helix_with_paired_parameters() {
+    let mut k = Kernel::default();
+    let body = screw_sweep(&mut k, &m10_groove(2.5).curves(), O, Z, 2.5, 1.271, 1e-5).unwrap();
+    let offset: Vec<_> = walls(&body)
+        .iter()
+        .map(|wall| {
+            let s = wall.procedural_sweep().unwrap();
+            let (_, b, swapped) = s.definition().definition_map();
+            let sign = (b[0] * b[1]).signum() * if swapped { -1.0 } else { 1.0 };
+            s.definition()
+                .normal_offset(s.net(), 0.4 * sign, 1e-4)
+                .unwrap()
+        })
+        .collect();
+    let (a, b) = (&offset[0], &offset[1]);
+    let da = a.procedural_sweep().unwrap().net().natural_uv_domain();
+    let db = b.procedural_sweep().unwrap().net().natural_uv_domain();
+    let curves = a
+        .global_surface_intersect(&k, &da, b, &db, [false, false], Some(1e-6), None)
+        .unwrap();
+    assert_eq!(curves.curves_3d.len(), 1);
+    let c = &curves.curves_3d[0];
+    assert!(matches!(
+        c.kind(),
+        solidcore::curve::curve::CurveKind::CrvOnSurf(_)
+    ));
+    let saved = solidcore::curve::from_parameters::record_of(&k, c, &c.natural_interval())
+        .expect("the exact screw section curve must have a portable record");
+    assert_eq!(
+        saved.interval,
+        [c.natural_interval().min(), c.natural_interval().max()]
+    );
+    let restored =
+        solidcore::curve::from_parameters::from_parameters(&k, &saved.curve, saved.interval)
+            .expect("the exact screw section record must reconstruct");
+    assert!(matches!(
+        restored.curve.kind(),
+        solidcore::curve::curve::CurveKind::CrvOnSurf(_)
+    ));
+    assert_eq!(restored.interval, c.natural_interval());
+    let solidcore::curve::curve::CurveKind::CrvOnSurf(original_cos) = c.kind() else {
+        panic!("source curve")
+    };
+    let solidcore::curve::curve::CurveKind::CrvOnSurf(restored_cos) = restored.curve.kind() else {
+        panic!("restored curve")
+    };
+    let original_sweep = original_cos.surface().procedural_sweep().unwrap();
+    let restored_sweep = restored_cos.surface().procedural_sweep().unwrap();
+    assert_eq!(
+        original_sweep.definition().screw(),
+        restored_sweep.definition().screw()
+    );
+    assert_eq!(
+        original_sweep.definition().definition_map(),
+        restored_sweep.definition().definition_map()
+    );
+    assert_eq!(
+        original_sweep.definition().stations(),
+        restored_sweep.definition().stations()
+    );
+    let original_record = original_sweep
+        .definition()
+        .to_record(original_sweep.net())
+        .unwrap();
+    let restored_record = restored_sweep
+        .definition()
+        .to_record(restored_sweep.net())
+        .unwrap();
+    let solidcore::eval::geometry::sweep::SweepDefinitionRecord::Screw {
+        profile: ap,
+        motion: am,
+        offset: ao,
+    } = &original_record.definition;
+    let solidcore::eval::geometry::sweep::SweepDefinitionRecord::Screw {
+        profile: bp,
+        motion: bm,
+        offset: bo,
+    } = &restored_record.definition;
+    assert_eq!((ap, am), (bp, bm));
+    assert_eq!(
+        ao.as_ref().map(|o| (&o.source, o.signed_distance)),
+        bo.as_ref().map(|o| (&o.source, o.signed_distance))
+    );
+    assert_eq!(original_cos.uv_domain(), restored_cos.uv_domain());
+    let saved_again =
+        solidcore::curve::from_parameters::record_of(&k, &restored.curve, &restored.interval)
+            .unwrap();
+    let (
+        solidcore::eval::Curve::OnSurface {
+            uv_curve: before_uv,
+            domain: before_domain,
+            ..
+        },
+        solidcore::eval::Curve::OnSurface {
+            uv_curve: after_uv,
+            domain: after_domain,
+            ..
+        },
+    ) = (&saved.curve, &saved_again.curve)
+    else {
+        panic!("lost UV record")
+    };
+    assert_eq!(before_uv, after_uv);
+    assert_eq!(before_domain, after_domain);
+    let plain_eval = solidcore::eval::CurveEval::new(&saved.curve).unwrap();
+    let mut bad_domain = saved.curve.clone();
+    if let solidcore::eval::Curve::OnSurface { domain, .. } = &mut bad_domain {
+        domain[0][0] = f64::NAN;
+    }
+    assert!(
+        solidcore::curve::from_parameters::from_parameters(&k, &bad_domain, saved.interval)
+            .is_err()
+    );
+    let mut bad_weight = saved.curve.clone();
+    if let solidcore::eval::Curve::OnSurface { uv_curve, .. } = &mut bad_weight {
+        let solidcore::eval::Curve2::Spline { knots, points } = uv_curve else {
+            panic!("expected polynomial UV spline")
+        };
+        *uv_curve = solidcore::eval::Curve2::RationalSpline {
+            knots: knots.clone(),
+            homogeneous: points.iter().map(|p| [p[0], p[1], -1.0]).collect(),
+        };
+    }
+    assert!(
+        solidcore::curve::from_parameters::from_parameters(&k, &bad_weight, saved.interval)
+            .is_err()
+    );
+    for fraction in [0.173, 0.619] {
+        let t = saved.interval[0] + fraction * (saved.interval[1] - saved.interval[0]);
+        let original = c.evaluate(&k, t, 2, false, false).unwrap();
+        let reopened = restored.curve.evaluate(&k, t, 2, false, false).unwrap();
+        for (a, b) in original.iter().zip(&reopened) {
+            assert!((*a - *b).length() <= 1e-11 * (1.0 + a.length()));
+        }
+        let (p, d) = plain_eval.derivs(t).unwrap();
+        assert!((p - original[0]).length() <= 1e-11 * (1.0 + original[0].length()));
+        assert!((d - original[1]).length() <= 1e-11 * (1.0 + original[1].length()));
+    }
+    let pa = curves.surface1_uv_curves[0].as_ref().unwrap();
+    let pb = curves.surface2_uv_curves[0].as_ref().unwrap();
+    let domain = c.natural_interval();
+    let mut radial_height: Option<(f64, f64)> = None;
+    for i in 1..100 {
+        let t = domain.min() + (domain.max() - domain.min()) * f64::from(i) / 100.0;
+        let p = c.evaluate_point(&k, t).unwrap();
+        {
+            let _loose = NetScope::new(&k);
+            assert_eq!(c.evaluate_point(&k, t).unwrap(), p);
+            assert!((c.evaluate(&k, t, 3, false, false).unwrap()[0] - p).length() < 2e-12);
+        }
+        let auv = pa.evaluate_point(&k, t).unwrap();
+        let buv = pb.evaluate_point(&k, t).unwrap();
+        let qa = a.evaluate_point(&k, Point2::new(auv.x, auv.y)).unwrap();
+        let qb = b.evaluate_point(&k, Point2::new(buv.x, buv.y)).unwrap();
+        assert!((p - qa).length() <= curves.deviations[0]);
+        assert!((p - qb).length() <= curves.deviations[0]);
+        let d = a.procedural_sweep().unwrap().definition();
+        let theta = d
+            .turn_at(d.definition_parameters(Point2::new(auv.x, auv.y)).y)
+            .0;
+        let invariant = (p.x.hypot(p.y), p.z - 2.5 * theta / (2.0 * PI));
+        if let Some((radius, height)) = radial_height {
+            assert!((invariant.0 - radius).abs() < 2e-12);
+            assert!((invariant.1 - height).abs() < 2e-12);
+        } else {
+            radial_height = Some(invariant);
+        }
+    }
 }

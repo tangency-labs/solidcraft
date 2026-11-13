@@ -65,17 +65,20 @@
 //! - `Dump` (print only) and `GetMemoryUsed` are not ported; `WriteToDB` belongs to
 //!   another unit.
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::p2::{self as curve_base, ISO_CURVE_TYPE};
 use crate::curve::curve::Curve;
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
@@ -83,6 +86,8 @@ use crate::surface::surface::p2::Surface;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 const OP_UV_ISO_LINE: &str = "curve::iso_curve::IsoCurve::create_uv_iso_line";
+const OP_RESTRICT: &str = "curve::iso_curve::IsoCurve::restrict";
+const OP_SCREW_BOX: &str = "curve::iso_curve::screw_patch_enclosure";
 const OP_READ: &str = "curve::iso_curve::IsoCurve::read_from_db";
 
 /// An iso-parametric curve of a surface (`SmIsoCurve`): `S(iso, s)` for a constant-`u`
@@ -97,6 +102,8 @@ pub struct IsoCurve {
     iso_parameter: f64,
     /// `m_bFromLeft`: side of a knot the iso parameter is evaluated on.
     from_left: bool,
+    /// Restriction of the varying coordinate; the evaluator keeps its original chart.
+    interval: Option<Extent1d>,
 }
 
 impl IsoCurve {
@@ -107,6 +114,7 @@ impl IsoCurve {
             surf_param: self.surf_param,
             iso_parameter: self.iso_parameter,
             from_left: self.from_left,
+            interval: self.interval,
         }
     }
 
@@ -118,6 +126,7 @@ impl IsoCurve {
             surf_param: self.surf_param,
             iso_parameter: self.iso_parameter,
             from_left: self.from_left,
+            interval: self.interval,
         })
     }
 
@@ -188,6 +197,7 @@ impl IsoCurve {
             surf_param,
             iso_parameter,
             from_left,
+            interval: None,
         };
         let Some(uv_domain) = clamp_domain else {
             return c;
@@ -251,6 +261,7 @@ impl IsoCurve {
         // first check the base: same type and dimension (always for two iso curves)
         Ok(self.surface.approx_eq(k, &other.surface)?
             && self.surf_param == other.surf_param
+            && self.interval == other.interval
             && is_zero(self.iso_parameter - other.iso_parameter)
             && self.from_left == other.from_left)
     }
@@ -291,7 +302,7 @@ impl IsoCurve {
     /// `both_params` (the opt-in WR-30 fix) both directions are built; without it the
     /// body is pinned v1.0.1's: the `SM_SP_U` test is repeated, so only constant `u`
     /// succeeds, over the u interval and from the domain-minimum origin.
-    fn uv_iso_line(&self, domain: Extent2d, both_params: bool) -> Result<Curve> {
+    pub(crate) fn uv_iso_line(&self, domain: Extent2d, both_params: bool) -> Result<Curve> {
         // locals
         let mut line_point = Point3::new(domain.min().x, domain.min().y, 0.0);
         let (line_ivl, line_unit_vec) = if self.surf_param == SurfParamType::U {
@@ -320,6 +331,26 @@ impl IsoCurve {
         Ok(new_line(line_point, line_unit_vec, &line_ivl, 1.0, 2))
     }
 
+    /// The UV line of this curve in its own parameter, over its interval
+    /// ([`IsoCurve::natural_interval`]): `(iso, t)` for constant `u`, `(t, iso)` otherwise, as
+    /// [`IsoCurve::evaluate_point`] reads it. The surface along it is this curve point for point
+    /// (a curve on the surface with the same parameter), which is how an iso curve of a
+    /// retained screw goes to the record.
+    pub(crate) fn uv_line(&self) -> Curve {
+        let (point, direction) = if self.surf_param == SurfParamType::U {
+            (
+                Point3::new(self.iso_parameter, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            )
+        } else {
+            (
+                Point3::new(0.0, self.iso_parameter, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+            )
+        };
+        new_line(point, direction, &self.natural_interval(), 1.0, 2)
+    }
+
     /// The minimum continuity and the continuities at the knots, inherited from the
     /// surface along the varying coordinate (`CalculateContinuities`).
     ///
@@ -337,12 +368,63 @@ impl IsoCurve {
     /// (`GetNaturalInterval`).
     #[must_use]
     pub fn natural_interval(&self) -> Extent1d {
+        if let Some(interval) = self.interval {
+            return interval;
+        }
         // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
         let uv_domain = self.surface.natural_uv_domain_if_built();
         if self.surf_param == SurfParamType::U {
             return Extent1d::from_min_max(uv_domain.min().y, uv_domain.max().y);
         }
         Extent1d::from_min_max(uv_domain.min().x, uv_domain.max().x)
+    }
+
+    /// Restrict the support without changing the surface or the curve parameter.
+    pub(crate) fn restrict(&mut self, interval: Extent1d) -> Result<()> {
+        let natural = self.natural_interval();
+        if !interval.min().is_finite()
+            || !interval.max().is_finite()
+            || interval.min() > interval.max()
+            || interval.min() < natural.min()
+            || interval.max() > natural.max()
+        {
+            return Err(SolidError::invalid_input(
+                OP_RESTRICT,
+                "iso restriction exceeds its support",
+            ));
+        }
+        self.interval = Some(interval);
+        Ok(())
+    }
+
+    /// The backing iso is a partition/seed only, never this curve's evaluator.
+    pub(crate) fn screw_seed(&self, k: &Kernel) -> Result<Option<BSplineCurve>> {
+        let Some(sweep) = self.surface.retained_screw() else {
+            return Ok(None);
+        };
+        Ok(Some(
+            sweep
+                .net()
+                .create_iso_parametric_curve(
+                    k,
+                    self.surf_param,
+                    self.iso_parameter,
+                    crate::nurbs::b_spline_surface::p2::IsoCurveOptions::default(),
+                )?
+                .curve,
+        ))
+    }
+
+    /// Enclose an entire retained screw iso interval, including its certificate.
+    /// Positive rational basis functions make B a convex combination of its
+    /// active Euclidean controls. Closed knot supports include both sides of a
+    /// joint. Outward division and addition enclose stored homogeneous controls
+    /// and the complete |S-B| bound; no sampled curve or extracted-net rounding
+    /// is used for this enclosure.
+    pub(crate) fn screw_enclosure(&self, interval: &Extent1d) -> Result<Option<Extent3d>> {
+        let a = self.uv(interval.min());
+        let b = self.uv(interval.max());
+        screw_patch_enclosure(&self.surface, Extent2d::from_points(a, b))
     }
 
     /// The surface coordinate varied by the evaluator and indexed by curve knots.
@@ -540,11 +622,140 @@ fn new_line(point: Point3, unit_vec: Vec3, interval: &Extent1d, scale: f64, dim:
     ))
 }
 
+/// The certified active-control enclosure shared by exact iso representations.
+pub(crate) fn screw_patch_enclosure(
+    surface: &Surface,
+    patch: Extent2d,
+) -> Result<Option<Extent3d>> {
+    let Some(sweep) = surface.retained_screw() else {
+        return Ok(None);
+    };
+    if let Some(bounds) = sweep.definition().definition_patch_enclosure(patch)? {
+        return Ok(Some(bounds));
+    }
+    let domain = sweep.net().natural_uv_domain();
+    let (lo, hi) = (domain.min(), domain.max());
+    if ![lo.x, lo.y, hi.x, hi.y].iter().all(|x| x.is_finite()) || lo.x > hi.x || lo.y > hi.y {
+        return Err(SolidError::invalid_input(
+            OP_SCREW_BOX,
+            "retained screw net domain is not finite and ordered",
+        ));
+    }
+    // Evaluation clamps a parameter to the net, so the box of the clamped patch
+    // encloses every point of a curve over an extended interval.
+    let clamp = |p: Point2| {
+        Point2::new(
+            crate::math::clamp_between(p.x, lo.x, hi.x),
+            crate::math::clamp_between(p.y, lo.y, hi.y),
+        )
+    };
+    let a = clamp(patch.min());
+    let b = clamp(patch.max());
+    if ![a.x, a.y, b.x, b.y].iter().all(|x| x.is_finite())
+        || !domain.contains_point(a, 0.0)
+        || !domain.contains_point(b, 0.0)
+        || !sweep.bound().is_finite()
+        || sweep.bound() < 0.0
+    {
+        return Err(SolidError::invalid_input(
+            OP_SCREW_BOX,
+            "iso box exceeds certified support",
+        ));
+    }
+    let net = sweep.net().gw_nurb().ok_or_else(|| {
+        SolidError::curve_missing(OP_SCREW_BOX, "the retained screw net's NURBS form")
+    })?;
+    let u_support = net
+        .u_knots()
+        .iter()
+        .zip(net.u_knots().iter().skip(net.p().saturating_add(1)));
+    let mut hull: Option<[Ivl; 3]> = None;
+    for (row, (&lo, &hi)) in net.rows().zip(u_support) {
+        if hi < a.x || lo > b.x {
+            continue;
+        }
+        let v_support = net
+            .v_knots()
+            .iter()
+            .zip(net.v_knots().iter().skip(net.q().saturating_add(1)));
+        for (point, (&lo, &hi)) in row.iter().zip(v_support) {
+            if hi < a.y || lo > b.y {
+                continue;
+            }
+            let weight = if net.is_rational() { point.w } else { 1.0 };
+            if !weight.is_finite()
+                || weight <= 0.0
+                || ![point.x, point.y, point.z].iter().all(|x| x.is_finite())
+            {
+                return Err(SolidError::invalid_input(
+                    OP_SCREW_BOX,
+                    "iso box needs finite positive-weight controls",
+                ));
+            }
+            let current = [point.x, point.y, point.z].map(|x| Ivl::from(x) / Ivl::from(weight));
+            if let Some(previous) = &mut hull {
+                for (dst, value) in previous.iter_mut().zip(current) {
+                    *dst = dst.hull(value);
+                }
+            } else {
+                hull = Some(current);
+            }
+        }
+    }
+    let hull = hull
+        .ok_or_else(|| SolidError::invalid_input(OP_SCREW_BOX, "iso box has no active controls"))?;
+    let [x, y, z] = hull.map(|v| v + Ivl::new(-sweep.bound(), sweep.bound()));
+    if ![x.lo, x.hi, y.lo, y.hi, z.lo, z.hi]
+        .iter()
+        .all(|x| x.is_finite())
+    {
+        return Err(SolidError::invalid_input(
+            OP_SCREW_BOX,
+            "iso box is not finite",
+        ));
+    }
+    Ok(Some(Extent3d::from_bounds(
+        x.lo, y.lo, z.lo, x.hi, y.hi, z.hi,
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface;
+
+    /// A box over a patch past a tapered screw's net (the fallback, which no definition box
+    /// covers) is the box of the patch clamped to the net, as evaluation clamps.
+    #[test]
+    fn a_screw_box_past_the_net_is_the_clamped_box() {
+        use crate::math::{Point3, Vec3};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::{ProceduralSweep, RadialLaw, ScrewMotion};
+        let line =
+            BSplineCurve::create_line_segment(3, Point3::X, Point3::new(2.0, 0.0, 1.0)).unwrap();
+        let law = RadialLaw::new(Vec3::X, vec![0.0, 0.6], vec![0.0, 0.1]).unwrap();
+        let motion = ScrewMotion::new(Point3::ZERO, Vec3::Z, 2.5, Some(law)).unwrap();
+        let stations = [0.0, 0.3, 0.6];
+        let definition = ProceduralSweep::create(&line, motion, &stations, 0.15).unwrap();
+        let net = crate::sweep::screw::screw_net(
+            definition.profile(),
+            definition.screw().unwrap(),
+            &stations,
+        )
+        .unwrap();
+        let d = net.natural_uv_domain();
+        let mut screw = crate::surface::surface::Surface::from(net);
+        screw.set_sweep_definition(definition);
+        let inside = Extent2d::from_points(d.min(), d.max());
+        let past = Extent2d::from_points(
+            Point2::new(d.min().x - 0.5, d.min().y),
+            Point2::new(d.max().x + 0.5, d.max().y + 0.25),
+        );
+        let clamped = screw_patch_enclosure(&screw, inside).unwrap().unwrap();
+        let extended = screw_patch_enclosure(&screw, past).unwrap().unwrap();
+        assert_eq!(format!("{clamped:?}"), format!("{extended:?}"));
+    }
 
     /// A bilinear patch over `[0, 2] x [-1, 3]`.
     fn patch() -> BSplineSurface {

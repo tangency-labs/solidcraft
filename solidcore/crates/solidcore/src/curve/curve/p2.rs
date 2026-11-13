@@ -878,6 +878,12 @@ impl Curve {
         &self.memo
     }
 
+    /// Makes this curve share `memo`, the memo of a curve whose value this one is (an
+    /// exact stand-in made for one query), so that its cache builds read and fill it.
+    pub(crate) fn share_memo(&mut self, memo: &CurveMemo) {
+        self.memo = memo.share();
+    }
+
     /// The key this curve object is notified under, once a context has issued it one
     /// (the kernel issues it; there is no setter).
     #[must_use]
@@ -1945,6 +1951,24 @@ impl Curve {
                 c.base_mut()
                     .trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d)
             }
+            // Not upstream: a retained screw's exact iso curve (a screw-swept wall's boundary,
+            // which upstream has as its net's B-spline) is trimmed by restricting it to the
+            // interval, clamped to its own; its surface and parameter stay as they are.
+            CurveKind::Iso(c) if c.surface().retained_screw().is_some() => {
+                let natural = c.natural_interval();
+                let (lo, hi) = (
+                    trim_interval.min().max(natural.min()),
+                    trim_interval.max().min(natural.max()),
+                );
+                if lo.partial_cmp(&hi) != Some(core::cmp::Ordering::Less) {
+                    return Err(SolidError::invalid_input(
+                        OP_BASE,
+                        "the trim interval misses the iso curve",
+                    ));
+                }
+                *trim_interval = Extent1d::from_min_max(lo, hi);
+                c.restrict(*trim_interval)
+            }
             CurveKind::Hermite(_)
             | CurveKind::Conic(_)
             | CurveKind::Iso(_)
@@ -1988,6 +2012,12 @@ impl Curve {
             CurveKind::Ellipse(c) => c.copy(k).map(Self::from),
             CurveKind::Hyperbola(c) => Ok(Self::from(c.copy())),
             CurveKind::Parabola(c) => Ok(Self::from(c.copy())),
+            // Not upstream: a retained screw's exact iso curve (a screw-swept wall's boundary,
+            // which upstream has as its net's B-spline) copies as itself, on a copy of its
+            // surface.
+            CurveKind::Iso(c) if c.surface().retained_screw().is_some() => {
+                c.clone_for_evaluation(0).map(Self::from)
+            }
             CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Iso(_) => Err(base_err()),
             CurveKind::Projected(c) => c.copy(k).map(Self::from),
             CurveKind::Offset(c) => c.copy().map(Self::from),

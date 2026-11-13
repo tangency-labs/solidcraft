@@ -97,6 +97,7 @@ use super::p4::NoObject;
 use super::p7::{good_drop_result, load_guesses, SpGlobalSolver};
 use super::{Surface, SurfaceKind};
 
+const OP_ISO: &str = "surface::surface::p5::Surface::create_iso_parametric_curve";
 const OP_SING: &str = "surface::surface::p5::Surface::is_singularity";
 const OP_LPS0: &str = "surface::surface::p5::Surface::local_point_solve_0";
 const OP_DROP: &str = "surface::surface::p5::Surface::drop_point";
@@ -517,6 +518,43 @@ impl Surface {
         domain: Option<&Extent2d>,
         want_uv_iso_curve: bool,
     ) -> Result<IsoParametricCurve> {
+        // A retained screw's net is only its search enclosure. Boundary roots
+        // must solve C(t)=S(iso,t), not the net's different boundary curve.
+        if self.retained_screw().is_some() {
+            let natural = self.natural_uv_domain_if_built();
+            let domain = domain.copied().unwrap_or(natural);
+            let fixed = if param == SurfParamType::U {
+                domain.u_interval()
+            } else {
+                domain.v_interval()
+            };
+            if !iso_parameter.is_finite()
+                || iso_parameter < fixed.min()
+                || iso_parameter > fixed.max()
+                || !natural.contains_point(domain.min(), 0.0)
+                || !natural.contains_point(domain.max(), 0.0)
+            {
+                return Err(SolidError::invalid_input(
+                    OP_ISO,
+                    "screw iso exceeds certified support",
+                ));
+            }
+            let mut iso =
+                iso_curve_of(k, self, param, iso_parameter, iso_parameter != fixed.min())?;
+            iso.restrict(if param == SurfParamType::U {
+                domain.v_interval()
+            } else {
+                domain.u_interval()
+            })?;
+            let uv_iso_curve = want_uv_iso_curve
+                .then(|| iso.uv_iso_line(domain, true))
+                .transpose()?;
+            return Ok(IsoParametricCurve {
+                curve: Curve::from(iso),
+                max_gap_3d: 0.0,
+                uv_iso_curve,
+            });
+        }
         match self.kind_with_nurb(k)? {
             // (SmSurfOfExtrusion inherits the B-spline override)
             SurfaceKind::SurfOfExtrusion(_) => {
@@ -2618,6 +2656,216 @@ mod tests {
 
     fn xy_plane() -> Surface {
         Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)))
+    }
+
+    #[test]
+    fn retained_screw_boundary_intersects_the_plane_on_its_definition() {
+        use crate::curve::curve::CurveKind;
+        use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        use crate::sweep::screw::screw_net;
+        use std::f64::consts::PI;
+        let k = Kernel::default();
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.6];
+        let definition = ProceduralSweep::create(&profile, motion.clone(), &stations, 0.3).unwrap();
+        let mut surface = Surface::from(screw_net(&profile, &motion, &stations).unwrap());
+        surface.set_sweep_definition(definition);
+        let domain = Extent2d::from_points(Point2::new(0.0, 0.1), Point2::new(1.0, 0.5));
+        let iso = surface
+            .create_iso_parametric_curve(&k, SurfParamType::U, 0.0, 1e-8, Some(&domain), true)
+            .unwrap();
+        let boundaries = surface
+            .create_natural_uv_trim_curves(&k, &domain, SurfParamType::U, false)
+            .unwrap();
+        assert_eq!(boundaries.curves_3d.len(), 4);
+        for (edge, uv) in boundaries.curves_3d.iter().zip(&boundaries.uv_curves) {
+            assert!(matches!(
+                edge.kind(),
+                CurveKind::CrvOnSurf(_) | CurveKind::Line(_)
+            ));
+            let interval = edge.natural_interval();
+            let t = interval.min() + 0.37 * interval.length();
+            let fraction = (t - interval.min()) / interval.length();
+            let uv_point = uv.evaluate_point(fraction);
+            let expected = surface
+                .evaluate_point(&k, Point2::new(uv_point.x, uv_point.y))
+                .unwrap();
+            assert!(edge.evaluate_point(&k, t).unwrap().distance(expected) < 1e-12);
+            let mut copy = edge.copy(&k).unwrap();
+            let mut trim = Extent1d::from_min_max(
+                interval.min() + 0.1 * interval.length(),
+                interval.max() - 0.1 * interval.length(),
+            );
+            copy.trim(
+                &k,
+                &mut trim,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Silent,
+            )
+            .unwrap();
+            assert!(copy.evaluate_point(&k, t).unwrap().distance(expected) < 1e-12);
+            let cache = crate::curve::curve::p5::make_curve_cache::<Obj>(&k, &copy, None).unwrap();
+            assert!(
+                cache
+                    .curve()
+                    .evaluate_point(&k, t)
+                    .unwrap()
+                    .distance(expected)
+                    < 1e-12
+            );
+        }
+        // The same affine constant-turn construction survives chart permutation.
+        for swapped in [false, true] {
+            let mut owner = surface.clone_exact_bounded();
+            let mut box_uv = domain;
+            if swapped {
+                owner.swap_uv(&k).unwrap();
+                box_uv = Extent2d::from_points(Point2::new(0.1, 0.0), Point2::new(0.5, 1.0));
+            }
+            let edges = owner
+                .create_natural_uv_trim_curves(&k, &box_uv, SurfParamType::U, false)
+                .unwrap();
+            assert_eq!(
+                edges
+                    .curves_3d
+                    .iter()
+                    .filter(|c| matches!(c.kind(), CurveKind::Line(_)))
+                    .count(),
+                2
+            );
+            for (edge, uv) in edges.curves_3d.iter().zip(&edges.uv_curves) {
+                if !matches!(edge.kind(), CurveKind::Line(_)) {
+                    continue;
+                }
+                let interval = edge.natural_interval();
+                for fraction in [0.0, 0.37, 1.0] {
+                    let t = interval.min() + fraction * interval.length();
+                    let uv_jet = uv.evaluate(fraction, 1);
+                    let point = uv_jet[0];
+                    let direction = uv_jet[1] / interval.length();
+                    let jet = owner
+                        .evaluate(
+                            &k,
+                            Point2::new(point.x, point.y),
+                            1,
+                            1,
+                            EvaluateFlags::default(),
+                        )
+                        .unwrap();
+                    let expected_tangent = jet[1][0] * direction.x + jet[0][1] * direction.y;
+                    let actual = edge.evaluate(&k, t, 1, true, false).unwrap();
+                    assert!(actual[0].distance(jet[0][0]) < 1e-12);
+                    assert!(actual[1].distance(expected_tangent) < 1e-12);
+                }
+            }
+        }
+        // A cylinder's authored boundary spans half a turn: the whole-domain
+        // search box must be finite before any local Taylor enclosure applies.
+        let half_turn_stations = [0.0, PI / 4.0, PI / 2.0, 3.0 * PI / 4.0, PI];
+        let half_turn =
+            ProceduralSweep::create(&profile, motion.clone(), &half_turn_stations, PI / 8.0)
+                .unwrap();
+        let half_turn_box = half_turn
+            .definition_patch_enclosure(Extent2d::from_points(
+                Point2::new(1.0, 0.0),
+                Point2::new(1.0, PI),
+            ))
+            .unwrap()
+            .unwrap();
+        for t in [0.0, PI / 4.0, PI / 2.0, PI] {
+            assert!(half_turn_box.contains_point(
+                half_turn
+                    .evaluate_definition_point(Point2::new(1.0, t))
+                    .unwrap(),
+                0.0
+            ));
+        }
+        let expected = surface.evaluate_point(&k, Point2::new(0.0, 0.17)).unwrap();
+        let backing = surface
+            .procedural_sweep()
+            .unwrap()
+            .net()
+            .evaluate_point(Point2::new(0.0, 0.17))
+            .unwrap();
+        assert!(
+            expected.distance(backing) > 1e-5,
+            "independent witness distinguishes S from B"
+        );
+        assert!(
+            iso.curve
+                .evaluate_point(&k, 0.17)
+                .unwrap()
+                .distance(expected)
+                < 1e-12
+        );
+        assert_eq!(iso.curve.natural_interval(), domain.v_interval());
+        let copy = iso.curve.clone_for_evaluation().unwrap();
+        assert_eq!(copy.natural_interval(), domain.v_interval());
+        assert_eq!(copy.evaluate_point(&k, 0.17).unwrap(), expected);
+        let uv = iso.uv_iso_curve.unwrap().evaluate_point(&k, 0.17).unwrap();
+        assert_eq!(uv, Vec3::new(0.0, 0.17, 0.0));
+        let CurveKind::Iso(exact) = iso.curve.kind() else {
+            panic!("retained iso");
+        };
+        let bbox = exact
+            .screw_enclosure(&domain.v_interval())
+            .unwrap()
+            .unwrap();
+        let tiny = Extent1d::from_min_max(0.17, 0.17000001);
+        let tiny_box = exact.screw_enclosure(&tiny).unwrap().unwrap();
+        assert!(
+            tiny_box.max().distance(tiny_box.min()) < 1e-6,
+            "exact iso enclosure must contract inside a single backing-net span"
+        );
+        assert!(tiny_box.contains_point(expected, 0.0));
+        let cache = crate::curve::curve::p5::make_curve_cache::<Obj>(&k, &iso.curve, None).unwrap();
+        assert_eq!(cache.curve().evaluate_point(&k, 0.17).unwrap(), expected);
+        let req = BoundingBoxRequest {
+            normal: true,
+            pseudo: true,
+            polar: false,
+        };
+        let boxes = iso
+            .curve
+            .calculate_bounding_box(&k, &domain.v_interval(), req, true)
+            .unwrap();
+        assert_eq!(boxes.normal, Some(bbox));
+        for t in [0.1, 0.17, 0.3, 0.49, 0.5] {
+            assert!(bbox.contains_point(
+                surface.evaluate_point(&k, Point2::new(0.0, t)).unwrap(),
+                0.0
+            ));
+        }
+        let plane = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, expected.z), Vec3::Z));
+        let plane_domain =
+            Extent2d::from_points(Point2::new(-10.0, -10.0), Point2::new(10.0, 10.0));
+        let roots = plane
+            .global_curve_intersect::<Obj>(
+                &k,
+                [Obj, Obj],
+                &plane_domain,
+                &iso.curve,
+                &domain.v_interval(),
+                1e-8,
+            )
+            .unwrap();
+        assert_eq!(roots.len(), 1);
+        let root = roots.get(0).unwrap();
+        let t = root.start.param(0).unwrap();
+        let point = surface.evaluate_point(&k, Point2::new(0.0, t)).unwrap();
+        assert!(
+            (point.z - expected.z).abs() < 1e-8,
+            "root must solve S/plane"
+        );
+        assert!((t - 0.17).abs() < 1e-7);
+        // A bounding proxy is not a replacement for the exact operand.
+        assert!(backing.distance(point) > 1e-5);
     }
 
     #[test]

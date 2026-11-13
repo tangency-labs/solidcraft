@@ -1,5 +1,6 @@
 use serde::Serialize;
 use solidcore_record::Vec3;
+use solidcore_record::brep::sweep::ProceduralSweepRecord;
 use solidcore_record::brep::{self, Brep, Curve, Loop, Shell, Surface};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb3, Mesh};
@@ -371,6 +372,7 @@ pub(crate) fn empty_record() -> Brep {
         faces: Vec::new(),
         edges: Vec::new(),
         vertices: Vec::new(),
+        screw_owners: Vec::new(),
     }
 }
 
@@ -452,7 +454,9 @@ impl SurfaceKind {
             S::Cone { .. } => SurfaceKind::Cone,
             S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
-            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } => SurfaceKind::Freeform,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } | S::ProceduralSweep(_) => {
+                SurfaceKind::Freeform
+            }
         }
     }
 }
@@ -1067,7 +1071,7 @@ impl Body {
             b.add(v3(v.point));
         }
         for e in &self.record.edges {
-            curve_hull(e.parameters(), e.interval, &mut b);
+            curve_hull(e.parameters(), e.interval, &self.record.screw_owners, &mut b);
         }
         b
     }
@@ -1604,8 +1608,9 @@ fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
 
 /// Grow `b` by a curve's hull over `interval`: its control points for splines, its points for
 /// lines, circles and ellipses (their exact extreme points), the leader's hull for an
-/// intersection curve.
-fn curve_hull(c: &Curve, interval: [f64; 2], b: &mut Aabb3) {
+/// intersection curve, and its sweep's net hull widened by the net's certified bound for a curve
+/// on a procedural sweep (`owners`: the record's screw owners).
+fn curve_hull(c: &Curve, interval: [f64; 2], owners: &[ProceduralSweepRecord], b: &mut Aabb3) {
     match c {
         Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } => {
             if let Ok(e) = solidcraft_geom::brep::eval::CurveEval::new(c) {
@@ -1625,7 +1630,25 @@ fn curve_hull(c: &Curve, interval: [f64; 2], b: &mut Aabb3) {
                 }
             }
         }
-        Curve::SurfaceIntersection { leader, .. } => curve_hull(leader, interval, b),
+        Curve::SurfaceIntersection { leader, .. } => curve_hull(leader, interval, owners, b),
+        Curve::OnSurface { surface, .. } => {
+            if let Surface::ProceduralSweep(s) = surface.as_ref() {
+                sweep_hull(s, b);
+            }
+        }
+        Curve::OnSurfaceRef { owner, .. } => {
+            if let Some(s) = usize::try_from(*owner).ok().and_then(|i| owners.get(i)) {
+                sweep_hull(s, b);
+            }
+        }
+    }
+}
+
+/// Grow `b` by the kernel's outline box of a procedural sweep.
+fn sweep_hull(s: &ProceduralSweepRecord, b: &mut Aabb3) {
+    if let Some((lo, hi)) = solidcore_ops::procedural_sweep::outline(s) {
+        b.add(Vec3::new(lo[0], lo[1], lo[2]));
+        b.add(Vec3::new(hi[0], hi[1], hi[2]));
     }
 }
 

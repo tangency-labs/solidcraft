@@ -203,7 +203,7 @@ impl Surface {
     /// A schema 4 record surface over the parameter box `domain` (`[[u0, u1], [v0, v1]]`, the
     /// record's own parameters: radians for angles), with the record's parameterisation and
     /// normal. A spline is taken over its whole knot domain. A cone only as a whole turn, widening
-    /// along its axis; a revolution not at all ([`Error::Unsupported`]).
+    /// along its axis; a revolution or a procedural sweep not at all ([`Error::Unsupported`]).
     pub fn from_record(surface: &solidcore_record::brep::Surface, domain: [[f64; 2]; 2]) -> Result<Surface> {
         use solidcore_record::brep::Surface as S;
         let [u, v] = domain;
@@ -251,7 +251,7 @@ impl Surface {
                 Surface::nurbs(degree, nu, nv, u_knots, v_knots, &flat, Some(&weights))
             }
             // A ball patch's label has no (u, v): its face's NURBS form is the surface.
-            S::PlacedRevolution { .. } | S::BallPatch { .. } | S::Blend { .. } => Err(Error::Unsupported),
+            S::PlacedRevolution { .. } | S::BallPatch { .. } | S::Blend { .. } | S::ProceduralSweep(_) => Err(Error::Unsupported),
         }
     }
 

@@ -67,7 +67,11 @@ pub(crate) fn surf_of(b: &Brep, face: usize) -> Option<Surf> {
             let (o, a) = axes(frame)?;
             Surf::Torus { o, a, big: *major_radius, h: 0.0, r: *minor_radius, convex: out }
         }
-        Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::PlacedRevolution { .. } | Surface::Blend { .. } => return None,
+        Surface::Spline { .. }
+        | Surface::RationalSpline { .. }
+        | Surface::PlacedRevolution { .. }
+        | Surface::Blend { .. }
+        | Surface::ProceduralSweep(_) => return None,
     })
 }
 
@@ -109,12 +113,22 @@ pub(crate) fn face_edges(b: &Brep, face: usize) -> Vec<u32> {
 }
 
 /// The chosen faces and every face on the same surface joined to them (the halves of a hole's
-/// wall), as face indices. Pieces of a face split on purpose (Split Face) stay apart.
+/// wall, the half-turn pieces of a thread's flank), as face indices. Pieces of a face split on purpose (Split Face) stay apart.
 pub fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
     let Ok(record) = crate::native::brep_record(b) else { return chosen.to_vec() };
     let tol = (b.size() * 1e-7).max(1e-9) * 100.0;
     let surfs: Vec<Option<Surf>> = (0..record.faces.len()).map(|i| surf_of(&record, i)).collect();
     let edges: Vec<Vec<u32>> = (0..record.faces.len()).map(|i| face_edges(&record, i)).collect();
+    // A screw-swept wall laid out in half turns (a thread or coil of an older design) is one
+    // exact surface in pieces: each piece carries the same definition, only its stations differ.
+    let sweep = |i: usize| match record.faces.get(i).map(|f| &f.surface) {
+        Some(Surface::ProceduralSweep(s)) => Some(&s.definition),
+        _ => None,
+    };
+    let same = |i: usize, j: usize| match (surfs.get(i).and_then(Option::as_ref), surfs.get(j).and_then(Option::as_ref)) {
+        (Some(si), Some(sj)) => si.same(sj, tol),
+        _ => sweep(i).is_some_and(|di| sweep(j).is_some_and(|dj| di == dj)),
+    };
     let keep = b.split_keep();
     let mut out: Vec<usize> = chosen.to_vec();
     let mut grew = true;
@@ -124,10 +138,12 @@ pub fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
             if out.contains(&i) {
                 continue;
             }
-            let Some(Some(si)) = surfs.get(i) else { continue };
+            if surfs.get(i).is_none_or(Option::is_none) && sweep(i).is_none() {
+                continue;
+            }
             let mine = edges.get(i).map(Vec::as_slice).unwrap_or(&[]);
             let joins = out.iter().any(|j| {
-                surfs.get(*j).and_then(|x| x.as_ref()).is_some_and(|sj| si.same(sj, tol))
+                same(i, *j)
                     && edges.get(*j).is_some_and(|theirs| {
                         theirs.iter().any(|e| {
                             mine.binary_search(e).is_ok()

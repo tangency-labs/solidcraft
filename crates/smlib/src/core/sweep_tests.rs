@@ -8,7 +8,7 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use super::sweep::{extrude, face_section, loft, loft_to_point, planar_faces, project_curves, revolve, screw_sweep, sweep_placed, sweep_stations};
+use super::sweep::{extrude, face_section, loft, loft_to_point, planar_faces, project_curves, revolve, sweep_placed, sweep_stations};
 use super::{Body, area, bounds, counts, make_box, make_cylinder, to_arrays, volume};
 use crate::Error;
 use crate::export::native;
@@ -80,9 +80,6 @@ enum Op {
     Loft(Vec<Vec<Curve>>, u32, bool),
     LoftToPoint(Vec<Curve>, [f64; 3]),
     Stations(Vec<Curve>, Vec<Affine>, Ends),
-    Screw(Vec<Curve>, [f64; 3], [f64; 3], f64, f64, f64),
-    /// A screw sweep with a radial law.
-    ScrewRadial(Vec<Curve>, [f64; 3], [f64; 3], f64, f64, Vec<(f64, f64)>, f64),
 }
 
 /// What a case must give.
@@ -244,27 +241,6 @@ fn case(name: &str) -> Case {
             Op::Stations(square(-1.0, -1.0, 2.0, 0.0), vec![scale_up(1.0, 0.0), scale_up(1.5, 5.0), scale_up(2.0, 10.0)], Ends::Capped),
             Expect::Volume(4.0 * 10.0 * 7.0 / 3.0),
         ),
-        // A square thread 1 x 1 from radius 5 to 6, pitch 2, two turns: Pappus along the screw
-        // motion (its rise lies in the profile's plane), A · 2π x̄ · turns, the walls within the
-        // tolerance of the screw surfaces.
-        "screw_sweep_square_thread" => c(
-            Op::Screw(polygon(&[[5.0, 0.0, 0.0], [6.0, 0.0, 0.0], [6.0, 0.0, 1.0], [5.0, 0.0, 1.0]]), [0.0; 3], Z, 2.0, 2.0, 1e-5),
-            Expect::About(TAU * 5.5 * 2.0, 1e-5),
-        ),
-        // The same thread moved out by 0 to 1 over its two turns, linearly: Pappus with the
-        // centroid at 5.5 + t/2, A · 2π · turns · (5.5 + 1/2).
-        "screw_sweep_radial_taper" => c(
-            Op::ScrewRadial(
-                polygon(&[[5.0, 0.0, 0.0], [6.0, 0.0, 0.0], [6.0, 0.0, 1.0], [5.0, 0.0, 1.0]]),
-                [0.0; 3],
-                Z,
-                2.0,
-                2.0,
-                vec![(0.0, 0.0), (2.0, 1.0)],
-                1e-5,
-            ),
-            Expect::About(TAU * 2.0 * 6.0, 1e-5),
-        ),
         _ => panic!("{name}"),
     }
 }
@@ -299,8 +275,6 @@ fn on_core(op: &Op) -> crate::Result<Body> {
         Op::Loft(s, d, cap) => loft(s, *d, *cap),
         Op::LoftToPoint(s, apex) => loft_to_point(s, *apex),
         Op::Stations(p, s, e) => sweep_stations(p, s, *e),
-        Op::Screw(p, o, a, pitch, turns, tol) => screw_sweep(p, *o, *a, *pitch, *turns, None, *tol, false),
-        Op::ScrewRadial(p, o, a, pitch, turns, law, tol) => screw_sweep(p, *o, *a, *pitch, *turns, Some(law), *tol, false),
     }
 }
 
@@ -390,8 +364,6 @@ cases!(
     loft_to_point_pyramid,
     sweep_stations_prism,
     sweep_stations_scaled,
-    screw_sweep_square_thread,
-    screw_sweep_radial_taper,
 );
 
 /// Arcs of a profile on one circle sweep one wall face (tangency-labs/smlib 7dee48f): a circle
@@ -610,14 +582,6 @@ fn hostile_arguments_are_refused() {
     let flat = Affine { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]], t: [0.0; 3] };
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3]), flat], Ends::Capped).err(), Some(Error::Argument), "a singular map");
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3])], Ends::Capped).err(), Some(Error::Argument), "one station");
-    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 0.0, 1.0, None, 1e-3, false).err(), Some(Error::Argument), "no pitch");
-    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 300.0, None, 1e-3, false).err(), Some(Error::Argument), "too many turns");
-    assert_eq!(
-        screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[(0.5, 0.0), (0.2, 0.0)]), 1e-3, false).err(),
-        Some(Error::Argument),
-        "a law going back"
-    );
-    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[]), 1e-3, false).err(), Some(Error::Argument), "an empty law");
     let b = make_box([0.0; 3], [1.0; 3]).unwrap();
     assert_eq!(project_curves(&b, [0.5; 3], 0.01, &sq, [0.0; 3], 1e-6).err(), Some(Error::Argument), "no direction");
     assert_eq!(project_curves(&b, [0.5; 3], 0.0, &sq, Z, 1e-6).err(), Some(Error::Argument), "no pick tolerance");

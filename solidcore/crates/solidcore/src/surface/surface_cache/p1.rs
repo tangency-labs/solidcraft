@@ -251,14 +251,31 @@ fn bspline_of_kind(kind: &SurfaceKind) -> Option<&BSplineSurface> {
 /// # Errors
 ///
 /// `SM_ERR_NULL_POINTER` for a curve that is not of a B-spline kind.
+///
+/// Not upstream: a curve on a retained screw (the exact boundary or intersection curve of a
+/// screw-swept wall, which upstream's net would have as a B-spline) is copied as itself, the
+/// curve it is; a B-spline copy of it would be the net's, off the wall.
 pub fn copy_as_bspline(curve: &Curve) -> Result<Curve> {
     // (an SmLine makes its NURB when the copy constructor asks for it)
     if let CurveKind::Line(l) = curve.kind() {
         return Ok(Curve::from(l.base_with_nurb()?.into_owned()));
     }
+    if on_retained_screw(curve) {
+        return Ok(curve.clone());
+    }
     bspline_curve_of(curve)
         .map(|b| Curve::from(b.clone()))
         .ok_or_else(|| SolidError::surface_missing(OP_COPY, "the curve's B-spline"))
+}
+
+/// Whether `curve` is a curve on a retained screw's wall, its exact curve and no B-spline: a
+/// curve on it, or one of its iso curves (its boundaries).
+fn on_retained_screw(curve: &Curve) -> bool {
+    match curve.kind() {
+        CurveKind::CrvOnSurf(c) => c.surface().retained_screw().is_some(),
+        CurveKind::Iso(c) => c.surface().retained_screw().is_some(),
+        _ => false,
+    }
 }
 
 /// `SM_CAST_PTR(SmBSplineCurve, curve)`: the B-spline (base) of the B-spline kinds.
@@ -1497,6 +1514,11 @@ impl AltSrfCache {
             };
             let mut list = Vec::with_capacity(cached.len());
             for c in cached {
+                // (a curve on a retained screw is copied as itself, as [`copy_as_bspline`])
+                if on_retained_screw(c) {
+                    list.push(c.clone());
+                    continue;
+                }
                 let Some(bsc) = bspline_curve_of(c) else {
                     return (
                         out,

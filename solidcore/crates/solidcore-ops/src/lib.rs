@@ -54,6 +54,7 @@ pub mod offset;
 pub mod order;
 pub mod pcurve;
 pub mod prism;
+pub mod procedural_sweep;
 pub mod provenance;
 pub mod record_check;
 pub mod session;

@@ -3094,6 +3094,18 @@ mod tests {
     fn offset_refusals_name_their_entities_and_statuses() {
         use offset::{LoopCrossing, OffsetFailure};
         let face = FaceId::from_index(4);
+        let section = OffsetFailure::SectionOrderLost {
+            faces: [face, FaceId::from_index(7)],
+            distance: 0.3,
+            limit: [0.27, 0.28],
+        };
+        assert_eq!(section.kind(), ErrorKind::OffsetWallsTouch);
+        assert_eq!(section.entity(), Some(EntityRef::Face(face)));
+        assert_eq!(section.comparison_status(), SM_ERR_OFFSET_WALLS_TOUCH);
+        assert_eq!(
+            section.to_string(),
+            "thread faces 4 and 7 lose their section ordering at offset magnitude 0.3: the largest offset preserving their ordered lands is bounded by [0.27, 0.28] (the limiting zero-width land is refused)"
+        );
         let folds = OffsetFailure::Folds {
             face,
             distance: -11.0,

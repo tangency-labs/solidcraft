@@ -403,6 +403,7 @@ fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2], analytic_plane
         b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(a, profile, *origin, *axis, matrix, *forward, domain)?,
         b::Surface::BallPatch { .. } => return Err(Unsupported::Invalid("a ball patch without its NURBS form")),
         b::Surface::Blend { .. } => return Err(Unsupported::Invalid("a blend without its NURBS form")),
+        b::Surface::ProceduralSweep(_) => return Err(Unsupported::NotYet("procedural sweep surfaces")),
     }
     Ok(false)
 }
@@ -658,6 +659,7 @@ fn curve(a: &mut Arrays, c: &b::Curve) -> R<()> {
             nurbs_curve(a, knots, homogeneous.iter().map(|h| ([h[0] / h[3], h[1] / h[3], h[2] / h[3]], h[3])))?
         }
         b::Curve::SurfaceIntersection { .. } => return Err(Unsupported::NotYet("traced intersection curves")),
+        b::Curve::OnSurface { .. } | b::Curve::OnSurfaceRef { .. } => return Err(Unsupported::NotYet("curves on procedural sweeps")),
     }
     Ok(())
 }
@@ -697,19 +699,28 @@ impl crate::Brep {
         crate::core::from_arrays(a).map(crate::Brep::made_core)
     }
 
-    /// The SMLib B-rep of a schema 4 record. `trusted` as in [`arrays`].
+    /// The SMLib B-rep of a schema 4 record. `trusted` as in [`arrays`]. A record with faces on
+    /// procedural sweeps is built by solidcore-ops' conversion, which keeps their definitions.
     pub fn from_record(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
-        let r = arrays(brep, trusted).map_err(crate::Error::Record).and_then(|a| crate::Brep::from_arrays(&a)).and_then(|body| body.adopt(brep));
+        let r = if crate::core::sweep_record::record_has_sweeps(brep) {
+            crate::core::sweep_record::from_record(brep, trusted).map(crate::Brep::made_core)
+        } else {
+            arrays(brep, trusted).map_err(crate::Error::Record).and_then(|a| crate::Brep::from_arrays(&a)).and_then(|body| body.adopt(brep))
+        };
         crate::trace::imported(&r, brep, trusted, false);
         r
     }
 
     /// [`crate::Brep::from_record`] through [`arrays_keeping_splines`].
     pub fn from_record_keeping_splines(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
-        let r = arrays_keeping_splines(brep, trusted)
-            .map_err(crate::Error::Record)
-            .and_then(|a| crate::Brep::from_arrays(&a))
-            .and_then(|body| body.adopt(brep));
+        let r = if crate::core::sweep_record::record_has_sweeps(brep) {
+            crate::core::sweep_record::from_record(brep, trusted).map(crate::Brep::made_core)
+        } else {
+            arrays_keeping_splines(brep, trusted)
+                .map_err(crate::Error::Record)
+                .and_then(|a| crate::Brep::from_arrays(&a))
+                .and_then(|body| body.adopt(brep))
+        };
         crate::trace::imported(&r, brep, trusted, true);
         r
     }

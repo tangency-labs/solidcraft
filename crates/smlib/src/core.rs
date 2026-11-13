@@ -44,6 +44,7 @@ pub(crate) mod split;
 mod split_tests;
 pub(crate) mod ssi;
 pub(crate) mod sweep;
+pub(crate) mod sweep_record;
 #[cfg(test)]
 mod sweep_tests;
 pub(crate) mod transform;

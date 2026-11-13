@@ -1182,10 +1182,7 @@ fn a_saved_segmented_thread_flank_pick_does_not_select_a_different_face() {
             for (name, pick) in &picks {
                 let (face, point) = solidcraft_doc::naming::face_on_body(shaft, name, *pick).unwrap();
                 assert!(point.dist(*pick) < 0.01, "{tip}: {name} must stay on its original flank: {point:?}");
-                assert!(
-                    matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }),
-                    "{tip}: {name} must not select a cylinder"
-                );
+                assert!(matches!(shaft.body.record().faces[face].surface, Surface::ProceduralSweep(_)), "{tip}: {name} must not select a cylinder");
             }
         };
         check_picks(&reopened);
@@ -1219,13 +1216,8 @@ fn a_modelled_thread_keeps_each_flank_as_one_face() {
         let body = &shaft.body;
         let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
         let record = body.record();
-        let flanks: Vec<usize> = record
-            .faces
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
-            .map(|(i, _)| i)
-            .collect();
+        let flanks: Vec<usize> =
+            record.faces.iter().enumerate().filter(|(_, f)| matches!(f.surface, Surface::ProceduralSweep(_))).map(|(i, _)| i).collect();
         assert_eq!(flanks.len(), 2, "one selectable face per flank, independent of the turn count");
         let names = solidcraft_doc::naming::face_names(shaft);
         let picks: Vec<_> = flanks
@@ -1243,8 +1235,71 @@ fn a_modelled_thread_keeps_each_flank_as_one_face() {
         for (name, point) in picks {
             let (face, found) = solidcraft_doc::naming::face_on_body(shaft, &name, point).unwrap();
             assert!(found.dist(point) < 1e-6, "the saved flank pick must remain on its named face: {name}");
-            assert!(matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }));
+            assert!(matches!(shaft.body.record().faces[face].surface, Surface::ProceduralSweep(_)));
         }
+    }
+}
+
+/// The area of each face of `body`'s fine mesh, by face index.
+fn face_areas(body: &solidcraft_kernel::Body) -> Vec<f64> {
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
+    let mut areas = vec![0.0; body.record().faces.len()];
+    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        if let (Some([a, b, c]), Some(sum)) = (mesh.tri(t), areas.get_mut(*f as usize)) {
+            *sum += 0.5 * (b - a).cross(c - a).len();
+        }
+    }
+    areas
+}
+
+/// Offset Face on a modelled thread's flank (#11582). A new thread's flank is one face, and the
+/// pick moves all of it: the volume changes by the distance times the flank's area. An old
+/// design's flank comes in half turns: the picked piece moves, and its neighbours on the same
+/// flank may move with it, so the change lies between that piece's share and the whole flank's.
+/// Either result is a valid solid, and it rebuilds to the same volume after the design is saved
+/// and reopened.
+#[test]
+fn offset_face_moves_a_modelled_threads_flank_and_reopens() {
+    use solidcore_record::brep::Surface;
+    let distance: f64 = -0.05;
+    for continuous in [true, false] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5.0, "height": 6.0, "body_name": "Shaft"}));
+        run(&mut s, "solid.thread", json!({"face": [5.0, 0, 3.0], "designation": "M10x1.5", "modeled": true, "continuous_flanks": continuous}));
+        let before = volume(&mut s, "Shaft");
+        let st = s.model.state();
+        let shaft = st.body("Shaft").unwrap();
+        let record = shaft.body.record();
+        let areas = face_areas(&shaft.body);
+        let profile = |f: usize| match &record.faces[f].surface {
+            Surface::ProceduralSweep(sweep) => Some(sweep.definition.clone()),
+            _ => None,
+        };
+        // The largest face on a flank, and every face on that flank (its half turns).
+        let flank = (0..areas.len()).filter(|&f| profile(f).is_some()).max_by(|a, b| areas[*a].total_cmp(&areas[*b])).unwrap();
+        let pieces: Vec<usize> = (0..areas.len())
+            .filter(|&f| match (profile(f), profile(flank)) {
+                (
+                    Some(solidcore_record::brep::sweep::SweepDefinitionRecord::Screw { profile: a, .. }),
+                    Some(solidcore_record::brep::sweep::SweepDefinitionRecord::Screw { profile: b, .. }),
+                ) => a == b,
+                _ => false,
+            })
+            .collect();
+        assert_eq!(pieces.len() == 1, continuous, "one face per flank only for a new thread: {pieces:?}");
+        let whole: f64 = pieces.iter().map(|&f| areas[f]).sum();
+        let pick = solidcraft_doc::naming::face_spot(shaft, flank).unwrap().point;
+        drop(st);
+        run(&mut s, "solid.offset_face", json!({"body": "Shaft", "faces": [[pick.x, pick.y, pick.z]], "distance": distance}));
+        let after = volume(&mut s, "Shaft");
+        let (least, most) = (distance.abs() * areas[flank], distance.abs() * whole);
+        let lost = before - after;
+        assert!(lost > 0.95 * least && lost < 1.05 * most, "continuous {continuous}: {lost} mm³ lost, between {least} and {most}");
+        assert!(s.model.state().body("Shaft").unwrap().body.validity().is_empty());
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!(reopened.model.results.iter().all(|r| r.error.is_none()), "{:?}", reopened.model.results);
+        assert!(reopened.model.state().body("Shaft").unwrap().body.validity().is_empty());
+        assert!((volume(&mut reopened, "Shaft") - after).abs() < 1e-6 * after);
     }
 }
 

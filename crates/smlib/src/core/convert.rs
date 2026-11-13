@@ -42,6 +42,7 @@ use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::query::brep::{BoundingBoxOptions, calculate_bounding_box};
 use solidcore::surface::ball_patch::BallPatch;
 use solidcore::surface::cone::Cone;
+use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surface::{Surface, SurfaceKind};
@@ -1979,6 +1980,63 @@ pub(super) fn same_nurbs(a: &NurbSurface, b: &NurbSurface, tol: f64) -> bool {
         && close(fa.r(FACE_NURBS_CVS), fb.r(FACE_NURBS_CVS), tol)
 }
 
+/// The analytic label of the face the arrays list `j`-th among the faces of kind `ty` (a
+/// cylinder, cone, sphere or torus), with the label's own numbers: its frame as the arrays
+/// carry it ([`placement`], as an analytic face without a form gets it), its radii, and a
+/// cone's half angle in the kernel's degrees, as solidcore's record conversion reads a label
+/// (`face_surface`'s `label_support`). `None` for any other kind.
+fn form_label(f: &In<'_>, ty: i64, j: usize) -> Result<Option<AnalyticSupport>> {
+    let frame = |ids: [i32; 3]| -> Result<Axis2Placement> { placement(get3(f.r(ids[0]), j)?, get3(f.r(ids[1]), j)?, get3(f.r(ids[2]), j)?) };
+    Ok(Some(if ty == SURFACE_CYLINDER_I {
+        AnalyticSupport::Cylinder {
+            placement: frame([FACE_CYLINDER_ORIGIN, FACE_CYLINDER_AXIS, FACE_CYLINDER_REF_DIRECTION])?,
+            radius: get(f.r(FACE_CYLINDER_RADIUS), j)?,
+        }
+    } else if ty == SURFACE_CONE_I {
+        AnalyticSupport::Cone {
+            placement: frame([FACE_CONE_ORIGIN, FACE_CONE_AXIS, FACE_CONE_REF_DIRECTION])?,
+            base_radius: get(f.r(FACE_CONE_RADIUS), j)?,
+            semi_angle_deg: rad2deg(get(f.r(FACE_CONE_SEMI_ANGLE), j)?),
+        }
+    } else if ty == SURFACE_SPHERE_I {
+        AnalyticSupport::Sphere {
+            placement: frame([FACE_SPHERE_CENTER, FACE_SPHERE_AXIS, FACE_SPHERE_REF_DIRECTION])?,
+            radius: get(f.r(FACE_SPHERE_RADIUS), j)?,
+        }
+    } else if ty == SURFACE_TORUS_I {
+        AnalyticSupport::Torus {
+            placement: frame([FACE_TORUS_ORIGIN, FACE_TORUS_AXIS, FACE_TORUS_REF_DIRECTION])?,
+            major_radius: get(f.r(FACE_TORUS_MAJOR_RADIUS), j)?,
+            minor_radius: get(f.r(FACE_TORUS_MINOR_RADIUS), j)?,
+        }
+    } else {
+        return Ok(None);
+    }))
+}
+
+/// An analytic face on its NURBS form `nurbs`, the `j`-th of its kind `ty` (`None`: no kind with a label): the label's own
+/// numbers ([`form_label`]) where the form proves them ([`AnalyticSupport::build`]: the form lies
+/// on the label's implicit surface and the label's surface on the form's parameters evaluates as
+/// it), holding the form, so the face's trims, which are in the form's parameters, stay as they
+/// are. Recomputed from the form's control points ([`analytic_of_nurbs`]), the numbers hold only
+/// to rounding: a shaft's axis came in 2e-15 mm off, no longer the one its thread was cut about
+/// (#11582). A label whose frame the form's parametrisation does not take (another angle
+/// origin) is the surface recognised in the form, as before.
+fn labelled(k: &Kernel, f: &In<'_>, ty: i64, j: Option<usize>, nurbs: &BSplineSurface, tol: f64) -> Result<Option<Surface>> {
+    let label = match j {
+        Some(j) => form_label(f, ty, j)?,
+        None => None,
+    };
+    if let Some(label) = label {
+        match label.build(k, nurbs.copy()) {
+            Ok(s) => return Ok(Some(s)),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(sc("AnalyticSupport::build")(e)),
+            Err(_) => {}
+        }
+    }
+    analytic_of_nurbs(k, nurbs, ty, tol)
+}
+
 /// `AnalyticOfNurbs`: the analytic surface of kind `ty` SMLib's own test finds in `nurbs`, kept
 /// only when its NURBS is `nurbs` (the face's trims are in its parameters).
 fn analytic_of_nurbs(k: &Kernel, nurbs: &BSplineSurface, ty: i64, tol: f64) -> Result<Option<Surface>> {
@@ -2269,12 +2327,15 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
 
         let mut surface: Surface = if form {
             // an analytic face with its NURBS form: that NURBS as the class the arrays name
+            let j = [(SURFACE_SPHERE_I, i_sphere), (SURFACE_CYLINDER_I, i_cyl), (SURFACE_CONE_I, i_cone), (SURFACE_TORUS_I, i_torus)]
+                .into_iter()
+                .find_map(|(t, j)| (t == ty).then_some(j));
             i_sphere += usize::from(ty == SURFACE_SPHERE_I);
             i_cyl += usize::from(ty == SURFACE_CYLINDER_I);
             i_cone += usize::from(ty == SURFACE_CONE_I);
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
-            analytic_of_nurbs(k, &nurbs, ty, xsect)?
+            labelled(k, f, ty, j, &nurbs, xsect)?
                 .ok_or_else(|| Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface")))?
         } else if ty == SURFACE_SPHERE_I {
             let j = i_sphere;

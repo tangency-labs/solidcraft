@@ -1579,7 +1579,16 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
         })
         .collect();
     let record_vertices = vertices.iter().map(|point| b::Vertex { point: *point, tolerance: tol }).collect();
-    let loose = b::Brep { version: b::VERSION, tolerance: tol, regions, shells, faces: record_faces, edges: record_edges, vertices: record_vertices };
+    let loose = b::Brep {
+        version: b::VERSION,
+        tolerance: tol,
+        regions,
+        shells,
+        faces: record_faces,
+        edges: record_edges,
+        vertices: record_vertices,
+        screw_owners: Vec::new(),
+    };
     let part = loose.canonical().map_err(|e| KernelError::Failed(format!("sew: the record is invalid: {e}")))?;
     let mut face_new = vec![usize::MAX; nf];
     for (c, &f) in part.faces.iter().enumerate() {

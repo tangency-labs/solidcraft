@@ -480,7 +480,8 @@ fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel
 
 /// The word a `surface_types` check names a face's surface by, as the record holds it: an
 /// analytic kind, `ball_patch` (a corner's patch on a sphere), `bspline` (a B-spline or NURBS
-/// surface), `revolution` (a revolved curve) or `blend` (a round by its definition, on its net).
+/// surface), `revolution` (a revolved curve), `blend` (a round by its definition, on its net) or
+/// `procedural_sweep` (a retained screw sweep).
 fn surface_word(s: &solidcore_record::brep::Surface) -> &'static str {
     use solidcore_record::brep::Surface as S;
     match s {
@@ -493,6 +494,7 @@ fn surface_word(s: &solidcore_record::brep::Surface) -> &'static str {
         S::Spline { .. } | S::RationalSpline { .. } => "bspline",
         S::PlacedRevolution { .. } => "revolution",
         S::Blend { .. } => "blend",
+        S::ProceduralSweep(_) => "procedural_sweep",
     }
 }
 

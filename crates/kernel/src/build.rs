@@ -979,6 +979,7 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcore_record
         faces: vec![rec::Face { nurbs: None, surface, domain: [[lo[0] - pad, hi[0] + pad], [lo[1] - pad, hi[1] + pad]], loops: face_loops }],
         edges,
         vertices,
+        screw_owners: Vec::new(),
     };
     solidcore_ops::record_check::validate(&brep).map_err(|e| KernelError::Failed(format!("profile face: {e}")))?;
     Ok(brep)

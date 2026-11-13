@@ -39,8 +39,9 @@
 //! - **"Moved no face".** The fork marks the new surfaces and, after the local operation,
 //!   asks whether some face's surface carries the mark. Surfaces here carry no attributes,
 //!   and the local operation's extended offset copies them, so a face is taken to lie on a
-//!   new surface when nine points of its surface over its UV domain drop onto that
-//!   surface within the B-rep's tolerance.
+//!   new surface when an affine normal-offset screw has exact continuation identity
+//!   on a proved common unclamped chart; other cases retain the nine-point drop test
+//!   over the face UV domain within the B-rep's tolerance.
 //! - **Not exact.** The fork's fillet executive can fail with `SM_FILERR_NOT_EXACT`
 //!   (`SM_OFR_NOT_EXACT` then); the port's has no such code, so that branch of step 5
 //!   is never taken.
@@ -798,14 +799,99 @@ impl FaceOffsetBrep<MoveHandle> for MoveBrep<'_> {
     }
 }
 
+/// Exact identity of two affine normal-offset screw carriers on an open common
+/// chart. An extension changes the fitted profile/support, not the retained
+/// generator r + d N. Equal source, signed distance, invariant motion, affine
+/// map and shared rational turn spans therefore prove carrier identity. The
+/// strict interior witness below excludes disjoint supports and endpoint clamps.
+fn retained_offset_target_patch(
+    surface: &Surface,
+    face_domain: &crate::geom::extent2d::Extent2d,
+    target: &Surface,
+) -> Result<bool> {
+    use crate::blend::fillet_section::interval::Ivl;
+
+    let (Some(a), Some(b)) = (surface.procedural_sweep(), target.procedural_sweep()) else {
+        return Ok(false);
+    };
+    let (ad, bd) = (a.definition(), b.definition());
+    if !ad.is_normal_offset()
+        || !bd.is_normal_offset()
+        || !ad.is_screw_invariant()
+        || !bd.is_screw_invariant()
+        || !ad.same_screw_parameterization(bd)
+        || ad.screw_offset_section()?.is_none()
+        || bd.screw_offset_section()?.is_none()
+    {
+        return Ok(false);
+    }
+    let da = a.net().natural_uv_domain();
+    let db = b.net().natural_uv_domain();
+    let mut middle = [0.0; 2];
+    for (out, (fa, fb, sa, sb, ta, tb)) in middle.iter_mut().zip([
+        (
+            face_domain.min.x,
+            face_domain.max.x,
+            da.min.x,
+            da.max.x,
+            db.min.x,
+            db.max.x,
+        ),
+        (
+            face_domain.min.y,
+            face_domain.max.y,
+            da.min.y,
+            da.max.y,
+            db.min.y,
+            db.max.y,
+        ),
+    ]) {
+        if ![fa, fb, sa, sb, ta, tb].iter().all(|v| v.is_finite()) {
+            return Ok(false);
+        }
+        let lo = fa.max(sa).max(ta);
+        let hi = fb.min(sb).min(tb);
+        *out = 0.5 * lo + 0.5 * hi;
+        if !(lo < *out && *out < hi) {
+            return Ok(false);
+        }
+    }
+    let [u, v] = middle;
+    let ([aw, at], [bw, bt], swapped) = ad.definition_map();
+    if ![aw, at, bw, bt].iter().all(|value| value.is_finite()) || bw == 0.0 || bt == 0.0 {
+        return Ok(false);
+    }
+    let (p, q) = if swapped { (v, u) } else { (u, v) };
+    let w = Ivl::from(aw) + Ivl::from(bw) * Ivl::from(p);
+    let t = Ivl::from(at) + Ivl::from(bt) * Ivl::from(q);
+    for definition in [ad, bd] {
+        let profile = definition.profile().natural_interval();
+        let (Some(&first), Some(&last)) =
+            (definition.stations().first(), definition.stations().last())
+        else {
+            return Ok(false);
+        };
+        if !(profile.min() < w.lo && w.hi < profile.max() && first < t.lo && t.hi < last) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Whether face `f` lies on one of `targets` (the fork marks the target surfaces and
 /// asks whether a face's surface carries the mark; see the module deviations): nine
-/// points of the face's surface over its UV domain within `tol` of a target.
+/// points of the face's surface over its UV domain within `tol` of a target, or
+/// exact affine-offset screw identity with a proved common unclamped chart.
 fn on_target(k: &Kernel, b: &Brep, f: FaceId, targets: &[Surface], tol: f64) -> Result<bool> {
     let Some(s) = crate::topology::face::p2::surface(b, f)? else {
         return Ok(false);
     };
     let domain = crate::topology::face::p2::uv_domain(b, f)?;
+    for target in targets {
+        if retained_offset_target_patch(s, &domain, target)? {
+            return Ok(true);
+        }
+    }
     let mut points = Vec::new();
     for i in 0..3u32 {
         for j in 0..3u32 {
@@ -1772,5 +1858,95 @@ mod tests {
         ex.move_faces(&mut k, &mut b, -2.0, tol).unwrap();
         let got = volume(&k, &mut b);
         assert!((got - 800.0).abs() <= 1e-9 * 800.0, "volume {got}");
+    }
+    #[test]
+    fn a_retained_offset_continuation_is_on_its_original_target() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        use crate::sweep::screw::screw_net;
+        use crate::topology::brep::{p3, p8};
+        use crate::topology::edge::NotifyEnv;
+        use crate::topology::loopuse;
+        use crate::topology::topology::NotifyRecords;
+        use crate::topology::topology_traverser::Marks;
+
+        let mut k = Kernel::default();
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(8.6, 0.0, -2.8),
+            Point3::new(10.1, 0.0, -3.65),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Point3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.1, 0.2];
+        let definition =
+            ProceduralSweep::create(&profile, motion.clone(), &stations, 0.05).unwrap();
+        let net = screw_net(&profile, &motion, &stations).unwrap();
+        let target = definition.normal_offset(&net, 0.1, 1e-4).unwrap();
+        let sweep = target.procedural_sweep().unwrap();
+        let continued = sweep
+            .definition()
+            .extended_for_offset(sweep.net(), 0.2, 1e-4)
+            .unwrap();
+        let domain = continued.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut b = p3::new_brep(
+            &mut k,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .unwrap();
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &loopuse::notify_ref,
+        };
+        let mut marks = Marks::default();
+        let this_face = |f| loopuse::notify_ref(EntityRef::Face(f));
+        let mut fenv = p8::FaceBuildEnv {
+            env: &mut env,
+            marks: &mut marks,
+            this_face: &this_face,
+        };
+        let face =
+            p8::create_face_from_surface(&mut k, &mut b, Some(continued), &domain, &mut fenv)
+                .unwrap();
+        assert!(on_target(&k, &b, face, std::slice::from_ref(&target), 1e-5).unwrap());
+        let output = b.face(face).unwrap().surface.as_ref().unwrap();
+        assert!(retained_offset_target_patch(output, &domain, &target).unwrap());
+        // Common carrier alone is insufficient: the face must share an open
+        // profile AND turn patch, not just a clamped endpoint or a disjoint strip.
+        let disjoint_profile = crate::geom::extent2d::Extent2d::from_bounds(1.1, 0.01, 1.2, 0.19);
+        let disjoint_turn = crate::geom::extent2d::Extent2d::from_bounds(0.1, 0.21, 0.9, 0.22);
+        for excluded in [disjoint_profile, disjoint_turn] {
+            assert!(!retained_offset_target_patch(output, &excluded, &target).unwrap());
+        }
+        let mut wrong_chart = target.clone();
+        wrong_chart.swap_uv(&k).unwrap();
+        assert!(!retained_offset_target_patch(output, &domain, &wrong_chart).unwrap());
+        let shifted_profile = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(8.6, 0.0, -2.7),
+            Point3::new(10.1, 0.0, -3.55),
+        )
+        .unwrap();
+        for (source, turns) in [
+            (&shifted_profile, stations),
+            (&profile, [0.0, 0.08, 0.2]),
+            (&profile, [0.3, 0.4, 0.5]),
+        ] {
+            let other = ProceduralSweep::create(source, motion.clone(), &turns, 0.06).unwrap();
+            let other_net = screw_net(source, &motion, &turns).unwrap();
+            let other = other.normal_offset(&other_net, 0.1, 1e-4).unwrap();
+            assert!(!retained_offset_target_patch(output, &domain, &other).unwrap());
+        }
+        // An unchanged or oppositely moved wall must not acquire target identity.
+        for distance in [0.0, -0.1, 0.2] {
+            let other = definition.normal_offset(&net, distance, 1e-4).unwrap();
+            assert!(!retained_offset_target_patch(output, &domain, &other).unwrap());
+            assert!(!on_target(&k, &b, face, &[other], 1e-5).unwrap());
+        }
     }
 }

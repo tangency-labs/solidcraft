@@ -357,6 +357,7 @@ crates/solidcore/src/blend/fillet_section/form.rs	hermite_points_sided	windows	2
 crates/solidcore/src/blend/fillet_section/recertify.rs	pieces	swap	1	open	swap(0, 1)	
 crates/solidcore/src/blend/fillet_section/recertify.rs	pieces	swap	2	open	swap(0, 1)	
 crates/solidcore/src/blend/fillet_section/recertify.rs	recertify_in_frame	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/blend/fillet_section/recertify.rs	refine_bezier	Vec::insert	1	proven	insert(k + 1, knot)	k + 1 is a partition_point, never past the end
 crates/solidcore/src/blend/fillet_section/recertify.rs	spans_of_definition	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/fillet_section/recertify.rs	sub_curve	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/fillet_section/section.rs	GnSectionFsg::build	windows	1	proven	windows(2)	constant non-zero size

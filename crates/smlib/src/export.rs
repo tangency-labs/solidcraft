@@ -98,13 +98,19 @@ impl Brep {
         self.to_native_report().map(|(brep, _)| brep)
     }
 
-    /// [`Brep::to_native`], with what the mapping kept as SMLib wrote it.
+    /// [`Brep::to_native`], with what the mapping kept as SMLib wrote it. A body with faces on
+    /// procedural sweeps goes out through solidcore-ops' conversion, which keeps their
+    /// definitions (and reports nothing kept as written).
     pub fn to_native_report(&self) -> std::result::Result<(b::Brep, Report), ExportError> {
-        let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        let r = native_ordered(&arrays).and_then(|(mut brep, report, order)| {
-            self.with_definitions(&mut brep, &order)?;
-            Ok((brep, report))
-        });
+        let r = if crate::core::sweep_record::has_sweeps(self.core()).map_err(ExportError::Smlib)? {
+            crate::core::sweep_record::to_record(self.core()).map(|(brep, _)| (brep, Report::default())).map_err(ExportError::Smlib)
+        } else {
+            let arrays = self.arrays().map_err(ExportError::Smlib)?;
+            native_ordered(&arrays).and_then(|(mut brep, report, order)| {
+                self.with_definitions(&mut brep, &order)?;
+                Ok((brep, report))
+            })
+        };
         if let Ok((record, _)) = &r {
             crate::trace::exported(self, record);
         }
@@ -116,11 +122,15 @@ impl Brep {
     /// SMLib's export lists faces and edges in the body's own order (`SmBrep::GetFaces`,
     /// `GetEdges`), the order its history uses.
     pub fn to_native_ordered(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
-        let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        let r = native_ordered(&arrays).and_then(|(mut brep, _, order)| {
-            self.with_definitions(&mut brep, &order)?;
-            Ok((brep, order))
-        });
+        let r = if crate::core::sweep_record::has_sweeps(self.core()).map_err(ExportError::Smlib)? {
+            crate::core::sweep_record::to_record(self.core()).map_err(ExportError::Smlib)
+        } else {
+            let arrays = self.arrays().map_err(ExportError::Smlib)?;
+            native_ordered(&arrays).and_then(|(mut brep, _, order)| {
+                self.with_definitions(&mut brep, &order)?;
+                Ok((brep, order))
+            })
+        };
         if let Ok((record, _)) = &r {
             crate::trace::exported(self, record);
         }
@@ -1358,7 +1368,8 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
             Ok(b::Shell::Faces { faces, wires: Vec::new() })
         })
         .collect::<Res<Vec<_>>>()?;
-    let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
+    let brep =
+        b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices, screw_owners: Vec::new() };
     solidcore_ops::record_check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
     let placed = |new: &[Option<u32>]| {
         new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()

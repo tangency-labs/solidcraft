@@ -118,6 +118,53 @@ primitive!(cone, "cone");
 primitive!(frustum, "frustum");
 primitive!(torus, "torus");
 
+/// An analytic face whose record carries its NURBS form (an extruded circle's wall, its seam
+/// turned off the x axis) comes in from the arrays on the label's own frame and radius, the form
+/// proved on them, and not on numbers recomputed from the form's control points, which give the
+/// axis only to rounding: 2e-15 mm off, a shaft was no longer coaxial with the thread cut about
+/// its axis, and Offset Face on the thread was refused (#11582).
+#[test]
+fn an_analytic_face_on_its_nurbs_form_keeps_the_labels_own_numbers() {
+    use solidcore::surface::surface::SurfaceKind;
+    let turn = 0.6129_f64;
+    let wall = [crate::sweeps::Curve::Arc {
+        center: [0.0; 3],
+        axis: [0.0, 0.0, 1.0],
+        reference: [turn.cos(), turn.sin(), 0.0],
+        radius: 5.0,
+        start: 0.0,
+        end: 2.0 * PI,
+    }];
+    let body = super::sweep::extrude(&wall, [0.0, 0.0, 1.0], 6.0, 0.0, crate::sweeps::DraftCorner::default(), true).unwrap();
+    let rec = record(&to_arrays(&body).unwrap());
+    let labels: Vec<_> = rec
+        .faces
+        .iter()
+        .filter_map(|f| match (&f.surface, &f.nurbs) {
+            (b::Surface::Cylinder { frame, radius }, Some(_)) => Some((frame.clone(), *radius)),
+            _ => None,
+        })
+        .collect();
+    let [(frame, radius)] = labels.as_slice() else { panic!("one cylinder on its NURBS form: {:?}", rec.faces) };
+    assert_eq!((frame.origin, *radius), ([0.0; 3], 5.0), "the extrusion's own cylinder");
+    let back = from_arrays(&import::arrays(&rec, true).unwrap()).unwrap();
+    // each cylinder's origin, then its radius as the first coordinate of the next entry
+    let cylinders = super::with_body("cylinders", &back, |k, brep| {
+        let mut out = Vec::new();
+        for f in solidcore::topology::brep::p1::faces(brep, None)? {
+            if let Some(SurfaceKind::Cone(c)) = solidcore::topology::face::p2::surface(brep, f)?.map(|s| s.kind_with_nurb(k)).transpose()? {
+                let fr = c.canonical();
+                let o = fr.origin.origin();
+                out.push([o.x, o.y, o.z]);
+                out.push([fr.radius, 0.0, 0.0]);
+            }
+        }
+        Ok(out)
+    })
+    .unwrap();
+    assert_eq!(cylinders, vec![[0.0; 3], [5.0, 0.0, 0.0]]);
+}
+
 #[test]
 fn hostile_arrays_are_refused() {
     let c = case("box");

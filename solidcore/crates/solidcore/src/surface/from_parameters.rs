@@ -95,6 +95,19 @@ pub fn from_parameters(
     let step_of: Box<dyn Fn([f64; 2]) -> [f64; 2]>;
     let p3 = |a: [f64; 3]| Point3::new(a[0], a[1], a[2]);
     let (surface, implicit) = match record {
+        Record::ProceduralSweep(record) => {
+            let surface = crate::surface::procedural_sweep::ProceduralSweep::from_record(record)?;
+            // A face's box lies on the sweep's certified net, as a curve's domain does.
+            let support = surface.natural_uv_domain_with_nurb(k)?;
+            if u[0] < support.u_min()
+                || u[1] > support.u_max()
+                || v[0] < support.v_min()
+                || v[1] > support.v_max()
+            {
+                return Err(bad("the box is outside the sweep's certified net"));
+            }
+            return Ok((surface, given(u, v)));
+        }
         Record::Plane {
             origin,
             u_axis,
@@ -541,6 +554,35 @@ mod tests {
 
     fn a(v: Vec3) -> [f64; 3] {
         [v.x, v.y, v.z]
+    }
+
+    #[test]
+    fn a_sweep_face_box_outside_its_certified_net_is_refused() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        let k = k();
+        let line =
+            BSplineCurve::create_line_segment(3, Point3::X, Point3::new(2.0, 0.0, 1.0)).unwrap();
+        let motion = ScrewMotion::new(Point3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.25, 0.5];
+        let definition = ProceduralSweep::create(&line, motion, &stations, 0.125).unwrap();
+        let net = crate::sweep::screw::screw_net(
+            definition.profile(),
+            definition.screw().unwrap(),
+            &stations,
+        )
+        .unwrap();
+        let record = Record::ProceduralSweep(Box::new(definition.to_record(&net).unwrap()));
+        let d = net.natural_uv_domain();
+        let inside = [[d.u_min(), d.u_max()], [d.v_min(), d.v_max()]];
+        assert!(from_parameters(&k, &record, inside).is_ok());
+        for outside in [
+            [[d.u_min() - 1.0, d.u_max()], [d.v_min(), d.v_max()]],
+            [[d.u_min(), d.u_max()], [d.v_min(), d.v_max() + 1.0]],
+        ] {
+            let e = from_parameters(&k, &record, outside).unwrap_err();
+            assert!(format!("{e:?}").contains("outside the sweep"), "{e:?}");
+        }
     }
 
     /// The points at the corners of the surface's natural box.

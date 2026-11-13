@@ -162,12 +162,26 @@ impl Body {
 
     /// The kernel's body, taken out.
     #[must_use]
-    #[allow(dead_code)] // the families' operations take their operands out
     pub(crate) fn into_inner(self) -> Brep {
         self.0
             .into_inner()
             .unwrap_or_else(PoisonError::into_inner)
             .brep
+    }
+
+    /// A body of the kernel's own: for a binding that still keeps the kernel's bodies itself, so
+    /// that it reads and writes records through [`Body::from_record`] and [`Body::to_record`]
+    /// rather than a conversion of its own. A body a panic left unfinished is refused by the
+    /// operations, as any.
+    #[must_use]
+    pub fn from_kernel(b: Brep) -> Body {
+        Body::new(b)
+    }
+
+    /// The kernel's body, taken out ([`Body::from_kernel`] the other way).
+    #[must_use]
+    pub fn into_kernel(self) -> Brep {
+        self.into_inner()
     }
 
     /// A deep copy (`SmApiBrepCopy`): the same topology in the same order, with the attributes

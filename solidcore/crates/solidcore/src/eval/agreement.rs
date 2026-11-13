@@ -239,11 +239,28 @@ const PCURVE_POINTS: [&str; 3] = [
 /// # Errors
 /// The first record that disagrees, and how.
 pub fn check(brep: &View<'_>) -> Result<()> {
+    check_with(brep, |_, e| CurveEval::new(e.curve).map(Box::new))
+}
+
+/// [`check`] with each edge's curve evaluated by `curve` (given the edge's index and the
+/// edge): a body's evaluator, which binds an edge on one of its shared screw owners
+/// (`OnSurfaceRef`) to that owner, where [`CurveEval::new`] alone has no owner to bind it to.
+///
+/// # Errors
+/// Those of [`check`]; an edge `curve` cannot evaluate is unevaluable.
+pub fn check_with<C, E>(
+    brep: &View<'_>,
+    curve: impl Fn(usize, &Edge<'_>) -> std::result::Result<C, E>,
+) -> Result<()>
+where
+    C: std::ops::Deref<Target = CurveEval>,
+    E: std::fmt::Display,
+{
     // Each edge's curve at its interval's start, middle and end, shared by all its uses.
     let mut points = Vec::new();
     for (i, e) in brep.edges.iter().enumerate() {
         let at = Record::Edge(index(i));
-        let curve = CurveEval::new(e.curve).map_err(|err| unevaluable(at, err))?;
+        let curve = curve(i, e).map_err(|err| unevaluable(at, err))?;
         let [t0, t1] = e.interval;
         let p = [t0, 0.5 * (t0 + t1), t1].map(|t| curve.point(t).ok_or(t));
         let p = match p {

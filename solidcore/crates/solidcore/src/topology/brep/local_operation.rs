@@ -257,6 +257,12 @@ fn local_operation_on(
         new_list.push(surface);
     }
 
+    // Ordered periodic screw sections provide a reach from their exact boundary
+    // roots and transverse endcaps. Extending these supports by the body's size
+    // introduces unrelated branches across the screw axis.
+    let thread_reach =
+        crate::offset::procedural_screw::operation_reach(k, b, &all_faces, &new_list)?;
+
     // the Brep's bounding sphere gives the executive an offset distance it does not use
     let mut bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
     // Not upstream (WR-534), opt-in `local_operation_box_holds_new_surfaces` (the fork's
@@ -296,6 +302,7 @@ fn local_operation_on(
     // vertices' faces all keep their surfaces are kept as they are, not intersected again
     // (`OffsetExecutive::keeps_edge`).
     executive.set_local_surfaces(&all_faces, new_list, &moved);
+    executive.set_thread_extension_reach(thread_reach);
     // the shell faces get copied without being offset: none
     executive.set_shell_faces(&[]);
     // extend/intersect to fill new convex edge gaps rather than adding a fillet
