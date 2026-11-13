@@ -898,11 +898,12 @@ mod tests {
         let ctx = crate::test_support::context();
         let item = Item { icon: ItemIcon::texture(HOST), ..Item::action("id", "Label", "") };
         for checked in [false, true] {
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 let mut row = MenuItem::new(&item.id, &item.label, item.icon.as_icon());
                 row.checked = Some(checked);
                 row.show(ui);
             });
+            output.textures_delta.clear();
             assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == HOST)));
             assert_eq!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Path(_))), checked);
         }
