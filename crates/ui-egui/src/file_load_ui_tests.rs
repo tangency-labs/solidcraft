@@ -1114,6 +1114,43 @@ fn a_newer_design_opens_with_a_notice_and_no_dialog() {
     assert!(app.dialog.is_none() && !app.ui.palette_open);
 }
 
+/// Imported STEP bodies have no editor. Both edit entry points explain this without opening
+/// the palette, changing its text, or leaving the timeline rolled back.
+#[test]
+fn editing_an_imported_body_reports_nothing_to_edit() {
+    let dir = scratch("import-edit");
+    let path = step_box(&dir);
+    for double_click in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.open_path(&path);
+        h.app.home.open = false;
+        let feature = h.app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).unwrap();
+        let (id, name) = (feature.id, feature.name.clone());
+        h.app.run("solid.box", json!({"length": 2, "width": 3, "height": 4, "corner": [40,0,0]})).unwrap();
+        h.settle();
+        let before = h.app.session.doc.to_json();
+        h.app.sbox.text = "kept search".into();
+        if double_click {
+            h.frames(4);
+            h.step(&json!({"click": {"handle": format!("timeline:{name}")}, "double": true})).unwrap();
+        } else {
+            let reply = h.call("ui.editFeature", json!({"feature": id}));
+            assert_eq!(reply["ok"], true, "{reply}");
+            assert_eq!(reply["result"]["dialog"], serde_json::Value::Null, "{reply}");
+            assert_eq!(reply["result"]["marker"], serde_json::Value::Null, "{reply}");
+        }
+        h.settle();
+        assert!(!h.app.ui.palette_open, "no raw command palette");
+        assert!(h.app.dialog.is_none() && h.app.editing_state.is_none());
+        assert_eq!(h.app.sbox.text, "kept search");
+        assert_eq!(h.app.session.doc.to_json(), before, "the timeline is restored");
+        let (text, _, error) = h.app.status.as_ref().expect("a status explains the missing editor");
+        assert_eq!(text, "Imported body: nothing to edit");
+        assert!(!error, "an informational notice");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A STEP file of a 10 x 20 x 30 box in `dir`.
 fn step_box(dir: &std::path::Path) -> String {
     let path = dir.join("box.step").to_string_lossy().to_string();

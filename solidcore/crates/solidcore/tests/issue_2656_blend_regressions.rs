@@ -548,8 +548,8 @@ fn block_cylinder_both_pieces_round_the_half_circle() {
     assert_rel(v, 19_091.962_003_483_477, 1e-9, "both pieces");
 }
 
-/// Both pieces rounded r 2 through the session's `do_fillet` (its tolerance scope, the split
-/// at radius corners and the closed-manifold check) with every fix but
+/// Both pieces rounded r 2 through the session's `do_fillet` (its tolerance scope and the
+/// split at radius corners) with every fix but
 /// `geometric_g2_continuity`, as the blend's other End tests: the same torus, valid at level
 /// 2 and a manifold solid, its volume at 1e-12.
 #[test]

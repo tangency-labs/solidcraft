@@ -2648,8 +2648,22 @@ impl SolveApp {
             }
             None => {
                 dialogs::restore_editing(self, marker);
-                self.sbox.text = format!("timeline.edit {{\"feature\": {id}, \"set\": {{}}}}");
-                self.ui.palette_open = true;
+                if let Some(f) = self.session.doc.feature(id) {
+                    use solidcraft_engine::doc::FeatureKind;
+                    let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
+                    let kind = match &f.kind {
+                        FeatureKind::Import { .. } => language.text("ui.feature_kind.import"),
+                        FeatureKind::MeshImport { .. } => language.text("ui.feature_kind.mesh_import"),
+                        FeatureKind::MeshConvert { .. } => language.text("ui.feature_kind.mesh_convert"),
+                        FeatureKind::Repair { .. } => language.text("ui.feature_kind.repair"),
+                        FeatureKind::Align { .. } => language.text("ui.feature_kind.align"),
+                        FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
+                        FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
+                        FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        _ => f.kind.base_name(),
+                    };
+                    self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
+                }
             }
         }
     }

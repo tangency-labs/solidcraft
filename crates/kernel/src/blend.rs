@@ -163,6 +163,22 @@ impl Faces {
     }
 }
 
+/// The unit direction record edge `e` leaves its end vertex `v` in, from its exact curve. None
+/// for a closed edge (both ends at one vertex) or one that does not end at `v`.
+pub(crate) fn leaving(rec: &Brep, e: usize, v: u32) -> Option<Vec3> {
+    let edge = rec.edges.get(e)?;
+    let [a, b] = edge.vertices;
+    if a == b {
+        None
+    } else if a == v {
+        curve_tangent(edge.parameters(), edge.interval[0])
+    } else if b == v {
+        curve_tangent(edge.parameters(), edge.interval[1]).map(|t| t * -1.0)
+    } else {
+        None
+    }
+}
+
 /// The unit tangent of a record curve at `t`, along increasing `t`.
 pub(crate) fn curve_tangent(c: &Curve, t: f64) -> Option<Vec3> {
     curve_derivative(c, t)?.normalized().filter(|d| d.is_finite())
@@ -1136,14 +1152,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
         }
         Ok(s)
     };
-    // The unit direction edge `e` leaves its end `v` in.
-    let leaving = |e: usize, v: u32| -> Option<Vec3> {
-        let [a, b] = rec.rec.edges.get(e)?.vertices;
-        if a == b {
-            return None;
-        }
-        if a == v { rec.tangent(e, false) } else { rec.tangent(e, true).map(|t| t * -1.0) }
-    };
+    let leaving = |e: usize, v: u32| leaving(&rec.rec, e, v);
     let cos = solidcraft_geom::TANGENT_CHAIN.cos();
     let accept = normal_reach(rec);
     // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the

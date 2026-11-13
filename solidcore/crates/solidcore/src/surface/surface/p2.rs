@@ -2737,6 +2737,26 @@ impl Surface {
         }
     }
 
+    /// [`Self::convert_uv_from_nurbs_to_step`] with whether the analytic conversion is
+    /// exact: `false` where a polar converter could only solve numerically, so its angle
+    /// is not a closed form's. The other kinds are their exact base maps.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::convert_uv_from_nurbs_to_step`].
+    pub(crate) fn convert_uv_from_nurbs_to_step_exact(
+        &self,
+        k: &Kernel,
+        nurbs_uv: Point2,
+    ) -> Result<(Point2, bool)> {
+        match self.kind_with_nurb(k)? {
+            SurfaceKind::Cone(s) => s.convert_uv_from_nurbs_to_step_exact(k, nurbs_uv),
+            SurfaceKind::Sphere(s) => s.convert_uv_from_nurbs_to_step_exact(k, nurbs_uv),
+            SurfaceKind::Torus(s) => s.convert_uv_from_nurbs_to_step_exact(k, nurbs_uv),
+            _ => Ok((self.convert_uv_from_nurbs_to_step(k, nurbs_uv)?, true)),
+        }
+    }
+
     /// [`Surface::step_inversion`] whose `GlobalPointSolve` runs under the caller's
     /// face context (`context`: the solve context and this surface's handle in it), so
     /// a face-owned surface's solutions are classified against the face's trims

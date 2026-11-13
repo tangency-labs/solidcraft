@@ -785,6 +785,19 @@ impl Torus {
         convert_uv_from_nurbs_to_step(&self.base, k, nurbs_uv)
     }
 
+    /// [`Self::convert_uv_from_nurbs_to_step`] with the polar converters' exactness.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::convert_uv_from_nurbs_to_step`].
+    pub(crate) fn convert_uv_from_nurbs_to_step_exact(
+        &self,
+        k: &Kernel,
+        nurbs_uv: Point2,
+    ) -> Result<(Point2, bool)> {
+        convert_uv_from_nurbs_to_step_exact(&self.base, k, nurbs_uv)
+    }
+
     // ---- STEP evaluation ------------------------------------------------------------
 
     /// The point and triangular derivatives at the STEP parameters `uv` (degrees),
@@ -1883,6 +1896,16 @@ fn convert_uv_from_nurbs_to_step(
     k: &Kernel,
     nurbs_uv: Point2,
 ) -> Result<Point2> {
+    Ok(convert_uv_from_nurbs_to_step_exact(base, k, nurbs_uv)?.0)
+}
+
+/// [`convert_uv_from_nurbs_to_step`] with the polar converters' exactness: `false` where
+/// the sweep or generator angle is not a closed form's.
+fn convert_uv_from_nurbs_to_step_exact(
+    base: &SurfOfRevolution,
+    k: &Kernel,
+    nurbs_uv: Point2,
+) -> Result<(Point2, bool)> {
     // m_bSwapUV - Nurb and STEP parameters are swapped
     let nurb_uv = if base.swap_uv {
         Point2::new(nurbs_uv.y, nurbs_uv.x)
@@ -1895,14 +1918,14 @@ fn convert_uv_from_nurbs_to_step(
         OP_CONVERT,
         "polar converter has no curve",
     ))?;
-    let (step_x, _exact) = base
+    let (step_x, exact_x) = base
         .polar
         .convert_to_polar_parameter(k, polar_curve, nurb_uv.x)?;
 
     // convert genCurve NurbParam to PolarParam
     let circle = gen_circle(base.gen_curve.as_ref(), OP_CONVERT)?;
-    let polar_param = circle.convert_t_from_nurbs_to_step(k, nurb_uv.y)?;
-    Ok(Point2::new(step_x, polar_param))
+    let (polar_param, exact_y) = circle.convert_t_from_nurbs_to_step_exact(k, nurb_uv.y)?;
+    Ok((Point2::new(step_x, polar_param), exact_x && exact_y))
 }
 
 /// Not upstream (WR-408, tangency-labs/solidcore#1112; the SolidCraft fork's
