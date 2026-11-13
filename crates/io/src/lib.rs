@@ -16,10 +16,13 @@ mod dxf_out;
 pub mod formats;
 mod glb;
 pub use design::{
-    DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
-    read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
-    write_design_container, write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
-    write_design_container_with_thumbnail, write_drawing_container,
+    DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
+    ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus, ProvenanceSummary, SignatureSource, Signer,
+    THUMBNAIL_SIZE, file_kind, has_design_provenance, is_design_container, read_design_file, read_design_geometry, read_design_preview,
+    read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file, read_design_provenance_file,
+    read_design_provenance_file_checked, read_design_provenance_summary_file, read_design_thumbnail, read_design_thumbnail_file, read_drawing,
+    read_drawing_file, write_design_container, write_design_container_with_cache, write_design_container_with_compression,
+    write_design_container_with_preview, write_design_container_with_provenance, write_design_container_with_thumbnail, write_drawing_container,
 };
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
@@ -199,6 +202,8 @@ pub struct StepFeature {
     pub kind: solidcraft_doc::FeatureKind,
     /// Body names from the file, as [`StepNames`] chose them (automatic by default).
     pub body_names: Vec<String>,
+    /// By body, whether the file marks it invisible: the design starts with it hidden.
+    pub invisible: Vec<bool>,
     pub warnings: Vec<String>,
     /// The file as read. Hold it until the feature has been evaluated: the timeline then reuses
     /// it instead of reading the file again (it is freed with the last holder).
@@ -275,6 +280,8 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     let hidden = hidden_items(file, bytes, &text);
     let skip: Vec<u64> = imp.bodies.iter().zip(0u64..).filter(|(b, _)| hidden.contains(&b.source_item)).map(|(_, i)| i).collect();
     let skip = if skip.len() == imp.bodies.len() { Vec::new() } else { skip };
+    // A body the STEP file itself marks invisible is still built, and starts hidden.
+    let invisible: Vec<bool> = imp.bodies.iter().map(|b| b.hidden).collect();
     // The root product's name; else the only body's name; else the file name.
     let name = match (imp.tree.as_slice(), body_names.as_slice()) {
         ([root], _) if !generic_name(&root.name) => root.name.clone(),
@@ -285,6 +292,7 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     Ok(StepFeature {
         name,
         body_names,
+        invisible,
         kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip },
         warnings: iges_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
         import: imp,

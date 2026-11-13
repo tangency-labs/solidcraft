@@ -2538,6 +2538,43 @@ pub fn origin_axes(app: &SolveApp) -> Vec<(&'static str, Vec3)> {
         .collect()
 }
 
+/// The stretch of the line through `o` along `d` that view-projection `vp` shows, as parameters
+/// `t0 <= t1` along `d`: the line cut by the six planes of the view (x and y within ±w, depth
+/// 0..w) in clip space, where it is linear in the world point. `None` when the line misses the
+/// view or a value is not finite.
+pub(crate) fn line_in_view(vp: &Mat4, o: Vec3, d: Vec3) -> Option<(f64, f64)> {
+    let [x, y, z, w] = vp.apply(o);
+    // Transform a direction without subtracting two points that may be far off screen.
+    let [dx, dy, dz, dw] = std::array::from_fn(|i| vp.0[0][i] * d.x + vp.0[1][i] * d.y + vp.0[2][i] * d.z);
+    // Each plane as q + p·t >= 0.
+    let planes = [(w + x, dw + dx), (w - x, dw - dx), (w + y, dw + dy), (w - y, dw - dy), (z, dz), (w - z, dw - dz)];
+    let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (q, p) in planes {
+        if !q.is_finite() || !p.is_finite() {
+            return None;
+        }
+        if p == 0.0 {
+            if q < 0.0 {
+                return None;
+            }
+        } else if p > 0.0 {
+            t0 = t0.max(-q / p);
+        } else {
+            t1 = t1.min(-q / p);
+        }
+    }
+    (t0.is_finite() && t1.is_finite() && t0 <= t1).then_some((t0, t1))
+}
+
+/// The point of the line through the origin along unit `a` nearest the ray from `o` along unit
+/// `d`; the one nearest `o` when the two run parallel.
+pub(crate) fn axis_point_nearest_ray(a: Vec3, o: Vec3, d: Vec3) -> Vec3 {
+    let b = a.dot(d);
+    let denom = 1.0 - b * b;
+    let s = if denom > 1e-12 { (a.dot(o) - b * d.dot(o)) / denom } else { a.dot(o) };
+    a * s
+}
+
 /// Construction axes shown, as segments: across the model where the axis passes it (a little
 /// past it either side), at least the origin axes' length around the axis's origin; a
 /// component's origin axis one arm long from its origin instead, like the design Origin's
@@ -3485,11 +3522,35 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // Origin axes.
     let size = origin_size(app.cam.half_height());
     let mut besta = Near::new(all);
+    // The short axis from the origin is picked as it always was, ahead of the surfaces.
     for (name, dir) in origin_axes(app) {
         if let (Some(a), Some(b)) = (proj.to_screen(Vec3::ZERO), proj.to_screen(dir * (size * AXIS_LEN))) {
             let dd = seg_dist(pos, a, b);
             if dd < 5.0 && besta.wants(dd) {
                 besta.offer(dd, Hit::Axis { name: name.into() });
+            }
+        }
+    }
+    // The rest of an axis drawn across the view (#11123) is the last thing a click picks, after
+    // every surface, and only while an axis is wanted: in an open sketch (constraints to the
+    // axes) or by a dialog input that takes axes. Elsewhere a click in empty space stays empty,
+    // and handles and bodies keep their picks. Where a face hides it (it runs behind the bodies
+    // it passes, unless reference geometry is drawn through them) a click there is the face's.
+    let mut far_axes = Near::new(all);
+    let axis_wanted = app.session.active_sketch.is_some()
+        || app.dialog.as_ref().and_then(|dl| dl.active_input()).is_some_and(|i| i.accept & crate::selection::AXES != 0);
+    if app.preferences.origin_axes_across_view && axis_wanted {
+        let axes_through = through || wireframe || app.picking_plane() || app.preferences.reference_geometry_through_bodies;
+        for (name, dir) in origin_axes(app) {
+            let Some((t0, t1)) = line_in_view(&proj.vp, Vec3::ZERO, dir) else { continue };
+            if !axes_through && hidden_from.is_some_and(|t| (axis_point_nearest_ray(dir, o, d) - o).dot(d) > t + slack) {
+                continue;
+            }
+            if let (Some(a), Some(b)) = (proj.to_screen(dir * t0), proj.to_screen(dir * t1)) {
+                let dd = seg_dist(pos, a, b);
+                if dd < 5.0 && far_axes.wants(dd) {
+                    far_axes.offer(dd, Hit::Axis { name: name.into() });
+                }
             }
         }
     }
@@ -3567,6 +3628,11 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     surf.extend(planes.into_iter().map(|(t, h)| (through.unwrap_or(t + slack), h)));
     surf.sort_by(|a, b| a.0.total_cmp(&b.0));
     hits.extend(surf.into_iter().map(|x| x.1));
+    for far in far_axes.hits() {
+        if !hits.contains(&far) {
+            hits.push(far);
+        }
+    }
     hits
 }
 
@@ -4377,13 +4443,17 @@ fn reference_line(sc: &mut GpuScene, a: [f32; 3], b: [f32; 3], col: [u8; 4], wid
     }
 }
 
-/// What the highlight draws of the hovered item. A face or a plane is lit the same wherever on it
-/// the pointer is, so the point under the pointer is left out: the highlight (a whole scanned
-/// mesh is one face) is not built again at every move of the pointer across it.
+/// What the highlight draws of the hovered item. A face, a plane, an edge or a sketch curve is lit
+/// the same wherever on it the pointer is, so the point under the pointer is left out: the
+/// highlight (a whole scanned mesh is one face) is not built again, and the cached scene not
+/// drawn again, at every move of the pointer across it. An edge keeps its `mid`, which picks the
+/// part of a split edge that is lit (`edge_of`); a vertex or a sketch point is its position.
 fn hover_drawn(hover: &Option<Hit>) -> String {
     match hover {
         Some(Hit::Face { body, index, .. }) => format!("face {body:?} {index}"),
         Some(Hit::Plane { name, .. }) => format!("plane {name:?}"),
+        Some(Hit::Edge { body, index, mid, .. }) => format!("edge {body:?} {index} {mid:?}"),
+        Some(Hit::SketchCurve { sketch, id, straight, .. }) => format!("curve {sketch} {id:?} {straight}"),
         other => format!("{other:?}"),
     }
 }
@@ -4475,19 +4545,26 @@ fn has_pickable_outline(mesh: &solidcraft_engine::geom::Mesh) -> bool {
 }
 
 pub(crate) fn highlight_key(app: &SolveApp) -> u64 {
+    highlight_key_with_projection(app, || display_proj(app))
+}
+
+fn highlight_key_with_projection(app: &SolveApp, projection: impl FnOnce() -> Proj) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     highlight_geometry_key(app).hash(&mut h);
     let selected = app.highlighted();
     app.cam.half_height().to_bits().hash(&mut h);
+    app.preferences.origin_axes_across_view.hash(&mut h);
     // A typed dimension value hides the hovered profile (see `build_highlight`).
     crate::dim_view::preview_solve(app).is_some().hash(&mut h);
     // Body triangles and outlines live in world space; the GPU applies the new camera.
-    // Only sketch feedback needs projected tessellation and the profile's lift toward the eye.
+    // Sketch feedback follows the projection, as do the clipped extensions of long origin axes.
+    // Neither changes the key of the cached world-space feedback block.
     let projected = selected.iter().any(|s| matches!(s, Sel::Profile { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. }))
         || matches!(app.viewport.hover, Some(Hit::Profile { .. }))
         || !selected_sketches(app, &selected).is_empty();
-    if projected {
-        crate::sketch_display::projection_key(&display_proj(app), app.viewport.pixels_per_point()).hash(&mut h);
+    let long_axes = app.preferences.origin_axes_across_view && !crate::render_workspace::active(app) && !origin_axes(app).is_empty();
+    if projected || long_axes {
+        crate::sketch_display::projection_key(&projection(), app.viewport.pixels_per_point()).hash(&mut h);
     }
     h.finish()
 }
@@ -4755,6 +4832,10 @@ fn light_whole_body(
 
 /// The highlight scene: origin widget, construction planes, selection and hover.
 pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
+    build_highlight_with_projection(app, || display_proj(app))
+}
+
+fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> Proj) -> GpuScene {
     let began = crate::now_ms();
     let t = Tokens::get();
     // The model scene's stable palette slots first: whole faded or see-through bodies are drawn
@@ -4842,8 +4923,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             };
             quad(&mut sc, q, fill, if selected { t.sel_edge } else { t.origin_plane_edge }, through);
         }
-        // Origin axes: solid near the origin, dashed beyond.
-        for (name, dir) in origin_axes(app) {
+        // Origin axes: solid near the origin, then either one thinner line on both sides to the
+        // edges of the view (#11123), or dashed a little beyond (the preference off).
+        let axes = origin_axes(app);
+        let across = (app.preferences.origin_axes_across_view && !axes.is_empty()).then(projection);
+        for (name, dir) in axes {
             let col = match name {
                 "X" => t.axis_x,
                 "Y" => t.axis_y,
@@ -4852,6 +4936,16 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             let on = sel.iter().any(|x| matches!(x, Sel::Axis { name: n } if n == name)) || matches!(hover, Some(Hit::Axis { name: n }) if n == name);
             let w = if on { 4.0 } else { 2.0 };
             reference_line(&mut sc, [0.0; 3], (dir * size).to_f32(), c4(col), w, through);
+            if let Some(proj) = &across {
+                if let Some((t0, t1)) = line_in_view(&proj.vp, Vec3::ZERO, dir) {
+                    for (start, end) in [(t0, t1.min(0.0)), (t0.max(size), t1)] {
+                        if start < end {
+                            reference_line(&mut sc, (dir * start).to_f32(), (dir * end).to_f32(), c4(col), w * 0.75, through);
+                        }
+                    }
+                }
+                continue;
+            }
             let dash = size * 0.08;
             let mut a = size + dash;
             while a < size * AXIS_LEN {
@@ -5479,6 +5573,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
+    crate::ui_kit::set_viewport_half_height(ui.ctx(), app.cam.half_height());
     // A component dragged as a layer is drawn from the meshes where its drag began.
     let layered = drag_layer::follow(app);
     refresh_layout(app, ui.ctx());
@@ -5515,7 +5610,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             false
         };
         crate::tool_modifiers::set_target_midpoint(mid);
-        app.preview.rolled_back = preview_should_roll_back(app, held, manipulator_dragging);
+        let busy_dragging = manipulator_dragging || crate::ui_kit::is_scrubbing(ui.ctx());
+        app.preview.rolled_back = preview_should_roll_back(app, held, busy_dragging);
     }
     let proj = projection(app, rect);
     if let Ok(mut cache) = app.viewport.display.lock() {
@@ -5619,9 +5715,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::frame_watch::step(app, "model scene");
         }
         refresh_sketch_scene(app, &proj);
-        let hk = highlight_key(app);
+        let hk = highlight_key_with_projection(app, || proj);
         if hk != app.viewport.hl_key {
-            let hl = build_highlight(app);
+            let hl = build_highlight_with_projection(app, || proj);
             if let Ok(mut slot) = app.viewport.hl_slot.lock() {
                 *slot = Some(hl);
             }
@@ -11550,8 +11646,15 @@ mod tests {
         assert_ne!(highlight_key(&app), key, "another face");
         app.viewport.hover = Some(Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::ZERO, point: Vec3::ZERO });
         let edge = highlight_key(&app);
+        app.viewport.hover = Some(Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::ZERO, point: Vec3::new(0.5, 0.0, 0.0) });
+        assert_eq!(highlight_key(&app), edge, "the same edge, the pointer elsewhere on it: nothing to build again");
         app.viewport.hover = Some(Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::X, point: Vec3::X });
         assert_ne!(highlight_key(&app), edge, "an edge's middle picks which part of it is lit");
+        let curve = |x: f64| Hit::SketchCurve { sketch: 1, id: "L1".into(), straight: true, point: Vec3::new(x, 0.0, 0.0) };
+        app.viewport.hover = Some(curve(0.0));
+        let on_curve = highlight_key(&app);
+        app.viewport.hover = Some(curve(3.0));
+        assert_eq!(highlight_key(&app), on_curve, "the same sketch curve, the pointer elsewhere on it");
         app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::ZERO });
         let plane = highlight_key(&app);
         app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::X });
@@ -15405,6 +15508,147 @@ mod grid_plane_tests {
         assert_eq!(origin_planes(&app).len(), 3, "Create Sketch still offers every origin plane");
     }
 
+    /// A view from the top, orthographic, 800 × 600, its middle at `target`, `distance` away.
+    fn top_view(target: Vec3, distance: f64, fov: f64) -> Camera {
+        Camera { target, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, roll: 0.0, distance, fov, ..Default::default() }
+    }
+
+    /// #11123: the stretch of an axis the view shows is where it enters and leaves the view. From
+    /// the top in an orthographic view the X axis spans the view's width around the target, Y
+    /// its height, a line wholly beside the view is not in it, and Z (along the view) runs from
+    /// the near plane to the far one; in perspective Z runs between those planes' depths.
+    #[test]
+    fn an_axis_is_cut_where_it_leaves_the_view() {
+        let aspect = 800.0 / 600.0;
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-6 * (1.0 + b.abs());
+        for target in [Vec3::ZERO, Vec3::new(500.0, 0.0, 0.0), Vec3::new(1e5, 0.0, 0.0)] {
+            let cam = top_view(target, 10.0, 0.0);
+            let vp = cam.view_proj(aspect, 50.0);
+            let (hh, hw) = (cam.half_height(), cam.half_height() * aspect);
+            let (t0, t1) = line_in_view(&vp, Vec3::ZERO, Vec3::X).expect("the X axis crosses the view");
+            assert!(close(t0, target.x - hw) && close(t1, target.x + hw), "{target:?}: X from {t0} to {t1}, the view {hw} either side");
+            let y = line_in_view(&vp, Vec3::ZERO, Vec3::Y);
+            if target.x == 0.0 {
+                let (t0, t1) = y.expect("Y crosses a view of the origin");
+                assert!(close(t0, -hh) && close(t1, hh), "Y from {t0} to {t1}, the view {hh} either side");
+            } else {
+                assert_eq!(y, None, "{target:?}: the Y axis lies beside the view");
+            }
+            let (near, far) = cam.clip(50.0);
+            let (t0, t1) = line_in_view(&vp, target, Vec3::Z).expect("a line along the view crosses it");
+            assert!(close(t0, cam.distance - far) && close(t1, cam.distance - near), "Z from {t0} to {t1}, clip {near}..{far}");
+        }
+        let cam = top_view(Vec3::ZERO, 100.0, 0.8);
+        let (near, far) = cam.clip(50.0);
+        let (t0, t1) = line_in_view(&cam.view_proj(aspect, 50.0), Vec3::ZERO, Vec3::Z).expect("Z points at the eye");
+        assert!(close(t0, cam.distance - far) && close(t1, cam.distance - near), "perspective Z from {t0} to {t1}, clip {near}..{far}");
+        // Nothing to cut: a view that is no view, or a line that is not one.
+        assert_eq!(line_in_view(&Mat4([[f64::NAN; 4]; 4]), Vec3::ZERO, Vec3::X), None);
+        assert_eq!(line_in_view(&cam.view_proj(aspect, 50.0), Vec3::ZERO, Vec3::new(f64::INFINITY, 0.0, 0.0)), None);
+    }
+
+    #[test]
+    fn origin_axes_are_drawn_across_the_view_after_a_far_pan() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.set_origin_shown(true);
+        app.session.visibility.hidden_origin = ["XY", "XZ", "YZ", "Y", "Z"].map(str::to_owned).to_vec();
+        app.preferences.origin_axes_across_view = true;
+        app.ui.auto_ortho_faces = false;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        app.viewport.rect = Some(rect);
+
+        for perspective in [false, true] {
+            app.ui.perspective = perspective;
+            for x in [-5e5, 5e5] {
+                app.cam = top_view(Vec3::X * x, 50.0, app.view_fov());
+                let proj = projection(&app, rect);
+                let scene = build_highlight(&app);
+                let (lines, remainder) = scene.guide_lines.as_chunks::<{ crate::gpu::LINE_SIZE }>();
+                assert!(remainder.is_empty());
+                assert_eq!(lines.len(), 2, "one short arm and the visible extension");
+                let segment = &lines[1];
+                let end = |at: usize| {
+                    let [x, y, z] = [at, at + 4, at + 8].map(|i| f64::from(f32::from_le_bytes(segment[i..i + 4].try_into().unwrap())));
+                    proj.to_screen(Vec3::new(x, y, z)).unwrap()
+                };
+                assert!(end(0).distance(rect.left_center()) < 2.0, "left edge after a pan to {x}, perspective {perspective}");
+                assert!(end(12).distance(rect.right_center()) < 2.0, "right edge after a pan to {x}, perspective {perspective}");
+            }
+        }
+    }
+
+    /// #11123: in an open sketch, zoomed in on a spot of the X axis far from the origin, the axis
+    /// is there to pick (it was 1.8 origin sizes long, off screen); with the preference off it
+    /// is as before. Out of a sketch (and of a dialog that takes axes) a click there stays in
+    /// empty space, so handles and bodies keep their picks. The long axis is the last hit:
+    /// where a body hides it a click there is the body's face alone, and drawn through bodies
+    /// it comes after the face.
+    #[test]
+    fn origin_axes_across_the_view_are_picked_last_where_they_show() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [180, -20, -20], "operation": "new"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.ui.perspective = false;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800., 600.));
+        let axis = |hits: &[Hit]| hits.iter().position(|h| matches!(h, Hit::Axis { name } if name == "X"));
+        assert!(!app.preferences.origin_axes_across_view, "short axes remain the default");
+        app.preferences.origin_axes_across_view = true;
+        // Far from the origin and the box, on the X axis.
+        let target = Vec3::X * 5e5;
+        app.cam = top_view(target, 50.0, 0.0);
+        let proj = projection(&app, rect);
+        let at = proj.to_screen(target + Vec3::X * 10.0).unwrap();
+        assert_eq!(pick(&app, &proj, at), Vec::new(), "out of a sketch, empty space stays empty");
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        assert!(app.session.active_sketch.is_some());
+        app.cam = top_view(target, 50.0, 0.0);
+        let proj = projection(&app, rect);
+        assert_eq!(axis(&pick(&app, &proj, at)), Some(0), "in a sketch the X axis runs through the far-panned view");
+        let off = proj.to_screen(target + Vec3::new(10.0, 10.0, 0.0)).unwrap();
+        assert_eq!(axis(&pick(&app, &proj, off)), None, "nothing off the axis");
+        app.preferences.origin_axes_across_view = false;
+        assert_eq!(axis(&pick(&app, &proj, at)), None, "the short axis ends near the origin");
+        app.preferences.origin_axes_across_view = true;
+        // The X axis runs through the box: from the top its face hides the axis.
+        app.cam = top_view(Vec3::new(200.0, 0.0, 0.0), 200.0, 0.0);
+        let proj = projection(&app, rect);
+        let inside = proj.to_screen(Vec3::new(195.0, 0.0, 0.0)).unwrap();
+        let hits = pick(&app, &proj, inside);
+        assert!(matches!(hits.first(), Some(Hit::Face { .. })), "the box's top face, not the axis under it: {hits:?}");
+        assert_eq!(axis(&hits), None, "{hits:?}");
+        let beside = proj.to_screen(Vec3::new(150.0, 0.0, 0.0)).unwrap();
+        assert_eq!(axis(&pick(&app, &proj, beside)), Some(0), "out of the box the axis shows");
+        crate::prefs::set(&mut app, &json!({"reference_geometry_through_bodies": true})).unwrap();
+        let hits = pick(&app, &proj, inside);
+        assert!(matches!(hits.first(), Some(Hit::Face { .. })) && axis(&hits).is_some(), "drawn through, picked after the face: {hits:?}");
+    }
+
+    #[test]
+    fn origin_axes_across_the_view_refresh_without_rebuilding_body_feedback() {
+        let mut session = solidcraft_engine::Session::default();
+        session.execute("solid.cylinder", &json!({"radius": 10, "height": 20})).unwrap();
+        let mut app = SolveApp::new(session, crate::Services::default());
+        app.set_origin_shown(true);
+        app.viewport.hover_bodies = vec!["Body1".into()];
+        app.preferences.origin_axes_across_view = true;
+        app.ui.perspective = false;
+        app.cam = top_view(Vec3::X * 500.0, 50.0, 0.0);
+        let key = highlight_key(&app);
+        let before = build_highlight(&app);
+        app.cam.target.x = 5e5;
+        assert_ne!(highlight_key(&app), key, "the clipped axes follow a pan");
+        let after = build_highlight(&app);
+        let bytes = |scene: &GpuScene| scene.blocks.last().unwrap().bytes.clone();
+        assert!(std::sync::Arc::ptr_eq(&bytes(&before), &bytes(&after)), "body feedback keeps its buffers");
+
+        let long = highlight_key(&app);
+        app.preferences.origin_axes_across_view = false;
+        let short = highlight_key(&app);
+        assert_ne!(short, long, "switching back to short axes refreshes the drawing");
+        app.cam.target.x = -5e5;
+        assert_eq!(highlight_key(&app), short, "short axes stay cached during a pan");
+    }
+
     /// Primary rolls a live preview back for reselect, but not while a manipulator is dragged
     /// (same gate [`show`] uses via [`preview_should_roll_back`]).
     #[test]
@@ -15420,6 +15664,13 @@ mod grid_plane_tests {
         let primary = crate::tool_modifiers::Held { primary: true, ..Default::default() };
         assert!(preview_should_roll_back(&app, primary, false), "Primary alone rolls the preview back when a preview dialog is open");
         assert!(!preview_should_roll_back(&app, primary, true), "Primary must not roll the preview back while a manipulator arrow is dragged");
+        let ctx = crate::fonts::test_context();
+        let scrub_id = egui::Id::unique("test_scrub");
+        crate::ui_kit::set_scrubbing(&ctx, scrub_id, true);
+        assert!(
+            !preview_should_roll_back(&app, primary, crate::ui_kit::is_scrubbing(&ctx)),
+            "Primary must not roll the preview back while scrubbing a value label"
+        );
     }
 }
 

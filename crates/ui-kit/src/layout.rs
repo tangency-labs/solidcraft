@@ -244,7 +244,17 @@ pub fn status_line(ui: &mut Ui, text: &str, tone: StatusTone) -> Response {
 pub fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     scrub_row(ui, label, |ui, scrub| {
         if let Some(scrub) = scrub {
-            super::fields::scrub(ui, scrub, value);
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::field(ui, value)
+    })
+}
+
+/// Expression row whose scrubbed value stops at zero (for physical dimensions like radius or thickness).
+pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
         }
         super::field(ui, value)
     })
@@ -260,7 +270,17 @@ pub fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &super::C
 pub fn hint_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
     scrub_row(ui, label, |ui, scrub| {
         if let Some(scrub) = scrub {
-            super::fields::scrub(ui, scrub, value);
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::hint_field(ui, value, hint)
+    })
+}
+
+/// Expression row with a hint whose scrubbed value stops at zero.
+pub fn hint_row_positive(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
         }
         super::hint_field(ui, value, hint)
     })

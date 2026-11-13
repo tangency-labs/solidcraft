@@ -1395,6 +1395,9 @@ mod tests {
                         "positive rendering fixtures must pass the shared app-aware capability policy"
                     );
                     assert_eq!(f.app.blur.radius(), radius);
+                    let panels = &f.app.universal_panel_frame().unwrap().layout.sections;
+                    assert!(!panels.is_empty());
+                    assert!(panels.iter().all(|panel| panel.paint_alpha == Some(180)), "the shared panels keep the ribbon's blur tint alpha");
                     assert!(f.app.blur.painted_frame().is_some(), "guard evidence comes from actual submitted visible marker work");
                     let source = f.pixels(true);
                     let resting = f.pixels(false);

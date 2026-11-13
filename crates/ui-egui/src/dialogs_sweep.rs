@@ -3,7 +3,7 @@
 //! reshape the profile. Loft and Surface Loft take the same guide rails (#201).
 
 use crate::selection::SelectionExt as _;
-use crate::ui_kit::{choice_row, expr_row};
+use crate::ui_kit::{choice_row, expr_row, expr_row_positive};
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
@@ -153,7 +153,7 @@ pub fn rows_with(ui: &mut egui::Ui, o: &mut SweepOpts, id: &str, between: impl F
     between(ui);
     crate::ui_kit::section(ui, id, "Advanced", false, |ui| {
         enter |= expr_row(ui, "Twist", &mut o.twist);
-        enter |= expr_row(ui, "End Scale", &mut o.scale);
+        enter |= expr_row_positive(ui, "End Scale", &mut o.scale);
         rail_fit_row(ui, id, &mut o.rail_fit);
     });
     enter

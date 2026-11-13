@@ -968,3 +968,57 @@ fn a_ball_with_its_poles_on_a_plane_or_a_cone_is_cut() {
     ));
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// The half roll less the r 6 ball about (0, 50 + δ, 20), its poles δ off the roll's outside:
+/// 1e-6 inside it and 1e-6 outside, within the tolerance the trace refines with, in the four
+/// frames of the walls' cylinders that failed above. The line where the ball crosses the wall
+/// passes the poles δ from them, and the trace takes each pole as a point of it (within that
+/// tolerance) and ends two curves there. `StepBackFromSingularity` took the pole point's
+/// singular parameter 1 % of the last span back from the pole, where the curve's direction
+/// seen from the pole is set by the pole's offset (an angle of about δ over the distance), not
+/// by the curve: every span into the pole failed the span test by about 100 δ, the steps
+/// shrank to the tolerance, and the pole points got singular parameters a quarter turn off
+/// (0.73 for 0.5) and UV tangents of 3e5, refused as not a solid. Each frame is one valid
+/// solid of V = 3920π less the ball between radii 48 and 50 at that distance ([`ball_inside`]).
+#[test]
+fn a_ball_with_its_poles_within_tolerance_of_a_rolls_face_is_cut() {
+    all_fixes();
+    let mut failed = Vec::new();
+    for delta in [-1e-6, 1e-6] {
+        let d = 50.0 + delta;
+        let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+        for frame in [2, 5, 8, 14] {
+            let what = format!("δ {delta:e}, frame {frame}");
+            failed.extend(cut_is_valid_solid(
+                half_roll(frame),
+                ball([0.0, d, 20.0], 0.0),
+                want,
+                &what,
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The same cut with the poles 1e-4 inside and outside the roll's outside, past the
+/// tolerance: each of the four frames is one valid solid of the closed-form volume, as it
+/// was before the trace placed its points at poles.
+#[test]
+fn a_ball_with_its_poles_past_tolerance_of_a_rolls_face_is_cut() {
+    all_fixes();
+    let mut failed = Vec::new();
+    for delta in [-1e-4, 1e-4] {
+        let d = 50.0 + delta;
+        let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+        for frame in [2, 5, 8, 14] {
+            let what = format!("δ {delta:e}, frame {frame}");
+            failed.extend(cut_is_valid_solid(
+                half_roll(frame),
+                ball([0.0, d, 20.0], 0.0),
+                want,
+                &what,
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}

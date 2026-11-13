@@ -1770,11 +1770,6 @@ fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec
     out
 }
 
-/// A construction plane, axis or point.
-fn is_construction(f: &Feature) -> bool {
-    matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-}
-
 /// Every string in `v` (names of planes, axes, bodies and features among them).
 fn json_strings<'a>(v: &'a serde_json::Value, out: &mut std::collections::BTreeSet<&'a str>) {
     match v {
@@ -1793,7 +1788,7 @@ fn json_strings<'a>(v: &'a serde_json::Value, out: &mut std::collections::BTreeS
 /// definition that is a construction's name may take one too many, never one too few: the
 /// other construction geometry no longer goes into every feature's key.
 fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: Option<&ModelState>) -> u64 {
-    if !doc.features.iter().any(is_construction) {
+    if !doc.features.iter().any(|f| f.kind.is_construction()) {
         return 0;
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1813,7 +1808,7 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
         if steps > 4096 {
             named = true;
             "too deep".hash(&mut h);
-            for c in doc.features.iter().filter(|c| is_construction(c)) {
+            for c in doc.features.iter().filter(|c| c.kind.is_construction()) {
                 fingerprint(doc, 0, c, vals, false, &ImportDigests::default()).hash(&mut h);
             }
             break;
@@ -1832,7 +1827,8 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
                 ids.insert(id.0);
             }
         });
-        for c in doc.features.iter().filter(|c| is_construction(c) && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str()))) {
+        for c in doc.features.iter().filter(|c| c.kind.is_construction() && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str())))
+        {
             if !seen.insert(c.id) {
                 continue;
             }
@@ -7446,24 +7442,22 @@ fn feature_tools_with_constructor(
             if !(r > 1e-6) {
                 return Err(DocError::Invalid("pipe diameter must be positive".into()));
             }
+            let region = pipe_region(vals, r, wall)?;
+            // Its faces are named as a sweep's caps and a cylinder's wall are (#14897).
+            let tool = |body: Body| crate::lineage::pipe_tool(body, region.outer.segs.len());
             if let Some(along) = path_points(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
                 let pts = along.points();
                 let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied()) else { return Err(DocError::Invalid("empty path".into())) };
                 let t = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
                 let plane = Plane::from_normal(a, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
-                return Ok(unnamed(vec![kernel::sweep_point_path_with(
-                    &plane,
-                    &pipe_region(vals, r, wall)?,
-                    &along,
-                    &kernel::SweepControl::default(),
-                )?]));
+                return Ok(vec![tool(kernel::sweep_point_path_with(&plane, &region, &along, &kernel::SweepControl::default())?)]);
             }
             let segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
             let first = segs.first().ok_or_else(|| DocError::Invalid("empty path".into()))?;
             let start = first.start();
             let (t, _) = first.tangents().ok_or_else(|| DocError::Invalid("path direction".into()))?;
             let plane = Plane::from_normal(start, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
-            Ok(unnamed(vec![kernel::sweep(&plane, &pipe_region(vals, r, wall)?, &segs)?]))
+            Ok(vec![tool(kernel::sweep(&plane, &region, &segs)?)])
         }
         FeatureKind::Box { corner, length, width, height, centred, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
