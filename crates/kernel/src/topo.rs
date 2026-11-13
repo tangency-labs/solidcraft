@@ -324,8 +324,15 @@ pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     for (face, d) in candidates {
         let (off, cyl) = match (faces.surf(face as usize), cylinder_of(&faces, face as usize)) {
             (_, Some((axis, o, r, internal))) => {
-                let c = CylinderFace { internal, ..cylinder_extent(&mesh, face, axis, o, r) };
-                (d.min(c.off(p)), Some(c))
+                let c = face_cylinder_extent(b.record(), face as usize, axis, o).map(|(start, end)| CylinderFace {
+                    axis_point: o,
+                    axis,
+                    radius: r,
+                    start,
+                    end,
+                    internal,
+                });
+                (c.map_or(d, |c| d.min(c.off(p))), c)
             }
             (Some(Surf::Plane { n, d: k }), None) => (d.min((n.dot(p) - k).abs()), None),
             _ => (d, None),
@@ -338,12 +345,15 @@ pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
 }
 
 /// Face `face` of a body as a cylinder: the axis and radius of its own surface, and its extent
-/// along the axis and side read from `mesh` (the body's tessellation, whose faces are the
-/// body's). `None` when the face is not part of a cylinder, or has no triangles.
-pub fn cylinder_face(b: &Body, mesh: &Mesh, face: usize) -> Option<CylinderFace> {
+/// along the axis and side. `None` when the face is not part of a cylinder.
+pub fn cylinder_face(b: &Body, face: usize) -> Option<CylinderFace> {
+    if b.is_mesh() {
+        return None;
+    }
     let crate::FaceSurface::Cylinder { origin, axis, radius } = crate::face_surface(b, face)? else { return None };
-    let c = cylinder_extent(mesh, u32::try_from(face).ok()?, axis, origin, radius);
-    (c.start.is_finite() && c.end.is_finite()).then_some(c)
+    let internal = matches!(surf_of(b.record(), face), Some(Surf::Cylinder { convex, .. }) if !convex);
+    let (start, end) = face_cylinder_extent(b.record(), face, axis, origin)?;
+    Some(CylinderFace { axis_point: origin, axis, radius, start, end, internal })
 }
 
 impl CylinderFace {
@@ -379,14 +389,17 @@ pub fn material_in_ring(b: &Body, c: &CylinderFace, r_in: f64, r_out: f64, along
 /// The cylindrical face one of whose end circles is centred at `p` (a circle given by its
 /// centre, where no face lies), the nearest when several are.
 pub fn cylinder_end_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
+    if b.is_mesh() {
+        return None;
+    }
     let size = b.size();
     let tol = (size * 1e-3).max(1e-3);
-    let mesh = b.mesh(&crate::MeshTolerance::chord(tol)).ok()?;
     let faces = Faces::new(b.record(), (size * 1e-4).max(1e-6) * 10.0);
     let mut best: Option<(f64, CylinderFace)> = None;
     for face in 0..b.record().faces.len() {
         let Some((axis, o, r, internal)) = cylinder_of(&faces, face) else { continue };
-        let c = CylinderFace { internal, ..cylinder_extent(&mesh, u32::try_from(face).ok()?, axis, o, r) };
+        let Some((start, end)) = face_cylinder_extent(b.record(), face, axis, o) else { continue };
+        let c = CylinderFace { axis_point: o, axis, radius: r, start, end, internal };
         let v = p - c.axis_point;
         let along = v.dot(c.axis);
         let off = (v - c.axis * along).len() + (along - c.start).abs().min((c.end - along).abs());
@@ -397,24 +410,45 @@ pub fn cylinder_end_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     best.map(|(_, c)| c)
 }
 
-/// The extent along its axis of a cylindrical face of a tessellated body, and its side as the
-/// mesh's normals have it.
-fn cylinder_extent(mesh: &Mesh, face: u32, axis: UnitVec3, ap: Vec3, r: f64) -> CylinderFace {
+/// The extent along its axis of a cylindrical face, computed from its exact B-rep boundary loops and curves.
+fn face_cylinder_extent(record: &Brep, face: usize, axis: UnitVec3, ap: Vec3) -> Option<(f64, f64)> {
+    let f = record.faces.get(face)?;
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
-    let mut inward = 0.0;
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        if *f != face {
-            continue;
-        }
-        for k in t {
-            let (Some(q), Some(n)) = (mesh.positions.get(*k as usize), mesh.normals.get(*k as usize)) else { continue };
-            let s = (*q - ap).dot(axis);
-            lo = lo.min(s);
-            hi = hi.max(s);
-            let radial = *q - ap - axis * s;
-            inward += n.dot(radial);
+    for l in &f.loops {
+        match l {
+            Loop::Edges { edges } => {
+                for u in edges {
+                    let Some(e) = record.edges.get(u.edge as usize) else { continue };
+                    for &vi in &e.vertices {
+                        if let Some(v) = record.vertices.get(vi as usize) {
+                            let s = (Vec3::from(v.point) - ap).dot(axis);
+                            lo = lo.min(s);
+                            hi = hi.max(s);
+                        }
+                    }
+                    if let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()) {
+                        let [t0, t1] = e.interval;
+                        const SAMPLES: usize = 16;
+                        for step in 1..SAMPLES {
+                            let t = t0 + (t1 - t0) * (step as f64 / SAMPLES as f64);
+                            if let Some(p) = eval.point(t) {
+                                let s = (p - ap).dot(axis);
+                                lo = lo.min(s);
+                                hi = hi.max(s);
+                            }
+                        }
+                    }
+                }
+            }
+            Loop::Vertex { vertex } => {
+                if let Some(v) = record.vertices.get(*vertex as usize) {
+                    let s = (Vec3::from(v.point) - ap).dot(axis);
+                    lo = lo.min(s);
+                    hi = hi.max(s);
+                }
+            }
         }
     }
-    CylinderFace { axis_point: ap, axis, radius: r, start: lo, end: hi, internal: inward < 0.0 }
+    (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
 }

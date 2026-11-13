@@ -6148,9 +6148,8 @@ fn parallel_tapped_wall(st: &ModelState, entry: Vec3, inward: Vec3, radius: f64,
         }
         #[cfg(test)]
         cost_tests::count(|c| c.tapped_wall += 1);
-        let mesh = body.mesh();
         for face in 0..body.body.face_count() {
-            let Some(c) = kernel::cylinder_face(&body.body, &mesh, face) else { continue };
+            let Some(c) = kernel::cylinder_face(&body.body, face) else { continue };
             let offset = entry - c.axis_point;
             if !c.internal
                 || (c.radius - radius).abs() > tol

@@ -24,7 +24,6 @@ crates/doc/src/eval.rs:hole_on_surface_in moves a hole back onto its face by the
 crates/doc/src/eval.rs:hole_reaches decides whether a drill reaches material by the display mesh
 crates/doc/src/eval.rs:nearest_object_face picks an extrusion's To Object face by the display mesh
 crates/doc/src/eval.rs:off_the_ends moves an edge point off the edge's ends by the display mesh
-crates/doc/src/eval.rs:parallel_tapped_wall finds a tapped hole's parallel wall on the display mesh
 crates/doc/src/eval.rs:resolve_edges finds edge references again on a mesh
 crates/doc/src/eval.rs:tangent_face_chain grows a face pick across tangent edges on the display mesh
 crates/doc/src/eval.rs:trim_to_body keeps the tool pieces touching the start by a mesh
@@ -48,12 +47,10 @@ crates/doc/src/joints_edge.rs:edge_frame places an edge snap by the display mesh
 crates/doc/src/joints_edge.rs:edge_snap places an edge snap by the display mesh
 crates/doc/src/joints_edge.rs:face_of picks the planar face beside an edge by the display mesh
 crates/doc/src/joints_edge.rs:nearest_edge picks the edge nearest a point by the display mesh
-crates/doc/src/joints_face.rs:NamedFace::own_cylinder reads a named face's cylinder from the display mesh
 crates/doc/src/joints_face.rs:NamedFace::plane reads a named face's centre and normal from the display mesh
 crates/doc/src/joints_face.rs:face_name_at names the face at a pick by its mesh triangles
 crates/doc/src/joints_face.rs:outline_centre finds a planar face's centre from mesh triangles
 crates/doc/src/joints_face.rs:rim_neighbour finds the face across a cylinder's rim by the display mesh
-crates/doc/src/joints_face.rs:round_end_at finds a cylinder's round end by the display mesh
 crates/doc/src/lineage.rs:order_legacy_family orders a face family by the display mesh
 crates/doc/src/name_lookup.rs:FaceHit::along meets a line with a found face on the display mesh
 crates/doc/src/name_lookup.rs:FaceHit::pick_point finds a point that picks a face again on the display mesh
@@ -177,7 +174,5 @@ crates/kernel/src/surface_trim.rs:cut_by trims a surface by a tool through a mes
 crates/kernel/src/surface_trim.rs:nearest_faces picks the face nearest each point by a mesh
 crates/kernel/src/surface_untrim.rs:face_point takes a point inside a face from its largest mesh triangle
 crates/kernel/src/surfaces.rs:nearest_face picks the face nearest a point by mesh triangles
-crates/kernel/src/topo.rs:cylinder_end_at finds a cylinder's end circle by a mesh
-crates/kernel/src/topo.rs:cylinder_extent measures a cylindrical face's extent and side from mesh normals
 crates/kernel/src/topo.rs:cylinder_face_at finds the cylindrical face at a point by a mesh
 crates/kernel/src/topo.rs:merged_topology counts merged topology from a mesh

@@ -69,7 +69,7 @@ impl NamedFace<'_> {
 
     /// The face as a cylinder, in the body's own coordinates (`None`: not a cylinder).
     fn own_cylinder(&self) -> Option<CylinderFace> {
-        solidcraft_kernel::cylinder_face(&self.body.body, &self.body.mesh(), self.face)
+        solidcraft_kernel::cylinder_face(&self.body.body, self.face)
     }
 
     /// The face as a cylinder, in the component's coordinates.
@@ -312,7 +312,7 @@ pub fn face_name_at(doc: &Document, st: &ModelState, component: u64, pick: Vec3,
             let (off, cylinder) = match solidcraft_kernel::face_surface(&b.body, f) {
                 Some(solidcraft_kernel::FaceSurface::Plane { normal, point }) => (d.min((p - point).dot(normal).abs()), false),
                 Some(solidcraft_kernel::FaceSurface::Cylinder { .. }) => {
-                    (solidcraft_kernel::cylinder_face(&b.body, &mesh, f).map_or(d, |c| d.min(c.off(p))), true)
+                    (solidcraft_kernel::cylinder_face(&b.body, f).map_or(d, |c| d.min(c.off(p))), true)
                 }
                 _ => (d, false),
             };
@@ -337,10 +337,9 @@ pub fn round_end_at(doc: &Document, st: &ModelState, component: u64, centre: Vec
         }
         let offset = doc.model_body_offset(b).copied().unwrap_or(IDENTITY);
         let p = apply_point(&mat_inverse(&offset)?, centre);
-        let mesh = b.mesh();
         let tol = (b.body.size() * 1e-3).max(1e-3);
         for f in 0..b.body.face_count() {
-            let Some(c) = solidcraft_kernel::cylinder_face(&b.body, &mesh, f) else { continue };
+            let Some(c) = solidcraft_kernel::cylinder_face(&b.body, f) else { continue };
             let v = p - c.axis_point;
             let along = v.dot(c.axis);
             for (at, _) in ends(&c) {
