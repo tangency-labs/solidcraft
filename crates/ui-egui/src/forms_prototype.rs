@@ -1426,7 +1426,7 @@ fn viewport_frame(app: &SolveApp, proj: &Proj, ppp: f32, key: u64) -> Frame {
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: Default::default(),
-        sky: crate::viewport::sky_uniform(app.preferences.dark_parts_shading, proj.cam.up),
+        sky: crate::viewport::sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, proj.cam.up),
         moving: None,
     }
 }
