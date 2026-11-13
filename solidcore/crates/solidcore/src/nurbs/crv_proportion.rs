@@ -128,9 +128,8 @@ impl Curve {
             points.reverse();
         }
         let polygon = Polygon::of(points)?;
-        let (lo, hi) = match (self.knots().first(), self.knots().last()) {
-            (Some(&lo), Some(&hi)) => (lo, hi),
-            _ => return Err(invalid("a curve without knots")),
+        let (Some(&lo), Some(&hi)) = (self.knots().first(), self.knots().last()) else {
+            return Err(invalid("a curve without knots"));
         };
         let length = |c: &Curve| c.arc_length(lo, hi, LENGTH_TOL, ToleranceKind::Relative);
         let make = |d: f64| -> Curve {

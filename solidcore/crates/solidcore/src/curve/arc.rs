@@ -182,11 +182,13 @@ impl ArcDefinition {
         };
         let reference = across(start);
         let radius = reference.length();
-        if !(radius > MIN_ARC) {
+        // Past the smallest arc, and a number (a NaN from an overflow is no length).
+        let off_axis = |d: f64| d.partial_cmp(&MIN_ARC) == Some(std::cmp::Ordering::Greater);
+        if !off_axis(radius) {
             return Err(SolidError::invalid_input(OP, "the start is on the axis"));
         }
         let towards = across(end);
-        if !(towards.length() > MIN_ARC) {
+        if !off_axis(towards.length()) {
             return Err(SolidError::invalid_input(OP, "the end is on the axis"));
         }
         let mut arc = ArcDefinition {
