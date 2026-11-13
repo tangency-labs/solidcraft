@@ -355,17 +355,20 @@ fn a_lone_last_point_waits_with_pick_another_point() {
 }
 
 #[test]
-fn a_lone_point_before_a_line_is_refused() {
+fn a_line_clicked_while_a_point_waits_unpicks_the_point() {
     let mut app = box_app();
     let base = sketch_id(&app, "Base");
     let line = Sel::ExternalSketchCurve { sketch: base, id: app.session.doc.sketch(base).unwrap().curves[0].id.clone() };
     let mut d = dialog_on(&mut app, &[]);
     pick(&app, &mut d, corner(0., 0., 0.));
     pick(&app, &mut d, line.clone());
-    assert_eq!(path(&d), [corner(0., 0., 0.)], "the line is taken back");
-    let e = d.error.clone().unwrap();
-    assert!(e.starts_with("Can't add that pick:") && e.contains("A point needs another point after it"), "{e}");
-    // Lines first, or after a whole pair, are fine.
+    assert_eq!((path(&d), d.error.as_deref()), (&[line.clone()][..], None), "the line takes the waiting point's place");
+    // After a whole pair the pair stays.
+    pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 400.)]);
+    let other = Sel::ExternalSketchCurve { sketch: base, id: app.session.doc.sketch(base).unwrap().curves[1].id.clone() };
+    pick(&app, &mut d, other.clone());
+    assert_eq!(path(&d), [line.clone(), corner(0., 0., 0.), corner(0., 0., 400.), other]);
+    // The command itself still refuses a point followed by a line.
     d.inputs[0].items = vec![corner(0., 0., 0.), line.clone()];
     assert_eq!(apply_commands(&app, &d).unwrap_err(), "A point needs another point after it");
     d.inputs[0].items = vec![line.clone(), corner(0., 0., 0.), corner(0., 0., 400.)];
@@ -374,17 +377,20 @@ fn a_lone_point_before_a_line_is_refused() {
 }
 
 #[test]
-fn the_same_point_twice_in_a_row_is_refused() {
+fn clicking_the_waiting_point_again_unpicks_it() {
     let mut app = box_app();
     let mut d = dialog_on(&mut app, &[]);
-    pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 0.)]);
-    assert_eq!(path(&d), [corner(0., 0., 0.)], "the pick is undone");
-    let e = d.error.clone().unwrap();
-    assert!(e.starts_with("Can't add that pick:"), "{e}");
-    assert!(crate::dialogs_frame::refused_pick(&e), "shown as guidance, with no Create Issue");
-    // The next good pick pairs with the waiting point.
+    pick(&app, &mut d, corner(0., 0., 0.));
+    assert_eq!(d.error.as_deref(), Some("Pick another point"));
+    pick(&app, &mut d, corner(0., 0., 0.));
+    assert_eq!((path(&d), d.error.as_deref()), (&[][..], None), "the point is unpicked and nothing waits");
+    // After a whole pair, its last point clicked again starts the next member from it.
+    pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 400.), corner(0., 0., 400.)]);
+    assert_eq!(path(&d).len(), 3);
+    assert_eq!(d.error.as_deref(), Some("Pick another point"));
+    // And that waiting point, clicked again, goes; its pair stays.
     pick(&app, &mut d, corner(0., 0., 400.));
-    assert_eq!((path(&d).len(), d.error.as_deref()), (2, None));
+    assert_eq!(path(&d), [corner(0., 0., 0.), corner(0., 0., 400.)]);
 }
 
 #[test]
