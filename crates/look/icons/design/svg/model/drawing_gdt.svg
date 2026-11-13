@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Geometric tolerance</title>
+  <path d="M11 16L53 16Q56 16 56 19L56 45Q56 48 53 48L11 48Q8 48 8 45L8 19Q8 16 11 16Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M33 17L33 47" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="21" cy="32" r="7" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M21 23L21 41M12 32L30 32M40 32L49 32" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

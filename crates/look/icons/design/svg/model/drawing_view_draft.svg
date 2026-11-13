@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Draft view</title>
+  <path d="M11 10L53 10Q56 10 56 13L56 51Q56 54 53 54L11 54Q8 54 8 51L8 13Q8 10 11 10Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M17 43L26 21L39 21L48 43ZM19 47L46 47" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

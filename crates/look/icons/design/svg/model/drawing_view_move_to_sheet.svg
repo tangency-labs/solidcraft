@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Move view to sheet</title>
+  <path d="M10 12L26 12Q29 12 29 15L29 49Q29 52 26 52L10 52Q7 52 7 49L7 15Q7 12 10 12Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M38 12L54 12Q57 12 57 15L57 49Q57 52 54 52L38 52Q35 52 35 49L35 15Q35 12 38 12Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M16 32L47 32M40 25L47 32L40 39" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

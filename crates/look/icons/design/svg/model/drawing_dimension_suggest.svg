@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Suggest dimensions</title>
+  <path d="M10 43L54 43M10 31L10 47M54 31L54 47" fill="none" stroke="currentColor" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10 22L19 22M27 22L36 22M44 22L54 22M16 16L10 22L16 28M48 16L54 22L48 28" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
