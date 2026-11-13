@@ -38,7 +38,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
-    k.fixes.fillet_refuse_non_manifold_result = true;
     k.fixes.fillet_vertex_error_diagnostics = true;
     k.fixes.fillet_corner_ball_patch = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;

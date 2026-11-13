@@ -255,7 +255,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
-    k.fixes.fillet_refuse_non_manifold_result = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;

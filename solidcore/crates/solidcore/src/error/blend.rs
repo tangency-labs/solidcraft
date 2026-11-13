@@ -849,32 +849,16 @@ mod tests {
                 None => SolidError::blend("blend::feature_executive", failure),
             }
         };
-        let non_manifold = |entity| {
-            let failure = BlendFailure::Failed("the result is not a closed manifold solid");
-            match entity {
-                Some(at) => {
-                    SolidError::blend_at("blend::fillet_executive::session::finish", failure, at)
-                }
-                None => SolidError::blend("blend::fillet_executive::session::finish", failure),
-            }
-        };
         for entity in [None, Some(edge)] {
-            for e in [open_base(entity), non_manifold(entity)] {
-                let filled = e.clone().or_at(at_edge.or(Site::point(point)));
-                assert_eq!(filled.entity(), e.entity());
-                assert_eq!(filled.upstream_status(), e.upstream_status());
-                assert_eq!(filled.kind(), e.kind());
-                assert_eq!(
-                    crate::blend::feature_executive::is_open_base_refusal(&filled),
-                    crate::blend::feature_executive::is_open_base_refusal(&e)
-                );
-                assert_eq!(
-                    crate::blend::fillet_executive::session::finish::is_non_manifold_refusal(
-                        &filled
-                    ),
-                    crate::blend::fillet_executive::session::finish::is_non_manifold_refusal(&e)
-                );
-            }
+            let e = open_base(entity);
+            let filled = e.clone().or_at(at_edge.or(Site::point(point)));
+            assert_eq!(filled.entity(), e.entity());
+            assert_eq!(filled.upstream_status(), e.upstream_status());
+            assert_eq!(filled.kind(), e.kind());
+            assert_eq!(
+                crate::blend::feature_executive::is_open_base_refusal(&filled),
+                crate::blend::feature_executive::is_open_base_refusal(&e)
+            );
         }
         assert!(crate::blend::feature_executive::is_open_base_refusal(
             &open_base(Some(edge))
@@ -891,10 +875,7 @@ mod tests {
     /// none.
     #[test]
     fn the_blend_routines_build_no_bare_statuses() {
-        const WAITING: &[(&str, usize)] = &[
-            ("blend/fillet_executive/session/finish.rs", 2),
-            ("blend/fillet_section/recertify.rs", 14),
-        ];
+        const WAITING: &[(&str, usize)] = &[("blend/fillet_section/recertify.rs", 14)];
         let found = super::super::query::tests::bare_statuses_in("blend", 100);
         let waiting: Vec<(String, usize)> = WAITING
             .iter()
@@ -939,7 +920,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1407;
+        const PHRASE_CAUSE_SITES: usize = 1406;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
