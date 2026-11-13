@@ -3,11 +3,12 @@
 //! a component's over the physical material's look; a body with none of these keeps the colour
 //! it was imported with.
 
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::Vec3;
+use solidcore_record::{Plane, Vec3, brep::Brep};
 
 use crate::Document;
 
@@ -498,18 +499,104 @@ pub fn face_index_at(b: &crate::ModelBody, p: Vec3) -> Option<usize> {
     (d <= pick_tolerance(b)).then_some(f)
 }
 
-/// The face of `b` nearest `p` and how far it is, however far.
-pub fn nearest_face(b: &crate::ModelBody, p: Vec3) -> Option<(f64, usize)> {
-    let m = b.mesh();
-    let mut best: Option<(f64, u32)> = None;
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let Some([a, bb, c]) = m.tri(t) else { continue };
-        let d = closest_on_triangle(p, a, bb, c).dist(p);
-        if best.is_none_or(|(x, _)| d < x) {
-            best = Some((d, *f));
+fn planar_face_contains(rec: &Brep, face_index: usize, plane: &Plane, p: Vec3, tol: f64) -> bool {
+    let Some(face) = rec.faces.get(face_index) else { return false };
+    let p2 = plane.to_local(p);
+    let mut inside = false;
+    let mut on_edge = false;
+    for lp in &face.loops {
+        let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+        let mut pts = Vec::new();
+        for u in edges {
+            let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+            let Ok(eval) = CurveEval::new(edge.parameters()) else { continue };
+            let [t0, t1] = if u.forward { edge.interval } else { [edge.interval[1], edge.interval[0]] };
+            let n = match &eval {
+                CurveEval::Line { .. } => 1,
+                _ => 16,
+            };
+            for k in 0..n {
+                let t = t0 + (t1 - t0) * (k as f64 / n as f64);
+                if let Some(pt) = eval.point(t) {
+                    pts.push(plane.to_local(pt));
+                }
+            }
+        }
+        if pts.len() >= 3 {
+            let ring = solidcraft_geom::Ring::from(pts);
+            for (a, b) in ring.edges() {
+                if p2.extend(0.0).dist_to_segment(a.extend(0.0), b.extend(0.0)) <= tol {
+                    on_edge = true;
+                    break;
+                }
+            }
+            if ring.contains(p2) {
+                inside = !inside;
+            }
         }
     }
-    best.map(|(d, f)| (d, f as usize))
+    on_edge || inside
+}
+
+/// The face of `b` nearest `p` and how far it is, however far.
+pub fn nearest_face(b: &crate::ModelBody, p: Vec3) -> Option<(f64, usize)> {
+    if b.body.is_mesh() {
+        return None;
+    }
+    let rec = b.body.record();
+    if rec.faces.is_empty() {
+        return None;
+    }
+    let size = b.body.size().max(1e-6);
+    let tol = (size * 1e-3).max(1e-4);
+
+    let mut best: Option<(f64, usize)> = None;
+
+    for (f, face) in rec.faces.iter().enumerate() {
+        let mut d_face = f64::INFINITY;
+
+        for lp in &face.loops {
+            let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+            for u in edges {
+                let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                let Ok(eval) = CurveEval::new(edge.parameters()) else { continue };
+                let [t0, t1] = edge.interval;
+                let n = match &eval {
+                    CurveEval::Line { .. } => 1,
+                    _ => 8,
+                };
+                for k in 0..=n {
+                    let t = t0 + (t1 - t0) * (k as f64 / n as f64);
+                    if let Some(pt) = eval.point(t) {
+                        d_face = d_face.min(pt.dist(p));
+                    }
+                }
+            }
+        }
+
+        if let Some(plane) = b.body.planar_face(f).or_else(|| b.body.face_plane(f)) {
+            let d_plane = (p - plane.origin).dot(plane.normal()).abs();
+            let q = p - plane.normal() * (p - plane.origin).dot(plane.normal());
+            if planar_face_contains(rec, f, &plane, q, tol) {
+                d_face = d_face.min(d_plane);
+            }
+        } else if let Ok(eval) = SurfaceEval::new(face.parameters()) {
+            let [[u0, u1], [v0, v1]] = face.domain;
+            if let Some([u, v]) = eval.project(p, Some([(u0 + u1) * 0.5, (v0 + v1) * 0.5]), f64::INFINITY) {
+                let clamped_u = u.clamp(u0.min(u1), u0.max(u1));
+                let clamped_v = v.clamp(v0.min(v1), v0.max(v1));
+                if let Some(pt) = eval.point([clamped_u, clamped_v]) {
+                    d_face = d_face.min(pt.dist(p));
+                }
+            }
+        }
+
+        if best.is_none_or(|(d, _)| d_face < d) {
+            best = Some((d_face, f));
+        }
+    }
+
+    best
 }
 
 /// How far from a face of `b` a picked point may lie and still pick it (`face_index_at`).
