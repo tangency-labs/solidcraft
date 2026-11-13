@@ -114,6 +114,8 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
+use crate::error::blend::BlendFailure;
+use crate::error::Failure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -173,6 +175,20 @@ const SKIN_ROUNDS: usize = 6;
 /// at most triples them again.
 const SKIN_STATION_FACTOR: usize = 64;
 
+/// A span the skin check splits (#15256): its index, the parameter of its new station and
+/// the solver's section there.
+type SkinSplit = (usize, f64, TsectPnt);
+
+/// What the skin check finds (#15256): the spans it splits, the largest distance it
+/// measured (infinite where a span's section could not be placed on the skin), and where it
+/// last computed a value that is not finite (a distance, or the balls' rate or speed).
+#[derive(Debug, Default)]
+struct SkinCheck {
+    splits: Vec<SkinSplit>,
+    worst: f64,
+    not_finite_at: Option<f64>,
+}
+
 /// The shares of the skin's section where `FlushCurve` measures it against the balls
 /// (#15256): both rails and seven points between.
 const SKIN_SHARES: [f64; 9] = [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0];
@@ -211,9 +227,12 @@ impl EnvelopeCone {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` where the radius changes faster than the centre moves (`|r'| >= |c'|`):
-    /// the balls have no envelope there.
+    /// [`BlendFailure::BallsNest`] where the radius changes at least as fast as the centre
+    /// moves (`|r'| >= |c'|`): each ball holds the next, so the balls have no envelope there;
+    /// [`BlendFailure::SkinMeasureNotFinite`] where a radius, the rate or the speed is not
+    /// finite. `s` is the section's parameter along the trace, for the record.
     fn at_section(
+        s: f64,
         cent: Point3,
         cent_d: Vec3,
         [(p1, d1), (p2, d2)]: [(Point3, Vec3); 2],
@@ -232,13 +251,22 @@ impl EnvelopeCone {
             });
         }
         let rate = 0.5 * (v1.dot(d1 - cent_d) / r1 + v2.dot(d2 - cent_d) / r2);
+        if !(r1.is_finite() && r2.is_finite() && speed.is_finite() && rate.is_finite()) {
+            return Err(SolidError::blend(
+                OP_FLUSH,
+                BlendFailure::SkinMeasureNotFinite { s },
+            ));
+        }
         let cos = -rate / speed;
         let sin_sq = 1.0 - cos * cos;
-        // (written to accept: a NaN refuses)
-        if sin_sq.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
-            return Err(SolidError::blend_failed(
+        if sin_sq <= 0.0 {
+            return Err(SolidError::blend(
                 OP_FLUSH,
-                "the balls have no envelope at a section",
+                BlendFailure::BallsNest {
+                    s,
+                    rate: rate.abs(),
+                    speed,
+                },
             ));
         }
         Ok(Self {
@@ -2005,15 +2033,25 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 Some(kept) => kept.pieces.iter().collect(),
                 None => vec![skin],
             };
-            let splits = self.skin_splits(solver, k, &pnts, &skins)?;
+            let SkinCheck {
+                splits,
+                worst,
+                not_finite_at,
+            } = self.skin_splits(solver, k, &pnts, &skins)?;
             if splits.is_empty() {
                 break built;
             }
             if round == SKIN_ROUNDS || pnts.len().saturating_add(splits.len()) > station_cap {
-                return Err(SolidError::blend_failed(
-                    OP_FLUSH,
-                    "the skin stays farther than the tolerance from its balls",
-                ));
+                let failure = match not_finite_at {
+                    Some(s) => BlendFailure::SkinMeasureNotFinite { s },
+                    None => BlendFailure::SkinPastStationCap {
+                        asked: self.base.base.this_approx_tol_3d,
+                        reached: worst,
+                        stations: pnts.len(),
+                        rounds: round,
+                    },
+                };
+                return Err(SolidError::blend(OP_FLUSH, failure));
             }
             // each split's section after the station it follows
             let mut splits = splits.into_iter().peekable();
@@ -2106,22 +2144,38 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     /// definition's net is certified against its definition. Leaves the solver's offsets
     /// loaded.
     ///
+    /// Returns the splits, the largest distance measured (infinite where a span's section
+    /// could not be placed on the skin, so the span was split unmeasured) and where a value
+    /// it computed was not finite. A distance, or a cone, that is not finite splits its span
+    /// as a span off its balls does: it proves nothing either way, and a local failure of an
+    /// evaluation goes away with the station. `FlushCurve` refuses only if one is still not
+    /// finite at the cap.
+    ///
+    /// Where the section does not project into its span (the skin passes it more than half
+    /// a span from where its stations put it, or the projection does not converge), the span
+    /// is split at its middle knot with that section, as [`Self::equalise_spans`] places a
+    /// station: the span needs stations either way, so the check is total and the case
+    /// converges or reaches the cap.
+    ///
     /// # Errors
     ///
-    /// Those of [`Self::solve_mid_point`], the rails' evaluations, the projection and
-    /// [`EnvelopeCone::at_section`]; `SM_ERR` for a section that does not project into
-    /// its span; `InvalidInput` for skins that do not run over the stations' parameters.
+    /// [`BlendFailure::StationDidNotConverge`] where no middle section is found from the
+    /// interpolated guess nor from either end station's (with the last solve's error as its
+    /// cause, where one failed); a cancellation or port failure of the plane solve as it is;
+    /// [`SolidError::PortInvariant`] for skins that do not run over the stations' parameters,
+    /// which they are built from; [`BlendFailure::BallsNest`] from
+    /// [`EnvelopeCone::at_section`]; those of the rails' evaluations and the projection.
     fn skin_splits<S: FilletSolverOps<FilletGeom = G>>(
         &self,
         solver: &mut S,
         k: &Kernel,
         pnts: &[TsectPnt],
         skins: &[&Surface],
-    ) -> Result<Vec<(usize, f64, TsectPnt)>> {
+    ) -> Result<SkinCheck> {
         let tol = self.base.base.this_approx_tol_3d;
         let (Some(first), Some(last)) = (pnts.first(), pnts.last()) else {
             solver.reload_surface_offsets()?;
-            return Ok(Vec::new());
+            return Ok(SkinCheck::default());
         };
         // the B-spline skins and their domains, which together run over the stations'
         // parameters (one skin, or the pieces of a round whose law has corners)
@@ -2131,7 +2185,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         for skin in skins {
             let SurfaceKind::BSpline(net) = skin.kind() else {
                 solver.reload_surface_offsets()?;
-                return Ok(Vec::new());
+                return Ok(SkinCheck::default());
             };
             nets.push((*skin, net.natural_uv_domain()));
         }
@@ -2141,13 +2195,14 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         });
         let (Some((_, d0)), Some((_, d1))) = (nets.first(), nets.last()) else {
             solver.reload_surface_offsets()?;
-            return Ok(Vec::new());
+            return Ok(SkinCheck::default());
         };
         if !joined
             || !near(d0.min().x, first.curve_parameter)
             || !near(d1.max().x, last.curve_parameter)
         {
-            return Err(SolidError::invalid_input(
+            // (the skin is built from these stations: a defect of its construction)
+            return Err(SolidError::port_invariant(
                 OP_FLUSH,
                 "the skin does not run over its stations' parameters",
             ));
@@ -2162,12 +2217,51 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             };
             let frac = 0.5;
             let knot = (1.0 - frac) * pj.curve_parameter + frac * pj1.curve_parameter;
-            mids.push((j, knot, self.solve_mid_point(solver, k, pj, pj1, frac)?));
+            // from the interpolated guess, then from either end station's, retried after a
+            // failed solve too (#15034 rule 5: a solve that does not converge is a defect,
+            // never "no section"); a cancellation or a port failure is not retried
+            let mut mid = None;
+            let mut failed = None;
+            for start in [None, Some(pj), Some(pj1)] {
+                match self.solve_mid_point_from(solver, k, pj, pj1, frac, start) {
+                    Ok(Some(found)) => {
+                        mid = Some(found);
+                        break;
+                    }
+                    Ok(None) => {}
+                    Err(e) if e.is_port_failure() || matches!(e, SolidError::Cancelled { .. }) => {
+                        return Err(e);
+                    }
+                    Err(e) => failed = Some(e),
+                }
+            }
+            let Some(mid) = mid else {
+                // (the plane solve reports neither its residual, its last step nor its
+                // iterations, only whether it found the section)
+                let failure = Failure::new(
+                    OP_FLUSH,
+                    BlendFailure::StationDidNotConverge {
+                        s: knot,
+                        residual: None,
+                        tolerance: self.base.base.this_approx_tol_3d,
+                        step: None,
+                        iterations: None,
+                    },
+                );
+                return Err(match failed {
+                    Some(e) => failure.caused_by(e),
+                    None => failure,
+                }
+                .into_error());
+            };
+            mids.push((j, knot, mid));
         }
 
         // its rail points and derivatives on the faces, and the skin against its cone
         solver.set_surfaces_to_zero_offset()?;
         let mut splits = Vec::new();
+        let mut worst = 0.0_f64;
+        let mut not_finite_at = None;
         for (j, knot, mid) in mids {
             // the skin over the span (a span's middle is never a piece's end: the pieces
             // end at stations)
@@ -2175,7 +2269,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 .iter()
                 .find(|(_, d)| d.min().x < knot && knot < d.max().x)
             else {
-                return Err(SolidError::invalid_input(
+                return Err(SolidError::port_invariant(
                     OP_FLUSH,
                     "no skin runs over a span's middle",
                 ));
@@ -2187,7 +2281,21 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                     solver.rail_surface_evaluate_1st_derivatives(k, rail, mid.uv_pos(s))?;
                 *slot = (pnt, du * uv_d.x + dv * uv_d.y);
             }
-            let cone = EnvelopeCone::at_section(mid.crv_pos(), mid.crv_deriv(), rails)?;
+            // (a cone that is not finite leaves the span unmeasured: it is split at its knot,
+            // as below, and refused only if the values stay not finite to the cap)
+            let cone = match EnvelopeCone::at_section(knot, mid.crv_pos(), mid.crv_deriv(), rails) {
+                Err(e)
+                    if matches!(
+                        e.blend_failure(),
+                        Some(BlendFailure::SkinMeasureNotFinite { .. })
+                    ) =>
+                {
+                    not_finite_at = Some(knot);
+                    splits.push((j, knot, mid));
+                    continue;
+                }
+                cone => cone?,
+            };
             // the section's parameter on the skin: where the skin passes its touch
             // circle's middle, so the skin is measured there and, added as a station at
             // that parameter, the section keeps the skin's own parametrisation (the
@@ -2207,13 +2315,13 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 Point2::new(knot, v_mid),
             )?;
             let at = solved.solution.start.param(0)?;
-            // (written to accept: a section off its span, or none found, refuses)
+            // (written to accept: a section off its span, or none found, splits the span
+            // at its middle knot unmeasured)
             let in_span = solved.found && lo < at && at < hi;
             if !in_span {
-                return Err(SolidError::blend_failed(
-                    OP_FLUSH,
-                    "a span's middle section is not on its skin",
-                ));
+                splits.push((j, knot, mid));
+                worst = f64::INFINITY;
+                continue;
             }
             let mut held = true;
             for share in SKIN_SHARES {
@@ -2221,7 +2329,15 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 let off = cone
                     .distance(skin.evaluate_point(k, Point2::new(at, v))?)
                     .abs();
-                // (written to accept: a NaN distance splits the span)
+                // (a distance that is not finite proves nothing about the skin either way:
+                // the span is split, as a span off its balls is, and the round is refused
+                // only if a value stays not finite to the cap)
+                if !off.is_finite() {
+                    not_finite_at = Some(at);
+                    held = false;
+                    continue;
+                }
+                worst = worst.max(off);
                 held &= off <= tol;
             }
             if !held {
@@ -2231,7 +2347,11 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             }
         }
         solver.reload_surface_offsets()?;
-        Ok(splits)
+        Ok(SkinCheck {
+            splits,
+            worst,
+            not_finite_at,
+        })
     }
 
     /// Step 5 of `FlushCurve`: splits every span more than `2.8` times the size of a
@@ -2335,14 +2455,35 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         pj1: &TsectPnt,
         frac: f64,
     ) -> Result<TsectPnt> {
+        self.solve_mid_point_from(solver, k, pj, pj1, frac, None)?
+            .ok_or_else(|| SolidError::blend_failed(OP_FLUSH, "no mid-point section was found"))
+    }
+
+    /// [`Self::solve_mid_point`], its plane solve started from `start`'s surface
+    /// parameters instead of the interpolated guess's (not upstream, #15256: the skin
+    /// check retries from each end station), and `None` where the plane has no solution.
+    ///
+    /// # Errors
+    ///
+    /// Those of the solver.
+    fn solve_mid_point_from<S: FilletSolverOps<FilletGeom = G>>(
+        &self,
+        solver: &mut S,
+        k: &Kernel,
+        pj: &TsectPnt,
+        pj1: &TsectPnt,
+        frac: f64,
+        start: Option<&TsectPnt>,
+    ) -> Result<Option<TsectPnt>> {
         let uv_domains = self.base.base.uv_domains;
         let curve_trace_direction = self.base.base.curve_trace_direction;
         let mut mid_pnt = TsectPnt::new();
         find_guess_mid_tsect_pnt(pj, pj1, frac, &mut mid_pnt);
 
         let plane_orig = mid_pnt.crv_pos();
-        let uv1 = mid_pnt.uv_pos(SrfIndex::First);
-        let uv2 = mid_pnt.uv_pos(SrfIndex::Second);
+        let guess = start.unwrap_or(&mid_pnt);
+        let uv1 = guess.uv_pos(SrfIndex::First);
+        let uv2 = guess.uv_pos(SrfIndex::Second);
         let plane_normal = mid_pnt.crv_deriv().unitize()?;
 
         // find filletPoint on given plane satisfying geometry
@@ -2358,10 +2499,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             &mut mid_pnt,
         )?;
         if !found_solution {
-            return Err(SolidError::blend_failed(
-                OP_FLUSH,
-                "no mid-point section was found",
-            ));
+            return Ok(None);
         }
 
         // save the rail UVCurve points for the new mid-span point
@@ -2381,7 +2519,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             Some(pj),
         )?;
 
-        Ok(mid_pnt)
+        Ok(Some(mid_pnt))
     }
 
     /// Steps 5b to 10 of `FlushCurve` over the stations `pnts` at `knots`: the centre
@@ -3645,5 +3783,432 @@ mod tests {
         flush_crv(3, &poly, &[0.0, 1.0, 2.0], &mut out).unwrap();
         assert_eq!(out.len(), 1);
         assert!(flush_crv(3, &poly, &[0.0, 1.0], &mut out).is_err());
+    }
+
+    /// A solver for the skin check (#15256): balls centred on the x axis at `x = t`, radius
+    /// `r0 + rate t`, with rails at `(t, 0, r)` and `(t, r, 0)`; both surfaces' parameters
+    /// are `(t, v)`. Its plane solve finds no section `fail_first` times (or always), then
+    /// the one on the plane; `skin` is the round's surface it builds.
+    struct SkinMock {
+        r0: f64,
+        rate: f64,
+        fail_first: usize,
+        err_first: usize,
+        always_fail: bool,
+        calls: usize,
+        skin: Option<Surface>,
+    }
+
+    impl SkinMock {
+        fn new(r0: f64, rate: f64, skin: Option<Surface>) -> Self {
+            Self {
+                r0,
+                rate,
+                fail_first: 0,
+                err_first: 0,
+                always_fail: false,
+                calls: 0,
+                skin,
+            }
+        }
+    }
+
+    impl FilletSolverOps for SkinMock {
+        type FilletGeom = ();
+
+        fn point_on_plane_solve(
+            &mut self,
+            _k: &Kernel,
+            plane_origin: Point3,
+            _plane_normal: Vec3,
+            _uv_domain1: &Extent2d,
+            _uv_domain2: &Extent2d,
+            _uv1: Point2,
+            _uv2: Point2,
+            point: &mut TsectPnt,
+        ) -> Result<bool> {
+            self.calls += 1;
+            if self.calls <= self.err_first {
+                return Err(SolidError::sm_err("test"));
+            }
+            if self.always_fail || self.calls <= self.fail_first {
+                return Ok(false);
+            }
+            *point.uv_pos_mut(SrfIndex::First) = Point2::new(plane_origin.x, 0.5);
+            *point.uv_pos_mut(SrfIndex::Second) = Point2::new(plane_origin.x, 0.5);
+            Ok(true)
+        }
+
+        fn compute_point_values(
+            &mut self,
+            _k: &Kernel,
+            uv_values: [Point2; 2],
+            _uv_domain1: &Extent2d,
+            _uv_domain2: &Extent2d,
+            _curve_trace_direction: f64,
+            point: &mut TsectPnt,
+            _previous: Option<&TsectPnt>,
+        ) -> Result<()> {
+            point.point_type = IntersectionPointType::Crossing;
+            *point.uv_pos_mut(SrfIndex::First) = uv_values[0];
+            *point.uv_pos_mut(SrfIndex::Second) = uv_values[1];
+            *point.uv_deriv_mut(SrfIndex::First) = Vec2::new(1.0, 0.0);
+            *point.uv_deriv_mut(SrfIndex::Second) = Vec2::new(1.0, 0.0);
+            *point.crv_pos_mut() = Vec3::new(uv_values[0].x, 0.0, 0.0);
+            *point.crv_deriv_mut() = Vec3::new(1.0, 0.0, 0.0);
+            Ok(())
+        }
+
+        fn step_solve(
+            &mut self,
+            _k: &Kernel,
+            _point: &TsectPnt,
+            _step_size: &mut f64,
+            _uv_domain1: &Extent2d,
+            _uv_domain2: &Extent2d,
+            _flags: &mut StepSolve,
+            _next: &mut TsectPnt,
+        ) -> Result<()> {
+            Err(SolidError::sm_err("test"))
+        }
+
+        fn compute_surface_values(
+            &mut self,
+            _k: &Kernel,
+            _uv_values: [Point2; 2],
+            _point: &mut TsectPnt,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn compute_uv_vectors(&mut self, _k: &Kernel, _point: &mut TsectPnt) -> Result<()> {
+            Ok(())
+        }
+
+        fn set_surfaces_to_zero_offset(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn reload_surface_offsets(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn offset_radii_can_change(&self) -> Result<bool> {
+            Ok(true)
+        }
+
+        fn rail_surface_evaluate_1st_derivatives(
+            &mut self,
+            _k: &Kernel,
+            rail: usize,
+            uv: Point2,
+        ) -> Result<(Point3, Vec3, Vec3)> {
+            let t = uv.x;
+            let r = self.r0 + self.rate * t;
+            Ok(if rail == 0 {
+                (
+                    Vec3::new(t, 0.0, r),
+                    Vec3::new(1.0, 0.0, self.rate),
+                    Vec3::ZERO,
+                )
+            } else {
+                (
+                    Vec3::new(t, r, 0.0),
+                    Vec3::new(1.0, self.rate, 0.0),
+                    Vec3::ZERO,
+                )
+            })
+        }
+
+        fn set_status(&mut self, _status: FilStatus) -> Result<()> {
+            Ok(())
+        }
+
+        fn last_fillet_geom(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn self_intersection_handler(&self) -> Result<Option<HandlingAlgorithmType>> {
+            Ok(None)
+        }
+
+        fn smooth_out_intersection(
+            &mut self,
+            _k: &Kernel,
+            _pseudo: &mut FilletBrep,
+            _geom: &(),
+            _curves_3d: &mut Vec<BSplineCurve>,
+            _uv_curves1: &mut Vec<BSplineCurve>,
+            _uv_curves2: &mut Vec<BSplineCurve>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn has_surface_generator(&self) -> Result<bool> {
+            Ok(true)
+        }
+
+        fn create_fillet_surface(
+            &mut self,
+            _k: &Kernel,
+            _center_line: &mut BSplineCurve,
+            _curve1: &mut BSplineCurve,
+            _curve2: &mut BSplineCurve,
+            _points: &[TsectPnt],
+            _uv1: &mut BSplineCurve,
+            _uv2: &mut BSplineCurve,
+        ) -> Result<(Option<Surface>, Option<LawCornerPieces>)> {
+            Ok((self.skin.clone(), None))
+        }
+
+        fn keep_law_corner_pieces(&mut self, _pieces: LawCornerPieces) -> Result<()> {
+            Ok(())
+        }
+
+        fn skins_varying_balls(&self) -> Result<bool> {
+            Ok(true)
+        }
+
+        fn set_fillet_surface(
+            &mut self,
+            _pseudo: &mut FilletBrep,
+            _geom: &(),
+            _surface: Option<Surface>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn set_center_line_curve(
+            &mut self,
+            _pseudo: &mut FilletBrep,
+            _geom: &(),
+            _center_line: BSplineCurve,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn set_rail_curve(
+            &mut self,
+            _pseudo: &mut FilletBrep,
+            _geom: &(),
+            _rail: usize,
+            _curve: BSplineCurve,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn set_rail_mate_uv_curve(
+            &mut self,
+            _pseudo: &mut FilletBrep,
+            _geom: &(),
+            _rail: usize,
+            _uv_curve: BSplineCurve,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    /// The flat chord between the rails of radius `r0` balls on the x axis, from `x = x0` to
+    /// `x0 + 1` over the parameter `u` in [0, 1]: `r0 (1 - 1/sqrt 2)` off the balls in its
+    /// middle.
+    fn chord_skin(r0: f64, x0: f64) -> Surface {
+        bilinear([
+            [x0, 0.0, r0],
+            [x0 + 1.0, 0.0, r0],
+            [x0, r0, 0.0],
+            [x0 + 1.0, r0, 0.0],
+        ])
+    }
+
+    /// Stations at the parameters `ts` on the mock's balls.
+    fn skin_stations(ts: &[f64]) -> Vec<TsectPnt> {
+        ts.iter()
+            .map(|&t| pnt([t, 0.5], [t, 0.5], [1.0, 0.0, 0.0], t))
+            .collect()
+    }
+
+    fn skin_check(mock: &mut SkinMock, ts: &[f64], skin: &Surface) -> Result<SkinCheck> {
+        let k = &Kernel::default();
+        let (a, b) = surfaces();
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+        fi.skin_splits(mock, k, &skin_stations(ts), &[skin])
+    }
+
+    /// `FlushCurve` over three stations on the mock's balls, whose skin is the mock's.
+    fn flush_with(mut mock: SkinMock) -> Result<()> {
+        let k = &Kernel::default();
+        let (a, b) = surfaces();
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+        for p in skin_stations(&[0.0, 0.5, 1.0]) {
+            let id = fi.base.base.alloc_point(p);
+            fi.base.base.add_point_to_curve(id).unwrap();
+        }
+        let mut out = TsectCurves::default();
+        fi.flush_curve(&mut mock, k, &mut FilletBrep::new(), &mut out)
+    }
+
+    #[test]
+    fn the_skin_check_measures_the_worst_distance_and_splits_where_it_is_past() {
+        let skin = chord_skin(1.0, 0.0);
+        let mut mock = SkinMock::new(1.0, 0.0, None);
+        let SkinCheck {
+            splits,
+            worst,
+            not_finite_at,
+        } = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap();
+        assert_eq!((splits.len(), not_finite_at), (1, None));
+        let (j, at, _) = &splits[0];
+        assert_eq!(*j, 0);
+        assert!((at - 0.5).abs() < 1e-9, "{at}");
+        assert!(
+            (worst - (1.0 - core::f64::consts::FRAC_1_SQRT_2)).abs() < 1e-9,
+            "{worst}"
+        );
+    }
+
+    /// Before, a section that did not project into its span refused the round ("a span's
+    /// middle section is not on its skin"); now the span takes that section at its middle
+    /// knot, unmeasured, as the span equalisation places a station.
+    #[test]
+    fn a_section_off_its_skin_splits_the_span_at_its_knot() {
+        let skin = chord_skin(1.0, 5.0);
+        let mut mock = SkinMock::new(1.0, 0.0, None);
+        let SkinCheck { splits, worst, .. } = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap();
+        assert_eq!(splits.len(), 1);
+        let (j, at, mid) = &splits[0];
+        assert_eq!((*j, *at), (0, 0.5));
+        assert_eq!(mid.curve_parameter, 0.5);
+        assert!(worst.is_infinite());
+    }
+
+    #[test]
+    fn balls_whose_radius_outruns_their_centres_are_refused_as_nesting() {
+        let skin = chord_skin(1.0, 0.0);
+        let mut mock = SkinMock::new(1.0, 2.0, None);
+        let e = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::BallsNest {
+                s: 0.5,
+                rate: 2.0,
+                speed: 1.0
+            }),
+            "{e:?}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::BallsFold);
+        assert!(e.is_refusal());
+    }
+
+    /// A value that is not finite proves nothing about the skin: the span is split at its
+    /// knot (as before, when a NaN distance split the span), and the round is refused as a
+    /// defect only if it stays not finite to the cap.
+    #[test]
+    fn a_skin_measure_that_is_not_finite_splits_and_is_a_defect_at_the_cap() {
+        let skin = chord_skin(1.0, 0.0);
+        let mut mock = SkinMock::new(f64::NAN, 0.0, None);
+        let SkinCheck {
+            splits,
+            not_finite_at,
+            ..
+        } = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap();
+        assert_eq!(not_finite_at, Some(0.5));
+        assert_eq!((splits.len(), splits[0].1), (1, 0.5));
+        let e = flush_with(SkinMock::new(f64::NAN, 0.0, Some(skin))).unwrap_err();
+        assert!(
+            matches!(
+                e.blend_failure(),
+                Some(BlendFailure::SkinMeasureNotFinite { .. })
+            ),
+            "{e:?}"
+        );
+        assert!(e.is_defect());
+    }
+
+    #[test]
+    fn a_skin_that_does_not_run_over_its_stations_is_a_port_invariant() {
+        let skin = chord_skin(1.0, 0.0);
+        let mut mock = SkinMock::new(1.0, 0.0, None);
+        let e = skin_check(&mut mock, &[0.0, 2.0], &skin).unwrap_err();
+        assert!(
+            matches!(
+                e,
+                SolidError::PortInvariant {
+                    reason: "the skin does not run over its stations' parameters",
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn a_middle_section_is_retried_from_both_end_stations_then_refused_as_not_converging() {
+        let skin = chord_skin(1.0, 0.0);
+        // found on the third start: the check goes on
+        let mut mock = SkinMock::new(1.0, 0.0, None);
+        mock.fail_first = 2;
+        let c = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap();
+        assert_eq!((mock.calls, c.splits.len()), (3, 1));
+        // a failed solve is retried too
+        let mut mock = SkinMock::new(1.0, 0.0, None);
+        mock.err_first = 2;
+        let c = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap();
+        assert_eq!((mock.calls, c.splits.len()), (3, 1));
+        // found from none of the three: a defect with its station
+        let mut mock = SkinMock::new(1.0, 0.0, None);
+        mock.always_fail = true;
+        let e = skin_check(&mut mock, &[0.0, 1.0], &skin).unwrap_err();
+        assert_eq!(mock.calls, 3);
+        match e.blend_failure() {
+            Some(&BlendFailure::StationDidNotConverge {
+                s,
+                residual,
+                step,
+                iterations,
+                ..
+            }) => {
+                // (the plane solve reports only whether it found the section)
+                assert_eq!((s, residual, step, iterations), (0.5, None, None, None));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(e.is_defect());
+    }
+
+    /// A skin that stays off its balls whatever the stations (the mock builds the same flat
+    /// chord every round) reaches the cap and is refused with the numbers.
+    #[test]
+    fn a_skin_still_off_its_balls_at_the_cap_is_refused_with_its_numbers() {
+        let e = flush_with(SkinMock::new(1.0, 0.0, Some(chord_skin(1.0, 0.0)))).unwrap_err();
+        let tol = {
+            let k = &Kernel::default();
+            let (a, b) = surfaces();
+            let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+            let fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
+                FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+            fi.base.base.this_approx_tol_3d
+        };
+        match e.blend_failure() {
+            Some(&BlendFailure::SkinPastStationCap {
+                asked,
+                reached,
+                stations,
+                rounds,
+            }) => {
+                assert_eq!(asked, tol);
+                assert!(
+                    (reached - (1.0 - core::f64::consts::FRAC_1_SQRT_2)).abs() < 1e-9,
+                    "{reached}"
+                );
+                assert_eq!(rounds, SKIN_ROUNDS, "{e}");
+                assert!(stations > 3, "{e}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(e.kind(), crate::error::ErrorKind::NotWithinTolerance);
     }
 }

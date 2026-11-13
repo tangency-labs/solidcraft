@@ -17,7 +17,9 @@
 //! | [`BlendFailure::NoRoom`]               | the reason's ([`no_room_class`]), 101 to 124 or 128 |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
-//! | [`BlendFailure::StageFailed`]          | [`ErrorKind::StageFailed`] (127)              |
+//! | [`BlendFailure::StageFailed`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
+//! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
+//! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -27,7 +29,7 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`]              | `SM_ERR_NULL_POINTER`             |
 //! | [`BlendFailure::InvalidValue`]         | `SM_ERR_INVALID_INPUT`            |
@@ -77,14 +79,14 @@ pub enum BlendFailure {
     StationDidNotConverge {
         /// The station: the blend's parameter along its spine.
         s: f64,
-        /// The residual the solve stopped at.
-        residual: f64,
+        /// The residual the solve stopped at (`None` where the solve does not report it).
+        residual: Option<f64>,
         /// The tolerance it had to reach.
         tolerance: f64,
-        /// The last step it took.
-        step: f64,
-        /// The iterations it took.
-        iterations: u32,
+        /// The last step it took (`None` where the solve does not report it).
+        step: Option<f64>,
+        /// The iterations it took (`None` where the solve does not report them).
+        iterations: Option<u32>,
     },
     /// The boundary loop of the faces the rails enclose is open: the failure's site vertex
     /// is where. A defect ([`ErrorKind::TrimLeaks`]).
@@ -96,6 +98,43 @@ pub enum BlendFailure {
     /// holds the operation, the status (for the goldens only) and where in solidcore's source
     /// it was built ([`Failure::origin`]).
     StageFailed,
+    /// A variable round's skin of balls' touch circles was still measured farther than
+    /// `asked` from its balls when its refinement reached its most rounds or stations
+    /// (#15256): the worst distance measured was `reached` (infinite where a span's section
+    /// could not be placed on the skin to be measured), with `stations` stations after
+    /// `rounds` rounds. Not within the tolerance ([`ErrorKind::NotWithinTolerance`]): no
+    /// tolerance is loosened and the skin is not kept.
+    SkinPastStationCap {
+        /// The tolerance asked: the solver's approximation tolerance.
+        asked: f64,
+        /// The largest distance measured from the skin to its balls at the cap.
+        reached: f64,
+        /// The stations the skin had at the cap.
+        stations: usize,
+        /// The refinement rounds run.
+        rounds: usize,
+    },
+    /// A quantity a variable round's skin check computes (a distance from the skin to its
+    /// balls, or the balls' radius rate and centre speed at a section) was still not a finite
+    /// number, last at the section at `s` along the trace, when the refinement reached its
+    /// most rounds or stations (#15256): a defect ([`ErrorKind::StageFailed`]). A value that
+    /// is not finite before the cap splits its span instead.
+    SkinMeasureNotFinite {
+        /// The section's parameter along the trace.
+        s: f64,
+    },
+    /// At the section at `s` along the trace a variable round's balls change their radius at
+    /// least as fast as their centres move (`|r'| = rate >= |c'| = speed`): each ball holds
+    /// the next, so no rolling-ball surface exists there (#15256). A refusal
+    /// ([`ErrorKind::BallsFold`]).
+    BallsNest {
+        /// The section's parameter along the trace.
+        s: f64,
+        /// `|r'|`: how fast the balls' radius changes along the trace.
+        rate: f64,
+        /// `|c'|`: how fast the balls' centres move along the trace.
+        speed: f64,
+    },
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
     /// ([`BlendFailure::is_phrase`]).
@@ -194,6 +233,9 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::SkinPastStationCap { .. }
+            | Self::SkinMeasureNotFinite { .. }
+            | Self::BallsNest { .. }
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
@@ -209,7 +251,10 @@ impl BlendFailure {
     /// The failure's class, its stable [`ErrorKind`], derived from the cause: the reason's
     /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
-    /// trim loop, and [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`]. A phrase
+    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`] and
+    /// [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
+    /// [`BlendFailure::SkinPastStationCap`] and [`ErrorKind::BallsFold`] for
+    /// [`BlendFailure::BallsNest`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -218,7 +263,9 @@ impl BlendFailure {
             Self::NoRoom(reason) => no_room_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::StageFailed => ErrorKind::StageFailed,
+            Self::StageFailed | Self::SkinMeasureNotFinite { .. } => ErrorKind::StageFailed,
+            Self::SkinPastStationCap { .. } => ErrorKind::NotWithinTolerance,
+            Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -243,7 +290,10 @@ impl BlendFailure {
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
-            | Self::StageFailed => false,
+            | Self::StageFailed
+            | Self::SkinPastStationCap { .. }
+            | Self::SkinMeasureNotFinite { .. }
+            | Self::BallsNest { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -269,6 +319,9 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::SkinPastStationCap { .. }
+            | Self::SkinMeasureNotFinite { .. }
+            | Self::BallsNest { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -293,16 +346,42 @@ impl core::fmt::Display for BlendFailure {
                 tolerance,
                 step,
                 iterations,
-            } => write!(
-                f,
-                "{}: the station at s = {s} did not converge: residual {residual} > {tolerance} after {iterations} iterations (last step {step})",
-                self.class()
-            ),
+            } => {
+                let shown = |x: Option<String>| x.unwrap_or_else(|| "unreported".into());
+                write!(
+                    f,
+                    "{}: the station at s = {s} did not converge: residual {} > {tolerance} after {} iterations (last step {})",
+                    self.class(),
+                    shown(residual.map(|r| r.to_string())),
+                    shown(iterations.map(|n| n.to_string())),
+                    shown(step.map(|d| d.to_string())),
+                )
+            }
             Self::TrimLoopOpen => write!(f, "{}: the trim loop is open", self.class()),
             Self::TrimLoopDoesNotSeparate => {
                 write!(f, "{}: the trim loop does not separate", self.class())
             }
             Self::StageFailed => write!(f, "{}", self.class()),
+            Self::SkinPastStationCap {
+                asked,
+                reached,
+                stations,
+                rounds,
+            } => write!(
+                f,
+                "{}: the round's skin is {reached} from its balls, past {asked}, with {stations} stations after {rounds} rounds",
+                self.class()
+            ),
+            Self::SkinMeasureNotFinite { s } => write!(
+                f,
+                "{}: the skin check computed a value that is not finite at s = {s}",
+                self.class()
+            ),
+            Self::BallsNest { s, rate, speed } => write!(
+                f,
+                "{}: at s = {s} the balls' radius changes at {rate}, as fast as their centres move ({speed}): no rolling-ball surface exists there",
+                self.class()
+            ),
             Self::Failed(what)
             | Self::InvalidValue(what)
             | Self::BadIntersections(what)
@@ -650,10 +729,10 @@ mod tests {
             (
                 BlendFailure::StationDidNotConverge {
                     s: 0.42,
-                    residual: 3e-6,
+                    residual: Some(3e-6),
                     tolerance: 1e-9,
-                    step: 1e-4,
-                    iterations: 50,
+                    step: Some(1e-4),
+                    iterations: Some(50),
                 },
                 ErrorKind::StationDidNotConverge,
             ),
@@ -711,15 +790,30 @@ mod tests {
             "blend::op",
             BlendFailure::StationDidNotConverge {
                 s: 0.42,
-                residual: 3e-6,
+                residual: Some(3e-6),
                 tolerance: 1e-9,
-                step: 0.0001,
-                iterations: 50,
+                step: Some(0.0001),
+                iterations: Some(50),
             },
         );
         assert_eq!(
             station.to_string(),
             "blend::op: station_did_not_converge: the station at s = 0.42 did not converge: residual 0.000003 > 0.000000001 after 50 iterations (last step 0.0001)"
+        );
+        // a solve that reports only whether it converged (#15256's skin check)
+        let unreported = SolidError::blend(
+            "blend::op",
+            BlendFailure::StationDidNotConverge {
+                s: 0.5,
+                residual: None,
+                tolerance: 1e-9,
+                step: None,
+                iterations: None,
+            },
+        );
+        assert_eq!(
+            unreported.to_string(),
+            "blend::op: station_did_not_converge: the station at s = 0.5 did not converge: residual unreported > 0.000000001 after unreported iterations (last step unreported)"
         );
         assert_eq!(
             SolidError::blend("blend::op", BlendFailure::NoRoom(R::OverflowWithRollover))
