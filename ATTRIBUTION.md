@@ -845,6 +845,22 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | `assets/locales/pending/hole-group-folder.json` | SolidCraft contributors | Original Hole grouping preference labels and translations | MIT OR Apache-2.0 |
 | assets/locales/pending/press-pull-dialog-title.json | SolidCraft contributors | Original Press Pull dialog title translations for SolidCraft's English catalog; no external text used | MIT OR Apache-2.0 |
 | docs/layers/layers.svg | SolidCraft contributors | original diagram of SolidCraft's crate layers for docs/layers.md, written as SVG in solidcore's docs/layers diagram style | MIT OR Apache-2.0 |
+| assets/locales/pending/agent-chat-select-all.json | SolidCraft contributors | Original assistant chat select-all strings and translations | MIT OR Apache-2.0 |
+| docs/book/src/media/ui-tour/window.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`solidcraft --sample`, light theme, software renderer, 1280x800) with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/parts.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (light theme, software renderer, 1280x800) showing a fully constrained sketch, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/parameters/dialog.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (light theme, software renderer) showing the Parameters dialog, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/getting-started/start.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (light theme, software renderer, 1280x800) showing the start page with its built-in sample thumbnails, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/files/menu.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`--sample`, light theme, software renderer) showing the File menu, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| assets/locales/pending/constraint-glyph-size.json | SolidCraft contributors | Original constraint glyph size preference label and help text | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/plane_auto.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/end_cap.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/end_cap_inward.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/end_cap_outward.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/lv.json | SolidCraft contributors | Original Latvian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/fonts/craft-ui-kr/CraftUI-KR.otf | Adobe / Google Inc. (Noto Sans KR); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/KR Regular, glyph-subset for the Hangul syllable block and renamed Craft UI KR (OFL reserved-name); licence text in assets/fonts/craft-ui-kr/OFL.txt; web UI Korean | SIL OFL 1.1 |
+| assets/fonts/craft-ui-kr/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-KR.otf | SIL OFL 1.1 |
+| `assets/locales/pending/names-from-file.json` | SolidCraft contributors | Original label for the names-from-file preference | MIT OR Apache-2.0 |
+| `assets/locales/pending/snap-points.json` | SolidCraft contributors | Original snap point labels and messages | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -862,6 +878,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | apps/solidcraft/src/open_documents.rs (macOS: files opened from Finder and the Dock, its test) | VectorCraft `apps/vectorcraft/src/open_documents.rs` (https://github.com/storytold/vectorcraft) | MIT OR Apache-2.0 |
 | LICENSE-MIT, LICENSE-APACHE (licence text) | CADCraft | — |
 | .github/workflows/release.yml, .github/workflows/packaging-lint.yml and packaging/ (release pipeline: Linux AppImage/deb/rpm/Flatpak/tar.gz, FreeBSD, macOS dmg, Windows MSI/portable zip, web zip; AppRun, nfpm, Flatpak, WiX and Info.plist templates) | PhotoCraft (https://github.com/storytold/photocraft) `.github/workflows/{release,packaging-lint}.yml`, `packaging/` | Apache-2.0 |
+| crates/viewport-gpu/src/environment.rs (the neutral room scene, the GGX prefilter and environment-BRDF table), crates/viewport-gpu/shaders/viewport.wgsl (`finished`, `ibl_ggx_fresnel`, `pbr_neutral`) | google/model-viewer `EnvironmentScene.ts` and its exposure for it (https://github.com/google/model-viewer); KhronosGroup glTF-Sample-Renderer `ibl.glsl`, `pbr.frag` (https://github.com/KhronosGroup/glTF-Sample-Renderer); KhronosGroup ToneMapping `pbrNeutral.glsl`; google/filament `light_indirect.fs`, `ambient_occlusion.fs` (https://github.com/google/filament) | Apache-2.0 |
 
 ## Incremental HDR codec adapter
 

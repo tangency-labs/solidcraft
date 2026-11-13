@@ -101,7 +101,10 @@ impl Brep {
     /// [`Brep::to_native`], with what the mapping kept as SMLib wrote it.
     pub fn to_native_report(&self) -> std::result::Result<(b::Brep, Report), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        let r = native(&arrays);
+        let r = native_ordered(&arrays).and_then(|(mut brep, report, order)| {
+            self.with_definitions(&mut brep, &order)?;
+            Ok((brep, report))
+        });
         if let Ok((record, _)) = &r {
             crate::trace::exported(self, record);
         }
@@ -114,11 +117,37 @@ impl Brep {
     /// `GetEdges`), the order its history uses.
     pub fn to_native_ordered(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        let r = native_ordered(&arrays).map(|(brep, _, order)| (brep, order));
+        let r = native_ordered(&arrays).and_then(|(mut brep, _, order)| {
+            self.with_definitions(&mut brep, &order)?;
+            Ok((brep, order))
+        });
         if let Ok((record, _)) = &r {
             crate::trace::exported(self, record);
         }
         r
+    }
+}
+
+impl Brep {
+    /// The record's blend faces as their definitions: each face of this body whose surface carries
+    /// a definition a record keeps (a procedural blend, a round of an exact class whose net has no
+    /// analytic label) is written as that definition, with its net, the face's NURBS, as its form.
+    /// The arrays carry the net alone; `order` places this body's faces in the record.
+    fn with_definitions(&self, record: &mut b::Brep, order: &Order) -> Res<()> {
+        let definitions = crate::core::definition::definitions(self.core()).map_err(ExportError::Smlib)?;
+        for (i, definition) in definitions.into_iter().enumerate() {
+            let Some(definition) = definition else { continue };
+            let at = if order.faces.is_empty() { i } else { *order.faces.get(i).ok_or_else(|| invalid("a face the order does not place"))? };
+            let face = record.faces.get_mut(at).ok_or_else(|| invalid("a face the record does not have"))?;
+            let net = face.nurbs.as_ref().unwrap_or(&face.surface);
+            if !matches!(net, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. }) {
+                continue;
+            }
+            let net = face.nurbs.take().unwrap_or_else(|| face.surface.clone());
+            face.surface = b::Surface::Blend { definition: Box::new(definition) };
+            face.nurbs = Some(net);
+        }
+        Ok(())
     }
 }
 

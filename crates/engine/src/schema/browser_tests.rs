@@ -76,7 +76,7 @@ fn the_reply_names_the_parameters_kept_in_the_old_unit() {
 
 #[test]
 fn browser_schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<BodyRenameParams>(), &["body", "name"]);
+    assert_keys(input_schema_for::<BodyRenameParams>(), &["bodies", "body", "name"]);
     assert_keys(input_schema_for::<BrowserGroupParams>(), &["component", "folder", "items", "name", "parent"]);
     assert_keys(input_schema_for::<BrowserUngroupParams>(), &["group"]);
     assert_keys(input_schema_for::<BrowserRenameGroupParams>(), &["group", "name"]);
@@ -99,6 +99,9 @@ fn browser_strict_keeps_todays_errors() {
         ("body.rename", json!({})),
         ("body.rename", json!({"body": 5, "name": "X"})),
         ("body.rename", json!({"body": null, "name": "X"})),
+        ("body.rename", json!({"bodies": [], "name": "X"})),
+        ("body.rename", json!({"bodies": ["Box", 5], "name": "X"})),
+        ("body.rename", json!({"bodies": "Box", "name": "X"})),
         ("browser.group", json!({})),
         ("browser.group", json!({"folder": "components"})),
         ("browser.group", json!({"folder": null})),
@@ -206,7 +209,9 @@ fn the_browser_schemas_take_what_the_handlers_read() {
         r.sort();
         r
     };
-    assert_eq!(required(input_schema_for::<BodyRenameParams>()), ["body", "name"]);
+    assert_eq!(required(input_schema_for::<BodyRenameParams>()), ["name"]);
+    // And one body or a list of them (#12341).
+    assert_eq!(input_schema_for::<BodyRenameParams>().as_value()["anyOf"], json!([{"required": ["body"]}, {"required": ["bodies"]}]));
     assert_eq!(required(input_schema_for::<BrowserGroupParams>()), Vec::<String>::new());
     assert_eq!(required(input_schema_for::<BrowserUngroupParams>()), ["group"]);
     assert_eq!(required(input_schema_for::<BrowserRenameGroupParams>()), ["group", "name"]);

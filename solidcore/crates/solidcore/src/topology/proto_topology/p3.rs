@@ -282,8 +282,9 @@ impl<O> Mates<O> for NoMates {
     }
 
     fn remove_relationship(&mut self, _brep_entity: O, _other_entity: O) -> Result<()> {
-        Err(SolidError::sm_err(
+        Err(SolidError::topology_failed(
             "topology::proto_topology::p3::remove_relationship",
+            "the two are not a mated pair",
         ))
     }
 }
@@ -613,7 +614,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             k.fixes.ssi_proto_topology_statuses_pass_on,
         )?)?
         .map_or((None, false), |(vd, created)| (Some(vd), created));
-        let new_vd = new_vd.ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
+        let new_vd = new_vd.ok_or_else(|| {
+            SolidError::topology_missing(OP_ED_SPLIT, "the vertex definition at the split")
+        })?;
 
         // For cleanup object: don't do it if it was 'found' (vs. created).
         let clean_vd = created.then_some(new_vd);
@@ -720,16 +723,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let c3 = d.xsect_curve_3d();
         let uvs = [d.xsect_uv_curve(1), d.xsect_uv_curve(2)];
         let copy = curve_of(&*geometry, c3)?.copy(k)?;
-        let handle = geometry
-            .insert_curve(copy)
-            .ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
+        let handle = geometry.insert_curve(copy).ok_or_else(|| {
+            SolidError::topology_missing(OP_ED_SPLIT, "the copied 3D curve's handle")
+        })?;
         self.set_ed_curve_3d(new_ed, Some(handle))?;
         for (which, uv) in [1, 2].into_iter().zip(uvs) {
             if uv.is_some() {
                 let copy = curve_of(&*geometry, uv)?.copy(k)?;
-                let handle = geometry
-                    .insert_curve(copy)
-                    .ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
+                let handle = geometry.insert_curve(copy).ok_or_else(|| {
+                    SolidError::topology_missing(OP_ED_SPLIT, "the copied UV curve's handle")
+                })?;
                 self.edge_def_mut(new_ed)
                     .ok_or(dangling("edge definition is deleted"))?
                     .set_xsect_curve_uv(which, Some(handle));
@@ -972,7 +975,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let (Some(&first1), Some(&first2)) =
             (e1.edge_definitions().first(), e2.edge_definitions().first())
         else {
-            return Err(SolidError::sm_err(OP_SPLIT_INT)); // [Reg_091215_simon_closed]
+            return Err(SolidError::topology_failed(
+                OP_SPLIT_INT,
+                "a proto edge has no edge definitions",
+            )); // [Reg_091215_simon_closed]
         };
 
         // no work - Skip the pair if they're known to overlap. Handled during Resolve
@@ -2038,6 +2044,19 @@ mod tests {
     use crate::surface::surface::Surface;
     use crate::surface::volume::Volume;
     use crate::topology::Brep;
+
+    /// An intersector without relationships has no mated pair to unlink.
+    #[test]
+    fn no_mates_has_no_relationship_to_remove() {
+        let e = Mates::<H>::remove_relationship(&mut NoMates, vtx(0), vtx(1)).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Failed(
+                "the two are not a mated pair"
+            ))
+        );
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     struct H(usize, ClassObjectKind);

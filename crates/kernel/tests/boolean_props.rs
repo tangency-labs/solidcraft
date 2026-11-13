@@ -285,6 +285,33 @@ fn edge_only_box_contact_is_scale_invariant() {
     }
 }
 
+/// A cylinder lying along a box's top edge, tangent there to the box's top face (scale_invariant's
+/// shrunk case). From 10x the two faces, a step off the edge, made too small an angle and were
+/// taken for parallel (a zero sector), and from 100x for one surface (coincident faces): the
+/// union failed.
+#[test]
+fn cylinder_resting_on_a_box_edge_is_scale_invariant() {
+    let a = Prim::Cyl { at: [0.0, 2.5, 15.0], axis: 1, r: 7.5, h: 25.0 };
+    let b = Prim::Box { at: [0.0, 0.0, 0.0], size: [5.0, 5.0, 7.5] };
+    for k in [0.05, 1.0, 40.0, 100.0, 1000.0] {
+        check(scale(&a, &b, k));
+        check(scale(&b, &a, k));
+    }
+}
+
+/// Two cylinders side by side, touching along a line. From 100x their faces, a step off the
+/// line, were taken for one surface: the union failed, and at 1000x the intersection was a
+/// whole cylinder.
+#[test]
+fn cylinders_touching_along_a_line_are_scale_invariant() {
+    let a = Prim::Cyl { at: [0.0, 0.0, 0.0], axis: 1, r: 7.5, h: 25.0 };
+    let b = Prim::Cyl { at: [15.0, 2.5, 0.0], axis: 1, r: 7.5, h: 25.0 };
+    for k in [100.0, 1000.0] {
+        check(scale(&a, &b, k));
+        check(scale(&b, &a, k));
+    }
+}
+
 fn check(r: Result<(), TestCaseError>) {
     if let Err(e) = r {
         panic!("{e}");

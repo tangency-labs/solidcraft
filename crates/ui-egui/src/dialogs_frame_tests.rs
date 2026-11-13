@@ -151,6 +151,23 @@ fn a_whole_sketch_section_stays_whole_through_an_edit() {
     assert_eq!(apply_commands(&app, &e).unwrap()[0].1["params"]["profile"]["kind"], "rect_tube");
 }
 
+/// A member placed by a profile point (`locate`, which the dialog has no field for) keeps it
+/// through an edit, so it stays attached where it was.
+#[test]
+fn an_edit_keeps_a_located_point() {
+    let mut app = frame_app();
+    let profile = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": profile, "locate": [10, 5]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    member(&mut e).angle = "90 deg".into();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["locate"], json!([10.0, 5.0]), "{}", c[0].1);
+    run_all(&mut app, c);
+    let FeatureKind::FrameMember { locate, .. } = &app.session.doc.feature(f).unwrap().kind else { panic!() };
+    assert_eq!(*locate, Some([10.0, 5.0]));
+}
+
 /// Without lines there is nothing to place; lines and the section in one sketch are refused.
 #[test]
 fn missing_or_mixed_picks_are_refused() {

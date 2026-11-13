@@ -158,30 +158,10 @@ mod tests {
     /// their messages name no SMLib API.
     #[test]
     fn the_heal_routines_build_no_bare_statuses() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/heal");
-        for rel in [
-            "gap.rs",
-            "face_props.rs",
-            "heal_data/p1.rs",
-            "heal_data/p2.rs",
-            "heal_data/p3.rs",
-            "stitch/p1.rs",
-            "stitch/p2.rs",
-        ] {
-            let text = std::fs::read_to_string(src.join(rel))
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("#[cfg(test)]\nmod tests")
-                .map_or(text.as_str(), |at| &text[..at]);
-            for needle in [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-                "\"SmApi",
-            ] {
-                assert!(!library.contains(needle), "{needle} in {rel}");
-            }
+        super::super::bare_scan::assert_waiting("heal", 7, &[]);
+        for (rel, text) in super::super::bare_scan::library_files("heal", 7) {
+            let library = super::super::bare_scan::library_text(&text);
+            assert!(!library.contains("\"SmApi"), "\"SmApi in {rel}");
         }
     }
 }

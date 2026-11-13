@@ -22,7 +22,7 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
     if keys.is_empty() || keys.len() > 1000 {
         return Err(bad(cmd, "`features` must list 1…1000 features"));
     }
-    if s.doc.marker.is_some() {
+    if s.doc.marker.is_some_and(|m| m < s.doc.features.len()) {
         return Err(bad(cmd, "finish timeline rollback before moving features"));
     }
     if !s.pending_moves.is_empty() {
