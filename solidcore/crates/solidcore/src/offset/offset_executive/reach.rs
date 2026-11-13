@@ -41,6 +41,7 @@ use crate::error::offset::OffsetFailure;
 use crate::error::Failure;
 use crate::error::{Result, SolidError};
 use crate::geom::certified;
+use crate::geom::expansion as exact;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector3d::{sqrt, Vec3};
 use crate::kernel::Kernel;
@@ -322,46 +323,6 @@ struct Tangent {
     raw: Vec3,
 }
 
-/// The point nearest `p` where the planes `a` and `b` meet: on their line of meeting, the
-/// point `p + α a.n + β b.n` (`α + β c = h_a`, `α c + β = h_b`, `c = a.n·b.n`, `h` each
-/// plane's height over `p`). Planes within `tangent_sine` of parallel meet only where they
-/// are one plane (within `tolerance` apart; then at `p`'s foot on it), else not at all.
-fn meeting_near(
-    p: Vec3,
-    a: Tangent,
-    b: Tangent,
-    tangent_sine: f64,
-    tolerance: f64,
-) -> Option<Vec3> {
-    let c = a.normal.dot(b.normal);
-    let h_a = (a.point - p).dot(a.normal);
-    let h_b = (b.point - p).dot(b.normal);
-    let det = 1.0 - c * c;
-    if det <= (tangent_sine * tangent_sine).max(EFF_ZERO) {
-        // one plane where the other's point lies on it, else apart
-        return ((b.point - a.point).dot(a.normal).abs() <= tolerance).then(|| p + a.normal * h_a);
-    }
-    let alpha = (h_a - c * h_b) / det;
-    let beta = (h_b - c * h_a) / det;
-    Some(p + a.normal * alpha + b.normal * beta)
-}
-
-/// The point where the planes `a`, `b` and `c` meet, `None` where they meet in no one point
-/// (two of them within `tangent_sine` of parallel: their triple product is below it).
-fn corner_of(a: Tangent, b: Tangent, c: Tangent, tangent_sine: f64) -> Option<Vec3> {
-    let bc = b.normal.cross(c.normal);
-    let det = a.normal.dot(bc);
-    if det.abs() <= tangent_sine.max(EFF_ZERO) {
-        return None;
-    }
-    let (ha, hb, hc) = (
-        a.point.dot(a.normal),
-        b.point.dot(b.normal),
-        c.point.dot(c.normal),
-    );
-    Some((bc * ha + c.normal.cross(a.normal) * hb + a.normal.cross(b.normal) * hc) * (1.0 / det))
-}
-
 /// A class a local operation's reach is bounded on: a plane, or a cone (a cylinder for
 /// `tan_angle = 0`) or a sphere, as [`Implicit`] holds them, or a bare B-spline net
 /// ([`net::Net`]).
@@ -415,27 +376,53 @@ fn point_distance(x: Vec3, c: &Exact) -> Option<f64> {
 }
 
 /// How two planes beside an edge meet, decided once for the whole edge from the planes
-/// alone (the thresholds of [`meeting_near`]).
+/// alone. Parallelism is exact; an angular tangency tolerance does not make two
+/// intersecting planes parallel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PlanePair {
     /// On a line.
     Line,
-    /// They are one plane (within the tangency tolerance of parallel, within the B-rep's
-    /// tolerance apart).
+    /// They are parallel and within the B-rep's tolerance apart.
     One,
     /// Parallel and apart: they meet nowhere.
     Apart,
 }
 
-fn plane_pair(a: Tangent, b: Tangent, tangent_sine: f64, tolerance: f64) -> PlanePair {
-    let c = a.normal.dot(b.normal);
-    if 1.0 - c * c > (tangent_sine * tangent_sine).max(EFF_ZERO) {
-        PlanePair::Line
+fn plane_pair(a: Tangent, b: Tangent, tolerance: f64) -> Option<PlanePair> {
+    let cross = exact::cross(a.raw, b.raw)?;
+    if cross.iter().any(|component| !exact::is_zero(component)) {
+        Some(PlanePair::Line)
     } else if (b.point - a.point).dot(a.normal).abs() <= tolerance {
-        PlanePair::One
+        Some(PlanePair::One)
     } else {
-        PlanePair::Apart
+        Some(PlanePair::Apart)
     }
+}
+
+/// Whether a plane pair's crossing must override the input's tangent-edge construction.
+/// Ordinary corners already take the mating path. Only nearly tangent input planes need
+/// the override; an input of another kind keeps the crossing for its sector test to decide.
+fn plane_crossing_override(
+    k: &Kernel,
+    b: &Brep,
+    faces: [Option<FaceId>; 2],
+    tangent_sine: f64,
+) -> Result<bool> {
+    let mut planes = Vec::new();
+    for face in faces.into_iter().flatten() {
+        let Some(surface) = crate::topology::face::p2::surface(b, face)? else {
+            return Ok(true);
+        };
+        match exact_class(k, surface)? {
+            Some(Exact::Plane(plane)) => planes.push(plane),
+            _ => return Ok(true),
+        }
+    }
+    let [a, c] = planes.as_slice() else {
+        return Ok(true);
+    };
+    let cross = a.normal.cross(c.normal);
+    Ok(cross.dot(cross) <= (tangent_sine * tangent_sine).max(EFF_ZERO))
 }
 
 /// The rounding of a unit normal and a height over it, relative to the distance of the
@@ -452,37 +439,147 @@ fn plane_distance(x: Vec3, a: Tangent) -> f64 {
     d.dot(a.normal).abs() + height_rounding() * d.length() + f64::from_bits(1)
 }
 
-/// An upper bound on the distance from `x` to the line where the planes `a` and `b` meet
-/// (`det = 1 − c²` above the tangency threshold, [`PlanePair::Line`]): the computed foot
-/// ([`meeting_near`]) and the rounding of its solve, whose heights are each off by
-/// [`height_rounding`] of their size and whose `α`, `β` divide by `det`, itself off by
-/// `gamma_8`, so off by both over `det²`.
-fn line_distance(x: Vec3, a: Tangent, b: Tangent, tangent_sine: f64, tolerance: f64) -> f64 {
-    let c = a.normal.dot(b.normal);
-    let det = 1.0 - c * c;
-    let Some(foot) = meeting_near(x, a, b, tangent_sine, tolerance) else {
-        return f64::INFINITY;
-    };
-    let size = (a.point - x).length() + (b.point - x).length();
-    let solve = (4.0 * height_rounding() + certified::gamma(16)) * size / (det * det);
-    let value = (foot - x).length();
-    value + solve + certified::gamma(5) * value + f64::from_bits(1)
+/// Enclose an exact expansion only after cancellation has been resolved. Zero components
+/// add no rounding; the remaining sum is outward rounded by the interval arithmetic.
+fn expansion_bound(value: &[f64]) -> Di {
+    value
+        .iter()
+        .rev()
+        .filter(|&&v| v != 0.0)
+        .fold(Di::constant(0.0), |sum, &v| sum + Di::constant(v))
 }
 
-/// An upper bound on the distance from `p` to the corner `x` of the planes `a`, `b`, `c`
-/// ([`corner_of`]): the computed distance and the rounding of the solve, its heights each
-/// off by [`height_rounding`] of their size and the triple product `det` by `gamma_8`, so
-/// off by both over `det²`.
-fn corner_distance(p: Vec3, x: Vec3, planes: [Tangent; 3]) -> f64 {
+fn expansion_product(a: &[f64], b: &[f64]) -> Option<Vec<f64>> {
+    b.iter().try_fold(Vec::new(), |sum, &v| {
+        Some(exact::add(&sum, &exact::scale(a, v)?))
+    })
+}
+
+/// A plane's exact height above `p`, including cancellation in the point difference.
+fn plane_height(p: Vec3, plane: Tangent) -> Option<Vec<f64>> {
+    Some(exact::sub(
+        &exact::dot(plane.point, plane.raw)?,
+        &exact::dot(p, plane.raw)?,
+    ))
+}
+
+fn distance_bound(squared: Di) -> Option<f64> {
+    let upper = squared.v.hi;
+    (upper >= 0.0 && upper.is_finite()).then(|| round_up(sqrt(upper)))
+}
+
+/// Bound the nearest distance to the planes' line. Set the displacement along the
+/// largest cross-product component to zero and solve the other two coordinates exactly,
+/// then remove the component along the line. This avoids the cancellation of the Gram
+/// solve for almost coincident planes.
+fn plane_line_distance(p: Vec3, a: Tangent, b: Tangent) -> Option<f64> {
+    let [dx, dy, dz] = exact::cross(a.raw, b.raw)?;
+    let direction = Dv {
+        x: expansion_bound(&dx),
+        y: expansion_bound(&dy),
+        z: expansion_bound(&dz),
+    };
+    let squared_direction = direction.dot(direction);
+    if !squared_direction.excludes_zero() {
+        return None;
+    }
+    let x = exact::to_f64(&dx).abs();
+    let y = exact::to_f64(&dy).abs();
+    let z = exact::to_f64(&dz).abs();
+    let (den, a1, a2, b1, b2, d1, d2) = if x >= y && x >= z {
+        (
+            dx,
+            a.raw.y,
+            a.raw.z,
+            b.raw.y,
+            b.raw.z,
+            direction.y,
+            direction.z,
+        )
+    } else if y >= z {
+        (
+            dy,
+            a.raw.z,
+            a.raw.x,
+            b.raw.z,
+            b.raw.x,
+            direction.z,
+            direction.x,
+        )
+    } else {
+        (
+            dz,
+            a.raw.x,
+            a.raw.y,
+            b.raw.x,
+            b.raw.y,
+            direction.x,
+            direction.y,
+        )
+    };
+    let den = expansion_bound(&den);
+    if !den.excludes_zero() {
+        return None;
+    }
+    let ha = plane_height(p, a)?;
+    let hb = plane_height(p, b)?;
+    let u = expansion_bound(&exact::sub(
+        &exact::scale(&ha, b2)?,
+        &exact::scale(&hb, a2)?,
+    )) / den;
+    let v = expansion_bound(&exact::sub(
+        &exact::scale(&hb, a1)?,
+        &exact::scale(&ha, b1)?,
+    )) / den;
+    let along = u * d1 + v * d2;
+    distance_bound(u * u + v * v - along * along / squared_direction)
+}
+
+fn line_distance(p: Vec3, a: Tangent, b: Tangent) -> f64 {
+    plane_line_distance(p, a, b).unwrap_or(f64::INFINITY)
+}
+
+/// Enclose one coordinate of Cramer's solve from exact heights and cross products.
+fn corner_coordinate(heights: &[Vec<f64>; 3], crosses: [&[f64]; 3], determinant: Di) -> Option<Di> {
+    let [ha, hb, hc] = heights;
+    let [bc, ca, ab] = crosses;
+    Some(
+        expansion_bound(&exact::add(
+            &exact::add(&expansion_product(ha, bc)?, &expansion_product(hb, ca)?),
+            &expansion_product(hc, ab)?,
+        )) / determinant,
+    )
+}
+
+/// The distance to the unique meeting of three planes, enclosed on their stored normals.
+/// Exact numerator arithmetic also resolves almost coincident drafted planes. An exactly
+/// singular system has no unique corner; an unresolved solve is refused.
+fn plane_corner_distance(p: Vec3, planes: [Tangent; 3]) -> Option<CornerMeeting> {
     let [a, b, c] = planes;
-    let det = a.normal.dot(b.normal.cross(c.normal)).abs();
-    let size: f64 = planes
-        .iter()
-        .map(|t| t.point.dot(t.normal).abs() + t.point.length())
-        .sum();
-    let solve = (4.0 * height_rounding() + certified::gamma(16)) * size / (det * det);
-    let value = (x - p).length();
-    value + solve + certified::gamma(5) * (value + p.length() + x.length()) + f64::from_bits(1)
+    let determinant = exact::det3(a.raw, b.raw, c.raw)?;
+    if exact::is_zero(&determinant) {
+        return Some(CornerMeeting::Nowhere);
+    }
+    let determinant = expansion_bound(&determinant);
+    if !determinant.excludes_zero() {
+        return None;
+    }
+    let heights = [
+        plane_height(p, a)?,
+        plane_height(p, b)?,
+        plane_height(p, c)?,
+    ];
+    let [bcx, bcy, bcz] = exact::cross(b.raw, c.raw)?;
+    let [cax, cay, caz] = exact::cross(c.raw, a.raw)?;
+    let [abx, aby, abz] = exact::cross(a.raw, b.raw)?;
+    let x = corner_coordinate(&heights, [&bcx, &cax, &abx], determinant)?;
+    let y = corner_coordinate(&heights, [&bcy, &cay, &aby], determinant)?;
+    let z = corner_coordinate(&heights, [&bcz, &caz, &abz], determinant)?;
+    distance_bound(x * x + y * y + z * z).map(CornerMeeting::Within)
+}
+
+fn planes_corner(p: Vec3, planes: [Tangent; 3]) -> CornerMeeting {
+    plane_corner_distance(p, planes).unwrap_or(CornerMeeting::Uncertified)
 }
 
 /// The most halvings a piece of an edge gets in [`edge_maximum`].
@@ -2054,7 +2151,7 @@ fn kept_straight_edge_corner(
 /// neighbours there: where four or more faces meet and one across the vertex moves, the
 /// vertex splits and the face's new edges run to the split points, which are among these
 /// meetings. Every pair is taken, so the reach bounds the split points from above. Three
-/// planes meet at [`corner_of`]; two planes and a quadric where the planes' line meets it
+/// planes meet at [`planes_corner`]; two planes and a quadric where the planes' line meets it
 /// ([`corner_with_quadric`]); where they meet in no one point, the edges' meetings stand.
 /// Where two curved quadrics are among the three, two of them kept and sharing a straight
 /// edge at the vertex (a round drawn as two faces split along a ruling, or two surfaces
@@ -2229,11 +2326,11 @@ pub fn local_extension_reach(
             }
             let (reach, apart, crosses) = match (&own, &other) {
                 (&Exact::Plane(a), &Exact::Plane(c)) => {
-                    match plane_pair(a, c, tangent_sine, tolerance) {
+                    match plane_pair(a, c, tolerance).ok_or_else(uncertified)? {
                         PlanePair::Line => (
-                            hull(&|x| line_distance(x, a, c, tangent_sine, tolerance))?,
+                            hull(&|x| line_distance(x, a, c))?,
                             false,
-                            false,
+                            plane_crossing_override(k, b, [own_face, other_face], tangent_sine)?,
                         ),
                         PlanePair::One => (hull(&|x| plane_distance(x, a))?, false, false),
                         PlanePair::Apart => (0.0, true, false),
@@ -2360,8 +2457,11 @@ fn corner(
                 })
                 .collect();
             let reach = match (planes.as_slice(), quadrics.as_slice(), nets.as_slice()) {
-                (&[x, y, z], [], []) => corner_of(x, y, z, at.tangent_sine)
-                    .map(|meeting| corner_distance(p, meeting, [x, y, z])),
+                (&[x, y, z], [], []) => match planes_corner(p, [x, y, z]) {
+                    CornerMeeting::Within(reach) => Some(reach),
+                    CornerMeeting::Nowhere => None,
+                    CornerMeeting::Uncertified => return Err(refuse()),
+                },
                 (&[x, y], [q], []) => {
                     let meeting = corner_with_quadric(p, x, y, q, at.tangent_sine, at.tolerance);
                     match meeting {
@@ -2490,9 +2590,9 @@ pub struct LocalReach {
     /// The edges whose two new surfaces are parallel planes apart: no extension makes them
     /// meet, and they add nothing to the reach.
     pub apart: Vec<crate::topology::EdgeId>,
-    /// The edges where a plane and a quadric, the two new surfaces, are certified to cross
-    /// in every normal section ([`Plan::Roots`] on every piece): they meet at an angle, even
-    /// where the faces were tangent in the input.
+    /// Edges whose new surfaces are certified to cross in every normal section, or two
+    /// planes across a nearly tangent input edge. They meet at an angle even where the
+    /// input sector was tangent.
     pub crossing: Vec<crate::topology::EdgeId>,
 }
 
@@ -2801,6 +2901,68 @@ mod tests {
         let (reach, shift) = (found.reach, found.shift);
         assert!((reach - delta * sqrt(1.5)).abs() < 1e-12, "{reach}");
         assert!((shift - delta).abs() < 1e-12, "{shift}");
+    }
+
+    /// Two walls 0.1146 degrees apart still intersect. Their new edge is half a
+    /// millimetre from the old one when just the second wall moves by 0.001 mm.
+    #[test]
+    fn nearly_parallel_planes_keep_their_line_and_corner() {
+        let wall = |point: Vec3, raw: Vec3| Tangent {
+            point,
+            normal: raw.unitize().unwrap(),
+            raw,
+        };
+        let a = wall(Vec3::new(10.0, 0.0, 0.0), Vec3::X);
+        let shift = 0.001 * sqrt(1.000004);
+        let b = wall(
+            Vec3::new(9.99 + shift, 0.0, 0.0),
+            Vec3::new(1.0, -0.002, 0.0),
+        );
+        assert_eq!(plane_pair(a, b, 2e-5), Some(PlanePair::Line));
+        let p = Vec3::new(10.0, 5.0, 0.0);
+        let expected = shift / 0.002;
+        let reach = line_distance(p, a, b);
+        assert!(
+            reach >= expected - 1e-12 && reach < expected + 1e-6,
+            "{reach} vs {expected}"
+        );
+        let cap = wall(Vec3::ZERO, Vec3::Z);
+        let CornerMeeting::Within(reach) = planes_corner(p, [a, b, cap]) else {
+            panic!("the three planes have a unique corner");
+        };
+        assert!(
+            reach >= expected - 1e-12 && reach < expected + 1e-6,
+            "{reach} vs {expected}"
+        );
+        let same = wall(Vec3::new(10.0, 7.0, 0.0), -Vec3::X);
+        assert_eq!(plane_pair(a, same, 2e-5), Some(PlanePair::One));
+        let apart = wall(Vec3::new(12.0, 0.0, 0.0), Vec3::X);
+        assert_eq!(plane_pair(a, apart, 2e-5), Some(PlanePair::Apart));
+        let tiny_angle = wall(Vec3::new(12.0, 0.0, 0.0), Vec3::new(1.0, 1e-16, 0.0));
+        assert_eq!(plane_pair(a, tiny_angle, 2e-5), Some(PlanePair::Line));
+        let far = line_distance(p, a, tiny_angle);
+        assert!((2e16 - 10.0..2e16 + 100.0).contains(&far), "{far}");
+        // A draft can bring walls together with normals differing by one rounding.
+        // Their cross product cancels; their common point still certifies zero reach.
+        let common = Vec3::new(20.0, 5.0, 10.0);
+        let first = wall(
+            common,
+            Vec3::new(0.9961946980917455, 0.0, 0.08715574274765817),
+        );
+        let second = wall(
+            common,
+            Vec3::new(0.9961946980917455, 0.0, 0.08715574274765818),
+        );
+        assert_eq!(plane_pair(first, second, 2e-5), Some(PlanePair::Line));
+        assert!(line_distance(common, first, second) < 1e-9);
+        let third = wall(common, Vec3::Y);
+        let CornerMeeting::Within(reach) = planes_corner(common, [first, second, third]) else {
+            panic!("the almost coincident planes have a common corner");
+        };
+        assert!(reach < 1e-9, "{reach}");
+        let unresolved = wall(Vec3::new(12.0, 0.0, 0.0), Vec3::new(1.0, 1e-310, 0.0));
+        assert_eq!(plane_pair(a, unresolved, 2e-5), None);
+        assert!(!line_distance(p, a, unresolved).is_finite());
     }
 
     /// Nothing moved: every face meets its neighbours at its edges.

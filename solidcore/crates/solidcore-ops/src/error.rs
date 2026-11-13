@@ -377,6 +377,9 @@ pub enum OffsetRefusal {
     /// The face meets itself across a seam, and the surface the operation gives it is not
     /// closed there.
     SeamOpened,
+    /// A vertex moves to or past an edge's other end. The offset does not make the
+    /// topology change needed when that edge vanishes.
+    EdgeVanishes,
     /// The faces beside an edge meet on an exact curve that could not be cut into its pieces.
     ExactCurveUncut,
     /// In a local operation, the new surfaces of the face and of its neighbour across an
@@ -434,6 +437,11 @@ impl std::fmt::Display for OffsetRefusal {
                 write!(f, "the tolerance {tolerance} is one no body can hold")
             }
             OffsetRefusal::SeamOpened => write!(f, "its surface opens across its seam"),
+            OffsetRefusal::EdgeVanishes => write!(
+                f,
+                "a vertex moves to or past an edge's other end; the edge would vanish, \
+                 a change of topology the offset does not make"
+            ),
             OffsetRefusal::ExactCurveUncut => {
                 write!(f, "an exact curve between extended faces could not be cut")
             }
