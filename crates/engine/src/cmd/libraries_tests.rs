@@ -1,4 +1,5 @@
 use super::*;
+use solidcraft_geom::prelude::*;
 use solidcraft_io::catalog::{Definition, Entry, FORMAT, LibraryLook, LibraryMaterial, Provenance};
 use std::sync::{
     Arc,
@@ -87,10 +88,10 @@ fn catalog_world_instance_targets_map_once_and_invalid_targets_are_atomic() {
     assert_eq!(s.doc.appearances.bodies[&source], look.to_look());
     let face = &s.doc.appearances.faces[0];
     assert_eq!(face.body, source);
-    assert!(face.point.dist(solidcraft_geom::Vec3::new(1., 1., 2.)) < 1e-9);
+    assert!(face.point.dist(solidcore_record::Vec3::new(1., 1., 2.)) < 1e-9);
     assert_eq!(face.look, look.to_look());
     assert_eq!(s.undo.len(), history.0 + 1);
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let placed = world.body(&instance).unwrap();
     assert!(s.doc.face_colors(placed).iter().any(|(_, assigned)| assigned == &look.to_look()));
     apply_entry(&mut s, &file, &c.entries[1], json!({"bodies":[instance]})).unwrap();

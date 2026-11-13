@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2820"
+ ],
+ "what": "a hollow pipe (outer diameter 10, wall 2) along a path of two lines joined by a tangent R20 quarter arc",
+ "source": "analytic",
+ "method": "a tube of constant ring section along a path of length 30 + (pi/2) 20 + 30 = 91.416: V = pi (5^2 - 3^2) L (Pappus: the section centre follows the path; R 20 > 5). Faces: outer cylinder, torus, cylinder; inner cylinder, torus, cylinder; two annular ends = 8.",
+ "body_count": 1,
+ "volume_mm3": 4595.065651620499,
+ "faces": 8
+}

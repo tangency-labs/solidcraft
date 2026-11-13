@@ -2,8 +2,9 @@
 //! side and turned the same way, as the design's parameters change.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{Snap, XRef};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::tests::{occ, place, run};
 use crate::Session;
@@ -322,7 +323,7 @@ fn origins_on_a_body_placed_by_an_offset_agree_named_or_not() {
     let wall = solidcraft_doc::joints::face_name_at(&s.doc, &st, 0, wall_pick, true);
     assert!(top.is_some() && wall.is_some(), "{top:?} {wall:?}");
     let resolve = |snap: Snap| {
-        let o = solidcraft_doc::joints::JointOrigin { occurrence: 0, snap };
+        let o = solidcraft_doc::joints::JointOrigin::new(0, snap);
         let m = solidcraft_doc::joints::resolve_origin(&s.doc, &st, &o).unwrap_or_else(|e| panic!("{e}"));
         (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]))
     };
@@ -380,7 +381,7 @@ fn a_face_centre_stays_put_when_a_hole_in_its_face_moves_or_goes() {
     let top = face_name(&mut s, "Plate", pick);
     run(&mut s, "joint.origin", json!({"name": "Top", "face": top}));
     let by_point = |s: &Session| {
-        let o = solidcraft_doc::joints::JointOrigin { occurrence: occ(s, "Plate"), snap: Snap::FaceCenter { pick, face: None, x: None } };
+        let o = solidcraft_doc::joints::JointOrigin::new(occ(s, "Plate"), Snap::FaceCenter { pick, face: None, x: None });
         let m = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &o).ok()?;
         Some((Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2])))
     };
@@ -573,4 +574,24 @@ fn jointed_arms_stay_together_as_the_arm_changes() {
         }
     }
     assert!(apart.is_empty(), "{} joints apart:\n{}", apart.len(), apart.join("\n"));
+}
+
+/// A planar face with a hole locates its joint origin outline centre from exact B-rep loops.
+#[test]
+fn planar_face_with_hole_locates_outline_centre_from_brep_loops() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [50, 50]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 20], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Body"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(&mut s, "joint.origin", json!({"name": "CenterOrigin", "occurrence": "Plate:1", "face": [0, 0, 10]}));
+    assert!(r["error"].is_null(), "{r}");
+    let jo = s.doc.assembly.origins.iter().find(|o| o.name == "CenterOrigin").unwrap();
+    let frame = s.doc.origin_world(&s.model.state(), &jo.origin).unwrap();
+    let point = solidcraft_doc::apply_point(&frame, Vec3::ZERO);
+    // The plate outline is [-50, 50] in X and Y, centered at (0, 0), so outline centre is at (0, 0, 10).
+    assert!((point.x).abs() < 1e-4 && (point.y).abs() < 1e-4 && (point.z - 10.0).abs() < 1e-4, "expected (0, 0, 10), got {point:?}");
 }

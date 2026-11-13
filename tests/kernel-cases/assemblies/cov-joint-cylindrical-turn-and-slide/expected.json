@@ -1,0 +1,47 @@
+{
+ "sources": [],
+ "what": "a cylindrical joint about z driven to 90 degrees and 7 mm",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); cylindrical about z: M = Rz(90)\u00b7T(0,0,7): (20,0,5) -> (20,0,12) -> (0,20,12)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "values": [
+     {
+      "value": 90.0
+     },
+     {
+      "value": 7.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      12.0
+     ],
+     "bbox": {
+      "min": [
+       -5.0,
+       0.0,
+       7.0
+      ],
+      "max": [
+       5.0,
+       40.0,
+       17.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

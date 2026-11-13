@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#561",
+  "tangency-labs/solidcraft#677"
+ ],
+ "what": "the start face of a 3-turn square-wire coil (4 mm wire, pitch 8, centre diameter 40) extruded 5 mm",
+ "source": "analytic",
+ "method": "the coil is 4 x 4 wire at radius 20 turned 3 times by the screw: V = 16 * 2 pi 20 * 3 = 6032.1. The start face is the 4 x 4 section in the plane y = 0 at x 18..22, z -2..2; extruding it 5 mm out of the plane (into free space, away from the wire) adds 16 * 5 = 80: V = 6112.1.",
+ "body_count": 1,
+ "volume_mm3": 6111.857894892402
+}

@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1311"
+ ],
+ "what": "a 100 x 60 plate turned 62 degrees about the origin with a 90 degree inside flange on one edge: the trimmed corner falls on the sew grid and the flange failed to close",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, setback R + T = 3. Plate 100 x 57 x 2 after the setback = 11400; the bend is a quarter annulus of radii 1 and 3 over 100 mm = (pi/4)(9 - 1)*100*... = (pi/2)(9-1)*100/2 = 628.319; the leg 20 - 3 = 17 long: 17*2*100 = 3400. V = 11400 + 628.319 + 3400",
+ "body_count": 1,
+ "volume_mm3": 15428.31853071796
+}

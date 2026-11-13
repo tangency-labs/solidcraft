@@ -71,7 +71,7 @@ The rendered subject provides most of the visual interest. The surrounding contr
 | Typography | `font_label`, `font_body`, `font_heading`, `font_small`, existing semibold and monospace helpers | Use established text roles; numbers and units align consistently. |
 | Spacing and rounding | `space_*`, `radius_*`, shared Panel/Window frames | Use existing tokens, not per-dialog constants or copied screenshot measurements. |
 
-Current defaults include 28-point controls, a 40-point header, 48-point footer, 264-point card basis and 70-point compact label basis. Table rows use `control_height + space_8`. These are observed values in `assets/styles/ui/palettes.rs`; callers should consume the tokens. The older board's 24-pixel rows do not replace the current kit measurements. Points are logical UI units, not a requirement to fix physical pixels at every display scale.
+Current defaults include 28-point controls, a 40-point header, 48-point footer, 264-point card basis and 70-point compact label basis. Table rows use `control_height + space_8`. These are observed values in `crates/theme/src/palettes.rs`; callers should consume the tokens. The older board's 24-pixel rows do not replace the current kit measurements. Points are logical UI units, not a requirement to fix physical pixels at every display scale.
 
 `render_accent` still exists, and `render_fill` is part of the Render accent vocabulary, but the ordinary selected Render tab uses `render_soft` and `render_ink`. `TabAccent::on_fill` belongs to the solid contextual-tab treatment used elsewhere. `icon_accent_for_tab` currently defines no Render icon override. **Keep each icon's existing semantic palette.** A Render tab tint is not permission to recolor shared SVGs or to repaint all actions in the tab color.
 
@@ -96,7 +96,7 @@ Current defaults include 28-point controls, a 40-point header, 48-point footer, 
 
 The literal icon IDs `sun`, `light`, `lighting`, `environment`, `scene`, `texture`, `quality`, `floor` and `stop` are not present in the inspected set. Use clear text for proposed actions until a semantically appropriate existing icon or reviewed alias/new master is assigned. A reused drawing cannot change the behavior of an existing command.
 
-No SVG or acceptance record is changed by this contribution. Existing accepted `ws_render`, `appearance` and `render_image` masters were inspected at 64, 24 and 16 pixels in both themes through the repository palette renderer. Those checks concern artwork only. Future icon work must follow `assets/icons/ui/STYLE_GUIDE.md`, aliases and review protection; never copy a private variant into Render.
+No SVG or acceptance record is changed by this contribution. Existing accepted `ws_render`, `appearance` and `render_image` masters were inspected at 64, 24 and 16 pixels in both themes through the repository palette renderer. Those checks concern artwork only. Future icon work must follow `crates/look/icons/STYLE_GUIDE.md`, aliases and review protection; never copy a private variant into Render.
 
 ## 3. Library and preset discovery
 

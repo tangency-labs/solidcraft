@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::ConstraintKind;
 
 use crate::Session;
@@ -182,7 +183,7 @@ fn curvature_polygon_arc_length_linear_diameter() {
     let sk = sketch(&s);
     let ai = sk.curve_index(&a).unwrap();
     let len = match sk.segs(ai)[0] {
-        solidcraft_geom::Seg2::Arc { radius, sweep, .. } => radius * sweep,
+        solidcore_record::Seg2::Arc { radius, sweep, .. } => radius * sweep,
         _ => 0.0,
     };
     assert!((len - 20.0).abs() < 1e-6, "{len}");
@@ -508,6 +509,32 @@ fn drawing_at_a_curve_crossing_keeps_the_point_on_both() {
     assert!(st.y > 0.0, "the upper crossing: {st:?}");
 }
 
+/// #15387: `sketch.point` at a curve crossing (`"x:<a>+<b>:x,y"`) holds the point on both curves
+/// with `PointOnCurve` constraints, so moving one curve slides the point along the other rather
+/// than leaving it behind.
+#[test]
+fn a_point_at_a_curve_crossing_is_held_on_both() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 20]], "infer": false}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 20], [20, 0]], "infer": false}))["curves"])[0].clone();
+    let p = run(&mut s, "sketch.point", json!({"point": format!("x:{a}+{b}:10.2,9.8")}))["point"].as_str().unwrap().to_string();
+    let sk = sketch(&s);
+    let pi = sk.resolve_point(&p).unwrap();
+    let (ia, ib) = (sk.curve_index(&a).unwrap(), sk.curve_index(&b).unwrap());
+    assert!(sk.point(pi).unwrap().dist(Vec2::new(10.0, 10.0)) < 1e-9);
+    for ci in [ia, ib] {
+        assert!(sk.constraints.iter().any(|k| matches!(k.kind, crate::sketch::ConstraintKind::PointOnCurve { p: q, c } if q == pi && c == ci)));
+    }
+    // Move one line's end: the point stays on both lines at their new crossing.
+    run(&mut s, "sketch.constraint.fix", json!({"entity": b}));
+    run(&mut s, "sketch.move_point", json!({"point": format!("{a}.end"), "to": [20, 10]}));
+    let sk = sketch(&s);
+    let at = sk.point(sk.resolve_point(&p).unwrap()).unwrap();
+    let want = Vec2::new(40.0 / 3.0, 20.0 / 3.0);
+    assert!(at.dist(want) < 1e-6, "at {at:?}, expected {want:?}");
+    assert!(sk.shape(ia).unwrap().dist(at) < 1e-6 && sk.shape(ib).unwrap().dist(at) < 1e-6);
+}
+
 #[test]
 fn drawing_at_an_infinite_line_crossing_keeps_the_point_on_both() {
     let mut s = new_sketch();
@@ -746,6 +773,37 @@ fn symmetry_slides_a_rectangle_whose_width_is_dimensioned() {
     let at = |r: String| sk.point(sk.resolve_point(&r).unwrap()).unwrap();
     let (l, r) = (at(format!("{}.start", sides[3])), at(format!("{}.start", sides[1])));
     assert!((r.x - l.x - 42.0).abs() < 1e-6 && (l.x + 21.0).abs() < 1e-6, "sides at ±21: {l:?} {r:?}");
+}
+
+#[test]
+fn symmetry_of_two_corners_of_one_edge_about_the_origin() {
+    // #4850: two corners of the same rectangle edge, symmetric about the origin point, were
+    // refused as "neither entity can move" although sliding the rectangle meets it.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-12, -6], "p1": [18, 10]}));
+    let sides = ids(&r["curves"]);
+    let sk = sketch(&s);
+    let bottom = sides
+        .iter()
+        .find(|id| {
+            let (a, b) = line_ends(&sk, id);
+            (a.y + 6.0).abs() < 1e-9 && (b.y + 6.0).abs() < 1e-9
+        })
+        .unwrap_or_else(|| panic!("no bottom side in {sides:?}"))
+        .clone();
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": format!("{bottom}.start"), "b": format!("{bottom}.end"), "point": "origin"}));
+    let sk = sketch(&s);
+    let (a, b) = line_ends(&sk, &bottom);
+    assert!((a.x + b.x).abs() < 1e-6 && (a.y + b.y).abs() < 1e-6, "corners not mirrored about the origin: {a:?} {b:?}");
+    assert!(a.y.abs() < 1e-6 && b.y.abs() < 1e-6, "corners not on y = 0: {a:?} {b:?}");
+    assert!((a.x - b.x).abs() > 1.0, "the bottom side collapsed: {a:?} {b:?}");
+    for corner in [a, b] {
+        let met = sides.iter().filter(|id| **id != bottom).any(|id| {
+            let (p, q) = line_ends(&sk, id);
+            p.dist(corner) < 1e-6 || q.dist(corner) < 1e-6
+        });
+        assert!(met, "no adjacent side meets the corner {corner:?}");
+    }
 }
 
 #[test]
@@ -1547,6 +1605,11 @@ fn midpoint_pair_orientation_uses_the_text_box_and_respects_explicit_types() {
         ("auto", [25., 33.], 'x'),
         ("auto", [43., 20.], 'y'),
         ("auto", [25., 20.], 'd'),
+        // The box's outer corners keep the distance between them, as before #7355.
+        ("auto", [50., 45.], 'd'),
+        ("auto", [55., 35.], 'd'),
+        ("auto", [0., 0.], 'd'),
+        ("auto", [-5., 5.], 'd'),
         ("distance", [25., 33.], 'd'),
         ("horizontal", [43., 20.], 'x'),
         ("vertical", [25., 33.], 'y'),
@@ -1707,7 +1770,7 @@ fn an_arc_and_its_end_point_dimension_the_arc_length() {
     let arc_length = |s: &Session, a: &str| {
         let sk = sketch(s);
         match sk.segs(sk.curve_index(a).unwrap())[0] {
-            solidcraft_geom::Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
+            solidcore_record::Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
             _ => f64::NAN,
         }
     };

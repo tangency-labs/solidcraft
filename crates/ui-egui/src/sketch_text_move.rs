@@ -96,6 +96,7 @@ pub(crate) fn end_drag(app: &mut SolveApp) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+    use solidcraft_engine::geom::prelude::*;
     use solidcraft_engine::sketch::LinkSource;
 
     fn setup() -> (Harness, String) {
@@ -126,7 +127,7 @@ mod tests {
         assert!(h.app.dialog.is_none());
         let sk = h.app.session.doc.sketch(1).unwrap();
         let LinkSource::Text { at, angle, text, .. } = &sk.link(&link).unwrap().source else { panic!() };
-        assert!(at.dist(solidcraft_engine::geom::Vec2::new(28.4, 2.0)) < 1e-8);
+        assert!(at.dist(solidcore_record::Vec2::new(28.4, 2.0)) < 1e-8);
         assert!((*angle - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
         assert_eq!(text, "II");
         assert_eq!(h.app.session.undo.len(), undo + 1);
@@ -167,7 +168,7 @@ mod tests {
         let curve = h.app.session.doc.sketch(1).unwrap().curves[0].id.clone();
         h.app.session.execute("sketch.drag", &json!({"entity":curve,"from":[0,0],"to":[2,3],"live":true})).unwrap();
         h.app.viewport.text_drag = Some((checkpoint, link));
-        h.app.viewport.point_drag = Some((curve, 0, None));
+        h.app.viewport.point_drag = Some((curve, 0, None, solidcore_record::Vec2::ZERO, false));
         crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
         assert!(h.app.viewport.text_drag.is_none());
         assert!(h.app.viewport.point_drag.is_none());

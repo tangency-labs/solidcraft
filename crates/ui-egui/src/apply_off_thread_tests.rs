@@ -354,10 +354,15 @@ fn an_edit_without_a_preview_adopts_its_suffix_without_window_evaluation() {
     if let Some(crate::dialogs::Kind::OffsetPlane { offset }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
         *offset = "15".into();
     }
+    // The worker's result is held until OK has been seen computing: the click settles over a few
+    // frames, and a window thread held up under load would find it in and apply it at once.
+    let (finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
     let window = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
     solidcraft_engine::doc::progress::watch(window.clone(), || {
         h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
         assert!(h.app.applying.is_some(), "computing beside the window");
+        finish.send(()).unwrap();
         until_applied(&mut h);
     });
     assert_eq!(window.features(), (0, 0), "nothing evaluated on the window thread");
@@ -377,7 +382,7 @@ fn cancelling_an_edit_restores_pinned_geometry_without_evaluating_an_evicted_suf
     let (mut h, target) = cut_chain();
     h.app.run("solid.box", json!({"corner":[100,0,0],"length":2,"width":2,"height":2})).unwrap();
     h.app.run("edit.undo", json!({})).unwrap();
-    let before = h.app.session.world_state();
+    let before = h.app.session.world_state().unwrap();
     let history = (h.app.session.undo.len(), h.app.session.redo.len());
     let visibility = h.app.session.visibility.clone();
     h.call("ui.editFeature", json!({"feature":target}));
@@ -400,7 +405,7 @@ fn cancelling_an_edit_restores_pinned_geometry_without_evaluating_an_evicted_suf
     assert_eq!(h.app.session.visibility, visibility, "temporary sketch display does not change stored visibility");
     assert_eq!(h.app.session.doc.marker, None);
     assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
-    assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.world_state()));
+    assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.world_state().unwrap()));
     assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Axis { name: "X".into() }]);
 }
 
@@ -478,7 +483,7 @@ fn a_worker_error_then_cancel_preserves_original_world_history_redo_and_selectio
     let (mut h, target) = cut_chain();
     h.app.run("solid.box", json!({"corner":[100,0,0],"length":2,"width":2,"height":2})).unwrap();
     h.app.run("edit.undo", json!({})).unwrap();
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let document = h.app.session.doc.clone();
     let history = (h.app.session.undo.len(), h.app.session.redo.len());
     h.app.session.selection = vec![solidcraft_engine::Sel::Feature { id: target }];
@@ -503,7 +508,7 @@ fn a_worker_error_then_cancel_preserves_original_world_history_redo_and_selectio
     });
     assert_eq!(window.features(), (0, 0));
     assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
-    assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state()));
+    assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state().unwrap()));
     assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
     assert_eq!(h.app.session.selection, selection);
 }

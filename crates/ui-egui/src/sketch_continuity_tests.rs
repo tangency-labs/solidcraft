@@ -21,7 +21,7 @@ fn the_button_shades_every_seam_pins_an_edge_and_turns_off() {
     assert_eq!(h.app.session.continuity.len(), 12, "every edge of the box");
     assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("inspect.continuity"));
     h.step(&json!({"click": {"world": [10, 0, 20]}})).unwrap();
-    assert_eq!(marks(), ["G0 90.000\u{b0}"], "{:?}", h.app.status);
+    assert_eq!(marks(), ["Crease 90.000\u{b0}"], "{:?}", h.app.status);
     assert_eq!(h.app.session.continuity.len(), 12, "the clicked edge is measured again, not added twice");
     h.step(&json!({"start": "inspect.continuity"})).unwrap();
     assert!(h.app.session.continuity.is_empty() && h.app.tool.is_none());
@@ -29,7 +29,7 @@ fn the_button_shades_every_seam_pins_an_edge_and_turns_off() {
     assert!(marks().is_empty(), "the markers go with the tool");
 }
 
-/// A round's tangent seam reads G1 with its curvature jump (1 / 4 mm against the flat side).
+/// A round's tangent seam reads Tangent with its curvature jump (1 / 4 mm against the flat side).
 #[test]
 fn a_tangent_seam_is_labelled_with_its_curvature_jump() {
     let mut h = crate::scenario::Harness::new();
@@ -41,7 +41,7 @@ fn a_tangent_seam_is_labelled_with_its_curvature_jump() {
     h.step(&json!({"click": {"world": [16, 0, 10]}})).unwrap();
     let labels = marks();
     assert_eq!(labels.len(), 1, "{labels:?} {:?}", h.app.status);
-    assert!(labels[0].starts_with("G1 0.000\u{b0} \u{394}k 0.2500/mm"), "{labels:?}");
+    assert!(labels[0].starts_with("Tangent 0.000\u{b0} \u{394}k 0.2500/mm"), "{labels:?}");
 }
 
 /// The legend shows while seams are shaded and goes with the analysis.

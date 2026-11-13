@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#647",
+  "tangency-labs/solidcraft#725",
+  "tangency-labs/solidcraft#1285",
+  "tangency-labs/solidcraft#1340"
+ ],
+ "what": "a 100 x 60 x 30 box shelled to 2 mm, converted to sheet metal by its four bottom edges and unfolded",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.44: BD(90) = 2*4 - (pi/2)(2 + 0.88) = 3.4761. The walls' outer legs are 30 long, so the flat reaches 30 - BD = 26.5239 past each edge of the 100 x 60 base (flat 160 - 2*BD = 153.048 by 113.048); the base keeps its place z 0..2",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -26.523893421169305,
+   -26.523893421169305,
+   0
+  ],
+  "max": [
+   126.5238934211693,
+   86.5238934211693,
+   2
+  ]
+ }
+}

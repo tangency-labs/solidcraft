@@ -2,15 +2,17 @@
 //! point of it reaches a target (and an axis of it points a given way), every value within its
 //! limits, motion links followed, and the closed loops those values are in kept closed.
 
+use solidcraft_geom::prelude::*;
 use std::cell::Cell;
 use std::collections::BTreeSet;
+use std::f64::consts::{PI, TAU};
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_sketch::linalg;
 
 use super::{
-    Assembly, Held, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian, joint_values,
-    largest, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
+    Assembly, Held, JointKind, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian,
+    joint_values, largest, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
 };
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
 
@@ -124,8 +126,27 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
         return Err(format!("its chain and loops have more than {MAX_LOOP_VALUES} values"));
     }
     let scale = loop_scale(tree, &around, &vals);
-    let bounds = limit_bounds(tree, &vars);
-    let x0: Vec<f64> = vars.iter().map(|(id, i)| vals.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
+    let raw_bounds = limit_bounds(tree, &vars);
+    let mut bounds = raw_bounds.clone();
+    let start: Vec<f64> = vars.iter().map(|(id, i)| vals.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
+    // A ball joint moves by a turn from where it starts, not by its Euler angles (`BallTurn`).
+    let balls = ball_turns(tree, &vars, &start, &raw_bounds);
+    let mut x0 = start.clone();
+    for k in balls.iter().flat_map(|b| b.at..b.at + 3) {
+        if let (Some(x), Some(b)) = (x0.get_mut(k), bounds.get_mut(k)) {
+            (*x, *b) = (0.0, (f64::NEG_INFINITY, f64::INFINITY));
+        }
+    }
+    // The joints' values for the solve's `x`.
+    let values = |x: &[f64]| -> Vec<f64> {
+        let mut v = x.to_vec();
+        for b in &balls {
+            if let (Some(q), Some(slot)) = (b.values(x), v.get_mut(b.at..b.at + 3)) {
+                slot.copy_from_slice(&q);
+            }
+        }
+        v
+    };
     // A distance steps by a share of the chain's size, of the way to the target or of the point's
     // reach from its joints, whichever is longest (one slider on its own has no size, and a part
     // turning about a joint far from its point moves that far).
@@ -146,7 +167,9 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     // a value a link sets can turn far more than the one that drives it, and a loop must stay
     // closed on the way, as joint.drive steps its loops.
     let mut paced: Vec<((u64, usize), f64)> = Vec::new();
-    for j in around.iter().filter_map(|id| tree.joints.get(id)) {
+    // A ball joint is paced by its turn (`cap`) instead: near pitch 0 a small turn changes its yaw
+    // and roll a lot.
+    for j in around.iter().filter_map(|id| tree.joints.get(id)).filter(|j| !balls.iter().any(|b| b.id == j.id)) {
         for i in 0..j.kind.dofs().len() {
             paced.push(((j.id, i), if j.kind.is_angle(i) { STEP_ANGLE.to_radians() } else { STEP_SHARE * span }));
         }
@@ -156,11 +179,11 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     let spent = Cell::new(0usize);
     let mut work = vals.clone();
     let mut workspace = super::PlacementWorkspace::new(tree);
-    let mut f = |x: &[f64]| misses(&mut workspace, asm, r, scale, &vars, &closers, x, &mut work, &spent);
+    let mut f = |x: &[f64]| misses(&mut workspace, asm, r, scale, &vars, &closers, &values(x), &mut work, &spent);
     let mut x = x0.clone();
     let miss = |res: &[f64]| res.iter().take(mt).map(|v| v * v).sum::<f64>().sqrt();
     let before = f(&x0).map_or(f64::INFINITY, |r| miss(&r));
-    let res = approach(&mut f, &|a, b| stride(asm, &vals, &vars, &paced, a, b), mt, &mut x, &bounds, &cap, tol, loose_gap(scale))
+    let res = approach(&mut f, &|a, b| stride(asm, &vals, &vars, &paced, &values(a), &values(b)), mt, &mut x, &bounds, &cap, tol, loose_gap(scale))
         .ok_or("a closed loop on its chain is open and can't close (joint.list shows its conflict)")?;
     let mut out = Reached::default();
     let point_miss = res.iter().take(3).map(|v| v * v).sum::<f64>().sqrt();
@@ -180,6 +203,17 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
                     out.limits.push((*id, *i, true));
                 } else if at(*lo) && pull < -eps {
                     out.limits.push((*id, *i, false));
+                }
+            }
+        }
+        // A ball joint's value held at its limit (its turn isn't bounded; its values are).
+        for b in &balls {
+            for (i, (v, (lo, hi))) in b.values(&x).unwrap_or(b.start).iter().zip(b.bounds).enumerate() {
+                let at = |l: f64| l.is_finite() && (v - l).abs() <= 1e-9 * l.abs().max(1.0);
+                if at(hi) {
+                    out.limits.push((b.id, i, true));
+                } else if at(lo) {
+                    out.limits.push((b.id, i, false));
                 }
             }
         }
@@ -219,7 +253,8 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
             let mut alone = vals.clone();
             let mut alone_workspace = super::PlacementWorkspace::new(tree);
             let mut g = |x: &[f64]| misses(&mut alone_workspace, asm, r, scale, &drive, &[], x, &mut alone, &spent);
-            let (mut xo, bo, co) = (x0.get(..k).unwrap_or_default().to_vec(), bounds.get(..k).unwrap_or_default(), cap.get(..k).unwrap_or_default());
+            let (mut xo, bo, co) =
+                (start.get(..k).unwrap_or_default().to_vec(), raw_bounds.get(..k).unwrap_or_default(), cap.get(..k).unwrap_or_default());
             // The loops left open, nothing to pace.
             if let Some(ro) = approach(&mut g, &|_, _| 0.0, mt, &mut xo, bo, co, tol, loose_gap(scale))
                 && miss(&ro) < miss(&res) - REACH_TOL.max(1e-9 * miss(&res))
@@ -231,7 +266,7 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     // The stored values that changed, when that got it closer (by more than the solver's noise:
     // a held part doesn't creep).
     let gained = before - miss(&res) > 1e-7;
-    for ((id, i), v) in vars.iter().zip(&x).filter(|_| gained) {
+    for ((id, i), v) in vars.iter().zip(&values(&x)).filter(|_| gained) {
         let Some(j) = tree.joints.get(id) else { continue };
         if j.values.get(*i) == Some(v) {
             continue;
@@ -246,6 +281,125 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
         }
     }
     Ok(out)
+}
+
+/// A unit quaternion (w, x, y, z): a turn that composes without the lock of Euler angles.
+#[derive(Clone, Copy, Debug)]
+struct Quat([f64; 4]);
+
+impl Quat {
+    fn mul(self, o: Quat) -> Quat {
+        let ([a1, b1, c1, d1], [a2, b2, c2, d2]) = (self.0, o.0);
+        Quat([
+            a1 * a2 - b1 * b2 - c1 * c2 - d1 * d2,
+            a1 * b2 + b1 * a2 + c1 * d2 - d1 * c2,
+            a1 * c2 - b1 * d2 + c1 * a2 + d1 * b2,
+            a1 * d2 + b1 * c2 - c1 * b2 + d1 * a2,
+        ])
+    }
+
+    /// The opposite turn.
+    fn conj(self) -> Quat {
+        let [w, x, y, z] = self.0;
+        Quat([w, -x, -y, -z])
+    }
+
+    /// The turn by the rotation vector `w`: |w| radians about its direction.
+    fn exp([x, y, z]: [f64; 3]) -> Quat {
+        let t = (x * x + y * y + z * z).sqrt();
+        let (s, c) = (t / 2.0).sin_cos();
+        let k = if t < 1e-12 { 0.5 } else { s / t };
+        Quat([c, x * k, y * k, z * k])
+    }
+
+    /// A ball joint's turn for its (yaw, pitch, roll): about z, then y, then z (`motion`).
+    fn zyz([a, b, c]: [f64; 3]) -> Quat {
+        let (sa, ca) = (a / 2.0).sin_cos();
+        let (sb, cb) = (b / 2.0).sin_cos();
+        let (sc, cc) = (c / 2.0).sin_cos();
+        Quat([ca, 0.0, 0.0, sa]).mul(Quat([cb, 0.0, sb, 0.0])).mul(Quat([cc, 0.0, 0.0, sc]))
+    }
+
+    /// Its (yaw, pitch, roll): of the two sets (at pitch 0 or 180°, the many), the one nearest
+    /// `near`, each angle a whole number of turns from where it would wrap.
+    fn to_zyz(self, near: [f64; 3]) -> [f64; 3] {
+        let [a0, b0, c0] = near;
+        let n = self.0.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-300);
+        let [w, x, y, z] = self.0.map(|v| v / n);
+        let r22 = 1.0 - 2.0 * (x * x + y * y);
+        let (r02, r12) = (2.0 * (x * z + w * y), 2.0 * (y * z - w * x));
+        let (r20, r21) = (2.0 * (x * z - w * y), 2.0 * (y * z + w * x));
+        let (r00, r10) = (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z));
+        // Not acos(r22): that rounds a turn under about 1e-8 to none, and a finite difference
+        // there sees nothing tilt.
+        let sin_b = r02.hypot(r12);
+        let b = sin_b.atan2(r22);
+        if sin_b > 1e-12 {
+            let (a, c) = (r12.atan2(r02), r21.atan2(-r20));
+            let one = [wrap(a, a0), wrap(b, b0), wrap(c, c0)];
+            let two = [wrap(a + PI, a0), wrap(-b, b0), wrap(c + PI, c0)];
+            let off = |v: &[f64; 3]| (v[0] - a0).abs() + (v[1] - b0).abs() + (v[2] - c0).abs();
+            if off(&two) < off(&one) { two } else { one }
+        } else if r22 > 0.0 {
+            // Pitch 0: only yaw + roll is known; yaw stays.
+            [a0, wrap(0.0, b0), wrap(r10.atan2(r00) - a0, c0)]
+        } else {
+            // Pitch 180°: only roll − yaw is known; yaw stays.
+            [a0, wrap(PI, b0), wrap(a0 + r10.atan2(-r00), c0)]
+        }
+    }
+}
+
+/// How far (radians) a ball joint turns from the (yaw, pitch, roll) `a` to `b`: near pitch 0 a
+/// small turn changes its yaw and roll a lot.
+pub(super) fn ball_turn_between(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let [w, x, y, z] = Quat::zyz(a).conj().mul(Quat::zyz(b)).0;
+    2.0 * (x * x + y * y + z * z).sqrt().atan2(w.abs())
+}
+
+/// `t` moved by whole turns to lie nearest `near`.
+fn wrap(t: f64, near: f64) -> f64 {
+    t + TAU * ((near - t) / TAU).round()
+}
+
+/// A ball joint whose three values all move in a reach or a loop solve. It is solved over a small
+/// turn from where it starts (a rotation vector in its own frame, radians) instead of its Euler
+/// angles, which lock at pitch 0: there yaw and roll turn about the same axis, and nothing tilts it
+/// the other way (#12873, #14852).
+pub(super) struct BallTurn {
+    id: u64,
+    /// Where its yaw is in the solve's values; pitch and roll follow.
+    pub(super) at: usize,
+    from: Quat,
+    start: [f64; 3],
+    bounds: [(f64, f64); 3],
+}
+
+impl BallTurn {
+    /// Its (yaw, pitch, roll) for the turn in `x`, each held within its limits (pitch is the
+    /// angle between the joint's z axes, so its limits hold it in a cone, its yaw still free).
+    pub(super) fn values(&self, x: &[f64]) -> Option<[f64; 3]> {
+        let w = x.get(self.at..self.at + 3)?;
+        let v = self.from.mul(Quat::exp([*w.first()?, *w.get(1)?, *w.get(2)?])).to_zyz(self.start);
+        let mut out = [0.0; 3];
+        for ((o, v), (lo, hi)) in out.iter_mut().zip(v).zip(self.bounds) {
+            *o = v.max(lo).min(hi);
+        }
+        Some(out)
+    }
+}
+
+/// The ball joints among `vars` with all three values there, in order.
+pub(super) fn ball_turns(tree: &Tree, vars: &[(u64, usize)], start: &[f64], bounds: &[(f64, f64)]) -> Vec<BallTurn> {
+    vars.windows(3)
+        .enumerate()
+        .filter_map(|(at, w)| {
+            let [(id, 0), (i1, 1), (i2, 2)] = w else { return None };
+            (id == i1 && id == i2 && tree.joints.get(id).is_some_and(|j| j.kind == JointKind::Ball)).then_some(())?;
+            let s = [*start.get(at)?, *start.get(at + 1)?, *start.get(at + 2)?];
+            Some(BallTurn { id: *id, at, from: Quat::zyz(s), start: s, bounds: [*bounds.get(at)?, *bounds.get(at + 1)?, *bounds.get(at + 2)?] })
+        })
+        .collect()
 }
 
 /// The target's misses with the values `vars` at `x`: the point's (mm), then the axis's (as mm
@@ -466,6 +620,37 @@ fn approach(
 mod tests {
     use super::super::tests::{PLACEMENT_INSERTS, PLACEMENT_STEPS, chain, placement_tree};
     use super::*;
+
+    /// A ball joint's quaternion is the turn `motion` places it by, and its angles come back
+    /// from it: the nearer of the two sets, and at pitch 0 the yaw it had.
+    #[test]
+    fn a_ball_turn_matches_the_joint_and_comes_back() {
+        let rot = |q: Quat, v: Vec3| {
+            let [w, x, y, z] = q.0;
+            let u = Vec3::new(x, y, z);
+            v + u.cross(v) * (2.0 * w) + u.cross(u.cross(v)) * 2.0
+        };
+        for zyz in [[0.3, 0.4, -1.2], [-2.0, -0.5, 0.7], [1.0, 3.0, 0.2], [0.5, 0.0, 0.25]] {
+            let (q, m) = (Quat::zyz(zyz), super::super::motion(JointKind::Ball, &zyz));
+            for v in [Vec3::X, Vec3::Y, Vec3::Z] {
+                assert!(rot(q, v).dist(apply_vector(&m, v)) < 1e-12, "{zyz:?} {v:?}");
+            }
+            let back = q.to_zyz(zyz);
+            assert!(back.iter().zip(zyz).all(|(a, b)| (a - b).abs() < 1e-9), "{zyz:?} -> {back:?}");
+        }
+        // Pitch negative, asked near it: the same turn as pitch positive, yaw and roll a half
+        // turn round, but given as it was.
+        let zyz = [0.2, -0.4, 0.1];
+        let back = Quat::zyz(zyz).to_zyz(zyz);
+        assert!(back.iter().zip(zyz).all(|(a, b)| (a - b).abs() < 1e-9), "{back:?}");
+        // A small turn off pitch 0 tilts it whichever way it points.
+        let tilted = Quat::zyz([0.0; 3]).mul(Quat::exp([0.05, 0.0, 0.0])).to_zyz([0.0; 3]);
+        assert!((tilted[1].abs() - 0.05).abs() < 1e-9, "{tilted:?}");
+        // That tilt is a turn of 0.05, though its yaw and roll moved a quarter turn each; and a
+        // turn is as far either way.
+        assert!((ball_turn_between([0.0; 3], tilted) - 0.05).abs() < 1e-9, "{tilted:?}");
+        assert!((ball_turn_between([0.3, 0.4, -1.2], [-2.0, -0.5, 0.7]) - ball_turn_between([-2.0, -0.5, 0.7], [0.3, 0.4, -1.2])).abs() < 1e-12);
+    }
 
     /// Exercise the IK callback itself: removing sharing at this call site must fail even if
     /// the reusable placement helper still passes its own tests.

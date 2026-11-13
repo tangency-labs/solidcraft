@@ -1,0 +1,12 @@
+# The source files whose change reruns this area of the kernel rig (scripts/ci/kernel_rig_plan.py),
+# besides the shared core in ../PATHS-ALL. One git pathspec glob a line, relative to the
+# repository root; `#` starts a comment.
+# Modelled and cosmetic threads, tapped holes, and the thread and pipe-thread catalogues.
+crates/doc/src/eval_thread.rs
+crates/doc/src/hole_reference.rs
+crates/doc/src/pipe_thread_catalog.rs
+crates/doc/src/pipe_thread_sizes.rs
+crates/doc/src/thread_catalog.rs
+crates/doc/src/thread_forms.rs
+crates/engine/src/cosmetic_threads.rs
+crates/kernel/src/helix.rs

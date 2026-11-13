@@ -1,0 +1,90 @@
+[
+  {
+    "case": "booleans/3012-filleted-boxes-1e-4-apart-cut",
+    "issue": "tangency-labs/solidcraft#15669",
+    "reason": "the two 1e-4 wide faces of the sliver (y=0 and y=30) are absorbed into the tolerance of their edges (4e-5 and 5e-5 for a body at 1e-5): 8 faces, 18 edges, 12 vertices instead of 10, 24, 16",
+    "fails": "faces 8 (rig 10), edges 18 (rig 24), vertices 12 (rig 16)"
+  },
+  {
+    "case": "booleans/3012-filleted-boxes-1e-4-apart-cut-reversed",
+    "issue": "tangency-labs/solidcraft#15669",
+    "reason": "the two 1e-4 wide faces of the sliver (y=0 and y=30) are absorbed into the tolerance of their edges (4e-5 and 5e-5 for a body at 1e-5): 8 faces, 18 edges, 12 vertices instead of 10, 24, 16",
+    "fails": "faces 8 (rig 10), edges 18 (rig 24), vertices 12 (rig 16)"
+  },
+  {
+    "case": "fillets/12342-round-wall-and-ledge-edges-r5-refused",
+    "issue": "solidcore#2845",
+    "reason": "status 1001 instead of the refusal naming the size that fits"
+  },
+  {
+    "case": "fillets/12342-round-wall-edge-r5-past-the-wall-refused",
+    "issue": "solidcore#2845",
+    "reason": "status 1001 instead of the refusal naming the size that fits"
+  },
+  {
+    "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
+    "issue": "tangency-labs/solidcraft#12645",
+    "reason": "solid.fillet builds `corner: g2` with `fit: exact` only"
+  },
+  {
+    "case": "fillets/9-fillet-corner-curvature-with-taper-fit",
+    "issue": "tangency-labs/solidcraft#12645",
+    "reason": "solid.fillet builds `corner: g2` with `fit: exact` only"
+  },
+  {
+    "case": "fillets/cov-fillet-g2-corner-beside-a-cylinder",
+    "issue": "tangency-labs/solidcore#2697",
+    "reason": "step 6 (solid.fillet): the open setback corner is not a closed solid, as on SMLib d01d7b0"
+  },
+  {
+    "case": "fillets/cov-fillet-g2-five-edge-apex-corner",
+    "issue": "tangency-labs/solidcore#2697",
+    "reason": "step 12 (solid.fillet): invalid input: the setback must be more than 3.5056 mm at the corner (-0.000, 0.000, 30.000): the rounds' contact lines meet 3"
+  },
+  {
+    "case": "fillets/cov-fillet-g2-four-edge-apex-corner",
+    "issue": "tangency-labs/solidcore#2697",
+    "reason": "step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3."
+  },
+  {
+    "case": "fillets/cov-fillet-g2-mixed-corner",
+    "issue": "tangency-labs/solidcore#2361",
+    "reason": "refused as on SMLib d01d7b0: a G2 corner is set back only where every edge meeting it is rounded and all are convex or all concave"
+  },
+  {
+    "case": "fillets/cov-fillet-g2-oblique-three-edge-corner",
+    "issue": "tangency-labs/solidcore#2697",
+    "reason": "not run here: the corner is a blend_setback_open call, which the rig has not ported yet; it waits on that port and on the certified G2 corner fill"
+  },
+  {
+    "case": "fillets/cov-fillet-g2-pocket-corner",
+    "issue": "solidcore#2697",
+    "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0"
+  },
+  {
+    "case": "fillets/cov-junction-y-junction-120-round",
+    "issue": "tangency-labs/solidcore#2361",
+    "reason": "refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)"
+  },
+  {
+    "case": "fillets/every-block-cylinder-tangent-concave-arc-r2-partial-chain",
+    "issue": "tangency-labs/solidcore#2864",
+    "reason": "refused: the picked edge runs on across the cylinder's seam into the rest of the same half circle, and a round does not end there; it passes as written (19091.9620) once the round runs on across the seam"
+  },
+  {
+    "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner",
+    "issue": "solidcore#2697",
+    "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)"
+  },
+  {
+    "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner-solver-residues",
+    "issue": "solidcore#2697",
+    "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)"
+  },
+  {
+    "case": "fillets/report-peg-front-and-concave-chamfers-together-d2",
+    "issue": "tangency-labs/solidcore#2849",
+    "reason": "the Mixed corner's chamfer face stands 7.2e-4 out of the front face y = 0 (its bilinear Coons patch bulges past the plane), past the case's 4e-5 box",
+    "fails": "volume 9383.450962465247 (rig 9383.4506602363)"
+  }
+]

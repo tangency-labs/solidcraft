@@ -13,10 +13,11 @@
 //! of the profile's bounding box at the origin. The outline runs counter-clockwise and holes
 //! clockwise, as [`Region2`] expects.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 use crate::expr::Kind;
 use crate::{DocError, Expr, Result};
@@ -365,7 +366,7 @@ fn at_most(what: &str, r: f64, room: f64, why: &str) -> Result<()> {
 }
 
 /// A number for a name: up to four decimals, without trailing zeros.
-fn short(x: f64) -> String {
+pub(crate) fn short(x: f64) -> String {
     let t = format!("{x:.4}");
     let t = if t.contains('.') { t.trim_end_matches('0').trim_end_matches('.') } else { &t };
     if t == "-0" { "0".into() } else { t.to_string() }
@@ -449,6 +450,19 @@ impl Profile {
             | Profile::Channel { width, height, .. }
             | Profile::IBeam { width, height, .. } => (width, height),
             Profile::RoundBar { diameter } | Profile::RoundTube { diameter, .. } => (diameter, diameter),
+        }
+    }
+
+    /// The profile's own origin, in the bounding-box-centred coordinates [`Self::region`] uses:
+    /// the point its dimensions are measured from (a bar's or an angle's bottom-left corner, the
+    /// heel for an angle; the middle of a channel's web back; the centre of a round bar, a tube
+    /// or an I beam). A member placed with `locate` keeps that profile point on its line when the
+    /// section's size changes.
+    pub fn origin(&self) -> Vec2 {
+        match *self {
+            Profile::Bar { width, height, .. } | Profile::Angle { width, height, .. } => Vec2::new(-width / 2.0, -height / 2.0),
+            Profile::RoundBar { .. } | Profile::RoundTube { .. } | Profile::RectTube { .. } | Profile::IBeam { .. } => Vec2::ZERO,
+            Profile::Channel { width, .. } => Vec2::new(-width / 2.0, 0.0),
         }
     }
 

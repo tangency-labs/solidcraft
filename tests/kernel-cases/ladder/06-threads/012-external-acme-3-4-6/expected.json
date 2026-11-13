@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a modelled 3/4-6 ACME thread (ASME B1.5, general purpose) on a 3/4 in shaft, six turns",
+ "source": "analytic",
+ "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns between free ends, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. ASME B1.5: 29 deg, h = P/2, crest flat 0.3707 P, external minor d - P - 0.020 in (10 threads per inch or coarser)",
+ "body_count": 1,
+ "volume_mm3": 5689.272256144,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

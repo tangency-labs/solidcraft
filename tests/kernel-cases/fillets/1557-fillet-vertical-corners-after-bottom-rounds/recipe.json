@@ -1,0 +1,89 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     25,
+     25
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "radius": 2,
+    "edges": [
+     [
+      12.5,
+      0,
+      0
+     ],
+     [
+      25,
+      12.5,
+      0
+     ],
+     [
+      12.5,
+      25,
+      0
+     ],
+     [
+      0,
+      12.5,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "radius": 2,
+    "edges": [
+     [
+      0,
+      0,
+      6
+     ],
+     [
+      25,
+      0,
+      6
+     ],
+     [
+      25,
+      25,
+      6
+     ],
+     [
+      0,
+      25,
+      6
+     ]
+    ]
+   }
+  }
+ ]
+}

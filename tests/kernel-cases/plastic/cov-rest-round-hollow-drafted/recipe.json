@@ -1,0 +1,27 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 3,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "plastic.rest",
+   "params": {
+    "position": [
+     30,
+     20,
+     3
+    ],
+    "width": 12,
+    "height": 4,
+    "thickness": 1.5,
+    "draft": "2 deg"
+   }
+  }
+ ]
+}

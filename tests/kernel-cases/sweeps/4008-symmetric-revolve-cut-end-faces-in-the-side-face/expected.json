@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4008"
+ ],
+ "what": "a 7 x 21 rectangle 2.6 mm from a block vertical edge revolved as a symmetric 180 degree cut about that edge: both end faces of the tool lie in the block left face (refused as \"could not be computed reliably\")",
+ "source": "analytic",
+ "method": "block 60 x 20 x 25 (x 0..60, y 0..20); the ring (radii 2.6..9.6, height 21 inside the 25) turns +-90 degrees about the edge x = 0, y = 20; only the quarter with y < 20 lies in the block: V = 30000 - pi (9.6^2 - 2.6^2) 21 / 4 = 28591.467.",
+ "body_count": 1,
+ "volume_mm3": 28591.466933763015
+}

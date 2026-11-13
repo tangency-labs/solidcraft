@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "sheet.hem on the bottom edge of a 100 x 60 x 2 base: the hem folds over the top face",
+ "source": "analytic",
+ "method": "as cov-hem-closed-on-a-top-edge, but a bottom-edge pick folds toward the top face: bend axis at (y 0, z T + g), the leg at z T + 2g .. 2T + 2g = 2.02 .. 4.02. V = 100*60*2 + (pi/2)(2.01^2 - 0.01^2)*100 + 5.99*100*2 = 13832.601716",
+ "body_count": 1,
+ "volume_mm3": 13832.601716025138,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   -2.01,
+   0
+  ],
+  "max": [
+   100,
+   60,
+   4.02
+  ]
+ }
+}

@@ -69,10 +69,9 @@ shared surface; mirror/rough reflection through an emitting secondary hit; a rea
 and AA ordered-prefix/coverage/PNG/quantum checks. Existing malformed AA completion
 cases are retained and extended for surface state.
 
-These are source contracts and written regressions. The recovered checkpoint and
-this scratch port have not been compiled or executed in this review. Qualification
-requires the exact candidate's formatting, target layout bound, render CPU ON/OFF
-tests, engine/UI contracts, Clippy, wasm, actual full project CI, and any newly
-exposed visible/native flow. Historical unrelated focal successes or full-CI
-failures remain attached to their original source revisions; they do not qualify
-this port.
+At the recovery handoff these were source contracts and written regressions.
+The combined CPU renderer has since executed analytic gradients, zero identity,
+shared-surface lighting, ordered AA, binding and cancellation/work checks. Current
+combined engine/UI contracts and visible/native flows still need qualification,
+alongside default-feature/platform, Clippy, wasm and full-project gates.
+Historical results remain attached to their original source revisions.

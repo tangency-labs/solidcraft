@@ -1,0 +1,34 @@
+{
+ "sources": [],
+ "what": "occurrence.align of a block's end face onto another part's top face",
+ "source": "analytic",
+ "method": "Base: box 40x40x10 from (50,0,0), grounded, top face z = 10; Peg: box 20x10x10 from the origin, end face x = 20 (normal +x) picked at (20,5,5), aligned to the top face at (70,20,10) (normal +z): faces meet facing each other, so +x turns to -z, a quarter turn about +y through (20,5,5), then (20,5,5) moves to (70,20,10). The centre (10,5,5) is (-10,0,0) from the pick, turned (0,0,10): (70,20,20); the 20 mm length stands along z: box (65,15,10)-(75,25,30)",
+ "body_count": 2,
+ "volume_mm3": 18000.0,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      70.0,
+      20.0,
+      20.0
+     ],
+     "bbox": {
+      "min": [
+       65.0,
+       15.0,
+       10.0
+      ],
+      "max": [
+       75.0,
+       25.0,
+       30.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

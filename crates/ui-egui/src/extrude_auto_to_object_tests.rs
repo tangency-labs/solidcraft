@@ -1,8 +1,8 @@
 //! Extrude's automatic To Object: with profiles picked, a pick off their plane is the object to
 //! extrude to, and the extent turns to To Object without the Extent Type choice.
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
 
 use crate::dialogs::{Dialog, Kind, apply_commands, face_sel};
 use crate::scenario::Harness;
@@ -84,7 +84,7 @@ fn face_off_the_profile_plane_turns_the_extent_to_that_face() {
     // OK builds the extrude up to the face.
     h.step(&json!({"widget": "OK"})).unwrap();
     h.frames(4);
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let volume: f64 = state.bodies.iter().filter_map(|b| solidcraft_engine::doc::kernel::measure(&b.body).ok()).map(|m| m.volume).sum();
     // The box, the cylinder and the 10 x 10 x 20 extrude.
     let expected = 8000.0 + std::f64::consts::PI * 25.0 * 30.0 + 2000.0;
@@ -117,7 +117,7 @@ fn vertex_and_curved_face_are_targets() {
 
 /// The cylinder's side, at the middle of one of its triangles.
 fn curved_hit(h: &Harness) -> Hit {
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     for b in &st.bodies {
         let m = b.mesh();
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
@@ -131,7 +131,7 @@ fn curved_hit(h: &Harness) -> Hit {
 }
 
 fn dialog_body(h: &Harness) -> String {
-    h.app.session.world_state().bodies.first().unwrap().name.clone()
+    crate::open_meshing::session_world(&h.app.session).bodies.first().unwrap().name.clone()
 }
 
 #[test]

@@ -1,15 +1,20 @@
 use serde_json::{Value, json};
 
-use super::{CenterOfMassParams, CentersOfMass, CurvatureCombParams, CurvatureCombs, IsocurveParams, Isocurves, MinimumRadii, MinimumRadiusParams};
+use super::{
+    CenterOfMassParams, CentersOfMass, CurvatureCombParams, CurvatureCombReply, IsocurveParams, IsocurveReply, MinimumRadii, MinimumRadiusParams,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<CurvatureCombParams>(), &["count", "curves", "density", "edges", "faces", "scale", "sketch"]);
+    assert_keys(
+        input_schema_for::<CurvatureCombParams>(),
+        &["add", "clear", "count", "curves", "density", "edges", "faces", "length", "scale", "sketch"],
+    );
     assert_keys(input_schema_for::<MinimumRadiusParams>(), &["curves", "edges", "faces", "sketch"]);
-    assert_keys(input_schema_for::<IsocurveParams>(), &["count", "faces"]);
+    assert_keys(input_schema_for::<IsocurveParams>(), &["add", "clear", "count", "faces"]);
     assert_keys(input_schema_for::<CenterOfMassParams>(), &["bodies"]);
 }
 
@@ -34,6 +39,9 @@ fn strict_keeps_todays_errors() {
         ("inspect.isocurve", json!({"faces": 5})),
         ("inspect.isocurve", json!({"faces": [[1, 2]]})),
         ("inspect.isocurve", json!({"faces": [{"x": 0, "y": 0, "z": 500}]})),
+        ("inspect.isocurve", json!({"faces": [[0, 0, 0]], "count": 0})),
+        ("inspect.isocurve", json!({"faces": [[0, 0, 0]], "count": 2.5})),
+        ("inspect.curvature_comb", json!({"edges": [[0, 0, 0]], "length": 0})),
         ("inspect.center_of_mass", json!({})),
         ("inspect.center_of_mass", json!({"bodies": ["nope"]})),
     ]);
@@ -46,9 +54,9 @@ fn strict_keeps_todays_errors() {
 #[test]
 fn analysis_commands_reply_with_their_schemas() {
     let (combs, radii, isocurves, centers) = (
-        output_schema_for::<CurvatureCombs>(),
+        output_schema_for::<CurvatureCombReply>(),
         output_schema_for::<MinimumRadii>(),
-        output_schema_for::<Isocurves>(),
+        output_schema_for::<IsocurveReply>(),
         output_schema_for::<CentersOfMass>(),
     );
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };

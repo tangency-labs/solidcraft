@@ -1,0 +1,13 @@
+{
+ "commands": [
+  {
+   "command": "construct.plane.at_angle",
+   "params": {
+    "base": "XY",
+    "axis": "X",
+    "angle": "30 deg",
+    "name": "P"
+   }
+  }
+ ]
+}

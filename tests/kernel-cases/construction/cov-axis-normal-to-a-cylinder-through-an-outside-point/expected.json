@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "an axis square to a cylinder's side through a point outside it",
+ "source": "analytic",
+ "method": "cylinder r 5, h 10 on (60,0,0) along +Z: through (66,8,5), 10 from the axis along (0.6,0.8,0): the radial line through (60,0,5) along (3,4,0)",
+ "construction": {
+  "A": {
+   "axis": {
+    "through": [
+     60,
+     0,
+     5
+    ],
+    "dir": [
+     3,
+     4,
+     0
+    ]
+   }
+  }
+ }
+}

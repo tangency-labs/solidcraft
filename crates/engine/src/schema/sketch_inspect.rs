@@ -8,7 +8,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::check::whole;
 use super::types::{Point3, SketchRef, StringList, present};
@@ -72,13 +72,85 @@ point_list!(
     bad: "`faces` must be points [x,y,z]",
     empty: None
 );
-point_list!(
-    /// Points on faces, each picking the nearest face of any body (the first 100 are used).
-    IsoFaces,
-    limit: 100,
-    bad: "`faces` must list points [x,y,z]",
-    empty: Some("`faces` is empty")
-);
+/// The most faces one isocurve call shows.
+pub const MAX_ISO_FACES: usize = 100;
+
+const ISO_FACES: &str = "`faces` must list points [x,y,z] on faces";
+
+/// Points on faces, each picking the nearest face of any body: 1 to [`MAX_ISO_FACES`] of them,
+/// with the handler's messages.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IsoFaces(pub Vec<Vec3>);
+
+impl<'de> Deserialize<'de> for IsoFaces {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let points = v.as_array().ok_or_else(|| D::Error::custom(whole(ISO_FACES)))?;
+        if points.is_empty() || points.len() > MAX_ISO_FACES {
+            return Err(D::Error::custom(whole(format!("`faces` must list 1…{MAX_ISO_FACES} points [x,y,z] on faces"))));
+        }
+        points.iter().map(params::vec3).collect::<Option<Vec<_>>>().map(IsoFaces).ok_or_else(|| D::Error::custom(whole(ISO_FACES)))
+    }
+}
+
+impl JsonSchema for IsoFaces {
+    fn schema_name() -> Cow<'static, str> {
+        "IsoFaces".into()
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({"type": "array", "items": point, "minItems": 1, "maxItems": MAX_ISO_FACES})
+    }
+}
+
+/// `true`, `false` or null, with the handler's message for anything else.
+fn flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom("must be true or false")),
+    }
+}
+
+/// The comb's length multiplier, 0.01 to 100, with the handler's message for anything else;
+/// `null` is none.
+fn multiplier<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => v
+            .as_f64()
+            .filter(|x| (0.01..=100.0).contains(x))
+            .map(Some)
+            .ok_or_else(|| D::Error::custom(whole("`length` must be a multiplier 0.01…100"))),
+    }
+}
+
+fn multiplier_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["number", "null"], "minimum": 0.01, "maximum": 100})
+}
+
+/// Isocurves each way, a whole number 1 to `MAX_ISO_COUNT`, with the handler's message for
+/// anything else; `null` is none.
+fn iso_count<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    let max = crate::kernel::MAX_ISO_COUNT;
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => v
+            .as_f64()
+            .filter(|c| c.fract() == 0.0 && (1.0..=max as f64).contains(c))
+            .map(Some)
+            .ok_or_else(|| D::Error::custom(whole(format!("`count` must be a whole number of curves each way, 1…{max}")))),
+    }
+}
+
+fn iso_count_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["integer", "null"], "minimum": 1, "maximum": crate::kernel::MAX_ISO_COUNT})
+}
 
 /// A number, as `params::num` reads one (finite, under 1e9 in size), with the curvature comb's
 /// message for anything else; `null` is none.
@@ -123,6 +195,17 @@ pub struct CurvatureCombParams {
     #[serde(default, deserialize_with = "number")]
     #[schemars(schema_with = "number_schema")]
     pub scale: Option<f64>,
+    /// A multiplier on the automatic scale (default 1; 0.01 to 100). Ignored with `scale`.
+    #[serde(default, deserialize_with = "multiplier")]
+    #[schemars(schema_with = "multiplier_schema")]
+    pub length: Option<f64>,
+    /// Keep the combs shown and add these, every comb again at one scale. With nothing picked it
+    /// draws those shown again with this call's options.
+    #[serde(default, deserialize_with = "flag")]
+    pub add: Option<bool>,
+    /// Turn the analysis off.
+    #[serde(default, deserialize_with = "flag")]
+    pub clear: Option<bool>,
 }
 
 /// The smallest radius of curvature of each sketch curve, edge or face, and where it is. With
@@ -142,15 +225,23 @@ pub struct MinimumRadiusParams {
     pub faces: Option<RadiusFaces>,
 }
 
-/// The isoparametric curves of faces.
+/// The isoparametric curves of faces, u = const and v = const of each face's surface, cut to its
+/// trims; `faces` unless `clear`.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct IsocurveParams {
-    pub faces: IsoFaces,
+    #[serde(default)]
+    pub faces: Option<IsoFaces>,
     /// How many curves each way (default 8; 1 to 100).
-    #[serde(default, deserialize_with = "number")]
-    #[schemars(schema_with = "number_schema")]
+    #[serde(default, deserialize_with = "iso_count")]
+    #[schemars(schema_with = "iso_count_schema")]
     pub count: Option<f64>,
+    /// Keep the faces already shown.
+    #[serde(default, deserialize_with = "flag")]
+    pub add: Option<bool>,
+    /// Turn the analysis off.
+    #[serde(default, deserialize_with = "flag")]
+    pub clear: Option<bool>,
 }
 
 /// The centre of mass of bodies, at uniform density, each and all together, where the bodies
@@ -163,10 +254,29 @@ pub struct CenterOfMassParams {
     pub bodies: Option<StringList>,
 }
 
-/// What `inspect.curvature_comb` returns.
+/// What a view analysis's `clear` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AnalysisCleared {
+    /// The analysis turned off.
+    pub analysis: String,
+    pub cleared: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `inspect.curvature_comb` returns: the combs, or the analysis turned off.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum CurvatureCombReply {
+    Combs(CurvatureCombs),
+    Cleared(AnalysisCleared),
+}
+
+/// The combs `inspect.curvature_comb` shows.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CurvatureCombs {
-    /// One comb per curve, edge and face isocurve.
+    /// One comb per curve, edge and face isocurve (those shown, with `add`).
     pub combs: Vec<Comb>,
     /// The tooth length per unit of curvature used for every comb (mm²).
     pub scale: f64,
@@ -217,14 +327,38 @@ pub struct RadiusItem {
     pub at: Option<[f64; 3]>,
 }
 
-/// What `inspect.isocurve` returns.
+/// What `inspect.isocurve` returns: the curves, or the analysis turned off.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum IsocurveReply {
+    Curves(Isocurves),
+    Cleared(AnalysisCleared),
+}
+
+/// The isocurves of the faces `inspect.isocurve` picked.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Isocurves {
     /// Each isoparametric curve as points along it, `count` each way per face.
     pub curves: Vec<Vec<[f64; 3]>>,
+    /// Each face picked.
+    pub faces: Vec<IsoFace>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// One face whose isocurves are shown.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct IsoFace {
+    /// The body, by name.
+    pub body: String,
+    /// The face's index in the body.
+    pub face: usize,
+    /// Curves asked for each way.
+    pub count: usize,
+    /// Curves along u (v = const) and along v (u = const), as cut to the face.
+    pub u_curves: usize,
+    pub v_curves: usize,
 }
 
 /// What `inspect.center_of_mass` returns.
@@ -236,6 +370,8 @@ pub struct CentersOfMass {
     pub volume: f64,
     /// Each body measured.
     pub bodies: Vec<BodyCenter>,
+    /// The bodies left out: those that enclose no volume or could not be measured.
+    pub skipped: Vec<SkippedBody>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -250,6 +386,13 @@ pub struct BodyCenter {
     pub center: [f64; 3],
     /// Its volume (mm³).
     pub volume: f64,
+}
+
+/// A body the centre of mass leaves out, and why.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SkippedBody {
+    pub body: String,
+    pub reason: String,
 }
 
 #[cfg(test)]

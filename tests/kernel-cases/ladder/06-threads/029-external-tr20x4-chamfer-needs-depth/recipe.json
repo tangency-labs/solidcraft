@@ -1,0 +1,30 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 10,
+    "height": 24,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     10,
+     0,
+     12
+    ],
+    "modeled": true,
+    "designation": "Tr20x4",
+    "tip": "both"
+   }
+  }
+ ]
+}

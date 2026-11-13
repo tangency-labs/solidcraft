@@ -1,7 +1,7 @@
-//! Text styles: alignment, letter and line spacing, a made-up italic, a bold the font lacks, and
+//! Text styles: alignment along and up or down, letter and line spacing, a made-up italic, a bold the font lacks, and
 //! text that follows a curve of its sketch; and text measured (`TextMetrics`) by the rule that draws it.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use super::*;
 use crate::{CurveKind, Sketch, font_data};
@@ -59,6 +59,35 @@ fn lines_align_left_center_or_right_on_the_anchor() {
 }
 
 #[test]
+fn the_block_of_lines_sits_on_its_baseline_top_middle_or_bottom() {
+    let at = |text: &str, vertical_align: TextVerticalAlign| extent(&styled(text, &TextStyle { vertical_align, ..TextStyle::default() }, None));
+    let near = |a: f64, b: f64| (a - b).abs() < 0.05;
+    // An H stands on the baseline and reaches the capital height, 10 mm.
+    let plain = at("H", TextVerticalAlign::Baseline);
+    assert!(near(plain.0.y, 0.0) && near(plain.1.y, 10.0), "{plain:?}");
+    let top = at("H", TextVerticalAlign::Top);
+    assert!(near(top.1.y, 0.0) && near(top.0.y, -10.0), "the capitals hang from the anchor: {top:?}");
+    // Two lines: the block runs from the first line's capital tops to the last line's baseline.
+    let two = at("H\nH", TextVerticalAlign::Baseline);
+    let middle = at("H\nH", TextVerticalAlign::Middle);
+    assert!(near(middle.0.y + middle.1.y, 0.0), "centred on the anchor: {middle:?}");
+    assert!(near(middle.1.y - middle.0.y, two.1.y - two.0.y), "the block keeps its size: {middle:?}");
+    // Bottom leaves room for the tails of g, p and y: the last line's g reaches down to the anchor
+    // (the font's descender is a little deeper than its g), and its H stands well above it.
+    let tail = at("H\nHg", TextVerticalAlign::Bottom);
+    assert!(tail.0.y > -1e-9 && tail.0.y < 0.3, "the tail ends at the anchor: {tail:?}");
+    let bottom = at("H\nH", TextVerticalAlign::Bottom);
+    assert!(bottom.0.y > 1.0 && bottom.0.y > tail.0.y, "the last line stands above the anchor: {bottom:?}");
+    assert!(near(bottom.1.y - bottom.0.y, two.1.y - two.0.y), "the block keeps its size: {bottom:?}");
+    assert!((plain.0.x - top.0.x).abs() < 1e-12, "vertical alignment moves lines up or down, not along");
+    // On a path the lines move off the curve the same way: centred, an H straddles it.
+    let line = [v(-20.0, 0.0), v(20.0, 0.0)];
+    let on =
+        extent(&styled("H", &TextStyle { path: Some("l".into()), vertical_align: TextVerticalAlign::Middle, ..TextStyle::default() }, Some(&line)));
+    assert!(near(on.0.y, -5.0) && near(on.1.y, 5.0), "{on:?}");
+}
+
+#[test]
 fn letter_spacing_adds_between_letters_and_line_spacing_scales_the_lines() {
     let plain = extent(&styled("HHH", &TextStyle::default(), None));
     let spaced = extent(&styled("HHH", &TextStyle { letter_spacing: 2.5, ..TextStyle::default() }, None));
@@ -88,7 +117,7 @@ fn italic_without_an_italic_face_slants_and_bold_without_a_bold_face_is_an_error
 /// its own; Bold sets its weight axis to 700, so the strokes widen at the same height.
 #[test]
 fn bold_in_a_variable_font_sets_its_weight_axis() {
-    let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf");
+    let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf");
     let font = file.to_string_lossy().into_owned();
     let set = |style: &TextStyle| extent(&text_geometry_styled(Some(&font), "l", Vec2::ZERO, 10.0, 0.0, style, None).unwrap());
     let (plain, bold) = (set(&TextStyle::default()), set(&TextStyle { bold: true, ..TextStyle::default() }));
@@ -189,6 +218,7 @@ fn a_style_is_saved_only_when_it_is_not_plain_and_reads_back() {
             bold: true,
             italic: true,
             align: TextAlign::Right,
+            vertical_align: TextVerticalAlign::Bottom,
             letter_spacing: -0.5,
             line_spacing: 1.5,
             path: Some("l3".into()),
@@ -198,6 +228,7 @@ fn a_style_is_saved_only_when_it_is_not_plain_and_reads_back() {
     };
     let json = serde_json::to_value(&styled).unwrap();
     assert_eq!(json["style"]["align"], "right");
+    assert_eq!(json["style"]["vertical_align"], "bottom");
     assert_eq!(serde_json::from_value::<LinkSource>(json).unwrap(), styled);
     // Saved without a style (before styles): plain.
     let mut old = serde_json::to_value(&plain).unwrap();

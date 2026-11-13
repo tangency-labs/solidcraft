@@ -2,7 +2,8 @@
 use serde_json::{Value, json};
 use solidcraft_engine::doc::physical_material::{Family, MaterialCard, PropertyData, admit_card};
 
-use crate::{SolveApp, i18n::tr, ui_kit};
+use crate::{SolveApp, ui_kit};
+use solidcraft_ui_text::tr;
 
 const MAX_BYTES: usize = 256 * 1024;
 const KINDS: &[&str] = &[
@@ -54,30 +55,21 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.material_card_review = Some(window);
         return;
     }
-    let palette = app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive());
-    let side =
-        if palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx) { crate::frame::Side::Left } else { crate::frame::Side::Right };
-    let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
-    let docked = egui::pos2(side.anchor_x(viewport), top);
+    let side = crate::frame::Side::Right;
+    let (_, docked) = crate::shell::floating_editor_anchor(app, ctx);
     let title = tr("ui.material_review.title");
     let moved = crate::frame::dock_offset(ctx, "material_card_review");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let panel = ui_kit::Panel::new(
         title,
-        egui::Id::new("sc_material_card_review"),
+        egui::Id::unique("sc_material_card_review"),
         anchor,
         drag_bounds,
         side,
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
-    .wide();
-    let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
-    } else {
-        panel
-    };
+    .width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
     let mut close = false;
     panel.window(ctx).show(ctx, |ui| {
         let (closed, action) = panel.feature(
@@ -95,8 +87,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             |ui| {
                 ui_kit::text(ui, tr("ui.material_review.scope"), ui_kit::Text::Hint("manage"));
                 ui_kit::text(ui, tr("ui.material_review.input"), ui_kit::Text::Report("material_input_label", false));
-                let response =
-                    ui_kit::text_area(ui, tr("ui.material_review.input"), egui::Id::new("sc_material_card_input"), &mut window.input, 5, MAX_BYTES);
+                let response = ui_kit::text_area(
+                    ui,
+                    tr("ui.material_review.input"),
+                    egui::Id::unique("sc_material_card_input"),
+                    &mut window.input,
+                    5,
+                    MAX_BYTES,
+                );
                 crate::scenario::publish_handle("review:input", response.rect.center());
                 if response.changed() {
                     window.reviewed = None;
@@ -272,7 +270,7 @@ mod tests {
         assert!(h.widget("Original synthetic candidate").is_some());
         assert!(h.widget("Density: Unknown").is_some());
         assert!(h.widget("E: 1.2e10 Pa").is_some());
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("sc_material_card_input")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("sc_material_card_input")));
         h.step(&json!({"text":" "})).unwrap();
         assert!(h.app.material_card_review.as_ref().unwrap().reviewed.is_none(), "editing invalidates the old report");
         h.step(&json!({"click":{"handle":"dialog:close"}})).unwrap();

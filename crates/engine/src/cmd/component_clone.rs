@@ -1,16 +1,18 @@
 //! Independent copies of a component definition graph, assembled and evaluated atomically.
 use solidcraft_doc::BodyName;
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::params::bad;
+use crate::schema::component::PasteNewResult;
 use crate::{Result, Sel, Session};
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::{Document, Feature, FeatureKind, Mat, Occurrence};
 
 const CMD: &str = "component.paste_new";
 const MAX_WORK: usize = 10_000;
 
-fn mesh_distance(mesh: &solidcraft_geom::Mesh, point: solidcraft_geom::Vec3) -> f64 {
+fn mesh_distance(mesh: &solidcraft_geom::Mesh, point: solidcore_record::Vec3) -> f64 {
     mesh.triangles
         .iter()
         .filter_map(|triangle| mesh.tri(triangle))
@@ -33,7 +35,7 @@ fn mesh_distance(mesh: &solidcraft_geom::Mesh, point: solidcraft_geom::Vec3) -> 
         .fold(f64::INFINITY, f64::min)
 }
 
-fn material_probe_matches(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, point: solidcraft_geom::Vec3, tol_a: f64, tol_b: f64) -> bool {
+fn material_probe_matches(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, point: solidcore_record::Vec3, tol_a: f64, tol_b: f64) -> bool {
     if !point.is_finite() || !tol_a.is_finite() || !tol_b.is_finite() || tol_a <= 0. || tol_b <= 0. {
         return false;
     }
@@ -48,7 +50,7 @@ fn material_probe_matches(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, 
     let offset = 4. * tol_a.max(tol_b);
     let mut material = false;
     let mut void = false;
-    for axis in [solidcraft_geom::Vec3::X, solidcraft_geom::Vec3::Y, solidcraft_geom::Vec3::Z] {
+    for axis in [solidcore_record::Vec3::X, solidcore_record::Vec3::Y, solidcore_record::Vec3::Z] {
         for sign in [-1., 1.] {
             let q = point + axis * (sign * offset);
             if !q.is_finite() {
@@ -190,7 +192,7 @@ fn graph(doc: &Document, root: u64) -> Result<Vec<u64>> {
 pub(super) struct Source<'a> {
     pub doc: &'a Document,
     pub model: &'a solidcraft_doc::Model,
-    pub pending_moves: &'a BTreeMap<u64, Mat>,
+    pub pending_moves: std::borrow::Cow<'a, BTreeMap<u64, Mat>>,
     /// Another design than the target: the copy can't point at anything outside it (it is
     /// refused, saying what), and the user parameters it uses come along.
     pub other_design: bool,
@@ -199,12 +201,12 @@ pub(super) struct Source<'a> {
 impl<'a> Source<'a> {
     /// The session's own design.
     pub fn of(s: &'a Session) -> Source<'a> {
-        Source { doc: &s.doc, model: &s.model, pending_moves: &s.pending_moves, other_design: false }
+        Source { doc: &s.doc, model: &s.model, pending_moves: s.uncaptured_moves(), other_design: false }
     }
 
     /// What was copied in another design.
     pub fn copied(copy: &'a crate::ForeignCopy) -> Source<'a> {
-        Source { doc: &copy.doc, model: &copy.model, pending_moves: &copy.pending_moves, other_design: true }
+        Source { doc: &copy.doc, model: &copy.model, pending_moves: std::borrow::Cow::Borrowed(&copy.pending_moves), other_design: true }
     }
 }
 
@@ -484,7 +486,7 @@ pub(super) fn build(
         } else if f.body_names.is_empty() {
             f.body_names = outputs.get(&old.id).cloned().unwrap_or_default();
         }
-        f.remap_clone(&features, &names, &bodies, &parameters)?;
+        f.remap_clone(&features, &names, &bodies, &parameters, &occurrences, &scratch.doc)?;
         transfer_into_copy(&mut f.kind, &components)?;
         if let FeatureKind::Emboss { face: Some(face), .. } = &mut f.kind
             && !face.path.is_empty()
@@ -507,6 +509,20 @@ pub(super) fn build(
                 anchor.path = cloned_path(source, &original.path, component, &clone_path, &occurrences)?;
             }
             anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
+        }
+        if let (FeatureKind::FrameEndCap { ends, .. }, FeatureKind::FrameEndCap { ends: originals, .. }) = (&mut f.kind, &old.kind) {
+            for (end, original) in ends.iter_mut().zip(originals) {
+                if let (Some(anchor), Some(original)) =
+                    (super::sketch::face::anchor_mut(&mut end.plane), super::sketch::face::anchor(&original.plane))
+                {
+                    if bodies.contains_key(&original.target.body) {
+                        anchor.component =
+                            *components.get(&original.component).ok_or_else(|| bad(CMD, "end cap's member is outside the copied graph"))?;
+                        anchor.path = cloned_path(source, &original.path, component, &clone_path, &occurrences)?;
+                    }
+                    anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
+                }
+            }
         }
         if let Some(slot) = scratch.doc_mut().feature_mut(f.id) {
             *slot = f;
@@ -561,7 +577,6 @@ pub(super) fn build(
                 }
                 if let Some(name) = &face.name {
                     face.point = solidcraft_doc::naming::point_on_face(&state, name, face.point)
-                        .map(|(point, _)| point)
                         .ok_or_else(|| bad(CMD, "source frozen face appearance lost its identity"))?;
                 }
                 let source_body = state.body(&face.body).ok_or_else(|| bad(CMD, "source frozen face appearance lost its body"))?;
@@ -649,6 +664,23 @@ pub(super) fn build(
                 "{} retains external exact face attachment to {} (producer {})",
                 feature.name, anchor.target.body, anchor.target.origin_feature
             ));
+        }
+        // A cap closes the end of a member it does not copy: that member, and the face it was
+        // picked on, stay outside.
+        if let FeatureKind::FrameEndCap { ends, .. } = &feature.kind {
+            for end in ends {
+                if !features.contains_key(&end.member.feature.0) {
+                    notices.push(format!("{} retains external feature reference {}", feature.name, end.member.feature));
+                }
+                if let Some(anchor) = super::sketch::face::anchor(&end.plane)
+                    && !bodies.contains_key(&anchor.target.body)
+                {
+                    notices.push(format!(
+                        "{} retains external exact face attachment to {} (producer {})",
+                        feature.name, anchor.target.body, anchor.target.origin_feature
+                    ));
+                }
+            }
         }
         for id in feature.kind.input_sketches() {
             if !features.contains_key(&id) {
@@ -756,8 +788,8 @@ pub(super) fn build(
         let mut material_matches = true;
         let tol_a = (a.size() * 1e-3).max(1e-3).max(a.size() * 1e-6);
         let tol_b = (b.size() * 1e-3).max(1e-3).max(b.size() * 1e-6);
-        let mesh_a = a.display_mesh(tol_a)?;
-        let mesh_b = b.display_mesh(tol_b)?;
+        let mesh_a = a.mesh(&solidcraft_kernel::MeshTolerance::chord(tol_a))?;
+        let mesh_b = b.mesh(&solidcraft_kernel::MeshTolerance::chord(tol_b))?;
         // Precharge all 27 candidates, six possible replacements, their triangle
         // distances and the three containment rays before any proof traversal.
         proof_work = proof_work.saturating_add(mesh_a.triangles.len().saturating_add(mesh_b.triangles.len()).saturating_mul(27 * 7 * 4));
@@ -768,7 +800,7 @@ pub(super) fn build(
             for y in [0.2, 0.5, 0.8] {
                 for z in [0.2, 0.5, 0.8] {
                     let d = ma.bbox.max - ma.bbox.min;
-                    let p = ma.bbox.min + solidcraft_geom::Vec3::new(d.x * x, d.y * y, d.z * z);
+                    let p = ma.bbox.min + solidcore_record::Vec3::new(d.x * x, d.y * y, d.z * z);
                     let roundoff = 64. * f64::EPSILON * (1. + p.len());
                     material_matches &= material_probe_matches(&mesh_a, &mesh_b, p, tol_a + roundoff, tol_b + roundoff);
                 }
@@ -793,7 +825,16 @@ pub(super) fn build(
         }
     }
     scratch.selection = vec![Sel::Occurrence { path: clone_path }];
-    let out = json!({"component":root,"occurrence":root_occurrence,"features":new_ids,"components":components.len(),"bodies":expected_count,"frozen_bodies":frozen,"notices":notices});
+    let out = super::component::reply(PasteNewResult {
+        component: root,
+        occurrence: root_occurrence,
+        features: new_ids,
+        components: components.len(),
+        bodies: expected_count,
+        frozen_bodies: frozen,
+        notices,
+        param_warnings: Vec::new(),
+    })?;
     Ok((scratch, out))
 }
 

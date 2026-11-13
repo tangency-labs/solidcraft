@@ -1,0 +1,9 @@
+{"commands": [
+ {"command": "sketch.create", "params": {"plane": "XY", "name": "Bottom"}},
+ {"command": "sketch.line", "params": {"closed": true, "infer": false, "connect": false, "points": [[10,10],[-10,10],[-10,-10],[10,-10]]}},
+ {"command": "sketch.finish", "params": {}},
+ {"command": "sketch.create", "params": {"plane": "XY", "offset": 30, "name": "Top"}},
+ {"command": "sketch.line", "params": {"closed": true, "infer": false, "connect": false, "points": [[0,14.142135623730951],[-14.142135623730951,0],[0,-14.142135623730951],[14.142135623730951,0]]}},
+ {"command": "sketch.finish", "params": {}},
+ {"command": "solid.loft", "params": {"sections": [{"sketch": "Bottom"}, {"sketch": "Top"}], "operation": "new"}}
+]}

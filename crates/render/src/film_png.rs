@@ -9,7 +9,8 @@
 use super::{CompletePass, MAX_BYTES, invalid, limit};
 use crate::job::encoding::PngEncoding;
 use crate::job::{CancelToken, CpuHost, ErrorCode, JobError, Phase, Progress, Reservation, Result};
-use solidcraft_geom::{Vec3, srgb::encode8};
+use solidcore_record::Vec3;
+use solidcraft_color::srgb::encode8;
 
 /// Encoded bytes retain the actual existing host lease. No detached byte getter.
 pub struct CompletedPng {
@@ -185,6 +186,7 @@ impl<'a> FilmPngTask<'a> {
                 self.pass = None;
                 let mut lease = self.lease.take().ok_or_else(|| invalid("missing film PNG lease"))?;
                 lease.shrink(bytes.capacity() as u64 + 1024)?;
+                lease.settle()?;
                 self.terminal = true;
                 return Ok(ResolvePoll::Complete(CompletedPng {
                     bytes,

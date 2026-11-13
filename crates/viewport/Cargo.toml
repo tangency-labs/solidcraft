@@ -1,0 +1,19 @@
+[package]
+name = "solidcraft-viewport"
+description = "The viewport renderer the Craft apps share: orbit camera, projection and picking rays, the description of a headless picture and its CPU rasterizer, the surface shading models and section hatches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+image = { workspace = true }
+serde = { workspace = true }
+solidcore-record = { workspace = true }
+solidcore-tess = { workspace = true }
+solidcraft-color = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

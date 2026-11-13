@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the top rim of a hole through a 10 mm plate rounded r12: the round runs past the wall on its tangent side, so it is built by subtraction and trims the bottom face round the hole",
+ "source": "analytic",
+ "method": "plate 40x40x10 with a through hole R5 at (20, 20): V0 = 16000 - 250 pi = 15214.6018. Owner rule: a round past a face on its tangent side is built (the blend on the extended faces, its removal region subtracted). The r12 round's circle (centre rho = 17, z = -2) would touch the wall 2 below the plate; what it removes is the spandrel clipped to the plate: at t = rho - 5 the depth min(12 - sqrt(144 - (12-t)^2), 10) (reaching the bottom for t < 12 - sqrt 140 = 0.1678, where the bottom face is trimmed back to rho = 5.1678). Removed = 2 pi int (5 + t) min(L(t), 10) dt (t = 12 (1 - cos th), Gauss-Legendre) = 1487.7439. V = 13726.8580. Faces 6 + round = 7.",
+ "body_count": 1,
+ "volume_mm3": 13726.857966844447,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

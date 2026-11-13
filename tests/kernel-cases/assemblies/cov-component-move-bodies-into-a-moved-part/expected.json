@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "a root body moved into a component placed 100 mm along x",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Holder (empty) moved by (100,0,0), then a box 10x10x10 from (0,20,0) moved into it: the body keeps its world place, centre (5,25,5)",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 12,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      5.0,
+      25.0,
+      5.0
+     ],
+     "volume_mm3": 1000.0
+    }
+   }
+  }
+ ]
+}

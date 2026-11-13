@@ -1,0 +1,65 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     40,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     20,
+     15
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 12.5,
+    "operation": "new",
+    "profiles": [
+     {
+      "point": [
+       2,
+       2
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      25,
+      15,
+      6.25
+     ]
+    ],
+    "thickness": 2.5
+   }
+  }
+ ]
+}

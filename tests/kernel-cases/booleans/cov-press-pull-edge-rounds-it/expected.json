@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "Press Pull on an edge (its fillet mode): the block's top front edge rounded r2",
+ "source": "analytic",
+ "method": "a round r2 along 40 mm removes (1 - pi/4) r^2 * 40; faces 6 + 1",
+ "body_count": 1,
+ "faces": 7,
+ "volume_mm3": 11965.663706143592
+}

@@ -1,0 +1,19 @@
+{
+ "sources": [],
+ "what": "a sheet 2 above and 2 short of a sheet's edge, matched G3 down onto it and stitched: the seam holds G3",
+ "source": "invariants",
+ "method": "target x 0..10 at z = 0, skirt x 12..20 at z = 2; the near boundary moves onto x = 10, z = 0 repeating the target's plane to G3, the far boundary stays at x = 20, z = 2. Graded: the seam's order as Continuity Analysis measures it, one body of 2 faces",
+ "valid": false,
+ "body_count": 1,
+ "faces": 2,
+ "continuity": {
+  "order": "g3",
+  "edges": [
+   [
+    10,
+    10,
+    0
+   ]
+  ]
+ }
+}

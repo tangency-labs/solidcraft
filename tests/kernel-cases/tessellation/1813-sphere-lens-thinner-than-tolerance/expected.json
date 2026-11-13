@@ -1,0 +1,13 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2712",
+    "tangency-labs/solidcraft#1813"
+  ],
+  "what": "a sphere whose centre lies on a box's top face, poking out of the box's side as a lens-shaped face thinner than the mesh tolerance; the face must still be meshed",
+  "source": "analytic",
+  "method": "box 7.5x20x5 (x 15..22.5, y 0..20, z 22.5..27.5): V=750. Sphere r=3.75: V=4/3 pi r^3=220.8932. Sphere centre (20,10,27.5) is on the box top, so the part inside the box is the lower half-sphere (110.4466) minus the half of the cap beyond the side plane x=22.5 (distance 2.5 from the centre, cap height h=1.25, cap V=pi h^2 (3r-h)/3=16.3625, half 8.1812): V_int=102.2654. Union = 750 + 220.8932 - 102.2654 = 868.6278. The sphere stays inside y 6.25..13.75 and z>=23.75, so it meets only the top and the x=22.5 side. Area: box 575 less the top disc (pi r^2 minus the circular segment beyond x=22.5: 44.1786-4.8398=39.3388) less the half circle on the side plane (pi(r^2-d^2)/2=12.2718), plus the sphere outside the box (upper hemisphere 88.3573 + half cap 2 pi r h/2=14.7262): 575-39.3388-12.2718+103.0835=626.4728. Faces: 6 planes and one sphere.",
+  "body_count": 1,
+  "volume_mm3": 868.6278,
+  "area_mm2": 626.4728,
+  "faces": 7
+}

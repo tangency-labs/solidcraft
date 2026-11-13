@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "the three edges at one box corner rounded r3, Corners: Curvature set back 3.5: refused, the setback too short for the corner's certified fill",
+ "source": "invariants",
+ "method": "box 40x30x20, the edges at (40,30,20) rounded r3, corner g2, set back 3.5. Past the radius, but since tangency-labs/solidcore#2988 the corner is the blend corner's Setback, whose fill is certified: at 3.5 the fill does not stay convex, so the setback is refused (NoRoom); solidcore names the least setback its own fill takes, 3.5595, as data (its SetbackTooShort refusal, #13913), and the refusal carries it as what solidcore's corner needs: SolidCraft's G2 patch replaces that fill here, and is not shown to fit at it. The N x N patch built here before was uncertified. The right answer is the refusal.",
+ "outcome": "refused",
+ "refusal": "is too short for its corner's fill: solidcore's corner needs a setback of at least 3.5595 mm"
+}

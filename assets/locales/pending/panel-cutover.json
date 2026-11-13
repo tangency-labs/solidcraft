@@ -1,0 +1,38 @@
+{
+  "ar": {
+    "prefs.history_in_browser": "إظهار السجل في المستعرض",
+    "prefs.history_in_browser_note": "يعرض عمليات كل مكوّن في المستعرض ويخفي لوحة السجل المنفصلة."
+  },
+  "de": {
+    "prefs.history_in_browser": "Verlauf im Browser anzeigen",
+    "prefs.history_in_browser_note": "Zeigt die Vorgänge jeder Komponente im Browser und blendet das separate Verlaufsfenster aus."
+  },
+  "en": {
+    "prefs.history_in_browser": "Show History in the Browser",
+    "prefs.history_in_browser_note": "List each component’s features in the Browser and hide the separate History panel."
+  },
+  "he": {
+    "prefs.history_in_browser": "הצגת ההיסטוריה בדפדפן",
+    "prefs.history_in_browser_note": "מציג את פעולות כל רכיב בדפדפן ומסתיר את לוח ההיסטוריה הנפרד."
+  },
+  "ja": {
+    "prefs.history_in_browser": "履歴をブラウザーに表示",
+    "prefs.history_in_browser_note": "各コンポーネントのフィーチャーをブラウザーに表示し、個別の履歴パネルを非表示にします。"
+  },
+  "ko": {
+    "prefs.history_in_browser": "브라우저에 이력 표시",
+    "prefs.history_in_browser_note": "각 구성요소의 피처를 브라우저에 표시하고 별도의 이력 패널을 숨깁니다."
+  },
+  "pl": {
+    "prefs.history_in_browser": "Pokazuj Historię w przeglądarce",
+    "prefs.history_in_browser_note": "Wyświetla operacje każdego komponentu w przeglądarce i ukrywa osobny panel Historii."
+  },
+  "vi": {
+    "prefs.history_in_browser": "Hiện lịch sử trong trình duyệt",
+    "prefs.history_in_browser_note": "Liệt kê các tính năng của từng thành phần trong trình duyệt và ẩn bảng lịch sử riêng."
+  },
+  "zh": {
+    "prefs.history_in_browser": "在浏览器中显示历史记录",
+    "prefs.history_in_browser_note": "在浏览器中列出各组件的特征，并隐藏独立的历史记录面板。"
+  }
+}

@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "a bracket: a 30 mm flange on the front edge, a 10 mm lip turned out on its far edge, a d10 hole through the base",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). The flange (as 002, H 30) stands on y = 0 up to z = 30. The lip is picked on that flange's far edge on its outer face (y = 0), the panel's bottom face, so it bends down there, turning out over y < 0; its outer virtual sharp is on the edge (z = 30, y = 2, the flange's top-face plane), so the flange's panel is cut back s0 = 3 more (30 - 3 - 3 = 24) and the lip's outer face is the plane z = 30, its panel 10 - 3 = 7, reaching y = 2 - 10 = -8. The hole (d10 at (50, 35)) is a cut-out of the flat. V = 2 (100 57 + 100 pi + 100 24 + 100 pi + 100 7 - 25 pi). Bbox: x 0..100, y -8..60, z 0..30",
+ "body_count": 1,
+ "volume_mm3": 18699.557428756,
+ "bbox": {
+  "min": [
+   0,
+   -8.0,
+   0
+  ],
+  "max": [
+   100.0,
+   60.0,
+   30.0
+  ]
+ }
+}

@@ -26,7 +26,7 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.inside_component(to, o.component) {
         return Err(bad(cmd, format!("{} can't go inside itself or a component within it", o.name)));
     }
-    if s.doc.marker.is_some() {
+    if s.doc.marker.is_some_and(|m| m < s.doc.features.len()) {
         return Err(bad(cmd, "finish timeline rollback before moving placements"));
     }
     if s.held_by_rigid_group(id).is_some() {
@@ -35,7 +35,7 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     // From the placement named (`path`), into the parent's placement named (`parent_path`).
     let moved = occurrence_path(s, p, id, cmd)?;
     let to_given = parent_path(p, cmd)?;
-    let doc = s.placed_document();
+    let doc = s.design_document();
     let (from_path, from_frame) = placement_of(s, &doc, o.parent, moved.split_last().map(|(_, up)| up), "path", cmd)?;
     let (to_path, to_frame) = placement_of(s, &doc, to, to_given.as_deref(), "parent_path", cmd)?;
     let local = doc.occurrences.iter().find(|x| x.id == id).map(|x| x.transform).unwrap_or(o.transform);
@@ -52,10 +52,12 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     let mut scratch = s.scratch();
     // Pending moves along both parents and of the placement itself are kept: its new transform
     // was worked out from them.
+    // The exploded view is shown only: an ancestor it moves keeps its placement, and stays shown.
+    let uncaptured = s.uncaptured_moves().into_owned();
     for ancestor in from_path.iter().chain(&to_path) {
-        if let Some(pending) = scratch.pending_moves.remove(ancestor)
-            && let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == *ancestor)
-        {
+        let Some(pending) = uncaptured.get(ancestor).copied() else { continue };
+        scratch.pending_moves.remove(ancestor);
+        if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == *ancestor) {
             x.transform = pending;
         }
     }
@@ -63,6 +65,14 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
         x.parent = to;
         x.transform = transform;
+        // A move typed in world axes takes them into the new parent's frame.
+        if x.expressed_moves.iter().any(|m| m.world) {
+            let mut frame = inverse;
+            frame[3] = [0.0, 0.0, 0.0, 1.0];
+            for m in x.expressed_moves.iter_mut().filter(|m| m.world) {
+                m.frame = frame;
+            }
+        }
     }
     // Once all its placements sit in the new parent, the component belongs there too, so what
     // follows the component tree (the parent's eye, its bodies) takes it along.

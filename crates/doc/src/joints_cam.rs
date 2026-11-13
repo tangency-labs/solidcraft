@@ -12,10 +12,12 @@
 //! oscillating one from its arm pointing away from the cam's axis) and stops where it first
 //! touches the profile: the follower stays in contact, as a spring would hold it.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb2, Aabb3, Ring, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::{Aabb2, Aabb3, Ring};
 
 use super::{JointKind, JointOrigin, MotionLink, Size, component_bodies, component_of, flip_of, occurrence_world, size_of};
 use crate::{DocError, Document, IDENTITY, Mat, ModelState, Result, apply_point, apply_vector, mat_inverse, mat_mul};
@@ -322,8 +324,10 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
             }
             // Each body sampled to its own size (a large part beside the cam leaves the cam fine).
             // Each body's edges with the faces beside them.
-            let meshes: Vec<solidcraft_geom::Mesh> =
-                bodies.iter().map(|b| b.body.tessellate(tolerance(b.body.size()))).collect::<std::result::Result<_, _>>()?;
+            let meshes: Vec<solidcraft_geom::Mesh> = bodies
+                .iter()
+                .map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance(b.body.size()))))
+                .collect::<std::result::Result<_, _>>()?;
             let edges: Vec<(usize, &Vec<Vec3>, &[u32])> = meshes
                 .iter()
                 .enumerate()
@@ -339,7 +343,7 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
                     let (body, p) = bodies
                         .iter()
                         .enumerate()
-                        .find_map(|(i, b)| crate::naming::find_edge(b, name, *pick).ok().map(|(p, _)| (i, p)))
+                        .find_map(|(i, b)| crate::naming::find_edge(b, name, *pick).ok().map(|p| (i, p)))
                         .ok_or_else(|| bad(&format!("the edge `{name}` no longer exists (edit the cam to pick again)")))?;
                     (on, at) = (Some(body), p);
                 }
@@ -484,7 +488,7 @@ pub fn sketch_profile<'a>(sk: &'a crate::SolvedSketch, curves: &[String]) -> Opt
 }
 
 /// A loop's polyline within `tol`, segment by segment: `None` past `MAX_PROFILE_POINTS` points.
-fn sampled(lp: &solidcraft_geom::Loop2, tol: f64) -> Option<Vec<Vec2>> {
+fn sampled(lp: &solidcore_record::Loop2, tol: f64) -> Option<Vec<Vec2>> {
     let mut out = Vec::new();
     for seg in &lp.segs {
         let p = seg.polyline(tol);
@@ -926,7 +930,7 @@ mod tests {
     /// a guide only on the cam's own side is refused.
     #[test]
     fn the_guide_is_the_side_fewer_moving_joints_from_the_frame() {
-        let origin = JointOrigin { occurrence: 0, snap: super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None } };
+        let origin = JointOrigin::new(0, super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None });
         let joint = |id: u64, kind: JointKind, a: u64, b: u64| super::super::Joint {
             id,
             name: format!("J{id}"),
@@ -940,8 +944,18 @@ mod tests {
             angle: 0.0,
             suppressed: false,
             exprs: Default::default(),
+            captured: None,
+            constraint: None,
         };
-        let occ = |id: u64, grounded: bool| crate::Occurrence { id, component: id, parent: 0, name: format!("O{id}"), transform: IDENTITY, grounded };
+        let occ = |id: u64, grounded: bool| crate::Occurrence {
+            id,
+            component: id,
+            parent: 0,
+            name: format!("O{id}"),
+            transform: IDENTITY,
+            grounded,
+            expressed_moves: Vec::new(),
+        };
         // 1 frame (grounded), 2 cam, 3-6 a rigid chain to the guide 7, 8 the piston, 9 crank, 10 rod.
         let mut doc = Document { occurrences: (1..=10).map(|id| occ(id, id == 1)).collect(), ..Document::default() };
         let (r, v, s) = (JointKind::Rigid, JointKind::Revolute, JointKind::Slider);

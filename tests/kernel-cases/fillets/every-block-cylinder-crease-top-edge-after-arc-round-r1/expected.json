@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "a block's concave arc at the cylinder it is joined to rounded r2, then the block's long top edge rounded r1, which ends on the arc's round",
+ "source": "invariants",
+ "method": "block 40x10x15 (x 0..40, y -5..5) joined to the cylinder R10 x 30 on the z axis, the block's end on the cylinder's diameter x = 0 so its sides y = +-5 meet the wall at vertical creases: V0 = 6000 + 3000 pi - 15 * (the disc's part with x > 0, |y| <= 5: 2 (y/2 sqrt(100-y^2) + 50 asin(y/10)) at y=5 = 95.661148) = 13989.8607 and the arc rounded r2 (every-block-cylinder-crease-concave-arc-r2). The top edge y = 5, z = 15 now ends where the top face meets the arc round (x = sqrt(144-25)); its tangent chain goes on up the edge between the side face and the arc round (the round's end, a curve on the plane y = 5 tangent to the top edge there) to the cylinder's crease. The r1 round along that curve has no closed-form volume (the curve is a torus cut by a plane): one valid body, blend seams G1.",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
+}

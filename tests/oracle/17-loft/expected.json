@@ -1,24 +1,34 @@
 {
-  "source": "freecad 1.1.4",
-  "method": "FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part.makeLoft",
+  "source": "analytic",
+  "method": "ruled loft, square 40 at z 0 to circle r 10 at z 40, each side on one rational quarter of the circle (corner (20, -20) at -45 deg): A(t) = (1-t)^2 A_S + t^2 A_C + t(1-t) M, M = 1/2 int (S x C' + C x S') du (Gauss-Legendre on the exact rational arcs), V = h (A_S/3 + A_C/3 + M/6), z_c = h (A_S/12 + A_C/4 + M/12) / (V/h), wall area = int |P_u x P_t| du dt",
   "body_count": 1,
-  "volume_mm3": 35125.49757633739,
-  "area_mm2": 6495.0000512370025,
+  "volume_mm3": 35080.725116114816,
+  "area_mm2": 6493.984396260195,
   "center_of_mass": [
-    4.902280481153527e-11,
-    9.800242527565077e-16,
-    15.119060422795876
+    0.0,
+    0.0,
+    15.112831028492234
   ],
   "bbox": {
     "min": [
-      -20.0000001,
-      -20.0000001,
-      -1e-07
+      -20.0,
+      -20.0,
+      0.0
     ],
     "max": [
-      20.0000001,
-      20.0000001,
-      40.000000100000015
+      20.0,
+      20.0,
+      40.0
     ]
-  }
+  },
+  "faces": 6,
+  "note": "a difference of definition with the FreeCAD (OpenCASCADE) loft, which runs each side to the quarter at uniform angle (arc length): that correspondence has no exact rational B-spline form, and SolidCraft keeps its surfaces exact; OpenCASCADE's volume is 35125.50 mm^3 (0.13% more). The reference.stl is OpenCASCADE's, so the surface comparison is left out",
+  "compare": [
+    "body_count",
+    "volume_mm3",
+    "area_mm2",
+    "center_of_mass",
+    "bbox",
+    "faces"
+  ]
 }

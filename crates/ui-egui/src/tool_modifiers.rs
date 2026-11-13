@@ -141,10 +141,10 @@ impl ModifierCombo {
     pub fn shown_label(self) -> String {
         let platform = Platform::host();
         if self == Self::CTRL_ALT {
-            return crate::i18n::format("ui.modifiers_either", &[("first", ctrl_name_for(platform)), ("second", alt_name_for(platform))]);
+            return solidcraft_ui_text::format("ui.modifiers_either", &[("first", ctrl_name_for(platform)), ("second", alt_name_for(platform))]);
         }
         if self == Self::NONE {
-            return crate::i18n::tr_label("None").to_string();
+            return solidcraft_ui_text::tr_label("None").to_string();
         }
         self.label_for(platform)
     }
@@ -228,6 +228,7 @@ pub enum ModAction {
     TextHandleConstrain = 8,
     IsoCurveAlternate = 9,
     ExtendPair = 10,
+    KeepSnapPoints = 11,
 }
 
 impl ModAction {
@@ -243,6 +244,7 @@ impl ModAction {
         Self::TextHandleConstrain,
         Self::IsoCurveAlternate,
         Self::ExtendPair,
+        Self::KeepSnapPoints,
     ];
 
     pub const fn id(self) -> &'static str {
@@ -258,6 +260,7 @@ impl ModAction {
             Self::TextHandleConstrain => "text_handle_constrain",
             Self::IsoCurveAlternate => "isocurve_alternate",
             Self::ExtendPair => "extend_pair",
+            Self::KeepSnapPoints => "keep_snap_points",
         }
     }
 
@@ -319,6 +322,9 @@ pub enum Scope {
     Manipulator,
     /// Feature dialogs with a live preview (Primary can roll the preview back for reselect).
     FeaturePreview,
+    /// Point inputs that take snap points (Move, Align, Measure, joints): a held key keeps the
+    /// shown points while the pointer moves.
+    PointPick,
 }
 
 impl Scope {
@@ -328,6 +334,7 @@ impl Scope {
             Self::SketchDraw | Self::SketchDrag => SKETCH_SNAP_BINDINGS,
             Self::Manipulator => MANIPULATOR_BINDINGS,
             Self::FeaturePreview => FEATURE_PREVIEW_BINDINGS,
+            Self::PointPick => POINT_PICK_BINDINGS,
         }
     }
 }
@@ -374,6 +381,15 @@ const FEATURE_PREVIEW_BINDINGS: &[Binding] = &[Binding {
     // Hold Primary to roll the command preview back so obscured geometry can be (re)selected.
     action: ModAction::PreviewReselect,
     defaults: &[ModifierCombo::CTRL],
+    matching: Match::AtLeast,
+    trigger: Trigger::Live,
+    rebindable: true,
+}];
+
+const POINT_PICK_BINDINGS: &[Binding] = &[Binding {
+    // Hold Shift to keep the shown snap points while the pointer crosses other edges and faces.
+    action: ModAction::KeepSnapPoints,
+    defaults: &[ModifierCombo::SHIFT],
     matching: Match::AtLeast,
     trigger: Trigger::Live,
     rebindable: true,
@@ -428,6 +444,11 @@ pub fn preview_reselect(held: Held, manipulator_dragging: bool) -> bool {
         return false;
     }
     resolve(&[Scope::FeaturePreview], None, held, Trigger::Live).contains(ModAction::PreviewReselect)
+}
+
+/// Whether the held keys keep the shown snap points where they are (Shift by default).
+pub fn keep_snap_points(held: Held) -> bool {
+    resolve(&[Scope::PointPick], None, held, Trigger::Live).contains(ModAction::KeepSnapPoints)
 }
 
 /// Resolve which actions are active for `held` under the given scopes and optional tool.

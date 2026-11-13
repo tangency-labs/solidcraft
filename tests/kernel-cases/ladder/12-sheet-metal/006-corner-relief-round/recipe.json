@@ -1,0 +1,37 @@
+{
+ "base": "../../12-sheet-metal/001-base-flange",
+ "commands": [
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "edges": [
+     [
+      50.0,
+      0,
+      2.0
+     ],
+     [
+      100.0,
+      30.0,
+      2.0
+     ],
+     [
+      50.0,
+      60.0,
+      2.0
+     ],
+     [
+      0,
+      30.0,
+      2.0
+     ]
+    ],
+    "height": 20.0,
+    "angle": 90,
+    "corner_relief_shape": "round",
+    "corner_relief": "4 mm"
+   }
+  }
+ ]
+}

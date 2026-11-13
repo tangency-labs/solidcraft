@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3412"
+ ],
+ "what": "a loft through two circles drawn on the same plane (no volume between them; it built a flat zero-volume body and reported success)",
+ "source": "invariants",
+ "method": "the two sections are coplanar, so no solid exists between them: the right behaviour is a clean refusal with no body left, never a zero-volume body.",
+ "outcome": "refused",
+ "refusal": "loft sections 1 and 2 lie in the same plane"
+}

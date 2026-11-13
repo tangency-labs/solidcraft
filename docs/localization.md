@@ -1,7 +1,7 @@
 # UI localization
 
 SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, Finnish, French, Galician, Hebrew, Croatian, Italian,
-Japanese, Korean, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Serbian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
+Japanese, Georgian, Korean, Latvian, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Serbian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
 embedded catalog and one registration there; the preferences selector and validation use the same
 registry.
 
@@ -39,6 +39,15 @@ entry has a note for translators: what the term must not be confused with. Its "
 than one meaning" table lists the English words that need a separate catalogue entry for each
 meaning (Construction, Flat, Round, Normal, Gap, Clearance).
 
+## Case
+
+Command labels (`cmd.*`: what menus, the toolbar, the command palette and the shortcut list show)
+are in title case: "Home View", "Center of Mass". All other English text is in sentence case:
+buttons, links, settings, rows, headings and tooltips, as in "Restore page defaults" or the "Center of
+mass" row in Design properties. So the same words can appear in both cases, as a command and as a
+link or row beside it (New Design in the File menu, New design on the home screen). Two buttons
+on one page never differ only by case; give them different words.
+
 ## English (UK)
 
 `en-GB.json` holds only the English messages whose spelling differs in UK English (Centre,
@@ -52,7 +61,7 @@ that looks untranslated. Two guards catch that in the build:
 
 - `every_complete_catalog_carries_every_english_message` — adding a key to `en.json`
   without giving it to a complete catalog fails the tests. English is the source catalog,
-  Arabic, Hebrew, Japanese and Chinese are delivered complete; Bosnian, Croatian and Serbian carry
+  Arabic, Hebrew, Japanese and Chinese are delivered complete; Bosnian, Croatian, Serbian, Georgian and Latvian carry
   every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Finnish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
   Turkish are partial — their gaps fall back to English and are reported by `cargo xtask i18n` without
   failing the build. A new label needs en, ar, he, ja, zh, de and ko; Russian, French, Ukrainian and Malay may
@@ -102,6 +111,8 @@ traka. In Serbian, brand and file names, acronyms, units, key names and placehol
 script inside the Cyrillic text. Command IDs, shortcuts, file formats, units and user-provided names
 are not translated.
 
+The Georgian catalog (`ka`, shown as ქართული) uses ესკიზი (Sketch), სხეული (Body), ოპერაცია (timeline Feature), შეზღუდვა (Constraint), ზომა (Dimension), ამოწევა (Extrude), ბრუნვით აგება (Revolve), მომრგვალება (Fillet), ფასკა (Chamfer), მასივი (Pattern), შეერთება (Joint), წახნაგი (Face), წიბო (Edge) and წვერო (Vertex); a design is a პროექტი. The Browser panel is მოდელის ხე (model tree) and the timeline ქრონოლოგია, apart from the undo history (ისტორია). Georgian has no letter case, so capitalised English labels are written in ordinary Mkhedruli, never in Mtavruli; a count stays singular after its number, so counted labels are written as `კომპონენტი: {count}`. The catalog is written in Mkhedruli; where no Georgian system font is found, egui's built-in Hack draws it in its monospace design. Command IDs, shortcuts, file formats, units and user-provided names stay unchanged. Written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker (@devius).
+
 The Finnish catalog (`fi`, shown as Suomi) uses Luonnos (Sketch), Kappale (Body), Piirre (timeline Feature), Rajoite (Constraint), Mitta (Dimension), Pyöristys (Fillet), Viiste (Chamfer), Pursotus (Extrude) and Pyöräytys (Revolve); a design is a malli and an AI model a tekoälymalli. Draft is Päästö, Flat Pattern is Levityskuva, Hem is Huulos, and Counterbore/Countersink are Upotus/Kartioupotus. Camera and view angles are Nyökkäys (pitch), Kääntö (yaw) and Kallistus (roll); a saved render shot is a Kuvakulma. Finnish puts a space before % (50 %). Command IDs, shortcuts, file formats, units and user-provided names stay unchanged.
 
 The Norwegian Bokmål catalog (`nb`, shown as Norsk bokmål) uses Skisse (Sketch),
@@ -112,6 +123,21 @@ forsenkning/Konisk forsenkning. Capture Position is Registrer posisjon, while
 sketch snapping is Punktfangst. Loft, Sweep, Spline and Offset remain technical
 terms. Command IDs, shortcuts, file formats, units and user-provided names stay
 unchanged.
+
+The Polish catalog (`pl`, shown as Polski) uses Szkic (Sketch), Bryła (Body), Ściana (Face),
+Krawędź (Edge), Wierzchołek (Vertex), Operacja (timeline Feature), Wiązanie (Constraint), Wymiar
+(Dimension), Wyciągnięcie (Extrude), Obrót (Revolve), Przeciągnięcie (Sweep), Wyciągnięcie złożone
+(Loft), Zaokrąglenie (Fillet), Faza (Chamfer), Szyk (Pattern), Skorupa (Shell), Złącze (Joint) and
+Złożenie (Assembly); a design is a projekt and a workspace is a środowisko (Projekt, Renderowanie).
+Draft is Pochylenie (a GitHub draft is a szkic zgłoszenia), Flat Pattern is Rozwinięcie, Suppress is
+Wygaś, Ground is Unieruchom, and Counterbore/Countersink are Pogłębienie walcowe/Pogłębienie stożkowe.
+Messages use sentence case and the informal "ty" in lower case, with no masculine-only forms. A
+button or command named inside a sentence takes a word that carries the grammar ("kliknij Zastosuj",
+"poleceniem Aktualizuj łącza", "opcję Nowa bryła"). Polish nouns change with the number, and messages
+have no plural selection, so a count follows a label (`Bryły: {count}`) or a unit
+(`{count} min temu`) rather than an inflected noun. Typography: „…” quotes, an en dash with spaces
+( – ) and the ellipsis character (…). Command IDs, shortcuts, file formats, units and user-provided
+names stay unchanged.
 
 One immutable `Locale` type handles all translations. Table widgets without an app reference
 use a render scope that restores the previous locale when it exits, including nested renders.
@@ -131,17 +157,22 @@ In the browser, `solidcraft-web` ships self-hosted script fonts (SIL OFL 1.1) in
 artifacts only, loaded asynchronously from the same origin without contacting any external CDNs or
 third-party servers:
 
-- Japanese (and Hangul-less Korean UI for now): `./fonts/BIZUDPGothic-Regular.ttf`
+- Japanese: `./fonts/BIZUDPGothic-Regular.ttf`
 - Simplified Chinese (`zh`): `./fonts/CraftUI-SC.otf` (a locale-glyph subset of Noto Sans SC, renamed
   under the OFL so it does not use the reserved name Noto)
 - Traditional Chinese (`zh-TW`): `./fonts/CraftUI-TC.otf` (same for Noto Sans TC)
+- Korean (`ko`): `./fonts/CraftUI-KR.otf` (a Hangul, kana and Latin subset of Noto Sans KR, renamed
+  the same way)
 
 A CJK interface language fetches the matching face on demand. With any other interface language, the
 first time Japanese text (kana, kanji or full-width forms in a design name, file name, body name or
 typed text) is drawn, the Japanese face is fetched (#720). A session that never shows such text
 downloads no script font. If the needed face fails to load, the web interface shows English for that
 session only to prevent missing glyphs (tofu); the saved language preference is kept, so the next
-visit tries again. Korean Hangul coverage on the web remains follow-up work.
+visit tries again. The Korean subset covers the whole Hangul syllable block and the Hangul jamo, so
+Korean text typed into a design renders as well. It carries no Hanja (CJK ideographs): a Korean
+interface fetches the Korean face alone, so Hanja in a design name is not drawn unless the Japanese
+face is fetched too, and the desktop falls back to the system Hangul font, which covers Hanja.
 
 ## Right-to-left text
 

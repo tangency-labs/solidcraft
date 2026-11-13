@@ -1,0 +1,21 @@
+{
+ "commands": [
+  {
+   "command": "component.insert_design",
+   "params": {
+    "path": "$CASE/plate.solidcraft",
+    "translate": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "occurrence.properties",
+   "params": {
+    "occurrence": "plate:1"
+   }
+  }
+ ]
+}

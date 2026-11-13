@@ -1,0 +1,37 @@
+{
+  "format": "solidcraft.panel-layout",
+  "version": 1,
+  "layout": {
+    "version": 1,
+    "workspace": "fixture.workspace",
+    "instances": [
+      {
+        "id": "editor",
+        "kind": "fixture.editor",
+        "requested_open": true,
+        "memory": {
+          "section": "editor-section",
+          "location": { "type": "dock", "zone": "left" },
+          "section_index": 0,
+          "tab_index": 0,
+          "size": { "width": 280.0, "height": 240.0 },
+          "collapsed": false
+        }
+      }
+    ],
+    "sections": [
+      {
+        "id": "editor-section",
+        "location": { "type": "dock", "zone": "left" },
+        "tabs": ["editor"],
+        "active": "editor",
+        "size": { "width": 280.0, "height": 240.0 },
+        "collapsed": false
+      }
+    ]
+  },
+  "quarantine": [],
+  "section_snapshots": {},
+  "section_order": ["editor-section"],
+  "retained_data": {}
+}

@@ -1,0 +1,52 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 60,
+    "width": 40,
+    "height": 10,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     10,
+     10,
+     10
+    ],
+    "diameter": 5,
+    "name": "H"
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "features": [
+     "H"
+    ],
+    "dir1": [
+     1,
+     0,
+     0
+    ],
+    "count1": 3,
+    "spacing1": 20,
+    "dir2": [
+     0,
+     1,
+     0
+    ],
+    "count2": 2,
+    "spacing2": 20
+   }
+  }
+ ]
+}

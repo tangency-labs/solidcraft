@@ -13,7 +13,7 @@
 # platform even for a multi-platform image. CI builds it outside Docker (with its Rust cache and
 # git commit for Help › About) and passes it in as the `site` stage: --build-context site=dist/web.
 
-ARG RUST_VERSION=1.95
+ARG RUST_VERSION=1.99.1
 ARG TRUNK_VERSION=0.21.14
 
 FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-slim-bookworm AS build

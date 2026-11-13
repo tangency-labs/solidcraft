@@ -1,0 +1,77 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Rule",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "2 mm",
+    "k_factor": 0.44
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 60,
+    "height": 30,
+    "body_name": "Tray"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      50,
+      30,
+      30
+     ]
+    ],
+    "thickness": 2
+   }
+  },
+  {
+   "command": "sheet.convert",
+   "params": {
+    "body": "Tray",
+    "face": [
+     50,
+     30,
+     0
+    ],
+    "bends": [
+     [
+      50,
+      0,
+      0
+     ],
+     [
+      100,
+      30,
+      0
+     ],
+     [
+      50,
+      60,
+      0
+     ],
+     [
+      0,
+      30,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sheet.unfold",
+   "params": {}
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

@@ -20,11 +20,17 @@ name = "solvecraft-cli"
 path = "src/alias.rs"
 
 [features]
-default = ["raytrace-cpu"]
+default = ["raytrace-cpu", "profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
+# The profiler, compiled in so any build can say where its time goes (`--profile`,
+# SOLIDCRAFT_PROFILE=1); it records nothing until asked.
+profile = ["solidcraft-engine/profile"]
 
 [dependencies]
+solidcraft-viewport-gpu = { workspace = true }
+solidcraft-viewport = { workspace = true }
+solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-gpu = { workspace = true }
 solidcraft-mcp = { workspace = true }
@@ -34,3 +40,6 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # Snapshot tests decode the pictures to compare them with a tolerance.
 image = { workspace = true }
+# Tests measure meshes at their own tolerances.
+solidcraft-kernel = { workspace = true }
+wat = "1"

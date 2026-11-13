@@ -1,0 +1,65 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Square"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     20,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.boundary",
+   "params": {
+    "sketch": "Square",
+    "curves": [
+     "l1",
+     "l2",
+     "l3",
+     "l4"
+    ],
+    "body_name": "Patch"
+   }
+  },
+  {
+   "command": "surface.fair",
+   "params": {
+    "body": "Patch",
+    "iterations": 20,
+    "keep_edges": false
+   }
+  }
+ ]
+}

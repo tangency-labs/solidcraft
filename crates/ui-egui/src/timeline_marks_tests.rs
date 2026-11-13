@@ -65,7 +65,7 @@ fn a_failed_feature_is_marked_in_the_bottom_timeline() {
     assert!(want.iter().any(|(n, failed)| *failed && n == "Fillet1"), "the sample's Fillet1 fails: {want:?}");
     assert!(want.iter().filter(|(_, failed)| !failed).count() >= 3, "and others don't");
     // The mark sits in the item's top-right corner: 10 points square, inside the 28-point item.
-    let got = marked(&mut app, crate::timeline::timeline, |item, d| (d.x - (item.x + 9.0)).abs() < 1.5 && (d.y - (item.y - 9.0)).abs() < 1.5);
+    let got = marked(&mut app, crate::timeline::panel_inline, |item, d| (d.x - (item.x + 9.0)).abs() < 1.5 && (d.y - (item.y - 9.0)).abs() < 1.5);
     assert_eq!(got, want, "an error mark on each failed feature and on no other");
 }
 
@@ -74,7 +74,7 @@ fn a_failed_feature_is_marked_in_the_feature_history() {
     let mut app = failing_sample();
     let want = features(&app);
     // The mark sits at the row's right end, on its centre line.
-    let got = marked(&mut app, crate::timeline_left::left_timeline, |item, d| (d.y - item.y).abs() < 1.5 && d.x > item.x);
+    let got = marked(&mut app, crate::timeline_left::panel_contents, |item, d| (d.y - item.y).abs() < 1.5 && d.x > item.x);
     assert_eq!(got, want, "an error mark on each failed feature and on no other");
 }
 
@@ -118,7 +118,7 @@ fn fresh_frame(h: &mut crate::scenario::Harness) -> (Vec<egui::epaint::ClippedSh
     let mut shapes = Vec::new();
     for _ in 0..2 {
         let app = &mut h.app;
-        let out = h.ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        let mut out = h.ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
             app.logic(ui.ctx());
             app.ui(ui);
         });
@@ -129,6 +129,7 @@ fn fresh_frame(h: &mut crate::scenario::Harness) -> (Vec<egui::epaint::ClippedSh
             colours.dedup();
             textures.insert(*id, colours);
         }
+        out.textures_delta.clear();
         shapes = out.shapes;
     }
     (shapes, textures)
@@ -167,7 +168,7 @@ fn a_sketchs_icon_takes_its_states_colour_in_both_histories_and_the_browser() {
     assert!(report("Fixed").ok() && report("Fixed").dof == 0);
     assert!(!report("Reach").ok(), "{:?}", report("Reach"));
     let states = crate::sketch_state::SketchStates::of(&h.app);
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let want = [("Guide", t.sketch), ("Fixed", t.sketch_fixed), ("Reach", t.error)];
     for (name, colour) in want {
         let id = h.app.session.doc.find_feature(name).unwrap().id;

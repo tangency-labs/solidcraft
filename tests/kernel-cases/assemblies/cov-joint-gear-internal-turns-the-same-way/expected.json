@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "an internal gear pair (a ring gear), radii 10 and 20",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Gear: box 10x10x10 from (60,-5,0), centre (65,0,5), on revolute G2 about z through (50,0,0); internal: ratio +ra/rb = +0.5, Hinge 60 turns G2 +30: Gear centre (50 + 15 cos30, 15 sin30, 5)",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 13,
+   "json": {
+    "ratio": 0.5
+   }
+  },
+  {
+   "step": 15,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      62.990381,
+      7.5,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

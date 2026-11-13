@@ -3,10 +3,11 @@
 //! a component's over the physical material's look; a body with none of these keeps the colour
 //! it was imported with.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Document;
 
@@ -46,11 +47,43 @@ fn opaque() -> f64 {
     1.0
 }
 
+/// The name a colour picked or typed in gets: no library entry's, no file's.
+pub const CUSTOM: &str = "Custom";
+
+/// The name of a colour a file gave without a name: `Custom(R,G,B)` when it is opaque, else
+/// `Custom(R,G,B,opacity)`, the opacity to two decimals with at least one shown
+/// (`Custom(196,199,204)`, `Custom(210,226,240,0.35)`), so the same colour always reads the same.
+pub fn unnamed_colour(color: [u8; 3], opacity: f64) -> String {
+    let hundredths = (if opacity.is_finite() { opacity.clamp(0.0, 1.0) } else { 1.0 } * 100.0).round() as u32;
+    let [r, g, b] = color;
+    if hundredths == 100 {
+        return format!("{CUSTOM}({r},{g},{b})");
+    }
+    let mut fraction = format!("{:02}", hundredths % 100);
+    if fraction.ends_with('0') {
+        fraction.pop();
+    }
+    format!("{CUSTOM}({r},{g},{b},{}.{fraction})", hundredths / 100)
+}
+
 impl Look {
     pub fn custom(color: [u8; 3], opacity: f64) -> Look {
-        Look { name: "Custom".into(), color, opacity: opacity.clamp(0.0, 1.0), pbr: None }
+        Look { name: CUSTOM.into(), color, opacity: opacity.clamp(0.0, 1.0), pbr: None }
     }
-    pub fn opaque_surface(&self) -> crate::Result<Option<solidcraft_render::surface::OpaqueSurface>> {
+
+    /// A colour read from a file: called what the file calls it, else [`unnamed_colour`].
+    pub fn imported(color: [u8; 3], opacity: f64, name: Option<&str>) -> Look {
+        let opacity = opacity.clamp(0.0, 1.0);
+        let name = name.map_or_else(|| unnamed_colour(color, opacity), str::to_string);
+        Look { name, color, opacity, pbr: None }
+    }
+
+    /// The name to write with this look's colour in a file (a STEP `COLOUR_RGB` name): its own,
+    /// unless it is the plain [`CUSTOM`], which says nothing.
+    pub fn file_name(&self) -> Option<String> {
+        (self.name != CUSTOM).then(|| self.name.clone()).and_then(|n| solidcraft_kernel::colour_name(&n))
+    }
+    pub fn opaque_surface(&self) -> crate::Result<Option<solidcraft_viewport::surface::OpaqueSurface>> {
         if self.pbr.is_some() && self.opacity != 1.0 {
             return Err(crate::DocError::Invalid("opaque PBR requires opacity 1".into()));
         }
@@ -92,6 +125,10 @@ pub struct ImportedLook {
     pub color: Option<[f32; 3]>,
     pub opacity: Option<f32>,
     pub faces: BTreeMap<String, ([f32; 3], f32)>,
+    /// The body colour's name in the file, if it had one.
+    pub name: Option<String>,
+    /// The names the file gives the faces' colours, by the same face names as `faces`.
+    pub face_names: BTreeMap<String, String>,
 }
 
 impl ImportedLook {
@@ -101,14 +138,17 @@ impl ImportedLook {
             return b.imported.clone();
         }
         let names = crate::naming::face_names(b);
-        let faces = b
-            .body
-            .paint()
-            .map(|p| {
-                p.faces.iter().filter_map(|f| names.get(f.face).map(|n| (crate::naming::strip_piece(n).to_string(), (f.color, f.opacity)))).collect()
-            })
-            .unwrap_or_default();
-        Some(std::sync::Arc::new(ImportedLook { color: b.body.color(), opacity: b.body.paint().map(|p| p.opacity), faces }))
+        let named = |f: &solidcraft_kernel::FacePaint| names.get(f.face).map(|n| crate::naming::strip_piece(n).to_string());
+        let painted = b.body.paint().map_or(&[][..], |p| p.faces.as_slice());
+        let faces = painted.iter().filter_map(|f| named(f).map(|n| (n, (f.color, f.opacity)))).collect();
+        let face_names = painted.iter().filter_map(|f| Some((named(f)?, f.name.clone()?))).collect();
+        Some(std::sync::Arc::new(ImportedLook {
+            color: b.body.color(),
+            opacity: b.body.paint().map(|p| p.opacity),
+            faces,
+            name: b.body.paint().and_then(|p| p.name.clone()),
+            face_names,
+        }))
     }
 }
 
@@ -316,7 +356,11 @@ impl Document {
     pub fn model_display_look(&self, body: &crate::ModelBody) -> Option<Look> {
         self.model_body_look(body).or_else(|| {
             let color = body.body.color().or_else(|| body.imported.as_ref().and_then(|p| p.color))?;
-            Some(Look::custom(color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8), self.model_body_opacity(body)))
+            let name = match body.body.color() {
+                Some(_) => body.body.paint().and_then(|p| p.name.as_deref()),
+                None => body.imported.as_ref().and_then(|p| p.name.as_deref()),
+            };
+            Some(Look::imported(color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8), self.model_body_opacity(body), name))
         })
     }
 
@@ -379,14 +423,17 @@ impl Document {
             Vec::new()
         } else {
             match b.body.paint() {
-                Some(p) => p.faces.iter().map(|f| (f.face, Look::custom(f.color.map(to8), f.opacity as f64))).collect(),
+                Some(p) => p.faces.iter().map(|f| (f.face, Look::imported(f.color.map(to8), f.opacity as f64, f.name.as_deref()))).collect(),
                 // Carried from an earlier version of the body: by face name (worked out only here:
                 // the viewport asks every body for its face colours on every change).
                 None => match &b.imported {
                     Some(imp) => crate::naming::face_names(b)
                         .iter()
                         .enumerate()
-                        .filter_map(|(i, n)| imp.faces.get(crate::naming::strip_piece(n)).map(|(c, o)| (i, Look::custom(c.map(to8), *o as f64))))
+                        .filter_map(|(i, n)| {
+                            let n = crate::naming::strip_piece(n);
+                            imp.faces.get(n).map(|(c, o)| (i, Look::imported(c.map(to8), *o as f64, imp.face_names.get(n).map(String::as_str))))
+                        })
                         .collect(),
                     None => Vec::new(),
                 },
@@ -531,9 +578,9 @@ mod tests {
             .faces(0.01)
             .unwrap()
             .iter()
-            .map(|face| solidcraft_kernel::FacePaint { face: face.index, color: [1., 0., 0.], opacity: 0.5 })
+            .map(|face| solidcraft_kernel::FacePaint { face: face.index, color: [1., 0., 0.], opacity: 0.5, name: None })
             .collect();
-        crate::ModelBody::new("Imported".into(), body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces })), 1)
+        crate::ModelBody::new("Imported".into(), body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: None })), 1)
     }
 
     fn check_imported_appearance_precedence(body: &crate::ModelBody) {
@@ -541,7 +588,7 @@ mod tests {
         let face_count = body.body.faces(0.01).unwrap().len();
         let imported = doc.face_colors(body);
         assert_eq!(imported.len(), face_count);
-        assert!(imported.iter().all(|(_, look)| *look == Look::custom([255, 0, 0], 0.5)));
+        assert!(imported.iter().all(|(_, look)| *look == Look::imported([255, 0, 0], 0.5, None)));
 
         let body_look = Look::custom([0, 0, 255], 0.8);
         doc.appearances.bodies.insert(body.definition_name().into(), body_look.clone());
@@ -564,7 +611,7 @@ mod tests {
         doc.appearances.bodies.clear();
         let restored = doc.face_colors(body);
         assert_eq!(restored.len(), face_count);
-        assert!(restored.iter().all(|(face, look)| *look == if *face == 0 { face_look.clone() } else { Look::custom([255, 0, 0], 0.5) }));
+        assert!(restored.iter().all(|(face, look)| *look == if *face == 0 { face_look.clone() } else { Look::imported([255, 0, 0], 0.5, None) }));
     }
 
     #[test]
@@ -587,6 +634,64 @@ mod tests {
         let faces = &linked.bodies[0].body.paint().unwrap().faces;
         assert_eq!(faces.len(), body.body.faces(0.01).unwrap().len());
         assert!(faces.iter().all(|face| face.color == [1., 0., 0.] && face.opacity == 0.5));
+    }
+
+    /// A colour a file names is called by that name; one it leaves unnamed by its values, the
+    /// opacity to two decimals with at least one shown. A picked colour's plain name is not written
+    /// to a file.
+    #[test]
+    fn imported_colours_are_called_by_their_file_name_or_their_values() {
+        assert_eq!(unnamed_colour([196, 199, 204], 1.0), "Custom(196,199,204)");
+        assert_eq!(unnamed_colour([210, 226, 240], 0.35), "Custom(210,226,240,0.35)");
+        assert_eq!(unnamed_colour([90, 96, 104], 0.5), "Custom(90,96,104,0.5)");
+        assert_eq!(unnamed_colour([0, 0, 0], 0.0), "Custom(0,0,0,0.0)");
+        // A 32-bit file opacity reads as the number it was written as.
+        assert_eq!(unnamed_colour([1, 2, 3], f64::from(0.35_f32)), "Custom(1,2,3,0.35)");
+        assert_eq!(unnamed_colour([1, 2, 3], 0.995), "Custom(1,2,3)", "rounds to opaque");
+        assert_eq!(unnamed_colour([1, 2, 3], 0.004), "Custom(1,2,3,0.0)");
+        for hostile in [f64::NAN, f64::INFINITY, 7.0] {
+            assert_eq!(unnamed_colour([1, 2, 3], hostile), "Custom(1,2,3)", "{hostile}");
+        }
+        assert_eq!(unnamed_colour([1, 2, 3], -3.0), "Custom(1,2,3,0.0)");
+        let named = Look::imported([160, 160, 160], 1.0, Some("Steel - Satin"));
+        assert_eq!((named.name.as_str(), named.color, named.opacity), ("Steel - Satin", [160, 160, 160], 1.0));
+        assert_eq!(Look::imported([1, 2, 3], 2.0, None).opacity, 1.0);
+        assert_eq!(named.file_name().as_deref(), Some("Steel - Satin"));
+        assert_eq!(Look::imported([1, 2, 3], 1.0, None).file_name().as_deref(), Some("Custom(1,2,3)"));
+        assert_eq!(Look::custom([1, 2, 3], 1.0).file_name(), None, "a picked colour's plain name says nothing");
+    }
+
+    /// The names a file gives a body's colour and its faces' colours name the looks the body
+    /// shows, still after a later feature rebuilds the body without its paint, and they are
+    /// exported with the colours.
+    #[test]
+    fn imported_colour_names_name_the_looks_and_outlive_later_features() {
+        let mut body = imported_box();
+        let mut paint = body.body.paint().unwrap().clone();
+        paint.name = Some("Body grey".into());
+        paint.faces[0].name = Some("Accent".into());
+        body.body = body.body.clone().with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(paint));
+        let doc = Document::default();
+        let check = |body: &crate::ModelBody| {
+            assert_eq!(doc.model_display_look(body).map(|l| l.name), Some("Body grey".into()));
+            let faces = doc.face_colors(body);
+            assert_eq!(faces.iter().find(|(face, _)| *face == 0).map(|(_, l)| l.name.as_str()), Some("Accent"));
+            assert!(faces.iter().filter(|(face, _)| *face != 0).all(|(_, l)| l.name == "Custom(255,0,0,0.5)"), "{faces:?}");
+        };
+        check(&body);
+        // A later feature's body carries the look by face name.
+        let mut later = body.clone();
+        later.imported = ImportedLook::of(&body);
+        later.body = later.body.clone().with_color(None).with_paint(None);
+        assert_eq!(later.imported.as_ref().and_then(|l| l.name.as_deref()), Some("Body grey"));
+        check(&later);
+        // Exported, the colours carry their names.
+        let mut state = crate::ModelState::default();
+        state.bodies.push(body);
+        let painted = doc.painted(&state);
+        let paint = painted.bodies[0].body.paint().unwrap();
+        assert_eq!(paint.name.as_deref(), Some("Body grey"));
+        assert_eq!(paint.faces.iter().find(|f| f.face == 0).and_then(|f| f.name.as_deref()), Some("Accent"));
     }
 
     #[test]
