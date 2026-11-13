@@ -748,8 +748,8 @@ fn assert_b27_rails_on_faces(input: &Body, made: &Body, r: f64) {
 /// keeping 250 of the gap's 351 degrees, and the extension back kept half of the rest: the
 /// rail's only crossing of the plane was 67 degrees past the other end, and the trim's
 /// interval was inverted. Each end now keeps what it keeps when the extension past the end
-/// closes. (Between 1.945 and the cutoff the trim now succeeds and the End's patch fails as
-/// at 1.6, "the smooth end cap is not built": a separate defect.)
+/// closes. (Between 1.945 and the cutoff the trim now succeeds, and the End's cap is built
+/// there too: [`a_round_in_the_sliver_below_the_cutoff_builds_its_end_cap`].)
 #[test]
 fn the_size_the_past_an_end_refusal_names_builds() {
     let (input, _) = b27();
@@ -896,5 +896,128 @@ fn a_round_rolled_onto_a_taller_boss_ends_inside_the_boss_face() {
                 "seam {seam:?} r {r}: boss area {boss_area}, expected {expected_area}"
             );
         }
+    }
+}
+
+/// [`assert_b27_rails_on_faces`] to `tol`, at more points: every edge the round made (no edge of `input`
+/// passes through its middle) that lies, at 65 points, within `tol` of the R3 round's
+/// cylinder (about x = 3, z = 4.5 along y), the pocket's sphere (radius 10 about
+/// (2.5, 50, 0)) or the plane z = 7.5, those on the cylinder within its face (between its
+/// tangent edges x = 0 and z = 7.5) and those on the plane past its tangent edge x = 3. At
+/// least one lies on each: the round rolls on the R3 round and the pocket and over the
+/// tangent edge onto z = 7.5.
+fn assert_b27_rails_on_faces_to(input: &Body, made: &Body, r: f64, tol: f64) {
+    use solidcore::query::api_queries::{edge_closest_point, get_edges};
+    let (ki, bi) = common::kernel_copy(input);
+    let (k, b) = common::kernel_copy(made);
+    let input_edges = get_edges(&bi).unwrap();
+    let mut counts = [0; 3];
+    for e in get_edges(&b).unwrap() {
+        let edge = b.edge(e).unwrap();
+        let curve = edge.curve.as_ref().unwrap();
+        let ivl = edge.interval;
+        let pts: Vec<_> = (0..=64)
+            .map(|i| {
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 64.0;
+                curve.evaluate_point(&k, t).unwrap()
+            })
+            .collect();
+        let old = input_edges.iter().any(|&f| {
+            edge_closest_point(&ki, &bi, f, pts[32])
+                .unwrap()
+                .closest
+                .distance
+                <= 1e-5
+        });
+        if old {
+            continue;
+        }
+        let on_cylinder = pts
+            .iter()
+            .all(|p| ((p.x - 3.0).hypot(p.z - 4.5) - 3.0).abs() <= tol);
+        let on_sphere = pts.iter().all(|p| {
+            (((p.x - 2.5).powi(2) + (p.y - 50.0).powi(2) + p.z * p.z).sqrt() - 10.0).abs() <= tol
+        });
+        let on_top = pts.iter().all(|p| (p.z - 7.5).abs() <= tol);
+        if on_cylinder {
+            counts[0] += 1;
+            for p in &pts {
+                assert!(
+                    p.x <= 3.0 + tol && p.z >= 4.5 - tol,
+                    "r {r}: a rail on the R3 round leaves it at {p:?}"
+                );
+            }
+        }
+        if on_sphere {
+            counts[1] += 1;
+        }
+        if on_top {
+            counts[2] += 1;
+            for p in &pts {
+                assert!(
+                    p.x >= 3.0 - tol,
+                    "r {r}: a rail on z = 7.5 leaves it at {p:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        counts.iter().all(|&n| n > 0),
+        "r {r}: rails on the R3 round, the pocket and z = 7.5: {counts:?}"
+    );
+}
+
+/// Edge 28 of `b27` rounded 1.6 builds a valid solid (#15906). It failed with status 1001,
+/// "the smooth end cap is not built": the End at the edge's end on x = 0 never built its
+/// edges. Its rail on the R3 round is the trace's Hermite approximation, which the trace
+/// accepts within the blend's approximation tolerance (4e-5) of the round; it crosses the
+/// End's plane 1.9e-5 off the round, past the round's zone (1e-5), so the rail end
+/// classified off its face and the End waited for a rollover over the round's tangent edge
+/// x = 0 that never comes (the round rolls over only its other tangent edge, z = 7.5, at the
+/// other end), in the rails' adjusted pass too. A rail end within the rail's tolerance of
+/// its face is now classified at its foot on the face. At 1.5 and 1.7 the crossing fell
+/// within 1e-5 of the round; those builds are unchanged, and the three volumes fall as the
+/// radius grows (a larger ball removes more of a convex edge).
+#[test]
+fn a_round_whose_rail_end_is_off_its_face_by_the_rails_tolerance_builds_its_end_cap() {
+    let (input, _) = b27();
+    let mut volume = input.volume(1e-9).unwrap();
+    for r in [1.5, 1.6, 1.7] {
+        let made = b27_edge_28(r).unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        let report = made.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r {r}: {report}");
+        let after = made.volume(1e-9).unwrap();
+        assert!(
+            after > 0.0 && after < volume,
+            "r {r}: {after} after {volume}"
+        );
+        volume = after;
+        // the rails lie on their faces to the tolerance the trace builds them to
+        assert_b27_rails_on_faces_to(&input, &made, r, 4e-5);
+    }
+}
+
+/// Edge 28 of `b27` rounded in the band just below the cutoff (1.945 to 1.9505), where the
+/// round is a sliver near the end on x = 0 and rolls over onto z = 7.5 for the rest, builds
+/// valid solids (#15906). Once the rails' trim succeeded there (#15905), these failed as 1.6
+/// did, "the smooth end cap is not built": the End on x = 0 found its rail end on the R3 round
+/// off the round by more than its zone and less than the rail's tolerance. The volumes fall as
+/// the radius grows, and the rails lie on their faces to the rail's tolerance.
+#[test]
+fn a_round_in_the_sliver_below_the_cutoff_builds_its_end_cap() {
+    let (input, _) = b27();
+    let mut volume = input.volume(1e-9).unwrap();
+    for r in [1.945, 1.948, 1.95, 1.9505] {
+        assert!(r < b27_edge_28_cutoff());
+        let made = b27_edge_28(r).unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        let report = made.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r {r}: {report}");
+        let after = made.volume(1e-9).unwrap();
+        assert!(
+            after > 0.0 && after < volume,
+            "r {r}: {after} after {volume}"
+        );
+        volume = after;
+        assert_b27_rails_on_faces_to(&input, &made, r, 4e-5);
     }
 }

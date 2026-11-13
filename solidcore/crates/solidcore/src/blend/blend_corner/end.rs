@@ -24,6 +24,7 @@
 //! | [`place_rolled_rail_end`]         | none (#2406: a rail end not reached on the End's plane before the rollover) |
 //! | `side_edge_in_cap` (private)      | none (#2406: a cap edge along a side edge in the cap's plane) |
 //! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
+//! | `classify_rail_end` (private)     | none (an End's rail end on its side face to the rail's tolerance, classified at its foot on the face) |
 //! | `run_on_leaves_the_part` (private) | none (#2656: a blend run on past a smooth vertex that runs out of the part ends on the end face, not capped) |
 //! | `runs_on_across_seam` (private), [`RUNS_ON_ACROSS_SEAM`] | none (#2864: a round does not end at a seam's vertex; a variable round's End there is refused, every other blend runs on across it) |
 //!
@@ -1129,6 +1130,73 @@ fn side_edge_in_cap(
     Ok(Some(side))
 }
 
+/// Not the fork's: an End's rail end `point` classified on its side face `face` (F), at F's
+/// zone. The rail end is the rail curve's crossing with the End's plane, and the rail is
+/// the trace's Hermite approximation of the contact line: the trace accepts a span whose 3D
+/// curve stays within `rail_tol` (the solver's `approx_tol_3d`) of its UV curve mapped onto
+/// F, so a rail end on F can lie up to `rail_tol` off F's
+/// surface, more than F's zone. A rail end off F (unknown at F's zone) that F's surface takes
+/// within `rail_tol` is classified at its foot there instead (`DropPoint`, on F's own
+/// surface, the point of F the rail end approximates): whether the rail ends on F or has left
+/// it across a boundary is F's trim boundary's question, not the rail's approximation
+/// error's. A rail that has left F across its tangent edge T lies on the face beyond, off F's
+/// surface by about d^2 / 2R at a distance d past T (R F's radius of curvature across T),
+/// far more than `rail_tol` for any rail end not at the vertex, and stays unknown.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` for a face without surface; those of the classification and the
+/// drop.
+fn classify_rail_end(
+    k: &Kernel,
+    target: &mut Brep,
+    face: FaceId,
+    point: Point3,
+    rail_tol: f64,
+) -> Result<PointClassification<EntityRef>> {
+    let zone = zone_tol3d(k, target.face(face)?.tolerance);
+    let mut on = PointClassification::new(zone);
+    point_3d_classify(
+        k,
+        target,
+        face,
+        point,
+        zone,
+        true,
+        &mut on,
+        Point3dClassifyOptions::default(),
+    )?;
+    if on.point_class() != PointClassType::Unknown {
+        return Ok(on);
+    }
+    let surface = crate::topology::face::p2::surface(target, face)?
+        .ok_or_else(nul)?
+        .clone_for_evaluation()?;
+    let foot = surface.drop_point::<NoObject>(
+        k,
+        point,
+        &surface.natural_uv_domain_with_nurb(k)?,
+        &DropPointOptions::default(),
+    )?;
+    // off F's surface by more than its zone (unknown for that, not for F's boundary) but
+    // within the rail's tolerance
+    if !(foot.success && foot.gap > zone && foot.gap <= rail_tol) {
+        return Ok(on);
+    }
+    let at = surface.evaluate_point(k, foot.result_uv)?;
+    let mut on_foot = PointClassification::new(zone);
+    point_3d_classify(
+        k,
+        target,
+        face,
+        at,
+        zone,
+        true,
+        &mut on_foot,
+        Point3dClassifyOptions::default(),
+    )?;
+    Ok(on_foot)
+}
+
 /// The fork's `SmBlendCorner::CalcEndCapEdges` (41a39ec): an End at a smooth vertex's
 /// cap edges on the side faces, each the face's intersection with the cap's plane
 /// between the rail's end and the vertex. A rail ending off its side face (rolling over
@@ -1171,17 +1239,12 @@ fn calc_end_cap_edges(
             } else {
                 start
             };
-        let zone = zone_tol3d(k, target.face(face)?.tolerance);
-        let mut on = PointClassification::new(zone);
-        point_3d_classify(
+        let on = classify_rail_end(
             k,
             target,
             face,
             pseudo.vertex_point(rail_end)?,
-            zone,
-            true,
-            &mut on,
-            Point3dClassifyOptions::default(),
+            corner.approx_tol_3d,
         )?;
         if on.point_class() == PointClassType::Unknown {
             // The rail ends off its side face, past the face's tangent edge at the vertex:
@@ -1453,17 +1516,12 @@ fn end_rolls_over(
             if !pseudo.fillet_vertex(rail_end)?.is_processed() {
                 continue;
             }
-            let zone = zone_tol3d(k, target.face(face)?.tolerance);
-            let mut on = PointClassification::new(zone);
-            point_3d_classify(
+            let on = classify_rail_end(
                 k,
                 target,
                 face,
                 pseudo.vertex_point(rail_end)?,
-                zone,
-                true,
-                &mut on,
-                Point3dClassifyOptions::default(),
+                corner.approx_tol_3d,
             )?;
             if on.point_class() != PointClassType::Unknown {
                 continue;
