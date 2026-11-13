@@ -80,6 +80,11 @@ pub(crate) fn shown_line_type(t: &Tool) -> u8 {
 pub(crate) fn choose_line_type(ctx: &egui::Context, t: &mut Tool, kind: u8) {
     t.line_type = kind;
     if kind == 3 {
+        // A segment's start is no part of an infinite line: the next click places that line.
+        // The angle method's first click is where its line passes, so it keeps it.
+        if construction_line_mode(t.cmd).is_some_and(length_box_at_start) {
+            t.pts.clear();
+        }
         t.dim_history.retain(|b| b.label != "Length");
         if let Some(i) = t.dims.iter().position(|b| b.label == "Length") {
             t.dims[i].locked = false;
@@ -90,12 +95,13 @@ pub(crate) fn choose_line_type(ctx: &egui::Context, t: &mut Tool, kind: u8) {
 }
 
 /// The length of the segment ending at `pointer` that the tool would draw now, when it draws one
-/// with no typed length: what its Length box shows.
+/// with no typed length: what its Length box shows. Measured to where a click there puts the end,
+/// as a typed angle moves it off the pointer.
 pub(crate) fn pointer_segment_length(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>)) -> Option<f64> {
     if typed_length(t).is_some() {
         return None;
     }
-    params(app, t, pointer, true)?.get("length")?.as_f64()
+    params(app, t, &crate::sketch_dims::placed(app, t, pointer), true)?.get("length")?.as_f64()
 }
 
 /// How far along the line the pointer is from its start: the length of a segment with no typed
@@ -159,23 +165,31 @@ fn params(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>), preview: b
     if mode == "angle" {
         let angle = crate::sketch_dims::locked_value(app, t, "Angle").unwrap_or_else(|| (pointer.0 - at.0).angle());
         p["angle"] = json!(angle.to_degrees());
-        if !preview && let Some(expression) = crate::sketch_dims::locked_expression(t, "Angle") {
-            p["angle"] = json!(expression);
-        }
     }
-    if matches!(mode, "parallel" | "horizontal" | "vertical") {
-        if let Some(offset) = crate::sketch_dims::locked_value(app, t, "Offset") {
-            p["offset"] = json!(offset);
-        }
-        // A locked box the user cleared is no offset. An empty string is not a length expression.
-        if !preview && let Some(expression) = crate::sketch_dims::locked_expression(t, "Offset").filter(|text| !text.trim().is_empty()) {
-            p["offset"] = json!(expression);
-        }
+    if matches!(mode, "parallel" | "horizontal" | "vertical")
+        && let Some(offset) = crate::sketch_dims::locked_value(app, t, "Offset")
+    {
+        p["offset"] = json!(offset);
     }
     if let Some(expression) = typed_length(t) {
         p["length"] = if preview { json!(crate::sketch_dims::locked_value(app, t, "Length")?) } else { json!(expression) };
     } else if segment(t) && takes_length(mode) && !t.pts.is_empty() {
+        // Measured on the numbers: the line is found from them, not from the expressions below.
         p["length"] = json!(pointer_length(app, &p, mode, pointer.0)?);
+    }
+    // The command keeps a typed angle or offset as its expression. A locked box the user cleared
+    // is no offset: an empty string is not a length expression.
+    if !preview {
+        if mode == "angle"
+            && let Some(expression) = crate::sketch_dims::locked_expression(t, "Angle")
+        {
+            p["angle"] = json!(expression);
+        }
+        if matches!(mode, "parallel" | "horizontal" | "vertical")
+            && let Some(expression) = crate::sketch_dims::locked_expression(t, "Offset").filter(|text| !text.trim().is_empty())
+        {
+            p["offset"] = json!(expression);
+        }
     }
     // An infinite line is always construction, so the line type only counts for a segment. A
     // centerline is made from a normal segment once it exists (`place_point`).
@@ -263,7 +277,8 @@ pub fn place_point(app: &mut SolveApp, t: &mut Tool, at: (Vec2, Option<String>))
 
 /// Shared geometry, drawn far enough either way to cover the visible sketch plane.
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
-    let Some(pointer) = &t.hover else { return };
+    // Where a click there puts the point: a typed angle moves the end off the pointer.
+    let Some(pointer) = &t.hover.as_ref().map(|hover| crate::sketch_dims::placed(app, t, hover)) else { return };
     let Some(mode) = construction_line_mode(t.cmd) else { return };
     let Some(p) = params(app, t, pointer, true) else { return };
     let state = crate::open_meshing::session_world(&app.session);
