@@ -894,6 +894,33 @@ impl<'a> Panel<'a> {
                         let scrolls = scroll.content_size.y > scroll.inner_rect.height() + 0.5;
                         d.insert_temp(self.id.with("body_scrollbar"), scrolls.then_some(scroll.inner_rect));
                     });
+                    // Content running on past either end of the viewport fades out into the card, so a
+                    // field cut by the header or the footer reads as "scroll for more" rather than as a
+                    // clipped dialog.
+                    let (view, offset) = (scroll.inner_rect, scroll.state.clamped_offset().y);
+                    let band = t.space_24.min(view.height() / 2.0);
+                    let edges = [
+                        (offset > 0.5, view.top(), view.top() + band, self.frame.fill, egui::Color32::TRANSPARENT),
+                        (
+                            offset + view.height() < scroll.content_size.y - 0.5,
+                            view.bottom() - band,
+                            view.bottom(),
+                            egui::Color32::TRANSPARENT,
+                            self.frame.fill,
+                        ),
+                    ];
+                    for (more, top, bottom, top_colour, bottom_colour) in edges {
+                        if more {
+                            let mut mesh = egui::Mesh::default();
+                            mesh.colored_vertex(egui::pos2(view.left(), top), top_colour);
+                            mesh.colored_vertex(egui::pos2(view.right(), top), top_colour);
+                            mesh.colored_vertex(egui::pos2(view.right(), bottom), bottom_colour);
+                            mesh.colored_vertex(egui::pos2(view.left(), bottom), bottom_colour);
+                            mesh.add_triangle(0, 1, 2);
+                            mesh.add_triangle(0, 2, 3);
+                            ui.painter().add(mesh);
+                        }
+                    }
                     solidcraft_ui_registry::publish_count("dialog:body:content_height", f64::from(scroll.content_size.y));
                     solidcraft_ui_registry::publish_count("dialog:body:scroll_y", f64::from(scroll.state.clamped_offset().y));
                     solidcraft_ui_registry::publish_rect("dialog:body:viewport", scroll.inner_rect);
