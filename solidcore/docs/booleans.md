@@ -229,6 +229,8 @@ that may not be settled yet (`ResolveOverlappingProtoEdges` re-parametrises over
 first points can lie 18 mm apart in an outset of `Boolean/extrudeHoles1.smb`), so their distance
 proves no separation.
 
+**A curve that runs along an edge without crossing it.** With `classify_edge_interval` (WR-305) an interval between two points on a face's boundary edge whose middle lies within the band of that edge is on the edge, not inside the face. An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). The middle is still read at one point, as WR-305 does.
+
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
 every later step. The port's strip rule is one such decision; a general one for curved faces within
