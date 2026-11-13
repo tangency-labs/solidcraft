@@ -407,6 +407,77 @@ fn length(f: &Frame, iso: Iso, (x_far, x_half): (Vec3, Vec3), x0: Vec3, x1: Vec3
     Ok(radius * phi)
 }
 
+/// The widened analytic path uses the same local chord and arc as the analytic's own
+/// measure: the STEP parameters select the definition's points, so no world-coordinate
+/// net subtraction or inverse mapping in the rebuilt form selects them.
+pub(super) fn widened_across(
+    k: &Kernel,
+    (source, source_dom, source_side): (&Surface, &crate::geom::extent2d::Extent2d, BoxSide),
+    (s, dom, side): (&Surface, &crate::geom::extent2d::Extent2d, BoxSide),
+) -> Result<Across> {
+    let support = AnalyticSupport::check(k, s)?;
+    let form = crate::blend::fillet_section::station::as_b_spline(k, s)?
+        .ok_or_else(|| SolidError::surface_failed(OP, "the surface has no B-spline form"))?;
+    let middle = side.point(dom, 0.5);
+    let end = side.at(&knot_box(&form)?);
+    let to = if side.is_u() {
+        Point2::new(end, middle.y)
+    } else {
+        Point2::new(middle.x, end)
+    };
+    let from = source_side.point(source_dom, 0.5);
+    let a = source.convert_uv_from_nurbs_to_step(k, from)?;
+    let b = s.convert_uv_from_nurbs_to_step(k, to)?;
+    let parallel = round_the_axis(s, side) == Some(true);
+    let (radius, radius_err, delta) = match support.implicit() {
+        Implicit::Cone {
+            radius, tan_angle, ..
+        } => {
+            if !parallel {
+                return Ok(super::measure::across(super::measure::chord(
+                    &form, middle, to,
+                )?));
+            }
+            let term = tan_angle * a.y;
+            let r = radius + term;
+            (r, gamma(4) * (radius.abs() + term.abs()), b.x - a.x)
+        }
+        Implicit::Sphere { radius, .. } => {
+            if parallel {
+                let latitude = a.y.to_radians();
+                let r = radius * latitude.cos();
+                (r, gamma(8) * radius * (1.0 + latitude.abs()), b.x - a.x)
+            } else {
+                (radius, 0.0, b.y - a.y)
+            }
+        }
+        Implicit::Torus { major, minor, .. } => {
+            if parallel {
+                let latitude = a.y.to_radians();
+                let term = minor * latitude.cos();
+                (
+                    major + term,
+                    gamma(12) * (major.abs() + minor * (1.0 + latitude.abs())),
+                    b.x - a.x,
+                )
+            } else {
+                (minor, 0.0, b.y - a.y)
+            }
+        }
+        Implicit::Plane { .. } => {
+            return Ok(super::measure::across(super::measure::chord(
+                &form, middle, to,
+            )?));
+        }
+    };
+    let angle = delta.to_radians().abs();
+    let angle_err = gamma(4) * angle;
+    Ok(super::measure::across(super::measure::circle_from_angle(
+        (radius, radius_err),
+        (angle, angle_err),
+    )?))
+}
+
 /// `cur` continued Natural past `side` by `distance` across it, capped (module docs): the
 /// result, its across length, whether the cap stopped it, and its construction bound;
 /// `None` where the (capped) distance is below the side's resolution ([`below_resolution`]).

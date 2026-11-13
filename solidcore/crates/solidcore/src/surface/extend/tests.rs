@@ -2179,6 +2179,73 @@ fn a_rounding_sized_distance_leaves_a_widened_cylinder_unchanged() {
     assert!(e.is_some());
 }
 
+/// A straight analytic iso has a distance-sized rounding budget even when the widening is
+/// much shorter than the cylinder's radius. The axial parameter runs to 3, where one ulp
+/// (4.4e-16) is already `STOP` of a distance of 4.4e-7: below that no stored parameter
+/// meets the distance, and the answer is none or a refusal, never a claim that it does.
+#[test]
+fn a_cylinder_widens_by_small_distances_along_its_axis() {
+    let kk = k();
+    let s = unit_cylinder(&kk);
+    for d in [1e-6, 2e-6, 5e-6] {
+        let e = s
+            .extended_by_distance(&kk, &dom(&s), BoxSide::VMax, Continuity::Natural, d)
+            .unwrap_or_else(|err| panic!("by {d:e}: {err:?}"))
+            .unwrap_or_else(|| panic!("by {d:e}: not extended"));
+        meets(&e, d);
+    }
+    for d in [5e-9, 1e-8, 1e-7] {
+        match s.extended_by_distance(&kk, &dom(&s), BoxSide::VMax, Continuity::Natural, d) {
+            Ok(None) | Err(SolidError::ExtendRefused { .. }) => {}
+            other => panic!("by {d:e}: {:?}", other.map(|e| e.map(|e| e.across))),
+        }
+    }
+}
+
+/// A ball patch far from the origin keeps the same small-distance certificate as at the
+/// origin; the sphere centre is the local frame for its iso.
+#[test]
+fn a_far_ball_patch_extends_by_the_same_small_distance_as_at_the_origin() {
+    use crate::surface::implicit::{lies_on, Implicit};
+    let kk = k();
+    for o in [0.0, 1e3, 1e5] {
+        let c = Vec3::new(o, o, 0.0);
+        let r = 2.0;
+        let (net, _, _) = crate::blend::blend_corner::ball::ball_triangle_patch(
+            c,
+            r,
+            &[Vec3::X, Vec3::Y, Vec3::Z],
+            0,
+            false,
+        )
+        .unwrap();
+        let s = Surface::from(crate::surface::ball_patch::BallPatch::create(&net, c, r).unwrap());
+        let d = 1e-3;
+        let e = s
+            .extended_sides(&kk, &[BoxSide::UMin], Continuity::Natural, d)
+            .unwrap_or_else(|err| panic!("at {o:e} by {d:e}: {err:?}"));
+        let SideExtension::Extended(a) = e.sides[0] else {
+            panic!("at {o:e}: {:?}", e.sides);
+        };
+        assert!(exact(&a, e.extension, d), "at {o:e}: {a:?}");
+        assert!(
+            (a.enclosure.mid() - d).abs() <= 1e-12 * d,
+            "at {o:e}: {a:?}"
+        );
+        let SurfaceKind::BallPatch(out) = e.surface.kind() else {
+            panic!("not a ball patch");
+        };
+        assert!(lies_on(
+            out.net(),
+            &Implicit::Sphere {
+                centre: c,
+                radius: r
+            }
+        )
+        .unwrap());
+    }
+}
+
 /// A finite plane kept on its parameters at a rounding-sized reach (the local operation's
 /// margin beside a face whose new surface passes through its old edges): every side
 /// `Unchanged`, and the result is still the plane's own B-spline form over its box (the
@@ -2631,12 +2698,10 @@ fn a_pyramid_side_extends_by_its_tolerance_past_its_base_after_its_ends() {
     assert!(e.extension <= 1e-6 * d, "{}", e.extension);
 }
 
-/// tangency-labs/solidcore#2980 (open): the cone of the test above, a quarter turn, moved
-/// off the origin and extended round its axis by a tolerance-sized distance. At the origin and at 1e3 it is certified (rounding about 2e-12
-/// and 5e-12); at 1e5 the closed form's rounding is sized on the part's position
-/// (`gamma(64) (length + size)`, 2.8e-10) and 1e-5 and 1e-4 are refused `NotExact`.
+/// The cone of the test above, a quarter turn, moved off the origin and extended round its
+/// axis by a tolerance-sized distance. The widened path measures the analytic's chord in
+/// the part's own frame, so the rounding is the same at the origin and at 1e5.
 #[test]
-#[ignore = "tangency-labs/solidcore#2980: the analytic closed forms' rounding is position-sized"]
 fn a_far_cone_extends_round_its_axis_by_a_tolerance_as_at_the_origin() {
     let kk = k();
     for o in [0.0, 1e3, 1e5] {

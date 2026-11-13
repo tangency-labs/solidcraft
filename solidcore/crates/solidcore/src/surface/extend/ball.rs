@@ -42,7 +42,7 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::sides::{ExtendedSides, SideExtension};
-use super::{below_resolution, keeps, Continuity, ExtendRefusal, Local};
+use super::{below_resolution, keeps, ExtendRefusal, Local};
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -54,7 +54,7 @@ use crate::nurbs::srf_basic::Direction;
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::surface::ball_patch::BallPatch;
 use crate::surface::implicit::{lies_on, Implicit};
-use crate::surface::side::{Across, BoxSide, Bracket};
+use crate::surface::side::{Across, BoxSide};
 use crate::surface::surface::Surface;
 use std::f64::consts::PI;
 
@@ -250,6 +250,7 @@ pub(super) fn source_iso(
 #[derive(Debug, Clone, Copy)]
 struct Measure {
     length: f64,
+    rounding: f64,
     turn: f64,
 }
 
@@ -272,22 +273,17 @@ fn extend_side(
     let source = Local::of(net, side)?;
     let dom = knot_box(cur)?;
     let middle = side.point(&dom, 0.5);
-    let made = |e: f64| -> Result<Option<(BSplineSurface, f64)>> {
-        let Some(g) = source.extended(Continuity::Natural, e)? else {
+    let made = |e: f64| -> Result<Option<super::local_iso::Made>> {
+        let Some(g) = super::local_iso::natural(&source, side, c, e)? else {
             return Ok(None);
         };
-        if !g.is_finite() {
-            return Ok(None);
-        }
-        let bound = g.bound();
-        let out = g.surface(side)?;
-        if !keeps(net, &out, side)? {
+        if !keeps(net, g.world.gw_nurb().ok_or_else(super::op_err)?, side)? {
             return Err(SolidError::port_invariant(
                 OP,
                 "the extension moved the source's net",
             ));
         }
-        Ok(Some((BSplineSurface::from_gw_nurb(&out), bound)))
+        Ok(Some(g))
     };
     // the iso across the side at its middle, from the side (0) to the extension's end (1)
     let from_end = side.at(&dom);
@@ -301,24 +297,70 @@ fn extend_side(
             Point2::new(middle.x, x)
         }
     };
-    // the iso's circle, its plane through the source's own points (`source_iso`), its
-    // normal turning from the source's far end through the side, outward
-    let (x_far, x_half) = source_iso(cur, &dom, side, middle)?;
-    let x_side = cur.evaluate_point(middle)?;
-    let n = {
-        let n = (x_half - x_far).cross(x_side - x_half);
-        let len = n.length();
-        if len.is_nan() || len <= 0.0 {
-            return Err(SolidError::surface_failed(
-                OP,
-                "the side's normal has no direction",
-            ));
-        }
-        n * (1.0 / len)
+    // Work about the sphere centre when finding the source iso's plane, too: its
+    // normal must not inherit absolute-coordinate evaluation errors.
+    let (lo, hi) = (dom.min(), dom.max());
+    let far_uv = if side.is_u() {
+        Point2::new(if side.is_high() { lo.x } else { hi.x }, middle.y)
+    } else {
+        Point2::new(middle.x, if side.is_high() { lo.y } else { hi.y })
     };
-    let measure = |s: &BSplineSurface| -> Result<Measure> {
-        let x0 = s.evaluate_point(at(s, 0.0))? - c;
-        let x1 = s.evaluate_point(at(s, 1.0))? - c;
+    let half_uv = Point2::new(0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y));
+    let (x_far, ef) = super::measure::point(cur, far_uv, c)?;
+    let (x_half, eh) = super::measure::point(cur, half_uv, c)?;
+    let (x_side, es) = super::measure::point(cur, middle, c)?;
+    let (a, b) = (x_half - x_far, x_side - x_half);
+    let raw = a.cross(b);
+    let norm = raw.length();
+    // Higham §§3.1–3.4: `gamma_16` covers the two differences, six cross-product
+    // products and three differences, squares/sums/sqrt, and bound arithmetic.
+    let ea = ef + eh + gamma(2) * (x_half.length() + x_far.length());
+    let eb = es + eh + gamma(2) * (x_side.length() + x_half.length());
+    let en = (a.length() * eb + b.length() * ea + ea * eb + gamma(16) * a.length() * b.length())
+        * (1.0 + gamma(8));
+    if norm.partial_cmp(&en) != Some(std::cmp::Ordering::Greater) {
+        return Err(refused(ExtendRefusal::NotExact, None));
+    }
+    let n = raw * (1.0 / norm);
+    let nerr = (2.0 * en / (norm - en) + gamma(8)) * (1.0 + gamma(8));
+    let measure = |g: &super::local_iso::Made| -> Result<Measure> {
+        let s = &g.local;
+        let (x0, e0) = super::measure::point(s, at(s, 0.0), Vec3::ZERO)?;
+        let (x1, e1) = super::measure::point(s, at(s, 1.0), Vec3::ZERO)?;
+        let cc = n * n.dot(x0);
+        let (u0, u1) = (x0 - cc, x1 - cc);
+        let radius = u0.length();
+        // The projection's sensitivity to its normal and point, plus its dot,
+        // product, difference and norm's `gamma_16` (Higham §§3.1–3.4).
+        let er = (2.0 * e0
+            + (2.0 * nerr + nerr * nerr) * x0.length()
+            + gamma(16) * (x0.length() + radius))
+            * (1.0 + gamma(8));
+        let (chord, chord_err) = super::measure::chord(s, at(s, 0.0), at(s, 1.0))?;
+        let bound = g.bound;
+        let eu = (er + e0 + e1 + 4.0 * bound) * (1.0 + gamma(8));
+        let sense = super::measure::turn_sign(u0, u1, n, eu, nerr);
+        // Endpoint perturbations move the chord and projected radius. Retain
+        // 4*bound conservatively, propagating it through asin rather than adding
+        // a fixed length error near a diameter.
+        let (length, rounding) = super::measure::oriented_arc(
+            (chord, chord_err + 4.0 * bound),
+            (radius, er + 4.0 * bound),
+            sense,
+        )?;
+        let (t0, t1) = (x0 - z * x0.dot(z), x1 - z * x1.dot(z));
+        Ok(Measure {
+            length,
+            rounding,
+            turn: angle(t0, t1),
+        })
+    };
+    // The probes that steer the solve for an extension parameter are plain evaluations in
+    // the local frame: they may be asked far past what is certified, and nothing is accepted
+    // from them. The extension finally built is measured by `measure`.
+    let probe = |s: &BSplineSurface| -> Result<Measure> {
+        let x0 = s.evaluate_point(at(s, 0.0))?;
+        let x1 = s.evaluate_point(at(s, 1.0))?;
         let cc = n * n.dot(x0);
         let (u0, u1) = (x0 - cc, x1 - cc);
         let mut phi = u0.cross(u1).dot(n).atan2(u0.dot(u1));
@@ -328,36 +370,22 @@ fn extend_side(
         let (t0, t1) = (x0 - z * x0.dot(z), x1 - z * x1.dot(z));
         Ok(Measure {
             length: u0.length() * phi,
+            rounding: 0.0,
             turn: angle(t0, t1),
         })
     };
     let value = |e: f64, turn: bool| -> Result<Option<f64>> {
         Ok(match made(e)? {
-            Some((s, _)) => {
-                let m = measure(&s)?;
+            Some(g) => {
+                let m = probe(&g.local)?;
                 Some(if turn { m.turn } else { m.length })
             }
             None => None,
         })
     };
-    // the length across an extension whose construction bound is `bound`, with the closed
-    // form's rounding (the evaluations at the points' size, the cross products, the atan2)
-    // and the points' construction bound through the angle
-    let size = c.length() + r;
-    let across_of = |s: &BSplineSurface, bound: f64| -> Result<Across> {
-        let length = measure(s)?.length;
-        let rounding = gamma(64) * (length + size) + 4.0 * bound;
-        Ok(Across {
-            enclosure: Bracket {
-                lower: (length - rounding).max(0.0),
-                upper: length + rounding,
-            },
-            truncation: 0.0,
-            rounding,
-            converged: true,
-            // a closed form at the points' size: its rounding part is sized on the part
-            resolution: 0.0,
-        })
+    let across_of = |g: &super::local_iso::Made| -> Result<Across> {
+        let m = measure(g)?;
+        Ok(super::measure::across((m.length, m.rounding)))
     };
     let range = source.range()?;
     let least = source.least_step()?;
@@ -365,8 +393,8 @@ fn extend_side(
         Cap::Arc(arc) => distance.min(r * arc),
         Cap::Round { length, .. } => distance.min(length),
     };
-    if let Some((g, bound)) = made(least)? {
-        if below_resolution(Some(&across_of(&g, bound)?), bound, asked) {
+    if let Some(g) = made(least)? {
+        if below_resolution(Some(&across_of(&g)?), g.bound, asked) {
             return Ok(None);
         }
     }
@@ -406,13 +434,15 @@ fn extend_side(
             }
         }
     };
-    let (grown, bound) = made(e)?.ok_or_else(|| {
+    let g = made(e)?.ok_or_else(|| {
         SolidError::surface_failed(
             OP,
             "the extension at the reached distance could not be made",
         )
     })?;
-    let across = across_of(&grown, bound)?;
+    let across = across_of(&g)?;
+    let bound = g.bound;
+    let grown = g.world;
     // a length solved for is met, or the extension is refused naming a length that works
     if goal.is_some_and(|goal| !solved_length_met(&across, bound, goal, e <= least)) {
         return Err(refused(
@@ -420,7 +450,8 @@ fn extend_side(
             super::workable(Some(&across), bound),
         ));
     }
-    certify_circle(&grown, side, middle, c, size)?;
+    // The certificate is sized on the sphere's own radius, not the centre's position.
+    certify_circle(&grown, side, middle, c)?;
     Ok(Some((grown, across, capped, bound)))
 }
 
@@ -563,13 +594,7 @@ fn bisect(
 /// every determinant of three spread homogeneous control points (from the centre `c`) and
 /// a fourth is zero within its rounding (`size` the points' absolute size), and the three
 /// span a plane. Refused as not exact otherwise.
-fn certify_circle(
-    s: &BSplineSurface,
-    side: BoxSide,
-    middle: Point2,
-    c: Vec3,
-    size: f64,
-) -> Result<()> {
+fn certify_circle(s: &BSplineSurface, side: BoxSide, middle: Point2, c: Vec3) -> Result<()> {
     let net = s
         .gw_nurb()
         .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
@@ -580,12 +605,36 @@ fn certify_circle(
         (middle.x, Direction::V)
     };
     let iso = extract_iso_crv(net, t, dir)?;
+    // Extraction happens BEFORE translation and therefore still has a
+    // world-sized input budget. Keep it separate from the local determinant's
+    // arithmetic; using world-sized row magnitudes also for its rank test would
+    // incorrectly declare a far-away, perfectly spread plane rank-deficient.
+    let degree = if side.is_u() { net.q() } else { net.p() };
+    let mut input = 0.0_f64;
+    for p in net.cpts().iter().flatten() {
+        let w = if p.w == NOW { 1.0 } else { p.w };
+        input = input.max(
+            p.x.abs().max(p.y.abs()).max(p.z.abs())
+                + (1.0 + c.x.abs().max(c.y.abs()).max(c.z.abs())) * w.abs(),
+        );
+    }
+    // Convex de Boor extraction: <=12q+4 operations on a path; the extra
+    // four cover input/translation and evaluating this bound (Higham §3).
+    let error = gamma(12 * degree + 8) * input * (1.0 + gamma(8));
     let mut rows: Vec<[f64; 4]> = Vec::new();
     let mut mags: Vec<f64> = Vec::new();
     for p in iso.cpts() {
         let w = if p.w == NOW { 1.0 } else { p.w };
-        rows.push([p.x - c.x * w, p.y - c.y * w, p.z - c.z * w, w]);
-        mags.push(p.x.abs().max(p.y.abs()).max(p.z.abs()) + (size + 1.0) * w.abs());
+        // One fused rounding per local coordinate, already covered by the
+        // determinant's `gamma_32` below; never round C w separately at |C|.
+        let local = [
+            (-c.x).mul_add(w, p.x),
+            (-c.y).mul_add(w, p.y),
+            (-c.z).mul_add(w, p.z),
+            w,
+        ];
+        mags.push(local.iter().fold(0.0_f64, |m, x| m.max(x.abs())));
+        rows.push(local);
     }
     let n = rows.len();
     let (Some(&r0), Some(&rm), Some(&rl)) = (rows.first(), rows.get(n / 2), rows.last()) else {
@@ -602,10 +651,15 @@ fn certify_circle(
             + g(r0, l) * (g(rm, i) * g(rl, j) - g(rm, j) * g(rl, i))
     };
     let three = m0 * mm * ml;
-    // the three span a plane: a minor well past its rounding
+    // Product perturbation without subtracting nearly equal products. These
+    // three terms contain all seven nonempty subsets of perturbed factors.
+    let perturb =
+        ((m0 + error) * (mm + error) * error + (m0 + error) * error * ml + error * mm * ml)
+            * (1.0 + gamma(12));
+    // the three span a plane: a minor well past arithmetic AND input rounding
     let spans = [(0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)]
         .iter()
-        .any(|&(i, j, l)| minor(i, j, l).abs() > 1e3 * 6.0 * gamma(16) * three);
+        .any(|&(i, j, l)| minor(i, j, l).abs() > 1e3 * 6.0 * (gamma(16) * three + perturb));
     if !spans {
         return Err(refused(ExtendRefusal::NotExact, None));
     }
@@ -619,7 +673,10 @@ fn certify_circle(
         // expansion along the fourth row; |fl(det) - det| <= gamma_K per(|A|) <= gamma_K 4!
         // times the product of the rows' sizes
         let det = -g(row, 0) * m123 + g(row, 1) * m023 - g(row, 2) * m013 + g(row, 3) * m012;
-        if det.abs() > gamma(32) * 24.0 * three * mag {
+        let tolerance = 24.0
+            * (gamma(32) * three * mag + perturb * (mag + error) + three * error)
+            * (1.0 + gamma(12));
+        if det.abs() > tolerance {
             return Err(refused(ExtendRefusal::NotExact, None));
         }
     }
