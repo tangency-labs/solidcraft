@@ -32,7 +32,7 @@ use crate::blend::fillet_executive::session::ball_regular::{
 };
 use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::fillet_executive::FitKind;
-use crate::blend::fillet_solver::p1::FilletSolverType;
+use crate::blend::fillet_solver::p1::{test_manifold_tangent_rollover, FilletSolverType};
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
@@ -133,6 +133,20 @@ pub fn ball_through(
     max: f64,
     ratio: Option<[f64; 2]>,
 ) -> Result<Option<(f64, f64)>> {
+    Ok(ball_through_at(k, target, solver, lk, q, max, ratio)?.map(|(rho, chord, _)| (rho, chord)))
+}
+
+/// [`ball_through`], with the filleted edge's parameter where the ball's centre lies square
+/// to it.
+fn ball_through_at(
+    k: &Kernel,
+    target: &Brep,
+    solver: &mut SolverObject,
+    lk: usize,
+    q: Point3,
+    max: f64,
+    ratio: Option<[f64; 2]>,
+) -> Result<Option<(f64, f64, f64)>> {
     let ratio = ratio.unwrap_or([1.0, 1.0]);
     let (bases, radii) = {
         let base = solver.base();
@@ -269,7 +283,7 @@ pub fn ball_through(
         let found = dropped.success
             && (edge::is_closed(target, e)?
                 || (dropped.parameter > ivl.min() + ends && dropped.parameter < ivl.max() - ends));
-        return Ok(found.then_some((rho, chord)));
+        return Ok(found.then_some((rho, chord, dropped.parameter)));
     }
     Ok(None)
 }
@@ -280,12 +294,21 @@ pub fn ball_through(
 /// face's boundary (an edge not the filleted one nor at its ends) and the other face, with
 /// what it sizes. `None` where no boundary point bounds it, or for a radius law.
 ///
+/// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled
+/// over a smooth far edge of its face, the whole length, rolls on the face beyond, and its
+/// face's boundary is that face's: less the edges it rolled over, and with the edges at their
+/// ends taken as the side edges the rail ends on (as those at the filleted edge's ends). The
+/// face it rolled off lies inside the band and does not bound it. A boundary point of a
+/// solver with a rolled rail sizes it only where the solver's own ball of that size touches
+/// that point ([`rolls_through`]): the ball through it may lie on another sheet of the
+/// rolled-onto face's surface (beyond a boss, against the extension of the other face).
+///
 /// # Errors
 ///
-/// Those of [`ball_through`] and the topology lookups.
+/// Those of [`ball_through`], [`rolls_through`] and the topology lookups.
 pub fn largest_size_on_its_faces(
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     solver: &mut SolverObject,
     only: Option<FaceId>,
 ) -> Result<Option<(f64, FitKind)>> {
@@ -325,15 +348,36 @@ pub fn largest_size_on_its_faces(
         .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let v0 = edge::vertex(target, blended)?;
     let ends = [v0, edge::other_vertex(target, blended, v0)?];
+    let rolled = solver.base().rolled_faces;
+    let tangency = solver.base().tangency_tolerance;
+    let confirm = rolled.iter().any(Option::is_some);
     for (rail, edgeuse) in [eu0, eu1].into_iter().enumerate() {
-        let Some(face) = eu::face(target, edgeuse)? else {
+        let Some(own) = eu::face(target, edgeuse)? else {
             continue;
         };
+        // the face the rail rolls on: its own, or the face beyond the smooth edge it rolled
+        // over; that edge, and the vertices it ends the rail at
+        let onto = rolled.get(rail).copied().flatten();
+        let face = onto.unwrap_or(own);
         if only.is_some_and(|f| f != face) {
             continue;
         }
+        let mut over: Vec<EdgeId> = Vec::new();
+        let mut rail_ends: Vec<Option<VertexId>> = ends.to_vec();
+        if onto.is_some() {
+            for e in crate::topology::face::p4::edges(target, face, None, false, None)? {
+                if edge::faces(target, e, None)?.contains(&own)
+                    && test_manifold_tangent_rollover(k, target, e, tangency)?.0
+                {
+                    let p0 = edge::vertex(target, e)?;
+                    let p1 = edge::other_vertex(target, e, p0)?;
+                    rail_ends.extend([p0, p1].into_iter().filter(Option::is_some));
+                    over.push(e);
+                }
+            }
+        }
         for e in crate::topology::face::p4::edges(target, face, None, false, None)? {
-            if e == blended {
+            if e == blended || over.contains(&e) {
                 continue;
             }
             let Some(curve) = edge::evaluation_curve(target, e)? else {
@@ -341,15 +385,16 @@ pub fn largest_size_on_its_faces(
             };
             let p0 = edge::vertex(target, e)?;
             let p1 = edge::other_vertex(target, e, p0)?;
-            if ends.contains(&p0) || ends.contains(&p1) {
-                continue; // a side edge at an end of the blended edge: the rail ends on it
+            if rail_ends.contains(&p0) || rail_ends.contains(&p1) {
+                continue; // a side edge at an end of the rail: the rail ends on it
             }
             let curve = curve.clone();
             let ivl = edge::interval(target, e)?;
+            let target_now: &Brep = target;
             let rho_at = |solver: &mut SolverObject, t: f64| -> Result<f64> {
                 let q = curve.evaluate_point(k, ivl.evaluate(smos_max(0.0, smos_min(1.0, t))))?;
                 Ok(
-                    match ball_through(k, target, solver, rail, q, max, Some(ratio))? {
+                    match ball_through(k, target_now, solver, rail, q, max, Some(ratio))? {
                         Some((rho, chord)) => {
                             if kind == FitKind::Chord {
                                 chord
@@ -395,13 +440,92 @@ pub fn largest_size_on_its_faces(
                     f2 = rho_at(solver, x2)?;
                 }
             }
+            // where the least lies, for its confirmation: the sample's, or the search's
+            let mut least_at = at;
+            if smos_min(f1, f2) < least {
+                least_at = if f1 < f2 { x1 } else { x2 };
+            }
             least = smos_min(least, smos_min(f1, f2));
+            if confirm && kind == FitKind::Radius {
+                let q = curve
+                    .evaluate_point(k, ivl.evaluate(smos_max(0.0, smos_min(1.0, least_at))))?;
+                let through = ball_through_at(k, target, solver, rail, q, max, Some(ratio))?;
+                let Some((rho, _, t)) = through else {
+                    continue;
+                };
+                if !rolls_through(k, target, solver, rail, q, rho, t)? {
+                    continue;
+                }
+            }
             if found.is_none_or(|r| least < r) {
                 found = Some(least);
             }
         }
     }
     Ok(found.map(|r| (r, kind)))
+}
+
+/// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): whether the
+/// ball of radius `rho` that `solver` rolls, in its section at its filleted edge's `t`,
+/// touches its face `rail` at `q`, within the solver's 3D tolerance. A ball through a boundary
+/// point that touches the other face's surface ([`ball_through`]) is not always the solver's:
+/// past a boss a rail rolled onto, it may touch that surface on the boss's far side and the
+/// other face's surface extended beyond the face, where the solver's ball never rolls. The
+/// solver's radius is its own again after.
+///
+/// # Errors
+///
+/// Those of the section solve and the evaluations; a missing offset surface, edge use or
+/// edge curve.
+fn rolls_through(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    rail: usize,
+    q: Point3,
+    rho: f64,
+    t: f64,
+) -> Result<bool> {
+    let base = solver.base();
+    let tol = base.approx_tol_3d;
+    let own = base
+        .surface(0)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
+        .surface
+        .offset_distance()
+        .abs();
+    let edgeuse = base
+        .edgeuse(0)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e = eu::edge(target, edgeuse)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+    let curve = edge::evaluation_curve(target, e)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
+        .clone();
+    let side = if rail == 0 {
+        SrfIndex::First
+    } else {
+        SrfIndex::Second
+    };
+    if !set_ball_radius(solver, rho)? {
+        return Ok(false); // no single ball: not confirmed
+    }
+    let contact = (|| -> Result<Option<Point3>> {
+        let Some(pnt) = ball_section_at(k, target, solver, &curve, t, None)? else {
+            return Ok(None);
+        };
+        let on = solver
+            .base()
+            .surface(rail)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
+            .surface
+            .base_surface()
+            .evaluate_point(k, pnt.uv_pos(side))?;
+        Ok(Some(on))
+    })();
+    set_ball_radius(solver, own)?;
+    let contact = contact?;
+    Ok(contact.is_some_and(|on| on.distance(q) <= tol))
 }
 
 /// `SmFilletSolver::BandsMeetAt(rOther, lMine, lTheirs, ...)`: the radius at which this

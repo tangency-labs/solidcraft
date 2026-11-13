@@ -422,51 +422,59 @@ fn the_boss_round_area_oracle_agrees_with_a_polygon() {
     }
 }
 
-#[test]
-fn a_round_past_a_side_running_into_a_boss_rolls_onto_the_boss() {
+/// The round `r` at C on the arm and boss: built, valid at the full check, its rails the straight
+/// lines along z through the ball's contacts on y = -65 and on the boss (the latter past the
+/// side's end), and its volume the closed form.
+fn assert_boss_round_builds(r: f64) {
     use solidcore::query::api_queries::edge_closest_point;
-    fixes();
     let height = 5.0;
     let profile = 72.0 * 25.0 + 36.0 * 25.0 + PI * 18.0 * 18.0 / 2.0;
-    for r in [26.0, 28.0, 30.0] {
-        let b = arm_and_boss();
-        let e = edge_at(&b, [-36.0, -65.0, height / 2.0]);
-        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
-            .unwrap_or_else(|err| panic!("r {r}: {err:?}"));
-        let report = b.check(CheckLevel::All).unwrap();
-        assert!(report.is_valid(), "r {r}: {report}");
-        // the rails: straight lines along z through the ball's contacts
-        let cy = -65.0 - r;
-        let cx = -54.0 + ((18.0 + r).powi(2) - (cy + 90.0).powi(2)).sqrt();
-        let d = ((cx + 54.0).powi(2) + (cy + 90.0).powi(2)).sqrt();
-        let t2 = (
-            -54.0 + 18.0 * (cx + 54.0) / d,
-            -90.0 + 18.0 * (cy + 90.0) / d,
-        );
-        assert!(
-            t2.1 < -90.0,
-            "r {r}: the contact on the boss lies past the side's end"
-        );
-        let (k, brep) = common::kernel_copy(&b);
-        for (x, y) in [(cx, -65.0), t2] {
-            for z in [0.5, 2.5, 4.5] {
-                let q = solidcore::Vec3::new(x, y, z);
-                let on_edge = brep.edge_list().iter().any(|&e| {
-                    edge_closest_point(&k, &brep, e, q)
-                        .unwrap()
-                        .closest
-                        .distance
-                        < 1e-7
-                });
-                assert!(on_edge, "r {r}: no rail through ({x}, {y}, {z})");
-            }
+    let b = arm_and_boss();
+    let e = edge_at(&b, [-36.0, -65.0, height / 2.0]);
+    blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+        .unwrap_or_else(|err| panic!("r {r}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "r {r}: {report}");
+    // the rails: straight lines along z through the ball's contacts
+    let cy = -65.0 - r;
+    let cx = -54.0 + ((18.0 + r).powi(2) - (cy + 90.0).powi(2)).sqrt();
+    let d = ((cx + 54.0).powi(2) + (cy + 90.0).powi(2)).sqrt();
+    let t2 = (
+        -54.0 + 18.0 * (cx + 54.0) / d,
+        -90.0 + 18.0 * (cy + 90.0) / d,
+    );
+    assert!(
+        t2.1 < -90.0,
+        "r {r}: the contact on the boss lies past the side's end"
+    );
+    let (k, brep) = common::kernel_copy(&b);
+    for (x, y) in [(cx, -65.0), t2] {
+        for z in [0.5, 2.5, 4.5] {
+            let q = solidcore::Vec3::new(x, y, z);
+            let on_edge = brep.edge_list().iter().any(|&e| {
+                edge_closest_point(&k, &brep, e, q)
+                    .unwrap()
+                    .closest
+                    .distance
+                    < 1e-7
+            });
+            assert!(on_edge, "r {r}: no rail through ({x}, {y}, {z})");
         }
-        let v = b.volume(1e-9).unwrap();
-        let expected = height * (profile + boss_round_area(r));
-        assert!(
-            (v - expected).abs() < 1e-6,
-            "r {r}: {v}, expected {expected}"
-        );
+    }
+    let v = b.volume(1e-9).unwrap();
+    let expected = height * (profile + boss_round_area(r));
+    assert!(
+        (v - expected).abs() < 1e-6,
+        "r {r}: {v}, expected {expected}"
+    );
+}
+
+#[test]
+fn a_round_past_a_side_running_into_a_boss_rolls_onto_the_boss() {
+    fixes();
+    let height = 5.0;
+    for r in [26.0, 28.0, 30.0] {
+        assert_boss_round_builds(r);
     }
     // Past r = 3217 / 86 (37.41) the ball's contact on y = -65 lies past that face's end at
     // x = 0 ((18 + r)^2 - (r - 25)^2 = 86 r - 301 > 54^2): no ball fits, and it is refused as a
@@ -483,5 +491,61 @@ fn a_round_past_a_side_running_into_a_boss_rolls_onto_the_boss() {
             }) => {}
             other => panic!("r {r}: {other:?}"),
         }
+    }
+}
+
+/// The largest round at C that builds on the arm and boss, in closed form. The ball touches
+/// y = -65 and rolls on the boss: its centre is at (x, -65 - r), 18 + r from B = (-54, -90), so
+/// (x + 54)^2 + (r - 25)^2 = (18 + r)^2, that is (x + 54)^2 = 86 r - 301, and its contact on
+/// y = -65 is straight above it at x = -54 + sqrt(86 r - 301). That contact grows with r and stays
+/// on the face y = -65 (x from -36 to 0) while sqrt(86 r - 301) <= 54: r <= (54^2 + 301) / 86 =
+/// 3217 / 86. Its contact on the boss lies past the side's end and short of the boss's bottom
+/// for every r > 25, and the side's own boundary (its end y = -90 at r = 25) does not bound it:
+/// the side is consumed, its rail rolled over onto the boss.
+const BOSS_ROUND_FITS: f64 = 3217.0 / 86.0;
+
+/// A round at C too large for the face y = -65 is refused as its rail leaving its face, and the
+/// refusal names the largest size at which its rails stay on the faces it rolls on, y = -65 and
+/// the boss it rolled onto: the closed form [`BOSS_ROUND_FITS`], open, so less the fit margin
+/// (the bound of the convex case above). Not the width of the side it rolled off (25, less the
+/// margin), at which it builds. The named size builds, as do radii between the built ones and
+/// it, with the closed-form rails and volume.
+#[test]
+fn a_boss_round_too_large_names_the_size_that_fits_the_boss() {
+    fixes();
+    // the closed form puts the contact on y = -65 at that face's end, x = 0
+    let at = -54.0 + (86.0 * BOSS_ROUND_FITS - 301.0).sqrt();
+    assert!(at.abs() < 1e-12, "the closed form's contact {at}");
+    let height = 5.0;
+    let mut named = Vec::new();
+    for r in [38.0_f64, 40.0] {
+        let b = arm_and_boss();
+        let e = edge_at(&b, [-36.0, -65.0, height / 2.0]);
+        match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Err(Error::TooLarge {
+                size,
+                why: Some(RoomReason::RailLeavesFace),
+                ..
+            }) => {
+                assert!(
+                    size < BOSS_ROUND_FITS && size > BOSS_ROUND_FITS - 0.02,
+                    "r {r}: fit {size}, the closed form {BOSS_ROUND_FITS}"
+                );
+                // exactly: the fit margin is a thousand of the edge's tolerances (1e-5)
+                assert!(
+                    (size - (BOSS_ROUND_FITS - 0.01)).abs() < 1e-9,
+                    "r {r}: fit {size}, the closed form {BOSS_ROUND_FITS} less 0.01"
+                );
+                named.push(size);
+            }
+            other => panic!("r {r}: {other:?}"),
+        }
+    }
+    for r in [32.0, 34.0, 36.0, 37.0, 37.4] {
+        assert!(r < BOSS_ROUND_FITS);
+        assert_boss_round_builds(r);
+    }
+    for size in named {
+        assert_boss_round_builds(size);
     }
 }
