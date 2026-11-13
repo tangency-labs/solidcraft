@@ -357,6 +357,7 @@ mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
 pub use solidcraft_ui_kit::window_chrome;
+mod wireframe_silhouettes;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;

@@ -169,6 +169,7 @@ pub struct ViewportState {
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
     pub(crate) sketch_slot: SceneSlot,
     sketch_key: u64,
+    wireframe: crate::wireframe_silhouettes::Outlines,
     physical_scale: f32,
     pub(crate) display: std::sync::Mutex<crate::sketch_display::DisplayCache>,
     pub(crate) hl_slot: SceneSlot,
@@ -638,6 +639,7 @@ fn base_scene_key(app: &SolveApp) -> u64 {
 fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     scene_key(app).hash(&mut h);
+    app.viewport.wireframe.generation().hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
     // The grid this scene draws follows the view when the preference says so (#1470): turning it
     // on or off redraws even while the camera holds still.
@@ -1911,6 +1913,7 @@ pub(crate) fn seam_width(order: Option<solidcraft_engine::kernel::Continuity>) -
 
 /// Rebuild the sketch scene when what it shows has changed.
 pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
+    refresh_wireframe(app, proj);
     let sk = sketch_scene_key(app, proj);
     if sk != app.viewport.sketch_key {
         let scene = build_sketch_scene(app, proj);
@@ -1919,6 +1922,36 @@ pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
         }
         app.viewport.sketch_key = sk;
     }
+}
+
+/// The camera changes only silhouette classification, never the body's mesh or GPU blocks.
+fn refresh_wireframe(app: &mut SolveApp, proj: &Proj) {
+    let mut outlines = std::mem::take(&mut app.viewport.wireframe);
+    if app.ui.visual_style != 2 {
+        if outlines.model().is_some() {
+            outlines.set_model(None, 0);
+        }
+        if outlines.busy() {
+            outlines.advance(&proj.cam, crate::wireframe_silhouettes::WORK_PER_FRAME, |_| None);
+        }
+    } else {
+        let key = scene_key(app);
+        let st = crate::open_meshing::shown_world(app);
+        if outlines.model() != Some(key) {
+            outlines.set_model(Some(key), st.bodies.len());
+        }
+        outlines.advance(&proj.cam, crate::wireframe_silhouettes::WORK_PER_FRAME, |index| {
+            let body = st.bodies.get(index)?;
+            if !app.body_visible(&body.name) || app.preview.effective_replaced().contains(&body.name) {
+                return None;
+            }
+            // The model scene already requested these display meshes. Reuse placements'
+            // shared triangles instead of materializing a moved copy during each drag.
+            let (mesh, placement) = shared_mesh(app, body).unwrap_or_else(|| (drawn_mesh(app, body), solidcraft_engine::doc::IDENTITY));
+            crate::wireframe_silhouettes::Source::new(mesh, placement)
+        });
+    }
+    app.viewport.wireframe = outlines;
 }
 
 /// View-dependent geometry: grid, sketch feedback and the ground shadow's visibility.
@@ -1936,6 +1969,12 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     {
         // A hidden shadow must not keep an earlier document's whole model alive.
         *cache = None;
+    }
+    if app.ui.visual_style == 2 {
+        let color = sc.color(c4(tk.text));
+        for [a, b] in app.viewport.wireframe.segments() {
+            sc.line(a.to_f32(), b.to_f32(), color, 1.3, false);
+        }
     }
     let mut fill_budget = 131_072;
     // The open sketch's plane in the model this frame shows.
@@ -5715,6 +5754,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::frame_watch::step(app, "model scene");
         }
         refresh_sketch_scene(app, &proj);
+        if app.viewport.wireframe.busy() {
+            ui.ctx().request_repaint();
+        }
         let hk = highlight_key_with_projection(app, || proj);
         if hk != app.viewport.hl_key {
             let hl = build_highlight_with_projection(app, || proj);
