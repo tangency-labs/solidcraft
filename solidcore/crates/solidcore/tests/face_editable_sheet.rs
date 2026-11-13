@@ -93,13 +93,24 @@ fn exact_form(k: &mut Kernel, sheet: &Brep, net: (usize, usize)) {
     assert!(lines.is_empty(), "{lines:?}");
 }
 
+/// A kernel whose loop check compares a seam end projected from its vertex with its
+/// neighbour on the nearest period (`check_loop_projected_seam_ends`, WR-440, the fork's
+/// reference). A sheet made on a closed surface has no UV trims, so the check takes its seam
+/// ends from vertex projections, known only modulo the period; upstream's check reports the
+/// seam of a whole turn as a UV gap of one period (`wr_440_revolved_line_seam_check.rs`).
+fn kernel() -> Kernel {
+    let mut k = Kernel::default();
+    k.fixes.check_loop_projected_seam_ends = true;
+    k
+}
+
 fn sheet_copy(k: &mut Kernel, b: &Brep) -> Brep {
     solidcore::topology::brep::p3::brep_copy(k, b).unwrap()
 }
 
 #[test]
 fn a_cylinders_side_is_its_exact_form_with_one_seam_edge() {
-    let mut k = Kernel::default();
+    let mut k = kernel();
     let b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 10.0).unwrap();
     let side = curved_face(&b);
     let sheet = editable_sheet(&mut k, &b, side).unwrap().expect("a sheet");
@@ -112,7 +123,7 @@ fn a_cylinders_side_is_its_exact_form_with_one_seam_edge() {
 
 #[test]
 fn a_cones_side_is_its_exact_form_with_one_seam_edge() {
-    let mut k = Kernel::default();
+    let mut k = kernel();
     let b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 0.0, 10.0).unwrap();
     let side = curved_face(&b);
     let sheet = editable_sheet(&mut k, &b, side).unwrap().expect("a sheet");
@@ -124,7 +135,7 @@ fn a_cones_side_is_its_exact_form_with_one_seam_edge() {
 
 #[test]
 fn a_sphere_is_its_exact_form_with_one_seam_edge() {
-    let mut k = Kernel::default();
+    let mut k = kernel();
     let b = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0).unwrap();
     let face = *b.face_list().first().unwrap();
     let sheet = editable_sheet(&mut k, &b, face).unwrap().expect("a sheet");
@@ -137,7 +148,7 @@ fn a_sphere_is_its_exact_form_with_one_seam_edge() {
 
 #[test]
 fn a_torus_is_its_exact_form_with_its_two_seam_edges() {
-    let mut k = Kernel::default();
+    let mut k = kernel();
     let b = create_torus(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 3.0).unwrap();
     let face = *b.face_list().first().unwrap();
     let sheet = editable_sheet(&mut k, &b, face).unwrap().expect("a sheet");
