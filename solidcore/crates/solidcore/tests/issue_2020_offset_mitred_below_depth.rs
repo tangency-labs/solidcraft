@@ -280,6 +280,7 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
+    k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;

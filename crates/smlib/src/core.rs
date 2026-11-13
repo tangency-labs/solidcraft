@@ -142,6 +142,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.found_torus_sphere_keep_tested_nurb = true;
     f.boolean_skips_faces_apart = true;
     f.uv_trim_checks_on_surface = true;
+    f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.iso_curve_sliver_domain_is_degenerate = true;
