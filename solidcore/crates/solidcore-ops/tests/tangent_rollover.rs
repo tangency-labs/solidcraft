@@ -17,7 +17,7 @@ use std::f64::consts::PI;
 use common::edge_at;
 use solidcore_ops::blend::{blend, Blend, Corners};
 use solidcore_ops::boolean::boolean;
-use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error};
+use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error, RoomReason};
 
 const LENGTH: f64 = 10.0;
 
@@ -467,5 +467,21 @@ fn a_round_past_a_side_running_into_a_boss_rolls_onto_the_boss() {
             (v - expected).abs() < 1e-6,
             "r {r}: {v}, expected {expected}"
         );
+    }
+    // Past r = 3217 / 86 (37.41) the ball's contact on y = -65 lies past that face's end at
+    // x = 0 ((18 + r)^2 - (r - 25)^2 = 86 r - 301 > 54^2): no ball fits, and it is refused as a
+    // rail leaving its face.
+    for r in [38.0, 40.0] {
+        let cx = -54.0 + ((18.0 + r).powi(2) - (r - 25.0).powi(2)).sqrt();
+        assert!(cx > 0.0, "r {r}: the contact {cx} lies past x = 0");
+        let b = arm_and_boss();
+        let e = edge_at(&b, [-36.0, -65.0, height / 2.0]);
+        match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Err(Error::TooLarge {
+                why: Some(RoomReason::RailLeavesFace),
+                ..
+            }) => {}
+            other => panic!("r {r}: {other:?}"),
+        }
     }
 }
