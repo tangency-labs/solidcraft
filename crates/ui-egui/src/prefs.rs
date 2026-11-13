@@ -1312,6 +1312,8 @@ preference_settings! {
     language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
     layout: crate::ui_kit::LayoutMode = Default::default(), PAGE_LAYOUT;
+    /// Preview panel placement and reflow while dragging. Off shows the drop outline.
+    live_panel_drag_preview: bool = true, PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
     navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
@@ -6708,6 +6710,7 @@ mod tests {
             ("ui_scale", json!(1.25), PAGE_APPEARANCE),
             ("ui_font", json!("test font"), PAGE_APPEARANCE),
             ("layout", json!("compact"), PAGE_LAYOUT),
+            ("live_panel_drag_preview", json!(false), PAGE_LAYOUT),
             ("ribbon_labels", json!(false), PAGE_LAYOUT),
             ("persistent_ribbon_pressed", json!(false), PAGE_LAYOUT),
             ("viewport_analysis_status", json!(false), PAGE_GRAPHICS),
@@ -10488,6 +10491,9 @@ mod tests {
             h.call("ui.prefs", json!({"open":"Layout"}));
             let before = h.app.preferences.clone();
             let doc = h.app.session.doc.to_json();
+            assert!(before.live_panel_drag_preview);
+            scroll_to_and_click(&mut h, "prefs:live_panel_drag_preview");
+            assert!(!h.app.preferences.live_panel_drag_preview);
             scroll_to_and_click(&mut h, "prefs:history_in_browser");
             assert!(h.app.preferences.history_in_browser);
             for tab in crate::workspace::choosable_tabs() {
@@ -10500,13 +10506,19 @@ mod tests {
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences, before, "Cancel restores every Layout edit");
             h.call("ui.prefs", json!({"open":"Layout"}));
+            scroll_to_and_click(&mut h, "prefs:live_panel_drag_preview");
             scroll_to_and_click(&mut h, "prefs:history_in_browser");
             h.call("ui.prefs", json!({"button":"apply"}));
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert!(!restored.preferences.live_panel_drag_preview);
             h.call("ui.prefs", json!({"button":"defaults"}));
+            assert!(h.app.preferences.live_panel_drag_preview);
             assert!(!h.app.preferences.history_in_browser);
             assert!(h.app.preferences.quick_measure && h.app.preferences.invert_curved_roll_arrows, "Layout reset retains Graphics and Navigation");
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert!(h.app.preferences.history_in_browser, "Cancel after Apply returns to the applied state");
+            assert!(!h.app.preferences.live_panel_drag_preview);
         }
     }
 
@@ -12950,6 +12962,7 @@ mod settings_search_tests {
             h.call("ui.prefs", serde_json::json!({"language":"en","open":"Layout"}));
             for (query, native) in [
                 ("Components start open", Some((Role::CheckBox, "prefs:browser_components_open"))),
+                ("Preview panel placement while dragging", Some((Role::CheckBox, "prefs:live_panel_drag_preview"))),
                 ("Menus", None),
                 ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
                 ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
