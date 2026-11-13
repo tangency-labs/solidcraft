@@ -39,7 +39,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type":"form","definition":{
                 "placement":{"origin":[2,3,4],"axes":[[1,0,0],[0,1,0],[0,0,1]]},
                 "cage":{"points":[[0,0,0],[10,0,0],[10,10,0],[0,10,0]],"faces":[[0,1,2,3]]},
-                "parameters":{"kind":"face","dimensions":[10,10,10],"segments":[1,1,1]}},"tolerance":"form.tolerance"}),
+                "parameters":{"kind":"face","dimensions":[10,10,10],"segments":[1,1,1]}},"tolerance":"form.tolerance","targets":["B"]}),
         ),
         (
             "body_transfer",
@@ -262,7 +262,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
     let o = [0, 0, 0];
     let tool = json!({"body": "B", "point": o});
     let extra = match name {
-        "form" | "extrude" | "extrude_thin" | "revolve" | "sweep" | "sweep_options" | "pipe" | "coil" | "thicken" => json!({"targets": ["B"]}),
+        "extrude" | "extrude_thin" | "revolve" | "sweep" | "sweep_options" | "pipe" | "coil" | "thicken" => json!({"targets": ["B"]}),
         "fillet_constant" | "fillet_chord" | "fillet_curvature" | "fillet_variable" | "fillet_spline" | "chamfer" | "shell" | "draft"
         | "offset_face" | "delete_face" | "replace_face" | "sheet_flange" | "sheet_hem" | "sheet_perforate" | "sheet_path" | "sheet_unfold"
         | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {

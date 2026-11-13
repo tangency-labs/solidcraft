@@ -4931,6 +4931,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             Sel::Body { name } => {
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
+                    && !moving(name)
                     && !(weld && replaced(name))
                 {
                     if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {

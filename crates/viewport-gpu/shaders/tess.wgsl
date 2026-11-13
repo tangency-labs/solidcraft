@@ -195,30 +195,42 @@ fn nurbs(s: Surface, u_in: f32, v_in: f32) -> Derivs {
     var a = vec4<f32>(0.0);
     var au = vec4<f32>(0.0);
     var av = vec4<f32>(0.0);
-    for (var j = 0u; j <= s.pv; j = j + 1u) {
-        for (var i = 0u; i <= s.pu; i = i + 1u) {
+    var j = 0u;
+    while (j <= s.pv) {
+        var i = 0u;
+        while (i <= s.pu) {
             let c = ctrl_at(s.ctrl + 4u * ((sv + j - s.pv) * s.nu + su + i - s.pu));
             a = a + bu0[i] * bv0[j] * c;
+            i = i + 1u;
         }
+        j = j + 1u;
     }
 
     // Differentiate control points before summing. Constant collapsed pole
     // rows then have exactly zero tangent instead of cancelling large terms.
-    for (var j = 0u; j <= s.pv; j = j + 1u) {
-        for (var i = 0u; i < s.pu; i = i + 1u) {
+    j = 0u;
+    while (j <= s.pv) {
+        var i = 0u;
+        while (i < s.pu) {
             let ix = su + i - s.pu;
             let k = (sv + j - s.pv) * s.nu + ix;
             let den = data[s.knots_u + ix + s.pu + 1u] - data[s.knots_u + ix + 1u];
             if (den > 0.0) { au = au + bu1[i] * bv0[j] * (f32(s.pu) / den) * (ctrl_at(s.ctrl + 4u * (k + 1u)) - ctrl_at(s.ctrl + 4u * k)); }
+            i = i + 1u;
         }
+        j = j + 1u;
     }
-    for (var j = 0u; j < s.pv; j = j + 1u) {
-        for (var i = 0u; i <= s.pu; i = i + 1u) {
+    j = 0u;
+    while (j < s.pv) {
+        var i = 0u;
+        while (i <= s.pu) {
             let iy = sv + j - s.pv;
             let k = iy * s.nu + su + i - s.pu;
             let den = data[s.knots_v + iy + s.pv + 1u] - data[s.knots_v + iy + 1u];
             if (den > 0.0) { av = av + bu0[i] * bv1[j] * (f32(s.pv) / den) * (ctrl_at(s.ctrl + 4u * (k + s.nu)) - ctrl_at(s.ctrl + 4u * k)); }
+            i = i + 1u;
         }
+        j = j + 1u;
     }
     r.ok = abs(a.w) > 0.0;
     if (r.ok) {
@@ -339,45 +351,58 @@ fn inside_domain(s: Surface, u: f32, v: f32) -> bool {
 // degree+1 controls of the active span are inspected, at most W per direction.
 fn collapsed_boundary(s: Surface, u: f32, v: f32) -> bool {
     if (s.kind != NURBS) { return false; }
-    for (var d = 0u; d < 2u; d = d + 1u) {
+    var d = 0u;
+    while (d < 2u) {
         let k0 = select(s.knots_u, s.knots_v, d != 0u);
         let p = select(s.pu, s.pv, d != 0u);
         let n = select(s.nu, s.nv, d != 0u);
         let t = select(u, v, d != 0u);
+        let along_v = d != 0u;
+        d = d + 1u;
         var row = 0u;
+        var inward = 1u;
         var clamped = true;
+        var j = 0u;
         if (t == data[k0 + p]) {
-            for (var j = 0u; j <= p; j = j + 1u) {
+            while (j <= p) {
                 clamped = clamped && data[k0 + j] == t;
+                j = j + 1u;
             }
         } else if (t == data[k0 + n]) {
             row = n - 1u;
-            for (var j = 0u; j <= p; j = j + 1u) {
+            inward = row - 1u;
+            while (j <= p) {
                 clamped = clamped && data[k0 + n + j] == t;
+                j = j + 1u;
             }
         } else { continue; }
         if (!clamped) { continue; }
-        let po = select(s.pv, s.pu, d != 0u);
-        let no = select(s.nv, s.nu, d != 0u);
-        let ko = select(s.knots_v, s.knots_u, d != 0u);
-        let to = select(v, u, d != 0u);
+        let po = select(s.pv, s.pu, along_v);
+        let no = select(s.nv, s.nu, along_v);
+        let ko = select(s.knots_v, s.knots_u, along_v);
+        let to = select(v, u, along_v);
         let span = span_of(ko, po, no, to);
         var anchor = vec3<f32>(0.0);
-        var same = true;
-        for (var j = 0u; j <= po; j = j + 1u) {
+        var scale = 0.0;
+        var deviation = 0.0;
+        var valid = true;
+        j = 0u;
+        while (j <= po) {
             let i = span + j - po;
-            let index = select(i * s.nu + row, row * s.nu + i, d != 0u);
+            let index = select(i * s.nu + row, row * s.nu + i, along_v);
+            let next_index = select(i * s.nu + inward, inward * s.nu + i, along_v);
             let h = ctrl_at(s.ctrl + 4u * index);
+            let next = ctrl_at(s.ctrl + 4u * next_index);
+            if (h.w == 0.0 || next.w == 0.0) { valid = false; break; }
             let point = h.xyz / h.w;
             if (j == 0u) { anchor = point; }
-            let a = abs(anchor);
-            let b = abs(point);
-            let scale = max(max(max(a.x, a.y), a.z), max(max(b.x, b.y), b.z));
             let delta = abs(point - anchor);
-            same = same && abs(h.w) > 0.0
-                && max(max(delta.x, delta.y), delta.z) <= 7.62939453125e-6 * scale;
+            let local = abs(next.xyz / next.w - point);
+            deviation = max(deviation, max(max(delta.x, delta.y), delta.z));
+            scale = max(scale, max(max(local.x, local.y), local.z));
+            j = j + 1u;
         }
-        if (same) { return true; }
+        if (valid && deviation <= 7.62939453125e-6 * scale) { return true; }
     }
     return false;
 }
@@ -397,26 +422,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         // pole. Require agreement across bounded increasing interior steps.
         let h = 1e-4 * (1.0 + max(abs(vert.u), abs(vert.v)));
         var found = false;
-        for (var k = 0u; k < 4u; k = k + 1u) {
+        var k = 0u;
+        while (k < 4u) {
             var step = h;
             var previous = vec3<f32>(0.0);
-            for (var attempt = 0u; attempt < 6u; attempt = attempt + 1u) {
+            var attempt = 0u;
+            while (attempt < 6u) {
                 let du = select(step, -step, (k & 1u) != 0u);
                 let dv = select(step, -step, (k & 2u) != 0u);
                 if (!inside_domain(s, vert.u + du, vert.v + dv)) { break; }
                 let e = derivs(s, vert.u + du, vert.v + dv);
                 let m = stable_normal(e.du, e.dv);
                 if (e.ok && dot(m.xyz, m.xyz) > 0.0) {
-                    n = oriented(s, m.xyz);
                     if (m.w > 1e-2 || (dot(previous, previous) > 0.0 && distance(previous, m.xyz) < 1e-3)) {
+                        n = oriented(s, m.xyz);
                         found = true;
                         break;
                     }
                     previous = m.xyz;
                 }
                 step = step * 2.0;
+                attempt = attempt + 1u;
             }
             if (found) { break; }
+            k = k + 1u;
         }
     }
     var nn = vec3<f32>(0.0, 0.0, 1.0);

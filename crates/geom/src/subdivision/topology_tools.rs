@@ -39,6 +39,7 @@ impl Cage {
             }
         }
         let mut seen = BTreeSet::new();
+        let mut region = vec![0; self.faces.len()];
         let mut parts = Vec::new();
         for first in 0..self.faces.len() {
             if seen.contains(&first) {
@@ -51,6 +52,7 @@ impl Cage {
                     continue;
                 }
                 faces.insert(id);
+                *region.get_mut(id).ok_or_else(|| bad("invalid seam face"))? = parts.len();
                 pending.extend(adjacency.get(id).ok_or_else(|| bad("missing seam adjacency"))?.iter().copied().filter(|id| !seen.contains(id)));
             }
             if parts.len() == 2 {
@@ -62,6 +64,13 @@ impl Cage {
         }
         if parts.len() != 2 {
             return Err(bad("the selected seam does not separate the cage"));
+        }
+        for edge in topology.edges.iter().filter(|edge| seam.contains(&key(edge.a, edge.b))) {
+            if let [a, b] = edge.faces.as_slice()
+                && region.get(*a) == region.get(*b)
+            {
+                return Err(bad("each selected seam edge must separate the two face regions"));
+            }
         }
         let second = parts.pop().ok_or_else(|| bad("missing second seam region"))?;
         let first = parts.pop().ok_or_else(|| bad("missing first seam region"))?;

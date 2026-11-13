@@ -106,6 +106,9 @@ impl Rational {
     }
     fn value(degree: usize, knots: &[f64], controls: &[Point], range: [f64; 2]) -> Option<Point> {
         let mid = range[0] * 0.5 + range[1] * 0.5;
+        if range[0] < range[1] && mid == range[1] {
+            return None;
+        }
         let span = solidcraft_geom::bspline::find_span(knots, degree, controls.len(), mid)?;
         let mut row = controls.get(span.checked_sub(degree)?..=span)?.to_vec();
         let t = Interval { lo: range[0], hi: range[1] };

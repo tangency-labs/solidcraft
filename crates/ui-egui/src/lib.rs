@@ -1971,17 +1971,6 @@ impl SolveApp {
             forms_prototype::pick_blend(self, id == "form.blend.import");
             return;
         }
-        if matches!(id, "form.pipe" | "form.surface") {
-            forms_prototype::start_source(self, id == "form.pipe");
-            return;
-        }
-        if id == "form.prototype.create" {
-            if self.session.active_sketch.is_some() {
-                self.finish_sketch();
-            }
-            let _ = self.run(id, json!({}));
-            return;
-        }
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;
@@ -2426,6 +2415,16 @@ impl SolveApp {
         {
             self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
         }
+        if matches!(id, "form.pipe" | "form.surface") {
+            forms_prototype::start_source(self, id == "form.pipe");
+            return;
+        }
+        if id == "form.prototype.create" {
+            if let Err(error) = self.run(id, json!({})) {
+                self.set_status(error, true);
+            }
+            return;
+        }
         if id == "sketch.project"
             && self.preferences.project_options_dialog
             && let Some(mut d) = dialogs::Dialog::for_command(self, id)
@@ -2533,7 +2532,9 @@ impl SolveApp {
 
     /// Does starting `id` open a tool or a dialog?
     fn interactive(&self, id: &str) -> bool {
-        tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some()
+        matches!(id, "form.prototype.create" | "form.pipe" | "form.surface")
+            || tools::Tool::for_command(id).is_some()
+            || dialogs::Dialog::for_command(self, id).is_some()
     }
 
     /// The ribbon has no sketch argument: use one unambiguous sketch pick, otherwise ask.
@@ -2606,7 +2607,8 @@ impl SolveApp {
         let Some(id) = self.pre_edit_component.as_ref().map(|pre| pre.feature) else { return };
         let open = self.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(feature, _)| feature == id))
             || self.pending_feature_edit.as_ref().is_some_and(|pending| pending.feature() == Some(id))
-            || self.session.active_sketch == Some(id);
+            || self.session.active_sketch == Some(id)
+            || forms_prototype::editing_feature(self, id);
         if open {
             return;
         }
@@ -3743,6 +3745,7 @@ impl SolveApp {
             ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Viewport).central().show(ui, |ui| forms_prototype::show(self, ui));
             messages::show(self, ui.ctx());
             prefs::show(self, ui.ctx());
+            shortcut_box::show(self, ui.ctx());
             return;
         }
         if self.home.open {
@@ -4013,5 +4016,7 @@ const SKETCH_ENDING_PANELS: [&str; 3] = ["CREATE", "MODIFY", "ASSEMBLE"];
 const SKETCH_TAB: &str = "SKETCH";
 
 fn ends_sketch(id: &str) -> bool {
-    solidcraft_engine::find_command(id).is_some_and(|c| c.tab != SKETCH_TAB && SKETCH_ENDING_PANELS.contains(&c.panel) && c.id != "sketch.create")
+    matches!(id, "form.prototype.create" | "form.pipe" | "form.surface")
+        || solidcraft_engine::find_command(id)
+            .is_some_and(|c| c.tab != SKETCH_TAB && SKETCH_ENDING_PANELS.contains(&c.panel) && c.id != "sketch.create")
 }

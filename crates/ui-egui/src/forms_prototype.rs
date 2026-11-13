@@ -36,6 +36,8 @@ mod transform_feedback;
 mod transform_job;
 mod translation_snap;
 #[cfg(target_arch = "wasm32")]
+pub use combine_preview::{BrowserPreview, BrowserPreviewHost, BrowserPreviewOutcome};
+#[cfg(target_arch = "wasm32")]
 pub use diagnostics::{BrowserCheckHost, BrowserCheckOutcome};
 pub(crate) use interchange::pick as pick_blend;
 use surface::Element;
@@ -246,9 +248,6 @@ pub(crate) fn enter(app: &mut SolveApp, id: u64) {
     }
 }
 pub(crate) fn start_source(app: &mut SolveApp, pipe: bool) {
-    if app.session.active_sketch.is_some() {
-        app.finish_sketch();
-    }
     if app.session.forms_prototype.is_none() {
         let state = app.session.model.state();
         let available = if pipe {
@@ -266,6 +265,11 @@ pub(crate) fn start_source(app: &mut SolveApp, pipe: bool) {
         opened(app);
     }
     tool_panel::start(app, if pipe { tool_panel::Mode::Pipe } else { tool_panel::Mode::Surface });
+}
+pub(crate) fn editing_feature(app: &SolveApp, id: u64) -> bool {
+    app.session.forms_prototype.as_ref().is_some_and(|form| form.editing_feature == Some(id))
+        || app.forms_prototype.repair_offer.as_ref().is_some_and(|(feature, _)| *feature == id)
+        || app.forms_prototype.repair_entry.as_ref().is_some_and(|entry| entry.feature == id)
 }
 pub(crate) fn opened(app: &mut SolveApp) {
     if app.session.forms_prototype.is_some() {
@@ -333,9 +337,6 @@ pub(crate) fn command_completed(app: &mut SolveApp, id: &str) {
     }
     if matches!(id, "form.prototype.close" | "form.prototype.commit") {
         app.forms_prototype = State::default();
-    }
-    if id == "browser.visibility" {
-        app.forms_prototype.context = Default::default();
     }
     if matches!(id, "form.prototype.parameters" | "form.prototype.undo" | "form.prototype.redo") {
         controls::sync(app);
@@ -1057,19 +1058,26 @@ fn show_gizmo(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, pr
         }
         let feedback_basis = d.basis;
         let feedback_soft = d.weights.iter().any(|&weight| weight > 0.0 && weight < 1.0);
-        let positions: Vec<[f64; 3]> = d
+        let positions: Option<Vec<[f64; 3]>> = d
             .points
             .iter()
             .zip(&d.weights)
             .map(|(&p, &weight)| {
                 let q = match readout {
-                    transform_feedback::Value::Scale(factors) => soft_selection::scale(p, d.anchor, d.basis, factors, weight),
-                    transform_feedback::Value::Move(delta) => soft_selection::translate(p, delta, weight),
-                    transform_feedback::Value::Rotate { axis, angle } => soft_selection::rotate(p, d.anchor, d.basis[axis], angle, weight),
+                    transform_feedback::Value::Scale(factors) => solidcore_ops::form_transform::scale(p, d.anchor, d.basis, factors, weight),
+                    transform_feedback::Value::Move(delta) => solidcore_ops::form_transform::translate(p, delta, weight),
+                    transform_feedback::Value::Rotate { axis, angle } => {
+                        solidcore_ops::form_transform::rotate(p, d.anchor, d.basis[axis], angle, weight)?
+                    }
                 };
-                [q.x, q.y, q.z]
+                Some([q.x, q.y, q.z])
             })
             .collect();
+        let Some(positions) = positions else {
+            let error = app.tr("forms.prototype.invalid_number").to_owned();
+            end_failed_snap_gizmo(app, ui.ctx(), id, error);
+            return true;
+        };
         let changed = app.session.forms_prototype.as_ref().is_some_and(|f| {
             let controls;
             let points = if d.control {
@@ -1221,7 +1229,7 @@ fn pull_with_modifiers(app: &mut SolveApp, pos: Pos2, mods: egui::Modifiers) {
         .iter()
         .zip(&d.weights)
         .map(|(&p, &weight)| {
-            let q = soft_selection::translate(p, delta, weight);
+            let q = solidcore_ops::form_transform::translate(p, delta, weight);
             [q.x, q.y, q.z]
         })
         .collect();
@@ -1442,6 +1450,29 @@ fn fallback(ui: &egui::Ui, proj: &Proj, mesh: &Mesh, color: egui::Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editing_a_component_form_keeps_its_occurrence_active_until_the_editor_closes() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let created = app.run("component.create", json!({"name":"Form Component"})).unwrap();
+        let component = app.session.active_component;
+        let occurrence = created["occurrence"].as_u64().unwrap();
+        assert_ne!(component, 0);
+        app.run("form.prototype.create", json!({"primitive":"face","segments":[1,1,1],"levels":0})).unwrap();
+        let saved = app.run("form.prototype.commit", json!({"name":"Skin","tolerance":0.05})).unwrap();
+        let feature = saved["feature"].as_u64().unwrap();
+        app.run("component.activate", json!({"component":0})).unwrap();
+
+        app.edit_feature_in(feature, Some((component, &[occurrence])));
+        assert!(editing_feature(&app, feature));
+        assert_eq!(app.session.active_component, component);
+        app.return_from_feature_edit();
+        assert_eq!(app.session.active_component, component);
+
+        app.run("form.prototype.close", json!({})).unwrap();
+        app.return_from_feature_edit();
+        assert_eq!(app.session.active_component, 0);
+    }
 
     fn settle_released_extrusion(h: &mut crate::scenario::Harness) {
         extrusion::flush_for_test(&mut h.app, &h.ctx).unwrap();
@@ -2195,19 +2226,6 @@ mod tests {
         assert!(soft_selection::weights(&points, &[vec![0, usize::MAX, 2]], &seeds, &editable, &locked, 3.0, 0).is_err());
     }
     #[test]
-    fn soft_transforms_have_exact_core_and_smooth_boundary() {
-        let p = Vec3::X;
-        let basis = [Vec3::X, Vec3::Y, Vec3::Z];
-        assert_eq!(soft_selection::translate(p, Vec3::Y * 4.0, 0.25), p + Vec3::Y);
-        assert_eq!(soft_selection::scale(p, Vec3::ZERO, basis, [3.0; 3], 0.5), p * 2.0);
-        let q = soft_selection::rotate(p, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2, 0.5);
-        assert!(q.dist(Vec3::new(0.5_f64.sqrt(), 0.5_f64.sqrt(), 0.0)) < 1e-12);
-        assert_eq!(soft_selection::rotate(p, Vec3::ZERO, Vec3::Z, 1.0, 0.0), p);
-        assert_eq!(soft_selection::falloff(0.0, 0), 1.0);
-        assert_eq!(soft_selection::falloff(1.0, 0), 0.0);
-        assert!(soft_selection::falloff(0.25, 0) > soft_selection::falloff(0.75, 0));
-    }
-    #[test]
     fn soft_gesture_preserves_refinement_and_is_one_undo_step() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.session.execute("form.prototype.create", &json!({"primitive":"face","segments":[2,2,1],"levels":1})).unwrap();
@@ -2228,7 +2246,7 @@ mod tests {
                 .iter()
                 .zip(&targets.weights)
                 .map(|(&p, &w)| {
-                    let p = soft_selection::translate(p, Vec3::Z * distance, w);
+                    let p = solidcore_ops::form_transform::translate(p, Vec3::Z * distance, w);
                     [p.x, p.y, p.z]
                 })
                 .collect();
@@ -2268,7 +2286,7 @@ mod tests {
             .iter()
             .zip(&targets.weights)
             .map(|(&p, &w)| {
-                let q = soft_selection::translate(p, Vec3::Z * 0.1, w);
+                let q = solidcore_ops::form_transform::translate(p, Vec3::Z * 0.1, w);
                 [q.x, q.y, q.z]
             })
             .collect();

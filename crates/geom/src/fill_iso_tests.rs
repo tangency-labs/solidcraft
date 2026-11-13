@@ -462,6 +462,16 @@ fn a_zero_unknown_g0_patch_measures_guides_before_accepting_the_initial_surface(
 }
 
 #[test]
+fn a_crowned_fill_cannot_report_a_pre_crown_guide_measurement() {
+    let corners = [Vec3::ZERO, Vec3::X * 10.0, Vec3::new(10.0, 10.0, 0.0), Vec3::Y * 10.0];
+    let edges = (0..4)
+        .map(|i| IsoEdge { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![corners[i], corners[(i + 1) % 4]], weights: None })
+        .collect::<Vec<_>>();
+    let result = iso_fill(&edges, &mut |_, ts| Ok(vec![None; ts.len()]), &IsoSpec { points: &[Vec3::new(5.0, 5.0, 3.0)], crown: 0.05, ..spec() });
+    assert!(matches!(result, Err(SplineError::Invalid(message)) if message.contains("crowned fill")));
+}
+
+#[test]
 fn a_square_g1_cap_leaves_incompatible_corner_conditions_out_and_stays_regular() {
     let corners = [Vec3::new(0.0, 0.0, 2.0), Vec3::new(10.0, 0.0, 2.0), Vec3::new(10.0, 10.0, 2.0), Vec3::new(0.0, 10.0, 2.0)];
     let edges = (0..4)

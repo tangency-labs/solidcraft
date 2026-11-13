@@ -46,7 +46,6 @@ pub mod subdivision;
 /// The plan evaluator, now the kernel's (`solidcore::eval::plan`), and the display plan, now
 /// solidcore-tess's (RFC 0003, item 1.1), under their old path.
 pub mod tess {
-    use crate::prelude::*;
     pub use solidcore::eval::plan::*;
     use solidcore_tess::SurfaceJet as PlanSurfaceJet;
     pub use solidcore_tess::{FacePlan, TessPlan};
@@ -87,21 +86,24 @@ pub mod tess {
             }
         }
 
-        pub fn normal(&self) -> Option<Vec3> {
-            self.du.cross(self.dv).normalized()
-        }
-
-        /// Normal curvature for two tangent directions on this surface.
-        pub fn curvature(&self, a: Vec3, b: Vec3) -> Option<f64> {
-            let jet = PlanSurfaceJet {
+        fn to_kernel(self) -> PlanSurfaceJet {
+            PlanSurfaceJet {
                 point: to_kernel(self.point),
                 du: to_kernel(self.du),
                 dv: to_kernel(self.dv),
                 duu: to_kernel(self.duu),
                 duv: to_kernel(self.duv),
                 dvv: to_kernel(self.dvv),
-            };
-            jet.curvature(to_kernel(a), to_kernel(b))
+            }
+        }
+
+        pub fn normal(&self) -> Option<Vec3> {
+            self.to_kernel().normal().map(from_kernel)
+        }
+
+        /// Normal curvature for two tangent directions on this surface.
+        pub fn curvature(&self, a: Vec3, b: Vec3) -> Option<f64> {
+            self.to_kernel().curvature(to_kernel(a), to_kernel(b))
         }
     }
 

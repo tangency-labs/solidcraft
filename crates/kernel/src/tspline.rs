@@ -99,6 +99,7 @@ pub fn nurbs_region_sheet(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>]) 
     let mut loops = Vec::with_capacity(boundaries.len());
     let mut domain = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
     let mut bounds = solidcraft_geom::Aabb3::EMPTY;
+    let mut oblique_work = 16_000_000;
     for wire in boundaries {
         let mut uses = Vec::with_capacity(wire.len());
         for (&a, &z) in wire.iter().zip(wire.iter().cycle().skip(1)).take(wire.len()) {
@@ -118,7 +119,7 @@ pub fn nurbs_region_sheet(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>]) 
                 let (knots, controls) = surface.iso_curve_segment(dir, a[1 - varying], range).map_err(spline_err)?;
                 if a[varying] < z[varying] { (knots, controls, a, z, true) } else { (knots, controls, z, a, false) }
             } else {
-                let (knots, controls) = surface.parameter_line(a, z).map_err(spline_err)?;
+                let (knots, controls) = surface.parameter_line_bounded(a, z, &mut oblique_work).map_err(spline_err)?;
                 (knots, controls, a, z, true)
             };
             let mut corner = |uv: [f64; 2]| -> Result<u32> {
@@ -484,6 +485,50 @@ mod tests {
         let exact = solidcraft_geom::brep::eval::SurfaceEval::new(body.record().faces[0].parameters()).unwrap();
         let centre = exact.derivs(0.5, 0.5).unwrap().0;
         assert!((centre.z - 5.625e-9).abs() < 1e-20);
+    }
+
+    #[test]
+    fn planar_support_keeps_curvature_when_translated_far_along_the_plane() {
+        let points: Vec<_> = (0..4)
+            .flat_map(|j| {
+                (0..4).map(move |i| {
+                    let z = if (1..3).contains(&i) && (1..3).contains(&j) { 1e-8 } else { 0.0 };
+                    Vec3::new(1e9 + i as f64, j as f64, z)
+                })
+            })
+            .collect();
+        let surface = NurbsSurface::new([3, 3], std::array::from_fn(|_| vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]), &points, &[1.0; 16]).unwrap();
+        let wire = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let body = super::nurbs_region_sheet_with_planar_support(&surface, &[wire]).unwrap();
+        let record = body.record();
+        let face = &record.faces[0];
+        assert!(matches!(face.surface, solidcore_record::brep::Surface::Spline { .. }));
+        let exact = solidcraft_geom::brep::eval::SurfaceEval::new(face.parameters()).unwrap();
+        assert!((exact.derivs(0.5, 0.5).unwrap().0.z - 5.625e-9).abs() < 1e-20);
+        let [solidcore_record::brep::Loop::Edges { edges }] = face.loops.as_slice() else { panic!("expected one trim") };
+        for use_ in edges {
+            let edge = &record.edges[use_.edge as usize];
+            let t = f64::midpoint(edge.interval[0], edge.interval[1]);
+            let p = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).unwrap().point(t).unwrap();
+            let [u, v] = solidcraft_geom::brep::pcurve::eval(&use_.pcurve, t).unwrap();
+            assert!(exact.derivs(u, v).unwrap().0.dist(p) < 2e-7);
+        }
+    }
+
+    #[test]
+    fn oblique_trim_edges_share_the_region_extraction_budget() {
+        let degree = 8;
+        let count = degree + 1;
+        let knots: Vec<_> = std::iter::repeat_n(0.0, count).chain(std::iter::repeat_n(1.0, count)).collect();
+        let points: Vec<_> = (0..count).flat_map(|v| (0..count).map(move |u| Vec3::new(u as f64, v as f64, 0.0))).collect();
+        let surface = NurbsSurface::new([degree; 2], [knots.clone(), knots], &points, &vec![1.0; count * count]).unwrap();
+        let a = [0.1, 0.2];
+        let b = [0.8, 0.3];
+        let c = [0.2, 0.9];
+        assert!(surface.parameter_line(a, b).is_ok());
+        let wire: Vec<_> = [a, b, c].into_iter().cycle().take(1023).collect();
+        let error = super::nurbs_region_sheet(&surface, &[wire.clone(), wire]).unwrap_err();
+        assert!(error.to_string().contains("shared work budget"), "{error}");
     }
 
     #[test]

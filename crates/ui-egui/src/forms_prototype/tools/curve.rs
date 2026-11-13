@@ -20,7 +20,7 @@ fn fail(app: &mut SolveApp, message: String) {
 pub(super) fn point(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj, pos: Pos2, clicked: bool) -> Option<([usize; 2], f64, Vec3)> {
     if clicked {
         if app.forms_prototype.tools.curve.clicks.len() + app.forms_prototype.tools.chain.len() >= 32 {
-            fail(app, app.tr("forms.prototype.insert_point_limit").to_owned());
+            app.set_status(app.tr("forms.prototype.insert_point_limit").to_owned(), true);
             return None;
         }
         if let Some(source) = curves::source(app) {

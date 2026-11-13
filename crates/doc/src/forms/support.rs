@@ -4,7 +4,6 @@ use crate::{DocError, Result, kernel};
 use solidcore_record::{Plane, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{
-    Aabb3,
     subdivision::{
         Cage,
         matching::{self, Config, Domain, Solution, Target, Tolerances},
@@ -55,7 +54,7 @@ impl BoundarySupport {
         let boundaries = kernel::face_boundaries(body, face)?;
         let indices =
             boundaries.get(geometry.outer).ok_or_else(|| invalid("Match support has no outer edge identities"))?.iter().map(|e| e.edge).collect();
-        Self::new(curves, Some(geometry), indices)
+        Self::new(curves, Some(geometry), None, indices)
     }
     pub fn from_adjacent_faces(body: &kernel::Body, face: usize) -> Result<Self> {
         let mut support = Self::from_face(body, face)?;
@@ -119,9 +118,9 @@ impl BoundarySupport {
             ordered.push(curve);
             indices.push(edge_index);
         }
-        Self::new(ordered, None, indices)
+        Self::new(ordered, None, kernel::edge_wire_plane(body, &indices)?, indices)
     }
-    fn new(curves: Vec<kernel::CurveGeometry>, face: Option<kernel::FaceGeometry>, indices: Vec<usize>) -> Result<Self> {
+    fn new(curves: Vec<kernel::CurveGeometry>, face: Option<kernel::FaceGeometry>, plane: Option<Plane>, indices: Vec<usize>) -> Result<Self> {
         if curves.is_empty() || curves.len() > 1024 || curves.len() != indices.len() {
             return Err(invalid("Match boundary curve budget exceeded"));
         }
@@ -156,9 +155,11 @@ impl BoundarySupport {
         }
         let origin = samples.first().map(|p| p.point).ok_or_else(|| invalid("empty support samples"))?;
         let area = samples.windows(2).fold(Vec3::ZERO, |a, p| a + (p[0].point - origin).cross(p[1].point - origin));
-        let bounds: Aabb3 = samples.iter().map(|p| p.point).collect();
-        let plane = Plane::from_normal(origin, area)
-            .filter(|plane| samples.iter().all(|p| (p.point - origin).dot(plane.normal()).abs() < 1e-7 * bounds.size().len().max(1.0)));
+        // Samples orient an already certified plane to the wire winding.
+        let plane = plane.and_then(|plane| {
+            let normal = plane.normal();
+            Plane::from_normal(plane.origin, if area.dot(normal) < 0.0 { -normal } else { normal })
+        });
         let mut corners = Vec::new();
         for (i, (curve, next)) in curves.iter().zip(curves.iter().cycle().skip(1)).enumerate() {
             let (point, a) = curve.at(1.0).ok_or_else(|| invalid("invalid boundary corner"))?;
@@ -215,7 +216,7 @@ impl BoundarySupport {
             })
             .collect();
         let indices = order.iter().map(|&(index, _)| self.indices[index]).collect();
-        let mut out = Self::new(curves, self.face.clone(), indices)?;
+        let mut out = Self::new(curves, self.face.clone(), self.plane, indices)?;
         if !self.adjacent.is_empty() {
             out.adjacent = order
                 .iter()

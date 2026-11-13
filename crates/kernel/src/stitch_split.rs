@@ -1,6 +1,4 @@
 //! Sew conforming patches to a rim whose original edges have fewer vertices.
-use std::collections::HashSet;
-
 use crate::{Body, KernelError, Result};
 
 /// Split existing edges at the operands' vertices before sewing. Faces retain
@@ -14,23 +12,21 @@ pub fn stitch_split(bodies: &[&Body], tolerance: f64) -> Result<Body> {
         body.require_brep("split and stitch")?;
     }
     crate::guard("split and stitch", || {
-        let mut seen = HashSet::new();
         let mut edges = 0usize;
+        let mut vertices = 0usize;
         for body in bodies {
             edges = edges.saturating_add(body.edge_count());
+            vertices = vertices.saturating_add(body.record().vertices.len());
+            if vertices > 16_384 {
+                return Err(KernelError::TooLarge("sewing vertex budget exceeded".into()));
+            }
             for vertex in &body.record().vertices {
-                let p = vertex.point;
-                if p.iter().any(|coordinate| !coordinate.is_finite()) {
+                if vertex.point.iter().any(|coordinate| !coordinate.is_finite()) {
                     return Err(KernelError::Invalid("a sewing vertex is not finite".into()));
-                }
-                let bits = |v: f64| if v == 0.0 { 0 } else { v.to_bits() };
-                seen.insert((bits(p[0]), bits(p[1]), bits(p[2])));
-                if seen.len() > 16_384 {
-                    return Err(KernelError::TooLarge("sewing vertex budget exceeded".into()));
                 }
             }
         }
-        if edges > 100_000 || edges.saturating_mul(seen.len()) > 5_000_000 {
+        if edges > 100_000 || edges.saturating_mul(vertices) > 5_000_000 {
             return Err(KernelError::TooLarge("split sewing work budget exceeded".into()));
         }
         // The current stitch path splits exact record edges at captured

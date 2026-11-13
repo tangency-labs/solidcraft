@@ -1234,6 +1234,9 @@ impl Session {
         preview: bool,
         cache: bool,
     ) -> solidcraft_io::Result<Vec<u8>> {
+        if self.forms_prototype.is_some() {
+            return Err(solidcraft_io::IoError::Invalid("finish or cancel the active Form before saving the design".into()));
+        }
         let design = self.design_at(path);
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();

@@ -14,6 +14,10 @@ struct BoundCurve {
     /// Incident named edges identify the endpoint even after the body moves or resizes.
     start: Vec<String>,
     end: Vec<String>,
+    /// Distinct endpoints with the same incident edge names are disambiguated
+    /// by their named vertices in the support definition frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    endpoint_vertices: Option<[String; 2]>,
     /// A periodic edge has one vertex: retain its own normalized source-curve orientation.
     forward: bool,
     /// Closed endpoints do not identify an intrinsic parameter direction. Certify that
@@ -90,7 +94,7 @@ impl IntrinsicCurve {
     fn follows(&self, current: &Self) -> bool {
         if self.kind != current.kind
             || self.degree != current.degree
-            || self.interval != current.interval
+            || !self.interval.iter().zip(current.interval).all(|(&a, b)| normalized_parameter_follows(a, b))
             || self.points.len() != current.points.len()
             || !normalized_knots_follow(&self.knots, &current.knots)
             || self.weights != current.weights
@@ -118,15 +122,12 @@ impl IntrinsicCurve {
 /// Knot normalization subtracts and divides native size-dependent parameters.
 /// Preserve their order and exact multiplicities while allowing only a bounded
 /// floating-point rounding change. This is independent of the CAD fit tolerance.
+fn normalized_parameter_follows(a: f64, b: f64) -> bool {
+    a.is_finite() && b.is_finite() && (a == b || (a > 0.0 && a < 1.0 && b > 0.0 && b < 1.0 && a.to_bits().abs_diff(b.to_bits()) <= 8))
+}
 fn normalized_knots_follow(saved: &[f64], current: &[f64]) -> bool {
     saved.len() == current.len()
-        && saved.iter().zip(current).all(|(&a, &b)| {
-            a.is_finite()
-                && b.is_finite()
-                && (0.0..=1.0).contains(&a)
-                && (0.0..=1.0).contains(&b)
-                && (a == b || (a > 0.0 && a < 1.0 && b > 0.0 && b < 1.0 && a.to_bits().abs_diff(b.to_bits()) <= 8))
-        })
+        && saved.iter().zip(current).all(|(&a, &b)| (0.0..=1.0).contains(&a) && (0.0..=1.0).contains(&b) && normalized_parameter_follows(a, b))
         && saved.windows(2).zip(current.windows(2)).all(|(a, b)| a[0].total_cmp(&a[1]) == b[0].total_cmp(&b[1]))
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -147,7 +148,12 @@ impl BoundaryBinding {
     pub fn same_attachment(&self, other: &Self) -> bool {
         self.curves.len() == other.curves.len()
             && self.curves.iter().zip(&other.curves).all(|(a, b)| {
-                a.edge.name == b.edge.name && a.start == b.start && a.end == b.end && a.forward == b.forward && a.intrinsic == b.intrinsic
+                a.edge.name == b.edge.name
+                    && a.start == b.start
+                    && a.end == b.end
+                    && a.endpoint_vertices == b.endpoint_vertices
+                    && a.forward == b.forward
+                    && a.intrinsic == b.intrinsic
             })
     }
     pub fn validate(&self) -> Result<()> {
@@ -157,7 +163,7 @@ impl BoundaryBinding {
         let name_bytes = self
             .curves
             .iter()
-            .flat_map(|c| std::iter::once(&c.edge.name).chain(&c.start).chain(&c.end))
+            .flat_map(|c| std::iter::once(&c.edge.name).chain(&c.start).chain(&c.end).chain(c.endpoint_vertices.iter().flatten()))
             .try_fold(0usize, |total, name| total.checked_add(name.len()));
         if name_bytes.is_none_or(|bytes| bytes > 1_048_576) {
             return Err(invalid("support identity text budget exceeded"));
@@ -179,8 +185,14 @@ impl BoundaryBinding {
             return Err(invalid("intrinsic support certificate control budget exceeded"));
         }
         for curve in &self.curves {
-            if (curve.start == curve.end) != curve.intrinsic.is_some() {
-                return Err(invalid("missing periodic support parameterization certificate"));
+            match &curve.endpoint_vertices {
+                Some([a, b])
+                    if curve.start == curve.end
+                        && a != b
+                        && curve.intrinsic.is_none()
+                        && [a, b].iter().all(|name| !name.is_empty() && name.len() <= 4096 && !name.contains('\0')) => {}
+                None if (curve.start == curve.end) == curve.intrinsic.is_some() => {}
+                _ => return Err(invalid("invalid support endpoint certificate")),
             }
             if let Some(intrinsic) = &curve.intrinsic {
                 intrinsic.validate()?;
@@ -201,6 +213,11 @@ impl BoundaryBinding {
             }
             curve.start.sort();
             curve.end.sort();
+            if let Some(vertices) = &mut curve.endpoint_vertices {
+                for name in vertices {
+                    *name = crate::remap_topology(name, features, bodies);
+                }
+            }
         }
     }
     pub(crate) fn capture(body: &ModelBody, support: &BoundarySupport) -> Result<Self> {
@@ -228,6 +245,7 @@ impl BoundaryBinding {
                 }
             }
         }
+        let mut vertex_names = None;
         let mut identity_bytes = 0usize;
         let mut endpoint_key = |vertex: u32| -> Result<Vec<String>> {
             let indices = vertices.get(vertex as usize).ok_or_else(|| invalid("missing support endpoint identity"))?;
@@ -260,7 +278,21 @@ impl BoundaryBinding {
                 let end = edge.vertices[usize::from(forward)];
                 let start_key = endpoint_key(start)?;
                 let end_key = endpoint_key(end)?;
-                let intrinsic = if start_key == end_key { Some(IntrinsicCurve::capture(body, curve, index)?) } else { None };
+                let intrinsic = (start == end).then(|| IntrinsicCurve::capture(body, curve, index)).transpose()?;
+                let endpoint_vertices = if start != end && start_key == end_key {
+                    let names = match &mut vertex_names {
+                        Some(names) => names,
+                        None => {
+                            let inverse =
+                                crate::mat_inverse(&body.source_transform).ok_or_else(|| invalid("support source transform is singular"))?;
+                            let local = crate::ModelState::default().body_in_frame(body, &inverse)?;
+                            vertex_names.insert(crate::naming::vertex_names(&local))
+                        }
+                    };
+                    Some([start, end].map(|id| names.get(id as usize).cloned().unwrap_or_default()))
+                } else {
+                    None
+                };
                 Ok(BoundCurve {
                     edge: NamedEdge {
                         name: names.get(index).cloned().ok_or_else(|| invalid("missing support edge name"))?,
@@ -268,6 +300,7 @@ impl BoundaryBinding {
                     },
                     start: start_key,
                     end: end_key,
+                    endpoint_vertices,
                     forward,
                     intrinsic,
                 })
@@ -277,7 +310,7 @@ impl BoundaryBinding {
         out.validate()?;
         Ok(out)
     }
-    fn apply(&self, current: &Self, support: &BoundarySupport) -> Result<BoundarySupport> {
+    fn apply(&self, current: &Self, support: &BoundarySupport, body: &ModelBody) -> Result<BoundarySupport> {
         self.validate()?;
         current.validate()?;
         if self.curves.len() != current.curves.len() {
@@ -303,12 +336,38 @@ impl BoundaryBinding {
                     }
                 } else {
                     if now.start != saved.start || now.end != saved.end {
-                        return Err(invalid("periodic support endpoint topology changed; reattach the support"));
+                        return Err(invalid("support endpoint topology changed; reattach the support"));
                     }
-                    if !saved.intrinsic.as_ref().zip(now.intrinsic.as_ref()).is_some_and(|(old, new)| old.follows(new)) {
-                        return Err(invalid("periodic support intrinsic parameterization changed; reattach the support"));
+                    if let Some([a, b]) = &saved.endpoint_vertices {
+                        let Some([first, last]) = &now.endpoint_vertices else {
+                            return Err(invalid("open support edge no longer has two distinct vertices; reattach the support"));
+                        };
+                        if a == first && b == last {
+                            false
+                        } else if a == last && b == first {
+                            true
+                        } else {
+                            return Err(invalid("named support endpoint vertices changed; reattach the support"));
+                        }
+                    } else {
+                        // Older two-edge bindings could retain an intrinsic
+                        // certificate for an open edge. Use that certificate
+                        // for legacy replay, even though new records name
+                        // the endpoints directly.
+                        let legacy;
+                        let intrinsic = if now.endpoint_vertices.is_some() {
+                            let curve = support.curves.get(index).ok_or_else(|| invalid("missing current support curve"))?;
+                            let edge = *support.indices.get(index).ok_or_else(|| invalid("missing current support edge"))?;
+                            legacy = IntrinsicCurve::capture(body, curve, edge)?;
+                            Some(&legacy)
+                        } else {
+                            now.intrinsic.as_ref()
+                        };
+                        if !saved.intrinsic.as_ref().zip(intrinsic).is_some_and(|(old, new)| old.follows(new)) {
+                            return Err(invalid("support intrinsic parameterization changed; reattach the support"));
+                        }
+                        saved.forward != now.forward
                     }
-                    saved.forward != now.forward
                 };
                 Ok((index, reverse))
             })
@@ -327,7 +386,7 @@ impl SupportRef {
         let body = state.body(self.body()).ok_or_else(|| invalid("named support body is missing"))?;
         let current = BoundaryBinding::capture(body, &support)?;
         match binding {
-            Some(binding) => Ok((binding.apply(&current, &support)?, binding.clone())),
+            Some(binding) => Ok((binding.apply(&current, &support, body)?, binding.clone())),
             None => Ok((support, current)),
         }
     }

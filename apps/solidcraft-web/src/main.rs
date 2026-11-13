@@ -310,6 +310,17 @@ mod web {
         first_unwritten: Option<f64>,
     }
 
+    type AutosaveRevision = (u64, files::KeptRevision, Option<String>);
+
+    fn autosave_revision(session: &Session) -> AutosaveRevision {
+        (session.uid, (session.revision, solidcraft_engine::recovery::form_revision(session)), session.path.clone())
+    }
+
+    struct PendingAutosave {
+        revision: Option<AutosaveRevision>,
+        done: std::sync::mpsc::Receiver<bool>,
+    }
+
     /// eframe cancels the browser's action for every Tab it gets, so the browser couldn't switch
     /// tabs while the app has the keyboard. Its tab-switching keys stop here, on the way down to
     /// the canvas, before eframe sees them; the browser then acts on them as usual.
@@ -357,9 +368,14 @@ mod web {
         api: Api,
         form_check_worker: Rc<crate::form_check_worker::FormCheckWorker>,
         files: Rc<Files>,
-        /// When the last autosave was (seconds), and the revision it holds (none stored: `None`).
+        /// When the last autosave attempt was made (seconds).
         autosaved_at: f64,
-        autosaved: Option<(u64, Option<solidcraft_engine::recovery::FormRevision>, Option<String>)>,
+        autosaved: Option<AutosaveRevision>,
+        /// The write or deletion in flight, which must succeed before tracking changes.
+        autosave_pending: Option<PendingAutosave>,
+        /// An archive may exist after a partial write, or until an explicit discard completes.
+        autosave_exists: bool,
+        autosave_discard: bool,
         /// A stored design being renamed: (its name, the new name).
         renaming: Option<(String, String)>,
         /// The rename field takes the keyboard when it appears.
@@ -529,41 +545,56 @@ mod web {
                 self.recents_synced = true;
                 self.sync_recents();
             }
-            let now = ctx.input(|i| i.time);
-            // With "keep unsaved work in this browser" on, each design's own copy takes over from
-            // the single autosave (#10220).
-            if self.app.preferences.keep_unsaved_in_browser && self.autosaved.is_some() && files::autosave(&self.files, None) {
-                self.autosaved = None;
-            }
-            // Unsaved work is kept (at most every AUTOSAVE_S); saved work needs no autosave.
-            if self.files.ready.get() && self.files.recovery.borrow().is_none() && !self.app.preferences.keep_unsaved_in_browser {
-                let s = &self.app.session;
-                let form = solidcraft_engine::recovery::form_revision(s);
-                if self.files.autosave_failed.replace(false) {
-                    self.autosaved = None;
-                }
-                let changed = s.is_dirty()
-                    && !self
-                        .autosaved
-                        .as_ref()
-                        .is_some_and(|(revision, saved_form, path)| *revision == s.revision && *saved_form == form && *path == s.path);
-                let wait = AUTOSAVE_S - (now - self.autosaved_at);
-                if changed && wait <= 0.0 {
-                    if files::autosave(&self.files, Some(s)) {
-                        self.autosaved = Some((s.revision, form, s.path.clone()));
-                        self.autosaved_at = now;
-                    }
-                } else if changed {
-                    // Come back for it even when nothing else happens.
-                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
-                } else if !s.is_dirty() && self.autosaved.is_some() && files::autosave(&self.files, None) {
-                    self.autosaved = None;
-                }
-            }
             if !self.files.ready.get() || !self.files.incoming.borrow().is_empty() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
             self.all_kept = self.keep_tick(Some(ctx), false);
+            self.autosave_tick(ctx);
+        }
+
+        fn autosave_tick(&mut self, ctx: &egui::Context) {
+            if !self.files.ready.get() {
+                return;
+            }
+            let now = ctx.input(|i| i.time);
+            if let Some(pending) = &mut self.autosave_pending {
+                let result = match pending.done.try_recv() {
+                    Ok(result) => result,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+                };
+                if result {
+                    self.autosave_exists = pending.revision.is_some();
+                    self.autosaved = pending.revision.take();
+                    self.autosave_discard = false;
+                } else {
+                    self.autosaved = None;
+                }
+                self.autosave_pending = None;
+            }
+            if self.files.recovery.borrow().is_some() {
+                return;
+            }
+            let session = &self.app.session;
+            let per_design = self.app.preferences.keep_unsaved_in_browser;
+            let desired = (!per_design && !self.autosave_discard && session.is_dirty()).then(|| autosave_revision(session));
+            // Wait until the per-design copy is current before giving up the single archive.
+            let remove = self.autosave_discard || (self.autosave_exists && desired.is_none() && (!per_design || self.all_kept));
+            if !remove && (desired.is_none() || self.autosaved == desired) {
+                return;
+            }
+            let wait = AUTOSAVE_S - (now - self.autosaved_at);
+            if wait > 0.0 {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+            } else {
+                let (finished, done) = std::sync::mpsc::channel();
+                files::autosave(&self.files, desired.as_ref().map(|_| session), finished);
+                // If the archive succeeds and its metadata fails, it still needs removal later.
+                self.autosave_exists |= desired.is_some();
+                self.autosave_pending = Some(PendingAutosave { revision: desired, done });
+                self.autosaved_at = now;
+                ctx.request_repaint();
+            }
         }
 
         /// Keep each open design's unsaved changes in the browser, when the preference asks for
@@ -795,7 +826,7 @@ mod web {
                     self.app.session.mark_unsaved();
                     self.app.home.open = false;
                     *self.files.recovery.borrow_mut() = None;
-                    files::autosave(&self.files, None);
+                    self.autosave_exists = true;
                 }
             }
         }
@@ -954,6 +985,10 @@ mod web {
                     Err(e) => self.app.set_status(e.to_string(), true),
                 },
                 "download_open" => {
+                    if self.app.session.forms_prototype.is_some() {
+                        self.app.set_status(self.app.tr("forms.prototype.finish_before_save").to_owned(), true);
+                        return;
+                    }
                     let d = &self.app.session.doc;
                     let result = self
                         .app
@@ -1047,7 +1082,8 @@ mod web {
                             return;
                         }
                         let s = &self.app.session;
-                        self.autosaved = Some((s.revision, solidcraft_engine::recovery::form_revision(s), s.path.clone()));
+                        self.autosaved = Some(autosave_revision(s));
+                        self.autosave_exists = true;
                         self.app.home.open = false;
                     }
                     Err(error) => {
@@ -1055,10 +1091,11 @@ mod web {
                         return;
                     }
                 }
-            } else if !files::autosave(&self.files, None) {
-                return;
+            } else {
+                self.autosave_discard = true;
             }
             *self.files.recovery.borrow_mut() = None;
+            ctx.request_repaint();
         }
 
         /// Whether leaving the page asks through the browser's own box (`keep::asks_before_unload`).
@@ -1442,6 +1479,9 @@ mod web {
                             files,
                             autosaved_at: f64::NEG_INFINITY,
                             autosaved: None,
+                            autosave_pending: None,
+                            autosave_exists: false,
+                            autosave_discard: false,
                             renaming: None,
                             rename_focus: false,
                             recents_synced: false,

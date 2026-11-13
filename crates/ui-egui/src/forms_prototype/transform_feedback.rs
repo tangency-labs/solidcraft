@@ -34,10 +34,9 @@ pub(super) fn gizmo_value(change: crate::gizmo::Change, drag: &Drag, handle: cra
         crate::gizmo::Change::Translate(delta) if drag.scale => {
             let factors = if handle == crate::gizmo::Handle::Ball {
                 let (r, u, _) = camera.basis();
-                let f = (1.0 + delta.dot(r + u) / drag.length).max(0.001);
-                [f; 3]
+                solidcore_ops::form_transform::uniform_factors(delta, drag.length, r, u)
             } else {
-                drag.basis.map(|axis| (1.0 + delta.dot(axis) / drag.length).max(0.001))
+                solidcore_ops::form_transform::scale_factors(delta, drag.length, drag.basis)
             };
             Value::Scale(factors)
         }

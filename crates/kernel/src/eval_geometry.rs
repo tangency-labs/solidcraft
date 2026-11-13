@@ -220,7 +220,7 @@ fn curve_geometry(source: &Curve, interval: [f64; 2], forward: bool) -> Result<C
 }
 pub fn face_geometry(body: &Body, face: usize) -> Result<FaceGeometry> {
     let source = selected(body, face)?;
-    let (surface, _) = solidcore_tess::eval_surface(source.parameters(), source.domain)?;
+    let (surface, _) = solidcore_ops::face_surface::eval_surface(source.parameters(), source.domain).map_err(invalid)?;
     let loops = source
         .loops
         .iter()
@@ -253,7 +253,7 @@ pub fn face_parameter_span(body: &Body, face: usize) -> Result<[[f64; 2]; 2]> {
         })
         .collect::<Result<Vec<_>>>()?;
     let span = solidcraft_geom::brep::form::extent(source.parameters(), &[curves]).ok_or_else(|| invalid("face has no bounded parameter span"))?;
-    let (_, map) = solidcore_tess::eval_surface(source.parameters(), source.domain)?;
+    let (_, map) = solidcore_ops::face_surface::eval_surface(source.parameters(), source.domain).map_err(invalid)?;
     let corners = [
         map.to_eval([span[0][0], span[1][0]]),
         map.to_eval([span[0][0], span[1][1]]),
@@ -265,6 +265,29 @@ pub fn face_parameter_span(body: &Body, face: usize) -> Result<[[f64; 2]; 2]> {
         return Err(invalid("face has no finite nondegenerate parameter span"));
     }
     Ok(out)
+}
+/// A plane certified for the complete curves of these edges. Traced
+/// intersections and other unproved wires return no planar support.
+pub fn edge_wire_plane(body: &Body, edges: &[usize]) -> Result<Option<solidcore_record::Plane>> {
+    body.require_brep("read exact wire support plane")?;
+    if edges.is_empty() || edges.len() > 256 {
+        return Err(KernelError::TooLarge("read 1..256 edges for a wire support plane".into()));
+    }
+    let mut budget = b::Budget::input();
+    let mut curves = Vec::with_capacity(edges.len());
+    for &id in edges {
+        let curve = body.record().edges.get(id).ok_or_else(|| invalid("missing wire support edge"))?.parameters();
+        if matches!(curve, Curve::SurfaceIntersection { .. }) || b::check_curve(curve, &mut budget).is_err() {
+            return Ok(None);
+        }
+        curves.push(curve.clone());
+    }
+    let plane = solidcore_ops::curve_plane::plane_of(&curves).map_err(invalid)?;
+    Ok(plane.and_then(|p| {
+        let [x, y, z] = p.origin;
+        let [a, b, c] = p.normal;
+        solidcore_record::Plane::from_normal(Vec3::new(x, y, z), Vec3::new(a, b, c))
+    }))
 }
 pub fn edge_geometry(body: &Body, edges: &[usize]) -> Result<Vec<CurveGeometry>> {
     body.require_brep("read edge geometry")?;

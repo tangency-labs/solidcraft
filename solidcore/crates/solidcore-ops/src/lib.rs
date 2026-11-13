@@ -47,6 +47,7 @@ pub mod error;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod form_transform;
 pub mod label;
 pub mod measure;
 pub mod network;
@@ -55,6 +56,8 @@ pub mod order;
 pub mod pcurve;
 pub mod prism;
 pub mod provenance;
+#[doc(hidden)]
+pub use solidcore::eval::ray_tensor;
 pub mod record_check;
 pub mod session;
 pub mod split;

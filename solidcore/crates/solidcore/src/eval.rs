@@ -20,6 +20,7 @@ pub mod check;
 pub mod collapse;
 pub mod curve;
 pub mod form;
+pub mod form_transform;
 pub mod geometry;
 pub mod label;
 pub mod normal_section;
@@ -27,9 +28,11 @@ pub mod pcurve;
 #[rustfmt::skip]
 pub mod plan;
 pub mod pole;
+pub mod ray_tensor;
 pub mod sphere;
 pub mod spline;
 pub mod surface;
+pub mod surface_plan;
 pub mod uv;
 pub mod vec;
 

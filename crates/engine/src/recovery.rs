@@ -8,7 +8,7 @@
 //! the next launch offers to recover it.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -202,13 +202,19 @@ pub fn capture_bytes(session: &Session) -> Result<Vec<u8>> {
     encode(&session.design(), draft)
 }
 
+/// Write the accepted Form without history for a preview on an isolated host.
+pub fn write_form_preview_source(session: &Session, target: impl Write) -> Result<()> {
+    let form = session.forms_prototype.as_ref().ok_or_else(|| EngineError::Other("create a Form first".into()))?;
+    serde_json::to_writer(target, &Draft::capture_source(form, false)).map_err(|e| EngineError::Other(e.to_string()))
+}
+
 fn capture_draft(s: &Session) -> Option<Draft> {
     let form = s.forms_prototype.as_ref()?;
     Some(Draft::capture(form, base_is_dirty(s)))
 }
 
 fn base_is_dirty(s: &Session) -> bool {
-    (!Arc::ptr_eq(&s.doc, &s.saved) && *s.doc != *s.saved) || s.visibility != s.saved_visibility
+    s.document_differs() || s.visibility != s.saved_visibility || s.moved_uncaptured()
 }
 
 fn encode(doc: &Document, draft: Option<Draft>) -> Result<Vec<u8>> {
@@ -221,6 +227,11 @@ fn encode(doc: &Document, draft: Option<Draft>) -> Result<Vec<u8>> {
 pub fn restore_bytes(bytes: &[u8], path: Option<&str>) -> Result<Session> {
     let (doc, draft) = solidcraft_io::read_recovery_container(bytes)?;
     restore(doc, draft.as_deref(), path)
+}
+
+/// Rebuild the isolated session for a Form preview with the same kernel validation setting.
+pub fn restore_form_preview(doc: Document, draft: &[u8], validation: crate::kernel::Validation) -> Result<Session> {
+    restore_validating(doc, Some(draft), None, validation)
 }
 
 pub(crate) fn restore(doc: Document, draft: Option<&[u8]>, path: Option<&str>) -> Result<Session> {
@@ -688,6 +699,21 @@ mod tests {
         assert!(!recovered.is_dirty(), "cancelling a new draft restores its clean base");
         remove(&d, &id).unwrap();
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn recovered_form_keeps_dirty_baseline_when_a_placement_was_uncaptured() {
+        let mut session = Session::default();
+        let component = session.execute("component.create", &json!({"name":"Move this component","grounded":false})).unwrap();
+        session.mark_saved();
+        let occurrence = component["occurrence"].as_u64().unwrap();
+        session.execute("occurrence.move", &json!({"occurrence":occurrence,"translate":[4,0,0],"capture":false})).unwrap();
+        assert!(session.moved_uncaptured() && !session.document_differs());
+        session.execute("form.prototype.create", &json!({})).unwrap();
+        assert!(form_revision(&session).unwrap().1);
+        let mut recovered = restore_bytes(&capture_bytes(&session).unwrap(), None).unwrap();
+        recovered.execute("form.prototype.close", &json!({})).unwrap();
+        assert!(recovered.is_dirty());
     }
 
     #[test]

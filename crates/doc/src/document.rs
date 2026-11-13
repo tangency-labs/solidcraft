@@ -2997,6 +2997,7 @@ impl FeatureKind {
         Some(match name {
             "BodyTransferFeature" => "body_transfer",
             "Sketch" => "sketch",
+            "FormFeature" => "form",
             "ExtrudeFeature" => "extrude",
             "RevolveFeature" => "revolve",
             "FilletFeature" => "fillet",

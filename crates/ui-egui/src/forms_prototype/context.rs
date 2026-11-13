@@ -38,6 +38,9 @@ pub(super) fn key(app: &SolveApp) -> u64 {
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     tool_panel::matching(app).hash(&mut hash);
     (Arc::as_ptr(&app.session.doc) as usize).hash(&mut hash);
+    app.session.visibility.hidden_bodies.hash(&mut hash);
+    app.session.visibility.hidden_occurrences.hash(&mut hash);
+    app.session.visibility.hidden_folders.hash(&mut hash);
     app.forms_prototype.other_preview.hash(&mut hash);
     controls::tolerance(app).map(f64::to_bits).hash(&mut hash);
     if let Some(f) = &app.session.forms_prototype {

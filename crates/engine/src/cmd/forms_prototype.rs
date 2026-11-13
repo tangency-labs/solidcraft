@@ -1299,6 +1299,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cancelled_form_command_restores_source_and_edit_history() {
+        use crate::doc::progress::{Progress, watch};
+        use std::sync::Arc;
+        let mut session = Session::default();
+        session.execute("form.prototype.create", &json!({"primitive":"face","segments":[1,1,1],"levels":0})).unwrap();
+        let initial = session.forms_prototype.as_ref().unwrap().definition();
+        session.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[0,0,1]]})).unwrap();
+        let before = session.forms_prototype.as_ref().unwrap().inspect();
+        let progress = Arc::new(Progress::default());
+        progress.cancel();
+        let reply = watch(progress, || session.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[0,0,2]]})));
+        assert!(matches!(reply, Err(EngineError::Cancelled(_))));
+        assert_eq!(session.forms_prototype.as_ref().unwrap().inspect(), before);
+        session.execute("form.prototype.undo", &json!({})).unwrap();
+        assert_eq!(session.forms_prototype.as_ref().unwrap().definition(), initial);
+        session.execute("form.prototype.redo", &json!({})).unwrap();
+        let recovered = session.forms_prototype.as_ref().unwrap().inspect();
+        assert_eq!(recovered["points"], before["points"]);
+        assert_eq!(recovered["undo"], before["undo"]);
+    }
+
+    #[test]
     fn history_availability_tracks_real_edit_undo_redo_and_cancelled_tool_preview() {
         let mut s = Session::default();
         let available = |s: &Session| s.forms_prototype.as_ref().unwrap().history_available();
@@ -1934,6 +1956,9 @@ mod tests {
         let feature = s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
         assert_eq!(s.model.state().body("Support").unwrap().component, 0);
         assert_eq!(s.doc.feature(feature).unwrap().component, component["component"].as_u64().unwrap());
+        let bounds = s.model.state().body("Support").unwrap().body.exact_bounds().unwrap();
+        assert!((bounds.min.x - 78.0).abs() < 1e-6 && (bounds.min.y - 17.0).abs() < 1e-6 && bounds.min.z.abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.max.x - 88.0).abs() < 1e-6 && (bounds.max.y - 27.0).abs() < 1e-6 && bounds.max.z > 2.0, "{bounds:?}");
         if let crate::doc::FeatureKind::Box { height, .. } = &mut s.doc_mut().feature_mut(base).unwrap().kind {
             *height = "3 mm".into();
         } else {
@@ -2574,6 +2599,21 @@ mod tests {
             assert!((crate::kernel::measure(&s.model.state().bodies[0].body).unwrap().volume - 8.0).abs() < 1e-8);
         }
     }
+    #[test]
+    fn a_closed_form_cut_that_misses_its_target_keeps_the_form_separately() {
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"corner":[40,40,40],"length":10,"width":10,"height":10,"body_name":"Stock"})).unwrap();
+        session.execute("form.prototype.create", &json!({"primitive":"box","size":8,"segments":[1,1,1]})).unwrap();
+        let finish = session.execute("form.prototype.commit", &json!({"operation":"cut","targets":["Stock"],"tolerance":0.05})).unwrap();
+        let id = finish["feature"].as_u64().unwrap();
+        let result = session.model.result(id).unwrap();
+        assert!(result.warning.as_ref().is_some_and(|warning| warning.contains("Form kept separately")));
+        let bodies = &result.state.bodies;
+        assert_eq!(bodies.len(), 2);
+        assert!(bodies.iter().any(|b| b.name == "Stock"));
+        assert!(bodies.iter().any(|b| b.feature == id && b.is_closed()));
+    }
+
     #[test]
     fn a_matched_cut_trims_coincident_form_walls_and_conserves_volume() {
         use crate::kernel::history::BodyHistory;
@@ -6514,9 +6554,13 @@ mod tests {
         assert!(s.is_dirty());
         let error = s.execute("file.save_as", &json!({"path":"target/forms-save-must-not-be-written.solidcraft"})).unwrap_err();
         assert!(error.to_string().contains("finish or cancel"));
-        assert!(s.forms_prototype.is_some());
+        let before = s.forms_prototype.as_ref().unwrap().inspect();
+        let error = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap_err();
+        assert!(error.to_string().contains("finish or cancel"));
+        assert_eq!(s.forms_prototype.as_ref().unwrap().inspect(), before);
         s.execute("form.prototype.close", &json!({})).unwrap();
         assert!(!s.is_dirty());
+        assert!(s.design_container(solidcraft_io::DesignCompression::Fast, false, false).is_ok());
     }
     #[test]
     fn mirror_face_pull_handles_the_complete_cubes_limit_null_mode() {

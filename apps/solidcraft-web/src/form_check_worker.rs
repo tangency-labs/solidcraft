@@ -1,11 +1,11 @@
-//! One lazy dedicated Worker for the browser shell's independent Form checks.
+//! One lazy dedicated Worker for the browser shell's Form checks and combined previews.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use solidcraft_engine::forms_prototype::validation::BrowserCheck;
-use solidcraft_ui_egui::forms_prototype::{BrowserCheckHost, BrowserCheckOutcome};
+use solidcraft_ui_egui::forms_prototype::{BrowserCheckHost, BrowserCheckOutcome, BrowserPreview, BrowserPreviewHost, BrowserPreviewOutcome};
 use solidcraft_web::{Kind, frame, frame_bytes, read};
 use wasm_bindgen::{JsCast, closure::Closure};
 use web_sys::{Event, MessageEvent, Worker, WorkerOptions, WorkerType};
@@ -75,7 +75,32 @@ struct Job {
     /// termination even if the editor cancels and drops its receiver.
     request: Option<Vec<u8>>,
     cancelled: Rc<Cell<bool>>,
-    done: Sender<BrowserCheckOutcome>,
+    done: Finished,
+}
+
+enum Finished {
+    Check(Sender<BrowserCheckOutcome>),
+    Preview(Sender<BrowserPreviewOutcome>),
+}
+
+impl Finished {
+    fn response(&self) -> Kind {
+        match self {
+            Self::Check(_) => Kind::Checked,
+            Self::Preview(_) => Kind::Previewed,
+        }
+    }
+
+    fn finish(self, result: Result<&[u8], String>) {
+        match self {
+            Self::Check(done) => {
+                let _ = done.send(result.and_then(BrowserCheck::decode_reply));
+            }
+            Self::Preview(done) => {
+                let _ = done.send(result.and_then(BrowserPreview::decode_reply));
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -96,12 +121,34 @@ impl BrowserCheckHost for FormCheckWorker {
     }
 
     fn submit(&self, request: Vec<u8>, cancelled: Rc<Cell<bool>>, done: Sender<BrowserCheckOutcome>, ctx: &egui::Context) -> Result<(), String> {
+        self.submit_job(Kind::Check, request, cancelled, Finished::Check(done), ctx)
+    }
+}
+
+impl BrowserPreviewHost for FormCheckWorker {
+    fn preview_busy(&self) -> bool {
+        self.busy()
+    }
+
+    fn submit_preview(
+        &self,
+        request: Vec<u8>,
+        cancelled: Rc<Cell<bool>>,
+        done: Sender<BrowserPreviewOutcome>,
+        ctx: &egui::Context,
+    ) -> Result<(), String> {
+        self.submit_job(Kind::Preview, request, cancelled, Finished::Preview(done), ctx)
+    }
+}
+
+impl FormCheckWorker {
+    fn submit_job(&self, kind: Kind, request: Vec<u8>, cancelled: Rc<Cell<bool>>, done: Finished, ctx: &egui::Context) -> Result<(), String> {
         let mut state = self.0.borrow_mut();
         if state.job.is_some() {
-            return Err("another Form CAD check is running".into());
+            return Err("another Form CAD computation is running".into());
         }
         let id = state.last_id.checked_add(1).ok_or("Form CAD worker job ID exhausted")?;
-        let request = frame(Kind::Check, id, &request)?;
+        let request = frame(kind, id, &request)?;
         if state.port.is_none() {
             let clock = now()?;
             state.port = Some(Port::open(ctx)?);
@@ -112,9 +159,7 @@ impl BrowserCheckHost for FormCheckWorker {
         ctx.request_repaint();
         Ok(())
     }
-}
 
-impl FormCheckWorker {
     pub(super) fn poll(&self, ctx: &egui::Context) {
         let mut state = self.0.borrow_mut();
         if state.port.is_none() {
@@ -127,7 +172,7 @@ impl FormCheckWorker {
             if let Some(job) = state.job.take()
                 && !job.cancelled.get()
             {
-                let _ = job.done.send(Err(error));
+                job.done.finish(Err(error));
             }
             ctx.request_repaint();
         }
@@ -146,13 +191,13 @@ impl State {
             let message = message?;
             match read(&message)? {
                 (Kind::Ready, _, _) if !self.ready => self.ready = true,
-                (Kind::Checked, id, payload) if self.ready => {
-                    if !self.job.as_ref().is_some_and(|job| job.id == id && job.request.is_none()) {
+                (kind @ (Kind::Checked | Kind::Previewed), id, payload) if self.ready => {
+                    if !self.job.as_ref().is_some_and(|job| job.id == id && job.request.is_none() && job.done.response() == kind) {
                         return Err("unexpected Form CAD worker job reply".into());
                     }
                     let job = self.job.take().ok_or("Form CAD worker job missing")?;
                     if !job.cancelled.get() {
-                        let _ = job.done.send(BrowserCheck::decode_reply(payload));
+                        job.done.finish(Ok(payload));
                     }
                 }
                 _ => return Err("Form CAD worker rejected its request or protocol".into()),
@@ -168,7 +213,9 @@ impl State {
         if self.ready
             && let Some(request) = self.job.as_mut().and_then(|job| job.request.take())
         {
-            port.worker.post_message(&js_sys::Uint8Array::from(request.as_slice())).map_err(|e| format!("could not send Form CAD check: {e:?}"))?;
+            port.worker
+                .post_message(&js_sys::Uint8Array::from(request.as_slice()))
+                .map_err(|e| format!("could not send Form CAD computation: {e:?}"))?;
             self.deadline = Some(clock + TIMEOUT_MS);
         }
         Ok(())

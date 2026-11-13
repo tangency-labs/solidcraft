@@ -256,6 +256,19 @@ fn snap(v: f64, step: f64, free: bool) -> f64 {
     if free || step <= 0.0 { v } else { (v / step).round() * step }
 }
 
+/// Screen-aligned axes in the plane normal to the gizmo's view ray.
+pub(crate) fn view_plane_basis(proj: &Proj, at: Pos2) -> Option<[Vec3; 2]> {
+    let (right, _, _) = proj.cam.basis();
+    solidcore_ops::form_transform::view_plane_basis(proj.ray(at).1, right)
+}
+
+fn snap_plane(delta: Vec3, basis: [Vec3; 2], step: f64, free: bool) -> Vec3 {
+    if free || step <= 0.0 {
+        return delta;
+    }
+    solidcore_ops::form_transform::SnapFrame::plane(basis).and_then(|frame| frame.quantise(delta, step)).unwrap_or(delta)
+}
+
 /// Discard a suspended pointer gesture without reporting a final model change.
 pub(crate) fn cancel(ctx: &egui::Context, id: egui::Id) {
     ctx.data_mut(|d| d.remove::<State>(id));
@@ -480,7 +493,12 @@ pub(crate) fn show_mode(
         }
         h => {
             let d = on_plane(proj, p, st.center, plane_normal(h)).map(|q| q - st.grab).unwrap_or(Vec3::ZERO);
-            Change::Translate(Vec3::new(snap(d.x, step, free), snap(d.y, step, free), snap(d.z, step, free)))
+            let basis = match h {
+                Handle::Plane(i) => Some([dirs[(i + 1) % 3], dirs[(i + 2) % 3]]),
+                Handle::Ball => view_plane_basis(proj, sh.ball),
+                _ => None,
+            };
+            Change::Translate(basis.map_or(d, |basis| snap_plane(d, basis, step, free)))
         }
     };
     if done {
@@ -595,6 +613,17 @@ pub fn axis_angle(m: &[[f64; 3]; 3]) -> (Vec3, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapped_drag_stays_in_an_oriented_plane() {
+        let normal = Vec3::new(0.6, 0.8, 0.0);
+        let along = Vec3::new(0.8, -0.6, 0.0);
+        let delta = along * 1.4 + Vec3::Z * 0.6;
+        let snapped = snap_plane(delta, [along, Vec3::Z], 1.0, false);
+        assert!(snapped.dot(normal).abs() < 1e-12);
+        assert!(snapped.dist(along + Vec3::Z) < 1e-12);
+        assert_eq!(snap_plane(delta, [along, Vec3::Z], 1.0, true), delta);
+    }
 
     #[test]
     fn plane_squares_stay_within_the_triad() {

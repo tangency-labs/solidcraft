@@ -15,6 +15,23 @@ use solidcore_record::brep::{Brep, Loop, Surface};
 use crate::error::{Error, Result};
 use crate::session::{run, Answer};
 
+/// Exact spline evaluator and parameter map for a native surface record.
+pub fn eval_surface(
+    surface: &Surface,
+    domain: [[f64; 2]; 2],
+) -> Result<(
+    solidcore::eval::plan::EvalSurface,
+    solidcore::eval::surface_plan::Params,
+)> {
+    let surface = solidcore_convert::surface(surface).map_err(|_| Error::Argument)?;
+    solidcore::eval::surface_plan::eval_surface(&surface, domain).map_err(|error| match error {
+        solidcore::eval::EvalError::Unsupported(_) => {
+            Error::Unsupported("the face has no supported exact evaluator")
+        }
+        _ => Error::Argument,
+    })
+}
+
 /// What a face's exact surface is.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Exact {

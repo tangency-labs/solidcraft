@@ -52,37 +52,29 @@ pub(super) fn collapsed_boundary(surface: &super::EvalSurface, u: f64, v: f64) -
             return Some(false);
         }
         let span = super::span_of(knots.get(other)?, p, *count.get(other)?, *uv.get(other)?);
-        let mut anchor = None;
-        for i in span.checked_sub(p)?..=span {
+        let width = *count.first()?;
+        let inward = if row == 0 { 1 } else { row.checked_sub(1)? };
+        let at = |i: usize, row: usize| -> Option<Vec3> {
             let index = if d == 0 {
-                i.checked_mul(count[0])?.checked_add(row)?
+                i.checked_mul(width)?.checked_add(row)?
             } else {
-                row.checked_mul(count[0])?.checked_add(i)?
+                row.checked_mul(width)?.checked_add(i)?
             };
-            let h = ctrl.get(index)?;
-            let point = Vec3::new(*h.first()? / h[3], h[1] / h[3], h[2] / h[3]);
-            if !point.is_finite() {
-                return Some(false);
-            }
-            if let Some(a) = anchor {
-                let a: Vec3 = a;
-                let scale =
-                    a.x.abs()
-                        .max(a.y.abs())
-                        .max(a.z.abs())
-                        .max(point.x.abs())
-                        .max(point.y.abs())
-                        .max(point.z.abs());
-                let tolerance = 64.0 * f64::EPSILON * scale;
-                let delta = point - a;
-                if delta.x.abs().max(delta.y.abs()).max(delta.z.abs()) > tolerance {
-                    return Some(false);
-                }
-            } else {
-                anchor = Some(point);
-            }
+            let &[x, y, z, w] = ctrl.get(index)?;
+            let point = Vec3::new(x / w, y / w, z / w);
+            point.is_finite().then_some(point)
+        };
+        let first = span.checked_sub(p)?;
+        let anchor = at(first, row)?;
+        let mut scale = 0.0_f64;
+        let mut deviation = 0.0_f64;
+        let max_component = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+        for i in first..=span {
+            let point = at(i, row)?;
+            deviation = deviation.max(max_component(point - anchor));
+            scale = scale.max(max_component(at(i, inward)? - point));
         }
-        Some(anchor.is_some())
+        Some(scale.is_finite() && deviation <= 64.0 * f64::EPSILON * scale)
     };
     collapsed(0).unwrap_or(false) || collapsed(1).unwrap_or(false)
 }

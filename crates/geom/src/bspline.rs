@@ -582,6 +582,7 @@ impl NurbsSurface {
         for (d, x) in [u, v].into_iter().enumerate() {
             let (p, n, kn) = (self.degree[d], self.count[d], &self.knots[d]);
             let span = find_span(kn, p, n, x).ok_or_else(|| SplineError::Invalid(format!("({u}, {v}) is outside the domain")))?;
+            let x = x.clamp(dom[d][0], dom[d][1]);
             let side = if x >= dom[d][1] { Side::Left } else { Side::Right };
             spans[d] = span;
             basis[d] = (span - p..=span).map(|i| kn.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, x, side, 0)[0])).collect();
@@ -604,7 +605,9 @@ impl NurbsSurface {
         let knots = &self.knots[across];
         let span =
             find_span(knots, p, self.count[across], fixed).ok_or_else(|| SplineError::Invalid("isocurve parameter is outside the surface".into()))?;
-        let side = if fixed >= self.domain()[across][1] { Side::Left } else { Side::Right };
+        let [low, high] = self.domain()[across];
+        let fixed = fixed.clamp(low, high);
+        let side = if fixed == high { Side::Left } else { Side::Right };
         let basis: Vec<_> = (span - p..=span).map(|i| knots.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, fixed, side, 0)[0])).collect();
         let mut ctrl = Vec::with_capacity(self.count[along]);
         for i in 0..self.count[along] {
@@ -1108,6 +1111,25 @@ pub(crate) mod tests {
             assert!(surface.parameter_line_bounded(a, b, &mut 1).is_err());
         }
         assert!(surface.parameter_line_bounded([0.0, 0.0], [1.0, 1.0], &mut 700).is_err());
+    }
+    #[test]
+    fn parameter_line_keeps_distinct_coordinates_in_a_tiny_knot_domain() {
+        let width = 1e-15;
+        let points = [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::X + Vec3::Y];
+        let surface = NurbsSurface::new([1, 1], [vec![0.0, 0.0, width, width], vec![0.0, 0.0, 1.0, 1.0]], &points, &[1.0; 4]).unwrap();
+        let (a, b) = ([width / 4.0, 0.1], [3.0 * width / 4.0, 0.9]);
+        let (_, ctrl) = surface.parameter_line(a, b).unwrap();
+        assert!(ctrl.first().unwrap().project().unwrap().dist(Vec3::new(0.25, 0.1, 0.0)) < 1e-14);
+        assert!(ctrl.last().unwrap().project().unwrap().dist(Vec3::new(0.75, 0.9, 0.0)) < 1e-14);
+        assert_eq!(surface.eval(width.next_up(), 1.0_f64.next_up()).unwrap(), points[3]);
+    }
+    #[test]
+    fn a_translated_parameter_line_refuses_a_discontinuous_knot() {
+        let points: Vec<_> = [0.0, 1.0].into_iter().flat_map(|y| [0.0, 1.0, 1.125, 2.0].map(|x| Vec3::new(1e9 + x, y, 0.0))).collect();
+        let surface = NurbsSurface::new([1, 1], [vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], &points, &[1.0; 8]).unwrap();
+        assert!(
+            matches!(surface.parameter_line([0.0, 0.0], [1.0, 1.0]), Err(SplineError::Unsupported(message)) if message.contains("discontinuous"))
+        );
     }
     #[test]
     fn restricted_tensor_charts_keep_rational_positions_and_two_derivatives_through_rotations() {

@@ -1,24 +1,36 @@
 //! Analytic second derivatives of the shared rational and revolved evaluators.
 use super::*;
 
+/// A curve's value and its derivatives at one parameter.
 #[derive(Clone, Copy, Debug)]
 pub struct CurveJet {
+    /// The point on the curve.
     pub point: Vec3,
+    /// The first derivative with respect to the curve parameter.
     pub tangent: Vec3,
+    /// The second derivative with respect to the curve parameter.
     pub second: Vec3,
 }
+/// A surface's value and its first and second partial derivatives.
 #[derive(Clone, Copy, Debug)]
 pub struct SurfaceJet {
+    /// The point on the surface.
     pub point: Vec3,
+    /// First partial derivative in U.
     pub du: Vec3,
+    /// First partial derivative in V.
     pub dv: Vec3,
+    /// Second partial derivative in U.
     pub duu: Vec3,
+    /// Mixed second partial derivative in U and V.
     pub duv: Vec3,
+    /// Second partial derivative in V.
     pub dvv: Vec3,
 }
 impl SurfaceJet {
+    /// The unit normal in parameter orientation, if both tangents define a plane.
     pub fn normal(&self) -> Option<Vec3> {
-        self.du.cross(self.dv).normalized()
+        normal::normal(self.du, self.dv)
     }
     /// The second fundamental form on two world-space tangent directions.
     /// Unit orthogonal directions give entries of the full curvature tensor.
@@ -46,27 +58,29 @@ impl SurfaceJet {
 }
 fn basis_jet(knots: &[f64], span: usize, p: usize, t: f64) -> Option<[[f64; W]; 3]> {
     let first = basis_ders(knots, span, p, t)?;
-    let mut out = [first[0], first[1], [0.0; W]];
+    let mut second = [0.0; W];
     if p > 1 {
-        let lower = basis_ders(knots, span, p - 1, t)?;
-        for j in 0..=p {
-            let i = span.checked_sub(p)?.checked_add(j)?;
+        let [_, lower] = basis_ders(knots, span, p - 1, t)?;
+        let start = span.checked_sub(p)?;
+        for (j, value) in second.iter_mut().enumerate().take(p + 1) {
+            let i = start.checked_add(j)?;
             let left = knots.get(i + p)? - knots.get(i)?;
             let right = knots.get(i + p + 1)? - knots.get(i + 1)?;
             let a = if j > 0 && left > 0.0 {
-                lower[1][j - 1] / left
+                lower.get(j - 1)? / left
             } else {
                 0.0
             };
             let b = if j < p && right > 0.0 {
-                lower[1][j] / right
+                lower.get(j)? / right
             } else {
                 0.0
             };
-            out[2][j] = p as f64 * (a - b);
+            *value = p as f64 * (a - b);
         }
     }
-    Some(out)
+    let [value, first] = first;
+    Some([value, first, second])
 }
 fn valid(p: usize, n: usize, k: &[f64]) -> bool {
     (1..=MAX_SPLINE_DEGREE).contains(&p)
@@ -87,11 +101,12 @@ impl EvalCurve {
         let span = span_of(&self.knots, p, n, t);
         let basis = basis_jet(&self.knots, span, p, t)?;
         let mut h = [[0.0; 4]; 3];
-        for j in 0..=p {
-            let c = self.ctrl.get(span + j - p)?;
+        let cpts = self.ctrl.get(span.checked_sub(p)?..=span)?;
+        for (j, c) in cpts.iter().enumerate() {
             for (h, b) in h.iter_mut().zip(&basis) {
+                let weight = b.get(j)?;
                 for (v, c) in h.iter_mut().zip(c) {
-                    *v += c * b[j];
+                    *v += c * weight;
                 }
             }
         }
@@ -187,18 +202,20 @@ fn nurbs_jet(
         basis_jet(&knots[0], su, pu, u)?,
         basis_jet(&knots[1], sv, pv, v)?,
     );
-    let u_basis: [[f64; 3]; W] = std::array::from_fn(|i| [bu[0][i], bu[1][i], bu[2][i]]);
-    let v_basis: [[f64; 3]; W] = std::array::from_fn(|i| [bv[0][i], bv[1][i], bv[2][i]]);
+    let [u0, u1, u2] = bu;
+    let [v0, v1, v2] = bv;
+    let u_basis = u0.into_iter().zip(u1).zip(u2).map(|((a, b), c)| [a, b, c]);
+    let v_basis = v0.into_iter().zip(v1).zip(v2).map(|((a, b), c)| [a, b, c]);
     let mut h = [[0.0; 4]; 6];
-    for (j, v_derivatives) in v_basis.iter().enumerate().take(pv + 1) {
-        for (i, u_derivatives) in u_basis.iter().enumerate().take(pu + 1) {
-            let c = ctrl.get((sv + j - pv) * nu + su + i - pu)?;
-            for (out, (a, b)) in h
-                .iter_mut()
-                .zip([(0, 0), (1, 0), (0, 1), (2, 0), (1, 1), (0, 2)])
-            {
+    let row = sv.checked_sub(pv)?;
+    let col = su.checked_sub(pu)?;
+    for (j, [v, dv, dvv]) in v_basis.enumerate().take(pv + 1) {
+        for (i, [u, du, duu]) in u_basis.clone().enumerate().take(pu + 1) {
+            let c = ctrl.get((row + j) * nu + col + i)?;
+            let weights = [u * v, du * v, u * dv, duu * v, du * dv, u * dvv];
+            for (out, weight) in h.iter_mut().zip(weights) {
                 for (out, c) in out.iter_mut().zip(c) {
-                    *out += u_derivatives[a] * v_derivatives[b] * c;
+                    *out += weight * c;
                 }
             }
         }

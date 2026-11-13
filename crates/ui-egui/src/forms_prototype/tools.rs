@@ -192,11 +192,11 @@ fn cancel(app: &mut SolveApp) {
     app.forms_prototype.tools = State { loop_preview, ..Default::default() };
 }
 pub(super) fn pointer(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj, input: &crate::navigation::CameraInput) {
-    curve::tick(app, ui.ctx());
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         cancel(app);
         return;
     }
+    curve::tick(app, ui.ctx());
     if ui.input(|i| i.key_pressed(egui::Key::M)) {
         app.forms_prototype.tools.axis = 1 - app.forms_prototype.tools.axis;
     }
@@ -571,17 +571,43 @@ mod tests {
         }
     }
     #[test]
+    fn escape_discards_a_deferred_insert_when_curves_become_ready() {
+        let (mut app, descriptors, proj, a, b) = fixture();
+        let original = app.session.forms_prototype.as_ref().unwrap().inspect();
+        let pending = curves::pending_for_test(&mut app);
+        app.forms_prototype.tools.mode = Mode::Points;
+        curve::queue_for_test(&mut app, proj, a);
+        curve::queue_for_test(&mut app, proj, b);
+        assert!(curve::defer_commit(&mut app));
+        pending.send(Ok(descriptors)).unwrap();
+        let ctx = egui::Context::default();
+        let raw =
+            egui::RawInput { screen_rect: Some(proj.rect), events: crate::test_support::key(egui::Key::Escape), focused: true, ..Default::default() };
+        let _ = crate::test_support::frame(&ctx, raw, |ui| {
+            let response = ui.interact(proj.rect, ui.scope_id().with("form_insert_escape"), egui::Sense::click());
+            let input = crate::navigation::handle(&mut app, ui, proj.rect, &response, crate::navigation::NavCaps::MODEL);
+            pointer(&mut app, ui, &proj, &input);
+        });
+        assert!(curve::empty(&app));
+        assert!(!active(&app));
+        assert!(app.forms_prototype.pending.is_none());
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().inspect(), original);
+    }
+    #[test]
     fn insertion_click_limit_covers_ready_and_pending_points() {
-        let (mut app, _, projection, a, _) = fixture();
+        let (mut app, descriptors, projection, a, _) = fixture();
         let point = curves::nearest(&app, &projection, a).unwrap();
         app.forms_prototype.tools.chain = vec![point; 32];
         curve::point(&mut app, &egui::Context::default(), &projection, a, true);
         assert_eq!(app.forms_prototype.tools.chain.len(), 32);
         app.forms_prototype.tools.chain.truncate(31);
-        let _pending = curves::pending_for_test(&mut app);
+        let pending = curves::pending_for_test(&mut app);
         curve::point(&mut app, &egui::Context::default(), &projection, a, true);
         curve::point(&mut app, &egui::Context::default(), &projection, a, true);
         assert_eq!(app.forms_prototype.tools.chain.len(), 31);
         assert!(app.forms_prototype.pending.is_none());
+        pending.send(Ok(descriptors)).unwrap();
+        curve::tick(&mut app, &egui::Context::default());
+        assert_eq!(app.forms_prototype.tools.chain.len(), 32, "the rejected click leaves the accepted pending click in the queue");
     }
 }

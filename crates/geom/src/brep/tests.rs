@@ -894,6 +894,18 @@ mod native_ray {
     }
 
     #[test]
+    fn context_cylinder_only_blocks_rays_that_enter_its_bounds() {
+        let rear = sheets(&[(3.0, square(-4.0, 4.0), None)]);
+        let mut context = sheets(&[(1.0, square(-2.0, 2.0), None)]);
+        context.faces[0].surface =
+            Surface::Cylinder { frame: Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 1.0 };
+        let scene = Scene::prepare(&rear, &[Some(7)], &[&context], &mut 2_000_000).unwrap();
+        let hit = |x| scene.front([x, 0.3, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap();
+        assert!(matches!(hit(2.5), Front::Hit { owner: 7, .. }));
+        assert_eq!(hit(0.5), Front::Unresolved);
+    }
+
+    #[test]
     fn planar_trim_joins_block_only_with_qualified_native_vertex_closure() {
         let rear = sheets(&[(2.0, square(-2.0, 2.0), None)]);
         let exact = sheets(&[(1.0, square(-1.0, 1.0), None)]);

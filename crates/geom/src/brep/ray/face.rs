@@ -449,6 +449,38 @@ fn through_axes(origin: [f64; 3], u_point: [f64; 3], v_point: [f64; 3]) -> [[I; 
     [u_point, v_point].map(|p| std::array::from_fn(|i| I::point(p[i]).sub(I::point(origin[i]))))
 }
 
+/// Prove every closed knot cell has two independent rational tangents.
+pub(crate) fn regular_spline(surface: &crate::bspline::NurbsSurface, work: &mut usize) -> Result<bool> {
+    let [nu, nv] = surface.count();
+    if nu.saturating_mul(nv) > MAX_CONTROLS {
+        return Err(FaceError::GeometryBudget);
+    }
+    let points: Vec<Vec<_>> = (0..nu)
+        .map(|u| {
+            (0..nv)
+                .map(|v| {
+                    let p = surface.point(u, v);
+                    [p.x, p.y, p.z, p.w]
+                })
+                .collect()
+        })
+        .collect();
+    let [u, v] = surface.knots();
+    let sheet = Sheet::tensor([u, v], &points, |p| p, surface.domain(), work)?;
+    let size = sheet.degree.map(|degree| degree + 1);
+    let mut net = ray::allocate(size[0] * size[1])?;
+    for u in &sheet.spans[0] {
+        for v in &sheet.spans[1] {
+            ray::spend(work, net.len())?;
+            sheet.grid.copy_span([u.start, v.start], size, &mut net)?;
+            if !ray::regular_net(size, &net, work)? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 fn plane_controls(origin: [f64; 3], du: [I; 3], dv: [I; 3], domain: Rect, work: &mut usize) -> Result<[Control; 4]> {
     if origin.iter().any(|x| !x.is_finite()) || du.iter().chain(&dv).any(|x| !x.is_finite()) {
         return Err(FaceError::InvalidFace);
@@ -491,8 +523,36 @@ pub(super) fn world_bounds(face: &Face, work: &mut usize) -> Result<[I; 3]> {
         }
         Surface::Spline { u_knots, v_knots, points } => tensor_bounds([u_knots, v_knots], points, |[x, y, z]| [x, y, z, 1.0], domain, work),
         Surface::RationalSpline { u_knots, v_knots, homogeneous } => tensor_bounds([u_knots, v_knots], homogeneous, |p| p, domain, work),
+        Surface::Cylinder { frame, radius } => revolved_bounds(frame, domain[1], I::point(*radius)),
+        Surface::Cone { frame, radius_at_origin, half_angle } => {
+            let tangent = half_angle.tan();
+            let slope = I { lo: tangent.next_down(), hi: tangent.next_up() };
+            let height = I { lo: domain[1][0], hi: domain[1][1] };
+            revolved_bounds(frame, domain[1], I::point(*radius_at_origin).add(height.mul(slope)))
+        }
+        Surface::Sphere { frame, radius } => revolved_bounds(frame, [-radius.abs(), radius.abs()], I::point(radius.abs())),
+        Surface::BallPatch { center, radius } => sphere_bounds(*center, I::point(radius.abs())),
+        Surface::Torus { frame, major_radius, minor_radius, .. } => {
+            let tube = minor_radius.abs();
+            revolved_bounds(frame, [-tube, tube], I::point(major_radius.abs()).add(I::point(tube)))
+        }
         _ => Err(FaceError::UnsupportedSurface),
     }
+}
+
+fn sphere_bounds(center: [f64; 3], radius: I) -> Result<[I; 3]> {
+    let bounds = center.map(|coordinate| I::point(coordinate).add(radius.mul(I { lo: -1.0, hi: 1.0 })));
+    bounds.iter().all(|bound| bound.is_finite()).then_some(bounds).ok_or(FaceError::UnsupportedSurface)
+}
+
+fn revolved_bounds(frame: &solidcore_record::brep::Frame, height: [f64; 2], radius: I) -> Result<[I; 3]> {
+    let x = frame.x_axis.map(I::point);
+    let y = frame.y_axis.map(I::point);
+    let z = [x[1].mul(y[2]).sub(x[2].mul(y[1])), x[2].mul(y[0]).sub(x[0].mul(y[2])), x[0].mul(y[1]).sub(x[1].mul(y[0]))];
+    let height = I { lo: height[0], hi: height[1] };
+    let r = radius.mul(I { lo: -1.0, hi: 1.0 });
+    let bounds = std::array::from_fn(|d| I::point(frame.origin[d]).add(z[d].mul(height)).add(x[d].mul(r)).add(y[d].mul(r)));
+    bounds.iter().all(|bound| bound.is_finite()).then_some(bounds).ok_or(FaceError::UnsupportedSurface)
 }
 
 fn tensor_bounds<T: Copy>(knots: [&[f64]; 2], rows: &[Vec<T>], point: impl Fn(T) -> [f64; 4], domain: Rect, work: &mut usize) -> Result<[I; 3]> {

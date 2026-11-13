@@ -401,9 +401,15 @@ pub(crate) fn planar_tensor_face(n: &NurbsSurface, edges: &[b::Edge], face: &mut
     if controls.iter().any(|h| !h.w.is_finite() || h.w <= 0.0) {
         return Ok(());
     }
-    let scale = controls.iter().filter_map(|h| h.project()).map(|p| p.x.abs().max(p.y.abs()).max(p.z.abs())).fold(1.0, f64::max);
+    let Some(anchor) = controls.first().and_then(|h| h.project()) else { return Ok(()) };
+    let scale = controls.iter().filter_map(|h| h.project()).map(|p| (p - anchor).len()).fold(0.0, f64::max);
+    if !scale.is_finite() {
+        return Ok(());
+    }
     let roundoff = 64.0 * f64::EPSILON * scale;
-    if controls.iter().any(|h| h.project().is_none_or(|p| !p.is_finite() || (p - origin).dot(normal).abs() > roundoff)) {
+    if controls.iter().any(|h| h.project().is_none_or(|p| (p - anchor).dot(normal).abs() > roundoff))
+        || (origin - anchor).dot(normal).abs() > roundoff
+    {
         return Ok(());
     }
     let projected = |p: Vec3| [(p - origin).dot(u), (p - origin).dot(v)];

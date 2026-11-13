@@ -820,10 +820,10 @@ true}` brings back the card over the design that makes everything wait for the f
 
 Timeouts and `control.pending` work as described above. A slow command is still answered when it
 is done, from a later frame. With the preference off, modelling commands run on the window
-thread; the native read-query exceptions above remain asynchronous. Headless hosts with no
-off-thread executor keep direct command execution. This does not add a browser worker:
-browser programmatic calls retain their existing direct execution semantics, and the browser
-Forms UI Check CAD action remains unavailable until a responsive worker backend is implemented.
+thread; the native read-query exceptions above remain asynchronous. Headless hosts and browser
+programmatic calls keep direct command execution. The browser's interactive **Check Form CAD**
+action runs in a dedicated worker for bounded independent Forms. The desktop app supports
+checks that need the surrounding design or exceed the browser worker's limits.
 
 Product images use `render.preflight/start/status/cancel/export` through `engine.execute`.
 Keep the returned session-scoped job ID for subsequent calls; status does not block or

@@ -12,6 +12,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod affine;
 mod assemble;
 mod blend;
 mod blend_corner;
@@ -191,7 +192,9 @@ pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, body_distance};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
-pub use eval_geometry::{BoundaryEdge, CurveGeometry, FaceGeometry, edge_geometry, face_boundaries, face_geometry, face_parameter_span};
+pub use eval_geometry::{
+    BoundaryEdge, CurveGeometry, FaceGeometry, edge_geometry, edge_wire_plane, face_boundaries, face_geometry, face_parameter_span,
+};
 pub use fair::{
     FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,
     fair_faces, fair_net, fair_nurbs_curve, fair_nurbs_surface, fair_surface,

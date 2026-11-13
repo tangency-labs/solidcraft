@@ -984,7 +984,7 @@ pub(super) fn pointer(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj, input: &cr
         None
     };
     if input.primary_pressed
-        && let Some((_, source, face, edge)) = hit
+        && let Some((_, source, face, edge)) = hit.filter(|(_, _, _, edge)| state.mode != Mode::Pipe || edge.is_some())
     {
         if state.mode == Mode::Pipe {
             pipe_panel::picked(&mut state);
@@ -1557,6 +1557,47 @@ mod tests {
         assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), original);
         assert!(app.session.forms_prototype.as_ref().unwrap().pipe_segments.is_empty());
         assert!(!matching(&app));
+    }
+    #[test]
+    fn pipe_panel_requires_reselection_for_missing_saved_sketches_and_edges() {
+        use solidcraft_engine::doc::forms::{NamedEdge, Pipe, PipeSource};
+        use solidcraft_engine::geom::subdivision::pipe_network::PipeSettings;
+
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.run("solid.box", json!({"length":20,"width":20,"height":20,"body_name":"Support"})).unwrap();
+        app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        app.run("sketch.line", json!({"points":[[0,0],[20,0]]})).unwrap();
+        app.finish_sketch();
+        app.run("form.prototype.create", json!({"primitive":"face","segments":[1,1,1],"levels":0})).unwrap();
+
+        let missing_sketch = PipeSource::Sketch { sketch: u64::MAX.into(), curves: vec!["missing".into()] };
+        app.session.forms_prototype.as_mut().unwrap().pipe =
+            Some(Box::new(Pipe { source: missing_sketch, settings: PipeSettings::default(), follow_path: true }));
+        start(&mut app, Mode::Pipe);
+        let source_required = app.tr("forms.prototype.pipe_source_required").to_owned();
+        let state = app.forms_prototype.tool_panel.take().unwrap();
+        assert_eq!(params(&app, &state).unwrap_err(), source_required);
+
+        let model = app.session.model.state();
+        let PipeSource::Edges { body, mut edges } = PipeSource::from_edges(model.body("Support").unwrap(), &[0]).unwrap() else {
+            panic!("expected a CAD edge source");
+        };
+        edges.push(NamedEdge { name: "missing edge".into(), pick: Vec3::new(1000.0, 1000.0, 1000.0) });
+        let missing_edge = PipeSource::Edges { body, edges };
+        app.session.forms_prototype.as_mut().unwrap().pipe =
+            Some(Box::new(Pipe { source: missing_edge.clone(), settings: PipeSettings::default(), follow_path: true }));
+        start(&mut app, Mode::Pipe);
+        let state = app.forms_prototype.tool_panel.take().unwrap();
+        assert_eq!(params(&app, &state).unwrap_err(), source_required);
+
+        app.session.forms_prototype.as_mut().unwrap().pipe =
+            Some(Box::new(Pipe { source: missing_edge, settings: PipeSettings::default(), follow_path: false }));
+        start(&mut app, Mode::Pipe);
+        let mut state = app.forms_prototype.tool_panel.take().unwrap();
+        let values = params(&app, &state).unwrap();
+        assert!(values["pipe"].get("body").is_none(), "a sculpted cage can keep its original association");
+        pipe_panel::set_regenerate_for_test(&mut state);
+        assert_eq!(params(&app, &state).unwrap_err(), source_required);
     }
     #[test]
     fn matching_preview_keeps_context_identity_while_drawing_and_cancels_the_association() {

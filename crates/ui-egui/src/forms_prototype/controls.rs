@@ -399,8 +399,12 @@ pub(super) fn topology(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else {
             app.forms_prototype.selected.iter().copied().collect()
         };
-        let value = if tool == "crease" { &app.forms_prototype.controls.sharpness } else { &app.forms_prototype.controls.distance };
-        if let Some(distance) = number(app, value, if matches!(tool, "crease" | "uncrease") { Kind::Unitless } else { Kind::Length }) {
+        let distance = match tool {
+            "uncrease" => Some(0.0),
+            "crease" => number(app, &app.forms_prototype.controls.sharpness, Kind::Unitless),
+            _ => number(app, &app.forms_prototype.controls.distance, Kind::Length),
+        };
+        if let Some(distance) = distance {
             if matches!(tool, "extrude_faces" | "extrude_edges") {
                 let dirs = match basis(app) {
                     Ok(dirs) => dirs,
@@ -524,16 +528,16 @@ fn transform(app: &mut SolveApp) {
             return;
         }
     };
-    let translation = dirs.iter().zip(t).fold(Vec3::ZERO, |q, (&axis, distance)| q + axis * distance);
-    let mut positions = Vec::with_capacity(targets.points.len());
-    for (&point, &weight) in targets.points.iter().zip(&targets.weights) {
-        let mut q = soft_selection::scale(point, center, dirs, s, weight);
-        for (axis, angle) in dirs.iter().zip(r) {
-            q = soft_selection::rotate(q, center, *axis, angle, weight);
-        }
-        q = soft_selection::translate(q, translation, weight);
-        positions.push([q.x, q.y, q.z]);
-    }
+    let positions: Option<Vec<_>> = targets
+        .points
+        .iter()
+        .zip(&targets.weights)
+        .map(|(&point, &weight)| solidcore_ops::form_transform::numeric(point, center, dirs, t, r, s, weight).map(|p| [p.x, p.y, p.z]))
+        .collect();
+    let Some(positions) = positions else {
+        app.set_status(app.tr("forms.prototype.invalid_number").to_owned(), true);
+        return;
+    };
     run(
         app,
         if targets.control { "form.prototype.set_vertices" } else { "form.prototype.set_surface_vertices" },
@@ -560,6 +564,22 @@ mod tests {
             egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
         ]);
         draw(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    }
+
+    #[test]
+    fn uncrease_does_not_read_the_distance_field() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.run("form.prototype.create", json!({"primitive":"box","segments":[1,1,1],"levels":0})).unwrap();
+        let edge = app.session.forms_prototype.as_ref().unwrap().cage.edges().unwrap()[0];
+        app.run("form.prototype.topology", json!({"tool":"crease","edges":[edge],"distance":2.0})).unwrap();
+        let form = app.session.forms_prototype.as_ref().unwrap();
+        assert!(!form.cage.edge_creases.is_empty());
+        app.forms_prototype.elements.insert(Element::Edge(edge));
+        app.forms_prototype.controls.distance = "2 mm".into();
+
+        click_topology(&mut app, &egui::Context::default(), "uncrease");
+
+        assert!(app.session.forms_prototype.as_ref().unwrap().cage.edge_creases.is_empty());
     }
 
     #[cfg(not(target_arch = "wasm32"))]

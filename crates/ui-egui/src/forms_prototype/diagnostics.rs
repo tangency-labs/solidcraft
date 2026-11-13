@@ -18,7 +18,7 @@ pub type BrowserCheckOutcome = Outcome;
 
 /// The shell owns its dedicated worker across Form/editor/document resets.
 #[cfg(target_arch = "wasm32")]
-pub trait BrowserCheckHost {
+pub trait BrowserCheckHost: super::combine_preview::BrowserPreviewHost {
     fn busy(&self) -> bool;
     fn submit(
         &self,

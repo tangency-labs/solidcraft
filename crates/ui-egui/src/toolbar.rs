@@ -631,6 +631,10 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
 
 /// File > Download design (browser build): the open design as a `.sc` file download.
 pub(crate) fn download_design(app: &mut SolveApp) {
+    if app.session.forms_prototype.is_some() {
+        app.set_status(app.tr("forms.prototype.finish_before_save").to_owned(), true);
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::DOWNLOAD.into());
         return;

@@ -73,13 +73,16 @@ fn start_command(app: &mut SolveApp, import: bool, params: serde_json::Value) {
             };
             let _ = tx.send(result);
         });
-        if spawned.is_ok() {
-            app.forms_prototype.interchange = Some(Pending { done: rx });
-            return;
+        match spawned {
+            Ok(_) => app.forms_prototype.interchange = Some(Pending { done: rx }),
+            Err(error) => app.set_status(error.to_string(), true),
         }
     }
-    let result = app.session.execute(id, &params).map_err(|e| e.to_string());
-    complete(app, id, result);
+    #[cfg(target_arch = "wasm32")]
+    {
+        let result = app.session.execute(id, &params).map_err(|e| e.to_string());
+        complete(app, id, result);
+    }
 }
 fn complete(app: &mut SolveApp, id: &str, result: Result<serde_json::Value, String>) {
     let warning = result

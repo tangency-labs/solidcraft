@@ -123,6 +123,15 @@ pub fn run_api(site: &str) -> Result<(), String> {
     println!("web-api-test: {form_check}");
     let keys = cdp.eval(KEYS_TEST)?;
     println!("web-api-test: {keys}");
+    // A fresh shell lets the preview test observe the Worker it starts.
+    let mut preview_tab = browser.new_tab()?;
+    preview_tab.call("Emulation.setDeviceMetricsOverride", json!({"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}))?;
+    preview_tab.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}?embed=editor", server.port)}))?;
+    wait_for(&mut preview_tab, "!!window.solidcraft && !document.getElementById('solidcraft_loading')", "the preview test page is ready", |value| {
+        value == true
+    })?;
+    let preview = preview_tab.eval(FORM_PREVIEW_TEST)?;
+    println!("web-api-test: {preview}");
     Ok(())
 }
 
@@ -268,6 +277,53 @@ const FORM_CHECK_TEST: &str = r#"(async () => {
     }
 })()"#;
 
+/// Hold the worker's message after it computes the real Boolean. The page must still answer
+/// inspect while the preview waits, then display the result without committing the Form.
+const FORM_PREVIEW_TEST: &str = r#"(async () => {
+    const app = window.solidcraft;
+    const Worker = window.Worker;
+    let withheld;
+    window.Worker = class extends Worker {
+        constructor(...args) {
+            super(...args);
+            this.addEventListener('message', event => {
+                if (!event.isTrusted || !(event.data instanceof Uint8Array) || event.data[4] !== 5) return;
+                event.stopImmediatePropagation();
+                withheld = [this, event.data];
+            }, {capture: true});
+        }
+    };
+    const wait = async (read, done, label) => {
+        const deadline = performance.now() + 60000;
+        do {
+            const value = await read();
+            if (done(value)) return value;
+        } while (performance.now() < deadline);
+        throw new Error(label);
+    };
+    try {
+        await app.request('ui.prefs', {forms_compact_editor:false});
+        await app.execute('file.new');
+        await app.execute('solid.box', {corner:[-0.5,-0.5,-0.5], length:1, width:1, height:1, body_name:'Base'});
+        await app.execute('form.prototype.create', {size:8, segments:[1,1,1], levels:2});
+        await app.execute('form.prototype.finish_options', {operation:'join', tolerance:'0.05 mm'});
+        const original = JSON.stringify(await app.execute('form.prototype.inspect'));
+        // The fresh editor has Show combined result enabled by default.
+        const inspect = async () => (await app.request('ui.inspect')).forms_prototype.combination;
+        await wait(async () => { await inspect(); return withheld; }, Boolean, 'expected a worker reply for the combined preview');
+        const waiting = await inspect();
+        if (!waiting.busy || waiting.ready || waiting.error) throw new Error('combined preview did not wait for its worker');
+        withheld[0].dispatchEvent(new MessageEvent('message', {data:withheld[1]}));
+        const result = await wait(inspect, state => state.ready || state.error, 'combined preview did not settle');
+        if (result.error || !result.ready) throw new Error('combined preview did not display: ' + JSON.stringify(result));
+        if (JSON.stringify(await app.execute('form.prototype.inspect')) !== original) throw new Error('combined preview changed its source');
+        return 'Combined Form CAD preview used a worker and preserved its source';
+    } finally {
+        window.Worker = Worker;
+        await app.execute('file.new');
+    }
+})()"#;
+
 /// The browser's own tab switching keys reach it while the app has the keyboard (#5227): their
 /// default action isn't cancelled, while Tab's is (the app moves between its fields with it).
 const KEYS_TEST: &str = r#"(async () => {
@@ -384,11 +440,11 @@ const API_TEST: &str = r#"(async () => {
     await app.request('ui.menuPick', {item: 'ui.openLinkedDesign'});
     // The menu action queues the design's staged load; its reply does not finish that load.
     const linkedDeadline = performance.now() + 240000;
-    let tabs;
-    do {
-        tabs = await app.request('ui.documents');
-        if (tabs.documents.length === 2 && tabs.active === 1) break;
-    } while (performance.now() < linkedDeadline);
+    while (performance.now() < linkedDeadline) {
+        const pendingTabs = await app.request('ui.documents');
+        if (pendingTabs.documents.length === 2 && pendingTabs.active === 1) break;
+    }
+    const tabs = await app.request('ui.documents');
     check(tabs.documents.length === 2 && tabs.active === 1, 'linked source opens in another tab');
     check((await app.inspect()).bodies[0].name === 'Browser API box', 'source design is active');
     await app.request('ui.documents', {action: 'switch', index: 0});

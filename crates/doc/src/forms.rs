@@ -2020,6 +2020,50 @@ mod tests {
         assert!(support.recover_legacy(&coordinates, &points, 1.0).err().unwrap().to_string().contains("ambiguous"));
     }
     #[test]
+    fn two_open_edges_with_the_same_incidence_follow_distinct_named_vertices() {
+        use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+        let sheet = |radius: f64, sweep: f64| {
+            let a = Vec2::new(radius, 0.0);
+            let b = Vec2::new(radius * sweep.cos(), radius * sweep.sin());
+            let outer = Loop2 { segs: vec![Seg2::Arc { center: Vec2::ZERO, radius, start: 0.0, sweep }, Seg2::Line { a: b, b: a }] };
+            crate::kernel::patch_region(&Plane::XY, &Region2 { outer, holes: Vec::new() }).unwrap()
+        };
+        let state = |body| {
+            let mut state = crate::ModelState::default();
+            state.bodies.push(crate::ModelBody::new("Support".into(), body, 1));
+            state
+        };
+        let original = state(sheet(4.0, std::f64::consts::PI));
+        assert_eq!(original.bodies[0].body.edge_count(), 2);
+        let reference = SupportRef::face(&original.bodies[0], 0).unwrap();
+        let (before, binding) = reference.resolve_bound(&original, false, None).unwrap();
+        let record = serde_json::to_value(&binding).unwrap();
+        for curve in record["curves"].as_array().unwrap() {
+            assert_eq!(curve["start"], curve["end"]);
+            assert!(curve["intrinsic"].is_null());
+            let vertices = curve["endpoint_vertices"].as_array().unwrap();
+            assert_ne!(vertices[0], vertices[1]);
+        }
+        let binding = serde_json::from_value(record).unwrap();
+        let after = state(sheet(4.0, std::f64::consts::FRAC_PI_2 * 1.9));
+        let (after, _) = reference.resolve_bound(&after, false, Some(&binding)).unwrap();
+        let bound = |wire: &support::BoundarySupport, curve| {
+            let a = wire.at_coordinate(&support::BoundaryCoordinate { curve, fraction: 0.0 }).unwrap().0;
+            let b = wire.at_coordinate(&support::BoundaryCoordinate { curve, fraction: 1.0 }).unwrap().0;
+            (a, b)
+        };
+        for i in 0..2 {
+            let (a, b) = bound(&before, i);
+            let (x, y) = bound(&after, i);
+            assert_eq!(a.x.is_sign_positive(), x.x.is_sign_positive());
+            assert_eq!(b.x.is_sign_positive(), y.x.is_sign_positive());
+            assert!((x.len() - 4.0).abs() < 1e-9 && (y.len() - 4.0).abs() < 1e-9);
+        }
+        assert!(after.supports_curvature());
+        assert!(after.target(0.2, &Placement::default(), 2).unwrap().normal.dot(Vec3::Z).abs() > 0.99);
+    }
+
+    #[test]
     fn periodic_support_binding_follows_radius_and_real_source_frame_but_refuses_intrinsic_rewrites() {
         use solidcore_record::Vec3;
         let cylinder = |radius, height| crate::kernel::cylinder(Vec3::ZERO, Vec3::Z, radius, height).unwrap();
@@ -2107,6 +2151,27 @@ mod tests {
             assert!(reference.resolve_bound(&seed, false, Some(&altered)).is_err(), "{label} must retain explicit reattachment refusal");
         }
     }
+    #[test]
+    fn a_nonplanar_closed_wire_refuses_tangent_and_curvature_support() {
+        use solidcore_record::Vec3;
+        let body = crate::kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 2.0, 1.0)).unwrap();
+        let record = body.record();
+        let points = [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 2.0, 0.0], [3.0, 2.0, 1.0], [0.0, 2.0, 1.0], [0.0, 0.0, 1.0]];
+        let vertices: Vec<_> = points.iter().map(|p| record.vertices.iter().position(|v| &v.point == p).unwrap() as u32).collect();
+        let edges: Vec<_> = vertices
+            .iter()
+            .zip(vertices.iter().cycle().skip(1))
+            .take(vertices.len())
+            .map(|(&a, &b)| record.edges.iter().position(|e| e.vertices == [a, b] || e.vertices == [b, a]).unwrap())
+            .collect();
+        let wire = support::BoundarySupport::from_edges(&body, &edges).unwrap();
+        assert!(!wire.supports_curvature());
+        assert!(wire.target(0.2, &Placement::default(), 0).is_ok());
+        for order in [1, 2] {
+            assert!(wire.target(0.2, &Placement::default(), order).is_err());
+        }
+    }
+
     #[test]
     fn exact_face_and_reordered_wire_supports_match_a_placed_form_and_sew_to_cad() {
         use solidcore_record::Vec3;

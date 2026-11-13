@@ -253,10 +253,11 @@ pub fn quad_cap(sides: [&[QuadCapPiece]; 4]) -> SplineResult<NurbsSurface> {
     let (u, [bottom, top]) = cap_rows(bottom, top)?;
     let (v, [left, right]) = cap_rows(left, right)?;
     let patch = coons([u, v], &bottom, &top, &left, &right, false)?;
-    if folds(&patch) {
+    let surface = patch.surface()?;
+    if !crate::brep::ray::regular_spline(&surface, &mut 4_000_000).unwrap_or(false) || folds(&patch) {
         return invalid("quad cap has a folded or singular chart");
     }
-    patch.surface()
+    Ok(surface)
 }
 
 fn cap_join(a: HPoint, b: HPoint, compare_weights: bool) -> bool {
@@ -1651,6 +1652,17 @@ pub fn iso_fill(
         let refine = refinable(&spans, wanted, shared, quilt.unknowns);
         if !wanted.iter().any(|w| *w) || (must && !refine) {
             let quilt = crowned(quilt, &stations, spec.crown, size)?;
+            let report = if spec.crown == 0.0 {
+                report
+            } else {
+                let located: Vec<_> = spec.points.iter().map(|point| nearest(&quilt, *point)).collect();
+                let count = quilt.patches.iter().map(|patch| station_count(&patch.spaces[0])).max().unwrap_or(0);
+                let (report, along) = measure(&quilt, &stations, spec.points, &located, count)?;
+                if report.point_deviation > spec.tol || along.angle.iter().any(|angle| *angle > spec.angle_tol) || quilt.patches.iter().any(folds) {
+                    return invalid("the crowned fill does not meet the guide, tangent or regularity tolerances");
+                }
+                report
+            };
             return finished(quilt, report);
         }
         if !refine {

@@ -5,6 +5,18 @@ use solidcore_record::Vec3;
 use std::collections::{BTreeMap, BTreeSet};
 
 impl Cage {
+    fn copy_creases(&mut self, source: &Self, duplicates: &BTreeMap<usize, usize>) {
+        self.edge_creases.extend(source.edge_creases.iter().filter_map(|crease| {
+            let [a, b] = crease.edge;
+            Some(super::EdgeCrease { edge: [*duplicates.get(&a)?, *duplicates.get(&b)?], sharpness: crease.sharpness })
+        }));
+        self.vertex_creases.extend(
+            source
+                .vertex_creases
+                .iter()
+                .filter_map(|crease| Some(super::VertexCrease { vertex: *duplicates.get(&crease.vertex)?, sharpness: crease.sharpness })),
+        );
+    }
     pub(super) fn selected_faces(&self, selected: &[usize]) -> Result<BTreeSet<usize>> {
         let set: BTreeSet<_> = selected.iter().copied().collect();
         if set.is_empty() || set.len() != selected.len() || set.iter().any(|&i| i >= self.faces.len()) {
@@ -78,6 +90,7 @@ impl Cage {
         for (a, b) in boundary.values().flatten().copied() {
             out.faces.push(vec![a, b, duplicates[&b], duplicates[&a]]);
         }
+        out.copy_creases(self, &duplicates);
         out.finish_edit()
     }
     pub fn extrude_edges(&self, selected: &[[usize; 2]], delta: Vec3) -> Result<Self> {
@@ -113,6 +126,7 @@ impl Cage {
                 .ok_or_else(|| bad("invalid boundary"))?;
             out.faces.push(vec![b, a, duplicates[&a], duplicates[&b]]);
         }
+        out.copy_creases(self, &duplicates);
         out.finish_edit()
     }
     /// Boundary loops follow the source face winding. The first vertex is not repeated.
@@ -231,6 +245,7 @@ impl Cage {
     }
     /// Detach a face region into a separate connected component, keeping its shape.
     pub fn unweld(&self, selected: &[usize]) -> Result<Self> {
+        self.validate()?;
         let selected = self.selected_faces(selected)?;
         let mut out = self.clone();
         let mut duplicates = BTreeMap::new();
@@ -238,14 +253,18 @@ impl Cage {
             let mut face = self.faces[fi].clone();
             for v in &mut face {
                 let old = *v;
-                *v = *duplicates.entry(old).or_insert_with(|| {
-                    let id = out.points.len();
-                    out.points.push(self.points[old]);
-                    id
-                });
+                *v = match duplicates.entry(old) {
+                    std::collections::btree_map::Entry::Occupied(entry) => *entry.get(),
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        let id = out.points.len();
+                        out.points.push(self.point(old)?);
+                        *entry.insert(id)
+                    }
+                };
             }
             out.faces[fi] = face;
         }
+        out.copy_creases(self, &duplicates);
         out.finish_edit()
     }
     pub fn thicken(&self, distance: f64, sharp: bool) -> Result<Self> {

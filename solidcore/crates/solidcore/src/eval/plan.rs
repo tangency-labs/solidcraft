@@ -484,8 +484,8 @@ pub fn nurbs_derivs<C>(
     for (b, nv0) in bv.iter().take(pv + 1).enumerate() {
         for (a, nu0) in bu.iter().take(pu + 1).enumerate() {
             let c = components(ctrl.get((sv + b - pv) * nu + su + a - pu)?);
-            for d in 0..4 {
-                s[d] += nu0 * nv0 * c[d];
+            for (sum, value) in s.iter_mut().zip(c) {
+                *sum += nu0 * nv0 * value;
             }
         }
     }
@@ -499,8 +499,8 @@ pub fn nurbs_derivs<C>(
             if denominator > 0.0 {
                 let (a, b) = (components(ctrl.get(k)?), components(ctrl.get(k + 1)?));
                 let weight = nu0 * nv0 * pu as f64 / denominator;
-                for d in 0..4 {
-                    s_u[d] += weight * (b[d] - a[d]);
+                for (sum, (a, b)) in s_u.iter_mut().zip(a.into_iter().zip(b)) {
+                    *sum += weight * (b - a);
                 }
             }
         }
@@ -513,8 +513,8 @@ pub fn nurbs_derivs<C>(
             if denominator > 0.0 {
                 let (a, b) = (components(ctrl.get(k)?), components(ctrl.get(k + nu)?));
                 let weight = nu0 * nv0 * pv as f64 / denominator;
-                for d in 0..4 {
-                    s_v[d] += weight * (b[d] - a[d]);
+                for (sum, (a, b)) in s_v.iter_mut().zip(a.into_iter().zip(b)) {
+                    *sum += weight * (b - a);
                 }
             }
         }
@@ -732,6 +732,18 @@ mod tests {
             ));
             assert!(close(jet.second, Vec3::ZERO, 1e-12));
         }
+    }
+
+    #[test]
+    fn a_translated_regular_boundary_keeps_its_normal() {
+        let base = 2.0_f64.powi(47);
+        let surface = EvalSurface::nurbs(
+            [1, 1],
+            [vec![0.0, 0.0, 1e-6, 1e-6], vec![0.0, 0.0, 1e-6, 1e-6]],
+            [2, 2],
+            vec![[base, base, base, 1.0], [base, base + 1.0, base, 1.0], [base, base, base + 1.0, 1.0], [base, base + 1.0, base + 1.0, 1.0]],
+        );
+        assert!(surface.eval(0.0, 0.0).1.dist(Vec3::X) < 1e-12);
     }
 
     #[test]

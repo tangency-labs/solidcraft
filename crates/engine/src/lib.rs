@@ -1774,8 +1774,11 @@ impl Session {
         (spec.enabled)(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         // Before anything changes: a refusal leaves the session exactly as it was.
         self.check_command(spec, params)?;
-        if spec.id.starts_with("form.") && !matches!(spec.id, "form.prototype.inspect" | "form.prototype.validate" | "form.blend.export") {
-            self.remember_form_at_checkpoints();
+        let form_before = (spec.id.starts_with("form.")
+            && !matches!(spec.id, "form.prototype.inspect" | "form.prototype.validate" | "form.blend.export"))
+        .then(|| self.forms_prototype.clone());
+        if let Some(form) = &form_before {
+            self.remember_form_at_checkpoints_from(form);
         }
         let before = Snapshot {
             label: spec.label.to_string(),
@@ -1921,6 +1924,11 @@ impl Session {
                 Ok(v)
             }
             Err(e) => {
+                if let Some(form) = form_before {
+                    self.forms_prototype = form;
+                    self.active_component = active_before.0;
+                    self.active_occurrence_path = active_before.1.clone();
+                }
                 if changed || hidden || self.pending_moves != before.pending_moves {
                     self.doc = before.doc;
                     self.active_sketch = before.active_sketch;
@@ -1995,6 +2003,12 @@ impl Session {
             return;
         }
         self.store_form_at_checkpoints(self.forms_prototype.clone());
+    }
+
+    fn remember_form_at_checkpoints_from(&mut self, form: &Option<forms_prototype::Form>) {
+        if self.checkpoints.last().is_some_and(|checkpoint| checkpoint.form.is_none()) {
+            self.store_form_at_checkpoints(form.clone());
+        }
     }
 
     fn store_form_at_checkpoints(&mut self, form: Option<forms_prototype::Form>) {

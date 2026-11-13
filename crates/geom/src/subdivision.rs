@@ -1078,6 +1078,21 @@ mod tests {
         }
     }
     #[test]
+    fn cage_topology_edits_keep_creases_on_their_duplicated_geometry() {
+        let cage = primitive("box", 2.0, 1).unwrap();
+        let [a, b] = [cage.faces[0][0], cage.faces[0][1]];
+        let cage = cage.with_creases(&[[a, b]], &[a], 2.0).unwrap();
+        let delta = Vec3::Z * 5.0;
+        for (edited, offset) in [(cage.extrude_faces(&[0], delta).unwrap(), delta), (cage.unweld(&[0]).unwrap(), Vec3::ZERO)] {
+            assert_eq!(edited.edge_creases.len(), 2);
+            assert_eq!(edited.vertex_creases.len(), 2);
+            assert!(edited.vertex_creases.iter().any(|c| edited.points[c.vertex] == cage.points[a] + offset && c.sharpness == 2.0));
+        }
+        let mut invalid = cage;
+        invalid.faces[0][0] = usize::MAX;
+        assert!(invalid.unweld(&[0]).is_err());
+    }
+    #[test]
     fn cube_stencil_and_closed_topology() {
         let c = primitive("box", 2.0, 1).unwrap();
         assert_eq!((c.points.len(), c.faces.len(), c.edges().unwrap().len()), (8, 6, 12));

@@ -7,6 +7,7 @@
 //! `plan/modules.toml`.
 
 pub mod a_object;
+pub mod affine_fit;
 pub mod assert_array;
 pub mod attribute;
 pub mod axis2_placement;

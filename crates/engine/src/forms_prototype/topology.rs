@@ -35,6 +35,7 @@ impl Form {
     }
     fn adopt_fitted_hierarchy(&mut self, hierarchy: Hierarchy, tolerance: f64) -> Result<()> {
         let mut definition = self.definition();
+        definition.cage = hierarchy.evaluate().map_err(error)?;
         definition.hierarchy = Some(hierarchy);
         // Qualify the exact CAD result before authoring one Undo checkpoint.
         crate::doc::forms::convert(&definition, tolerance)?;

@@ -3,6 +3,9 @@ use super::*;
 use solidcraft_engine::doc::forms::PipeSource;
 use solidcraft_engine::geom::subdivision::pipe_network::PipeSettings;
 
+// An out-of-range selection leaves the kit dropdown blank until the user chooses a source.
+const UNRESOLVED: usize = usize::MAX;
+
 pub(super) struct Inputs {
     source_kind: usize,
     sketches: Vec<(u64, String)>,
@@ -14,6 +17,7 @@ pub(super) struct Inputs {
     branch: usize,
     pub(super) overrides: std::collections::BTreeMap<String, [String; 2]>,
     pub(super) all_edges: bool,
+    missing_edges: bool,
     was_sculpted: bool,
     regenerate: bool,
     source_changed: bool,
@@ -44,7 +48,7 @@ impl Inputs {
             match &pipe.source {
                 PipeSource::Sketch { sketch: id, curves: ids } => {
                     source_kind = 0;
-                    sketch = sketches.iter().position(|(n, _)| *n == id.0).unwrap_or(0);
+                    sketch = sketches.iter().position(|(n, _)| *n == id.0).unwrap_or(UNRESOLVED);
                     curves = ids.clone();
                 }
                 PipeSource::Edges { .. } => source_kind = 1,
@@ -65,6 +69,7 @@ impl Inputs {
                 .map(|(key, v)| (key.clone(), [v.diameter.unwrap_or(0.0).to_string(), v.samples.unwrap_or(0).to_string()]))
                 .collect(),
             all_edges: true,
+            missing_edges: false,
             was_sculpted: pipe.is_some_and(|p| !p.follow_path),
             regenerate: false,
             source_changed: false,
@@ -73,14 +78,19 @@ impl Inputs {
 }
 pub(super) fn select_source(app: &SolveApp, state: &mut State, world: Option<&solidcraft_engine::doc::ModelState>) {
     if let Some(PipeSource::Edges { body, edges }) = app.session.forms_prototype.as_ref().and_then(|f| f.pipe.as_ref()).map(|p| &p.source) {
-        state.support = state.supports.iter().position(|(name, _)| name == body.as_ref()).unwrap_or(0);
-        if let Some(model) = world.and_then(|w| w.body(body)) {
-            state.support_edges =
-                edges.iter().filter_map(|e| solidcraft_engine::doc::naming::locate_edge(model, &e.name, e.pick).ok().map(|hit| hit.edge)).collect();
-        }
+        state.support = state.supports.iter().position(|(name, _)| name == body.as_ref()).unwrap_or(UNRESOLVED);
+        let resolved = world.and_then(|world| world.body(body)).and_then(|model| {
+            edges
+                .iter()
+                .map(|e| solidcraft_engine::doc::naming::locate_edge(model, &e.name, e.pick).ok().map(|hit| hit.edge))
+                .collect::<Option<BTreeSet<_>>>()
+        });
+        let resolved = resolved.filter(|indices| indices.len() == edges.len());
         if let Some(pipe) = &mut state.pipe {
             pipe.all_edges = false;
+            pipe.missing_edges = resolved.is_none();
         }
+        state.support_edges = resolved.unwrap_or_default();
     }
 }
 pub(super) fn has_sources(state: &State) -> bool {
@@ -93,11 +103,16 @@ pub(super) fn picked(state: &mut State) {
     if let Some(p) = &mut state.pipe {
         p.source_changed = true;
         p.all_edges = false;
+        p.missing_edges = false;
         p.overrides.clear();
     }
 }
 pub(super) fn highlight(state: &State, edge: usize) -> bool {
     state.pipe.as_ref().is_some_and(|p| p.all_edges || state.support_edges.contains(&edge))
+}
+#[cfg(test)]
+pub(super) fn set_regenerate_for_test(state: &mut State) {
+    state.pipe.as_mut().unwrap().regenerate = true;
 }
 fn number(app: &SolveApp, text: &str, kind: solidcraft_engine::doc::expr::Kind) -> Result<f64, String> {
     controls::number(app, text, kind).ok_or_else(|| app.tr("forms.prototype.invalid_number").to_owned())
@@ -141,7 +156,7 @@ pub(super) fn params(app: &SolveApp, state: &State) -> Result<serde_json::Value,
             let (body, _) = state.supports.get(state.support).ok_or_else(|| app.tr("forms.prototype.pipe_source_required").to_owned())?;
             given["body"] = json!(body);
             if !p.all_edges {
-                if state.support_edges.is_empty() {
+                if p.missing_edges || state.support_edges.is_empty() {
                     return Err(app.tr("forms.prototype.pipe_source_required").to_owned());
                 }
                 given["edges"] = json!(state.support_edges);
@@ -169,6 +184,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
             p.overrides.clear();
             p.branch = 0;
             p.all_edges = true;
+            p.missing_edges = false;
+            state.support_edges.clear();
             state.picking_support = false;
         }
         if p.source_kind == 0 {
@@ -179,6 +196,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
                 let old = p.sketch;
                 let r = crate::ui_kit::choice_row(ui, app.tr("forms.prototype.pipe_sketch"), "forms_pipe_sketch", &mut p.sketch, &labels);
                 crate::scenario::publish_handle("forms_pipe_sketch", r.rect.center());
+                if p.sketch == UNRESOLVED {
+                    ui.label(app.tr("forms.prototype.pipe_source_required"));
+                }
                 if old != p.sketch {
                     p.curves.clear();
                     p.overrides.clear();
@@ -197,6 +217,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
                 if old != state.support {
                     state.support_edges.clear();
                     p.all_edges = true;
+                    p.missing_edges = false;
                     p.source_changed = true;
                     p.overrides.clear();
                     p.branch = 0;
@@ -205,6 +226,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
                 crate::scenario::publish_handle("forms_pipe_all_edges", r.rect.center());
                 if r.changed() {
                     p.source_changed = true;
+                    if p.all_edges {
+                        p.missing_edges = false;
+                    }
                 }
                 let r = crate::ui_kit::button(
                     ui,
@@ -221,6 +245,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
                 }
                 if !p.all_edges {
                     ui.label(solidcraft_ui_text::format("forms.prototype.pipe_edges_count", &[("count", &state.support_edges.len().to_string())]));
+                }
+                if state.support == UNRESOLVED || p.missing_edges {
+                    ui.label(app.tr("forms.prototype.pipe_source_required"));
                 }
             }
         }

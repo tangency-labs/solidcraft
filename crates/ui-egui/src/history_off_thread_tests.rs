@@ -530,6 +530,22 @@ fn switching_from_a_sketch_to_a_feature_defers_a_new_command_until_restoration()
 }
 
 #[test]
+fn starting_forms_waits_for_the_sketch_to_restore_its_history() {
+    let (mut h, sketches) = sketches_with_later_bodies();
+    h.app.edit_sketch(sketches[0]);
+    until_settled(&mut h);
+    assert_eq!(h.app.session.active_sketch, Some(sketches[0]));
+    assert!(marker(&h).is_some());
+    h.app.start("form.prototype.create");
+    assert!(h.app.session.forms_prototype.is_none(), "the Form waits for the sketch to finish");
+    assert_eq!(h.app.start_after_roll.as_ref().map(|(id, _)| id.as_str()), Some("form.prototype.create"));
+    until_settled(&mut h);
+    assert!(h.app.session.active_sketch.is_none());
+    assert!(h.app.session.forms_prototype.is_some());
+    assert_eq!(marker(&h), None);
+}
+
+#[test]
 fn switching_from_a_sketch_to_a_feature_defers_press_pull_with_its_pick_contract() {
     let (mut h, sketches) = sketches_with_later_bodies();
     let feature = h.app.session.doc.features[3].id;

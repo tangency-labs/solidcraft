@@ -7,8 +7,11 @@
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
 //! numbers and passes them on.
 
+use solidcore::geom::affine_fit;
 use solidcore::geom::certified::Verdict;
 use solidcore::{Transform, Vec3};
+use solidcore_convert::{record_vec3, vec3 as kernel_vec3};
+use solidcore_record::Vec3 as RecordVec3;
 
 use crate::body::REGULAR_RATIO;
 use crate::{Error, Result};
@@ -98,6 +101,95 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
         return Err(Error::Argument);
     }
     taken(map.inverse())
+}
+
+/// The rigid or affine map that takes every source point to its supplied target.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fit {
+    /// A translation or rotation preserves all pair distances.
+    Rigid(Matrix),
+    /// A proper affine map includes a non-rigid stretch.
+    Affine(Matrix),
+}
+
+/// Match ordered points to a proper rigid or affine map, when one fits all the pairs.
+pub fn fit_between(from: &[RecordVec3], to: &[RecordVec3]) -> Option<Fit> {
+    if from.len() != to.len() {
+        return None;
+    }
+    let pairs = from
+        .iter()
+        .zip(to)
+        .map(|(&p, &q)| (kernel_vec3(p), kernel_vec3(q)));
+    Some(match affine_fit::between(pairs)? {
+        affine_fit::Fit::Rigid(map) => Fit::Rigid(map.m),
+        affine_fit::Fit::Affine(map) => Fit::Affine(map.m),
+    })
+}
+
+/// Rotate about the line through `origin`, then translate, with editor axis tolerances.
+pub fn rigid_motion(
+    translation: RecordVec3,
+    origin: RecordVec3,
+    axis: RecordVec3,
+    angle: f64,
+) -> Result<Matrix> {
+    affine_fit::rigid_motion(
+        kernel_vec3(translation),
+        kernel_vec3(origin),
+        kernel_vec3(axis),
+        angle,
+        1e-12,
+    )
+    .map(|map| map.m)
+    .ok_or(Error::Argument)
+}
+
+/// Check the axes of a proper orthonormal frame at a caller's tolerance.
+pub fn proper_axes(axes: [RecordVec3; 3], tolerance: f64) -> bool {
+    affine_fit::proper_axes(axes.map(kernel_vec3), tolerance)
+}
+
+/// Orthonormalise the first two directions of an affine image of a frame.
+pub fn mapped_axes(matrix: &Matrix, axes: [RecordVec3; 3]) -> Option<[RecordVec3; 3]> {
+    affine_fit::mapped_axes(&Transform { m: *matrix }, axes.map(kernel_vec3))
+        .map(|axes| axes.map(record_vec3))
+}
+
+/// Build a frame's matrix from its supplied axes and origin.
+pub fn from_frame(origin: RecordVec3, axes: [RecordVec3; 3]) -> Matrix {
+    affine_fit::from_frame(kernel_vec3(origin), axes.map(kernel_vec3)).m
+}
+
+/// Map a point using a qualified affine matrix.
+pub fn point(matrix: &Matrix, point: RecordVec3) -> RecordVec3 {
+    let map = Transform { m: *matrix };
+    record_vec3(affine_fit::point(&map, kernel_vec3(point)))
+}
+
+/// Map a displacement using a qualified affine matrix.
+pub fn vector(matrix: &Matrix, vector: RecordVec3) -> RecordVec3 {
+    record_vec3(affine_fit::vector(
+        &Transform { m: *matrix },
+        kernel_vec3(vector),
+    ))
+}
+
+/// Resolve a vector's components in a qualified orthonormal frame.
+pub fn frame_vector(axes: [RecordVec3; 3], vector: RecordVec3) -> RecordVec3 {
+    record_vec3(affine_fit::frame_vector(
+        axes.map(kernel_vec3),
+        kernel_vec3(vector),
+    ))
+}
+
+/// Resolve a point relative to a qualified orthonormal frame and its origin.
+pub fn frame_point(origin: RecordVec3, axes: [RecordVec3; 3], point: RecordVec3) -> RecordVec3 {
+    record_vec3(affine_fit::frame_point(
+        kernel_vec3(origin),
+        axes.map(kernel_vec3),
+        kernel_vec3(point),
+    ))
 }
 
 #[cfg(test)]

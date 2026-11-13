@@ -2559,6 +2559,9 @@ fn reads_none_of(f: &Feature, st: &ModelState, moved: &[(u64, Vec<ModelBody>)], 
         }
         FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() => return false,
         FeatureKind::Revolve { to: Some(_), .. } | FeatureKind::Revolve { axis: AxisRef::Model { .. }, .. } => return false,
+        FeatureKind::Form { definition, .. } if definition.profile.is_some() || definition.matching.is_some() || definition.pipe.is_some() => {
+            return false;
+        }
         kind if drawn_tools_change_bodies(kind) => {
             let mut reads = PlacementReads::default();
             reads.drawn_targets(Some(st), f);
@@ -2763,6 +2766,21 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         FeatureKind::Pattern { bodies, .. } if !bodies.is_empty() => {
             for b in bodies {
                 reads.placed_body(st, &b.0);
+            }
+        }
+        FeatureKind::Form { definition, .. } => {
+            if definition.profile.is_none() && drawn_tools_change_bodies(&f.kind) {
+                reads.drawn_targets(st, f);
+            }
+            for support in definition.profile.iter().map(|profile| &profile.source).chain(definition.matching.iter().map(|matching| &matching.source))
+            {
+                reads.placed_body(st, support.body().as_ref());
+            }
+            if let Some(pipe) = definition.pipe.as_ref().filter(|pipe| pipe.follow_path) {
+                match &pipe.source {
+                    crate::forms::PipeSource::Edges { body, .. } => reads.placed_body(st, body.as_ref()),
+                    crate::forms::PipeSource::Sketch { sketch, .. } => reads.sketch(doc, sketch.0),
+                }
             }
         }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
@@ -6909,9 +6927,10 @@ fn evaluate_form_surface(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
     let combined = Traced::step(solid, &[&open, &patch]);
     let combined = tool_in(&combined, tool_frame(&name))?;
     let original = st.body(&name).ok_or_else(|| DocError::Invalid("the Form Surface source disappeared".into()))?;
-    let mut changed = ModelBody::traced_new(name.clone(), combined, original.feature);
-    changed.component = original.component;
+    let mut changed = original.remade(combined);
     changed.transferred = original.transferred;
+    changed.source_name = original.source_name.clone();
+    changed.source_transform = original.source_transform;
     if let Some(slot) = st.bodies.iter_mut().find(|b| b.name == name) {
         *slot = changed;
     }
@@ -9487,9 +9506,10 @@ fn eval_feature(
                     let skin = tool_in(&skin, tool_frame(&source))?;
                     if let Ok(Some(body)) = kernel::replace_matched_face(&base.body, index, &skin.body, *operation == Operation::Cut, tolerance) {
                         let result = Traced::step(body, &[&base.traced(), &skin]);
-                        let mut changed = ModelBody::traced_new(base.name.clone(), result, base.feature);
-                        changed.component = base.component;
+                        let mut changed = base.remade(result);
                         changed.transferred = base.transferred;
+                        changed.source_name = base.source_name.clone();
+                        changed.source_transform = base.source_transform;
                         if let Some(slot) = st.bodies.iter_mut().find(|b| b.name == source) {
                             *slot = changed;
                             return Ok(());
@@ -9501,10 +9521,10 @@ fn eval_feature(
             let result = apply_traced(doc, &mut candidate, f, tools.clone(), *operation, &targets).and_then(|()| {
                 let made: Vec<_> = candidate.bodies.iter().filter(|b| st.body(&b.name).is_none_or(|old| !old.body.same_shape(&b.body))).collect();
                 let removed = st.bodies.iter().any(|b| candidate.body(&b.name).is_none());
-                if (made.is_empty() && removed)
-                    || made.len() > 1
-                    || made.iter().any(|b| b.is_surface() || b.body.lumps().map_or(true, |l| l.len() != 1))
-                {
+                if made.is_empty() && !removed {
+                    return Err(DocError::Invalid("the Form does not change its target".into()));
+                }
+                if made.is_empty() || made.len() > 1 || made.iter().any(|b| b.is_surface() || b.body.lumps().map_or(true, |l| l.len() != 1)) {
                     return Err(DocError::Invalid("combining the Form did not produce one solid".into()));
                 }
                 Ok(())
@@ -10389,28 +10409,29 @@ fn eval_feature(
             };
             let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
             let origin = origin.as_ref().map(|p| point(vals, p)).transpose()?.unwrap_or(Vec3::ZERO);
+            let matrix = kernel::affine::rigid(t, origin, axis, ang)?;
             // With `copy` set, the source body is kept in place and the transform lands on a new
             // body pushed beside it instead of replacing it.
             let mut output = 0;
             for n in bodies {
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 let Some(mb) = st.bodies.get(i).cloned() else { continue };
-                let nb = kernel::transform(&mb.body, t, origin, axis, ang)?;
+                let nb = kernel::transform_matrix(&mb.body, matrix)?;
                 if *copy {
                     let traced = moved_copy(&mb, nb, 1);
                     let name = copy_body_name(st, f, output, &mb.name);
-                    copy_sheet(st, &mb.name, &name, &crate::rigid(t, origin, axis, ang));
+                    copy_sheet(st, &mb.name, &name, &matrix);
                     st.bodies.push(ModelBody::traced_new(name, traced, f.id));
                     output += 1;
                 } else if let Some(slot) = st.bodies.get_mut(i) {
                     let mut moved = mb.remade(Traced::step(nb, &[&mb.traced()]));
                     moved.source_name = mb.source_name.clone();
-                    moved.source_transform = crate::mat_mul(&crate::rigid(t, origin, axis, ang), &mb.source_transform);
+                    moved.source_transform = kernel::affine::then(&mb.source_transform, &matrix)?;
                     *slot = moved;
                 }
             }
             if !*copy {
-                move_constructions_with(doc, st, bodies, &crate::rigid(t, origin, axis, ang));
+                move_constructions_with(doc, st, bodies, &matrix);
             }
             Ok(())
         }
@@ -10746,6 +10767,7 @@ thread_local! {
 /// frame; it moves them itself.)
 fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
     match kind {
+        FeatureKind::Form { definition, operation, .. } => definition.profile.is_some() || *operation != Operation::NewBody,
         FeatureKind::Box { operation, .. }
         | FeatureKind::Cylinder { operation, .. }
         | FeatureKind::Sphere { operation, .. }

@@ -2,7 +2,7 @@
 use crate::{DocError, Mat, Result};
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_geom::prelude::*;
+use solidcraft_kernel::affine;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,8 +20,7 @@ impl Placement {
         *self == Self::default()
     }
     pub fn matrix(&self) -> Mat {
-        let [x, y, z] = self.axes;
-        [[x.x, x.y, x.z, 0.0], [y.x, y.y, y.z, 0.0], [z.x, z.y, z.z, 0.0], [self.origin.x, self.origin.y, self.origin.z, 1.0]]
+        affine::from_frame(self.origin, self.axes)
     }
     pub fn from_matrix(m: &Mat) -> Result<Self> {
         if m.iter().flatten().any(|v| !v.is_finite()) || m[..3].iter().any(|c| c[3].abs() > 1e-10) || (m[3][3] - 1.0).abs() > 1e-10 {
@@ -33,29 +32,24 @@ impl Placement {
         Ok(p)
     }
     pub fn validate(&self) -> Result<()> {
-        let [x, y, z] = self.axes;
         if !self.origin.is_finite()
             || self.origin.x.abs().max(self.origin.y.abs()).max(self.origin.z.abs()) > 100_000.0
-            || self.axes.iter().any(|v| !v.is_finite() || (v.len2() - 1.0).abs() > 1e-8)
-            || x.dot(y).abs() > 1e-8
-            || y.dot(z).abs() > 1e-8
-            || z.dot(x).abs() > 1e-8
-            || x.cross(y).dot(z) < 1.0 - 1e-8
+            || !affine::proper_axes(self.axes, 1e-8)
         {
             return Err(DocError::Invalid("Form placement requires a proper orthonormal frame and bounded origin".into()));
         }
         Ok(())
     }
     pub fn point(&self, p: Vec3) -> Vec3 {
-        self.origin + self.vector(p)
+        affine::point(&self.matrix(), p)
     }
     pub fn vector(&self, v: Vec3) -> Vec3 {
-        self.axes[0] * v.x + self.axes[1] * v.y + self.axes[2] * v.z
+        affine::vector(&self.matrix(), v)
     }
     pub fn local_point(&self, p: Vec3) -> Vec3 {
-        self.local_vector(p - self.origin)
+        affine::frame_point(self.origin, self.axes, p)
     }
     pub fn local_vector(&self, v: Vec3) -> Vec3 {
-        Vec3::new(v.dot(self.axes[0]), v.dot(self.axes[1]), v.dot(self.axes[2]))
+        affine::frame_vector(self.axes, v)
     }
 }

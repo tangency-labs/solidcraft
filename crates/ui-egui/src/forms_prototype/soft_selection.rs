@@ -1,11 +1,9 @@
 //! Proportional transforms use authored logical adjacency and evaluated world points.
 use super::*;
+use solidcore_ops::form_transform::MAX_WEIGHT_POINTS;
 use solidcraft_ui_kit::BackingTooltipExt as _;
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::BTreeMap;
 
-const MAX_POINTS: usize = 65_536;
-const MAX_FACE_USES: usize = 262_144;
 const MAX_TARGETS: usize = 256;
 
 pub(super) struct State {
@@ -59,31 +57,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
 }
 
-#[derive(Clone, Copy, PartialEq)]
-struct Queue {
-    distance: f64,
-    id: usize,
-}
-impl Eq for Queue {}
-impl PartialOrd for Queue {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for Queue {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other.distance.total_cmp(&self.distance).then_with(|| other.id.cmp(&self.id))
-    }
-}
-pub(super) fn falloff(distance: f64, kind: usize) -> f64 {
-    let t = distance.clamp(0.0, 1.0);
-    match kind {
-        1 => 1.0 - t,
-        2 => (1.0 - t).powi(2),
-        _ => 1.0 - t * t * (3.0 - 2.0 * t),
-    }
-}
-/// Distances follow logical edges. Close but disconnected islands never influence each other.
 pub(super) fn weights(
     points: &[Vec3],
     faces: &[Vec<usize>],
@@ -93,57 +66,14 @@ pub(super) fn weights(
     radius: f64,
     kind: usize,
 ) -> Result<BTreeMap<usize, f64>, String> {
-    if !radius.is_finite() || !(0.000001..=100_000.0).contains(&radius) || kind > 2 {
-        return Err(message("forms.soft.invalid_radius"));
-    }
-    if points.len() > MAX_POINTS
-        || faces.len() > MAX_FACE_USES
-        || faces.iter().try_fold(0_usize, |n, f| n.checked_add(f.len())).is_none_or(|n| n > MAX_FACE_USES)
-    {
-        return Err(message("forms.soft.limit"));
-    }
-    if points.iter().any(|p| !p.is_finite()) || seeds.iter().chain(editable).chain(locked).any(|&i| i >= points.len()) {
-        return Err(message("forms.soft.invalid_source"));
-    }
-    let mut graph = vec![Vec::new(); points.len()];
-    for face in faces {
-        for (&a, &b) in face.iter().zip(face.iter().cycle().skip(1)).take(face.len()) {
-            let (Some(pa), Some(pb)) = (points.get(a), points.get(b)) else { return Err(message("forms.soft.invalid_source")) };
-            let length = pa.dist(*pb);
-            if !length.is_finite() {
-                return Err(message("forms.soft.invalid_source"));
-            }
-            graph.get_mut(a).ok_or_else(|| message("forms.soft.invalid_source"))?.push((b, length));
-            graph.get_mut(b).ok_or_else(|| message("forms.soft.invalid_source"))?.push((a, length));
-        }
-    }
-    let mut distances = vec![f64::INFINITY; points.len()];
-    let mut queue = BinaryHeap::new();
-    for &id in seeds.intersection(editable).filter(|id| !locked.contains(*id)) {
-        *distances.get_mut(id).ok_or_else(|| message("forms.soft.invalid_source"))? = 0.0;
-        queue.push(Queue { distance: 0.0, id });
-    }
-    while let Some(Queue { distance, id }) = queue.pop() {
-        if distance > *distances.get(id).ok_or_else(|| message("forms.soft.invalid_source"))? || distance >= radius {
-            continue;
-        }
-        for &(next, length) in graph.get(id).ok_or_else(|| message("forms.soft.invalid_source"))? {
-            let candidate = distance + length;
-            let old = distances.get_mut(next).ok_or_else(|| message("forms.soft.invalid_source"))?;
-            if candidate < radius && candidate < *old {
-                *old = candidate;
-                queue.push(Queue { distance: candidate, id: next });
-            }
-        }
-    }
-    Ok(editable
-        .iter()
-        .filter(|id| !locked.contains(*id))
-        .filter_map(|&id| {
-            let d = *distances.get(id)?;
-            (d < radius).then(|| (id, falloff(d / radius, kind)))
+    use solidcore_ops::form_transform::WeightError;
+    solidcore_ops::form_transform::weights(points, faces, seeds, editable, locked, radius, kind).map_err(|error| {
+        message(match error {
+            WeightError::InvalidRadius => "forms.soft.invalid_radius",
+            WeightError::InvalidSource => "forms.soft.invalid_source",
+            WeightError::Limit => "forms.soft.limit",
         })
-        .collect())
+    })
 }
 fn capture(app: &SolveApp) -> Result<Targets, String> {
     let form = app.session.forms_prototype.as_ref().ok_or_else(|| message("forms.soft.invalid_source"))?;
@@ -222,20 +152,6 @@ pub(super) fn targets(app: &SolveApp, extrusion: bool) -> Result<Targets, String
     let weights = vec![1.0; indices.len()];
     Ok(Targets { indices, points, weights, control, influence: BTreeMap::new() })
 }
-pub(super) fn translate(p: Vec3, delta: Vec3, weight: f64) -> Vec3 {
-    p + delta * weight
-}
-pub(super) fn rotate(p: Vec3, pivot: Vec3, axis: Vec3, angle: f64, weight: f64) -> Vec3 {
-    pivot + crate::gizmo::apply(&crate::gizmo::rotation(axis, angle * weight), p - pivot)
-}
-pub(super) fn scale(p: Vec3, pivot: Vec3, basis: [Vec3; 3], factors: [f64; 3], weight: f64) -> Vec3 {
-    let local = p - pivot;
-    pivot
-        + basis.iter().zip(factors).fold(Vec3::ZERO, |q, (&axis, factor)| {
-            let factor = if weight == 1.0 { factor } else { 1.0 + (factor - 1.0) * weight };
-            q + axis * (local.dot(axis) * factor)
-        })
-}
 pub(super) fn preview_key(app: &SolveApp) -> u64 {
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     app.session.document_id.hash(&mut hash);
@@ -248,7 +164,7 @@ pub(super) fn preview_key(app: &SolveApp) -> u64 {
         // Accepted fixed CAD guide handles can change without an authoring revision.
         // Hash the actual logical inputs and availability, never tessellation topology.
         form.surface.vertices.len().hash(&mut hash);
-        for point in form.surface.vertices.iter().take(MAX_POINTS + 1) {
+        for point in form.surface.vertices.iter().take(MAX_WEIGHT_POINTS + 1) {
             point.x.to_bits().hash(&mut hash);
             point.y.to_bits().hash(&mut hash);
             point.z.to_bits().hash(&mut hash);

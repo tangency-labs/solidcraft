@@ -213,8 +213,10 @@ An unsupported or ambiguous query reports an error and preserves the selection.
 
 For **Add**, **Subtract** and **Intersect**, enable **Show combined result**
 to preview the same CAD operation that Finish will evaluate. The panel reports
-when the preview cannot produce a combined body. A matched opening can join to
-a concave or curved support when the mating plane separates both shapes.
+when the preview cannot produce a combined body. The browser computes this preview
+in a worker for small independent Forms and designs. Use the desktop app for
+larger results or Forms with retained support. A matched opening can join to a
+concave or curved support when the mating plane separates both shapes.
 
 ## Commands and interchange
 

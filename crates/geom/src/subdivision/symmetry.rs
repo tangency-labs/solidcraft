@@ -4,6 +4,8 @@ use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use std::collections::{BTreeMap, BTreeSet};
+
+const PARTNER_TOLERANCE: f64 = 2e-6;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Symmetry {
@@ -20,20 +22,35 @@ impl Symmetry {
         if axis > 2 || !origin.is_finite() {
             return Err(bad("invalid symmetry plane"));
         }
-        let key = |p: Vec3| ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64, (p.z * 1e6).round() as i64);
+        let key = |p: Vec3| [p.x, p.y, p.z].map(|coordinate| (coordinate / PARTNER_TOLERANCE).floor() as i64);
         let mut lookup = BTreeMap::new();
         for (i, &p) in cage.points.iter().enumerate() {
-            if lookup.insert(key(p), i).is_some() {
+            let bucket: &mut Vec<usize> = lookup.entry(key(p)).or_default();
+            if bucket.iter().any(|&id| cage.points.get(id) == Some(&p)) {
                 return Err(bad("symmetry cannot distinguish coincident cage vertices"));
             }
+            if bucket.len() >= 32 {
+                return Err(bad("too many cage vertices in one symmetry tolerance cell"));
+            }
+            bucket.push(i);
         }
         let mut out = Self { axis, origin, partners: Vec::with_capacity(cage.points.len()) };
         for &p in &cage.points {
             let q = out.reflect(p);
-            let i = *lookup.get(&key(q)).ok_or_else(|| bad("the current cage is not symmetric about this origin plane"))?;
-            if cage.point(i)?.dist(q) > 2e-6 {
-                return Err(bad("no matching symmetry partner"));
+            if !q.is_finite() {
+                return Err(bad("invalid reflected control point"));
             }
+            let [x, y, z] = key(q);
+            let neighbors = (-1_i64..=1).flat_map(|dx| {
+                (-1_i64..=1).flat_map(move |dy| (-1_i64..=1).filter_map(move |dz| Some([x.checked_add(dx)?, y.checked_add(dy)?, z.checked_add(dz)?])))
+            });
+            let (i, _) = neighbors
+                .filter_map(|cell| lookup.get(&cell))
+                .flatten()
+                .filter_map(|&i| Some((i, cage.points.get(i)?.dist(q))))
+                .filter(|(_, distance)| *distance <= PARTNER_TOLERANCE)
+                .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+                .ok_or_else(|| bad("no matching symmetry partner"))?;
             out.partners.push(i);
         }
         out.validate(cage)?;
@@ -82,7 +99,7 @@ impl Symmetry {
         self.validate(cage)?;
         let partner = |vertex: usize| self.partners.get(vertex).copied().ok_or_else(|| bad("invalid mirror partner"));
         for (i, &j) in self.partners.iter().enumerate() {
-            if self.reflect(cage.point(i)?).dist(cage.point(j)?) > 2e-6 {
+            if self.reflect(cage.point(i)?).dist(cage.point(j)?) > PARTNER_TOLERANCE {
                 return Err(bad("control positions must be mirrored"));
             }
         }

@@ -81,8 +81,6 @@ pub struct Files {
     pub panel: Cell<bool>,
     /// An autosave left by an earlier session: its design's name and file.
     pub recovery: RefCell<Option<(String, Option<String>)>>,
-    autosave_busy: Cell<bool>,
-    pub autosave_failed: Cell<bool>,
     /// The app's context, to wake it when a browser call finishes.
     pub ctx: RefCell<Option<egui::Context>>,
     /// This page's id: the copies it keeps are named after it (`keep::entry_id`).
@@ -238,7 +236,11 @@ async fn remove_file(name: &str) -> Result<(), String> {
         return st.remove_item(&crate::channel::key(&format!("{LOCAL_PREFIX}{name}"))).map_err(err);
     }
     let dir = root().await?;
-    JsFuture::from(dir.remove_entry(name)).await.map_err(err)?;
+    if let Err(error) = JsFuture::from(dir.remove_entry(name)).await
+        && Reflect::get(&error, &"name".into()).ok().and_then(|name| name.as_string()).as_deref() != Some("NotFoundError")
+    {
+        return Err(err(error));
+    }
     Ok(())
 }
 
@@ -445,11 +447,8 @@ pub fn rename(files: &Rc<Files>, from: &str, to: &str) -> Result<(), String> {
 }
 
 /// Keep (or drop) the autosave of the open design. A previous asynchronous
-/// replacement must finish before any later write or deletion starts.
-pub fn autosave(files: &Rc<Files>, session: Option<&solidcraft_engine::Session>) -> bool {
-    if files.autosave_busy.get() {
-        return false;
-    }
+/// replacement must finish before the shell requests a later write or deletion.
+pub fn autosave(files: &Rc<Files>, session: Option<&solidcraft_engine::Session>, finished: std::sync::mpsc::Sender<bool>) {
     let files = files.clone();
     match session {
         Some(session) => {
@@ -457,39 +456,41 @@ pub fn autosave(files: &Rc<Files>, session: Option<&solidcraft_engine::Session>)
                 Ok(bytes) => bytes,
                 Err(e) => {
                     files.say(format!("autosave: {e}"), true);
-                    files.autosave_failed.set(true);
-                    return true;
+                    let _ = finished.send(false);
+                    return;
                 }
             };
             let meta = serde_json::json!({"name": session.doc.name, "path": session.path, "saved_at": js_sys::Date::now()}).to_string();
-            files.autosave_busy.set(true);
             spawn_local(async move {
                 let r = async {
                     write_file(RECOVERY, &bytes).await?;
                     write_file(RECOVERY_META, meta.as_bytes()).await
                 };
-                if let Err(e) = r.await {
-                    files.autosave_failed.set(true);
+                let result = r.await;
+                let _ = finished.send(result.is_ok());
+                if let Err(e) = result {
                     files.say(format!("autosave: {e}"), true);
                 }
-                files.autosave_busy.set(false);
                 files.wake();
             });
         }
         None => {
-            files.autosave_busy.set(true);
             spawn_local(async move {
-                let _ = remove_file(RECOVERY).await;
-                for legacy in LEGACY_RECOVERY {
-                    let _ = remove_file(legacy).await;
+                let mut deleted = true;
+                for name in [RECOVERY, RECOVERY_META].into_iter().chain(LEGACY_RECOVERY) {
+                    if let Err(error) = remove_file(name).await {
+                        deleted = false;
+                        files.say(format!("autosave: {error}"), true);
+                    }
                 }
-                let _ = remove_file(RECOVERY_META).await;
-                files.autosave_busy.set(false);
+                if deleted {
+                    let _ = vfs::remove(&format!("{OPFS}{RECOVERY}"));
+                }
+                let _ = finished.send(deleted);
                 files.wake();
             });
         }
     }
-    true
 }
 
 /// A stored path for `name` that no stored file has: `name`, else `name (2)`, `name (3)`…

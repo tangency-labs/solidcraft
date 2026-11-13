@@ -66,6 +66,12 @@ impl Draft {
         let history = |stack: &[Arc<Snapshot>]| {
             stack.iter().skip(stack.len().saturating_sub(MAX_HISTORY)).map(|snapshot| State::from_snapshot(snapshot)).collect()
         };
+        Self { undo: history(&form.undo), redo: history(&form.redo), ..Self::capture_source(form, base_dirty) }
+    }
+
+    /// The accepted Form without Undo history, for computing one isolated preview.
+    pub(crate) fn capture_source(form: &Form, base_dirty: bool) -> Self {
+        let form = accepted(form);
         Self {
             version: VERSION,
             editing_feature: form.editing_feature,
@@ -82,8 +88,8 @@ impl Draft {
                 next_part: form.next_part,
                 pipe_segments: form.pipe_segments.clone(),
             },
-            undo: history(&form.undo),
-            redo: history(&form.redo),
+            undo: Vec::new(),
+            redo: Vec::new(),
         }
     }
 
