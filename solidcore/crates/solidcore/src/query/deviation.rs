@@ -1,5 +1,7 @@
 //! How far one curve strays from another curve or from a surface: the largest distance found,
 //! where it is, the sampled pairs a comb is drawn from, and, where it applies, a certified bound.
+//! And how far a curve strays from lying at a given distance from another (an offset's check,
+//! [`distance_deviation`]): measured at the stations only.
 //!
 //! Not upstream. `samples` stations at even steps of the first curve's natural interval, its
 //! ends included; each station's point dropped onto the other curve (its whole natural
@@ -98,6 +100,12 @@ fn of(comb: Vec<(Point3, Point3)>, bound: Option<f64>) -> Result<Deviation> {
 /// `InvalidInput` for a station count outside [`MIN_SAMPLES`]..=[`MAX_SAMPLES`]; a query failure
 /// when no station drops onto `b`; those of the evaluations and the drops.
 pub fn curve_deviation(k: &Kernel, a: &Curve, b: &Curve, samples: usize) -> Result<Deviation> {
+    of(curve_pairs(k, a, b, samples)?, certified(a, b))
+}
+
+/// Each of `samples` stations of `a` and its foot on `b` (its whole natural interval, the
+/// minimising drop); a station whose drop fails is left out.
+fn curve_pairs(k: &Kernel, a: &Curve, b: &Curve, samples: usize) -> Result<Vec<(Point3, Point3)>> {
     let ts = stations(a, samples)?;
     let over = b.natural_interval();
     let mut comb = Vec::new();
@@ -116,7 +124,53 @@ pub fn curve_deviation(k: &Kernel, a: &Curve, b: &Curve, samples: usize) -> Resu
             comb.push((p, b.evaluate_point(k, d.parameter)?));
         }
     }
-    of(comb, certified(a, b))
+    Ok(comb)
+}
+
+/// How far a curve strays from lying at a given distance from another ([`distance_deviation`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DistanceDeviation {
+    /// The largest difference found at the stations between a station's distance from the other
+    /// curve and the distance asked.
+    pub worst: f64,
+    /// Where on the first curve it is.
+    pub at: Point3,
+    /// Its foot on the other curve.
+    pub to: Point3,
+}
+
+/// How far curve `c` strays from lying `distance` from curve `from` (an offset of it, say): at
+/// `samples` stations of `c`, each dropped onto `from` as [`curve_deviation`] drops them, the
+/// largest `|d - distance|` of the distances `d` found, where it is and its foot. Measured at
+/// the stations, not proved between them.
+///
+/// # Errors
+///
+/// `InvalidInput` for a distance not finite or negative, or a station count outside
+/// [`MIN_SAMPLES`]..=[`MAX_SAMPLES`]; a query failure when no station drops onto `from`; those
+/// of the evaluations and the drops.
+pub fn distance_deviation(
+    k: &Kernel,
+    c: &Curve,
+    from: &Curve,
+    distance: f64,
+    samples: usize,
+) -> Result<DistanceDeviation> {
+    if !(distance.is_finite() && distance >= 0.0) {
+        return Err(invalid("a distance finite and not negative"));
+    }
+    let mut worst: Option<DistanceDeviation> = None;
+    for (p, q) in curve_pairs(k, c, from, samples)? {
+        let off = (p.distance(q) - distance).abs();
+        if worst.is_none_or(|w| off > w.worst) {
+            worst = Some(DistanceDeviation {
+                worst: off,
+                at: p,
+                to: q,
+            });
+        }
+    }
+    worst.ok_or_else(|| SolidError::query_failed(OP, "no station dropped onto the other"))
 }
 
 /// How far curve `c` strays from `surface` over its parameter box `domain`, at `samples`
