@@ -5405,6 +5405,18 @@ impl RailTrimAccess<FilletObject> for SessionObjects<'_> {
             pseudo.trim_rail_curves_with_solver(k, geometry, id, actual_solver, target)
         })
     }
+    fn rails_rolled_on_their_faces(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        executive: &mut FilletExecutive<FilletObject>,
+    ) -> Result<bool> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let lone = executive.solvers.len() == 1;
+        self.rolled_rails_on_their_faces(k, id, lone)
+    }
 }
 
 impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {

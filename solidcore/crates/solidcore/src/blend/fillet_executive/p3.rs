@@ -33,6 +33,10 @@
 //! the offset's put-back of its blends (`OffsetFacesExecutive::reblend`), WR-212.
 //! Not upstream: [`ExecutiveAccess::shrink_face`] shrinks the new fillet faces with
 //! knot snapping of rounding errors (tangency-labs/solidcore#472).
+//! Not upstream (solidcore-native, #15767): `trim_solver_rails` refuses a blend, as a rail
+//! leaving its face ([`NoRoomReason::RailLeavesFace`]), where a rail rolled over a smooth far
+//! edge of its face before the trace is not proved on the face beyond as trimmed
+//! ([`RailTrimAccess::rails_rolled_on_their_faces`]).
 
 use std::collections::BTreeMap;
 
@@ -1983,6 +1987,22 @@ pub trait RailTrimAccess<O: ClassObject + SolutionObject + Ord>: SolverGeometryA
         solver: O,
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
+
+    /// Not upstream (solidcore-native, #15767): whether every rail of `solver` rolled over a
+    /// smooth far edge of its face before the trace, on the evidence of the ball's sections
+    /// only, is proved to lie on the face beyond as trimmed. `true` where none rolled so (the
+    /// default, for an access without that rollover).
+    ///
+    /// # Errors
+    /// A missing dependency or a cancellation from the proof; actual lookup errors.
+    fn rails_rolled_on_their_faces(
+        &mut self,
+        _k: &mut Kernel,
+        _solver: O,
+        _executive: &mut FilletExecutive<O>,
+    ) -> Result<bool> {
+        Ok(true)
+    }
 }
 
 impl<O, A> RailTrimAccess<O> for A
@@ -3351,6 +3371,15 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     access.geometry_edge(solver)?,
                     7,
                     "Fillet Surface Computation Failure: Unable to Trim Rail Curve",
+                );
+            }
+            // Not upstream (solidcore-native, #15767): a rail rolled over a smooth far edge of
+            // its face before the trace, which the ball's sections only proposed, is accepted
+            // once proved on the face beyond as trimmed; otherwise the blend is refused
+            if !access.rails_rolled_on_their_faces(k, solver, self)? {
+                return self.record_no_room(
+                    NoRoomReason::RailLeavesFace,
+                    "Fillet Error: a rail rolled over a smooth edge of its face, the whole length, is not proved to lie on the face beyond",
                 );
             }
             index += 1;

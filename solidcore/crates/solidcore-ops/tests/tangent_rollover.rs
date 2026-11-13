@@ -734,6 +734,40 @@ fn a_rim_round_partly_on_the_top_rolls_onto_the_foot_round_partway() {
     }
 }
 
+/// A real miss between the sections that propose the rollover (#15767 review): the foot round
+/// is cut by a slot 0.04 wide and 2 deep, from the top z = 5 up through the foot round, across
+/// x = -38.6 to -36.3 at y = `ys`, halfway between two of the 17 sections along x = -36 (0.105
+/// apart at r4 = 9), so its floor is the top reaching under the ball's contact x = -38. At every
+/// section the contact lies off the top and the foot round carries the ball, and the rail is
+/// rolled onto the foot round; in the slot the foot round is cut away, and the rail rolled onto
+/// it crosses the slot's edges. It is not proved on the foot round
+/// ([`RoomReason::RailLeavesFace`]'s refusal, which without the corpus's fixes reads as a rail
+/// leaving its face without the cliff overflow fix). Without that proof the blend failed later,
+/// in the trace's rollover, with status 1001; with the corpus's fixes it fails before the trim.
+#[test]
+fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_refused() {
+    let r4 = 9.0;
+    let d = 2.0;
+    let (v, w) = (-65.0 - r4, top_end_on_side());
+    let step = (v - w) / 16.0;
+    let ys = v - 8.5 * step;
+    let width = 0.04;
+    assert!(width < step / 2.0, "the slot lies between two sections");
+    fixes();
+    let b = arm_boss_and_foot_round(r4);
+    let slot = make_box([-38.6, ys - width / 2.0, 5.0], [2.3, width, 2.0]).unwrap();
+    let b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let rim = top_rim(&b, r4);
+    session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
+    fixes();
+    match result {
+        Err(Error::Unsupported(reason)) if reason.contains("rail leaves its face") => {}
+        other => panic!("the slot between the sections: {other:?}"),
+    }
+}
+
 /// The largest round at C that builds on the arm and boss, in closed form. The ball touches
 /// y = -65 and rolls on the boss: its centre is at (x, -65 - r), 18 + r from B = (-54, -90), so
 /// (x + 54)^2 + (r - 25)^2 = (18 + r)^2, that is (x + 54)^2 = 86 r - 301, and its contact on
