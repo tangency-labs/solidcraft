@@ -2091,17 +2091,19 @@ impl Dialog {
 
     /// What input `i`'s list of picked items shows, one row each (#3683): what its chip counts.
     /// A rim or a surface split into pieces is one row, as it is one pick; a Shell with Tangent
-    /// Chain lists every face it opens.
+    /// Chain lists every face it opens. Frame Member's path lists a point once for each time it
+    /// is in it: each occurrence is in its own pair (#15705).
     pub(crate) fn listed_items(&self, s: &Session, i: usize) -> Vec<Sel> {
         if i == 0
             && let Some(faces) = self.shell_faces(s)
         {
             return faces;
         }
+        let ordered = self.inputs.get(i).is_some_and(|inp| inp.ordered_points);
         let mut rows: Vec<Sel> = Vec::new();
         let mut shown: Vec<Sel> = Vec::new();
         for item in self.inputs.get(i).map(|inp| inp.items.as_slice()).unwrap_or_default() {
-            if shown.iter().any(|x| selection::same_item(x, item)) {
+            if !ordered && shown.iter().any(|x| selection::same_item(x, item)) {
                 continue;
             }
             shown.extend(crate::viewport::grouped_selection(s, item));
@@ -2113,8 +2115,8 @@ impl Dialog {
     /// Remove a listed row's item from input `i`, as picking it again toggles it off: the
     /// pieces of its rim or surface go with it, and the hand-picked edges and the explicit
     /// profile choice follow. A face a Shell's tangent chain opens goes with the picks whose
-    /// chain holds it.
-    pub(crate) fn remove_listed(&mut self, s: &Session, i: usize, item: &Sel) {
+    /// chain holds it. In Frame Member's path only row `row`'s occurrence goes.
+    pub(crate) fn remove_listed(&mut self, s: &Session, i: usize, row: usize, item: &Sel) {
         let shell_chain = i == 0 && self.shell_faces(s).is_some();
         // A Fillet or Chamfer row its Tangent Chain brought goes with the picks whose chain holds
         // it, as picking it again would; else ticking Tangent Chain again brings it back.
@@ -2143,6 +2145,12 @@ impl Dialog {
                     b != body || !model.is_some_and(|m| solidcraft_engine::doc::tangent_face_chain(m, &[*point]).iter().any(|(f, _)| f == index))
                 });
             }
+            // A point the path holds twice is in two pairs: the other pair keeps its own.
+            _ if inp.ordered_points => {
+                if let Kind::Frame(m) = &mut self.kind {
+                    m.remove_at(&mut inp.items, row);
+                }
+            }
             // Without the model to find the chain in, the row goes on its own.
             _ => {
                 inp.items.retain(|x| !gone.iter().any(|g| selection::same_item(x, g)));
@@ -2160,6 +2168,9 @@ impl Dialog {
         }
         self.list_hover = None;
         self.error = None;
+        if matches!(self.kind, Kind::Frame(_)) {
+            crate::dialogs_frame::prompt(self);
+        }
         self.sync_thread(s);
     }
 }
@@ -3502,7 +3513,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         hovered = Some((i, item.clone()));
                     }
                     if row.clicked() {
-                        remove = Some((i, item));
+                        remove = Some((i, index, item));
                     }
                 }
             });
@@ -3520,8 +3531,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     if let Some(i) = toggle_list {
         d.listed = if d.listed == Some(i) { None } else { Some(i) };
     }
-    if let Some((input, item)) = remove {
-        d.remove_listed(s, input, &item);
+    if let Some((input, row, item)) = remove {
+        d.remove_listed(s, input, row, &item);
     }
     if let Some(i) = activate {
         d.active = i;

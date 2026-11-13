@@ -925,3 +925,53 @@ fn the_pick_cache_follows_the_previews_centrelines_and_ghosting() {
     member(open(&mut app)).ghost = false;
     assert_eq!(first_face(&mut app).as_deref(), Some("Rail"));
 }
+
+// ---------------------------------------------------------------------------------------------
+// The path's picked list (#15705)
+
+/// p0, p1, p1, p2: the path's picked list shows the shared corner once for each pair it is in,
+/// and a row's remove button takes out that occurrence only, so the other pair keeps its point,
+/// its reference and its id.
+#[test]
+fn the_picked_list_shows_each_occurrence_and_a_rows_remove_takes_out_only_that_one() {
+    let mut h = crate::scenario::Harness::new();
+    let rail = json!({"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)});
+    let top = json!({"a": vertex(0., 0., 400.), "b": vertex(600., 0., 400.)});
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 400, "name": "Box", "body_name": "Box"})),
+        ("frame.member", json!({"profile": tube(), "pairs": [rail, top]})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    let f = h.app.session.doc.features.last().unwrap().id;
+    let stored = match &h.app.session.doc.feature(f).unwrap().kind {
+        FeatureKind::FrameMember { pairs, .. } => serde_json::to_value(pairs).unwrap(),
+        _ => panic!(),
+    };
+    h.app.dialog = Some(edit_dialog(&h.app, f, None).unwrap());
+    h.frames(2);
+    let (p0, p1, p2) = (corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 400.));
+    assert_eq!(path(h.app.dialog.as_ref().unwrap()), [p0.clone(), p1.clone(), p1.clone(), p2.clone()]);
+    let m = member(h.app.dialog.as_mut().unwrap());
+    let (refs, ids) = (m.refs.clone(), m.pair_ids.clone());
+    assert_eq!(ids[1].as_deref(), Some("pair1"));
+
+    h.step(&json!({"click": {"handle": "dialog:list_toggle:Path"}})).unwrap();
+    h.frames(2);
+    let rows = (0..8).take_while(|i| crate::scenario::handle_at(&format!("dialog:list:Path:{i}:remove")).is_some()).count();
+    assert_eq!(rows, 4, "a row for each occurrence");
+    // The second p1 is the second pair's.
+    h.step(&json!({"click": {"handle": "dialog:list:Path:2:remove"}})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert_eq!(path(d), [p0, p1, p2], "only that occurrence goes");
+    let m = member(d);
+    assert_eq!(m.refs, [refs[0].clone(), refs[1].clone(), refs[3].clone()]);
+    assert_eq!(m.pair_ids, [ids[0].clone(), ids[1].clone(), ids[3].clone()]);
+    assert_eq!(d.error.as_deref(), Some("Pick another point"), "p2 now waits");
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["params"]["pairs"], json!([stored[0]]), "the first pair is intact, id and references");
+}
