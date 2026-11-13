@@ -82,9 +82,15 @@ pub struct Centreline {
 /// How near the pointer a centreline lights up and takes a click, in points.
 const TUBE_PX: f32 = 8.0;
 
+/// The centrelines of the Frame Members a preview's commands made or changed (the features its
+/// replies name).
+pub(crate) fn centrelines(p: &solidcraft_engine::Preview) -> Vec<Centreline> {
+    p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64)).flat_map(|id| feature_centrelines(p, id)).collect()
+}
+
 /// The centrelines of Frame Member feature `id` among a preview's features, in member order:
 /// its lines', then its pairs', as the document's own segments place them.
-pub(crate) fn centrelines(p: &solidcraft_engine::Preview, id: u64) -> Vec<Centreline> {
+fn feature_centrelines(p: &solidcraft_engine::Preview, id: u64) -> Vec<Centreline> {
     let Some(f) = p.doc.feature(id) else { return Vec::new() };
     let FeatureKind::FrameMember { path_sketch, pairs, .. } = &f.kind else { return Vec::new() };
     let Ok(segments) = frame::member_segments(&p.doc, &p.model.state_before(id), f) else { return Vec::new() };
@@ -202,6 +208,10 @@ pub(crate) fn remove_picked(app: &mut SolveApp) -> bool {
 /// pair shares stays), a line's pick. Each other entry keeps its reference and pair id. With All
 /// Lines, the lines kept are listed from then on, so the one taken out stays out.
 pub(crate) fn remove_tubes(app: &mut SolveApp, ids: &[String]) {
+    // While OK computes, the path holds.
+    if app.applying.is_some() {
+        return;
+    }
     // The last finished preview's, busy or not: tubes are picked again whenever the path
     // changes, so a preview still computing is of this same path.
     let all = app.preview.centrelines.clone();
@@ -391,6 +401,11 @@ pub(crate) fn pick(app: &SolveApp, d: &mut Dialog, sel: Sel) {
 fn pick_as(app: &SolveApp, d: &mut Dialog, sel: Sel, given: Option<Value>) {
     let mut before = (matches!(d.kind, Kind::Frame(_)) && d.active == 0).then(|| crate::selection::items(&d.inputs, 0).to_vec());
     let original = before.clone();
+    // What is kept for each entry goes back with the entries when the pick is refused.
+    let kept = match &d.kind {
+        Kind::Frame(m) => Some((m.path.clone(), m.refs.clone(), m.pair_ids.clone())),
+        _ => None,
+    };
     // A point waiting for its partner: clicked again it is taken out, and a line clicked instead
     // takes its place.
     if let Some(at) = before.as_deref().and_then(|b| pair_indices(b).ok()).and_then(|(_, _, waiting)| waiting) {
@@ -421,6 +436,9 @@ fn pick_as(app: &SolveApp, d: &mut Dialog, sel: Sel, given: Option<Value>) {
     if let Some(why) = refusal(app, d, &before) {
         if let Some((path, original)) = d.inputs.first_mut().zip(original) {
             path.items = original;
+        }
+        if let (Kind::Frame(m), Some(kept)) = (&mut d.kind, kept) {
+            (m.path, m.refs, m.pair_ids) = kept;
         }
         d.error = Some(solidcraft_ui_text::format("frame.pick_refused", &[("reason", tr(&why))]));
         return;
@@ -525,6 +543,10 @@ fn other_sketch_ends(app: &SolveApp, before: &[Sel], sel: &Sel) -> Option<[(Sel,
 
 /// Ctrl+click on a point of the path: its last occurrence goes. False when the click is not that.
 pub(crate) fn take_out(app: &mut SolveApp, sel: &Sel) -> bool {
+    // While OK computes, the path holds.
+    if app.applying.is_some() {
+        return false;
+    }
     let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, Kind::Frame(_)) && d.active == 0) else { return false };
     if !is_point(sel) || !d.inputs.first_mut().is_some_and(|path| path.ordered_points && path.remove_last(sel)) {
         return false;
