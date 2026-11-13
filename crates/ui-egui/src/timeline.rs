@@ -669,7 +669,18 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
         }
         None => return None,
     };
-    result.import_report.as_deref().map(import_summary)
+    result.import_report.as_deref().map(|report| {
+        let summary = import_summary(report);
+        if reply
+            .get("warnings")
+            .and_then(Value::as_array)
+            .is_some_and(|warnings| warnings.iter().any(|warning| warning.as_str() == Some(solidcraft_engine::io::NX_IMPORT_WARNING)))
+        {
+            format!("{summary} {}", crate::file_load::import_warning_text(app, solidcraft_engine::io::NX_IMPORT_WARNING))
+        } else {
+            summary
+        }
+    })
 }
 
 /// An import's warnings for a person who uses CAD: how many of the file's parts came in as

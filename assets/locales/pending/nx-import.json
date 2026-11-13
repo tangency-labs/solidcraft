@@ -1,0 +1,26 @@
+{
+  "en": {
+    "file_import.nx_experimental": "Experimental Siemens NX geometry import: support is partial; sketches and feature history are not imported."
+  },
+  "de": {
+    "file_import.nx_experimental": "Experimenteller Siemens-NX-Geometrieimport: Die Unterstützung ist eingeschränkt; Skizzen und Featurehistorie werden nicht importiert."
+  },
+  "ar": {
+    "file_import.nx_experimental": "استيراد هندسة Siemens NX تجريبي: الدعم جزئي؛ لا يتم استيراد الرسومات التخطيطية أو سجل الميزات."
+  },
+  "he": {
+    "file_import.nx_experimental": "ייבוא גאומטריה ניסיוני של Siemens NX: התמיכה חלקית; סקיצות והיסטוריית תכונות אינן מיובאות."
+  },
+  "ja": {
+    "file_import.nx_experimental": "Siemens NX の形状インポートは試験的な機能です。対応は部分的で、スケッチやフィーチャ履歴はインポートされません。"
+  },
+  "vi": {
+    "file_import.nx_experimental": "Nhập hình học Siemens NX đang thử nghiệm: chỉ hỗ trợ một phần; không nhập bản phác thảo và lịch sử tính năng."
+  },
+  "zh": {
+    "file_import.nx_experimental": "Siemens NX 几何体导入为实验性功能：仅提供部分支持，不导入草图和特征历史。"
+  },
+  "ko": {
+    "file_import.nx_experimental": "Siemens NX 형상 가져오기는 실험적 기능입니다. 일부만 지원하며 스케치와 피처 이력은 가져오지 않습니다."
+  }
+}
