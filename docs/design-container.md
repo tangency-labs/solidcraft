@@ -181,8 +181,9 @@ without the application's version, `.cargo/config.toml`, and the cache's own rea
 that changed none of it (the interface, the commands, other file formats, a new
 version number) opens designs from the caches the build before it wrote (#7168);
 one that changed any of it (a kernel fix, the codec, a dependency) evaluates them
-again, once, and the next save writes a cache of its own. A build of unknown source
-(a tarball without git) never reads a cache.
+again, once, and the next save writes a cache of its own. Without `git` (Docker,
+Nix, or a source archive), `build.rs` hashes those same inputs from disk; a build
+whose source cannot be read (`"unknown"`) never reads a cache.
 
 The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
 with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
