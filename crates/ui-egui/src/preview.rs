@@ -38,7 +38,8 @@ pub struct Colors {
     /// The tool a join, cut or intersect adds, a datum plane a preview creates, and, where the
     /// preference asks for it (`tint_new`), the surface a feature adds to a body it changes.
     pub added: [u8; 4],
-    /// A body the preview creates (New Body), so it doesn't look like a join.
+    /// A body the preview creates (New Body), so it doesn't look like a join. See-through
+    /// (alpha below 255: Ghost Frame Members), such bodies are drawn see-through.
     pub new_body: [u8; 4],
     pub removed: [u8; 4],
     /// A Mirror's copies: the proposed-geometry green, as see-through as removed material.
@@ -420,6 +421,25 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
     Some(job_key(&setup, revision, colors))
 }
 
+/// How see-through Ghost Frame Members draws this Frame Member's new members.
+const FRAME_GHOST_ALPHA: u8 = 77;
+
+/// The colours the open dialog's preview is drawn in.
+pub(crate) fn colors(app: &SolveApp) -> Colors {
+    let mut colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, app.tool.is_some() || app.dialog.is_some());
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { .. }))) {
+        colors.ghost = app.preferences.drive_joints_ghost;
+    }
+    colors.tint_new = app.preferences.preview_tint_new_faces;
+    colors.cut_tint = app.preferences.cut_preview_tint;
+    // Ghost Frame Members: this feature's new members see-through in the new-body tint, apart
+    // from the grey other frame members are drawn in (#15705).
+    if crate::viewport::frame_ghosting(app) {
+        colors.new_body[3] = FRAME_GHOST_ALPHA;
+    }
+    colors
+}
+
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
@@ -446,12 +466,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
     };
-    let mut colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, app.tool.is_some() || app.dialog.is_some());
-    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { .. }))) {
-        colors.ghost = app.preferences.drive_joints_ghost;
-    }
-    colors.tint_new = app.preferences.preview_tint_new_faces;
-    colors.cut_tint = app.preferences.cut_preview_tint;
+    let colors = colors(app);
     let key = job_key(&cmds, app.session.revision, colors);
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
@@ -874,6 +889,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             _ => Vec::new(),
         };
         let kept = if old.is_some() { body_color } else { new_body };
+        let glass = old.is_none() && c.new_body[3] < 255;
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
             let new = new_face.get(*f as usize).copied().unwrap_or(false);
             let col = if new && c.tint_new { added_color } else { kept };
@@ -881,7 +897,11 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (am.positions.get(i), am.normals.get(i)) {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
+                    if glass {
+                        sc.glass_tri(p.to_f32(), n.to_f32(), col);
+                    } else {
+                        sc.tri(p.to_f32(), n.to_f32(), col);
+                    }
                     if through {
                         sc.xray_tri(p.to_f32(), n.to_f32(), removed);
                     }

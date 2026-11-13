@@ -69,7 +69,40 @@ struct Layout {
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
-    let FeatureKind::FrameMember { path_sketch, lines, pairs, profile, anchor, locate, angle, mirror, .. } = &f.kind else {
+    let FeatureKind::FrameMember { profile, anchor, locate, angle, mirror, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let segments = segments(doc, vals, f, st)?;
+    let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
+    if *mirror {
+        regions = regions.iter().map(frame::mirrored).collect();
+    }
+    let at = match locate {
+        Some([x, y]) => {
+            // A design file is hostile input: the command checks the point, a file may not.
+            if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
+                return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
+            }
+            // `locate` is the profile point that sits on the line, measured from the profile's
+            // own origin (`Profile::origin`). The built-in region is centred on its bounding
+            // box, so that origin moves when the section's size changes, and the located point
+            // moves with it: the member stays attached at the same point of its section.
+            let p = origin + Vec2::new(*x, *y);
+            if *mirror { Vec2::new(-p.x, p.y) } else { p }
+        }
+        None => frame::anchor_point(&regions, *anchor),
+    };
+    let turn = match angle {
+        Some(e) => val(vals, e, Kind::Angle)?,
+        None => 0.0,
+    };
+    Ok(Layout { segments, regions, description, at, turn })
+}
+
+/// Each member's line in the feature's component frame: (member id, start, end), the sketch's
+/// lines then the pairs'.
+fn segments(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Vec<(String, Vec3, Vec3)>> {
+    let FeatureKind::FrameMember { path_sketch, lines, pairs, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let mut segments = match path_sketch {
@@ -97,30 +130,15 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     if segments.len() > MAX_MEMBERS {
         return Err(DocError::Invalid(format!("at most {MAX_MEMBERS} members in one feature")));
     }
-    let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
-    if *mirror {
-        regions = regions.iter().map(frame::mirrored).collect();
-    }
-    let at = match locate {
-        Some([x, y]) => {
-            // A design file is hostile input: the command checks the point, a file may not.
-            if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
-                return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
-            }
-            // `locate` is the profile point that sits on the line, measured from the profile's
-            // own origin (`Profile::origin`). The built-in region is centred on its bounding
-            // box, so that origin moves when the section's size changes, and the located point
-            // moves with it: the member stays attached at the same point of its section.
-            let p = origin + Vec2::new(*x, *y);
-            if *mirror { Vec2::new(-p.x, p.y) } else { p }
-        }
-        None => frame::anchor_point(&regions, *anchor),
-    };
-    let turn = match angle {
-        Some(e) => val(vals, e, Kind::Angle)?,
-        None => 0.0,
-    };
-    Ok(Layout { segments, regions, description, at, turn })
+    Ok(segments)
+}
+
+/// Each member's centreline where the view shows it: (member id, start, end), in the world.
+/// `st` is the model the feature was evaluated on (`Model::state_before`).
+pub fn member_segments(doc: &Document, st: &ModelState, f: &Feature) -> Result<Vec<(String, Vec3, Vec3)>> {
+    let m = doc.component_transform(f.component);
+    let place = |p: Vec3| crate::apply_point(&m, p);
+    Ok(segments(doc, &doc.evaluation_values(), f, st)?.into_iter().map(|(id, a, b)| (id, place(a), place(b))).collect())
 }
 
 /// The member of feature `f` on line `line`, as its body was made: the plane square to the line

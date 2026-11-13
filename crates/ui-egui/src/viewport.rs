@@ -376,6 +376,14 @@ pub enum Hit {
     Axis {
         name: String,
     },
+    /// The `end` (0: start, 1: end) of the centreline of member `line` (a line or pair id) of
+    /// Frame Member `feature`, at `point`: offered while the Frame Member dialog ghosts members.
+    MemberEnd {
+        feature: u64,
+        line: String,
+        end: usize,
+        point: Vec3,
+    },
 }
 
 impl ViewportState {
@@ -614,6 +622,7 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     app.session.active_occurrence_path.hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
+    frame_ghosting(app).hash(&mut h);
     app.preferences.cosmetic_threads.hash(&mut h);
     app.preferences.section_hatch.hash(&mut h);
     solidcraft_theme::is_dark().hash(&mut h);
@@ -725,6 +734,24 @@ pub(crate) fn active_body_names(app: &SolveApp) -> Option<ActiveBodyNames> {
         *cache = Some(ActiveBodies { doc: s.doc.clone(), state, path: path.clone(), names: names.clone() });
     }
     Some(names)
+}
+
+/// How see-through Ghost Frame Members draws the bodies it ghosts.
+const FRAME_GHOST_OPACITY: f64 = 0.3;
+
+/// Is the Frame Member dialog open with Ghost Frame Members ticked (#15705)?
+pub(crate) fn frame_ghosting(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, crate::dialogs::Kind::Frame(m) if m.ghost))
+}
+
+/// A frame member or End Cap body while [`frame_ghosting`]: drawn see-through in the body
+/// colour, and picked only by its vertices and centreline ends, so a click on its faces reaches
+/// what is behind. Its own state, not [`body_faded`] (outside the active component), which also
+/// decides component fading, marquee scoping and `view.pick`'s `include_ghosted`.
+pub(crate) fn frame_ghosted(app: &SolveApp, body: &solidcraft_engine::doc::ModelBody) -> bool {
+    use solidcraft_engine::doc::FeatureKind;
+    frame_ghosting(app)
+        && app.session.doc.feature(body.feature).is_some_and(|f| matches!(f.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameEndCap { .. }))
 }
 
 /// With a component active, bodies outside it are drawn faded.
@@ -1095,6 +1122,9 @@ fn plan_class(app: &SolveApp, faces: &[crate::gpu::TriClass]) -> Option<crate::g
 fn face_classes(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, active_bodies: &Option<ActiveBodyNames>) -> Vec<crate::gpu::TriClass> {
     if body_faded(app, b, active_bodies) {
         return vec![crate::gpu::TriClass::Faded; b.body.face_count()];
+    }
+    if frame_ghosted(app, b) {
+        return vec![crate::gpu::TriClass::Glass; b.body.face_count()];
     }
     let resolved = resolve_appearance(app, b);
     (0..b.body.face_count())
@@ -1760,18 +1790,21 @@ fn body_scene(
                 sc.line(a.to_f32(), c.to_f32(), slots.edge, 0.85, false);
             }
         }
-        let base = resolved.component.or(resolved.body).unwrap_or(tk.body);
+        // Ghost Frame Members: see-through in the plain body colour, whatever its appearance.
+        let ghosted = !faded && frame_ghosted(app, b);
+        let base = if ghosted { tk.body } else { resolved.component.or(resolved.body).unwrap_or(tk.body) };
         let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
         set_palette_color(&mut arena, &mut sc.palette, slots.body, col);
         // Appearances: the body's opacity, and faces with looks of their own.
-        let opacity = resolved.opacity;
+        let opacity = if ghosted { FRAME_GHOST_OPACITY } else { resolved.opacity };
         // PBR finishes (metallic, roughness) for opaque bodies and faces in their own colours
         // (shown when Preferences › Graphics says so, `sky_uniform`).
         let finishes = !faded;
         let body_pbr = resolved.pbr.filter(|_| finishes && resolved.component.is_none() && opacity >= 0.999);
         arena.set_material(slots.body, finish(base, body_pbr));
         arena.set_material(slots.instance, finish(base, body_pbr));
-        let face_looks = &resolved.face_looks;
+        let no_looks = std::collections::HashMap::new();
+        let face_looks = if ghosted { &no_looks } else { &resolved.face_looks };
         let faces = b.body.face_count();
         let mut face_colors = Vec::with_capacity(faces);
         let mut face_classes = Vec::with_capacity(faces);
@@ -3118,6 +3151,7 @@ pub fn same_target(a: &Hit, b: &Hit) -> bool {
         (Hit::Plane { name: a, .. }, Hit::Plane { name: b, .. })
         | (Hit::Axis { name: a }, Hit::Axis { name: b })
         | (Hit::ConstructionPoint { name: a }, Hit::ConstructionPoint { name: b }) => a == b,
+        (Hit::MemberEnd { feature: f, line: l, end: e, .. }, Hit::MemberEnd { feature: g, line: m, end: k, .. }) => f == g && l == m && e == k,
         _ => false,
     }
 }
@@ -3243,6 +3277,20 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // A woken centre's extra reach (past the usual 8) yields to a curve under the pointer, so a
     // click on a small circle's edge still takes the circle.
     let mut woken_far: Option<(f32, Hit)> = None;
+    // The centreline ends of the members Frame Member ghosts (#15705): points, drawn over
+    // everything, offered first so they win a tie with a sketch or construction point an end lies
+    // on (its pick copies what that end is built on), and before any line or centreline there.
+    for h in crate::dialogs_frame::member_ends(app) {
+        if let Hit::MemberEnd { point, .. } = &h
+            && let Some(sp) = proj.to_screen(*point)
+        {
+            let dd = sp.distance(pos);
+            let rank = (dd, prefer_free);
+            if dd < 8.0 && best.wants(rank) {
+                best.offer(rank, h);
+            }
+        }
+    }
     for ss in point_sketches.iter().filter_map(|sid| st.sketch(*sid)) {
         let sid = ss.feature;
         let shown = snapping.then(|| crate::dialogs::SnapPoints::of(&ss.sketch));
@@ -3392,7 +3440,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // Bounds retain the state's body order. Looking each one up by name made both passes
     // quadratic for assemblies with many small parts.
     for (i, b) in st.bodies.iter().enumerate() {
-        if !through && !app.body_visible(&b.name) {
+        // A ghosted frame member's faces don't stop a click: it goes through to what is behind.
+        if (!through && !app.body_visible(&b.name)) || frame_ghosted(app, b) {
             continue;
         }
         // Bodies whose box the ray misses (or enters behind the best hit so far) are skipped.
@@ -3466,6 +3515,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         if !through && !app.body_visible(&b.name) {
             continue;
         }
+        // A ghosted frame member's vertices are picked, its edges are not.
+        let ghosted = frame_ghosted(app, b);
         let mut body_slack = slack;
         if let Some(bb) = body_box(i, b) {
             // Only bodies whose outline on screen is near the cursor can have an edge under it.
@@ -3498,6 +3549,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                         }
                     }
                 }
+            }
+            if ghosted {
+                continue;
             }
             let (Some(p0), Some(p1)) = (e.get(si).map(|p| at(*p)), e.get(si + 1).map(|p| at(*p))) else { continue };
             let (Some(a), Some(c)) = (proj.to_screen(p0), proj.to_screen(p1)) else { continue };
@@ -4068,6 +4122,8 @@ pub fn hit_sel(h: &Hit) -> Option<Sel> {
         Hit::Plane { name, .. } => Sel::Plane { name: name.clone() },
         Hit::Axis { name } => Sel::Axis { name: name.clone() },
         Hit::ConstructionPoint { name } => Sel::ConstructionPoint { name: name.clone() },
+        // Only the Frame Member dialog's path takes one (`dialogs_frame::end_pick`).
+        Hit::MemberEnd { .. } => return None,
     })
 }
 
@@ -4187,6 +4243,7 @@ fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
         Hit::Edge { .. } => !off("edges") && !app.ui.pick_bodies && !app.ui.pick_components,
         Hit::Face { .. } => !off("faces") || app.ui.pick_bodies || app.ui.pick_components,
         Hit::Plane { .. } | Hit::Axis { .. } | Hit::ConstructionPoint { .. } => true,
+        Hit::MemberEnd { .. } => false,
     }
 }
 
@@ -4276,7 +4333,7 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
             d.pick(&app.session, sel.clone());
             d.active = on;
         }
-        crate::hole_place::PickMove::No => crate::dialogs_frame::pick(app, &mut d, sel.clone()),
+        crate::hole_place::PickMove::No => crate::dialogs_frame::pick_hit(app, &mut d, hit, sel.clone()),
         crate::hole_place::PickMove::Moved | crate::hole_place::PickMove::Spent => {
             d.focus = true;
             d.awaiting_pick = false;
@@ -7410,6 +7467,17 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 (t.origin_point, Stroke::new(1.0, Color32::from_gray(110)))
             };
             painter.circle(sp, 4.5, fill, stroke);
+        }
+    }
+    // The centreline ends of the members Frame Member ghosts, to pick as points (#15705).
+    for h in crate::dialogs_frame::member_ends(app) {
+        if let Hit::MemberEnd { point, .. } = &h
+            && let Some(p) = proj.to_screen(*point)
+        {
+            let hovered = app.viewport.hover.as_ref().is_some_and(|x| same_target(x, &h));
+            let (fill, stroke) =
+                if hovered { (t.hover_edge_halo, Stroke::new(1.5, t.hover_edge)) } else { (t.construction_geom, Stroke::new(1.0, t.body_edge)) };
+            painter.circle(p, 3.5, fill, stroke);
         }
     }
     for x in app.highlighted() {

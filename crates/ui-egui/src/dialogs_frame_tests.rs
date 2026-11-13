@@ -488,3 +488,210 @@ fn an_end_cap_edit_refuses_to_drop_an_end_it_cannot_find() {
     inputs[0].items = vec![top, bottom];
     assert!(crate::dialogs_end_cap::commands(&app, &c, &inputs, &extra).is_ok());
 }
+
+// ---------------------------------------------------------------------------------------------
+// Ghost Frame Members (#15705)
+
+fn tube() -> Value {
+    json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3})
+}
+
+/// The box with a rail over its top: a 40 mm tube `Rail` on the 3D sketch line from
+/// (100, 200, 500) to (500, 200, 500), and an orthographic camera straight down over the middle
+/// (0.75 px a millimetre in a 960 × 600 view).
+fn railed_box() -> SolveApp {
+    let mut app = box_app();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Rail path"})),
+        ("sketch.options", json!({"sketch_3d": true})),
+        ("sketch.line3d", json!({"points": [[100, 200, 500], [500, 200, 500]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Rail path", "body_name": "Rail", "profile": tube()})),
+    ] {
+        app.run(id, p).unwrap();
+    }
+    app.cam = solidcraft_viewport::Camera {
+        target: Vec3::new(300.0, 200.0, 450.0),
+        yaw: 0.0,
+        pitch: std::f64::consts::FRAC_PI_2,
+        roll: 0.0,
+        distance: 1000.0,
+        fov: 0.0,
+        up: Default::default(),
+    };
+    app
+}
+
+/// The 960 × 600 model view `view.pick` answers for by default, as the mouse picker sees it.
+fn model_proj(app: &SolveApp) -> crate::viewport::Proj {
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 600.0));
+    crate::viewport::Proj { cam: app.cam, vp: app.cam.view_proj(960.0 / 600.0, crate::viewport::scene_radius(app)), rect }
+}
+
+fn model_body(st: &solidcraft_engine::doc::ModelState, name: &str) -> solidcraft_engine::doc::ModelBody {
+    st.bodies.iter().find(|b| b.name == name).unwrap().clone()
+}
+
+/// The colour the model scene paints the body in (its first face's): see-through below 255.
+fn drawn(app: &SolveApp, body: &str) -> [u8; 4] {
+    crate::viewport::build_scene(app);
+    let arena = app.viewport.palette.lock().unwrap();
+    arena.slots(body).and_then(|s| arena.get(s.face(0))).unwrap()
+}
+
+/// The first face the mouse picker finds under the centre of the view.
+fn face_under_centre(app: &SolveApp) -> String {
+    let hits = crate::viewport::pick(app, &model_proj(app), egui::pos2(480.0, 300.0));
+    hits.iter()
+        .find_map(|h| match h {
+            crate::viewport::Hit::Face { body, .. } => Some(body.clone()),
+            _ => None,
+        })
+        .unwrap()
+}
+
+fn frame_dialog(app: &mut SolveApp) -> Dialog {
+    app.start("frame.member");
+    app.dialog.clone().unwrap()
+}
+
+#[test]
+fn ghosting_is_on_when_the_dialog_opens() {
+    let mut app = railed_box();
+    let st = crate::open_meshing::shown_world(&app);
+    let (rail, boxed) = (model_body(&st, "Rail"), model_body(&st, "Box"));
+    assert!(!crate::viewport::frame_ghosted(&app, &rail), "no dialog: nothing is ghosted");
+    let mut d = frame_dialog(&mut app);
+    assert!(member(&mut d).ghost);
+    assert!(crate::viewport::frame_ghosted(&app, &rail));
+    assert!(!crate::viewport::frame_ghosted(&app, &boxed), "only frame members are");
+    // Not remembered: ticked again whenever the dialog opens, Edit Feature's too.
+    member(app.dialog.as_mut().unwrap()).ghost = false;
+    crate::dialogs::cancel(&mut app);
+    assert!(member(&mut frame_dialog(&mut app)).ghost);
+    crate::dialogs::cancel(&mut app);
+    let f = app.session.doc.features.last().unwrap().id;
+    assert!(member(&mut edit_dialog(&app, f, None).unwrap()).ghost);
+}
+
+#[test]
+fn a_click_on_a_ghosted_members_face_goes_through_to_what_is_behind() {
+    let mut app = railed_box();
+    frame_dialog(&mut app);
+    assert_eq!(face_under_centre(&app), "Box", "the mouse picks the box's top through the rail");
+    let r = crate::view_pick::pick_command(&mut app, &json!({"frame": "model", "pixels": [[480, 300]]})).unwrap();
+    let hit = &r["hits"][0];
+    assert_eq!(hit["body"], "Box", "view.pick agrees: {hit}");
+    assert!((hit["point"][2].as_f64().unwrap() - 400.0).abs() < 1e-6, "{hit}");
+}
+
+#[test]
+fn a_ghosted_members_vertex_and_centreline_end_can_be_picked() {
+    let mut app = railed_box();
+    frame_dialog(&mut app);
+    let proj = model_proj(&app);
+    let at = |p: Vec3| proj.to_screen(p).unwrap();
+    // A corner of the tube's start (rounded: its vertices sit where the sides meet the arcs).
+    let corner = Vec3::new(100.0, 180.0, 514.0);
+    let hits = crate::viewport::pick(&app, &proj, at(corner));
+    assert!(
+        hits.iter().any(|h| matches!(h, crate::viewport::Hit::Vertex { body, point } if body == "Rail" && point.dist(corner) < 1e-6)),
+        "{hits:?}"
+    );
+    let end = Vec3::new(500.0, 200.0, 500.0);
+    let hits = crate::viewport::pick(&app, &proj, at(end));
+    let rail = app.session.doc.features.last().unwrap().id;
+    let path_sketch = sketch_id(&app, "Rail path");
+    let wire = app.session.doc.sketch(path_sketch).unwrap().wires[0].id.clone();
+    assert!(
+        hits.iter().any(|h| matches!(h, crate::viewport::Hit::MemberEnd { feature, line, end: 1, point } if *feature == rail && *line == wire && point.dist(end) < 1e-6)),
+        "{hits:?}"
+    );
+    // The path takes it as the point that end is built on: the 3D line's last node.
+    let (_, sel) = crate::viewport::candidate(&app, &hits).unwrap();
+    assert_eq!(sel, Sel::SketchPoint { id: format!("{path_sketch}:{wire}:1") });
+}
+
+#[test]
+fn picking_a_centreline_end_stores_the_point_it_is_built_on() {
+    let mut app = box_app();
+    let base = sketch_id(&app, "Base");
+    let l0 = app.session.doc.sketch(base).unwrap().curves[0].clone();
+    let upright = json!({"a": vertex(600., 0., 0.), "b": vertex(600., 0., 400.)});
+    app.run("frame.member", json!({"sketch": "Base", "lines": [l0.id], "profile": tube(), "pairs": [upright]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let FeatureKind::FrameMember { pairs, .. } = &app.session.doc.feature(f).unwrap().kind else { panic!() };
+    let pair_a = serde_json::to_value(&pairs[0].a).unwrap();
+    let solidcraft_engine::sketch::CurveKind::Line { a, .. } = l0.kind else { panic!() };
+    let start = app.session.doc.sketch(base).unwrap().points[a].id.clone();
+    let mut d = frame_dialog(&mut app);
+    let ends = super::member_ends(&app);
+    let end_of = |line: &str, end: usize| {
+        ends.iter().find(|h| matches!(h, crate::viewport::Hit::MemberEnd { line: l, end: e, .. } if l == line && *e == end)).unwrap().clone()
+    };
+    for hit in [end_of(&l0.id, 0), end_of("pair1", 0)] {
+        let (_, sel) = crate::viewport::candidate(&app, std::slice::from_ref(&hit)).unwrap();
+        pick_hit(&app, &mut d, &hit, sel);
+    }
+    assert_eq!(path(&d)[0], Sel::SketchPoint { id: format!("{base}:{start}") });
+    let refs = member(&mut d).refs.clone();
+    assert_eq!(refs, [Some(json!({"sketch": base, "point": start})), Some(pair_a.clone())], "the line's end point, and a copy of the pair's");
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["pairs"][0]["b"], pair_a);
+}
+
+#[test]
+fn this_frame_members_tubes_are_tinted_apart_from_other_frame_members() {
+    let mut app = railed_box();
+    let mut d = frame_dialog(&mut app);
+    pick_all(&app, &mut d, &[corner(0., 0., 400.), corner(600., 0., 400.)]);
+    app.dialog = Some(d.clone());
+    let colors = crate::preview::colors(&app);
+    let built = crate::preview::compute(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap();
+    assert!(built.scene.tris.is_empty() && !built.scene.glass.is_empty(), "this feature's new tube is drawn see-through");
+    let own = colors.new_body;
+    let other = drawn(&app, "Rail");
+    assert!(own[3] < 255 && other[3] < 255, "both see-through: {own:?} {other:?}");
+    let body = solidcraft_theme::Tokens::get().body.to_srgba_unmultiplied();
+    assert_eq!(other[..3], body[..3], "other frame members are grey");
+    assert_ne!(own[..3], other[..3], "this one's are tinted");
+}
+
+#[test]
+fn with_ghosting_off_members_draw_and_pick_as_today() {
+    let mut app = railed_box();
+    let opaque = drawn(&app, "Rail");
+    assert_eq!(opaque[3], 255);
+    assert_eq!(face_under_centre(&app), "Rail");
+    let mut d = frame_dialog(&mut app);
+    member(&mut d).ghost = false;
+    app.dialog = Some(d);
+    assert_eq!(drawn(&app, "Rail"), opaque);
+    assert_eq!(face_under_centre(&app), "Rail");
+    let r = crate::view_pick::pick_command(&mut app, &json!({"frame": "model", "pixels": [[480, 300]]})).unwrap();
+    assert_eq!(r["hits"][0]["body"], "Rail");
+    assert!(super::member_ends(&app).is_empty(), "no centreline ends to pick");
+    assert_eq!(crate::preview::colors(&app).new_body[3], 255, "the preview's new tubes are solid");
+}
+
+#[test]
+fn end_caps_are_ghosted_with_members() {
+    let mut app = app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Post path"})),
+        ("sketch.options", json!({"sketch_3d": true})),
+        ("sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Post path", "body_name": "Post", "profile": tube()})),
+    ]);
+    let st = app.session.model.state();
+    let b = st.body("Post").unwrap();
+    let top = (0..b.body.face_count())
+        .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().z > 0.999 && (pl.origin.z - 300.0).abs() < 1e-6))
+        .unwrap();
+    app.run("frame.end_cap", json!({"faces": [{"body": "Post", "index": top, "face": [18.5, 0.0, 300.0]}], "thickness": 6})).unwrap();
+    let st = crate::open_meshing::shown_world(&app);
+    let cap = st.bodies.iter().find(|b| b.name != "Post").unwrap().name.clone();
+    assert_eq!(drawn(&app, &cap)[3], 255);
+    frame_dialog(&mut app);
+    assert!(crate::viewport::frame_ghosted(&app, &model_body(&st, &cap)));
+    assert!(drawn(&app, &cap)[3] < 255 && drawn(&app, "Post")[3] < 255);
+}

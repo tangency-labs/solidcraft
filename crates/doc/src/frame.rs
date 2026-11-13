@@ -348,7 +348,7 @@ impl crate::walk::Walk for ProfileSpec {
     }
 }
 
-pub use crate::eval::frame_member::{member_line_ids, member_names};
+pub use crate::eval::frame_member::{member_line_ids, member_names, member_segments};
 
 /// A frame member between two points (#15705): its id, which names the member as a line's id
 /// does (`names`, End Caps), and its two ends, found again on every evaluation so the member
