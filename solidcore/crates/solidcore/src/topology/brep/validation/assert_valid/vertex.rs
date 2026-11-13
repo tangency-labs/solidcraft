@@ -7,7 +7,7 @@
 //! | `vertex` | `SmVertex::AssertValid` |
 //! | `vertexuse` | `SmVertexuse::AssertValid` |
 //!
-//! Deviations: the vertex's local tolerance bounds its face and corner gaps,
+//! Deviations: the vertex's local tolerance bounds its face gaps,
 //! with the body's intersection tolerance as a floor (see `seams`).
 
 use super::{base, class, seams, Cx};
@@ -26,7 +26,7 @@ pub(super) fn vertex(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, v: VertexId)
         rtn &= base::owning(b, cx, this)?;
     }
 
-    // 1: Vertex location must meet its faces and corner within its local tolerance;
+    // 1: Vertex location must meet its faces within its local tolerance;
     // the check runs at every level, its report is level 2
     let (located, max_gap) = seams::assert_test_vertex1(k, b, v)?;
     if !located {

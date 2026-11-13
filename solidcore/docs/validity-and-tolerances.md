@@ -131,7 +131,7 @@ The tests that decide each property, by the test numbers the check reports:
 | an edge is not smaller than its tube | curve length ≥ τ_e (Edge 7) | `assert_valid/edge.rs` | 0 |
 | edge ends at its vertices | \|C(t_end) − P_v\| ≤ τ_e + τ_v (Edge 16, 17) | `assert_valid/edge.rs` | 0 |
 | edge on its faces | the largest edge/face gap ≤ τ_e + τ_f (Edge 13) | `topology/edge/edge_form.rs` | 2 |
-| vertex on its faces | face gaps and the solved corner within the vertex's local tolerance, floored at the body's intersection tolerance (Vertex 1) | `assert_valid/vertex.rs` | 2 (report) |
+| vertex on its faces | face gaps within the vertex's local tolerance, floored at the body's intersection tolerance (Vertex 1) | `assert_valid/vertex.rs` | 2 (report) |
 | the tolerance pass | vertex/edge and vertex/face gaps ≤ τ_v / 2, edge/face gap ≤ τ_e (`SmBrep` list 2, tests 0 to 4) | `assert_valid/brep.rs`, `validate_and_update` | 0 |
 | seams and poles | §6 | `assert_valid/face.rs`, `vertex.rs` | 0 and 2 |
 | closed shells | a region's outer shell is a closed face-use shell (Brep 10, 11), its inner shells lie inside it (Brep 12), every region is reached across face uses (Brep 18, 19) | `assert_valid/brep.rs` | 0 |
@@ -168,7 +168,10 @@ a size between 0.5 and 500, 1e-4 up to 5e4, 1e-6 down to 0.005, and so on by fac
 size. Vertex tolerances must be finite and at least the body's tolerance (allowing the check's 1%
 rounding margin). There is no upper ratio between a vertex's local tolerance and the body's:
 an imported corner's gap does not change the accuracy of unrelated topology. Geometric gap checks
-still apply. The pointer check retains legacy upper ratios of 1000 for faces and edges
+still apply. The pointer check also drops each vertex onto non-incident bounded edges and
+trimmed faces: a vertex ball that reaches either is refused, including contact at its radius.
+Bounding boxes prune these queries; they do not decide contact. The pointer check retains
+legacy upper ratios of 1000 for faces and edges
 (`validation/pointers.rs`); the separate Edge tests 5, 6 are obsolete, and Face tests 25, 26 and 30
 are not run (`assert_valid/face.rs`).
 

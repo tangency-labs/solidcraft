@@ -41,9 +41,36 @@ WR-93 (open-loop reporting), and WR-679 (the tolerance updater's half-radius tes
 ## Local geometric bounds
 
 The vertex ratio limit is replaced by a finite-value check. The existing lower
-bound remains. Face and solved-corner gaps use the larger of the vertex radius
-and the body's existing intersection tolerance. Strict corner queries used by
-repair retain their existing semantics.
+bound remains. Measured face gaps use the larger of the vertex radius and the
+body's existing intersection tolerance. Strict corner queries used by placement
+and repair retain their existing semantics. A placement solver's displacement
+to an ideal surface intersection is not a vertex/face gap: the solver can slide
+along an intersection curve, and ideal surfaces omit the faces' tolerance bands.
+Making that displacement a new mandatory bound regressed fillet case 1488 and
+the R 1/2 and 1/2-14 NPT tapered external thread ladder cases. Vertex Test 1
+continues to report actual face gaps, as before this branch.
+
+Diagnostic replays of those three cases measured face gaps of 0.000000413910,
+0.000000891323 and 0.000000682559 mm, respectively. The displaced ideal corners
+were 0.000036418552, 0.000037565744 and 0.000024489688 mm away. The near-parallel
+supports amplify small face deviations into larger ideal-intersection motion;
+the stored points themselves remain inside the incident face bands. No vertex,
+edge or face tolerance is enlarged by the correction.
+
+After the correction, the CLI's normal each-feature rig replay passes
+`1488-fillet-slab-end-after-nudged-loft-join`, `022-external-r-1-2-taper` and
+`023-external-1-2-npt`. The ladder golden is unchanged. The existing validation
+tests also cover a ball reaching a non-incident box face or a separate wire edge,
+and loop-use tests cover both directions and individual endpoint-zone failures.
+These are newly added tests, not newly executed tests: this review lane's buildq
+policy refuses targeted Rust tests, clippy and golden comparison/regeneration.
+The unit-test results recorded below describe the earlier branch revision;
+the review additions still need CI validation.
+
+Removing the ratio does not allow a vertex ball to swallow unrelated topology.
+The pointer validator drops vertices onto non-incident bounded edges and trimmed
+faces, refusing contact within or at the vertex's radius. Solver precision stays
+independent of that radius; bounding boxes only prune the distance queries.
 
 For a loop junction, the previous curve end and next curve start must name one
 topological vertex. Each endpoint must lie within that vertex's radius plus its

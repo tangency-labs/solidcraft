@@ -710,6 +710,36 @@ pub(crate) fn junction_vertex(
     Ok(end.filter(|v| Some(*v) == start))
 }
 
+/// The edge/edge bound, enlarged only when both endpoints meet their shared
+/// vertex within their individual edge and vertex zones.
+pub(crate) fn junction_tolerance(
+    k: &Kernel,
+    b: &Brep,
+    previous: EdgeuseId,
+    next: EdgeuseId,
+    endpoints: [Point3; 2],
+    zones: [f64; 2],
+) -> Result<f64> {
+    let [end, start] = endpoints;
+    let [end_zone, start_zone] = zones;
+    let edge_limit = tol::xsect_tol_3d_from_zones(k, end_zone, start_zone);
+    let shared_vertex = if end.distance_squared(start) > edge_limit * edge_limit {
+        junction_vertex(b, previous, next)?
+    } else {
+        None
+    };
+    if let Some(v) = shared_vertex {
+        let vertex = b.vertex(v)?;
+        let radius = tol::zone_tol3d(k, vertex.tolerance);
+        if end.distance(vertex.point) <= radius + end_zone
+            && start.distance(vertex.point) <= radius + start_zone
+        {
+            return Ok(edge_limit + 2.0 * radius);
+        }
+    }
+    Ok(edge_limit)
+}
+
 /// `IsClosed3d`: whether every gap between an edge use's end and its CCW neighbour's
 /// start is within their cross-section tolerance (`ZoneTol3d + ZoneTol3d`), with the
 /// gap reported; `true` for a vertex loop use (outputs zero). The local vertex
@@ -767,26 +797,16 @@ pub fn is_closed_3d(k: &Kernel, b: &Brep, lu: LoopuseId, check_all_gaps: bool) -
         // ThisEndPoint to NextStartPoint gap
         let gap_3d_sq = this_end_point.distance_squared(next_start_point);
 
-        // EdgeEnd/EdgeEnd tolerance
-        let mut xsect_tol_3d = tol::xsect_tol_3d_from_zones(k, this_zone_tol_3d, next_zone_tol_3d);
-        // An imported corner can carry more uncertainty than its incident edges.
-        // Both curve ends must still meet the same vertex within their own zones.
-        // The triangle inequality then bounds their gap by the two edge zones
-        // plus twice the vertex zone, without changing any stored tolerance.
-        let shared_vertex = if gap_3d_sq > xsect_tol_3d * xsect_tol_3d {
-            junction_vertex(b, this_eu, next_eu)?
-        } else {
-            None
-        };
-        if let Some(v) = shared_vertex {
-            let vertex = b.vertex(v)?;
-            let radius = tol::zone_tol3d(k, vertex.tolerance);
-            if this_end_point.distance(vertex.point) <= radius + this_zone_tol_3d
-                && next_start_point.distance(vertex.point) <= radius + next_zone_tol_3d
-            {
-                xsect_tol_3d += 2.0 * radius;
-            }
-        }
+        // The triangle inequality bounds a shared junction by both edge zones
+        // plus twice the vertex zone, provided each endpoint meets that vertex.
+        let xsect_tol_3d = junction_tolerance(
+            k,
+            b,
+            this_eu,
+            next_eu,
+            [this_end_point, next_start_point],
+            [this_zone_tol_3d, next_zone_tol_3d],
+        )?;
         let xsect_tol_3d_sq = tol::tol3d(xsect_tol_3d * xsect_tol_3d);
 
         // When Gap is largest - save maxGap values
@@ -1905,6 +1925,60 @@ mod tests {
         // Each endpoint must lie within the vertex and its own edge's zones.
         b.vertex_mut(corner).unwrap().point.z += 1e-3;
         assert!(!is_closed_3d(&k, &b, lu(0), true).unwrap().closed);
+    }
+
+    #[test]
+    fn surface_loop_and_curve_closure_share_bounded_vertex_junctions() {
+        let mut k = Kernel::default();
+        k.fixes.loop_use_reports_open_gaps = true;
+        k.fixes.check_loop_vertex_tolerance = true;
+        let corner = VertexId::from_index(2);
+        let gap = 6e-4;
+        let mut b = square(gap);
+        b.vertex_mut(corner).unwrap().tolerance = 2.6e-4;
+        b.vertex_mut(corner).unwrap().point.x += gap * 0.5;
+        let surface = Surface::from(Plane::new(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            crate::geom::vector2d::Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(-2.0, -2.0, 2.0, 2.0),
+        ));
+        // Keep UV ends tied to the geometric curves, independently of the
+        // vertex positions being tested. Without trims the UV ends use vertices.
+        for i in 0..8 {
+            let trim = b.edge(EdgeId::from_index(i / 2)).unwrap().curve.clone();
+            b.edgeuse_mut(eu(i)).unwrap().uv_trim_curve = trim;
+        }
+
+        let check = |b: &mut Brep, expected: bool| {
+            for side in [lu(0), lu(1)] {
+                b.loop_mut(LoopId::from_index(0)).unwrap().loopuse = Some(side);
+                let curve = is_closed_3d(&k, b, side, true).unwrap();
+                assert_eq!(curve.closed, expected);
+                let closure = crate::topology::trimming_tools::check_loop(
+                    &k,
+                    b,
+                    &surface,
+                    LoopId::from_index(0),
+                    1e-5,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(closure, if expected { 0 } else { 3 });
+            }
+        };
+        // Each endpoint is 3e-4 from the vertex (within 1e-4 + 2.6e-4).
+        // Their 6e-4 gap needs both vertex radii, beyond max(edge limit, radius).
+        check(&mut b, true);
+        assert_eq!(b.vertex(corner).unwrap().tolerance, 2.6e-4);
+
+        // The gap still fits the expanded bound, but one endpoint misses its zone.
+        b.vertex_mut(corner).unwrap().point.x += 1e-4;
+        check(&mut b, false);
+        // Both endpoints outside the vertex zone must also be rejected.
+        b.vertex_mut(corner).unwrap().point.z += 1e-3;
+        check(&mut b, false);
     }
 
     #[test]

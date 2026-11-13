@@ -110,6 +110,7 @@ fn object_info(b: &Brep, object: Object) -> Result<(ObjectKey, i64, &'static str
 struct Reports<'a> {
     array: Option<&'a mut AssertArray>,
     level: u8,
+    failed: bool,
 }
 
 impl Reports<'_> {
@@ -177,6 +178,7 @@ impl Reports<'_> {
         tol: f64,
         value: f64,
     ) -> Result<bool> {
+        self.failed |= !passed;
         let Some(array) = self.array.as_deref_mut() else {
             return Ok(passed);
         };
