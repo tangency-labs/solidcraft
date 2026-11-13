@@ -13,7 +13,8 @@
 )]
 
 use solidcore_ops::blend_surface::{
-    blend_edges, fillet_sheets, BlendEdges, BlendSide, FilletSheets, Section,
+    blend_edges, fillet_crossing, fillet_sheets, BlendEdges, BlendSide, FilletCrossing,
+    FilletSheets, Section, SheetSide,
 };
 use solidcore_ops::continuity::{ContinuityTolerances, SeamReport};
 use solidcore_ops::sweep::railed::Continuity;
@@ -405,6 +406,141 @@ fn malformed_fillets_are_refused() {
     );
     assert!(matches!(
         fillet_sheets(&a, &apart, &fillet_how(Section::Radius(5.0), false)),
+        Err(Error::Unsupported(_))
+    ));
+}
+
+// ---- fillet between two crossing sheets ------------------------------------------------------
+
+/// Two flat sheets crossing at a right angle along the line x = z = 0: the first in z = 0 for x
+/// in -10..10, the second in x = 0 for z in -10..10, both 10 deep along y.
+fn cross() -> (Body, Body) {
+    let (a, _) = sheet(
+        line([-10.0, 0.0, 0.0], [-10.0, 10.0, 0.0]),
+        line([10.0, 0.0, 0.0], [10.0, 10.0, 0.0]),
+    );
+    let (b, _) = sheet(
+        line([0.0, 0.0, -10.0], [0.0, 10.0, -10.0]),
+        line([0.0, 0.0, 10.0], [0.0, 10.0, 10.0]),
+    );
+    (a, b)
+}
+
+fn crossing(sides: [SheetSide; 2], section: Section, trim: bool) -> FilletCrossing {
+    FilletCrossing {
+        sides,
+        fillet: FilletSheets {
+            tolerance: 1e-5,
+            ..fillet_how(section, trim)
+        },
+    }
+}
+
+const SIDES: [[SheetSide; 2]; 4] = [
+    [SheetSide::Front, SheetSide::Front],
+    [SheetSide::Front, SheetSide::Back],
+    [SheetSide::Back, SheetSide::Front],
+    [SheetSide::Back, SheetSide::Back],
+];
+
+/// Radius 5 in each of the four quadrants the side choices name: each fillet a quarter cylinder
+/// touching each sheet 5 from the crossing, and the four in four different quadrants.
+#[test]
+fn a_radius_5_fillet_sits_in_the_quadrant_the_sides_choose() {
+    let (a, b) = cross();
+    let mut quadrants = Vec::new();
+    for sides in SIDES {
+        let f = fillet_crossing(&a, &b, &crossing(sides, Section::Radius(5.0), false)).unwrap();
+        assert_eq!(f.fillet.counts().unwrap()[0], 1, "{sides:?}");
+        let area = f.fillet.area(1e-10).unwrap();
+        assert!(
+            (area - quarter_cylinder()).abs() <= 1e-4,
+            "{sides:?}: {area}"
+        );
+        let x = [5.0, -5.0]
+            .into_iter()
+            .find(|&x| has_edge_through(&f.fillet, [x, 5.0, 0.0]));
+        let z = [5.0, -5.0]
+            .into_iter()
+            .find(|&z| has_edge_through(&f.fillet, [0.0, 5.0, z]));
+        let (Some(x), Some(z)) = (x, z) else {
+            panic!("{sides:?}: contact lines not 5 from the crossing");
+        };
+        assert!(!quadrants.contains(&(x, z)), "{sides:?} repeats ({x}, {z})");
+        quadrants.push((x, z));
+        assert!(f.trimmed.is_none());
+    }
+    assert_eq!(quadrants.len(), 4);
+}
+
+/// Trimmed, each sheet comes back as its kept half cut back to the fillet: 10 by 5.
+#[test]
+fn trimmed_crossing_sheets_keep_their_halves_cut_back_to_the_fillet() {
+    let (a, b) = cross();
+    let f = fillet_crossing(&a, &b, &crossing(SIDES[0], Section::Radius(5.0), true)).unwrap();
+    let (ta, tb) = f.trimmed.unwrap();
+    for t in [&ta, &tb] {
+        let area = t.area(1e-10).unwrap();
+        assert!((area - 50.0).abs() <= 1e-4, "{area}");
+    }
+}
+
+/// The curvature-continuous fillet between crossing sheets: G2 at both seams.
+#[test]
+fn a_g2_fillet_between_crossing_sheets_is_curvature_continuous() {
+    let (a, b) = cross();
+    let f = fillet_crossing(&a, &b, &crossing(SIDES[0], Section::Curvature(5.0), true)).unwrap();
+    assert_eq!(f.seams.len(), 2, "{:?}", f.seams);
+    for seam in &f.seams {
+        holds(seam, 2);
+    }
+}
+
+/// A cylinder's wall (radius 10, axis z, from z = -10 to 10) through a flat sheet in z = 0: a
+/// radius 2 fillet runs round where they cross, tangent to both.
+#[test]
+fn a_fillet_runs_round_a_cylinder_crossing_a_sheet() {
+    let solid = solidcore_ops::make_cylinder([0.0, 0.0, -10.0], 10.0, 20.0).unwrap();
+    let (_, order) = solid.to_record().unwrap();
+    // the caps are its flat faces: the kernel gives them a plane normal, the wall none
+    let caps: Vec<usize> = (0..order.faces.len())
+        .filter(|&f| solid.face_plane_normal(&order, f).unwrap().is_some())
+        .collect();
+    let wall = solidcore_ops::trim::remove_faces(&solid, &order, &caps).unwrap();
+    let (plate, _) = sheet(
+        line([-20.0, -20.0, 0.0], [-20.0, 20.0, 0.0]),
+        line([20.0, -20.0, 0.0], [20.0, 20.0, 0.0]),
+    );
+    let f = fillet_crossing(
+        &wall,
+        &plate,
+        &crossing(SIDES[0], Section::Radius(2.0), false),
+    )
+    .unwrap();
+    assert!(f.fillet.counts().unwrap()[0] >= 1);
+    assert!(!f.seams.is_empty());
+    for seam in &f.seams {
+        holds(seam, 1);
+    }
+}
+
+/// The refusals: sheets that stand apart, one sheet twice, a sheet of several faces.
+#[test]
+fn malformed_crossing_fillets_are_refused() {
+    let (a, b) = cross();
+    let how = crossing(SIDES[0], Section::Radius(5.0), false);
+    let (apart, _) = sheet(
+        line([30.0, 0.0, -10.0], [30.0, 10.0, -10.0]),
+        line([30.0, 0.0, 10.0], [30.0, 10.0, 10.0]),
+    );
+    assert!(matches!(
+        fillet_crossing(&a, &apart, &how),
+        Err(Error::Unsupported(_))
+    ));
+    assert_eq!(fillet_crossing(&a, &a, &how).err(), Some(Error::Argument));
+    let boxed = solidcore_ops::make_box([0.0; 3], [1.0; 3]).unwrap();
+    assert!(matches!(
+        fillet_crossing(&boxed, &b, &how),
         Err(Error::Unsupported(_))
     ));
 }
