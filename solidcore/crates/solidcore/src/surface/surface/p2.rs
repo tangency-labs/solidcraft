@@ -79,10 +79,10 @@
 //!   ([`Surface::global_surface_intersect_with_partial`]). The general intersection
 //!   resets them first (`SmSurfaceIntersector::DoIntersection`): a special case that asks
 //!   for it keeps none of its own outputs.
-//! - **Touching loops** (not upstream, WR-405, tangency-labs/solidcore#892, opt-in
-//!   `Kernel::fixes.join_touching_loops`): `create_plane_with_3d_curves`
-//!   joins a loop touching another loop of its face at a vertex into that loop
-//!   (`join_touching_loops`, the SolidCraft fork's `JoinTouchingLoops`).
+//! - **Touching loops** (not upstream, WR-405, tangency-labs/solidcore#892):
+//!   `create_plane_with_3d_curves` joins a loop touching another loop of its face at a
+//!   vertex into that loop (`join_touching_loops`, the SolidCraft fork's
+//!   `JoinTouchingLoops`).
 //! - **`IsParallelToVector`** (WR-39, #2145, opt-in
 //!   `Kernel::fixes.surface_parallel_to_vector_checks`): [`Surface::is_parallel_to_vector`]
 //!   forwards `k` to [`BSplineSurface::is_parallel_to_vector_with_kernel`] and
@@ -3399,7 +3399,7 @@ impl Surface {
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => base_edit(),
-            SurfaceKind::Plane(s) => s.reparameterize_with_kernel(k, new_domain),
+            SurfaceKind::Plane(s) => s.reparameterize(new_domain),
             // the inherited SmSurfOfRevolution::Reparameterize with the cone's iso curves
             SurfaceKind::Cone(s) => s.reparameterize(k, new_domain),
             SurfaceKind::Sphere(s) => s.reparameterize(k, new_domain),
@@ -4420,19 +4420,17 @@ impl Surface {
             tol_3d,
         )?;
 
-        // not upstream (WR-405, #892, opt-in): an inner loop touching another loop of
-        // its face at a vertex is part of that loop
-        if k.fixes.join_touching_loops {
-            join_touching_loops(
-                k,
-                curves,
-                &mut ordered,
-                &mut loop_counts,
-                &mut orients,
-                &mut outer_loop_counts,
-                tol_3d,
-            )?;
-        }
+        // not upstream (WR-405, #892): an inner loop touching another loop of its face at
+        // a vertex is part of that loop
+        join_touching_loops(
+            k,
+            curves,
+            &mut ordered,
+            &mut loop_counts,
+            &mut orients,
+            &mut outer_loop_counts,
+            tol_3d,
+        )?;
 
         // make ortho-normal vector set from PlaneNormal vector
         let [_, plane_x_vect, mut plane_y_vect] = plane_normal.make_unit_ortho_vectors(None)?;
@@ -8858,7 +8856,6 @@ mod issue_892_tests {
         let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
 
         let mut k = Kernel::default();
-        k.fixes.join_touching_loops = true;
         // the plane's loops: the hole joined into the outline, one loop of 8 curves
         let plane =
             crate::surface::surface::Surface::create_plane_with_3d_curves(&k, &curves, 1e-6)
@@ -8884,19 +8881,16 @@ mod issue_892_tests {
     }
 
     /// The same 10 x 6 plate with the triangular hole whose corner touches the outline
-    /// at (0, 3), built through the public capped sweep with only
-    /// `Kernel::fixes.join_touching_loops` toggled (WR-405). With the flag off (the
-    /// default, upstream's separate loops) the hole is a second outer loop, so the sweep
-    /// builds 12 faces with volume 122: both loops are taken as material, the plate plus
-    /// the hole's prism (area 1, 2 long) instead of the plate less it. With the flag on it
-    /// is 10 faces and volume 118 (the plate less the hole). `check_brep` at `Level2`
-    /// passes both bodies: validity does not see the difference, only the loops, the face
-    /// count and the volume do.
+    /// at (0, 3), built through the public capped sweep (WR-405). The hole is joined
+    /// into the outline, so the sweep builds 10 faces with volume 118: the plate less the
+    /// hole's prism (area 1, 2 long). Upstream keeps the hole as a second outer loop and
+    /// builds 12 faces with volume 122, the plate plus the prism, which `check_brep` at
+    /// `Level2` passes all the same.
     #[test]
-    fn issue_892_only_join_touching_loops_changes_the_sweep() {
+    fn issue_892_join_touching_loops_cuts_the_hole() {
         // the plane's loop structure, the sweep's face count and volume, and the
-        // whole-body check's failure lines, for one setting of the flag
-        fn measure(join: bool) -> (Vec<usize>, Vec<usize>, usize, f64, Vec<String>) {
+        // whole-body check's failure lines
+        fn measure() -> (Vec<usize>, Vec<usize>, usize, f64, Vec<String>) {
             let points = |p: &[(f64, f64)]| -> Vec<Curve> {
                 p.iter()
                     .zip(p.iter().cycle().skip(1))
@@ -8914,7 +8908,6 @@ mod issue_892_tests {
             let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
 
             let mut k = Kernel::default();
-            k.fixes.join_touching_loops = join;
             let plane =
                 crate::surface::surface::Surface::create_plane_with_3d_curves(&k, &curves, 1e-6)
                     .unwrap();
@@ -8945,15 +8938,7 @@ mod issue_892_tests {
             )
         }
 
-        // the flag is not part of the default kernel: pin it before either run
-        assert!(!Kernel::default().fixes.join_touching_loops);
-        let (outer, loops, faces, volume, lines) = measure(false);
-        assert_eq!((outer, loops), (vec![2], vec![5, 3]));
-        assert_eq!(faces, 12);
-        assert!((volume - 122.0).abs() < 1e-6, "volume {volume}");
-        assert!(lines.is_empty(), "{lines:?}");
-
-        let (outer, loops, faces, volume, lines) = measure(true);
+        let (outer, loops, faces, volume, lines) = measure();
         assert_eq!((outer, loops), (vec![1], vec![8]));
         assert_eq!(faces, 10);
         assert!((volume - 118.0).abs() < 1e-6, "volume {volume}");

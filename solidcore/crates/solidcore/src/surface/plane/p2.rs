@@ -25,9 +25,8 @@
 //!   the geometric tolerance is returned as a point curve at the interval midpoint,
 //!   including a trailing interval at the source curve's end. The extent bound
 //!   includes arithmetic rounding.
-//! - **Plane first with a torus (opt-in, not upstream).** With
-//!   `fixes.plane_first_torus_section_exact` (WR-721, #2405) `GlobalSurfaceIntersect` takes a
-//!   torus's own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV
+//! - **Plane first with a torus (not upstream, WR-721, #2405).** `GlobalSurfaceIntersect`
+//!   takes a torus's own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV
 //!   curves swapped as for a surface of revolution); upstream has no torus case and marches it.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are
 //!   dropped. `GlobalSurfaceIntersect`'s and `IntersectWithPlane`'s optional output
@@ -1680,9 +1679,9 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             need_nurb_intersection = x.needs_more_intersections;
             *out = SurfaceIntersection::from(x);
         }
-        // Not upstream (WR-721, #2405, opt-in): the torus's own plane section, as for a
-        // surface of revolution (upstream has no SmTorus case: the default branch)
-        SurfaceKind::Torus(torus) if k.fixes.plane_first_torus_section_exact => {
+        // Not upstream (WR-721, #2405): the torus's own plane section, as for a surface of
+        // revolution (upstream has no SmTorus case: the default branch)
+        SurfaceKind::Torus(torus) => {
             // the plane's boxes take its face's tolerance
             let need = torus.intersect_with_plane_owned_into(
                 k,
@@ -1695,8 +1694,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
             need_nurb_intersection = need?;
         }
-        SurfaceKind::Torus(_)
-        | SurfaceKind::BSpline(_)
+        SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)

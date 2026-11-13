@@ -596,8 +596,6 @@ pub struct UpstreamFixes {
     pub refine_cc_range_ends: bool,
     /// `SmSurface::GetFlatCorners` tests each corner bit instead of clearing the others (WR-384, #525).
     pub flat_corners_test_bits: bool,
-    /// `SmSurfaceCache::GetSurfaceContinuity` checks the last internal V knot (`iv + 1 < rVConts.GetSize()`) rather than skipping it (`iv + 1 < rVConts.GetSize() - 1`) (WR-42).
-    pub surface_continuity_checks_last_v_knot: bool,
     /// `sm_GoodDropResult` (`SmSurface::DropPoint` given a guess) refuses a local solve's result when the result is farther from the point than its guess, as its comment says; upstream measures its two distances the wrong way round (`dDsqGuess` to the result, `dDsqResult` to the guess), so it refused a result nearer than its guess, sending the drop to the global solve, and took one farther. The same fork change also takes a local result as the foot only when the gap's components along the unit tangents are within the local solve's tight tolerance, `SM_EFF_ZERO (1 + max|P|)` (their sum under it; an interior result each under it), where upstream takes any foot 1e-4 off (an interior one 1e-3 off in each direction); a stalled solve goes to the global solve (WR-56, #1852; the fork's tangency-labs/smlib@eaa998a (was 0b4de8c) / eaa998a, fork PR #70).
     pub good_drop_result_distances_in_order: bool,
     /// `SmTwistVolume::EvaluateSimple` uses positive `per * cos` for the y
@@ -618,16 +616,6 @@ pub struct UpstreamFixes {
     /// Volume line-domain checks using `SmExtent3d::ContainsLineSeg3d` require
     /// both endpoints inside the natural parameter box instead of either (WR-3).
     pub extent3d_contains_both_segment_endpoints: bool,
-    /// `SmSurface::LocalSurfaceIntersect`'s out-of-bounds boundary retries guard both
-    /// the minimum and maximum boundary tests of the second through fourth parameter
-    /// branches (`v` of `this`, `u` of `other`, `v` of `other`) with `!bFoundSolution`,
-    /// matching step 1, instead of binding `!bFoundSolution` only to the minimum test
-    /// via `!bFoundSolution && min || max` and re-running `sm_IntersectSrfBndryCrv` at
-    /// a maximum boundary where a failed solve overwrites an already-found boundary
-    /// solution (WR-99, #2210;
-    /// `plan/upstream-issues/WR-99--addendum-2026-11-01-guard-max-boundary-retry.md`).
-    /// Off by default for pinned C++ parity.
-    pub local_surface_intersect_guards_max_boundary_retry: bool,
     /// `SmTrackTopologyChanges::StopTracking` clears the context's system notify
     /// callback and records post-edit dependencies only when the context's currently
     /// installed callback is this tracker's own (`IsTracking`), instead of whenever
@@ -641,11 +629,6 @@ pub struct UpstreamFixes {
     pub cylinder_rebuild_mean_radius: bool,
     /// `SmCylinder::IsNurbSurfaceCylinder` gives an inside-out NURB (its iso circles turning against the line through their centres) the frame `IsNurbSurfaceCone` gives one: Z against the NURB's linear direction, origin at its top-knot circle; upstream keeps the bottom-knot circle and the NURB's direction, so the cylinder's Z is reversed and its STEP evaluation is mirrored in height (WR-496, #1463).
     pub nurb_cylinder_inside_out_frame: bool,
-    /// `SmPlane::Reparameterize` moves the placement origin to `sOriginMax` when the UV domain
-    /// is reparameterized, maintaining consistency between analytic plane and NURB evaluations
-    /// across shifted domains; upstream computes `sOriginMax` but only references it under
-    /// `SM_DEBUG_CODE` (WR-41). Off by default for pinned C++ parity.
-    pub plane_reparameterize_moves_origin: bool,
     /// `SmCurveBoundedSurface::ReadFromDB` dispatches each UV boundary curve on its own
     /// stream header type (`lUVType`) instead of reusing the last 3D boundary's type
     /// (`l3DType`, `0` when there are no 3D boundaries), and passes the read
@@ -690,8 +673,6 @@ pub struct UpstreamFixes {
     pub curve_sweep_closed_path_joins_ends: bool,
     /// `CreateLinearSweep` makes a circular arc short of a whole turn that is swept square to its plane an `SmCylinder` bounded 0..its sweep angle by 0..the distance, its frame turned to the arc's start (for a sweep against the arc's normal, to its end and then flipped), where upstream makes a cylinder only of a whole circle and an `SmSurfOfExtrusion` of any other arc; a sweep that is not square stays a surface of extrusion (WR-565, #1477; SolidCraft change, tangency-labs/smlib 12918e9).
     pub linear_sweep_arc_is_cylinder: bool,
-    /// Planar faces from curves join a loop touching another loop at a vertex into that loop (WR-405, #892).
-    pub join_touching_loops: bool,
     /// `sm_CheckEdgeuseGeometry` evaluates the clockwise neighbour in UV space with
     /// `SmEdgeuse::NormalizedEvaluate(.., TRUE, ..)`, whose `GetOrCreateUVTrimCurve`
     /// stores a new UV trim curve on that neighbour: a `const` validation
@@ -1119,8 +1100,6 @@ pub struct UpstreamFixes {
     pub fillet_overflow_crease_along_edge: bool,
     /// A convex blend whose section between its rails would break through the part (leave its material through a face and come back into it, where one of the faces it crosses there shares no edge with the blended faces: a hollow behind a wall, such as a round on a wall thinner than it reaches into the hollow behind, or a blind pocket or cavity under a blended face, which the pinned construction builds into a body that intersects itself or has the wrong volume) is refused with `FilletErrorType::NoRoom` (`NoRoomReason::BreaksThrough`), naming the largest size whose sections do not break through, and that size less the fit margin is the refusal's fit (`SolidError::FilletRefused`). A section that runs off its face (past a cliff, into a hole or an opening: the part beyond it reaches a rail) or through a hole in a blended face does not break through. The same 32 sections as `BandCutsThePart` are judged; the faces at the blended edge's ends, which the corners trim, are not ([`crate::blend::fillet_executive::session::band_cuts::band_breaks_through_the_part`]). Not the fork's: fork 5e8c9c1 segfaults in `DoFilleting` on #2299's case (WR-707, #2299; addendum `plan/upstream-issues/WR-707--addendum-2026-11-02-rounds-running-off-their-faces.md`).
     pub fillet_refuse_rounds_breaking_through: bool,
-    /// `SmPlane::GlobalSurfaceIntersect` with a torus as the other surface takes the torus's own plane section (`SmSurfOfRevolution::IntersectWithPlane` with the torus's iso circles: the circles of a plane square to the axis, the meridians of a plane through it), the orders and UV curves swapped as for a surface of revolution, where upstream has no torus case and marches it (circles 1.4e-6 off, meridians 3.5e-6 off); a meridian keeps its generator's circle kind (WR-721, #2405; solidcore-native, no fork commit).
-    pub plane_first_torus_section_exact: bool,
     /// A face made from exact pcurves keeps them as its edge uses' trims where upstream drops them and projects each edge's curve again later, a fit: the draft extrusion's curvature-keeping and tangent-plane walls ([`crate::primitive::primitive_creation::p2::PrimitiveCreationAccess::face_with_curves`]) pass theirs to `SmBrep::MakeFaceWithCurves` with `pbOptCrvOnSurf` set, and `SmBrep::CopyFaces` without the merge passes a face's own trims (`CreateCurvesFromFace`) on to its copy. And `MakeFaceWithCurves`'s keep step (`CreateUVTrimCurves(&uv, &orients)`) flips the orientations for a face made with its surface's orientation opposite: they are given along the loop, and `sm_FindBestUVCurve` matches them against the upward face use's edge uses, which run the other way there, so upstream's tangent test refuses every exact curve and each is projected again. A draft half disc's cone wall then keeps its seam pcurves on their edges to 1.2e-13, where upstream's are 2.4e-6 off. And an arc's draft wall on its cone covers just its face (from its seams' least angle to their greatest, exact), not the seams' padded reach, which `SmBrep::ShrinkGeometry` trimmed to the face where the pad passed a thousandth of the face's size, removing the exact trims to project the edges again; so a seam cut at a span end of the cone keeps its quartics (#2497) (WR-722, #2405; solidcore-native, no fork commit).
     pub keep_exact_pcurves: bool,
     /// A face's planar section with no approximation tolerance given (`SmBrep::CreatePlanarSectionCurves` and `SmSurface::CreatePlanarSectionCurves` through [`crate::topology::brep::planar_section::face_planar_section_curves`], `SmApiIntersectBrepWithPlane`) is traced to the face's tolerance, as the curves are to lie within it of the face, where upstream passes the null on and the surface intersector traces to its default, 1/1000 of the surface's size: a G^n round's section on a 40 x 30 x 20 box left the round by 5.2e-3 at a face tolerance of 1.6e-4 (WR-723, #2451; solidcore-native, no fork commit).

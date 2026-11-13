@@ -3,8 +3,8 @@
 //! triangular hole whose corner touches it at (0, 3), as eight lines in the record's 24
 //! orders (none, the outline or the hole reversed, every rotation of the list), swept 2
 //! along +z with caps by `create_linear_sweep`. The caps go through
-//! `create_plane_with_3d_curves`, so through `order_curves_into_loops` (#2423), with
-//! `join_touching_loops` (WR-405) on as SolidCraft runs it.
+//! `create_plane_with_3d_curves`, so through `order_curves_into_loops` (#2423) and
+//! `join_touching_loops` (WR-405).
 //!
 //! The fork has this case in one order: tangency-labs/smlib@1f2b0c4, capi test
 //! `capi/tests/sweeps.cpp` "extrude plate notched at a corner" (`smlib_extrude` of the same
@@ -119,7 +119,6 @@ fn orders() -> Vec<(usize, usize, Vec<Curve>)> {
 
 fn kernel(round: bool) -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.join_touching_loops = true;
     k.fixes.loops_go_on_round_the_vertex = round;
     k
 }

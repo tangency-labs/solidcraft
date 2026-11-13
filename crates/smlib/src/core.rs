@@ -95,7 +95,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
-    f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
@@ -234,10 +233,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.check_seam_crossing_unclosed = true;
     f.ascii_doubles_round_trip = true;
     f.offset_edges_keep_source_tolerance = true;
-    f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
     f.stop_tracking_checks_own_callback = true;
-    f.plane_reparameterize_moves_origin = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.knot_vector_valid_requires_span = true;
     f.volume_representational_end_continuities = true;
@@ -250,7 +247,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.bend_volume_bbox_contains_wide_angle_and_inf_u = true;
     f.bend_volume_trim_param_box_across_period = true;
     f.degen_param_tiebreak_uses_actual_param = true;
-    f.local_surface_intersect_guards_max_boundary_retry = true;
     f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
@@ -268,7 +264,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_unbounded_parameterized_as_nurb = true;
     f.fillet_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
-    f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
     f.planar_section_face_tolerance = true;
     f.face_swap_uv_transposes_trims = true;
