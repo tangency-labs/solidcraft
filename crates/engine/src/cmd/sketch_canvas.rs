@@ -111,6 +111,7 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         plane,
         center,
         width,
+        height: None,
         angle: num(p, "angle").unwrap_or(0.0).to_radians(),
         opacity,
         flip: bool_(p, "flip").unwrap_or(false),
@@ -166,8 +167,12 @@ fn edit_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     if width.is_some_and(|w| !(w > 1e-6 && w < 1e7)) {
         return Err(bad(cmd, "`width` must be positive"));
     }
+    let height = num(p, "height");
+    if height.is_some_and(|h| !(h > 1e-6 && h < 1e7)) {
+        return Err(bad(cmd, "`height` must be positive"));
+    }
     // Unlocking in the same call lets the other changes through.
-    let moves = ["center", "width", "angle", "flip"].iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
+    let moves = ["center", "width", "height", "angle", "flip"].iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
     if moves && bool_(p, "locked") != Some(false) {
         refuse_locked(s, i, cmd)?;
     }
@@ -180,6 +185,9 @@ fn edit_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(w) = width {
         c.width = w;
+    }
+    if let Some(h) = height {
+        c.height = Some(h);
     }
     if let Some(a) = num(p, "angle") {
         c.angle = a.to_radians();

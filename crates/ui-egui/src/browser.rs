@@ -2637,12 +2637,13 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
 /// undo step.
 #[derive(Clone, Debug)]
 pub(crate) struct CanvasEditDrag {
-    /// 0 move, 1 scale, 2 rotate, 3 opacity.
+    /// 0 move, 1 scale, 2 rotate, 3 opacity, 4 flip_h, 5 flip_v, 6 stretch_x, 7 stretch_y.
     pub(crate) kind: u8,
     pub(crate) depth: usize,
     pub(crate) pointer: [f64; 2],
     pub(crate) center: [f64; 2],
     pub(crate) width: f64,
+    pub(crate) height: f64,
     pub(crate) angle: f64,
 }
 

@@ -80,13 +80,18 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     m.distance = m.distance.clamp(0.001, 1e6);
                 }
             } else {
-                let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);
+                let (mut x, mut y, mut w, mut h, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.height(), c.angle.to_degrees(), c.opacity, c.flip);
                 let mut changed = false;
+                let mut height_changed = false;
                 changed |=
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Center X"), |ui| ui_kit::length_field(ui, &mut x, &units, decimals)).changed();
                 changed |=
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Center Y"), |ui| ui_kit::length_field(ui, &mut y, &units, decimals)).changed();
                 changed |= ui_kit::row(ui, solidcraft_ui_text::tr_label("Width"), |ui| ui_kit::length_field(ui, &mut w, &units, decimals)).changed();
+                if ui_kit::row(ui, solidcraft_ui_text::tr_label("Height"), |ui| ui_kit::length_field(ui, &mut h, &units, decimals)).changed() {
+                    changed = true;
+                    height_changed = true;
+                }
                 changed |= ui_kit::row(ui, solidcraft_ui_text::tr_label("Angle"), |ui| ui_kit::angle_field(ui, &mut ang)).changed();
                 changed |= ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default()))
                     .changed();
@@ -95,7 +100,11 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     changed = true;
                 }
                 if changed {
-                    edit = Some(json!({ "canvas": name, "center": [x, y], "width": w.clamp(0.01, 1e6), "angle": ang, "opacity": op, "flip": flip }));
+                    let mut p = json!({ "canvas": name, "center": [x, y], "width": w.clamp(0.01, 1e6), "angle": ang, "opacity": op, "flip": flip });
+                    if height_changed || c.height.is_some() {
+                        p["height"] = json!(h.clamp(0.01, 1e6));
+                    }
+                    edit = Some(p);
                 }
             }
         });
@@ -137,6 +146,7 @@ fn edit_handles(c: &Canvas, plane: &Plane, proj: &Proj) -> Vec<(u8, Pos2)> {
     [
         (0, c.center), (1, bl), (1, br), (1, tr), (1, tl),
         (2, rotation), (3, opacity), (4, flip_h), (5, flip_v),
+        (6, (br + tr) * 0.5), (6, (bl + tl) * 0.5), (7, top),
     ]
     .into_iter()
     .filter_map(|(kind, point)| proj.to_screen(plane.to_world(point)).map(|screen| (kind, screen)))
@@ -213,7 +223,7 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
                 if kind == 5 { params["angle"] = json!(c.angle.to_degrees() + 180.0); }
                 panel.edit_drag = Some(crate::browser::CanvasEditDrag {
                     kind, depth: app.session.undo.len(), pointer: [local.x, local.y], center: [c.center.x, c.center.y],
-                    width: c.width, angle: c.angle,
+                    width: c.width, height: c.height(), angle: c.angle,
                 });
                 app.tree.canvas_panel = Some(panel);
                 let _ = app.run("canvas.edit", params);
@@ -221,7 +231,7 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
             }
             panel.edit_drag = Some(crate::browser::CanvasEditDrag {
                 kind, depth: app.session.undo.len(), pointer: [local.x, local.y], center: [c.center.x, c.center.y],
-                width: c.width, angle: c.angle,
+                width: c.width, height: c.height(), angle: c.angle,
             });
         }
     }
@@ -233,7 +243,12 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
         0 => { let next = centre + (local - start); params["center"] = json!([next.x, next.y]); }
         1 => {
             let before = start.dist(centre); let after = local.dist(centre);
-            if before > 1e-9 && after.is_finite() { params["width"] = json!((drag.width * after / before).clamp(1e-6, 1e7)); }
+            if before > 1e-9 && after.is_finite() {
+                params["width"] = json!((drag.width * after / before).clamp(1e-6, 1e7));
+                if c.height.is_some() {
+                    params["height"] = json!((drag.height * after / before).clamp(1e-6, 1e7));
+                }
+            }
         }
         2 => {
             let before = (start.y - centre.y).atan2(start.x - centre.x);
@@ -242,10 +257,27 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
         }
         3 => {
             let (sin, cos) = drag.angle.sin_cos();
-            let along = (local.x - centre.x) * cos + (local.y - centre.y) * sin;
+            let sign = if c.flip { -1.0 } else { 1.0 };
+            let along = ((local.x - centre.x) * cos + (local.y - centre.y) * sin) * sign;
             params["opacity"] = json!((along / drag.width + 0.5).clamp(0.0, 1.0));
         }
         4 | 5 => return true,
+        6 => {
+            let (sin, cos) = drag.angle.sin_cos();
+            let before = ((start.x - centre.x) * cos + (start.y - centre.y) * sin).abs();
+            let after = ((local.x - centre.x) * cos + (local.y - centre.y) * sin).abs();
+            if before > 1e-9 && after.is_finite() {
+                params["width"] = json!((drag.width * after / before).clamp(1e-6, 1e7));
+            }
+        }
+        7 => {
+            let (sin, cos) = drag.angle.sin_cos();
+            let before = (-(start.x - centre.x) * sin + (start.y - centre.y) * cos).abs();
+            let after = (-(local.x - centre.x) * sin + (local.y - centre.y) * cos).abs();
+            if before > 1e-9 && after.is_finite() {
+                params["height"] = json!((drag.height * after / before).clamp(1e-6, 1e7));
+            }
+        }
         _ => return false,
     }
     let depth = drag.depth;
@@ -559,13 +591,13 @@ mod tests {
         let (vals, _) = h.app.session.doc.param_values();
         let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
 
-        // 1. Verify all edit handles exist (center cross, 4 corners, rotation, opacity, 2 flip buttons)
+        // 1. Verify all edit handles exist (center cross, 4 corners, rotation, opacity, 2 flip buttons, 2 horizontal stretch, 1 vertical stretch)
         let handles = super::edit_handles(&c, &plane, &proj);
-        assert_eq!(handles.len(), 9, "expected 9 edit handles: center, 4 corners, rotate, opacity, flip_h, flip_v");
+        assert_eq!(handles.len(), 12, "expected 12 edit handles: center, 4 corners, rotate, opacity, flip_h, flip_v, stretch_x x2, stretch_y");
 
-        // Verify kinds: 0 (center), 1 (corners x 4), 2 (rotate), 3 (opacity), 4 (flip_h), 5 (flip_v)
+        // Verify kinds: 0 (center), 1 (corners x 4), 2 (rotate), 3 (opacity), 4 (flip_h), 5 (flip_v), 6 (stretch_x x 2), 7 (stretch_y)
         let kinds: Vec<u8> = handles.iter().map(|(k, _)| *k).collect();
-        assert_eq!(kinds, vec![0, 1, 1, 1, 1, 2, 3, 4, 5]);
+        assert_eq!(kinds, vec![0, 1, 1, 1, 1, 2, 3, 4, 5, 6, 6, 7]);
 
         // Pointer ownership over handles
         let center_screen = handles[0].1;

@@ -25,8 +25,11 @@ pub struct Canvas {
     pub plane: PlaneRef,
     /// Centre of the image on the plane (plane coordinates, mm).
     pub center: Vec2,
-    /// Width on the plane (mm); the height follows the image's aspect.
+    /// Width on the plane (mm); the height follows the image's aspect unless `height` is set.
     pub width: f64,
+    /// Optional explicit height on the plane (mm) for non-uniform stretching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
     /// Rotation on the plane (radians).
     #[serde(default)]
     pub angle: f64,
@@ -60,6 +63,9 @@ fn yes() -> bool {
 
 impl Canvas {
     pub fn height(&self) -> f64 {
+        if let Some(h) = self.height {
+            return h;
+        }
         let [w, h] = self.pixels;
         if w == 0 { self.width } else { self.width * f64::from(h) / f64::from(w) }
     }
