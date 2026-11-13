@@ -125,8 +125,7 @@ pub enum Skip {
     /// A minimal relief whose gap is so large that the circle reaches neither wall.
     Unreached,
     /// A face at a blind end leans over the corner so far that no relief fits above it: the
-    /// relief would have to stop short of the end by the edge's whole length or more, or the
-    /// face runs along the edge with the relief's circle through it.
+    /// relief would have to stop short of the end by the edge's whole length or more.
     Overhang,
 }
 
@@ -392,17 +391,13 @@ pub fn edge_relief(
     // How far the relief stops short of each blind end (an open end runs on past it).
     let short_of = |past: f64, there: Point3, here: Point3, faces: &[Option<Vec3>]| {
         if past > 0.0 {
-            Ok(Some(0.0))
+            Ok(0.0)
         } else {
             pull_back(there, here, faces, centre, o.radius)
         }
     };
-    let (Some(before), Some(after)) = (
-        short_of(past_start, edge.end, edge.start, at_start)?,
-        short_of(past_end, edge.start, edge.end, at_end)?,
-    ) else {
-        return Ok(EdgeRelief::Skipped(Skip::Overhang));
-    };
+    let before = short_of(past_start, edge.end, edge.start, at_start)?;
+    let after = short_of(past_end, edge.start, edge.end, at_end)?;
     let height = cylinder.height - before - after;
     if height <= STRAIGHT * cylinder.height.max(1.0) {
         return Ok(EdgeRelief::Skipped(Skip::Overhang));
@@ -423,9 +418,8 @@ pub fn edge_relief(
 /// `rise = d·n` (at most 0 for a blind face) and `n⊥ = n − d·rise` (its tilt, `|n⊥| = sin β`),
 /// the disc's lowest point sits `t·|rise| + n⊥·centre − radius·|n⊥|` above the plane when the
 /// relief stops `t` short, so `t = max(0, radius·|n⊥| − n⊥·centre) / |rise|`: 0 at a square
-/// end, at most `reach · tan β` for a circle within `reach` of the edge line. `None` when a face
-/// runs along the edge (`|rise|` at most [`STRAIGHT`]) with the circle through its plane: no
-/// pull-back clears it.
+/// end, at most `reach · tan β` for a circle within `reach` of the edge line. A face along the
+/// edge (`|rise|` at most [`STRAIGHT`]) is not read: no pull-back moves the relief off its plane.
 ///
 /// # Errors
 /// As [`end_slope`].
@@ -435,7 +429,7 @@ fn pull_back(
     faces: &[Option<Vec3>],
     centre: Vec3,
     radius: f64,
-) -> Result<Option<f64>> {
+) -> Result<f64> {
     let along = here - there;
     if !centre.is_finite() {
         return Err(invalid("points and normals must be finite"));
@@ -450,17 +444,17 @@ fn pull_back(
             return Err(invalid("a vector of zero length"));
         };
         let rise = d.dot(n);
-        let tilt = n - d * rise;
-        let lift = radius * tilt.length() - tilt.dot(centre);
-        if lift <= 0.0 {
+        // A face along the edge (a wall split at the end, say) does not bound the relief's end:
+        // stopping short moves nothing off its plane, which the relief beside the edge meets the
+        // same way along its whole length.
+        if rise.abs() <= STRAIGHT {
             continue;
         }
-        if rise.abs() <= STRAIGHT {
-            return Ok(None);
-        }
-        back = back.max(lift / rise.abs());
+        let tilt = n - d * rise;
+        let lift = radius * tilt.length() - tilt.dot(centre);
+        back = back.max(lift.max(0.0) / rise.abs());
     }
-    Ok(Some(back))
+    Ok(back)
 }
 
 /// What a straight edge between two planar faces is.

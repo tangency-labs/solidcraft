@@ -755,16 +755,20 @@ fn a_relief_stops_short_of_a_tilted_blind_floor() {
     };
     assert_eq!(c.base.z, 4.0);
     assert_eq!(c.height, 6.0 + R);
-    // A floor so steep that the relief would stop short by more than the edge's length, and a
-    // face along the edge with the circle through it: skipped, never cut under them.
+    // A floor so steep that the relief would stop short by more than the edge's length: skipped,
+    // never cut under it.
     let lean = Vec3::new(-FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0);
     let steep_n = (Vec3::Z * 0.05 + lean).unitize().unwrap();
     let steep: &[Option<Vec3>] = &[Some(steep_n)];
-    let along: &[Option<Vec3>] = &[Some(lean)];
-    for ends in [[steep, top], [along, top]] {
-        assert_eq!(
-            edge_relief(&up, &walls, ends, &o).unwrap(),
-            EdgeRelief::Skipped(Skip::Overhang)
-        );
-    }
+    assert_eq!(
+        edge_relief(&up, &walls, [steep, top], &o).unwrap(),
+        EdgeRelief::Skipped(Skip::Overhang)
+    );
+    // A face along the edge at its end (a wall split there, say) does not stop the relief short.
+    let split: &[Option<Vec3>] = &[Some(Vec3::Z), Some(Vec3::Y), Some(lean)];
+    let EdgeRelief::Relief(c) = edge_relief(&up, &walls, [split, top], &o).unwrap() else {
+        panic!("split wall: no relief");
+    };
+    assert_eq!(c.base.z, 4.0);
+    assert_eq!(c.height, 6.0 + R);
 }
