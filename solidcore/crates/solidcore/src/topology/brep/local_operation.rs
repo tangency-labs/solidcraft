@@ -20,8 +20,7 @@
 //! and the copy back gives them to the B-rep (SMLib's Copy handler), so each face keeps
 //! its attributes as upstream's do. `SmTemporaryChangeValue` of
 //! `m_bEditingEnabled` is a set and restore of the flag. The debug drawing code is omitted. No
-//! recursion is introduced here. Opt-in (WR-534,
-//! `Kernel::fixes.local_operation_box_holds_new_surfaces`, the fork's
+//! recursion is introduced here. Not upstream (WR-534, the fork's
 //! tangency-labs/smlib@a1ee273): the box that sizes the executive's offset distance also
 //! holds the replacement surfaces. (not upstream) The B-rep's cached topology fields are
 //! refreshed before the operation returns ([`Brep::refresh_cached_topology`]), as every
@@ -259,27 +258,25 @@ fn local_operation_on(
 
     // the Brep's bounding sphere gives the executive an offset distance it does not use
     let mut bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
-    // Not upstream (WR-534), opt-in `local_operation_box_holds_new_surfaces` (the fork's
-    // tangency-labs/smlib@a1ee273): the box also holds the replacement surfaces. Their
+    // Not upstream (WR-534, the fork's tangency-labs/smlib@a1ee273): the box also holds
+    // the replacement surfaces. Their
     // faces' edges are found by extending the neighbouring surfaces to meet them, by a
     // distance sized from this box: sized from the original body alone, a face moved
     // further than about its size away left the extended neighbours short of it.
-    if k.fixes.local_operation_box_holds_new_surfaces {
-        for (j, slot) in placed.iter().enumerate() {
-            let surface = match (given.get(j).and_then(Option::as_ref), slot) {
-                (Some(surface), _) => surface,
-                (None, Some(at)) => new_list
-                    .get(*at)
-                    .ok_or_else(|| null("the placed new surface"))?,
-                (None, None) => continue,
-            };
-            let domain = surface.natural_uv_domain_with_nurb(k)?;
-            let surf_box = surface
-                .calculate_bounding_box(k, &domain, [true, false, false], true)?
-                .normal_box
-                .ok_or_else(|| null("the new surface's bounding box"))?;
-            bbox = bbox.union(&surf_box);
-        }
+    for (j, slot) in placed.iter().enumerate() {
+        let surface = match (given.get(j).and_then(Option::as_ref), slot) {
+            (Some(surface), _) => surface,
+            (None, Some(at)) => new_list
+                .get(*at)
+                .ok_or_else(|| null("the placed new surface"))?,
+            (None, None) => continue,
+        };
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let surf_box = surface
+            .calculate_bounding_box(k, &domain, [true, false, false], true)?
+            .normal_box
+            .ok_or_else(|| null("the new surface's bounding box"))?;
+        bbox = bbox.union(&surf_box);
     }
     let radius = bbox.sphere_bound().radius;
     let tolerance = b.tolerance();
@@ -1705,7 +1702,6 @@ mod tests {
     #[test]
     fn moves_the_top_of_a_box_further_than_its_size() {
         let mut k = Kernel::default();
-        k.fixes.local_operation_box_holds_new_surfaces = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 80.0), Vec3::Z));
@@ -1746,7 +1742,6 @@ mod tests {
     #[test]
     fn a_far_top_on_a_unit_square_plane_is_refused_as_not_sound() {
         let mut k = Kernel::default();
-        k.fixes.local_operation_box_holds_new_surfaces = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::new(

@@ -94,7 +94,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.revolve_analytic_profile_faces = true;
     f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
-    f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_walls_touch_refused = true;
@@ -143,7 +142,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.found_torus_sphere_keep_tested_nurb = true;
     f.boolean_skips_faces_apart = true;
     f.uv_trim_checks_on_surface = true;
-    f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.iso_curve_sliver_domain_is_degenerate = true;
