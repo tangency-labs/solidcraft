@@ -679,7 +679,8 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
     /// part does not narrow its normals, and a line lying in it is a coincidence, which
     /// the leaf's own solve takes. A leaf whose surface cannot bound a part on its own
     /// ([`SurfaceCache::boxes_over`] is `None`) is one part, solved as upstream solves it.
-    /// An explicit stack, at most [`MAX_PART_DEPTH`] deep and [`MAX_PARTS`] parts.
+    /// An explicit stack, at most [`MAX_PART_DEPTH`] deep and [`MAX_PARTS`] parts, that
+    /// polls cancellation once per part.
     fn parts_crossed_once(
         &self,
         k: &Kernel,
@@ -691,6 +692,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         let mut parts = Vec::new();
         let mut stack = vec![(leaf.domain, 0_u32)];
         while let Some((domain, depth)) = stack.pop() {
+            k.check_cancelled(OP_LSI)?;
             // a surface with no bounds of a part's own (an offset surface, say) bounds
             // every part as the whole leaf: halving drops nothing and narrows nothing, so
             // the leaf is solved whole, as upstream solves it
@@ -949,7 +951,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // so does this. A ray drops a first crossing behind its start before that search,
         // so the crossing ahead was never looked for: a ray's leaf is solved part by part,
         // each part crossed at most once, so a crossing behind the start cannot hide one
-        // ahead of it (WR-758, #3120).
+        // ahead of it (WR-758, #3120). A leaf whose surface cannot bound a part on its own
+        // ([`SurfaceCache::boxes_over`] is `None`: an offset or a procedural blend) stays
+        // one part, solved as upstream solves it.
         let line_vec = self.line_vector.unitize()?;
         let crossed_twice = cache
             .polar_box_unstored(k, surface_id)?
@@ -961,6 +965,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                     part.interval,
                     line_curve(self.line_point, self.line_vector),
                 );
+                k.check_cancelled(OP_LSI)?;
                 self.solve_part(k, &part_leaf, part.once)?;
             }
         } else if self.solve_part(k, &leaf, !crossed_twice)? {

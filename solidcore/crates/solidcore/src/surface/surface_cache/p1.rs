@@ -2658,9 +2658,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// most once, [`crate::surface::surface::p2::LsiGlobalSolver`]). A B-spline's own
     /// boxes are its whole net's whatever the domain, so the box is the net's of the
     /// sub-patch over `domain` (`CopySubPatch`), its normals the surface's own; a plane's
-    /// is its domain's. `None` for a surface carried by no B-spline net and not a plane
-    /// (an offset, procedural blend, curve-bounded or STEP surface): its bounds are the
-    /// whole surface's whatever the domain, so they tell nothing of one part. A box or
+    /// is its domain's. `None` for any other surface: one whose boxes are a base's grown
+    /// by a bound of its own (an offset, a procedural blend, whose net's sub-patch alone
+    /// would not hold its points) or one with no net (a curve-bounded or STEP surface),
+    /// whose bounds are the whole surface's whatever the domain. A box or
     /// normal map the surface cannot bound is `None` in the pair.
     ///
     /// # Errors
