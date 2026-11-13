@@ -51,7 +51,10 @@
 //!   definitions show to lie on different surfaces
 //!   ([`crate::query::face::p1::faces_on_other_surfaces`]) is held back likewise. Where the
 //!   faces part by more than the tolerance the sector decides; where a step leaves a face
-//!   or the rounds run out first, the class is returned.
+//!   or the rounds run out first, the class is returned. Three planes are read once, at
+//!   the edge: two of them closer than 0.001° there are coincident only where their faces
+//!   stay within the tolerance band of each other's plane; walls 3.3e-7 rad apart through
+//!   the edge, 2.8e-5 apart 85 mm from it, are classified by their exact binormals.
 //! - **Loops.** The step-off loops of both classifications keep upstream's bound (20
 //!   rounds of growing step-offs). No recursion.
 

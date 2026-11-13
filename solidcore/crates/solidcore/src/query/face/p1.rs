@@ -49,7 +49,7 @@ use crate::error::ignored;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::tol::xsect_tol_3d_from_zones;
+use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::point_class::{ClassGeometry, PointClassType, PointClassification};
@@ -138,11 +138,12 @@ pub fn surface_comparison_extent(
 }
 
 /// Not upstream: whether the definitions show the surfaces of two faces to be different
-/// surfaces: two different analytic kinds ([`Surface::is_other_analytic_kind`]), or two
-/// quadrics of one kind that [`Surface::same_analytic_surface`] tells apart within
+/// surfaces: two different analytic kinds ([`Surface::is_other_analytic_kind`]), two planes
+/// whose faces part by more than their tolerance band ([`planes_part`]), or two quadrics of
+/// one kind that [`Surface::same_analytic_surface`] tells apart within
 /// [`surface_comparison_extent`]. Faces on such surfaces meet in curves and points, however
-/// parallel they leave a common edge. `false` where the definitions cannot tell (two planes,
-/// a B-spline, an offset, an extrusion, a revolution): the faces may be on one surface.
+/// parallel they leave a common edge. `false` where the definitions cannot tell (a B-spline,
+/// an offset, an extrusion, a revolution): the faces may be on one surface.
 ///
 /// # Errors
 ///
@@ -163,6 +164,9 @@ pub fn faces_on_other_surfaces(
     if a.is_other_analytic_kind(b) {
         return Ok(true);
     }
+    if let (SurfaceKind::Plane(pa), SurfaceKind::Plane(pb)) = (a.kind(), b.kind()) {
+        return planes_part(k, brep, face, pb, other, other_face, pa);
+    }
     // of one kind, only quadrics have definitions that tell two surfaces apart
     let quadric = |s: &Surface| {
         matches!(
@@ -175,6 +179,67 @@ pub fn faces_on_other_surfaces(
     }
     let (tol, region) = surface_comparison_extent(k, brep, face, other, other_face)?;
     Ok(a.same_analytic_surface(b, tol, &region) == Some(false))
+}
+
+/// Points on a curved edge, besides its ends, at which the gap to the other plane is read.
+const PLANE_GAP_EDGE_SAMPLES: u32 = 8;
+
+/// Not upstream: whether the planar faces `face` (on `face_plane`) and `other_face` (on
+/// `other_plane`) part by more than the band of their two zone tolerances: some point of
+/// either face lies farther than the band from the other's plane. The gap to a plane is
+/// linear, so over a planar face it is largest on the face's boundary; it is read at the
+/// ends of every edge and, on a curved edge, at [`PLANE_GAP_EDGE_SAMPLES`] points between.
+/// Every point read is a point of the face, so a gap past the band proves the planes part
+/// there (two walls through a common edge at 3.3e-7 rad are 2.8e-5 apart 85 mm from it);
+/// faces whose points all stay within the band (a coincident strip, two planes crossing
+/// at an angle within the tolerance of each other across the strip) are left to the sector.
+fn planes_part(
+    k: &Kernel,
+    brep: &Brep,
+    face: FaceId,
+    other_plane: &crate::surface::plane::Plane,
+    other: &Brep,
+    other_face: FaceId,
+    face_plane: &crate::surface::plane::Plane,
+) -> Result<bool> {
+    let band = zone_tol3d(k, fp2::tolerance(brep, face)?)
+        + zone_tol3d(k, fp2::tolerance(other, other_face)?);
+    Ok(plane_gap(k, brep, face, other_plane, band)?
+        || plane_gap(k, other, other_face, face_plane, band)?)
+}
+
+/// Whether a point of `face`'s boundary lies farther than `band` from `plane` (see
+/// [`planes_part`]).
+fn plane_gap(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    plane: &crate::surface::plane::Plane,
+    band: f64,
+) -> Result<bool> {
+    let pos = plane.position();
+    let (origin, normal) = (pos.origin(), pos.z_axis());
+    for e in topology_traverser::face_edges(b, face)? {
+        let edge = b.edge(e)?;
+        let Some(curve) = edge.curve.as_ref() else {
+            continue;
+        };
+        let ivl = edge.interval;
+        let steps = if matches!(curve.kind(), CurveKind::Line(_)) {
+            1
+        } else {
+            PLANE_GAP_EDGE_SAMPLES + 1
+        };
+        for i in 0..=steps {
+            let p = curve.evaluate_point(k, ivl.evaluate(f64::from(i) / f64::from(steps)))?;
+            let gap = (p - origin).dot(normal).abs();
+            // NaN is no proof of a gap
+            if gap > band {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 const NORMAL_BOX: BoundingBoxRequest = BoundingBoxRequest {
