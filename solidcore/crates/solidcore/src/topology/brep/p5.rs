@@ -1177,9 +1177,10 @@ fn join_copied_curves(
 /// span's length and cannot tell a removable knot from a corner when that span is
 /// 1e-7 of the curve. The merge here extrapolates the longer span over the shorter one
 /// instead (de Casteljau at a parameter just outside the span, well conditioned since
-/// the step is small), and keeps it only when the shorter span is its piece: the same
-/// weights to 1e-9 and control points within a thousandth of `max_gap`. Only spans that
-/// are whole Bezier segments are merged (the knots at their far ends have full
+/// the step is small), and keeps it only when the merged span, as it is stored, stays
+/// within a thousandth of `max_gap` of both original spans (an enclosed bound of the
+/// rational curves' distance, [`rational_bezier_deviation_bound`]) and its weights stay
+/// in the supported range. Only spans that are whole Bezier segments are merged (the knots at their far ends have full
 /// multiplicity, as the canonical arcs and the intersection curves have them); a
 /// junction that is a real corner keeps its knot.
 fn remove_join_knot(curve: &mut Curve, at: Point3, max_gap: f64) -> Result<()> {
@@ -1216,14 +1217,15 @@ fn remove_join_knot(curve: &mut Curve, at: Point3, max_gap: f64) -> Result<()> {
 }
 
 /// The curve with the two Bezier spans meeting at the knot of multiplicity `p` that
-/// starts at index `first` merged into one ([`remove_join_knot`]), or `None` when they
-/// are not one span to `tol` or are not whole Bezier segments.
+/// starts at index `first` merged into one ([`remove_join_knot`]), or `None` when the
+/// merged span may leave either original span by more than `tol`, has a weight outside
+/// `[WEIGHT_MIN, WEIGHT_MAX]`, or the two are not whole Bezier segments.
 fn merge_bezier_spans(
     nurb: &crate::nurbs::crv_basic::Curve,
     first: usize,
     tol: f64,
 ) -> Result<Option<crate::nurbs::crv_basic::Curve>> {
-    use crate::nurbs::math::{CPoint, NOW};
+    use crate::nurbs::math::CPoint;
     let p = nurb.degree();
     let knots = nurb.knots();
     let pw = nurb.cpts();
@@ -1280,34 +1282,42 @@ fn merge_bezier_spans(
         (before, after)
     };
     let s = left_len / (left_len + right_len);
-    let (merged, short_again, short) = if right_len >= left_len {
-        // the right span run back over the left one: its polygon on [t0, 1]
-        let (_, merged) = split(right, -left_len / right_len);
-        let (piece, _) = split(&merged, s);
-        (merged, piece, left)
+    // the longer span run over the shorter one: its polygon on [0, 1] of the union
+    let merged = if right_len >= left_len {
+        split(right, -left_len / right_len).1
     } else {
-        let (merged, _) = split(left, (left_len + right_len) / left_len);
-        let (_, piece) = split(&merged, s);
-        (merged, piece, right)
+        split(left, (left_len + right_len) / left_len).0
     };
-    if merged.len() != p + 1 || short_again.len() != short.len() {
+    // the candidate span exactly as it is stored: its ends the neighbours' points as
+    // they are, so the curve stays joined to the spans beyond
+    let (Some(&start), Some(&end)) = (left.first(), right.last()) else {
+        return Ok(None);
+    };
+    let mut span = Vec::new();
+    span.push(start);
+    span.extend(merged.iter().skip(1).take(p.saturating_sub(1)).copied());
+    span.push(end);
+    if merged.len() != p + 1 || span.len() != p + 1 {
         return Ok(None);
     }
-    for (a, b) in short_again.iter().zip(short) {
-        let distance = a.to_euclid().distance(b.to_euclid());
-        let weights = if a.w == NOW || b.w == NOW {
-            0.0
-        } else {
-            (a.w / b.w - 1.0).abs()
-        };
-        if distance.is_nan() || distance > tol || weights.is_nan() || weights > 1e-9 {
-            return Ok(None);
-        }
+    // a rational candidate keeps its weights in the supported range: two spans with
+    // valid weights can be pieces of a span whose interior weight is negative, whose
+    // control polygon then no longer encloses it
+    if !weights_supported(&span) || !weights_supported(left) || !weights_supported(right) {
+        return Ok(None);
     }
-    // the merged polygon, its ends the neighbours' points as they are
+    // the candidate cut where the knot was, each piece bounded against its original
+    let (span_left, span_right) = split(&span, s);
+    match (
+        rational_bezier_deviation_bound(&span_left, left),
+        rational_bezier_deviation_bound(&span_right, right),
+    ) {
+        (Some(a), Some(b)) if a <= tol && b <= tol => {}
+        _ => return Ok(None),
+    }
     let mut cpts = Vec::new();
     cpts.extend_from_slice(pw.get(..=left_start).unwrap_or(&[]));
-    cpts.extend(merged.iter().skip(1).take(p.saturating_sub(1)).copied());
+    cpts.extend(span.iter().skip(1).take(p.saturating_sub(1)).copied());
     cpts.extend_from_slice(pw.get(junction + p..).unwrap_or(&[]));
     let mut new_knots = Vec::new();
     new_knots.extend_from_slice(knots.get(..first).unwrap_or(&[]));
@@ -1315,6 +1325,88 @@ fn merge_bezier_spans(
     Ok(Some(crate::nurbs::crv_basic::Curve::new(
         cpts, p, new_knots,
     )?))
+}
+
+/// Whether a Bezier polygon is non-rational throughout, or rational with every weight
+/// in `[WEIGHT_MIN, WEIGHT_MAX]` (NaN weights fail).
+fn weights_supported(polygon: &[crate::nurbs::math::CPoint]) -> bool {
+    use crate::nurbs::math::NOW;
+    use crate::nurbs::srf_basic::{WEIGHT_MAX, WEIGHT_MIN};
+    polygon.iter().all(|c| c.w == NOW)
+        || polygon
+            .iter()
+            .all(|c| (WEIGHT_MIN..=WEIGHT_MAX).contains(&c.w))
+}
+
+/// An upper bound on `max_t |A(t) - B(t)|` for two Bezier curves of one degree on one
+/// parameter interval, `a` computed (a de Casteljau piece of the merge candidate) and
+/// `b` given, or `None` when no bound holds (a weight not positive, a value not
+/// finite). Rounding is counted.
+///
+/// With `A = Sum(B_i a_i P_i) / Sum(B_i a_i)` and `B` likewise with weights `b_i` and
+/// points `Q_i`, `A - B = Sum(B_i [a_i (P_i - Q_i) + (a_i - b_i)(Q_i - B(t))]) /
+/// Sum(B_i a_i)`. `B(t)` lies in the hull of the `Q_i` (positive `b_i`), so `|Q_i -
+/// B(t)|` is at most the diagonal `d` of their box, and `|A - B| <= max_i(|a_i P_i - a_i
+/// Q_i| + |a_i - b_i| d) / min_i a_i`. The bound depends on where the curve is only
+/// through rounding: a weight change counts with the polygon's extent, not with its
+/// distance from the origin.
+///
+/// Rounding: `a` comes from a convex de Casteljau split (at most three roundings of a
+/// value up to the largest magnitude `m` per level, `p` levels) at a split parameter
+/// that is itself rounded (moving each point by at most `p` times twice `m` times the
+/// parameter's error); `e = 16 (p + 1) eps m` encloses both per homogeneous coordinate
+/// and is added as a perturbation of every `a_i` and `a_i P_i`. The bound's own
+/// arithmetic is covered by a relative `64 eps` and a further `e`.
+fn rational_bezier_deviation_bound(
+    a: &[crate::nurbs::math::CPoint],
+    b: &[crate::nurbs::math::CPoint],
+) -> Option<f64> {
+    use crate::nurbs::math::{CPoint, NOW, NOZ};
+    if a.len() != b.len() || a.is_empty() {
+        return None;
+    }
+    let degree = a.len() - 1;
+    // homogeneous (w x, w y, w z) and w; a non-rational point has weight 1, a 2D one z 0
+    let homogeneous = |c: &CPoint| {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        let z = if c.z == NOZ { 0.0 } else { c.z };
+        (Vec3::new(c.x, c.y, z), w)
+    };
+    let ha: Vec<(Vec3, f64)> = a.iter().map(homogeneous).collect();
+    let hb: Vec<(Vec3, f64)> = b.iter().map(homogeneous).collect();
+    let qb: Vec<Vec3> = hb.iter().map(|&(h, w)| h * (1.0 / w)).collect();
+    let largest = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+    let magnitude = ha
+        .iter()
+        .chain(hb.iter())
+        .map(|&(h, w)| largest(h).max(w.abs()))
+        .chain(qb.iter().map(|&q| largest(q)))
+        .fold(0.0_f64, f64::max);
+    let eps = f64::EPSILON;
+    let e = 16.0 * (degree as f64 + 1.0) * eps * magnitude;
+    let extent = |pick: fn(Vec3) -> f64| {
+        let (low, high) = qb
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &q| {
+                (l.min(pick(q)), h.max(pick(q)))
+            });
+        high - low
+    };
+    let diagonal = Vec3::new(extent(|q| q.x), extent(|q| q.y), extent(|q| q.z)).length();
+    let mut numerator = 0.0_f64;
+    let mut denominator = f64::INFINITY;
+    for ((&(pa, wa), &(_, wb)), &q) in ha.iter().zip(&hb).zip(&qb) {
+        if wb.is_nan() || wb <= 0.0 {
+            return None;
+        }
+        let offset = (pa - q * wa).length();
+        let term =
+            offset + 3.0_f64.sqrt() * e * (1.0 + q.length()) + ((wa - wb).abs() + e) * diagonal;
+        numerator = numerator.max(term);
+        denominator = denominator.min(wa - e);
+    }
+    let bound = numerator / denominator * (1.0 + 64.0 * eps) + e;
+    (denominator > 0.0 && bound.is_finite()).then_some(bound)
 }
 
 /// The `SmBSplineCurve` part of a curve of that kind. A line's NURB is made first when it
@@ -4192,5 +4284,165 @@ mod tests {
         {
             assert!(!is_no_vertex_sector(&other), "{other:?}");
         }
+    }
+
+    /// de Casteljau's split of a Bezier polygon at `t`: the polygons of `[0, t]` and
+    /// `[t, 1]`.
+    fn bezier_split(
+        seg: &[crate::nurbs::math::CPoint],
+        t: f64,
+    ) -> (
+        Vec<crate::nurbs::math::CPoint>,
+        Vec<crate::nurbs::math::CPoint>,
+    ) {
+        use crate::nurbs::math::CPoint;
+        let mut level = seg.to_vec();
+        let (mut before, mut after) = (Vec::new(), Vec::new());
+        while let (Some(&head), Some(&tail)) = (level.first(), level.last()) {
+            before.push(head);
+            after.push(tail);
+            level = level
+                .windows(2)
+                .map(|w| CPoint::combine2(1.0 - t, w[0], t, w[1]))
+                .collect();
+        }
+        after.reverse();
+        (before, after)
+    }
+
+    /// The curve of two Bezier spans of degree `left.len() - 1` on `[0, s]` and `[s, 1]`
+    /// meeting at a knot of full multiplicity (the knot run starts at index `p + 1`).
+    fn two_span_curve(
+        left: &[crate::nurbs::math::CPoint],
+        right: &[crate::nurbs::math::CPoint],
+        s: f64,
+    ) -> crate::nurbs::crv_basic::Curve {
+        let p = left.len() - 1;
+        let mut cpts = left.to_vec();
+        cpts.extend_from_slice(&right[1..]);
+        let mut knots = vec![0.0; p + 1];
+        knots.extend(std::iter::repeat_n(s, p));
+        knots.extend(std::iter::repeat_n(1.0, p + 1));
+        crate::nurbs::crv_basic::Curve::new(cpts, p, knots).expect("curve")
+    }
+
+    /// A 120-degree arc of radius 85.5 as one rational quadratic span.
+    fn arc_120() -> Vec<crate::nurbs::math::CPoint> {
+        use crate::nurbs::math::CPoint;
+        let r = 85.5;
+        let (c, sn) = (60f64.to_radians().cos(), 60f64.to_radians().sin());
+        vec![
+            CPoint::weighted(Vec3::new(r * c, -r * sn, 0.0), 1.0),
+            CPoint::weighted(Vec3::new(2.0 * r, 0.0, 0.0), 0.5),
+            CPoint::weighted(Vec3::new(r * c, r * sn, 0.0), 1.0),
+        ]
+    }
+
+    /// A rational arc split anywhere, the short piece down to 1e-7 of the span at either
+    /// end, merges back into one span that runs where the arc runs (within 1e-12, against
+    /// a tolerance of 2e-8).
+    #[test]
+    fn merge_bezier_spans_rejoins_a_split_rational_arc() {
+        use crate::nurbs::knots::Side;
+        use crate::nurbs::nurbs_crv::crv_eval;
+        let arc = arc_120();
+        let whole =
+            crate::nurbs::crv_basic::Curve::new(arc.clone(), 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+                .expect("arc");
+        for s in [0.3, 0.5, 2.8e-5 / 179.0, 1e-7, 1.0 - 1e-7] {
+            let (left, right) = bezier_split(&arc, s);
+            let curve = two_span_curve(&left, &right, s);
+            let merged = merge_bezier_spans(&curve, 3, 2e-8)
+                .expect("merge")
+                .unwrap_or_else(|| panic!("the arc split at {s} merges back"));
+            assert_eq!(merged.knots(), &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+            assert_eq!(merged.cpts().first(), arc.first());
+            assert_eq!(merged.cpts().last(), arc.last());
+            for i in 0..=64 {
+                let u = (f64::from(i) + 0.5) / 65.0;
+                let a = crv_eval(&merged, u, Side::Left).expect("merged point");
+                let b = crv_eval(&whole, u, Side::Left).expect("arc point");
+                assert!(
+                    (a - b).length() <= 1e-12,
+                    "s {s}, u {u}: {}",
+                    (a - b).length()
+                );
+            }
+        }
+    }
+
+    /// Two spans that meet in a corner, or tangent to each other but on different
+    /// curves, keep their knot.
+    #[test]
+    fn merge_bezier_spans_keeps_a_corner() {
+        use crate::nurbs::math::CPoint;
+        let arc = arc_120();
+        let (left, _) = bezier_split(&arc, 0.5);
+        let joint = left[2].to_euclid();
+        let radial = joint * (1.0 / joint.length());
+        let tangent = Vec3::new(-radial.y, radial.x, 0.0);
+        for direction in [radial, tangent] {
+            let right = [
+                left[2],
+                CPoint::weighted(joint + direction * 5.0, 1.0),
+                CPoint::weighted(joint + direction * 10.0, 1.0),
+            ];
+            let curve = two_span_curve(&left, &right, 0.5);
+            assert!(merge_bezier_spans(&curve, 3, 2e-8)
+                .expect("merge")
+                .is_none());
+        }
+    }
+
+    /// A weight change of 2^-31 on a polygon 2^22 across moves the curve by about 1e-4:
+    /// the polygons match to a relative 1e-9 in weight and within 2^-20 in position, but
+    /// the bound counts the weight with the polygon's extent and refuses the merge.
+    #[test]
+    fn merge_bezier_spans_refuses_a_weight_change_on_a_large_polygon() {
+        use crate::nurbs::math::CPoint;
+        let l = 2f64.powi(20);
+        let d = 2f64.powi(-31);
+        let point = |x: f64, y: f64, w: f64| CPoint::weighted(Vec3::new(x, y, 0.0), w);
+        let curve = crate::nurbs::crv_basic::Curve::new(
+            vec![
+                point(-2.0 * l, l, 1.0 + d),
+                point(-l, 0.0, 1.0),
+                point(0.0, 0.0, 1.0),
+                point(l, 0.0, 1.0),
+                point(2.0 * l, l, 1.0),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0],
+        )
+        .expect("curve");
+        assert!(merge_bezier_spans(&curve, 3, 2f64.powi(-20))
+            .expect("merge")
+            .is_none());
+    }
+
+    /// Two halves with valid weights of a degree-4 span whose interior weight is -1/8:
+    /// the merge would rebuild that span exactly, but its weight is outside
+    /// `[WEIGHT_MIN, WEIGHT_MAX]` (its polygon no longer encloses it), so the knot is kept.
+    #[test]
+    fn merge_bezier_spans_refuses_weights_outside_the_supported_range() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::{WEIGHT_MAX, WEIGHT_MIN};
+        let point = |x: f64, y: f64, w: f64| CPoint::weighted(Vec3::new(x, y, 0.0), w);
+        let parent = [
+            point(0.0, 0.0, 1.0),
+            point(1.0, 0.0, -0.125),
+            point(0.0, 1.0, 1.0),
+            point(0.0, 1.0, 1.0),
+            point(0.0, 2.0, 1.0),
+        ];
+        let (left, right) = bezier_split(&parent, 0.5);
+        let curve = two_span_curve(&left, &right, 0.5);
+        assert!(curve
+            .cpts()
+            .iter()
+            .all(|c| (WEIGHT_MIN..=WEIGHT_MAX).contains(&c.w)));
+        assert!(merge_bezier_spans(&curve, 5, 1e-9)
+            .expect("merge")
+            .is_none());
     }
 }
