@@ -384,10 +384,13 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
         Section::Curvature(r) => (crate::Blend::Curvature, r),
     };
     let seam = how.seam;
-    if !(size.is_finite() && size > 0.0 && size <= crate::blend::MAX_SIZE)
-        || !(how.tolerance.is_finite() && how.tolerance > 0.0)
-        || !(MIN_STATIONS..=MAX_STATIONS).contains(&how.stations)
-        || ![
+    let valid = size.is_finite()
+        && size > 0.0
+        && size <= crate::blend::MAX_SIZE
+        && how.tolerance.is_finite()
+        && how.tolerance > 0.0
+        && (MIN_STATIONS..=MAX_STATIONS).contains(&how.stations)
+        && [
             seam.gap_mm,
             seam.angle_rad,
             seam.curvature_per_mm,
@@ -396,8 +399,8 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
         ]
         .into_iter()
         .all(|t| t.is_finite() && t >= 0.0)
-        || std::ptr::eq(a, b)
-    {
+        && !std::ptr::eq(a, b);
+    if !valid {
         return Err(Error::Argument);
     }
     let (a_order, b_order) = (native_order(a), native_order(b));
