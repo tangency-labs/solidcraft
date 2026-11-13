@@ -54,7 +54,11 @@ fn two_lines_at_g0_g1_and_g2() {
         assert!(near(p[0], [10.0, 0.0, 0.0]) && near(p[n], [20.0, 5.0, 0.0]));
         if order >= 1 {
             assert!(near(p[1], [10.0 + 0.3 * chord, 0.0, 0.0]), "{:?}", p[1]);
-            assert!(near(p[n - 1], [20.0 - 0.3 * chord, 5.0, 0.0]), "{:?}", p[n - 1]);
+            assert!(
+                near(p[n - 1], [20.0 - 0.3 * chord, 5.0, 0.0]),
+                "{:?}",
+                p[n - 1]
+            );
         }
         if order == 2 {
             let comb = curve_comb(&blend, [0.0, 1.0], 5).unwrap();
@@ -80,8 +84,17 @@ fn a_circle_arc_met_at_g2() {
         ],
     };
     let b = line([-10.0, 14.0, 0.0], [-20.0, 14.0, 0.0]);
-    let blend = blend_curve(&arc, End::End, Contact::G2, 0.4, &b, End::Start, Contact::G1, 0.4)
-        .unwrap();
+    let blend = blend_curve(
+        &arc,
+        End::End,
+        Contact::G2,
+        0.4,
+        &b,
+        End::Start,
+        Contact::G1,
+        0.4,
+    )
+    .unwrap();
     assert_eq!(points(&blend).len(), 5, "a quartic");
     let comb = curve_comb(&blend, [0.0, 1.0], 5).unwrap();
     let first = &comb[0];
