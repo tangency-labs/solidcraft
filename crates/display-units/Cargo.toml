@@ -1,0 +1,9 @@
+[package]
+name = "solidcraft-display-units"
+description = "Length display: a millimetre value in a design unit (mm, cm, m, in, ft) with a number of decimal places"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
