@@ -14,7 +14,7 @@ use crate::selection::{PROFILES, SKETCH_LINES, SelInput, SelectionExt as _};
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
 
 /// The anchors as `frame.member` names them, and their labels.
-const ANCHORS: [(&str, &str); 11] = [
+const ANCHORS: &[(&str, &str)] = &[
     ("origin", "Origin"),
     ("center", "Center"),
     ("centroid", "Centroid"),
@@ -70,7 +70,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 }
 
 fn tr(text: &str) -> &str {
-    crate::i18n::tr_label(text)
+    solidcraft_ui_text::tr_label(text)
 }
 
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.
@@ -119,14 +119,14 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     let mut known = None;
     for pick in picks {
         match pick {
-            Sel::ExternalSketchCurve { sketch, id } => {
+            Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) } => {
                 if known.is_some_and(|k| k != *sketch) {
                     return Err("the lines must be in one sketch".into());
                 }
                 known = Some(*sketch);
                 lines.push(id.clone());
             }
-            Sel::SketchCurve { id } => lines.push(id.clone()),
+            Sel::SketchCurve { id, sketch: None } => lines.push(id.clone()),
             _ => {}
         }
     }
@@ -173,7 +173,7 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
 
 /// The dialog editing a frame member feature, filled from it.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, angle, mirror, body_name, .. } = kind else { return None };
+    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, body_name, .. } = kind else { return None };
     let (_, mut inputs) = start(app, "frame.member")?;
     let st = app.session.model.state();
     let mut m = Member::new();
@@ -190,7 +190,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             {
                 m.kind = index;
                 for (name, v) in k.required.iter().chain(k.optional).zip(values.iter_mut()) {
-                    *v = profile.dims.get(*name).map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default();
+                    *v = profile.dims.get(*name).map(|e| shown_expr(e, frame::dimension_kind(name))).unwrap_or_default();
                 }
             }
         }
@@ -207,7 +207,13 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     m.angle = angle.as_deref().map(|a| shown_expr(a, ValueKind::Angle)).unwrap_or_default();
     m.mirror = *mirror;
     m.name = body_name.clone().unwrap_or_default();
-    Some((Kind::Frame(m), inputs, Map::new()))
+    // The dialog has no field for a located point: an edit keeps it, so the member stays where it
+    // is attached.
+    let mut extra = Map::new();
+    if let Some(at) = locate {
+        extra.insert("locate".into(), json!(at));
+    }
+    Some((Kind::Frame(m), inputs, extra))
 }
 
 #[cfg(test)]

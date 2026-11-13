@@ -10,6 +10,7 @@
 
 use serde_json::json;
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::dialogs::{Kind, apply_commands};
 use crate::scenario::Harness;
@@ -30,7 +31,7 @@ fn existing_patterns_reopen_from_menu_and_badge_and_edit_without_changing_surviv
         };
         let out = h.app.run(cmd, p).unwrap();
         let before = h.app.session.doc.to_json();
-        h.app.session.selection = vec![Sel::SketchCurve { id: "l2".into() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: "l2".into(), sketch: None }];
         h.settle();
         let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
         let item = menu.iter().find(|item| item.id == "ui.editSketchPattern").expect("a copy offers Edit Sketch Pattern");
@@ -93,7 +94,7 @@ fn the_typed_factor_reaches_the_command_unchanged() {
     let h = rectangle();
     let ids = curve_ids(&h);
     let mut inputs = vec![SelInput::new("Entities", crate::selection::CURVES, true), SelInput::new("Base point", crate::selection::POINTS, false)];
-    inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     let k = Mod::Scale { factor: "2.5".into() };
     let out = commands(&h.app, &k, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out.len(), 1);
@@ -110,7 +111,7 @@ fn an_expression_in_the_factor_field_is_evaluated() {
     h.app.run("parameters.add", json!({"name": "growth", "expression": "3", "unit": ""})).unwrap();
     let ids = curve_ids(&h);
     let mut inputs = vec![SelInput::new("Entities", crate::selection::CURVES, true)];
-    inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     let out = commands(&h.app, &Mod::Scale { factor: "growth * 2".into() }, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out[0].1["factor"], json!(6.0));
 }
@@ -121,7 +122,7 @@ fn a_picked_base_point_loses_the_sketch_prefix_that_picking_adds() {
     let sid = h.app.session.active_sketch.unwrap();
     let ids = curve_ids(&h);
     let mut inputs = vec![SelInput::new("Entities", crate::selection::CURVES, true), SelInput::new("Base point", crate::selection::POINTS, false)];
-    inputs[0].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
+    inputs[0].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     let point = {
         let st = h.app.session.model.state();
         st.sketch(sid).unwrap().sketch.points.first().unwrap().id.clone()
@@ -138,7 +139,7 @@ fn an_empty_selection_or_a_bad_factor_is_an_error_the_window_shows() {
     let empty = vec![SelInput::new("Entities", crate::selection::CURVES, true)];
     assert!(commands(&h.app, &Mod::Scale { factor: "2".into() }, &empty, &serde_json::Map::new()).is_err());
     let mut filled = empty.clone();
-    filled[0].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
+    filled[0].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     for bad in ["0", "-2", "", "nonsense"] {
         let r = commands(&h.app, &Mod::Scale { factor: bad.into() }, &filled, &serde_json::Map::new());
         assert!(r.is_err(), "factor `{bad}` should not reach the command: {r:?}");
@@ -156,7 +157,7 @@ fn the_window_scales_the_picked_geometry_and_leaves_the_rest_alone() {
     h.step(&json!({"start": "sketch.scale"})).unwrap();
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.inputs[0].items = rect.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+        d.inputs[0].items = rect.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
         d.kind = Kind::SketchModify(Mod::Scale { factor: "2".into() });
     }
     // A frame with the picks in place: the canvas value box takes focus on the frame after a
@@ -204,13 +205,162 @@ fn the_toolbar_button_opens_a_window_with_both_picks_visible() {
 }
 
 #[test]
+fn mirror_uses_the_only_preselected_construction_line_among_multiple_lines() {
+    for second_axis in [false, true] {
+        let mut h = line_and_circle();
+        let ids = curve_ids(&h);
+        h.app.run("sketch.construction", json!({"curves": [ids[0]], "value": true})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[5, -20], [5, 20]], "construction": true, "ids": ["second_axis"]})).unwrap();
+        let line = if second_axis { "second_axis" } else { &ids[0] };
+        let mut picks = vec![Sel::SketchCurve { id: line.into(), sketch: None }, Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
+        if second_axis {
+            picks.reverse();
+        }
+        h.app.session.selection = picks.clone();
+        let before = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"start": "sketch.mirror"})).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items, picks);
+        assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: line.into(), sketch: None }]);
+        assert_eq!(h.app.session.doc.to_json(), before, "opening Mirror only previews the result");
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.frames(2);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+        let state = h.app.session.model.state();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert_eq!(sketch.curves.len(), 4, "neither the reference nor the unselected construction line is copied");
+        let solidcraft_engine::sketch::CurveKind::Circle { c, r } = &sketch.curves.last().unwrap().kind else { panic!("expected mirrored circle") };
+        let at = sketch.point(*c).unwrap();
+        let expected_x = if second_axis { 0.0 } else { -10.0 };
+        assert!((at.x - expected_x).abs() < 1e-6 && at.y.abs() < 1e-6);
+        assert!((*r - 3.0).abs() < 1e-6);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before);
+    }
+}
+
+/// #11700: with circles preselected, Mirror opens on the empty Mirror line. A further circle
+/// clicked then joins the Entities (the line field refuses it), so every selected circle is
+/// mirrored instead of the last one being dropped without a word; the line is still picked next.
+#[test]
+fn mirror_takes_a_circle_clicked_while_the_mirror_line_is_active_into_the_entities() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, -30], [0, 30]], "construction": true, "ids": ["axis"]})).unwrap();
+    for y in [-15, 0, 15] {
+        h.app.run("sketch.circle.center", json!({"center": [10, y], "radius": 3})).unwrap();
+    }
+    h.settle();
+    h.step(&json!({"click": {"world": [13, -15, 0]}})).unwrap();
+    h.step(&json!({"click": {"world": [13, 0, 0]}, "ctrl": true})).unwrap();
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "the window waits for the mirror line");
+    h.step(&json!({"click": {"world": [13, 15, 0]}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let curve = |id: &str| Sel::SketchCurve { id: id.into(), sketch: None };
+    assert_eq!(d.inputs[0].items, vec![curve("c1"), curve("c2"), curve("c3")]);
+    assert!(d.inputs[1].items.is_empty());
+    assert_eq!(d.active, 1, "the mirror line is still the next pick");
+    // Clicked again, the circle leaves the Entities, as a pick in that list does.
+    h.step(&json!({"click": {"world": [13, 15, 0]}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![curve("c1"), curve("c2")]);
+    h.step(&json!({"click": {"world": [13, 15, 0]}})).unwrap();
+    h.step(&json!({"click": {"world": [0, 25, 0]}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![curve("axis")]);
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+    let state = h.app.session.model.state();
+    let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let mut centres: Vec<(i64, i64)> = sketch
+        .curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            solidcraft_engine::sketch::CurveKind::Circle { c, .. } => sketch.point(c),
+            _ => None,
+        })
+        .filter(|p| p.x < 0.0)
+        .map(|p| (p.x.round() as i64, p.y.round() as i64))
+        .collect();
+    centres.sort();
+    assert_eq!(centres, vec![(-10, -15), (-10, 0), (-10, 15)], "every selected circle is mirrored");
+}
+
+#[test]
+fn mirror_auto_line_requires_one_preselected_straight_construction_line_and_the_preference() {
+    for (count, selected, enabled) in [(0, 1, true), (1, 0, true), (2, 0, true), (1, 1, true), (2, 1, true), (2, 2, true), (1, 1, false)] {
+        let mut h = line_and_circle();
+        let ids = curve_ids(&h);
+        // A construction circle never qualifies, and ordinary lines do not count.
+        h.app.run("sketch.construction", json!({"curves": [ids[1]], "value": true})).unwrap();
+        if count > 0 {
+            h.app.run("sketch.construction", json!({"curves": [ids[0]], "value": true})).unwrap();
+        }
+        if count > 1 {
+            h.app.run("sketch.line", json!({"points": [[5, -20], [5, 20]], "construction": true, "ids": ["second_axis"]})).unwrap();
+        }
+        h.app.session.selection = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
+        h.app
+            .session
+            .selection
+            .extend([ids[0].as_str(), "second_axis"].into_iter().take(selected).map(|id| Sel::SketchCurve { id: id.into(), sketch: None }));
+        h.app.preferences.sketch_mirror_auto_line = enabled;
+        h.step(&json!({"start": "sketch.mirror"})).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        let expected = if count > 0 && selected == 1 && enabled { vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }] } else { vec![] };
+        assert_eq!(d.inputs[1].items, expected, "count={count}, selected={selected}, enabled={enabled}");
+    }
+}
+
+#[test]
+fn mirror_auto_line_respects_manual_references_and_only_uses_the_active_sketch() {
+    let mut h = line_and_circle();
+    let ids = curve_ids(&h);
+    h.app.run("sketch.construction", json!({"curves": [ids[0]], "value": true})).unwrap();
+    h.app.session.selection.clear();
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs[0].items.is_empty() && d.inputs[1].items.is_empty(), "nothing is inferred without preselection");
+    assert_eq!(d.active, 0);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let line = Sel::SketchCurve { id: ids[0].clone(), sketch: None };
+    let axis = Sel::Axis { name: "X".into() };
+    h.app.session.selection = vec![axis.clone(), line.clone()];
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![axis]);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.app.session.selection = vec![line];
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
+    h.step(&json!({"click": {"handle": "dialog:clear:Mirror line"}})).unwrap();
+    h.frames(3);
+    assert!(h.app.dialog.as_ref().unwrap().inputs[1].items.is_empty(), "a cleared reference stays empty");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let previous_sketch = h.app.session.active_sketch;
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XZ"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, -20], [0, 20]], "construction": true, "ids": [ids[0]]})).unwrap();
+    h.app.session.selection = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: previous_sketch }];
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[1].items.is_empty(), "another sketch's construction line is not used");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.app.session.selection = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: h.app.session.active_sketch }];
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }]);
+}
+
+#[test]
 fn the_two_picks_become_the_command() {
     let h = line_and_circle();
     let ids = curve_ids(&h);
     let (line, circle) = (ids[0].clone(), ids[1].clone());
     let mut inputs = mirror_inputs();
-    inputs[0].items = vec![Sel::SketchCurve { id: circle.clone() }];
-    inputs[1].items = vec![Sel::SketchCurve { id: line.clone() }];
+    inputs[0].items = vec![Sel::SketchCurve { id: circle.clone(), sketch: None }];
+    inputs[1].items = vec![Sel::SketchCurve { id: line.clone(), sketch: None }];
     let out = commands(&h.app, &Mod::Mirror, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].0, "sketch.mirror");
@@ -222,22 +372,22 @@ fn a_half_filled_window_is_an_error_instead_of_a_command() {
     let h = line_and_circle();
     let ids = curve_ids(&h);
     let mut only_entities = mirror_inputs();
-    only_entities[0].items = vec![Sel::SketchCurve { id: ids[1].clone() }];
+    only_entities[0].items = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
     assert!(commands(&h.app, &Mod::Mirror, &only_entities, &serde_json::Map::new()).is_err());
     let mut only_line = mirror_inputs();
-    only_line[1].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
+    only_line[1].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     assert!(commands(&h.app, &Mod::Mirror, &only_line, &serde_json::Map::new()).is_err());
     // The AXES mask also takes an origin axis, which is no curve of this sketch.
     let mut origin_axis = mirror_inputs();
-    origin_axis[0].items = vec![Sel::SketchCurve { id: ids[1].clone() }];
-    origin_axis[1].items = vec![Sel::Axis { name: "Y".into() }];
+    origin_axis[0].items = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
+    origin_axis[1].items = vec![Sel::Axis { name: "Z".into() }];
     assert!(commands(&h.app, &Mod::Mirror, &origin_axis, &serde_json::Map::new()).is_err());
-    // The line itself must not be in the entities: the old click flow could not express that
-    // either, and the engine silently dropped it.
+    // The mirror line may itself be among the entities (a chain or profile picked in one action):
+    // the command leaves the line in place and mirrors the rest.
     let mut line_in_both = mirror_inputs();
-    line_in_both[0].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
-    line_in_both[1].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
-    assert!(commands(&h.app, &Mod::Mirror, &line_in_both, &serde_json::Map::new()).is_err());
+    line_in_both[0].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
+    line_in_both[1].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
+    assert_eq!(commands(&h.app, &Mod::Mirror, &line_in_both, &serde_json::Map::new()).unwrap()[0].1, json!({"entities": [ids[0]], "line": ids[0]}));
 }
 
 #[test]
@@ -248,8 +398,8 @@ fn the_window_reflects_the_picked_circle_across_the_line() {
     h.step(&json!({"start": "sketch.mirror"})).unwrap();
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.inputs[0].items = vec![Sel::SketchCurve { id: ids[1].clone() }];
-        d.inputs[1].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
+        d.inputs[0].items = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
+        d.inputs[1].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     }
     // A frame with the picks in place: the dialog reads them when it next draws.
     h.frames(2);
@@ -269,7 +419,7 @@ fn the_window_reflects_the_picked_circle_across_the_line() {
 
 fn move_inputs(h: &Harness) -> Vec<SelInput> {
     let mut v = vec![SelInput::new("Entities", CURVES | POINTS, true), SelInput::new("Center", POINTS, false)];
-    v[0].items = curve_ids(h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    v[0].items = curve_ids(h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     v
 }
 
@@ -304,7 +454,7 @@ fn the_context_menu_item_fills_the_window_from_the_selection() {
     h.app.run("select.set", json!({"items": [{"type": "sketch_curve", "id": ids[0]}]})).unwrap();
     h.step(&json!({"start": "sketch.move"})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(d.inputs[0].items, vec![Sel::SketchCurve { id: ids[0].clone() }]);
+    assert_eq!(d.inputs[0].items, vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }]);
 }
 
 #[test]
@@ -349,7 +499,7 @@ fn the_window_moves_the_rectangle_and_the_copy_row_leaves_the_original_behind() 
     let sid = h.app.session.active_sketch.unwrap();
     h.step(&json!({"start": "sketch.move"})).unwrap();
     // Read the ids before the dialog is borrowed mutably: `curve_ids` borrows the harness.
-    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
@@ -383,7 +533,7 @@ fn a_plain_move_takes_the_geometry_with_it() {
     let sid = h.app.session.active_sketch.unwrap();
     h.step(&json!({"start": "sketch.move"})).unwrap();
     // Read the ids before the dialog is borrowed mutably: `curve_ids` borrows the harness.
-    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
@@ -401,6 +551,31 @@ fn a_plain_move_takes_the_geometry_with_it() {
     let ys: Vec<f64> = sk.points.iter().filter(|p| corners.contains(&p.id)).map(|p| p.pos.y).collect();
     assert_eq!(ys.len(), 4, "{ys:?}");
     assert!(ys.iter().all(|y| (*y - 15.0).abs() < 1e-6 || (*y - 25.0).abs() < 1e-6), "the rectangle moved up by 5 mm: {ys:?}");
+    assert!(!h.app.status_undo, "nothing tied it to what stays, so nothing is let go: {:?}", h.app.status);
+}
+
+/// #2980: a rectangle drawn from the origin moves whole, and the status line says its corner's
+/// coincidence with the origin was let go; its Undo button undoes the move.
+#[test]
+fn a_move_that_lets_go_of_the_origin_says_so_and_offers_undo() {
+    let mut h = rectangle();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = picks;
+        d.kind = Kind::SketchModify(Mod::Move { x: "15 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
+    }
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    let (msg, _, error) = h.app.status.clone().expect("the move says what it let go");
+    assert!(!error, "{msg}");
+    assert!(msg.contains("1 constraint") && msg.contains("Coincident"), "{msg}");
+    assert!(h.app.status_undo, "the message offers Undo");
+    let xs: Vec<f64> = h.app.session.model.state().sketch(sid).unwrap().sketch.points.iter().filter(|p| p.id != "origin").map(|p| p.pos.x).collect();
+    assert!(xs.iter().all(|x| (*x - 15.0).abs() < 1e-6 || (*x - 35.0).abs() < 1e-6), "the rectangle moved whole: {xs:?}");
 }
 
 #[test]
@@ -413,8 +588,8 @@ fn escape_leaves_the_sketch_exactly_as_it_was() {
     h.step(&json!({"start": "sketch.mirror"})).unwrap();
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.inputs[0].items = vec![Sel::SketchCurve { id: before[1].clone() }];
-        d.inputs[1].items = vec![Sel::SketchCurve { id: before[0].clone() }];
+        d.inputs[0].items = vec![Sel::SketchCurve { id: before[1].clone(), sketch: None }];
+        d.inputs[1].items = vec![Sel::SketchCurve { id: before[0].clone(), sketch: None }];
     }
     h.frames(2);
     h.step(&json!({"key": "Escape"})).unwrap();
@@ -430,13 +605,13 @@ fn the_x_distance_gets_a_drag_arrow_along_the_sketch_x_axis() {
     let mut h = rectangle();
     h.step(&json!({"start": "sketch.move"})).unwrap();
     // Read the ids before the dialog is borrowed mutably: `curve_ids` borrows the harness.
-    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
     }
     let sid = h.app.session.active_sketch.unwrap();
-    let x = h.app.session.world_state().sketch(sid).unwrap().plane.x;
+    let x = h.app.session.world_state().unwrap().sketch(sid).unwrap().plane.x;
     let d = h.app.dialog.as_ref().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, d).expect("a picked sketch curve anchors the manipulator");
     let dir = dir.expect("a sketch move's X Distance has a direction to drag along");
@@ -468,6 +643,27 @@ fn rect(h: &mut crate::scenario::Harness, count: &str, spacing: &str, count2: &s
 }
 
 #[test]
+fn two_sided_offset_shows_a_dimension_for_each_distance() {
+    let (mut h, id) = open("sketch.offset");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
+    }
+    h.frames(2);
+    assert!(crate::scenario::handle_at("arrow").is_some(), "Distance has its dimension");
+    assert!(crate::scenario::handle_at("arrow2").is_none(), "one side draws a single dimension");
+    if let Kind::SketchModify(Mod::Offset { distance, distance2, mode, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {
+        *mode = 1;
+        *distance = "9 mm".into();
+        *distance2 = "2 mm".into();
+    }
+    h.frames(2);
+    let first = crate::scenario::handle_at("arrow").expect("Distance stays on the sketch");
+    let second = crate::scenario::handle_at("arrow2").expect("Distance 2 gets its own dimension");
+    assert!(first.distance(second) > 20.0, "the two dimensions sit on opposite sides: {first:?} {second:?}");
+}
+
+#[test]
 fn rectangular_pattern_window_opens_instead_of_a_click_tool() {
     let (h, _) = open("sketch.pattern.rectangular");
     assert!(h.app.tool.is_none(), "the click tool still takes the command");
@@ -483,7 +679,7 @@ fn rectangular_pattern_window_opens_instead_of_a_click_tool() {
 fn rectangular_sections_flip_and_center_independently_and_restore_even_counts_when_editing() {
     use solidcraft_engine::sketch::PatternAlignment;
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     rect(&mut h, "4", "20", "2", "10");
     h.settle();
     let first = crate::scenario::handle_at("dialog:Spacing").unwrap();
@@ -502,12 +698,12 @@ fn rectangular_sections_flip_and_center_independently_and_restore_even_counts_wh
     assert_eq!(commands[0].1["alignment"], "center");
     assert_eq!(commands[0].1["alignment2"], "right");
     assert_eq!(commands[0].1["reversed2"], true);
-    assert_eq!(commands[0].1["count"], 4);
+    assert_eq!(commands[0].1["count"], "4");
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
     let sid = h.app.session.active_sketch.unwrap();
-    let pattern = h.app.session.world_state().sketch(sid).unwrap().sketch.patterns[0].id.clone();
+    let pattern = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.patterns[0].id.clone();
     assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, &pattern));
     assert!(matches!(
         h.app.dialog.as_ref().unwrap().kind,
@@ -528,24 +724,24 @@ fn rectangular_sections_flip_and_center_independently_and_restore_even_counts_wh
 #[test]
 fn typed_counts_and_spacings_reach_the_command_with_the_second_direction() {
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     rect(&mut h, "5", "20", "2", "15 mm");
     let d = h.app.dialog.clone().unwrap();
     let cmds = apply_commands(&h.app, &d).unwrap();
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].0, "sketch.pattern.rectangular");
     // The click tool could only ever send a count of 3 and no second count at all.
-    assert_eq!(cmds[0].1["count"], json!(5));
-    assert_eq!(cmds[0].1["spacing"], json!(20.0));
-    assert_eq!(cmds[0].1["count2"], json!(2));
-    assert_eq!(cmds[0].1["spacing2"], json!(15.0));
+    assert_eq!(cmds[0].1["count"], json!("5"));
+    assert_eq!(cmds[0].1["spacing"], json!("20"));
+    assert_eq!(cmds[0].1["count2"], json!("2"));
+    assert_eq!(cmds[0].1["spacing2"], json!("15 mm"));
     assert!(cmds[0].1.get("dir").is_none(), "an unpicked direction leaves the command's own default");
 }
 
 #[test]
 fn a_picked_axis_becomes_an_in_plane_direction() {
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     h.app.dialog.as_mut().unwrap().inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
     rect(&mut h, "3", "10", "1", "10");
     let d = h.app.dialog.clone().unwrap();
@@ -559,9 +755,9 @@ fn two_picked_lines_are_sent_as_live_references_and_restored_in_the_editor() {
     h.app.run("sketch.line", json!({"points":[[0,-20],[10,-20]],"ids":["dir1"]})).unwrap();
     h.app.run("sketch.line", json!({"points":[[0,-40],[6,-32]],"ids":["dir2"]})).unwrap();
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::SketchCurve { id }];
-    d.inputs[1].items = vec![Sel::SketchCurve { id: "dir1".into() }];
-    d.inputs[2].items = vec![Sel::SketchCurve { id: "dir2".into() }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
+    d.inputs[1].items = vec![Sel::SketchCurve { id: "dir1".into(), sketch: None }];
+    d.inputs[2].items = vec![Sel::SketchCurve { id: "dir2".into(), sketch: None }];
     rect(&mut h, "3", "20", "2", "10");
     let d = h.app.dialog.clone().unwrap();
     let cmds = apply_commands(&h.app, &d).unwrap();
@@ -570,8 +766,8 @@ fn two_picked_lines_are_sent_as_live_references_and_restored_in_the_editor() {
     let out = h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
     assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, out["pattern"].as_str().unwrap()));
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "dir1".into() }]);
-    assert_eq!(d.inputs[2].items, vec![Sel::SketchCurve { id: "dir2".into() }]);
+    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "dir1".into(), sketch: None }]);
+    assert_eq!(d.inputs[2].items, vec![Sel::SketchCurve { id: "dir2".into(), sketch: None }]);
     let reopened = apply_commands(&h.app, d).unwrap();
     assert_eq!(reopened[0].1["direction2"], "dir2");
 }
@@ -595,7 +791,7 @@ fn sketch_pattern_tools_are_promoted_together_and_open_from_the_toolbar() {
 #[test]
 fn an_axis_perpendicular_to_the_sketch_is_reported_not_silently_replaced() {
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     h.app.dialog.as_mut().unwrap().inputs[1].items = vec![Sel::Axis { name: "Z".into() }];
     rect(&mut h, "3", "10", "1", "10");
     let d = h.app.dialog.clone().unwrap();
@@ -603,18 +799,16 @@ fn an_axis_perpendicular_to_the_sketch_is_reported_not_silently_replaced() {
     assert!(e.contains("sketch plane"), "{e}");
 }
 
-/// Upstream #218 is the same shape: `solid.pattern.circular` took expressions in its axis origin
-/// and stored `[0, 0, 0]`. Rectangular sketch patterns still read `count` with `num`, which
-/// takes a JSON number only, so the window evaluates their count fields itself.
+/// Count expressions stay linked to parameters when sent to the command.
 #[test]
-fn a_count_expression_is_evaluated_rather_than_sent_as_a_string() {
+fn a_count_expression_reaches_the_command_as_text() {
     let (mut h, id) = open("sketch.pattern.rectangular");
     h.app.run("parameters.add", json!({"name": "n", "expression": "4", "unit": ""})).unwrap();
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     rect(&mut h, "n", "10", "1", "10");
     let d = h.app.dialog.clone().unwrap();
     let cmds = apply_commands(&h.app, &d).unwrap();
-    assert_eq!(cmds[0].1["count"], json!(4));
+    assert_eq!(cmds[0].1["count"], json!("n"));
 }
 
 #[test]
@@ -623,7 +817,7 @@ fn bad_counts_and_an_empty_selection_are_refused_before_the_command_runs() {
     rect(&mut h, "5", "20", "1", "20");
     let d = h.app.dialog.clone().unwrap();
     assert!(apply_commands(&h.app, &d).unwrap_err().contains("Select"));
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     for bad in ["0", "2.5", "501", "wat"] {
         rect(&mut h, bad, "20", "1", "20");
         let d = h.app.dialog.clone().unwrap();
@@ -640,14 +834,93 @@ fn bad_counts_and_an_empty_selection_are_refused_before_the_command_runs() {
 #[test]
 fn the_spacing_gets_a_canvas_arrow_along_the_pattern_direction() {
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     let d = h.app.dialog.clone().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, &d).expect("an anchor on the picked curve");
-    assert_eq!(dir, Some(solidcraft_engine::geom::Vec3::X));
+    assert_eq!(dir, Some(solidcore_record::Vec3::X));
     h.app.dialog.as_mut().unwrap().inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
     let d = h.app.dialog.clone().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, &d).expect("an anchor on the picked curve");
-    assert_eq!(dir, Some(solidcraft_engine::geom::Vec3::Y));
+    assert_eq!(dir, Some(solidcore_record::Vec3::Y));
+}
+
+/// Dragging a spacing arrow past its start flips the direction, as typing a negative spacing does
+/// (#5497): the first direction's arrow and the second's both read a negative value.
+#[test]
+fn dragging_a_spacing_arrow_past_zero_gives_a_negative_spacing() {
+    let (mut h, id) = open("sketch.pattern.rectangular");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
+    h.app.dialog.as_mut().unwrap().inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    h.app.dialog.as_mut().unwrap().inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
+    rect(&mut h, "3", "20", "2", "10");
+    // From above, so both arrows lie across the screen.
+    h.step(&json!({"camera": {"yaw": 0.4, "pitch": 1.2}})).unwrap();
+    h.frames(5);
+    let spacing = |h: &crate::scenario::Harness, second: bool| {
+        let Some(Kind::SketchModify(Mod::PatternRect { spacing, spacing2, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else {
+            panic!("the pattern window")
+        };
+        h.app.session.doc.eval(if second { spacing2 } else { spacing }, solidcraft_engine::doc::expr::Kind::Length).unwrap()
+    };
+    let (at, dir) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).expect("an anchor");
+    let dir = dir.expect("a direction");
+    let to = at - dir * 10.0;
+    h.step(&json!({"drag": [{"handle": "arrow"}, {"world": [to.x, to.y, to.z]}], "ctrl": true})).unwrap();
+    let v = spacing(&h, false);
+    assert!((v + 10.0).abs() < 0.5, "dragging 10 mm back gave {v}");
+    h.frames(3);
+    let (at, _) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).expect("an anchor");
+    let dir2 = crate::sketch_modify_ui::arrow2(&h.app, h.app.dialog.as_ref().unwrap()).expect("a second direction");
+    let to = at - dir2 * 6.0;
+    h.step(&json!({"drag": [{"handle": "arrow2"}, {"world": [to.x, to.y, to.z]}], "ctrl": true})).unwrap();
+    assert!(spacing(&h, true) < 0.0, "the second arrow stayed positive: {}", spacing(&h, true));
+}
+
+/// Dragging a one-sided offset's arrow back across its curve offsets to the other side, the same
+/// as typing a negative distance (#5497). A symmetric offset uses the distance's size only, so its
+/// arrow still stops short of the curve.
+#[test]
+fn dragging_an_offset_arrow_across_its_curve_offsets_the_other_way() {
+    let made_radius = |drag: bool, symmetric: bool| {
+        let (mut h, id) = open("sketch.offset");
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
+        let Kind::SketchModify(Mod::Offset { distance, mode, .. }) = &mut d.kind else { panic!("the offset window") };
+        if symmetric {
+            *mode = 2;
+        }
+        if !drag {
+            *distance = "-1 mm".into();
+        }
+        h.step(&json!({"camera": {"yaw": 0.4, "pitch": 1.2}})).unwrap();
+        h.frames(5);
+        if drag {
+            let (at, dir) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).expect("an anchor");
+            let to = at - dir.expect("a direction") * 1.0;
+            h.step(&json!({"drag": [{"handle": "arrow"}, {"world": [to.x, to.y, to.z]}], "ctrl": true})).unwrap();
+        }
+        let Some(Kind::SketchModify(Mod::Offset { distance, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the offset window") };
+        let value = h.app.session.doc.eval(distance, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+        h.step(&json!({"widget": "OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let radii: Vec<f64> = sk
+            .curves
+            .iter()
+            .filter_map(|c| if let solidcraft_engine::sketch::CurveKind::Circle { r, .. } = c.kind { Some(r) } else { None })
+            .collect();
+        (value, radii)
+    };
+    // The circle's offset to the left of its curve is inside it; the other way is outside.
+    let (dragged, radii) = made_radius(true, false);
+    assert!((dragged + 1.0).abs() < 0.05, "dragging 1 mm back across the curve gave {dragged}");
+    assert_eq!(radii.len(), 2, "{radii:?}");
+    assert!((radii[1] - (5.0 - dragged)).abs() < 1e-6, "{radii:?}");
+    let (_, typed) = made_radius(false, false);
+    assert!((typed[1] - 6.0).abs() < 1e-6 && (radii[1] - typed[1]).abs() < 0.05, "dragged {radii:?}, typed {typed:?}");
+    let (symmetric, _) = made_radius(true, true);
+    assert!(symmetric > 0.0, "a symmetric offset's arrow went past its curve: {symmetric}");
 }
 
 /// A sketch holding one circle 30 mm out and a lone point at the origin, with the circular
@@ -669,7 +942,7 @@ fn open_circ() -> (crate::scenario::Harness, String) {
     };
     h.step(&json!({"start": "sketch.pattern.circular"})).unwrap();
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::SketchCurve { id: curve }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id: curve, sketch: None }];
     d.inputs[1].items = vec![Sel::SketchPoint { id: format!("{sid}:{centre}") }];
     (h, centre)
 }
@@ -705,12 +978,12 @@ fn the_typed_count_and_total_angle_reach_the_command() {
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].0, "sketch.pattern.circular");
     // The click flow could only ever send a count of 6, and never any angle.
-    assert_eq!(cmds[0].1["count"], json!(4));
-    assert_eq!(cmds[0].1["angle"], json!(180.0));
+    assert_eq!(cmds[0].1["count"], json!("4"));
+    assert_eq!(cmds[0].1["angle"], json!("180"));
     assert_eq!(cmds[0].1["center"], json!(centre), "the bare point id the command resolves");
     circ(&mut h, "4", "90 deg");
     let d = h.app.dialog.clone().unwrap();
-    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["angle"], json!(90.0));
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["angle"], json!("90 deg"));
 }
 
 #[test]
@@ -723,14 +996,14 @@ fn circular_flip_and_center_buttons_apply_and_reopen_the_saved_placement() {
     h.step(&json!({"click":{"handle":"dialog:Alignment:Flip direction"}})).unwrap();
     let d = h.app.dialog.clone().unwrap();
     let params = &apply_commands(&h.app, &d).unwrap()[0].1;
-    assert_eq!(params["count"], json!(6));
-    assert_eq!(params["angle"], json!(90.));
+    assert_eq!(params["count"], json!("6"));
+    assert_eq!(params["angle"], json!("90 deg"));
     assert_eq!(params["alignment"], json!("center"));
     assert_eq!(params["reversed"], json!(true));
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     let sid = h.app.session.active_sketch.unwrap();
     let id = {
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let pattern = &state.sketch(sid).unwrap().sketch.patterns[0];
         assert!(matches!(pattern.kind, SketchPatternKind::Circular { alignment: PatternAlignment::Center, reversed: true, .. }));
         pattern.id.clone()
@@ -748,17 +1021,14 @@ fn circular_flip_and_center_buttons_apply_and_reopen_the_saved_placement() {
     assert_eq!(params["reversed"], json!(true));
 }
 
-/// The same lesson as upstream #218: `num` reads a JSON number only, and `sketch.pattern.circular`
-/// falls back to a full turn when `angle` is anything else. An expression has to be evaluated
-/// here or it disappears in silence.
+/// Angle expressions stay linked to parameters when sent to the command.
 #[test]
-fn an_angle_expression_is_evaluated_rather_than_sent_as_a_string() {
+fn an_angle_expression_reaches_the_command_as_text() {
     let (mut h, _) = open_circ();
     h.app.run("parameters.add", json!({"name": "sweep", "expression": "120", "unit": "deg"})).unwrap();
     circ(&mut h, "3", "sweep");
     let d = h.app.dialog.clone().unwrap();
-    let angle = apply_commands(&h.app, &d).unwrap()[0].1["angle"].as_f64().expect("a number, not the text `sweep`");
-    assert!((angle - 120.0).abs() < 1e-9, "{angle}");
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["angle"], "sweep");
 }
 
 #[test]
@@ -786,7 +1056,7 @@ fn circular_quantity_keeps_its_expression_when_reopened_and_follows_parameter_ch
     h.app.run("sketch.circle.center", json!({"center":[20,0],"radius":2,"id":"seed"})).unwrap();
     h.app.start("sketch.pattern.circular");
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::SketchCurve { id: "seed".into() }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id: "seed".into(), sketch: None }];
     d.inputs[1].items = vec![Sel::SketchPoint { id: "origin".into() }];
     if let Kind::SketchModify(Mod::PatternCirc { count, .. }) = &mut d.kind {
         *count = "HoleAmount".into();
@@ -801,5 +1071,77 @@ fn circular_quantity_keeps_its_expression_when_reopened_and_follows_parameter_ch
     assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, out["pattern"].as_str().unwrap()));
     assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternCirc { count, .. }) if count=="HoleAmount"));
     let sid = h.app.session.active_sketch.unwrap();
-    assert_eq!(h.app.session.world_state().sketch(sid).unwrap().sketch.curves.len(), 7);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.curves.len(), 7);
+}
+
+#[test]
+fn mirror_origin_axis_picks_use_the_same_reference_as_symmetry() {
+    for (plane, name, expected) in [("XY", "X", "x"), ("XY", "Y", "y"), ("XZ", "Z", "y"), ("YZ", "Y", "x")] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":plane})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]})).unwrap();
+        h.step(&json!({"start":"sketch.mirror"})).unwrap();
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::SketchCurve { id: "source".into(), sketch: None }];
+        h.settle();
+        h.step(&json!({"click":{"handle":"dialog:Mirror line"}})).unwrap();
+        let on_axis = match name {
+            "X" => [10, 0, 0],
+            "Y" => [0, 10, 0],
+            _ => [0, 0, 10],
+        };
+        h.step(&json!({"click":{"world":on_axis}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![Sel::Axis { name: name.into() }]);
+        if plane == "XY" && name == "Y" {
+            h.step(&json!({"shot":"mirror-origin-y-before"})).unwrap();
+        }
+        let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(cmds[0].1["line"], expected);
+        h.frames(2);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+        if plane == "XY" && name == "Y" {
+            h.step(&json!({"shot":"mirror-origin-y-after"})).unwrap();
+        }
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert!(sk.sketch_axis_curve(expected).is_some());
+        assert_eq!(sk.constraints.iter().filter(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Symmetric { .. })).count(), 2);
+    }
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":{"origin":[0,5,0],"x_dir":[1,1,0],"y_dir":[-1,1,0]}})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]})).unwrap();
+    let mut inputs = mirror_inputs();
+    inputs[0].items = vec![Sel::SketchCurve { id: "source".into(), sketch: None }];
+    inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    let cmds = commands(&h.app, &Mod::Mirror, &inputs, &serde_json::Map::new()).unwrap();
+    assert_eq!(cmds[0].1["line"], json!({"axis":"Y"}));
+    h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+}
+
+/// #8201: on a sketch whose plane does not hold the picked origin axis, Mirror sends the axis
+/// and the engine mirrors about its projection into the sketch plane.
+#[test]
+fn mirror_sends_an_origin_axis_outside_the_sketch_plane_for_its_projection() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[0,1,-1],"y_dir":[-2,1,1]}})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]})).unwrap();
+    let mut inputs = mirror_inputs();
+    inputs[0].items = vec![Sel::SketchCurve { id: "source".into(), sketch: None }];
+    inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    let cmds = commands(&h.app, &Mod::Mirror, &inputs, &serde_json::Map::new()).unwrap();
+    assert_eq!(cmds[0].1, json!({"entities":["source"], "line":{"axis":"X"}}));
+    let out = h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    assert_eq!(out["curves"].as_array().map(Vec::len), Some(1));
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let copy = out["curves"][0].as_str().unwrap();
+    let start = sk.point(sk.resolve_point(&format!("{copy}.start")).unwrap()).unwrap();
+    let end = sk.point(sk.resolve_point(&format!("{copy}.end")).unwrap()).unwrap();
+    let (start, end) = ((start.x, start.y), (end.x, end.y));
+    let mirrored = |p: (f64, f64), x: f64, y: f64| (p.0 - x).abs() < 1e-6 && (p.1 - y).abs() < 1e-6;
+    assert!(
+        (mirrored(start, -10.0, 3.0) && mirrored(end, -15.0, 8.0)) || (mirrored(start, -15.0, 8.0) && mirrored(end, -10.0, 3.0)),
+        "{start:?} {end:?}"
+    );
 }

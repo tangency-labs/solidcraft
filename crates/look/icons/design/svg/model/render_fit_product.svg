@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Fit product — frame the whole product in the view</title>
+  <path d="M15.98 22.75L32 32L32 50.5L15.98 41.25Z" fill="#b8c3cf"/>
+  <path d="M48.02 22.75L32 32L32 50.5L48.02 41.25Z" fill="#8e9faf"/>
+  <path d="M32 13.5L48.02 22.75L32 32L15.98 22.75Z" fill="#e2e8ef"/>
+  <path d="M32 13.5L48.02 22.75L48.02 41.25L32 50.5L15.98 41.25L15.98 22.75Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15.98 22.75L32 32L48.02 22.75" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L32 50.5" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M5.5 18.5L5.5 5.5L18.5 5.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M58.5 18.5L58.5 5.5L45.5 5.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M58.5 45.5L58.5 58.5L45.5 58.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M5.5 45.5L5.5 58.5L18.5 58.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

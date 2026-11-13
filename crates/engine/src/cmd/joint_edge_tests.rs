@@ -1,7 +1,8 @@
 //! Joint origins on an edge of a face (its middle, or a corner) follow the face as it changes size.
 
 use serde_json::json;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::tests::{place, run};
 use crate::Session;
@@ -105,4 +106,70 @@ fn edge_origins_refuse_bad_picks_and_report_a_lost_edge() {
     *s.doc_mut() = doc;
     let r = run(&mut s, "joint.solve", json!({}));
     assert!(r["errors"][0]["why"].as_str().is_some_and(|w| w.contains("no longer exists")), "{r}");
+}
+
+#[test]
+fn an_edge_origin_on_a_body_placed_by_an_offset_lands_on_that_edge() {
+    // A 40 x 30 x 5 plate made at the origin, then placed by an offset (turned a quarter about x,
+    // moved), as an imported part's body is: its geometry stays where it was made and the offset
+    // places it. Edge origins picked where the plate is shown sit on its edges there.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 5, "corner": [0, 0, 0], "body_name": "Plate"}));
+    let offset = solidcraft_doc::rigid(Vec3::new(7.0, 0.0, 3.0), Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_2);
+    s.doc_mut().body_offsets.insert("Plate".into(), offset);
+    s.refresh();
+    let at = |p: Vec3| solidcraft_doc::apply_point(&offset, p);
+    let up = solidcraft_doc::apply_vector(&offset, Vec3::Z);
+    let st = s.model.state();
+    let resolve = |snap: solidcraft_doc::joints::Snap| {
+        let o = solidcraft_doc::joints::JointOrigin::new(0, snap);
+        let m = solidcraft_doc::joints::resolve_origin(&s.doc, &st, &o).unwrap_or_else(|e| panic!("{e}"));
+        (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]))
+    };
+    // The middle of the top face's front edge, and the corner at the plate's own origin.
+    let middle = solidcraft_doc::joints::edge_snap(&s.doc, &st, 0, at(Vec3::new(20.0, 0.0, 5.0)), Some(at(Vec3::new(20.0, 10.0, 5.0))), None)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let (o, z) = resolve(middle);
+    assert!(near(o, at(Vec3::new(20.0, 0.0, 5.0))) && near(z, up), "{o:?} {z:?}");
+    let corner = solidcraft_doc::joints::edge_snap(
+        &s.doc,
+        &st,
+        0,
+        at(Vec3::new(20.0, 0.0, 5.0)),
+        Some(at(Vec3::new(20.0, 10.0, 5.0))),
+        Some(at(Vec3::new(1.0, 0.0, 5.0))),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let (o, z) = resolve(corner);
+    assert!(near(o, at(Vec3::new(0.0, 0.0, 5.0))) && near(z, up), "{o:?} {z:?}");
+}
+
+/// A corner's other edge is found by its own name. Where no edge answers to that name any more,
+/// the corner is gone: the pick lies on the edge the corner was picked from, never on the other
+/// edge, so it cannot say which edge that name meant.
+#[test]
+fn a_corner_whose_other_edge_is_gone_asks_again() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 5, "corner": [0, 0, 0], "body_name": "Plate"}));
+    let boss =
+        run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 5, "base": [20, 20, 5], "operation": "join", "targets": ["Plate"]}))["feature"]
+            .as_u64()
+            .unwrap();
+    let st = s.model.state();
+    let snap = solidcraft_doc::joints::edge_snap(
+        &s.doc,
+        &st,
+        0,
+        Vec3::new(20.0, 0.0, 5.0),
+        Some(Vec3::new(20.0, 10.0, 5.0)),
+        Some(Vec3::new(1.0, 0.0, 5.0)),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let solidcraft_doc::joints::Snap::Edge { pick, edge, face: Some(face), corner: Some(_), axis } = snap else { panic!("{snap:?}") };
+    // The top face, and a face of the boss (a feature with faces on the plate) that no face
+    // answers to: the edge the pick lies on would take that name's place.
+    let corner = Some(format!("{face}|F{boss}:side:l99"));
+    let stale = solidcraft_doc::joints::Snap::Edge { pick, edge, face: Some(face), corner, axis };
+    let origin = solidcraft_doc::joints::JointOrigin::new(0, stale);
+    assert!(solidcraft_doc::joints::resolve_origin(&s.doc, &st, &origin).is_err());
 }

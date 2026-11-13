@@ -87,7 +87,7 @@ fn live_text_resize_follows_each_frame_and_rebuilds_downstream_on_release() {
         assert!((*angle + 10_f64.to_radians()).abs() < 1e-12);
         // Same letters, same outlines: what references them keeps working.
         assert_eq!(sk.link_curves(&link).len(), curves);
-        let shown = s.world_state();
+        let shown = s.world_state().unwrap();
         assert!(shown.sketch(1).unwrap().profiles.len() >= 2, "the sketch shown follows the frame");
     }
     run(&mut s, "sketch.drag_end", json!({}));
@@ -122,13 +122,13 @@ fn text_move_in_a_rotated_component_preserves_font_and_local_coordinates() {
     let sid = created["sketch"].as_u64().unwrap();
     let result = run(&mut s, "sketch.text", json!({"text":"I","at":[0,0],"height":10,"font":solidcraft_sketch::DEFAULT_FONT_FAMILY}));
     let link = result["link"].as_str().unwrap();
-    let before = s.world_state().sketch(sid).unwrap().plane;
+    let before = s.world_state().unwrap().sketch(sid).unwrap().plane;
     run(&mut s, "sketch.move", json!({"entities":[result["curves"][0]],"translate":[5,2]}));
     let sk = s.doc.sketch(sid).unwrap();
     let LinkSource::Text { at, font, .. } = &sk.link(link).unwrap().source else { panic!() };
     assert!(at.dist(Vec2::new(5.0, 2.0)) < 1e-9);
     assert_eq!(font.as_deref(), Some(solidcraft_sketch::DEFAULT_FONT_FAMILY));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     assert!(state.sketch(sid).unwrap().plane.to_world(*at).dist(before.to_world(Vec2::new(5.0, 2.0))) < 1e-9);
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert_eq!(reopened.doc.sketch(sid).unwrap().link(link).unwrap().source, sk.link(link).unwrap().source);
@@ -153,7 +153,7 @@ fn text_move_rejects_malformed_values_without_changing_history() {
 
 /// The box around the solved outlines of text `link` in sketch 1: (min, max).
 fn text_box(s: &Session, link: &str) -> (Vec2, Vec2) {
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let sk = &state.sketch(1).unwrap().sketch;
     let pts: Vec<Vec2> = sk.link_curves(link).into_iter().flat_map(|ci| sk.polyline(ci)).collect();
     let lo = pts.iter().fold(Vec2::new(f64::MAX, f64::MAX), |m, p| Vec2::new(m.x.min(p.x), m.y.min(p.y)));
@@ -189,6 +189,36 @@ fn text_on_a_path_follows_its_curve_when_the_curve_moves() {
     assert_eq!(solidcraft_doc::Document::from_json(&saved).unwrap().to_json(), saved);
 }
 
+/// A path placed by a parameter: the text on it follows in the same evaluation. (Texts are laid
+/// out with the sketch's links, before the solve that moves the path: the text came one
+/// evaluation late, where the path had been before the change.)
+#[test]
+fn text_on_a_path_follows_the_path_when_a_parameter_moves_it() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"W","expression":"20 mm"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    let line = run(&mut s, "sketch.line", json!({"points":[[20,15],[80,15]],"construction":true}))["curves"][0].as_str().unwrap().to_string();
+    let start = format!("{line}.start");
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line":line,"mode":"horizontal"}));
+    run(&mut s, "sketch.dimension", json!({"entities":[start,"origin"],"type":"horizontal","value":"W"}));
+    run(&mut s, "sketch.dimension", json!({"entities":[start,"origin"],"type":"vertical","value":"15 mm"}));
+    run(&mut s, "sketch.dimension", json!({"entities":[line],"type":"length","value":"60 mm"}));
+    let link =
+        run(&mut s, "sketch.text", json!({"text":"AB-12","at":[0,0],"height":8,"path":line,"align":"center"}))["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let middle = |s: &Session| {
+        let (lo, hi) = text_box(s, &link);
+        (lo.x + hi.x) / 2.0
+    };
+    let drawn = middle(&s);
+    assert!((drawn - 50.0).abs() < 1.0, "{drawn}");
+    for w in [300.0, 20.0, 140.0] {
+        run(&mut s, "parameters.change", json!({"name":"W","expression":format!("{w} mm")}));
+        let moved = middle(&s) - drawn;
+        assert!((moved - (w - 20.0)).abs() < 1e-6, "W {w}: the text moved {moved}");
+    }
+}
+
 #[test]
 fn text_style_parameters_are_checked() {
     let (mut s, link, _) = setup();
@@ -196,6 +226,8 @@ fn text_style_parameters_are_checked() {
         (json!({"link":link,"bold":true}), "no bold face"),
         (json!({"link":link,"bold":"yes"}), "`bold` must be true or false"),
         (json!({"link":link,"align":"justify"}), "`align` must be left, center or right"),
+        (json!({"link":link,"vertical_align":"above"}), "`vertical_align` must be baseline, top, middle or bottom"),
+        (json!({"link":link,"vertical_align":1}), "`vertical_align` must be baseline, top, middle or bottom"),
         (json!({"link":link,"line_spacing":0}), "`line_spacing` must be a positive factor"),
         (json!({"link":link,"letter_spacing":"wide"}), "`letter_spacing` must be a length"),
         (json!({"link":link,"path":"no-such-curve"}), "not a curve of this sketch"),
@@ -205,14 +237,19 @@ fn text_style_parameters_are_checked() {
         assert!(e.contains(error), "{params}: {e}");
         assert_eq!(s.doc.to_json(), before);
     }
-    run(&mut s, "sketch.edit_text", json!({"link":link,"italic":true,"align":"right","letter_spacing":1.5,"line_spacing":1.2}));
+    run(
+        &mut s,
+        "sketch.edit_text",
+        json!({"link":link,"italic":true,"align":"right","vertical_align":"middle","letter_spacing":1.5,"line_spacing":1.2}),
+    );
     let LinkSource::Text { style, text, .. } = &s.doc.sketch(1).unwrap().link(&link).unwrap().source else { panic!() };
     assert_eq!(text, "II");
     assert!(style.italic && style.align == solidcraft_sketch::TextAlign::Right && style.letter_spacing == 1.5 && style.line_spacing == 1.2);
+    assert_eq!(style.vertical_align, solidcraft_sketch::TextVerticalAlign::Middle);
     // Left out, a style stays.
     run(&mut s, "sketch.edit_text", json!({"link":link,"text":"I"}));
     let LinkSource::Text { style, .. } = &s.doc.sketch(1).unwrap().link(&link).unwrap().source else { panic!() };
-    assert!(style.italic && style.letter_spacing == 1.5);
+    assert!(style.italic && style.letter_spacing == 1.5 && style.vertical_align == solidcraft_sketch::TextVerticalAlign::Middle);
 }
 
 /// `base` with the keys of `extra` set (a null `extra` value is sent as null).
@@ -354,7 +391,7 @@ fn a_text_on_a_spline_turns_its_path_into_a_guide() {
     let t = run(&mut s, "sketch.text", json!({"text":"Phago","at":[0,0],"height":10,"path":spline}));
     assert_eq!(t["guide"], json!(spline));
     assert!(construction(&s));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let ss = state.sketch(s.active_sketch.unwrap()).unwrap();
     for (i, p) in ss.profiles.iter().enumerate() {
         let alone = p.curve_ids().iter().all(|id| ss.sketch.curves.iter().any(|c| &c.id == id && c.link.is_some()));

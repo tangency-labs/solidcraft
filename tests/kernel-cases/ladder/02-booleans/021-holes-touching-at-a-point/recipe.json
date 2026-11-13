@@ -1,0 +1,31 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     25,
+     20,
+     -1
+    ],
+    "radius": 5,
+    "height": 22,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     35,
+     20,
+     -1
+    ],
+    "radius": 5,
+    "height": 22,
+    "operation": "cut"
+   }
+  }
+ ]
+}

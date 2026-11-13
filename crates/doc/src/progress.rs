@@ -1,7 +1,9 @@
 //! Progress and cooperative cancellation for a long evaluation (opening a large design) run
 //! off the window thread. The caller wraps the work in [`watch`]; the timeline's evaluation
 //! loop reports each feature it reaches and, once [`Progress::cancel`] is called, skips the
-//! rest. Nothing changes for evaluations that are not watched.
+//! rest. The kernel work of the feature it is on stops too, at the kernel's next check (#10577):
+//! a long boolean no longer runs to its end after Cancel. Nothing changes for evaluations that
+//! are not watched.
 
 use std::cell::RefCell;
 use std::sync::{
@@ -21,10 +23,15 @@ pub struct Progress {
     work_stage: std::sync::Mutex<&'static str>,
     work_done: AtomicUsize,
     work_total: AtomicUsize,
+    /// The item a command works through one at a time (the linked design Update Links reads
+    /// again): its name, its place and how many there are ([`item`]).
+    item: std::sync::Mutex<Option<(String, usize, usize)>>,
     /// A window wants the model as far as it is built, to show while the rest is ([`Progress::want_partial`]).
     partial_wanted: AtomicBool,
     /// The latest such model and when it was offered.
     partial: std::sync::Mutex<(Option<Partial>, Option<web_time::Instant>)>,
+    /// Over the kernel work of the watched evaluation ([`watch`]): stopped on Cancel.
+    stop: solidcraft_kernel::Stop,
 }
 
 /// The model as far as an evaluation has built it, placed in the world as the design places it.
@@ -48,16 +55,21 @@ impl Default for Progress {
             work_stage: std::sync::Mutex::new(""),
             work_done: AtomicUsize::new(0),
             work_total: AtomicUsize::new(0),
+            item: std::sync::Mutex::new(None),
             partial_wanted: AtomicBool::new(false),
             partial: std::sync::Mutex::new((None, None)),
+            stop: solidcraft_kernel::Stop::new(),
         }
     }
 }
 
 impl Progress {
-    /// Ask the watched evaluation to stop at its next feature.
+    /// Ask the watched evaluation to stop at its next feature, and its kernel work at the
+    /// kernel's next check. Marked cancelled first: a feature its stopped kernel call fails is
+    /// then never kept in the evaluation cache ([`Evaluation::cancelled`]).
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
+        self.stop.stop();
     }
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
@@ -86,6 +98,23 @@ impl Progress {
         let stage = self.work_stage.lock().map(|s| *s).unwrap_or("");
         (total > 0 && !stage.is_empty()).then(|| (stage, self.work_done.load(Ordering::Relaxed).min(total), total))
     }
+    /// The item being worked on, as [`item`] reported it: (name, index from 0, count).
+    pub fn item(&self) -> Option<(String, usize, usize)> {
+        self.item.lock().ok().and_then(|i| i.clone())
+    }
+}
+
+/// Tell a watcher which item a command is on (`name`, `index` from 0 of `count`), such as the
+/// linked design Update Links reads again; `None` once it is past them. Nothing happens unless
+/// the work is watched ([`watch`]).
+pub fn item(current: Option<(&str, usize, usize)>) {
+    CURRENT.with(|c| {
+        if let Some(cur) = c.borrow().as_ref()
+            && let Ok(mut i) = cur.progress.item.lock()
+        {
+            *i = current.map(|(name, index, count)| (name.to_string(), index.min(count), count));
+        }
+    });
 }
 
 /// The kernel's long work (STEP import) reports to the same progress and stops on Cancel.
@@ -117,6 +146,7 @@ thread_local! {
 /// Run `f` with `progress` watching every evaluation it makes on this thread.
 pub fn watch<R>(progress: Arc<Progress>, f: impl FnOnce() -> R) -> R {
     let kernel = Arc::new(KernelWatch(progress.clone()));
+    let stop = progress.stop.clone();
     let previous = CURRENT.with(|c| c.replace(Some(Current { progress, depth: 0 })));
     struct Restore(Option<Option<Current>>);
     impl Drop for Restore {
@@ -127,7 +157,13 @@ pub fn watch<R>(progress: Arc<Progress>, f: impl FnOnce() -> R) -> R {
         }
     }
     let _restore = Restore(Some(previous));
-    solidcraft_kernel::watch::watching(kernel, f)
+    stop.within(|| solidcraft_kernel::watch::watching(kernel, f))
+}
+
+/// Whether the watch over this thread's evaluations asked them to stop. Work done after that may
+/// have been cut short: it is not kept.
+pub fn cancelled() -> bool {
+    CURRENT.with(|c| c.borrow().as_ref().is_some_and(|cur| cur.progress.is_cancelled()))
 }
 
 /// Entered at the start of an evaluation; the guard leaves it.
@@ -152,6 +188,13 @@ pub(crate) fn begin(total: usize) -> Evaluation {
 }
 
 impl Evaluation {
+    /// Whether the watcher asked to stop. A feature cut short then (a STEP import that stopped
+    /// part way) failed only because of it: its result must not be kept for the same inputs, as
+    /// the evaluation cache is shared with the model a preview was copied from (#7167).
+    pub(crate) fn cancelled(&self) -> bool {
+        CURRENT.with(|c| c.borrow().as_ref().is_some_and(|cur| cur.progress.is_cancelled()))
+    }
+
     /// Feature `index` is next. True when the watcher asked to stop: skip it.
     pub(crate) fn step(&self, index: usize) -> bool {
         CURRENT.with(|c| {
@@ -195,7 +238,8 @@ impl Evaluation {
         if !due {
             return;
         }
-        let world = Arc::new(crate::world_state(doc, state));
+        // A world that cannot be placed is shown with the evaluation's own error, at its end.
+        let Ok(world) = crate::world_state(doc, state).map(Arc::new) else { return };
         if let Ok(mut p) = progress.partial.lock() {
             *p = (Some(Partial { features, world }), Some(web_time::Instant::now()));
         }
@@ -242,17 +286,54 @@ mod tests {
         assert!(!begin(1).step(0), "the watch ends with its scope");
     }
 
+    /// Cancel reaches the kernel work of a watched evaluation, even under the token of the
+    /// design whose job it is (#10577): a boolean asked for after it is refused, rather than
+    /// running to its end.
+    #[test]
+    fn cancel_stops_the_kernel_work_under_the_watch() {
+        use solidcore_record::Vec3;
+        // Two cylinders crossing at right angles: a boolean only the kernel answers.
+        let a = solidcraft_kernel::cylinder(Vec3::new(0.0, 0.0, -10.0), Vec3::Z, 3.0, 20.0).unwrap();
+        let b = solidcraft_kernel::cylinder(Vec3::new(-10.0, 0.0, 0.0), Vec3::X, 2.0, 20.0).unwrap();
+        let design = solidcraft_kernel::Stop::new();
+        let union = || design.within(|| solidcraft_kernel::boolean(&a, &b, solidcraft_kernel::BoolOp::Union));
+        let p = Arc::new(Progress::default());
+        assert!(watch(p.clone(), union).is_ok_and(|u| u.is_some()), "a watch alone stops nothing");
+        p.cancel();
+        let stopped = watch(p.clone(), union);
+        assert!(stopped.as_ref().is_err_and(|e| e.to_string().contains("cancel")), "{stopped:?}");
+        assert!(!design.is_stopped(), "the design's own token goes on");
+        assert!(union().is_ok_and(|u| u.is_some()), "and so does its work outside the watch");
+    }
+
+    /// The item a command is on reaches its watcher, and only a watcher.
+    #[test]
+    fn items_go_to_the_watcher() {
+        item(Some(("unwatched", 0, 1)));
+        let p = Arc::new(Progress::default());
+        assert_eq!(p.item(), None);
+        watch(p.clone(), || {
+            item(Some(("plate", 1, 3)));
+            assert_eq!(p.item(), Some(("plate".to_string(), 1, 3)));
+            item(None);
+        });
+        assert_eq!(p.item(), None, "cleared once past the items");
+        item(Some(("after", 0, 1)));
+        assert_eq!(p.item(), None, "the watch ends with its scope");
+    }
+
     /// A watcher that asks for partial models gets the model built so far, placed, now and then;
     /// one that doesn't ask, or an unwatched evaluation, never pays for it.
     #[test]
     fn partial_models_go_only_to_a_watcher_that_wants_them() {
         let mut doc = crate::Document::new("partial");
         let block = crate::FeatureKind::Box {
-            corner: crate::point_expr(solidcraft_geom::Vec3::ZERO),
+            corner: crate::point_expr(solidcore_record::Vec3::ZERO),
             length: "2 mm".into(),
             width: "3 mm".into(),
             height: "4 mm".into(),
             operation: crate::Operation::NewBody,
+            centred: false,
         };
         doc.add_feature(block, Some("Block")).unwrap();
         let mut model = crate::Model::default();

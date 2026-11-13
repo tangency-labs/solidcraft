@@ -1,3 +1,12 @@
+newer_file_feature
+frame_end_cap
+  inputs:
+    Angle = cap1.angle (Angle)
+    Offset = cap1.offset (Length)
+    Thickness = cap.thickness (Length)
+    Inset Ratio = cap.ratio (Unitless)
+    Corner Chamfer = cap.chamfer (Length)
+  expressions: cap1.angle, cap1.offset, cap.thickness, cap.ratio, cap.chamfer
 body_transfer
 sketch
   inputs:
@@ -73,6 +82,13 @@ cylinder
     Radius = cyl.radius (Length)
     Height = cyl.height (Length)
   expressions: cyl.radius, cyl.height, cyl.x, cyl.y, cyl.z
+cylinder_references
+  inputs:
+    Radius = cyl.radius (Length)
+    Height = cyl.height (Length)
+    Reference distance = cyl.reference1 (Length)
+    Reference distance = cyl.reference2 (Length)
+  expressions: cyl.radius, cyl.height, cyl.reference1, cyl.reference2, 0, 0, 0
 sphere
   inputs:
     Radius = sph.radius (Length)
@@ -82,6 +98,12 @@ torus
     Major radius = tor.major (Length)
     Minor radius = tor.minor (Length)
   expressions: tor.major, tor.minor, tor.x, tor.y, tor.z
+cone
+  inputs:
+    Radius = cone.radius (Length)
+    Top radius = cone.top_radius (Length)
+    Height = cone.height (Length)
+  expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z
 combine
 pattern_rectangular
   inputs:
@@ -94,7 +116,7 @@ pattern_circular
   inputs:
     Quantity = circ.count (Unitless)
     Total angle = circ.angle (Angle)
-  expressions: circ.count, circ.angle
+  expressions: circ.count, circ.angle, 0, 0, 0
 pattern_path
   inputs:
     Quantity = path.count (Unitless)
@@ -250,6 +272,19 @@ coil
     Section size = coil.section_size (Length)
     Start angle = coil.start_angle (Angle)
   expressions: coil.diameter, coil.pitch, coil.turns, coil.section_size, coil.start_angle, coil.x, coil.y, coil.z
+coil_profile
+  inputs:
+    Pitch = coil_profile.pitch (Length)
+    Revolutions = coil_profile.turns (Unitless)
+  expressions: coil_profile.pitch, coil_profile.turns, coil_profile.x, coil_profile.y, coil_profile.z
+cell_grid
+  inputs:
+    Sides = cell_grid.sides (Unitless)
+    Cell size = cell_grid.size (Length)
+    Web = cell_grid.web (Length)
+    Angle = cell_grid.angle (Angle)
+    Depth = cell_grid.depth (Length)
+  expressions: cell_grid.sides, cell_grid.size, cell_grid.web, cell_grid.angle, cell_grid.depth, cell_grid.x, cell_grid.y, cell_grid.z
 sheet_base
 sheet_contour
   inputs:
@@ -281,6 +316,10 @@ sheet_fold
     Angle = fold.angle (Angle)
     Bend radius = fold.radius (Length)
   expressions: fold.angle, fold.radius
+sheet_path
+  inputs:
+    Bend radius = path.radius (Length)
+  expressions: path.radius
 sheet_unfold
 sheet_convert
 boss
@@ -413,3 +452,7 @@ mesh_convert
     Tolerance = mesh_convert.tolerance (Length)
   expressions: mesh_convert.tolerance
 mesh_import
+repair
+  inputs:
+    Gap = repair.gap (Length)
+  expressions: repair.gap

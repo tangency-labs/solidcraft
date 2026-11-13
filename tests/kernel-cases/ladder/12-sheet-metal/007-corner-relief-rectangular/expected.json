@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "003's tray with a rectangular corner relief 4 mm across at each corner",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). A corner relief (sheet.rs plan_relief) is cut from the base at the corner of the bends, size/2 = r along both edges: a quarter disc (round) or an r x r square (rectangular) at a square corner; both bends then start r from the corner, and the panels keep the ends the closing gave them. r = 2: each corner takes r^2 = 4 of the base and 2 mm of each of its two bends (2 BA = 2 pi); V = 2 (003's flat area - 4 x that - 8 x 2 pi)",
+ "body_count": 1,
+ "volume_mm3": 22119.125363769,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   100.0,
+   60.0,
+   20.0
+  ]
+ }
+}

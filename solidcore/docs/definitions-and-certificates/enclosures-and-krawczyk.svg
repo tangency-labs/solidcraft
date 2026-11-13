@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="600" viewBox="0 0 1000 600">
+  <title>enclosures-and-krawczyk</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L1000 0 L1000 600 L0 600 Z" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 40 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Enclosures and Krawczyk&apos;s test</tspan></text>
+    <path d="M500 80 L500 530" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <text transform="matrix(1 0 0 1 40 95)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Enclosures under subdivision</tspan></text>
+    <path d="M70 145.949 L330 145.949 L330 222.05 L70 222.05 Z" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M70 190 L75.2 186.4 L80.4 182.9 L85.6 179.4 L90.8 176 L96 172.8 L101.2 169.6 L106.4 166.7 L111.6 163.9 L116.8 161.4 L122 159.1 L127.2 157 L132.4 155.3 L137.6 153.8 L142.8 152.6 L148 151.7 L153.2 151.2 L158.4 151 L163.6 151 L168.8 151.4 L174 152.2 L179.2 153.2 L184.4 154.5 L189.6 156.1 L194.8 157.9 L200 160 L205.2 162.4 L210.4 164.9 L215.6 167.6 L220.8 170.5 L226 173.5 L231.2 176.6 L236.4 179.7 L241.6 182.9 L246.8 186.1 L252 189.3 L257.2 192.5 L262.4 195.5 L267.6 198.5 L272.8 201.3 L278 204 L283.2 206.4 L288.4 208.7 L293.6 210.7 L298.8 212.5 L304 214 L309.2 215.2 L314.4 216.1 L319.6 216.7 L324.8 217 L330 217" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 350 184)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">level 0: 1 box</tspan></text>
+    <text transform="matrix(1 0 0 1 350 204)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#1f6fb2"><tspan x="0" y="0">over the target</tspan></text>
+    <path d="M70 275.949 L200 275.949 L200 325 L70 325 Z" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M200 285.044 L330 285.044 L330 352.05 L200 352.05 Z" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M70 320 L75.2 316.4 L80.4 312.9 L85.6 309.4 L90.8 306 L96 302.8 L101.2 299.6 L106.4 296.7 L111.6 293.9 L116.8 291.4 L122 289.1 L127.2 287 L132.4 285.3 L137.6 283.8 L142.8 282.6 L148 281.7 L153.2 281.2 L158.4 281 L163.6 281 L168.8 281.4 L174 282.2 L179.2 283.2 L184.4 284.5 L189.6 286.1 L194.8 287.9 L200 290 L205.2 292.4 L210.4 294.9 L215.6 297.6 L220.8 300.5 L226 303.5 L231.2 306.6 L236.4 309.7 L241.6 312.9 L246.8 316.1 L252 319.3 L257.2 322.5 L262.4 325.5 L267.6 328.5 L272.8 331.3 L278 334 L283.2 336.4 L288.4 338.7 L293.6 340.7 L298.8 342.5 L304 344 L309.2 345.2 L314.4 346.1 L319.6 346.7 L324.8 347 L330 347" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 350 314)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">level 1: 2 boxes</tspan></text>
+    <text transform="matrix(1 0 0 1 350 334)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#1f6fb2"><tspan x="0" y="0">over the target</tspan></text>
+    <path d="M70 409.49 L135 409.49 L135 455 L70 455 Z" fill="#dce9f5" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M135 405.949 L200 405.949 L200 425.044 L135 425.044 Z" fill="#dce9f5" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M200 415.044 L265 415.044 L265 462.027 L200 462.027 Z" fill="#dce9f5" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M265 452.027 L330 452.027 L330 482.051 L265 482.051 Z" fill="#dce9f5" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M70 450 L75.2 446.4 L80.4 442.9 L85.6 439.4 L90.8 436 L96 432.8 L101.2 429.6 L106.4 426.7 L111.6 423.9 L116.8 421.4 L122 419.1 L127.2 417 L132.4 415.3 L137.6 413.8 L142.8 412.6 L148 411.7 L153.2 411.2 L158.4 411 L163.6 411 L168.8 411.4 L174 412.2 L179.2 413.2 L184.4 414.5 L189.6 416.1 L194.8 417.9 L200 420 L205.2 422.4 L210.4 424.9 L215.6 427.6 L220.8 430.5 L226 433.5 L231.2 436.6 L236.4 439.7 L241.6 442.9 L246.8 446.1 L252 449.3 L257.2 452.5 L262.4 455.5 L267.6 458.5 L272.8 461.3 L278 464 L283.2 466.4 L288.4 468.7 L293.6 470.7 L298.8 472.5 L304 474 L309.2 475.2 L314.4 476.1 L319.6 476.7 L324.8 477 L330 477" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 350 444)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">level 2: 4 boxes</tspan></text>
+    <text transform="matrix(1 0 0 1 350 464)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#555555"><tspan x="0" y="0">certified</tspan></text>
+    <text transform="matrix(1 0 0 1 66 528)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">a</tspan></text>
+    <text transform="matrix(1 0 0 1 326 528)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">b</tspan></text>
+    <text transform="matrix(1 0 0 1 540 95)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Krawczyk: K(X) inside X</tspan></text>
+    <path d="M600 140 L860 140 L860 400 L600 400 Z" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 610 162)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">X</tspan></text>
+    <path d="M690 230 L810 230 L810 320 L690 320 Z" fill="#f0f0f0" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 697 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">K(X)</tspan></text>
+    <path d="M726.5 285 C726.5 283.067 728.067 281.5 730 281.5 C731.933 281.5 733.5 283.067 733.5 285 C733.5 286.933 731.933 288.5 730 288.5 C728.067 288.5 726.5 286.933 726.5 285 Z" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 738 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">x̃</tspan></text>
+    <path d="M775 261 L776.763 265.573 L781.657 265.837 L777.853 268.927 L779.114 273.663 L775 271 L770.886 273.663 L772.147 268.927 L768.343 265.837 L773.237 265.573 Z" fill="#1f6fb2"/>
+    <path d="M781 265 L880 215" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 884 214)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">the unique</tspan></text>
+    <text transform="matrix(1 0 0 1 884 232)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">root</tspan></text>
+    <text transform="matrix(1 0 0 1 540 450)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">K(X) = x̃ − Y F(x̃) + (I − Y F′(X)) (X − x̃)</tspan></text>
+    <text transform="matrix(1 0 0 1 540 478)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">K(X) ⊂ int X and ‖I − Y F′(X)‖ &lt; 1:</tspan></text>
+    <text transform="matrix(1 0 0 1 540 500)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#555555"><tspan x="0" y="0">exactly one root in X, and it lies in K(X)</tspan></text>
+    <text transform="matrix(1 0 0 1 40 560)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Left: the boxes over a span shrink as it is cut. Right: the operator maps the box into its interior, which proves one root.</tspan></text>
+  </g>
+</svg>

@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "name": "analytic_torus_iso_boundary",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:21745 IntersectSurfaceBoundaries of an SmPlane with a canonical SmTorus (SmTorus::CreateCanonical, source/SMLib/src/SmTorus.cpp:172): SmTorus::CreateIsoParametricCurve builds the typed minor circle. One u-min minor circle inside the plane's square is the source prediction; the fixture does not hardcode the retained count; all returned values are compared.",
+      "inputs": {
+        "op": 1,
+        "a": {
+          "kind": 1,
+          "net": [
+            [0.0, 0.5, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.0, 0.0, 1.0, 1.0]
+        },
+        "b": {
+          "kind": 2,
+          "net": [
+            [0.2, 0.5, 0.5],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.3, 0.2, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.0, 0.0, 1.0, 1.0]
+        },
+        "tol": 1e-6,
+        "guesses": [0.0, 0.0, 0.0, 0.0],
+        "boundary_testing": false
+      }
+    },
+    {
+      "name": "analytic_torus_iso_boundary_radius_control",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:21745 IntersectSurfaceBoundaries of an SmPlane with a canonical SmTorus (SmTorus::CreateCanonical, source/SMLib/src/SmTorus.cpp:172): SmTorus::CreateIsoParametricCurve builds the typed minor circle. Same call, plane, axes, centre, analytic and NURB domains and tolerance as analytic_torus_iso_boundary, with only the torus minor radius changed from 0.2 to 0.200001 (major radius stays 0.3): a planned geometric parameter control after that case's native success, not a fix for a failure. The fixture does not hardcode the retained count and expects no particular values; it makes no claim about this control's native result.",
+      "inputs": {
+        "op": 1,
+        "a": {
+          "kind": 1,
+          "net": [
+            [0.0, 0.5, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.0, 0.0, 1.0, 1.0]
+        },
+        "b": {
+          "kind": 2,
+          "net": [
+            [0.2, 0.5, 0.5],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.3, 0.200001, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.0, 0.0, 1.0, 1.0]
+        },
+        "tol": 1e-6,
+        "guesses": [0.0, 0.0, 0.0, 0.0],
+        "boundary_testing": false
+      }
+    }
+  ]
+}

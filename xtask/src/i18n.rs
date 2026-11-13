@@ -24,7 +24,7 @@ const DIR: &str = "assets/locales";
 
 /// Catalogs delivered complete: a missing message here fails `--check`. English is the source
 /// catalog and is checked implicitly; keep this in step with `COMPLETE` in `ui-egui::i18n`.
-const COMPLETE: &[&str] = &["ja", "zh"];
+const COMPLETE: &[&str] = &["ar", "he", "ja", "vi", "zh"];
 
 /// What `run` found.
 #[derive(Default)]
@@ -47,7 +47,28 @@ impl Report {
     }
 }
 
+/// The registry flags. CI splits the check so the fast repository job never builds the app:
+/// that job passes `--no-registry` (catalog coverage only), and the job that already built
+/// `solidcraft-cli` passes `--cli <binary>` (everything, command labels included). With neither
+/// the registry is read through `cargo run`, as before. A registry that cannot be read still
+/// fails the check; only an explicit `--no-registry` skips it.
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
+    let cli = match args.iter().position(|a| *a == "--cli") {
+        Some(i) => Some(args.get(i + 1).ok_or("--cli needs the path of a built solidcraft-cli")?.to_string()),
+        None => None,
+    };
+    if args.contains(&"--no-registry") {
+        if cli.is_some() || args.contains(&"--add-missing") {
+            return Err("--no-registry cannot be combined with --cli or --add-missing".into());
+        }
+        println!("i18n: catalog coverage only; command labels are checked where solidcraft-cli is built (--cli)");
+        return run_with_registry(root, args, || Ok(Vec::new()));
+    }
+    run_with_registry(root, args, || registry(cli.as_deref()))
+}
+
+/// Resolve the command registry before reporting success or writing any catalog.
+fn run_with_registry(root: &Path, args: &[&str], registry: impl FnOnce() -> Result<Vec<Value>, String>) -> Result<(), String> {
     let english = read(root, "en")?;
     let mut catalogs: Vec<(String, Map<String, Value>)> = Vec::new();
     for id in locales(root)? {
@@ -67,7 +88,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     }
 
     let known: Vec<&str> = english.values().filter_map(Value::as_str).collect();
-    for (label, ids) in labels_needing_translation(&known) {
+    for (label, ids) in labels_needing_translation(&known, registry()?) {
         report.untranslated.insert(label, ids);
     }
 
@@ -77,7 +98,8 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
         return Ok(());
     }
 
-    print_report(&report);
+    let labels = !args.contains(&"--no-registry");
+    print_report(&report, labels);
 
     if args.contains(&"--check") {
         if report.problems() > 0 {
@@ -90,13 +112,17 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
         }
         if report.reported_only() > 0 {
             println!(
-                "i18n: every complete catalog ({}) carries every English message and every command label is translatable; \
+                "i18n: every complete catalog ({}) carries every English message; {}; \
                  {} message(s) are still missing from the partial catalogs (de, ko)",
                 COMPLETE.join(", "),
+                if labels { "every command label is translatable" } else { "command labels not checked here" },
                 report.reported_only()
             );
         } else {
-            println!("i18n: every catalog carries every English message; every command label is translatable");
+            println!(
+                "i18n: every catalog carries every English message; {}",
+                if labels { "every command label is translatable" } else { "command labels not checked here" }
+            );
         }
     }
     Ok(())
@@ -122,8 +148,15 @@ fn locales(root: &Path) -> Result<Vec<String>, String> {
 fn read(root: &Path, locale: &str) -> Result<Map<String, Value>, String> {
     let path = root.join(DIR).join(format!("{locale}.json"));
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Messages still in assets/locales/pending/ count: they are folded on main.
+    let pending = crate::pending::locale_messages(root, locale)?;
     match serde_json::from_str(&text) {
-        Ok(Value::Object(map)) => Ok(map),
+        Ok(Value::Object(mut map)) => {
+            for (id, text) in pending {
+                map.entry(id).or_insert(Value::String(text));
+            }
+            Ok(map)
+        }
         Ok(_) => Err(format!("{}: a catalog must be a JSON object", path.display())),
         Err(e) => Err(format!("{}: {e}", path.display())),
     }
@@ -133,11 +166,8 @@ fn read(root: &Path, locale: &str) -> Result<Map<String, Value>, String> {
 ///
 /// The registry is read through `solidcraft-cli commands` so the report comes from the real
 /// command table, never from a copy of it.
-fn labels_needing_translation(known: &[&str]) -> BTreeMap<String, Vec<String>> {
+fn labels_needing_translation(known: &[&str], commands: Vec<Value>) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let Ok(commands) = registry() else {
-        return out;
-    };
     for command in commands {
         let (Some(id), Some(label)) = (command["id"].as_str(), command["label"].as_str()) else {
             continue;
@@ -153,11 +183,20 @@ fn labels_needing_translation(known: &[&str]) -> BTreeMap<String, Vec<String>> {
     out
 }
 
-fn registry() -> Result<Vec<Value>, String> {
-    let out = crate::cargo()
-        .args(["run", "-q", "--release", "-p", "solidcraft-cli", "--", "commands"])
-        .output()
-        .map_err(|e| format!("solidcraft-cli: {e}"))?;
+fn registry(cli: Option<&str>) -> Result<Vec<Value>, String> {
+    let mut command = match cli {
+        Some(path) => {
+            let mut c = std::process::Command::new(path);
+            c.arg("commands");
+            c
+        }
+        None => {
+            let mut c = crate::cargo();
+            c.args(["run", "-q", "--profile", "ci", "-p", "solidcraft-cli", "--", "commands"]);
+            c
+        }
+    };
+    let out = command.output().map_err(|e| format!("solidcraft-cli: {e}"))?;
     if !out.status.success() {
         return Err(format!("solidcraft-cli commands failed:\n{}", String::from_utf8_lossy(&out.stderr)));
     }
@@ -194,7 +233,7 @@ fn add_missing(root: &Path, report: &mut Report) -> Result<usize, String> {
     Ok(added)
 }
 
-fn print_report(report: &Report) {
+fn print_report(report: &Report, labels: bool) {
     for (locale, missing) in &report.missing {
         println!("i18n: {locale} is missing {} English message(s):", missing.len());
         for id in missing {
@@ -209,13 +248,73 @@ fn print_report(report: &Report) {
         println!("i18n: run `cargo xtask i18n --add-missing` to add them to en.json, then translate them.");
     }
     if report.problems() == 0 {
-        println!("i18n: catalogs complete; every command label is translatable");
+        if labels {
+            println!("i18n: catalogs complete; every command label is translatable");
+        } else {
+            println!("i18n: catalog coverage ok (command labels not checked here)");
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn catalog_root() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!("solidcraft-i18n-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(root.join(DIR)).unwrap();
+        std::fs::write(root.join(DIR).join("en.json"), "{\"cmd.known\":\"Known\"}\n").unwrap();
+        root
+    }
+
+    #[test]
+    fn registry_errors_fail_every_mode_without_writing_catalogs() {
+        let root = catalog_root();
+        let english = root.join(DIR).join("en.json");
+        let before = std::fs::read(&english).unwrap();
+        let errors = [
+            format!("solidcraft-cli: {}", std::io::Error::from(std::io::ErrorKind::NotFound)),
+            "solidcraft-cli commands failed:\ncompiler failed".to_owned(),
+            format!("commands JSON: {}", serde_json::from_slice::<Vec<Value>>(b"not JSON").unwrap_err()),
+        ];
+        for mode in [None, Some("--check"), Some("--add-missing")] {
+            let args: Vec<&str> = mode.into_iter().collect();
+            for error in &errors {
+                let result = run_with_registry(&root, &args, || Err(error.clone()));
+                assert_eq!(result, Err(error.clone()), "mode {mode:?} must retain the registry failure");
+                assert_eq!(std::fs::read(&english).unwrap(), before, "a registry failure must not rewrite the catalog");
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn known_labels_and_repeated_command_ids_stay_deduplicated() {
+        let commands = vec![
+            serde_json::json!({"id":"known","label":"Known"}),
+            serde_json::json!({"id":"zeta","label":"New"}),
+            serde_json::json!({"id":"alpha","label":"New"}),
+            serde_json::json!({"id":"zeta","label":"New"}),
+        ];
+        assert_eq!(labels_needing_translation(&["Known"], commands), BTreeMap::from([("New".into(), vec!["zeta".into(), "alpha".into()])]));
+    }
+
+    #[test]
+    fn a_valid_registry_still_checks_and_adds_missing_labels() {
+        let root = catalog_root();
+        let commands = vec![serde_json::json!({"id":"zeta","label":"New"}), serde_json::json!({"id":"alpha","label":"New"})];
+        let error = run_with_registry(&root, &["--check"], || Ok(commands.clone())).unwrap_err();
+        assert!(error.contains("1 command label(s) with no English entry"), "{error}");
+        run_with_registry(&root, &["--add-missing"], || Ok(commands.clone())).unwrap();
+        let english: Value = serde_json::from_slice(&std::fs::read(root.join(DIR).join("en.json")).unwrap()).unwrap();
+        assert_eq!(english["cmd.known"], "Known");
+        assert_eq!(english["cmd.alpha"], "New", "the lowest command id still names a shared label");
+        assert!(english.get("cmd.zeta").is_none());
+        run_with_registry(&root, &["--check"], || Ok(commands)).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn report_counts_both_kinds_of_gap() {
@@ -229,5 +328,20 @@ mod tests {
     #[test]
     fn an_empty_report_has_no_problems() {
         assert_eq!(Report::default().problems(), 0);
+    }
+
+    #[test]
+    fn no_registry_skips_label_discovery_and_conflicts_are_refused() {
+        let root = catalog_root();
+        run(&root, &["--check", "--no-registry"]).unwrap();
+        assert!(run(&root, &["--check", "--no-registry", "--cli", "x"]).is_err());
+        assert!(run(&root, &["--add-missing", "--no-registry"]).is_err());
+    }
+
+    #[test]
+    fn an_unreadable_cli_fails_the_check() {
+        let root = catalog_root();
+        let error = run(&root, &["--check", "--cli", "/nonexistent/solidcraft-cli"]).unwrap_err();
+        assert!(error.starts_with("solidcraft-cli:"), "{error}");
     }
 }

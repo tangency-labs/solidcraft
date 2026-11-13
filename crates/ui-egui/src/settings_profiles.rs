@@ -1,0 +1,845 @@
+//! Settings profiles (#6237): the input and interface settings kept together under a name, such
+//! as "Laptop" and "Large monitor", and switched at once. A profile holds the original Interface,
+//! Navigation and Sketch preference keys and the language, keyboard shortcuts, toolbar (with its
+//! quick-access bar), S box favourites, imported theme it uses, and the custom view navigator's
+//! texture, arrows and Home, and its body (when one is chosen; a profile without one leaves the
+//! current body alone). Page moves preserve that stored key set; device-specific 3D mouse keys,
+//! graphics, recent files and Assistant settings stay out.
+//! An enabled panel runtime contributes the selected layout workspace and every
+//! workspace's current arrangement, without its named library or native window geometry.
+//!
+//! A profile is kept, exported and imported as one `solidcraft-profile/1` document. Every
+//! document is checked by [`sanitize`] first: unknown keys are dropped, sizes are capped, and a
+//! preference this version can't read is left out. Applying one sets each preference through
+//! [`prefs::set`], so it is checked again and has the same effects as a change in Preferences;
+//! one that is refused there (an interface font this computer lacks) keeps its current value.
+//! Saved theme option maps are restored intact, retaining stale entries for fallback notices.
+//!
+//! The `settings.profile.*` commands reach the profiles; the engine only checks their
+//! parameters, and [`command`] does the rest after `SolveApp::run`.
+
+use serde_json::{Map, Value, json};
+use solidcraft_engine::io::vfs;
+use solidcraft_engine::{MAX_PROFILE_NAME, profile_name};
+
+use crate::ui_kit::BackingTooltipExt as _;
+use crate::{SolveApp, prefs, theme_files, ui_kit};
+
+/// The format tag of a profile document.
+pub const FORMAT: &str = "solidcraft-profile/1";
+/// Most profiles kept.
+pub const MAX_PROFILES: usize = 32;
+/// Most bytes read from a profile file.
+const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+/// Most bytes in one checked profile document.
+const MAX_PROFILE_BYTES: usize = 1024 * 1024;
+const MAX_SHORTCUTS: usize = 2000;
+const MAX_FAVOURITES: usize = 64;
+/// Most imported themes one profile carries (the one it uses).
+const MAX_THEMES: usize = 4;
+/// Most characters in a command id or a key name.
+const MAX_ID: usize = 200;
+
+/// The original 98 Interface, Navigation, Sketch and language keys, plus explicitly added
+/// settings. Device-specific space_mouse_* and orbit_cursor stay outside profiles. Page moves
+/// and title tags never remove stored keys such as the bridge, origin names and direct interaction.
+const PROFILE_KEYS: &[&str] = &[
+    "browser_bodies_folders",
+    "browser_eye_left",
+    "center_arc_follows_cursor",
+    "color_vision",
+    "dialog_buttons",
+    "direct_interaction",
+    "escape_twice_finishes_sketch",
+    "free_orbit",
+    "free_orbit_upright",
+    "hidden_toolbar_tabs",
+    "hide_constraint_glyphs_zoomed_out",
+    "history_in_browser",
+    "history_play_button",
+    "history_sketches",
+    "home_fit_size",
+    "invert_navigator_arrows",
+    "keep_hover_while_navigating",
+    "keep_work_on_tab_switch",
+    "language",
+    "layout",
+    "line_drag_draws_one",
+    "line_hover_tangent_arc",
+    "live_panel_drag_preview",
+    "logo_accent",
+    "look_at_anim",
+    "look_at_speed",
+    "manipulator_free_alt",
+    "maya_horizontal_zoom",
+    "middle_double_click",
+    "mouse_gestures",
+    "nav",
+    "nav_bridge_enabled",
+    "nav_bridge_port",
+    "navigation_bar",
+    "navigator_fit",
+    "navigator_style",
+    "orbit_around",
+    "orbit_reverse",
+    "origin_plane_names",
+    "pan_reverse_x",
+    "pan_reverse_y",
+    "persistent_ribbon_pressed",
+    "prefer_free_sketch_points",
+    "project_options_dialog",
+    "quick_measure",
+    "radial_context_menu",
+    "ribbon_click_ends_tool",
+    "ribbon_icon_grid",
+    "ribbon_labels",
+    "ribbon_menus_follow_hover",
+    "ribbon_menus_skip_pinned",
+    "ribbon_reveal",
+    "ribbon_tabs_only",
+    "right_drag_orbits",
+    "select_other_hidden",
+    "selection_shift_add_only",
+    "shortcut_cycles_modes",
+    "sketch_align_points",
+    "sketch_auto_dimensions",
+    "sketch_auto_locate",
+    "sketch_conflict_colour",
+    "sketch_construction_lines",
+    "sketch_exit_view",
+    "sketch_face_activates_part",
+    "sketch_open_look_at",
+    "sketch_recent_snap",
+    "sketch_snap_to_visible_grid",
+    "sketch_state_icons",
+    "sketch_tab_always",
+    "sketch_tracking_guides",
+    "sketch_tracking_points",
+    "smooth_wheel_zoom",
+    "status_bar",
+    "suppress_sketch_snap",
+    "theme",
+    "theme_day",
+    "theme_follow",
+    "theme_night",
+    "theme_options",
+    "timeline_origin_bodies",
+    "toast_place",
+    "trackpad_pan",
+    "trackpad_twist_turns",
+    "trackpad_zoom_modifier",
+    "ui_font",
+    "ui_scale",
+    "view_confirm_corner",
+    "viewport_analysis_status",
+    "viewport_background",
+    "viewport_section_status",
+    "viewport_status_details",
+    "viewport_status_summary",
+    "viewport_theme",
+    "wheel_zoom_speed",
+    "zoom_reverse",
+    "zoom_stop_at_model",
+    "zoom_to_cursor",
+];
+
+/// The preferences a profile holds, by their stored key.
+pub fn keys() -> impl Iterator<Item = &'static str> {
+    prefs::FIELD_PAGES.iter().map(|(key, _)| *key).filter(|key| PROFILE_KEYS.contains(key))
+}
+
+/// The kept profiles, which one was applied or saved last, and the Preferences section's state.
+#[derive(Default)]
+pub struct Profiles {
+    /// Checked `solidcraft-profile/1` documents, in the order they were added.
+    pub list: Vec<Value>,
+    /// The profile applied or saved last, while it exists.
+    pub active: Option<String>,
+    /// The independent name typed in Preferences, empty until the user enters one.
+    draft: String,
+    /// The last action's outcome in Preferences.
+    message: Option<Outcome>,
+    /// General's row-local rename editor; never changes the active profile just to rename it.
+    rename: Option<Rename>,
+}
+
+struct Rename {
+    name: String,
+    text: String,
+    focused: bool,
+    at: egui::Pos2,
+}
+
+/// What a profile action in Preferences reports. Kept untranslated: applying a profile can
+/// change the language, and the report is shown in the new one.
+enum Outcome {
+    /// It worked: the message id.
+    Done(&'static str),
+    /// A profile applied with this many settings refused.
+    Skipped(usize),
+    Failed(String),
+}
+
+impl Profiles {
+    /// What the app keeps between runs.
+    pub fn prefs(&self) -> Value {
+        json!({ "active": self.active, "profiles": self.list })
+    }
+
+    /// Back from [`Profiles::prefs`]: profiles that fail the checks, and repeated names, are dropped.
+    pub fn load(&mut self, v: &Value) {
+        self.list.clear();
+        for doc in v.get("profiles").and_then(Value::as_array).into_iter().flatten().take(MAX_PROFILES) {
+            match sanitize(doc) {
+                Ok(doc) if self.find(name_of(&doc)).is_none() => self.list.push(doc),
+                Ok(_) => {}
+                Err(e) => log::warn!("settings profiles: one is dropped: {e}"),
+            }
+        }
+        self.active = v.get("active").and_then(Value::as_str).filter(|name| self.find(name).is_some()).map(str::to_string);
+    }
+
+    /// The profile names, in order.
+    pub fn names(&self) -> Vec<String> {
+        self.list.iter().map(|doc| name_of(doc).to_string()).collect()
+    }
+
+    fn find(&self, name: &str) -> Option<usize> {
+        self.list.iter().position(|doc| name_of(doc) == name)
+    }
+
+    fn get(&self, name: &str) -> Result<&Value, String> {
+        self.find(name).and_then(|i| self.list.get(i)).ok_or_else(|| format!("no settings profile `{name}`"))
+    }
+
+    /// `name`, or the first of `name 2`, `name 3`… no profile has yet.
+    fn free_name(&self, name: &str) -> String {
+        if self.find(name).is_none() {
+            return name.to_string();
+        }
+        (2..=MAX_PROFILES + 1)
+            .map(|n| {
+                let suffix = format!(" {n}");
+                let base: String = name.chars().take(MAX_PROFILE_NAME - suffix.chars().count()).collect();
+                format!("{}{suffix}", base.trim_end())
+            })
+            .find(|candidate| self.find(candidate).is_none())
+            .unwrap_or_else(|| name.to_string())
+    }
+}
+
+fn name_of(doc: &Value) -> &str {
+    doc.get("name").and_then(Value::as_str).unwrap_or_default()
+}
+
+fn set_name(doc: &mut Value, name: &str) {
+    if let Some(o) = doc.as_object_mut() {
+        o.insert("name".into(), json!(name));
+    }
+}
+
+/// The current settings as a profile called `name`.
+pub fn capture(app: &SolveApp, name: &str) -> Value {
+    let all = serde_json::to_value(&app.preferences).unwrap_or_default();
+    let preferences: Map<String, Value> = keys().filter_map(|key| Some((key.to_string(), all.get(key)?.clone()))).collect();
+    let themes: Vec<Value> = app.preferences.custom_themes.iter().filter(|t| t.id == app.preferences.theme).map(theme_document).collect();
+    let mut doc = json!({
+        "format": FORMAT,
+        "name": name,
+        "preferences": preferences,
+        "shortcuts": app.keymap.prefs(),
+        "favourites": app.sbox.pinned,
+        "toolbar": app.toolbar_custom.prefs(),
+        "themes": themes,
+    });
+    // The custom view navigator's own settings ride in their own entry: they are newer than the
+    // profile key set above, which never changes.
+    if let Some(o) = doc.as_object_mut() {
+        o.insert("view_navigator".into(), crate::view_gizmo::profile_settings(app));
+        if let Some(layout) = crate::panel_runtime::profile_value(app) {
+            o.insert("panel_layout".into(), layout);
+        }
+    }
+    let gizmo = app.view_gizmo.stored();
+    if let Some(o) = doc.as_object_mut().filter(|_| gizmo.is_object()) {
+        o.insert("view_gizmo".into(), gizmo);
+    }
+    doc
+}
+
+/// An imported theme as a theme file that also keeps the id the profile's `theme` names.
+fn theme_document(theme: &theme_files::ThemeFile) -> Value {
+    let mut v = serde_json::to_value(theme).unwrap_or_default();
+    if let Some(o) = v.as_object_mut() {
+        o.insert("format".into(), json!(theme_files::FORMAT));
+    }
+    v
+}
+
+/// A theme id as a profile may name one: lower-case letters, digits and dashes.
+fn theme_id(id: &str) -> Option<&str> {
+    (!id.is_empty() && id.len() <= MAX_PROFILE_NAME && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')).then_some(id)
+}
+
+/// A profile document checked and cut down to what this version keeps: the format and a usable
+/// name are required; unknown keys, preferences this version can't read, and themes that fail
+/// their checks are dropped; lists and texts are capped.
+pub fn sanitize(v: &Value) -> Result<Value, String> {
+    let o = v.as_object().ok_or("not a SolidCraft settings profile")?;
+    if o.get("format").and_then(Value::as_str) != Some(FORMAT) {
+        return Err(format!("not a SolidCraft settings profile: `format` must be \"{FORMAT}\""));
+    }
+    let name = o
+        .get("name")
+        .and_then(Value::as_str)
+        .and_then(profile_name)
+        .ok_or_else(|| format!("`name` must be 1 to {MAX_PROFILE_NAME} characters, without control characters"))?;
+    let mut preferences = Map::new();
+    if let Some(src) = o.get("preferences") {
+        let src = src.as_object().ok_or("`preferences` must be an object")?;
+        let defaults = serde_json::to_value(prefs::Prefs::default()).map_err(|e| e.to_string())?;
+        for key in keys() {
+            let Some(value) = src.get(key) else { continue };
+            let mut probe = defaults.clone();
+            if let Some(p) = probe.as_object_mut() {
+                p.insert(key.to_string(), value.clone());
+            }
+            if serde_json::from_value::<prefs::Prefs>(probe).is_ok() {
+                preferences.insert(key.to_string(), value.clone());
+            } else {
+                log::warn!("settings profile `{name}`: `{key}` is not understood by this version; left out");
+            }
+        }
+    }
+    let text = |v: &Value| v.as_str().filter(|s| !s.is_empty() && s.chars().count() <= MAX_ID).map(str::to_string);
+    let shortcuts: Map<String, Value> = o
+        .get("shortcuts")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(id, _)| id.chars().count() <= MAX_ID)
+        .filter_map(|(id, keys)| Some((id.clone(), shortcut_keys(id, keys)?)))
+        .take(MAX_SHORTCUTS)
+        .collect();
+    let favourites: Vec<String> = o.get("favourites").and_then(Value::as_array).into_iter().flatten().filter_map(text).take(MAX_FAVOURITES).collect();
+    let mut toolbar = crate::toolbar_custom::ToolbarCustom::default();
+    if let Some(t) = o.get("toolbar") {
+        toolbar.load(t);
+    }
+    let mut themes = Vec::new();
+    for t in o.get("themes").and_then(Value::as_array).into_iter().flatten().take(MAX_THEMES) {
+        match theme_files::from_value(t) {
+            Ok(mut theme) => {
+                if let Some(id) = t.get("id").and_then(Value::as_str).and_then(theme_id) {
+                    theme.id = id.to_string();
+                }
+                themes.push(theme_document(&theme));
+            }
+            Err(e) => log::warn!("settings profile `{name}`: a theme is left out: {e}"),
+        }
+    }
+    let mut doc = json!({
+        "format": FORMAT,
+        "name": name,
+        "preferences": preferences,
+        "shortcuts": shortcuts,
+        "favourites": favourites,
+        "toolbar": toolbar.prefs(),
+        "themes": themes,
+    });
+    if let Some(settings) = o.get("view_navigator").map(crate::view_gizmo::checked_profile_settings)
+        && let Some(d) = doc.as_object_mut()
+    {
+        d.insert("view_navigator".into(), settings);
+    }
+    if let Some(v) = o.get("view_gizmo") {
+        match crate::view_gizmo::Shape::from_json(v) {
+            Some(shape) => {
+                if let Some(d) = doc.as_object_mut() {
+                    d.insert("view_gizmo".into(), shape.to_json());
+                }
+            }
+            None => log::warn!("settings profile `{name}`: the view navigator's body can't be read; left out"),
+        }
+    }
+    if let Some(layout) = o.get("panel_layout") {
+        crate::panel_runtime::validate_profile_value(layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        if let Some(d) = doc.as_object_mut() {
+            d.insert("panel_layout".into(), layout.clone());
+        }
+    }
+    if doc.to_string().len() > MAX_PROFILE_BYTES {
+        return Err(format!("a settings profile is at most {} KiB", MAX_PROFILE_BYTES / 1024));
+    }
+    Ok(doc)
+}
+
+/// A command's keys in a profile, as the keymap saves them (`""`, one key or a list of them), or
+/// `None` when they can't be read or a key name is too long.
+fn shortcut_keys(id: &str, v: &Value) -> Option<Value> {
+    let keys = crate::keymap::saved_keys(id, v)?;
+    keys.iter().all(|k| k.chars().count() <= MAX_ID).then(|| crate::keymap::keys_value(&keys))
+}
+
+/// Apply a checked profile: its themes, each preference (through [`prefs::set`], except saved option maps), the
+/// shortcuts, the favourites and the toolbar. Returns the preferences that were refused.
+fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
+    let mut theme_ids = std::collections::BTreeMap::new();
+    for t in doc.get("themes").and_then(Value::as_array).into_iter().flatten() {
+        let Ok(mut theme) = theme_files::from_value(t) else { continue };
+        let wanted = t.get("id").and_then(Value::as_str).and_then(theme_id).unwrap_or(&theme.id).to_string();
+        theme.id = wanted.clone();
+        if let Ok(id) = theme_files::add(&mut app.preferences.custom_themes, theme) {
+            theme_ids.insert(wanted, id);
+        }
+    }
+    // Resolve imported identities before migrating retired built-in cards. Migrate the
+    // theme and its option maps together: applying `theme` first and then replacing the
+    // saved maps would otherwise discard the old card's selected contrast.
+    let mut preferences = doc.get("preferences").and_then(Value::as_object).cloned().unwrap_or_default();
+    if let Some(id) = preferences.get("theme").and_then(Value::as_str).and_then(|id| theme_ids.get(id)).cloned() {
+        preferences.insert("theme".into(), json!(id));
+    }
+    if let Some(options) = preferences.get("theme_options").and_then(Value::as_object) {
+        let remapped: Map<String, Value> = options.iter().map(|(id, values)| (theme_ids.get(id).unwrap_or(id).clone(), values.clone())).collect();
+        preferences.insert("theme_options".into(), Value::Object(remapped));
+    }
+    let options = preferences
+        .get("theme_options")
+        .map(|value| serde_json::from_value::<std::collections::BTreeMap<String, std::collections::BTreeMap<String, Value>>>(value.clone()))
+        .transpose();
+    // Leave malformed raw fields intact for the existing per-key skipped reporting.
+    // In particular, a bad option map must not become an empty map that clears saved values.
+    if let Ok(options) = options {
+        let theme = preferences.get("theme").and_then(Value::as_str).map(str::to_owned);
+        let legacy = theme.as_deref().and_then(theme_files::legacy_gruvbox).is_some();
+        let mut migrated = prefs::Prefs {
+            theme: theme.clone().unwrap_or_else(|| "dark".into()),
+            theme_options: options.unwrap_or_else(|| app.preferences.theme_options.clone()),
+            ..Default::default()
+        };
+        prefs::migrate_gruvbox(&mut migrated);
+        if theme.is_some() {
+            preferences.insert("theme".into(), json!(migrated.theme));
+        }
+        if preferences.contains_key("theme_options") || legacy {
+            preferences.insert("theme_options".into(), json!(migrated.theme_options));
+        }
+    }
+    let mut skipped = Vec::new();
+    for (key, value) in &preferences {
+        if key == "theme_options" {
+            // Restoring saved state keeps stale entries just like loading preferences. The
+            // control channel's strict merge is for new edits, not profile restoration.
+            match serde_json::from_value::<std::collections::BTreeMap<String, std::collections::BTreeMap<String, Value>>>(value.clone()) {
+                Ok(options) => {
+                    app.preferences.theme_options = options;
+                }
+                Err(_) => skipped.push(key.clone()),
+            }
+            continue;
+        }
+        if let Err(e) = prefs::set(app, &json!({ key: value })) {
+            log::warn!("settings profile: `{key}` keeps its current value: {e}");
+            skipped.push(key.clone());
+        }
+    }
+    if let Some(s) = doc.get("shortcuts") {
+        app.keymap.load(s);
+    }
+    if let Some(f) = doc.get("favourites").and_then(Value::as_array) {
+        app.sbox.pinned = f.iter().filter_map(|x| x.as_str().map(str::to_string)).collect();
+    }
+    if let Some(t) = doc.get("toolbar") {
+        app.toolbar_custom.load(t);
+    }
+    if let Some(v) = doc.get("view_navigator") {
+        crate::view_gizmo::apply_profile_settings(app, v);
+    }
+    if let Some(v) = doc.get("view_gizmo") {
+        app.view_gizmo.load(Some(v));
+    }
+    if let Some(layout) = doc.get("panel_layout")
+        && let Err(reason) = crate::panel_runtime::apply_profile_value(app, layout)
+    {
+        log::warn!("settings profile: panel layout keeps its current value: {}", solidcraft_engine::panels::commands::error_text(reason));
+        skipped.push("panel_layout".into());
+    }
+    skipped
+}
+
+/// A profile file read and checked, refusing one too large to be a profile. Read through `vfs`, so
+/// an MCP agent's folders apply as they do to the engine's files (#11362).
+fn read_file(path: &str) -> Result<Value, String> {
+    let size = vfs::len(path).map_err(|e| format!("{path}: {e}"))?;
+    if size > MAX_FILE_BYTES {
+        return Err(format!("{path}: a settings profile file is at most {} MiB", MAX_FILE_BYTES / 1024 / 1024));
+    }
+    let text = vfs::read_to_string(path, MAX_FILE_BYTES as usize).map_err(|e| format!("{path}: {e}"))?;
+    serde_json::from_str(&text).map_err(|e| format!("{path}: not a settings profile: {e}"))
+}
+
+/// Add a checked profile under its name, or `name` when given, made unique; never switches to it.
+fn add(app: &mut SolveApp, doc: &Value, name: Option<&str>) -> Result<String, String> {
+    let mut doc = sanitize(doc)?;
+    if app.settings_profiles.list.len() >= MAX_PROFILES {
+        return Err(format!("at most {MAX_PROFILES} settings profiles; delete one first"));
+    }
+    let name = app.settings_profiles.free_name(name.unwrap_or(name_of(&doc)));
+    set_name(&mut doc, &name);
+    app.settings_profiles.list.push(doc);
+    Ok(name)
+}
+
+/// The rest of a `settings.profile.*` command, after the engine checked its parameters (`v`, its echo).
+pub fn command(app: &mut SolveApp, id: &str, v: &Value) -> Result<Value, String> {
+    let name = v.get("name").and_then(Value::as_str).unwrap_or_default();
+    match id {
+        "settings.profile.list" => Ok(json!({ "profiles": app.settings_profiles.names(), "active": app.settings_profiles.active })),
+        "settings.profile.save" => {
+            // The checks a profile meets when it is read back, so none is saved only to be dropped.
+            let doc = sanitize(&capture(app, name))?;
+            match app.settings_profiles.find(name) {
+                Some(i) => {
+                    if let Some(old) = app.settings_profiles.list.get_mut(i) {
+                        *old = doc;
+                    }
+                }
+                None if app.settings_profiles.list.len() >= MAX_PROFILES => {
+                    return Err(format!("at most {MAX_PROFILES} settings profiles; delete one first"));
+                }
+                None => app.settings_profiles.list.push(doc),
+            }
+            app.settings_profiles.active = Some(name.to_string());
+            Ok(json!({ "name": name }))
+        }
+        "settings.profile.apply" => {
+            let doc = app.settings_profiles.get(name)?.clone();
+            let skipped = apply(app, &doc);
+            app.settings_profiles.active = Some(name.to_string());
+            let applied = doc.get("preferences").and_then(Value::as_object).map_or(0, |p| p.len().saturating_sub(skipped.len()));
+            Ok(json!({ "name": name, "applied": applied, "skipped": skipped }))
+        }
+        "settings.profile.rename" => {
+            let to = v.get("to").and_then(Value::as_str).unwrap_or_default();
+            let i = app.settings_profiles.find(name).ok_or_else(|| format!("no settings profile `{name}`"))?;
+            if to != name && app.settings_profiles.find(to).is_some() {
+                return Err(format!("another settings profile is called `{to}`"));
+            }
+            if let Some(doc) = app.settings_profiles.list.get_mut(i) {
+                set_name(doc, to);
+            }
+            if app.settings_profiles.active.as_deref() == Some(name) {
+                app.settings_profiles.active = Some(to.to_string());
+            }
+            Ok(json!({ "name": to }))
+        }
+        "settings.profile.delete" => {
+            let i = app.settings_profiles.find(name).ok_or_else(|| format!("no settings profile `{name}`"))?;
+            app.settings_profiles.list.remove(i);
+            if app.settings_profiles.active.as_deref() == Some(name) {
+                app.settings_profiles.active = None;
+            }
+            Ok(json!({ "deleted": name }))
+        }
+        "settings.profile.export" => {
+            let doc = app.settings_profiles.get(name)?.clone();
+            if let Some(path) = v.get("path").and_then(Value::as_str) {
+                let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+                vfs::write(path, text.as_bytes()).map_err(|e| format!("{path}: {e}"))?;
+                return Ok(json!({ "profile": doc, "path": path }));
+            }
+            Ok(json!({ "profile": doc }))
+        }
+        "settings.profile.import" => {
+            let doc = match v.get("path").and_then(Value::as_str) {
+                Some(path) => read_file(path)?,
+                None => v.get("profile").cloned().unwrap_or_default(),
+            };
+            let name = add(app, &doc, v.get("name").and_then(Value::as_str))?;
+            Ok(json!({ "name": name }))
+        }
+        _ => Err(format!("`{id}` is not a settings profile command")),
+    }
+}
+
+/// Run a profile command from Preferences and show its outcome there.
+fn act(app: &mut SolveApp, id: &str, params: Value, done: &'static str) {
+    let result = app.run(id, params);
+    app.settings_profiles.message = Some(match result {
+        Ok(v) => match v.get("skipped").and_then(Value::as_array).map_or(0, Vec::len) {
+            0 => Outcome::Done(done),
+            skipped => Outcome::Skipped(skipped),
+        },
+        Err(e) => Outcome::Failed(e),
+    });
+}
+
+/// General's saved profiles and row actions. All mutations still use settings.profile.*.
+pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = solidcraft_theme::Tokens::get();
+    let count = solidcraft_ui_text::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
+    ui_kit::settings_section_count(ui, "profiles", app.tr("ui.profiles"), Some(&count), |ui| {
+        let names = app.settings_profiles.names();
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = t.space_8;
+            for name in &names {
+                let active = app.settings_profiles.active.as_ref() == Some(name);
+                let edited = active && app.settings_profiles.get(name).is_ok_and(|doc| *doc != capture(app, name));
+                ui.push_id(name, |ui| {
+                    let card = ui_kit::settings_row_card(ui, active, t.control_height + t.space_14, |ui| {
+                        ui.spacing_mut().item_spacing.x = t.space_6;
+                        let state_width = if active {
+                            ui_kit::ContentWidth::label(ui, app.tr("prefs.general.active"))
+                                + t.space_16
+                                + if edited { ui_kit::ContentWidth::label(ui, app.tr("prefs.general.edited")) + t.space_24 } else { 0.0 }
+                        } else {
+                            ui_kit::ContentWidth::label(ui, app.tr("ui.apply")) + t.space_24
+                        };
+                        let name_width = (ui.available_width() - t.space_24 * 3.0 - t.space_6 * 4.0 - state_width).max(0.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(name_width, t.control_height),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                let side = t.space_16 + t.space_2 / 2.0;
+                                let (icon, _) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
+                                crate::icons::paint_ink(ui.painter(), icon, "settings_profile", if active { t.selected_ink } else { t.form_dim });
+                                ui_kit::text(ui, name, if active { ui_kit::Text::SelectedNameCell } else { ui_kit::Text::NameCell(false) });
+                            },
+                        );
+                        if edited {
+                            let badge = ui_kit::settings_state_badge(ui, app.tr("prefs.general.edited"), ui_kit::SettingsBadgeTone::Warning);
+                            crate::scenario::publish_rect(&format!("prefs:profile:{name}:edited"), badge.rect);
+                        }
+                        if active {
+                            let badge = ui_kit::settings_state_badge(ui, app.tr("prefs.general.active"), ui_kit::SettingsBadgeTone::Accent);
+                            crate::scenario::publish_rect(&format!("prefs:profile:{name}:active"), badge.rect);
+                        } else {
+                            let button = ui_kit::button(ui, app.tr("ui.apply"), ui_kit::Button::Small);
+                            crate::scenario::publish_target(&format!("prefs:profile:{name}:apply"), button.rect);
+                            if button.clicked() {
+                                act(app, "settings.profile.apply", json!({ "name": name }), "prefs.profile_applied");
+                            }
+                        }
+                        for (action, icon, label) in [
+                            ("export", "export_tray", app.tr("prefs.profile_export")),
+                            ("rename", "edit", app.tr("prefs.profile_rename")),
+                            ("delete", "delete", app.tr_label("Delete")),
+                        ] {
+                            let (target, _) = ui.allocate_exact_size(egui::vec2(t.space_24, t.space_24), egui::Sense::hover());
+                            let button = ui_kit::icon_button_at(ui, target, icon, label);
+                            crate::scenario::publish_target(&format!("prefs:profile:{name}:{action}"), button.rect);
+                            if button.clicked() {
+                                match action {
+                                    "export" => {
+                                        let name = name.clone();
+                                        app.pick_save(&format!("{name}.solidcraft-profile.json"), &["json"], move |app, path| {
+                                            if let Some(path) = path {
+                                                act(app, "settings.profile.export", json!({ "name": name, "path": path }), "prefs.profile_exported");
+                                            }
+                                        });
+                                    }
+                                    "rename" => {
+                                        app.settings_profiles.rename =
+                                            Some(Rename { name: name.clone(), text: name.clone(), focused: false, at: button.rect.left_bottom() });
+                                    }
+                                    "delete" => {
+                                        act(app, "settings.profile.delete", json!({ "name": name }), "prefs.profile_deleted");
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    });
+                    crate::scenario::publish_rect(&format!("prefs:profile:{name}:card"), card.response.rect);
+                });
+            }
+        });
+        // Searching for "profiles" must keep this entry on the results page; without a hit here the
+        // whole section was dropped and the name field could not be reached with a query active.
+        let entry = [app.tr("prefs.general.profile_name"), app.tr("prefs.general.save_new"), app.tr("prefs.general.import")];
+        if crate::ui_kit::settings_search::visible(ui, &entry) {
+            ui.horizontal_wrapped(|ui| {
+                let mut draft = std::mem::take(&mut app.settings_profiles.draft);
+                let enter = ui_kit::named_control(ui, app.tr("prefs.general.profile_name"), |ui| {
+                    ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
+                        ui_kit::text_field(ui, &mut draft, app.tr("prefs.general.name_setup")).0
+                    })
+                });
+                app.settings_profiles.draft = draft;
+                let name = app.settings_profiles.draft.trim().to_string();
+                let valid = profile_name(&name).is_some();
+                let save = ui_kit::icon_label_action(ui, app.tr("prefs.general.save_new"), None, valid, true)
+                    .backing_on_hover_text(app.tr("prefs.profiles_note"));
+                crate::scenario::publish_target("prefs:profile:save", save.rect);
+                if valid && (enter || save.clicked()) {
+                    act(app, "settings.profile.save", json!({ "name": name }), "prefs.profile_saved");
+                }
+                let import = ui_kit::icon_label_button(ui, app.tr("prefs.general.import"), "import_tray", true, false);
+                crate::scenario::publish_target("prefs:profile:import", import.rect);
+                if import.clicked() {
+                    app.pick_open_for(&["json"], |app, path| {
+                        if let Some(path) = path {
+                            act(app, "settings.profile.import", json!({ "path": path }), "prefs.profile_imported");
+                        }
+                    });
+                }
+            });
+        }
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = t.space_8;
+            for (label, chips, accent) in [
+                (
+                    app.tr("prefs.general.held"),
+                    &[
+                        ("prefs.structure.appearance", "prefs_appearance"),
+                        ("prefs.structure.layout", "prefs_layout"),
+                        ("ui.navigation", "prefs_navigation"),
+                        ("prefs.structure.sketch", "prefs_sketch"),
+                        ("prefs.shortcuts", "prefs_shortcuts"),
+                        ("ui.language", "settings"),
+                    ][..],
+                    true,
+                ),
+                (
+                    app.tr("prefs.general.this_computer"),
+                    &[("prefs.structure.mouse3d", "lock"), ("ui.graphics", "lock"), ("prefs.assistant", "lock")][..],
+                    false,
+                ),
+            ] {
+                let key = if accent { "held" } else { "computer" };
+                let row = ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = t.space_6;
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_24 * 3.0 + t.space_12, t.space_24), egui::Sense::hover());
+                    let mut label_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                    let caption = ui_kit::text(&mut label_ui, label, ui_kit::Text::Inline);
+                    crate::scenario::publish_rect(&format!("prefs:profiles:{key}:label"), caption.rect);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
+                        for (index, (chip, icon)) in chips.iter().enumerate() {
+                            let response =
+                                ui_kit::settings_chip(ui, app.tr(chip), ui_kit::SettingsChip { icon: Some(icon), accent, ..Default::default() });
+                            if index == 0 {
+                                crate::scenario::publish_rect(&format!("prefs:profiles:{key}:first_chip"), response.rect);
+                            }
+                        }
+                    });
+                });
+                crate::scenario::publish_rect(&format!("prefs:profiles:{key}:row"), row.response.rect);
+            }
+        });
+        let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+        match &app.settings_profiles.message {
+            Some(Outcome::Done(id)) => {
+                ui_kit::text(ui, locale.text(id), ui_kit::Text::Note("profile_message"));
+            }
+            Some(Outcome::Skipped(n)) => {
+                let text = locale.format("prefs.profile_skipped", &[("n", &n.to_string())]);
+                ui_kit::text(ui, &text, ui_kit::Text::Error("profile_message"));
+            }
+            Some(Outcome::Failed(e)) => {
+                ui_kit::text(ui, e, ui_kit::Text::Error("profile_message"));
+            }
+            None => {}
+        }
+    });
+}
+
+/// Run before the Preferences window so Escape belongs to this editor, including in a scrolled
+/// page. A separate popup container keeps the shared rename menu accessible and unclipped.
+pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.prefs_window.shell.open || app.prefs_window.shell.section != prefs::PAGE_GENERAL || !app.prefs_window.shell.filter.is_empty() {
+        app.settings_profiles.rename = None;
+        return;
+    }
+    let Some(mut rename) = app.settings_profiles.rename.take() else { return };
+    crate::ui_kit::settings_search::note_key_sink(ctx);
+    let mut done = None;
+    let popup = ui_kit::Container::new(ctx, ui_kit::Surface::Popup)
+        .area(egui::Id::unique("sc_profile_rename"))
+        .fixed_pos(rename.at)
+        .constrain(true)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            done = ui_kit::rename_menu(ui, &mut rename.text, &mut rename.focused);
+        });
+    crate::scenario::publish_rect("prefs:profile:rename_popup", popup.response.rect);
+    for action in ["ok", "cancel"] {
+        if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{action}")) {
+            crate::scenario::publish_target(&format!("prefs:profile:rename:{action}"), rect);
+        }
+    }
+    if ctx.input(|i| i.pointer.any_pressed()) && !popup.response.contains_pointer() {
+        done = Some(false);
+    }
+    ctx.input_mut(|input| {
+        for key in [egui::Key::Escape, egui::Key::Enter, egui::Key::Tab] {
+            input.consume_key(egui::Modifiers::NONE, key);
+        }
+    });
+    match done {
+        Some(true) if profile_name(&rename.text) != Some(rename.name.as_str()) => {
+            act(app, "settings.profile.rename", json!({"name": rename.name, "to": rename.text}), "prefs.profile_renamed");
+        }
+        Some(_) => {}
+        None => app.settings_profiles.rename = Some(rename),
+    }
+}
+
+/// The pinned profile switcher on every Preferences page. Actions use the same commands as
+/// General > Profiles; saving a new name remains in that existing section.
+pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
+    let active = app.settings_profiles.active.clone();
+    let edited = active.as_ref().is_some_and(|name| app.settings_profiles.get(name).is_ok_and(|doc| *doc != capture(app, name)));
+    let current = active.clone().unwrap_or_else(|| app.tr_label("None").to_string());
+    let names = app.settings_profiles.names();
+    let mut apply = None;
+    let mut save = false;
+    let label = app.tr("prefs.structure.profile");
+    let changed_hint = app.tr("prefs.structure.profile_edited");
+    let menu = ui
+        .push_id("profile_sidebar", |ui| {
+            ui_kit::Menu::button_with(
+                ui,
+                |ui, _| ui_kit::settings_profile_button(ui, label, &current, edited, changed_hint),
+                |ui| {
+                    for name in &names {
+                        if ui_kit::list_picker(ui, name, name, active.as_ref() == Some(name)).clicked() {
+                            apply = Some(name.clone());
+                        }
+                    }
+                    if active.is_some() && ui_kit::button(ui, app.tr("prefs.profile_save"), ui_kit::Button::Normal).clicked() {
+                        save = true;
+                        apply = None;
+                        ui.close();
+                    }
+                    if ui_kit::button(ui, app.tr("prefs.profiles"), ui_kit::Button::Normal).clicked() {
+                        prefs::open_profiles(app);
+                        ui.close();
+                    }
+                },
+            )
+        })
+        .inner;
+    if menu.inner.is_some() && ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        // The standard menu has handled Escape; the Preferences footer must not also cancel.
+        menu.response.request_focus();
+    }
+    crate::scenario::publish_target("prefs:profile", menu.response.rect);
+    if let Some(name) = apply {
+        act(app, "settings.profile.apply", json!({"name":name}), "prefs.profile_applied");
+    } else if save && let Some(name) = active {
+        act(app, "settings.profile.save", json!({"name":name}), "prefs.profile_saved");
+    }
+}
+
+/// Page-title tag. Membership is descriptive; the stable key list above governs storage.
+pub(crate) fn tag(ui: &mut egui::Ui) {
+    let response = ui_kit::settings_chip(
+        ui,
+        solidcraft_ui_text::tr("prefs.structure.in_profile"),
+        ui_kit::SettingsChip { icon: Some("settings_profile"), compact: true, ..Default::default() },
+    )
+    .backing_on_hover_text(solidcraft_ui_text::tr("prefs.structure.profile_hover"));
+    crate::scenario::publish_target("prefs:in_profile", response.rect);
+}

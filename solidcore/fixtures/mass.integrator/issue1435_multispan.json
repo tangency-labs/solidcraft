@@ -1,0 +1,1802 @@
+{
+ "cases": [
+  {
+   "name": "issue1435_multispan_full_eps0.001_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps0.001_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps0.001_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps0.001_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps1e-06_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps1e-06_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps1e-06_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps1e-06_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps1e-08_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps1e-08_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps1e-08_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_eps1e-08_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps0.001_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps0.001_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps0.001_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps0.001_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps1e-06_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps1e-06_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps1e-06_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps1e-06_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps1e-08_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps1e-08_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps1e-08_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_eps1e-08_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps0.001_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps0.001_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps0.001_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps0.001_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps1e-06_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps1e-06_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps1e-06_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps1e-06_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps1e-08_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps1e-08_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps1e-08_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_onespan_eps1e-08_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.5,
+      0.55,
+      0.9,
+      0.95,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps0.001_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps0.001_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps0.001_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps0.001_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      0.001,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps1e-06_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps1e-06_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps1e-06_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps1e-06_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps1e-08_orientation0_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps1e-08_orientation1_flags1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      1,
+      1
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps1e-08_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_atknots_eps1e-08_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.4,
+      0.5,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      1,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_query2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 2
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_query3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 3
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_query4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 4
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_query5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 5
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_full_query6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0,
+      0,
+      1,
+      1,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 6
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_query2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 2
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_query3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 3
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_query4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 4
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_query5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 5
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_sub_query6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      2,
+      3,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-06,
+      0,
+      0,
+      63
+     ],
+     "query": 6
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_huge_eps0.0001_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      10000.0,
+      20000.0,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      0.0001,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_huge_eps1e-08_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      10000.0,
+      20000.0,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_tiny_eps0.0001_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      0.001,
+      0.002,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      0.0001,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1435_multispan_tiny_eps1e-08_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties, SmODEAreaIFEO::Evaluate; #1435 multi-span NURBS face (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 5,
+     "parameters": [
+      1,
+      2,
+      3,
+      0.001,
+      0.002,
+      0.1,
+      0.2,
+      0.9,
+      0.8,
+      2.37,
+      3.21,
+      3.41,
+      1e-08,
+      0,
+      0,
+      63
+     ],
+     "query": 0
+    }
+   }
+  }
+ ]
+}

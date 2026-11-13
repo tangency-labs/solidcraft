@@ -1,0 +1,9 @@
+# The solidcore crates SolidCraft may use directly, one a line (solidcore docs/layers.md §1).
+# `cargo xtask layers` reads this list; any other solidcore crate needs a line in
+# xtask/solidcore-seam.txt. After vendoring, solidcore owns the list as
+# solidcore/public-crates.txt (its CODEOWNERS), and the check reads that copy first.
+solidcore-ops
+solidcore-tess
+solidcore-record
+# STEP import and export, until its build is kernel primitives under an ops recipe (RFC 0003, 1.6).
+solidcore-step

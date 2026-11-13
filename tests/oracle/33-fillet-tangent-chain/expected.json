@@ -1,13 +1,13 @@
 {
   "source": "analytic",
-  "method": "obround (R8, centres 40 apart) x 10 minus R2 fillet spandrel R^2(1-pi/4) and 1 mm chamfer triangle swept round the whole loop (Pappus: section x path of its centroid, inset R(10-3pi)/(3(4-pi)) resp. c/3); surfaces likewise (fillet arc centroid inset R-2R/pi)",
+  "method": "obround (R8, centres 40 apart) x 10 minus R2 fillet spandrel R^2(1-pi/4) and 1 mm chamfer triangle swept round the whole loop. Swept volumes use Pappus; Z moments account for inward-offset perimeter P(u)=P-2pi*u: fillet top-depth moment P*A*d-2pi*r^4*(19/24-pi/4), A=r^2*(1-pi/4), d=r*(10-3pi)/(3*(4-pi)); bottom chamfer Z moment P*c^3/6-pi*c^4/12; surfaces use fillet arc centroid inset r-2r/pi",
   "body_count": 1,
   "volume_mm3": 8237.12239193832,
   "area_mm2": 2793.569488148386,
   "center_of_mass": [
     20.0,
     0.0,
-    4.975827363940953
+    4.975870942023957
   ],
   "bbox": {
     "min": [

@@ -4,9 +4,11 @@
 //! A round origin's end is kept by the name of the face across the rim at that end, so it is the
 //! same end after the design changes; an x reference keeps the origin's turn about its axis.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::{Loop2, Plane, Vec2, Vec3};
+use solidcraft_geom::Ring;
 use solidcraft_kernel::CylinderFace;
 
 use super::{Snap, XRef, component_bodies};
@@ -30,16 +32,29 @@ fn gone(name: &str) -> DocError {
     DocError::Invalid(format!("joint origin: the face `{name}` no longer exists (edit the joint to pick again)"))
 }
 
-/// The face called `name` nearest `pick` (an error when it is gone: a joint must not quietly
-/// attach elsewhere).
-pub(super) fn named_face<'a>(doc: &Document, st: &'a ModelState, pick: Vec3, name: &str) -> Result<NamedFace<'a>> {
+/// The face called `name` on the bodies of `component` nearest `pick` (an error when it is gone:
+/// a joint must not quietly attach elsewhere). Each body is looked at in its own coordinates, and
+/// the nearest of the faces the name finds is taken. Only the component's own bodies: the parts of one STEP import share their face names, and another
+/// part's face of that name can lie nearer the pick than this part's own.
+pub(super) fn named_face<'a>(doc: &Document, st: &'a ModelState, component: u64, pick: Vec3, name: &str) -> Result<NamedFace<'a>> {
+    let own = component_bodies(doc, st, component).into_iter().filter_map(|body| {
+        let offset = doc.model_body_offset(body).copied().unwrap_or(IDENTITY);
+        let (face, at) = crate::naming::face_on_body(body, name, apply_point(&mat_inverse(&offset)?, pick))?;
+        let point = apply_point(&offset, at);
+        Some((point.dist(pick), NamedFace { body, face, point, offset }))
+    });
+    if let Some((_, nf)) = own.min_by(|(a, _), (b, _)| a.total_cmp(b)) {
+        return Ok(nf);
+    }
+    // On none of them (the face's body has gone to another component since): wherever the name
+    // is now.
     let hit = crate::name_lookup::locate_face(st, name, pick).ok_or_else(|| gone(name))?;
     let body = st.bodies.get(hit.body).ok_or_else(|| gone(name))?;
     let Some(offset) = doc.model_body_offset(body).copied() else {
         return Ok(NamedFace { body, face: hit.face, point: hit.point, offset: IDENTITY });
     };
     let inv = mat_inverse(&offset).ok_or_else(|| gone(name))?;
-    let (face, at, _) = crate::naming::face_on_body(body, name, apply_point(&inv, pick)).ok_or_else(|| gone(name))?;
+    let (face, at) = crate::naming::face_on_body(body, name, apply_point(&inv, pick)).ok_or_else(|| gone(name))?;
     Ok(NamedFace { body, face, point: apply_point(&offset, at), offset })
 }
 
@@ -62,11 +77,63 @@ impl NamedFace<'_> {
         self.own_cylinder().map(|c| placed(&self.offset, c))
     }
 
-    /// The face's centre and outward normal (the component's coordinates), when it is planar.
+    /// The face's centre (the middle of its outline, `outline_centre`) and outward normal (the
+    /// component's coordinates), when it is planar.
     pub fn plane(&self) -> Result<Option<(Vec3, Vec3)>> {
         let faces = self.body.joint_faces()?;
-        Ok(faces.get(self.face).and_then(|f| f.plane_normal.map(|n| (apply_point(&self.offset, f.centroid), apply_vector(&self.offset, n)))))
+        Ok(faces.get(self.face).and_then(|f| {
+            let n = f.plane_normal?;
+            let c = outline_centre(&self.body.body, self.face, f.centroid, n).unwrap_or(f.centroid);
+            Some((apply_point(&self.offset, c), apply_vector(&self.offset, n)))
+        }))
     }
+}
+
+/// The middle of the area the outer boundary of planar face `face` encloses (the body's own
+/// coordinates; `centroid` and `n` are the face's), for a face with holes: a hole cut into the
+/// face, moved or suppressed changes the face's centroid but not its outline, so a joint at the
+/// face's centre stays where it is. `None` for a face without holes (its centroid is that middle
+/// already) and for one whose boundary gives no clean outline (the caller keeps the centroid).
+pub(super) fn outline_centre(body: &solidcraft_kernel::Body, face: usize, centroid: Vec3, n: Vec3) -> Option<Vec3> {
+    if body.is_mesh() {
+        return None;
+    }
+    let plane = Plane::from_normal(centroid, n)?;
+    let rec = body.record();
+    let f = rec.faces.get(face)?;
+    if f.loops.len() < 2 {
+        return None;
+    }
+    let mut loops: Vec<Ring<Vec2>> = Vec::new();
+    for lp in &f.loops {
+        let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+        let mut ring = Vec::new();
+        for u in edges {
+            let edge = rec.edges.get(u.edge as usize)?;
+            let eval = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).ok()?;
+            let [t0, t1] = edge.interval;
+            let n_samples = match &eval {
+                solidcraft_geom::brep::eval::CurveEval::Line { .. } => 1,
+                _ => 16,
+            };
+            for k in 0..n_samples {
+                let frac = k as f64 / n_samples as f64;
+                let t = if u.forward { t0 + (t1 - t0) * frac } else { t1 - (t1 - t0) * frac };
+                let p = eval.point(t)?;
+                ring.push(plane.to_local(p));
+            }
+        }
+        if !ring.is_empty() {
+            loops.push(Ring::new(ring));
+        }
+    }
+    if loops.len() < 2 {
+        return None;
+    }
+    let size = body.size().max(1e-9);
+    let q = (size * 1e-9).max(1e-12);
+    let outer = loops.iter().max_by(|a, b| a.signed_area().abs().total_cmp(&b.signed_area().abs()))?;
+    (outer.signed_area().abs() > q * q).then(|| plane.to_world(Loop2::polygon(outer).centroid()))
 }
 
 /// A cylinder of a body's own coordinates placed by the body's (rigid) offset.
@@ -167,8 +234,8 @@ impl Round {
 /// A circle-centre snap's cylinder found through its named face (`None`: the snap names no
 /// face, or the face is not a cylinder any more; the caller looks by point, as older builds
 /// did). The end is the one whose rim meets the face called `end`, else the one nearer `pick`.
-pub(super) fn named_round(doc: &Document, st: &ModelState, pick: Vec3, face: &str, end: Option<&str>) -> Result<Option<Round>> {
-    let nf = named_face(doc, st, pick, face)?;
+pub(super) fn named_round(doc: &Document, st: &ModelState, component: u64, pick: Vec3, face: &str, end: Option<&str>) -> Result<Option<Round>> {
+    let nf = named_face(doc, st, component, pick, face)?;
     let Some(own) = nf.own_cylinder() else { return Ok(None) };
     let chosen = end.and_then(|name| end_named(nf.body, nf.face, &own, name)).unwrap_or_else(|| end_by_pick(&nf, &own));
     Ok(Some(Round::at(placed(&nf.offset, own), chosen)))
@@ -196,13 +263,14 @@ fn end_named(b: &ModelBody, face: usize, own: &CylinderFace, name: &str) -> Opti
     }
 }
 
-/// The x axis an x reference gives a frame at `o` with axis `z` (`None`: no reference).
-pub(super) fn x_axis(doc: &Document, st: &ModelState, x: Option<&XRef>, o: Vec3) -> Result<Option<Vec3>> {
+/// The x axis an x reference gives a frame at `o` (of `component`) with axis `z` (`None`: no
+/// reference).
+pub(super) fn x_axis(doc: &Document, st: &ModelState, component: u64, x: Option<&XRef>, o: Vec3) -> Result<Option<Vec3>> {
     Ok(match x {
         None => None,
         Some(XRef::Dir(d)) => Some(*d),
         Some(XRef::Face { face, pick }) => {
-            let nf = named_face(doc, st, pick.unwrap_or(o), face)?;
+            let nf = named_face(doc, st, component, pick.unwrap_or(o), face)?;
             if let Some((_, n)) = nf.plane()? {
                 Some(n)
             } else if let Some(c) = nf.cylinder() {
@@ -290,22 +358,22 @@ pub fn round_end_at(doc: &Document, st: &ModelState, component: u64, centre: Vec
     Some(Snap::CircleCenter { pick: centre, face: Some(face), end, x: None })
 }
 
-/// Name the end a named circle-centre snap takes now (the face across the rim there), so it
-/// keeps that end when the design changes. Other snaps, and one whose end is named already, are
-/// left as they are.
-pub fn pin_end(doc: &Document, st: &ModelState, snap: &mut Snap) {
+/// Name the end a named circle-centre snap of `component` takes now (the face across the rim
+/// there), so it keeps that end when the design changes. Other snaps, and one whose end is named
+/// already, are left as they are.
+pub fn pin_end(doc: &Document, st: &ModelState, component: u64, snap: &mut Snap) {
     let Snap::CircleCenter { pick, face: Some(face), end: end @ None, .. } = snap else { return };
-    let Ok(nf) = named_face(doc, st, *pick, face) else { return };
+    let Ok(nf) = named_face(doc, st, component, *pick, face) else { return };
     let Some(own) = nf.own_cylinder() else { return };
     let (at, _) = end_by_pick(&nf, &own);
     *end = rim_neighbour(nf.body, nf.face, &own, at).and_then(|n| crate::naming::face_names(nf.body).get(n).cloned()).filter(|n| !n.is_empty());
 }
 
-/// The names of the faces across the rims at the two ends of a named circle-centre snap's
-/// cylinder (what its `end` can be); empty when the snap names no cylinder.
-pub fn end_faces(doc: &Document, st: &ModelState, snap: &Snap) -> Vec<String> {
+/// The names of the faces across the rims at the two ends of the cylinder a named circle-centre
+/// snap of `component` names (what its `end` can be); empty when the snap names no cylinder.
+pub fn end_faces(doc: &Document, st: &ModelState, component: u64, snap: &Snap) -> Vec<String> {
     let Snap::CircleCenter { pick, face: Some(face), .. } = snap else { return Vec::new() };
-    let Ok(nf) = named_face(doc, st, *pick, face) else { return Vec::new() };
+    let Ok(nf) = named_face(doc, st, component, *pick, face) else { return Vec::new() };
     let Some(own) = nf.own_cylinder() else { return Vec::new() };
     let names = crate::naming::face_names(nf.body);
     ends(&own)

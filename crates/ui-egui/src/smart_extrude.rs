@@ -10,12 +10,16 @@
 //!   into a body is a Cut and stays one however far it goes, through the far side included;
 //!   one that starts as a Join does not turn into a Cut when it reaches another body. When
 //!   the distance passes through zero onto the other side (a drag reversed past the start, or
-//!   Reverse), the operation is decided afresh for that side and latched there. A zero
+//!   Reverse), the operation is decided afresh for that side and latched there. So is a new
+//!   start (From Object, a start offset): it moves the extrude to other bodies (#467), and
+//!   so is a body shown or hidden while the window is open (#9919). With no body shown it is a
+//!   New Body: there is nothing to join or cut. A zero
 //!   distance changes nothing. Choosing an operation by hand ends the automatic choice for
 //!   the rest of the extrude.
 
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 /// The extrude window's automatic state.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -28,8 +32,21 @@ pub struct Smart {
     pub latch: Option<(usize, i8)>,
     /// The To Object target the distance was last set from.
     pub target: Option<Sel>,
+    /// The profiles the taper handle's limits were last worked out for, and their radii
+    /// (`canvas::taper_radii`): too slow to work out every frame on a profile with many holes.
+    pub taper_radii: Option<(Vec<solidcore_record::Region2>, (f64, f64))>,
+    /// Where the extrude starts (its From Object and start offset) when the latch was decided.
+    pub start: serde_json::Value,
+    /// The bodies shown when the latch was decided (None: every one), as `shown_scope` gives them.
+    pub shown: Option<Vec<String>>,
     /// Picks off the profile plane become the To Object target (Preferences › Design).
     pub auto_to_object: bool,
+    /// The user clicked into the Profiles box: until another input is chosen, an off-plane pick
+    /// is one more profile, not the To Object target.
+    pub profiles_chosen: bool,
+    /// The engine's automatic operation for the last parameters and design: a key over all it
+    /// depends on, and its answer. It probes the bodies' triangles, too slow to ask every frame.
+    pub auto: Option<(u64, Option<&'static str>)>,
 }
 
 /// One-side direction for a new pick: 0 (along the normal) or 1 (reversed). `ray` is the view
@@ -72,7 +89,7 @@ pub fn operation(fresh: usize, current: usize, side: i8, latch: &mut Option<(usi
 }
 
 /// The view ray at `at`: from the eye for a perspective view, along the view for a parallel one.
-pub fn view_ray(cam: &solidcraft_engine::render::Camera, at: Vec3) -> Vec3 {
+pub fn view_ray(cam: &solidcraft_viewport::Camera, at: Vec3) -> Vec3 {
     if cam.fov > 0.0 { (at - cam.eye()).normalized().unwrap_or(-cam.back()) } else { -cam.back() }
 }
 
@@ -158,7 +175,7 @@ mod tests {
 
     #[test]
     fn view_ray_of_both_projections() {
-        let mut cam = solidcraft_engine::render::Camera { fov: 0.0, ..Default::default() };
+        let mut cam = solidcraft_viewport::Camera { fov: 0.0, ..Default::default() };
         assert!((view_ray(&cam, Vec3::ZERO) + cam.back()).len() < 1e-12);
         cam.fov = 0.8;
         let at = Vec3::new(10.0, 0.0, 0.0);

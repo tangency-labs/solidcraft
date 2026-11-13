@@ -1,12 +1,12 @@
 # What works
 
-The full feature summary, moved out of the README. The commands by area are in [features.md](features.md); status and plans are in [ROADMAP](../ROADMAP.md).
+The full feature summary, moved out of the README. The commands by area are in [features.md](features.md); status and plans are in [ROADMAP](roadmap-detail.md).
 
 **Status: early but usable for simple parts.** 75 of 76 public reference parts
 match their analytic or FreeCAD-computed volume, area, centre of mass and bounding box
 ([oracle.md](oracle.md)); the other is a tracked bug.
 These checks do not establish complete geometric or workflow equivalence. The commands SolidCraft has
-are listed by area in [features.md](features.md); status and plans are in [ROADMAP.md](../ROADMAP.md).
+are listed by area in [features.md](features.md); status and plans are in [ROADMAP.md](roadmap-detail.md).
 Open work and known bugs are in [GitHub issues](https://github.com/tangency-labs/solidcraft/issues),
 and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
@@ -31,7 +31,7 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   and the rank of its Jacobian gives the remaining degrees of freedom. Constraints: coincident,
   point on curve, horizontal/vertical, parallel, perpendicular, tangent, curvature (G2), equal,
   concentric, collinear, midpoint, symmetry, fix; linear, aligned, horizontal, vertical,
-  point-to-line, line-to-circle, radius, diameter, angle, arc sweep, arc length and slot length dimensions driven
+  point-to-line, line-to-circle, point-to-circle, circle-to-circle, radius, diameter, angle, arc sweep, arc length and slot length dimensions driven
   by parameters. Over-constraining edits are rejected; fully constrained geometry turns black.
   Dragging solves the sketch every frame and rebuilds the model once, when the drag ends.
   Select a line or its two endpoints, type its dimension and press Enter to commit one undo
@@ -42,7 +42,7 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
 - **Features** on a parametric timeline: extrude, revolve, sweep, loft, fillet/chamfer,
   shell, draft, holes, threads, patterns, mirror, split, combine, move and construction geometry.
   The timeline rebuilds incrementally; features can be edited, suppressed, renamed, reordered
-  and deleted. Supported geometry and current limitations are described in [ROADMAP.md](../ROADMAP.md).
+  and deleted. Supported geometry and current limitations are described in [ROADMAP.md](roadmap-detail.md).
   New revolves preserve symmetric and two-sided angular placement across reversed axes;
   older designs retain their saved convention when reopened or edited.
 - **Parameters and configurations** with unit-aware expressions (`2 * width + 5 mm`,
@@ -54,23 +54,27 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   retained shallow prismatic pockets, exact line/arc/circle DXF outlines and bend tables;
   plastic enclosure features and rules. Pocket depth and side survive unfold/refold and appear
   separately from through-hole outlines in the flat preview and DXF.
-- **Files**: design containers (`.solidcraft`) with lossless binary mesh payloads;
+- **Files**: design containers (`.sc`; `.solidcraft` still opens) with lossless binary mesh payloads;
   plain JSON remains supported for opening, Save As and export. Desktop Open can show a saved
   provisional picture from warm geometry caches while rebuilding before editing; caches never
   replace the parametric design. Export to STEP (AP242 with body names, colours and
   components as assemblies; revolved faces as native planes, cylinders, cones, spheres and tori),
-  IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII) and OBJ, and
+  IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII), OBJ and GLB (placed bodies with their opaque
+  colours, metallic and roughness, in metres with Y up, each part under a node named after its occurrence), and
   assemblies with joints as URDF for robot simulators (urdf.md);
   3MF, STL, OBJ and glTF 2.0 (`.glb`/`.gltf`, its node tree as components and its materials as
   appearances) import as mesh bodies (they render, measure, move and export; solid features
-  need B-rep bodies). The `mesh.convert` command reconstructs supported closed constant-section parts
-  as parametric solids with planar and circular cylindrical faces;
+  need B-rep bodies). The `mesh.convert` command reconstructs closed meshes as parametric
+  solids — constant-section parts with planar and circular cylindrical faces, any other closed
+  mesh as the faceted solid its triangles describe;
   STEP import (AP203/AP214/AP242 solids, assemblies, units, names, colours) and IGES import
   (manifold solid B-reps, or trimmed and bounded surfaces sewn into solids) as a base feature
   that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a
   design, or drop it on the window ([docs/step-import.md](step-import.md)); FreeCAD
   `.FCStd` and Rhino `.3dm` solids import the same way through
-  [cadmpeg](https://github.com/cadmpeg/cadmpeg) in the desktop app, the browser app and the CLI.
+  [cadmpeg](https://github.com/cadmpeg/cadmpeg) in the desktop app, the browser app and the CLI,
+  and a FreeCAD file's sketches, pads, pockets, revolutions, grooves, fillets, chamfers and
+  primitives come in as editable features when every one can be rebuilt.
 - **Render:** opaque surfaces can use metal fraction, roughness and dielectric IOR in the
   integrated product viewport and CPU preview PNGs. Existing simple colors remain supported.
   Fixed direct lighting is a preview; HDRI, refraction and texture maps are not implemented.

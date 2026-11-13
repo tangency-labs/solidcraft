@@ -1,3 +1,6 @@
+newer_file_feature
+frame_end_cap
+  moves: ends[0].plane.axis_dir[0], ends[0].plane.axis_dir[1], ends[0].plane.axis_origin[0], ends[0].plane.axis_origin[1], ends[0].plane.axis_origin[2]
 body_transfer
 sketch
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
@@ -12,6 +15,7 @@ revolve
   moves: axis.dir[0], axis.dir[1], axis.dir[2], axis.origin[0], axis.origin[1], axis.origin[2], to[0], to[1], to[2]
   face points: [3, 3.5, 3.25]
   profiles: 1 all
+  placement: 9, 9.5, 9.25
 fillet_constant
   moves: edges[0][0], edges[0][1], edges[0][2]
 fillet_chord
@@ -30,17 +34,24 @@ box
 cylinder
   moves: axis[0], axis[2], base[0], base[1], base[2]
   placement: cyl.x, cyl.y, cyl.z
+cylinder_references
+  moves: axis[0], axis[2], base[0], base[1], base[2], references[0].edge[0], references[0].edge[1], references[0].edge[2], references[1].edge[0], references[1].edge[1], references[1].edge[2]
+  placement: 0, 0, 0
 sphere
   moves: center[0], center[1], center[2]
   placement: sph.x, sph.y, sph.z
 torus
   moves: center[0], center[1], center[2]
   placement: tor.x, tor.y, tor.z
+cone
+  moves: axis[0], axis[2], base[0], base[1], base[2]
+  placement: cone.x, cone.y, cone.z
 combine
 pattern_rectangular
   moves: pattern.dir1[0], pattern.dir1[1], pattern.dir2[1], pattern.dir2[2]
 pattern_circular
   moves: pattern.axis[0], pattern.axis[2], pattern.origin[0], pattern.origin[1], pattern.origin[2]
+  placement: 0, 0, 0
 pattern_path
 mirror
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
@@ -79,6 +90,7 @@ construction_plane
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
 split
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2], tool.point[0], tool.point[1], tool.point[2]
+  face points: [0, 0, 0]
 split_line
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
 construction_axis
@@ -115,6 +127,14 @@ align
 coil
   moves: axis[0], axis[2], base[0], base[1], base[2]
   placement: coil.x, coil.y, coil.z
+coil_profile
+  moves: axis[0], axis[2], base[0], base[1], base[2]
+  profiles: 1 indices
+  placement: coil_profile.x, coil_profile.y, coil_profile.z
+cell_grid
+  moves: anchor[0], anchor[1], anchor[2]
+  profiles: 1 indices
+  placement: cell_grid.x, cell_grid.y, cell_grid.z
 sheet_base
   profiles: 1 all
 sheet_contour
@@ -123,8 +143,11 @@ sheet_flange
 sheet_hem
   moves: edges[0][0], edges[0][1], edges[0][2]
 sheet_perforate
+  profiles: 1 all
 sheet_fold
   moves: a[0], a[1], a[2], b[1], b[2], fixed[0], fixed[1], fixed[2]
+sheet_path
+  moves: edge[0], edge[1], edge[2]
 sheet_unfold
 sheet_convert
   moves: bends[0][0], bends[0][1], bends[0][2], face[0], face[1], face[2]
@@ -134,6 +157,7 @@ boss
   face points: [0, 0, 0]
 lip
   moves: face[0], face[1], face[2]
+  face points: [0, 0, 0]
 snap_fit
   moves: direction[0], direction[2], hook[0], hook[1], position[0], position[1], position[2]
   face points: [0, 0, 0]
@@ -152,6 +176,7 @@ surface_extrude
   face points: [1, 1.5, 1.25], [2, 2.5, 2.25]
 surface_revolve
   moves: axis.dir[0], axis.dir[1], axis.dir[2], axis.origin[0], axis.origin[1], axis.origin[2]
+  placement: 9, 9.5, 9.25
 surface_sweep
 surface_sweep_options
 surface_loft
@@ -198,3 +223,4 @@ move
 import
 mesh_convert
 mesh_import
+repair
