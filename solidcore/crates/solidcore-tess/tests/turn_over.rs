@@ -1,6 +1,6 @@
-//! A sheet turned over (`Body::turn_over`) meshes as the same points with each normal negated and
-//! each triangle wound the other way: its record reads each face backward in its shell, which the
-//! mesher follows.
+//! A sheet turned over (`Body::turn_over`, its surface's u and v swapped) meshes facing the other
+//! way: at each point both meshes have, the normal is negated, and each triangle is wound
+//! counter-clockwise about its normal before and after.
 
 #![allow(
     clippy::panic,
@@ -54,30 +54,43 @@ fn dot(a: Vec3, b: Vec3) -> f64 {
 #[test]
 fn a_turned_sheet_meshes_with_its_normals_negated() {
     let before = sheet();
-    let (body, _) = Body::from_record(&before, true).unwrap();
-    body.turn_over().unwrap();
-    let (after, _) = body.to_record().unwrap();
+    let (body, order) = Body::from_record(&before, true).unwrap();
+    let after = body.turn_over(&order).unwrap().record;
 
+    // the turned surface (u and v swapped) is laid out in its own order: compare at the points
+    // both meshes have (its corners and the samples its edges share), and overall
     let (m0, m1) = (mesh(&before), mesh(&after));
-    assert_eq!(m1.positions, m0.positions, "the same points");
-    assert_eq!(m1.normals.len(), m0.normals.len());
-    for (n1, n0) in m1.normals.iter().zip(&m0.normals) {
-        assert_eq!(
-            (n1.x, n1.y, n1.z),
-            (-n0.x, -n0.y, -n0.z),
-            "each normal negated"
+    assert!(!m0.triangles.is_empty() && !m1.triangles.is_empty());
+    let mut shared = 0;
+    for (p1, n1) in m1.positions.iter().zip(&m1.normals) {
+        let Some(i) = m0
+            .positions
+            .iter()
+            .position(|p0| (p0.x - p1.x).abs() + (p0.y - p1.y).abs() + (p0.z - p1.z).abs() < 1e-12)
+        else {
+            continue;
+        };
+        let n0 = m0.normals[i];
+        assert!(
+            (n0.x + n1.x).abs() + (n0.y + n1.y).abs() + (n0.z + n1.z).abs() < 1e-9,
+            "at {p1:?}: {n0:?} then {n1:?}"
         );
+        shared += 1;
     }
-    assert_eq!(m1.triangles.len(), m0.triangles.len());
-    assert!(!m0.triangles.is_empty());
-    for (&t1, &t0) in m1.triangles.iter().zip(&m0.triangles) {
-        assert_eq!(
-            t1,
-            [t0[0], t0[2], t0[1]],
-            "each triangle wound the other way"
-        );
-        // wound counter-clockwise about its own corner's normal, before and after
-        assert!(dot(wound(&m0, t0), m0.normals[t0[0] as usize]) > 0.0);
-        assert!(dot(wound(&m1, t1), m1.normals[t1[0] as usize]) > 0.0);
+    assert!(shared >= 4, "the corners at least: {shared}");
+    let sum = |m: &Mesh| {
+        m.normals.iter().fold(Vec3::new(0.0, 0.0, 0.0), |a, n| {
+            Vec3::new(a.x + n.x, a.y + n.y, a.z + n.z)
+        })
+    };
+    assert!(
+        dot(sum(&m0), sum(&m1)) < 0.0,
+        "facing the other way overall"
+    );
+    // each triangle wound counter-clockwise about its own corner's normal, before and after
+    for m in [&m0, &m1] {
+        for &t in &m.triangles {
+            assert!(dot(wound(m, t), m.normals[t[0] as usize]) > 0.0);
+        }
     }
 }
