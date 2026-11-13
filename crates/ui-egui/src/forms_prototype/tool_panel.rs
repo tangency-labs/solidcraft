@@ -1577,6 +1577,7 @@ mod tests {
         let source_required = app.tr("forms.prototype.pipe_source_required").to_owned();
         let state = app.forms_prototype.tool_panel.take().unwrap();
         assert_eq!(params(&app, &state).unwrap_err(), source_required);
+        cancel(&mut app);
 
         let model = app.session.model.state();
         let PipeSource::Edges { body, mut edges } = PipeSource::from_edges(model.body("Support").unwrap(), &[0]).unwrap() else {
@@ -1589,6 +1590,7 @@ mod tests {
         start(&mut app, Mode::Pipe);
         let state = app.forms_prototype.tool_panel.take().unwrap();
         assert_eq!(params(&app, &state).unwrap_err(), source_required);
+        cancel(&mut app);
 
         app.session.forms_prototype.as_mut().unwrap().pipe =
             Some(Box::new(Pipe { source: missing_edge, settings: PipeSettings::default(), follow_path: false }));
