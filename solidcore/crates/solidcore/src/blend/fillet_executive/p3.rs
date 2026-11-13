@@ -520,6 +520,26 @@ pub trait FilletFinishAccess<O: ClassObject + SolutionObject + Ord> {
         data2: Option<O>,
         data3: Option<O>,
     ) -> Result<()>;
+    /// `SmFace::Notify(PreEdit)` of every face of `brep`, in `SmBrep::GetFaces` order, as
+    /// the tail of `DoFilleting` sends it. A face's ordinary notification failure is
+    /// ignored as upstream; an unported or cancelled one stops the walk.
+    ///
+    /// # Errors
+    /// Lookup failures; an unported or cancelled notification.
+    fn finish_pre_edit_faces(&mut self, k: &mut Kernel, brep: O) -> Result<()> {
+        for face in self.finish_faces(brep)? {
+            // SmTypes.h:659: SM_NO_GET_BREP(face) expands to a null object.
+            ignore(self.finish_notify_face(
+                k,
+                face,
+                NotifyOperation::PreEdit,
+                Some(face),
+                None,
+                None,
+            ))?;
+        }
+        Ok(())
+    }
     /// `SmBrep::OrientTrimmedSurfaces`.
     ///
     /// # Errors
@@ -4282,17 +4302,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // Upstream cbi_MAP_TOPO_EDGES=0: do not collect mapped intersections.
         access.finish_remove_topo_edges(k, self)?;
         access.finish_boolean_post_process(k, self, true)?;
-        for face in access.finish_faces(target)? {
-            // SmTypes.h:659: SM_NO_GET_BREP(face) expands to a null object.
-            ignore(access.finish_notify_face(
-                k,
-                face,
-                NotifyOperation::PreEdit,
-                Some(face),
-                None,
-                None,
-            ))?;
-        }
+        access.finish_pre_edit_faces(k, target)?;
         let mut maybe_not_solid = false;
         // fork 873c7c9 passes this on (SER)
         let oriented =
