@@ -386,30 +386,29 @@ pub fn edge_relief(
         Ok(cylinder) => cylinder,
         Err(skip) => return Ok(EdgeRelief::Skipped(skip)),
     };
+    let [past_start, past_end] = extend;
     // The circle's centre less the edge's points (square to the edge).
-    let centre = cylinder.base + cylinder.axis * extend[0] - edge.start;
-    let mut back = [0.0; 2];
-    for (i, (there, here, faces)) in [
-        (edge.end, edge.start, at_start),
-        (edge.start, edge.end, at_end),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        if extend[i] > 0.0 {
-            continue;
+    let centre = cylinder.base + cylinder.axis * past_start - edge.start;
+    // How far the relief stops short of each blind end (an open end runs on past it).
+    let short_of = |past: f64, there: Point3, here: Point3, faces: &[Option<Vec3>]| {
+        if past > 0.0 {
+            Ok(Some(0.0))
+        } else {
+            pull_back(there, here, faces, centre, o.radius)
         }
-        match pull_back(there, here, faces, centre, o.radius)? {
-            Some(t) => back[i] = t,
-            None => return Ok(EdgeRelief::Skipped(Skip::Overhang)),
-        }
-    }
-    let height = cylinder.height - back[0] - back[1];
+    };
+    let (Some(before), Some(after)) = (
+        short_of(past_start, edge.end, edge.start, at_start)?,
+        short_of(past_end, edge.start, edge.end, at_end)?,
+    ) else {
+        return Ok(EdgeRelief::Skipped(Skip::Overhang));
+    };
+    let height = cylinder.height - before - after;
     if height <= STRAIGHT * cylinder.height.max(1.0) {
         return Ok(EdgeRelief::Skipped(Skip::Overhang));
     }
     Ok(EdgeRelief::Relief(ReliefCylinder {
-        base: cylinder.base + cylinder.axis * back[0],
+        base: cylinder.base + cylinder.axis * before,
         height,
         ..cylinder
     }))
