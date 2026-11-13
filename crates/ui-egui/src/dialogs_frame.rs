@@ -134,22 +134,13 @@ pub(crate) fn tube_near(app: &SolveApp, proj: &crate::viewport::Proj, pos: egui:
         .map(|(_, c)| Hit::Centreline { line: c.id.clone() })
 }
 
-/// The centreline under the cursor, unless a point the click would pick is there too: a point
-/// wins (a pair's end is the point it was picked on).
+/// The centreline under the cursor, unless the click would pick something else there (a point,
+/// a pair's end, the sketch line a line member lies on): that wins, as it did before tubes could
+/// be picked.
 pub(crate) fn tube_hover(app: &SolveApp, hits: &[Hit]) -> Option<Hit> {
     let tube = hits.iter().find(|h| matches!(h, Hit::Centreline { .. }))?;
-    let point = crate::viewport::candidate(app, hits).is_some_and(|(h, _)| {
-        matches!(
-            h,
-            Hit::SketchPoint { .. }
-                | Hit::SketchPoint3d { .. }
-                | Hit::SketchMidpoint { .. }
-                | Hit::Vertex { .. }
-                | Hit::ConstructionPoint { .. }
-                | Hit::MemberEnd { .. }
-        )
-    });
-    (!point).then(|| tube.clone())
+    // Only where a click would pick nothing else: a line or point under it is picked as before.
+    crate::viewport::candidate(app, hits).is_none().then(|| tube.clone())
 }
 
 fn frame_member(app: &mut SolveApp) -> Option<&mut Member> {
@@ -173,6 +164,10 @@ pub(crate) fn click_tube(app: &mut SolveApp, hit: &Hit) -> bool {
 /// A right-click on a centreline: its tube is picked, unless it already is, and the Remove Tube
 /// menu opens. False when the click is not on one.
 pub(crate) fn open_menu(app: &mut SolveApp, at: egui::Pos2) -> bool {
+    // With Right-click confirms on, a right-click confirms the input there as before.
+    if app.preferences.right_click_confirms {
+        return false;
+    }
     let Some(Hit::Centreline { line }) = app.viewport.hover.clone() else { return false };
     let Some(m) = frame_member(app) else { return false };
     if !m.picked_tubes.contains(&line) {

@@ -3439,7 +3439,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         }
     }
     // A centreline of the Frame Member being made, before the curves (a line member's sketch line
-    // lies under it); a point the click would pick still wins (`dialogs_frame::tube_hover`).
+    // lies under it); anything else the click would pick still wins (`dialogs_frame::tube_hover`).
     hits.extend(crate::dialogs_frame::tube_near(app, proj, pos));
     let before_curves = hits.len();
     hits.extend(bestc.hits());
