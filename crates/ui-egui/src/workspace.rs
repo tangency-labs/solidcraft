@@ -1095,7 +1095,7 @@ mod tests {
         h.step(&json!({"click":{"handle":"button:drawing.view.base.planned"}})).unwrap();
         h.frames(3);
         assert!(crate::scenario::rect_of("drawing:settings").is_some(), "known options open from the shared ribbon");
-        assert!(h.widget("Apply (not implemented)").is_some());
+        assert!(h.widget("Finish").is_some());
         assert!(h.app.run("drawing.view.base.planned", json!({})).is_err(), "the preview never enables engine execution");
         h.step(&json!({"click":{"handle":"drawing:settings:close"}})).unwrap();
         h.step(&json!({"click":{"handle":"tab:DRAWING PARTS"}})).unwrap();
