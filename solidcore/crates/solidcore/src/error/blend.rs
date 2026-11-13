@@ -210,9 +210,6 @@ pub enum RemovalRefusal {
     /// The tangent surfaces of a ring fillet do not meet in a closed curve near its rails
     /// within their domains: the sharp edge would lie on a continuation of one of them.
     TangentSurfacesDoNotMeet,
-    /// A tangent face's seam stops short of the sharp edge and is not a line, so it cannot
-    /// run on exactly.
-    SeamNotStraight,
     /// A seam's UV trim, run on, does not reach the new vertex on its face's surface.
     SeamTrimMissesNewVertex,
     /// The fillet face does not have four edges.
@@ -264,7 +261,6 @@ pub const fn removal_class(reason: RemovalRefusal) -> ErrorKind {
         | R::SideEdgeNotStraight
         | R::CornerOffSideLine
         | R::TangentSurfacesDoNotMeet
-        | R::SeamNotStraight
         | R::SeamTrimMissesNewVertex => ErrorKind::RemovalNotExact,
         R::NotFourEdges
         | R::AdjacentEdgesTangent
@@ -795,7 +791,6 @@ mod tests {
             (R::SideEdgeNotStraight, ErrorKind::RemovalNotExact),
             (R::CornerOffSideLine, ErrorKind::RemovalNotExact),
             (R::TangentSurfacesDoNotMeet, ErrorKind::RemovalNotExact),
-            (R::SeamNotStraight, ErrorKind::RemovalNotExact),
             (R::SeamTrimMissesNewVertex, ErrorKind::RemovalNotExact),
             (R::NotFourEdges, ErrorKind::NotARemovableFillet),
             (R::AdjacentEdgesTangent, ErrorKind::NotARemovableFillet),

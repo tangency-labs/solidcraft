@@ -505,8 +505,7 @@ impl RingFilletRemoval {
                 // a line runs on along itself (its end span continued, the same line),
                 // anything else would have to be continued past its curve.
                 if !side_curve.is_linear(k, tol, false)?.linear {
-                    self.not_exact = true;
-                    return Err(refused(R::SeamNotStraight));
+                    return Err(curved_seam_without_crossing());
                 }
                 let side_ivl = side_curve.natural_interval();
                 let at_high = self.side_at_high(ii)?;
@@ -908,6 +907,14 @@ pub fn join_shells_at_vertex(k: &mut Kernel, b: &mut Brep, v: Option<VertexId>) 
     Ok(())
 }
 
+/// A curved seam with no crossing of the sharp edge found: a stage failure. The global
+/// intersector finding no crossing proves nothing about the seam stopping short, so nothing
+/// is proved inexact either (#15034 rule 5).
+#[track_caller]
+fn curved_seam_without_crossing() -> SolidError {
+    stage_failed()
+}
+
 /// Why no candidate curve is the sharp edge: a stage failure when a drop onto a candidate
 /// stopped (`undecided`), which proves nothing about it (#15034 rule 5); otherwise
 /// [`R::TangentSurfacesDoNotMeet`]: the surfaces don't meet near the fillet within their
@@ -940,5 +947,15 @@ mod tests {
         );
         assert!(refused.is_refusal() && !refused.is_defect());
         assert_eq!(undecided.upstream_status(), refused.upstream_status());
+    }
+
+    /// A curved seam with no crossing found is not proved to stop short of the sharp edge:
+    /// a stage failure, never a refusal.
+    #[test]
+    fn a_curved_seam_without_a_crossing_is_a_stage_failure() {
+        let e = curved_seam_without_crossing();
+        assert_eq!(e.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert!(e.is_defect() && !e.is_refusal());
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
     }
 }
