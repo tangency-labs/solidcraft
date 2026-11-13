@@ -58,6 +58,9 @@ pub struct Step<'a> {
     pub ink: Option<egui::Color32>,
     /// The hover text, written only while it shows.
     pub tip: &'a dyn Fn() -> String,
+    /// Its handle's name ([`Handles::step`] followed by the label) when the app keeps it ready,
+    /// so a long bar publishes its steps without building their names every frame; `None` builds it.
+    pub handle: Option<&'a std::sync::Arc<str>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -112,6 +115,12 @@ enum Drag {
     Step(u64),
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times steps out of view read the focus and the open popups.
+    static QUIET_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The strip being laid out, left to right.
 pub struct Strip<'u, 'b> {
     ui: &'u mut egui::Ui,
@@ -129,6 +138,10 @@ pub struct Strip<'u, 'b> {
     hovered: Option<u64>,
     edit: Option<u64>,
     actions: Vec<Action>,
+    /// The focused widget and whether a popup is open, as last read for steps out of view: a run
+    /// of them reads both once, not twice per step. Forgotten by whatever adds or interacts with a
+    /// widget (a step in view, the app's chips, its `ui`), which can move the focus or open one.
+    quiet: Option<(Option<egui::Id>, bool)>,
 }
 
 /// Draws the steps in `rect`, scrolled sideways (`scroll` keeps its own scroll offset), the bar's
@@ -165,13 +178,14 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         bar,
         rect,
         x,
-        xs: Vec::new(),
+        xs: Vec::with_capacity(bar.steps),
         marker_rect: None,
         trays: Vec::new(),
         drag,
         hovered: None,
         edit: None,
         actions: Vec::new(),
+        quiet: None,
     };
     contents.entries(&mut strip);
     let Strip { ui, painter: p, x: end, xs, mut marker_rect, mut drag, hovered, edit, mut actions, .. } = strip;
@@ -271,6 +285,7 @@ fn slot_at(xs: &[f32], end: f32, x: f32) -> usize {
 impl Strip<'_, '_> {
     /// The strip's ui, for what the app draws itself.
     pub fn ui(&mut self) -> &mut egui::Ui {
+        self.quiet = None;
         self.ui
     }
 
@@ -295,20 +310,33 @@ impl Strip<'_, '_> {
     /// drawn nor interactive; its slot still places the marker and drops. One being dragged or
     /// focused, or under an open menu, stays alive until that ends.
     pub fn step(&mut self, step: &Step) -> Rect {
-        let t = Tokens::get();
         if step.slot == self.bar.marker {
             self.marker_here();
         }
         self.xs.push(self.x);
         let br = Rect::from_min_size(pos2(self.x, self.rect.top() + 6.0), vec2(28.0, 28.0));
         self.x += 32.0;
-        solidcraft_ui_registry::publish_handle(&format!("{}{}", self.bar.handles.step, step.label), br.center());
+        match step.handle {
+            Some(name) => solidcraft_ui_registry::publish_shared_handle(name, br.center()),
+            None => solidcraft_ui_registry::publish_handle(&format!("{}{}", self.bar.handles.step, step.label), br.center()),
+        }
+        let dragged = self.drag == Some(Drag::Step(step.id));
+        // Out of view and not dragged, the chip is left out unless it has the focus or a popup is
+        // open; its id is worked out only to compare with a focused one.
+        if !self.ui.clip_rect().intersects(br) && !dragged {
+            let ui = &*self.ui;
+            let (focused, popup) = *self.quiet.get_or_insert_with(|| {
+                #[cfg(test)]
+                QUIET_READS.with(|reads| reads.set(reads.get() + 1));
+                (ui.memory(|m| m.focused()), egui::Popup::is_any_open(ui.ctx()))
+            });
+            if !popup && focused.is_none_or(|focused| focused != ui.scope_id().with(("feat", step.id))) {
+                return br;
+            }
+        }
+        self.quiet = None;
         let ui = &mut *self.ui;
         let chip_id = ui.scope_id().with(("feat", step.id));
-        let dragged = self.drag == Some(Drag::Step(step.id));
-        if !ui.clip_rect().intersects(br) && !dragged && !ui.memory(|m| m.has_focus(chip_id)) && !egui::Popup::is_any_open(ui.ctx()) {
-            return br;
-        }
         let sense = if self.bar.reorder { Sense::click_and_drag() } else { Sense::click() };
         let resp = ui.interact(br, chip_id, sense);
         if resp.hovered() {
@@ -330,6 +358,7 @@ impl Strip<'_, '_> {
         }
         .paint(&self.painter, br, HistoryStyle::Bottom);
         if self.bar.floating && step.state.last_done {
+            let t = Tokens::get();
             self.painter.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, self.bar.accent.color);
         }
         if self.bar.reorder && resp.drag_started() {
@@ -357,6 +386,7 @@ impl Strip<'_, '_> {
     /// before it. An `open` one starts a tray `depth` deep, ended by [`Strip::end_tray`].
     /// Returns its rect.
     pub fn chip(&mut self, start: usize, end: usize, open: bool, depth: usize, draw: impl FnOnce(&mut egui::Ui, &Painter, Pos2) -> f32) -> Rect {
+        self.quiet = None;
         let marker = self.bar.marker;
         if start < end && start == marker {
             self.marker_here();
@@ -389,6 +419,7 @@ impl Strip<'_, '_> {
     /// Something of the app's own that takes no slot, drawn by `draw` from x in the bar's rect,
     /// returning where it ends.
     pub fn inline(&mut self, draw: impl FnOnce(&mut egui::Ui, &Painter, f32, Rect) -> f32) {
+        self.quiet = None;
         self.x = draw(self.ui, &self.painter, self.x, self.rect);
     }
 }
