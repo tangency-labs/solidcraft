@@ -759,6 +759,23 @@ pub(crate) fn seed_records(
     records.or_default(p2::brep_ref(b).key);
 }
 
+/// [`seed_records`] that visits only the objects `b` gained since this store last seeded
+/// this B-rep value under this key scheme ([`seed_records_once`]), so seeding before each
+/// of many small edits of a large B-rep walks each object once, not once per edit. The
+/// store ends exactly as [`seed_records`] leaves it. The progress is shared with the
+/// edits [`with_caller_identities`] runs on `b` under the same keys.
+pub(crate) fn seed_records_since(
+    records: &mut crate::topology::topology::NotifyRecords,
+    b: &mut Brep,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) {
+    let id = progress_id(b, b.notify_serial(), key_of);
+    let instance = b.progress_tag();
+    if seed_records_once(records, (id, instance), b, key_of).is_err() {
+        seed_records(records, b, key_of);
+    }
+}
+
 /// How [`reseed_records`] names a B-rep's objects: `key_of` for the objects, `brep_key`
 /// for the B-rep, `entity_of` for `key_of`'s inverse on keys, and `serial`, the B-rep's
 /// serial as the edits that follow read it (for their seeding progress id).
@@ -6305,6 +6322,63 @@ mod tests {
     /// in between) and added. After another edit of the same B-rep value under the same
     /// scheme it asks the key of only what changed (the scheme's progress id asks one
     /// per kind); a removed record, a copy put back and another scheme walk it all.
+    /// Seeding before each small edit of a large part walked every object of the part each
+    /// time, which made a fillet's merge cost edits x objects. `seed_records_since` visits
+    /// only the objects added since, and leaves the store as a full seeding would.
+    #[test]
+    fn seed_records_since_visits_only_new_objects() {
+        use crate::topology::topology::NotifyRecords;
+        use std::cell::Cell;
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let asked = Cell::new(0_usize);
+        let key_of = |e: EntityRef| {
+            asked.set(asked.get() + 1);
+            topology_ref(7, e)
+        };
+        let full = |b: &Brep| {
+            let mut fresh = NotifyRecords::new();
+            seed_records(&mut fresh, b, &|e| topology_ref(7, e));
+            fresh
+        };
+        let mut records = NotifyRecords::new();
+        // (the progress id asks one key per kind)
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert!(asked.get() > entity_count(&b));
+        assert_eq!(records, full(&b));
+
+        // nothing new: no object is visited
+        asked.set(0);
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert_eq!(asked.get(), KINDS);
+
+        // a record the caller changed is kept, as `seed_records` keeps it
+        let face = b.face_list()[0];
+        records
+            .get_mut(&topology_ref(7, EntityRef::Face(face)).key)
+            .unwrap()
+            .set_user_index1(5);
+
+        // one object added: only it is visited
+        let added = b.add_vertex(Point3::new(5.0, 5.0, 5.0)).unwrap();
+        asked.set(0);
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert_eq!(asked.get(), KINDS + 1);
+        assert!(records.contains_key(&topology_ref(7, EntityRef::Vertex(added)).key));
+        let mut want = full(&b);
+        want.get_mut(&topology_ref(7, EntityRef::Face(face)).key)
+            .unwrap()
+            .set_user_index1(5);
+        assert_eq!(records, want);
+
+        // a removed record makes the next seeding visit everything again
+        records.remove(&topology_ref(7, EntityRef::Vertex(added)).key);
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert_eq!(records, want);
+    }
+
     #[test]
     fn reseed_records_equals_a_fresh_seeding() {
         use crate::topology::topology::NotifyRecords;
