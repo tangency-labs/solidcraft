@@ -12,12 +12,6 @@
     "fails": "faces 8 (rig 10), edges 18 (rig 24), vertices 12 (rig 16)"
   },
   {
-    "case": "fillets/10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5",
-    "issue": "tangency-labs/solidcraft#10876",
-    "reason": "a mixed-convexity corner beside a curved face (the bore), which the Setback does not take (docs/generic-blend.md section 3.2): the old corner fails",
-    "fails": "call 3 (blend_dropping) refused: solidcore failed (status 1001)"
-  },
-  {
     "case": "fillets/12342-round-wall-and-ledge-edges-r5-refused",
     "issue": "solidcore#2845",
     "reason": "status 1001 instead of the refusal naming the size that fits"
@@ -26,12 +20,6 @@
     "case": "fillets/12342-round-wall-edge-r5-past-the-wall-refused",
     "issue": "solidcore#2845",
     "reason": "status 1001 instead of the refusal naming the size that fits"
-  },
-  {
-    "case": "fillets/15768-fillet-ledge-concave-edge-beside-bore-r0-5",
-    "issue": "tangency-labs/solidcraft#15768",
-    "reason": "a closed solid at the closed-form volume, but the end cap stays a face of its own beside the bore wall: the fillet clean-up keeps the split side edge piece by its input id (WR-459), where the mirror image merges it",
-    "fails": "faces 28 (rig 27), edges 75 (rig 73), vertices 49 (rig 48)"
   },
   {
     "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",

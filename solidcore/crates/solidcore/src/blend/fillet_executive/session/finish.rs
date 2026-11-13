@@ -53,6 +53,7 @@ use crate::kernel::Kernel;
 use crate::surface::procedural_blend::NetScope;
 use crate::topology::brep::{p1, p3};
 use crate::topology::{BrepId, EdgeId};
+use std::collections::BTreeSet;
 
 const OP: &str = "blend::fillet_executive::session::finish";
 
@@ -407,7 +408,18 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             }
         }
         if let Some((edges, faces)) = &self.0.cleanup_kept {
-            relations.kept_edges.clone_from(edges);
+            // An input edge is kept by its id while it is still the whole input edge, with
+            // the ends it had. A split one is not: which of its pieces keeps the id follows
+            // the edge's direction, so a part and its mirror image would keep different
+            // pieces (#15768). Its pieces stay where they lie between two input faces.
+            let live: BTreeSet<EdgeId> = p1::edges(self.0.target, None)?.into_iter().collect();
+            for (&edge, ends) in edges {
+                if live.contains(&edge)
+                    && crate::topology::edge::vertices(self.0.target, edge, None)? == *ends
+                {
+                    relations.kept_edges.insert(edge);
+                }
+            }
             relations.kept_faces.clone_from(faces);
         }
         let before = p1::edges(self.0.target, None)?;
@@ -807,8 +819,13 @@ impl FilletSession<'_> {
         }
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
+            let mut edges = std::collections::BTreeMap::new();
+            for edge in p1::edges(self.objects.target, None)? {
+                let ends = crate::topology::edge::vertices(self.objects.target, edge, None)?;
+                edges.insert(edge, ends);
+            }
             Some((
-                p1::edges(self.objects.target, None)?.into_iter().collect(),
+                edges,
                 p1::faces(self.objects.target, None)?.into_iter().collect(),
             ))
         } else {
