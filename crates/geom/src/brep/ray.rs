@@ -12,8 +12,6 @@ use tensor::{Interval as I, spend};
 pub use face::{FaceError, FaceProof, PreparedFace};
 pub use tensor::ProofError;
 
-pub(crate) use face::regular_spline;
-
 pub const MAX_FACES: usize = 8_192;
 pub const MAX_CONTEXT: usize = 64;
 

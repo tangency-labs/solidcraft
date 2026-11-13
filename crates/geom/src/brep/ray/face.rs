@@ -449,38 +449,6 @@ fn through_axes(origin: [f64; 3], u_point: [f64; 3], v_point: [f64; 3]) -> [[I; 
     [u_point, v_point].map(|p| std::array::from_fn(|i| I::point(p[i]).sub(I::point(origin[i]))))
 }
 
-/// Prove every closed knot cell has two independent rational tangents.
-pub(crate) fn regular_spline(surface: &crate::bspline::NurbsSurface, work: &mut usize) -> Result<bool> {
-    let [nu, nv] = surface.count();
-    if nu.saturating_mul(nv) > MAX_CONTROLS {
-        return Err(FaceError::GeometryBudget);
-    }
-    let points: Vec<Vec<_>> = (0..nu)
-        .map(|u| {
-            (0..nv)
-                .map(|v| {
-                    let p = surface.point(u, v);
-                    [p.x, p.y, p.z, p.w]
-                })
-                .collect()
-        })
-        .collect();
-    let [u, v] = surface.knots();
-    let sheet = Sheet::tensor([u, v], &points, |p| p, surface.domain(), work)?;
-    let size = sheet.degree.map(|degree| degree + 1);
-    let mut net = ray::allocate(size[0] * size[1])?;
-    for u in &sheet.spans[0] {
-        for v in &sheet.spans[1] {
-            ray::spend(work, net.len())?;
-            sheet.grid.copy_span([u.start, v.start], size, &mut net)?;
-            if !ray::regular_net(size, &net, work)? {
-                return Ok(false);
-            }
-        }
-    }
-    Ok(true)
-}
-
 fn plane_controls(origin: [f64; 3], du: [I; 3], dv: [I; 3], domain: Rect, work: &mut usize) -> Result<[Control; 4]> {
     if origin.iter().any(|x| !x.is_finite()) || du.iter().chain(&dv).any(|x| !x.is_finite()) {
         return Err(FaceError::InvalidFace);

@@ -87,6 +87,10 @@ fn planar_supported(surface: &NurbsSurface, body: Body) -> Result<Body> {
 /// Trim one tensor surface by closed straight wires in its parameter plane.
 /// The edge and its pcurve share one parameter interval, including oblique trims.
 pub fn nurbs_region_sheet(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>]) -> Result<Body> {
+    nurbs_region_sheet_with_budget(surface, boundaries, 16_000_000)
+}
+
+fn nurbs_region_sheet_with_budget(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>], mut oblique_work: usize) -> Result<Body> {
     if boundaries.is_empty()
         || boundaries.len() > 128
         || boundaries.iter().any(|w| !(3..=1024).contains(&w.len()))
@@ -99,7 +103,6 @@ pub fn nurbs_region_sheet(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>]) 
     let mut loops = Vec::with_capacity(boundaries.len());
     let mut domain = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
     let mut bounds = solidcraft_geom::Aabb3::EMPTY;
-    let mut oblique_work = 16_000_000;
     for wire in boundaries {
         let mut uses = Vec::with_capacity(wire.len());
         for (&a, &z) in wire.iter().zip(wire.iter().cycle().skip(1)).take(wire.len()) {
@@ -517,7 +520,7 @@ mod tests {
 
     #[test]
     fn oblique_trim_edges_share_the_region_extraction_budget() {
-        let degree = 8;
+        let degree = 4;
         let count = degree + 1;
         let knots: Vec<_> = std::iter::repeat_n(0.0, count).chain(std::iter::repeat_n(1.0, count)).collect();
         let points: Vec<_> = (0..count).flat_map(|v| (0..count).map(move |u| Vec3::new(u as f64, v as f64, 0.0))).collect();
@@ -525,9 +528,13 @@ mod tests {
         let a = [0.1, 0.2];
         let b = [0.8, 0.3];
         let c = [0.2, 0.9];
-        assert!(surface.parameter_line(a, b).is_ok());
-        let wire: Vec<_> = [a, b, c].into_iter().cycle().take(1023).collect();
-        let error = super::nurbs_region_sheet(&surface, &[wire.clone(), wire]).unwrap_err();
+        let budget = 3_000;
+        for (start, end) in [(a, b), (b, c), (c, a)] {
+            let mut remaining = budget;
+            assert!(surface.parameter_line_bounded(start, end, &mut remaining).is_ok());
+        }
+        let wire = vec![a, b, c];
+        let error = super::nurbs_region_sheet_with_budget(&surface, &[wire], budget).unwrap_err();
         assert!(error.to_string().contains("shared work budget"), "{error}");
     }
 
