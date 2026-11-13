@@ -696,12 +696,9 @@ mod tests;
 pub(crate) fn snap_point(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -> Option<Vec3> {
     let near = |pts: Vec<Vec3>| pts.into_iter().min_by(|a, b| a.dist(at).total_cmp(&b.dist(at)));
     match kind {
-        "vertex" => near(
-            st.bodies
-                .iter()
-                .flat_map(|b| b.mesh().edges.iter().flat_map(|e| [e.first().copied(), e.last().copied()]).flatten().collect::<Vec<_>>())
-                .collect(),
-        ),
+        "vertex" => {
+            near(st.bodies.iter().filter(|b| !b.body.is_mesh()).flat_map(|b| b.body.record().vertices.iter().map(|v| Vec3::from(v.point))).collect())
+        }
         "edge_mid" => {
             let d = |e: &solidcraft_doc::kernel::EdgeInfo| e.points.windows(2).map(|w| at.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min);
             st.bodies
