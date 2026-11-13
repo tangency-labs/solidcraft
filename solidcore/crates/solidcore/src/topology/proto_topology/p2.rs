@@ -97,7 +97,7 @@
 //!   ([`ProtoBrep::face_coincident_edge`], `SmTools::FindCoincidentEdge`) as the
 //!   definition's edge there instead of making a second one (the SMLib fork's
 //!   tangency-labs/smlib@81cd61a).
-//! - **Opt-in fix (WR-619, #1794; own design).** With `Kernel::fixes.imprint_skips_collapsed_definition`,
+//! - **Not upstream (WR-619, #1794; own design).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] makes no edge for a definition whose ends
 //!   are one proto vertex and one vertex in each B-rep, along a speck within that vertex's
 //!   tolerance and the definition's own, when another definition of its proto edge is
@@ -920,7 +920,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         (result, edited)
     }
 
-    /// Not upstream (WR-619, opt-in `fixes.imprint_skips_collapsed_definition`): when the
+    /// Not upstream (WR-619): when the
     /// definition `ed`, with proto vertices `pvs` and final vertices `vertices` (start, end in
     /// B-reps 1 and 2), is a collapsed speck, returns each B-rep vertex's maximum sampled
     /// distance to the speck and the speck's start and end points. All must hold, else `None`:
@@ -1023,22 +1023,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let brep1 = self.which_brep(1);
         let brep2 = self.which_brep(2);
 
-        // Not upstream (WR-619, #1794; opt-in, own design): a definition that would be a closed
+        // Not upstream (WR-619, #1794; own design): a definition that would be a closed
         // edge on one vertex in each B-rep along a speck within that vertex's tolerance and its
         // own, beside a sibling definition imprinted between distinct vertices, makes no edge;
         // each vertex's tolerance covers the skipped speck's span in `ImprintIntersections`.
-        if k.fixes.imprint_skips_collapsed_definition {
-            if let Some(([gap1, gap2], p0, p1)) = self.collapsed_beside_sibling(
-                k,
-                &*brep,
-                ed,
-                (start_pv, end_pv),
-                [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
-            )? {
-                self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
-                self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
-                return Ok(());
-            }
+        if let Some(([gap1, gap2], p0, p1)) = self.collapsed_beside_sibling(
+            k,
+            &*brep,
+            ed,
+            (start_pv, end_pv),
+            [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
+        )? {
+            self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
+            self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
+            return Ok(());
         }
 
         // not upstream (WR-452, WR-453, #435, #410): fit the ends to the proto vertices

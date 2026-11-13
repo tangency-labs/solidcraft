@@ -2198,8 +2198,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     }
 
     /// Final vertices `(vertex, max_gap, speck_start, speck_end)` whose collapsed speck
-    /// definition `SmEdgeDefinition::Imprint` skipped under
-    /// `Kernel::fixes.imprint_skips_collapsed_definition` (WR-619). Not upstream.
+    /// definition `SmEdgeDefinition::Imprint` skipped (WR-619). Not upstream.
     #[must_use]
     pub fn skipped_speck_vertices(&self) -> &[(O, f64, Point3, Point3)] {
         &self.skipped_speck_vertices

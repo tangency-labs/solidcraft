@@ -1,5 +1,4 @@
-//! Not upstream (WR-614, tangency-labs/solidcore#1794; opt-in
-//! `Kernel::fixes.boolean_coincident_strip_drops_crossing`): the crossing line of two
+//! Not upstream (WR-614, tangency-labs/solidcore#1794): the crossing line of two
 //! planes that stay within tolerance of each other across a strip bounded by their edges
 //! is not an edge.
 //!
@@ -24,7 +23,7 @@
 //! |------|----------|
 //! | `TopologyIntersector::drop_crossings_in_coincident_strips` (crate) | none (own design) |
 //!
-//! Deviations: not upstream at all; off by default.
+//! Deviations: not upstream at all; always on (its opt-in flag was retired).
 
 use crate::error::Result;
 use crate::geom::solution_array::SolutionObject;
