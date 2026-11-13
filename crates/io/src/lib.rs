@@ -1502,6 +1502,73 @@ mod tests {
         m
     }
 
+    /// The smallest angle (degrees) of each triangle of an STL file.
+    fn stl_smallest_angles(bytes: &[u8]) -> Vec<f64> {
+        read_stl(bytes)
+            .unwrap()
+            .iter()
+            .map(|t| {
+                let p = |k: usize| Vec3::new(t[k][0] as f64, t[k][1] as f64, t[k][2] as f64);
+                let corner = |a: Vec3, b: Vec3, c: Vec3| {
+                    let (u, v) = (b - a, c - a);
+                    u.cross(v).len().atan2(u.dot(v)).to_degrees()
+                };
+                let (a, b, c) = (p(0), p(1), p(2));
+                corner(a, b, c).min(corner(b, c, a)).min(corner(c, a, b))
+            })
+            .collect()
+    }
+
+    /// The smallest angle the mesh export asks for: `MeshSpec::chord`'s default.
+    const EXPORT_MIN_ANGLE: f64 = 25.0;
+
+    /// How far an STL corner's angle may move from the mesh's own when the coordinates are
+    /// rounded to `f32` (a relative 6e-8 of each coordinate, on parts of 10 to 30 mm with sides
+    /// of a tenth of a millimetre or more: under 1e-4 degrees).
+    const F32_ANGLE_SLACK: f64 = 1e-3;
+
+    /// A 10 × 20 × 30 box exported as STL has no triangle sharper than the mesh export's smallest
+    /// angle: every face goes through the mesh path (`solidcore_tess::mesh`), planar ones too.
+    /// On the display path (`Body::mesh`, before #15622) it was 12 triangles, two per face, 4 of
+    /// them under 25° (the 10 × 30 faces' halves), the smallest 18.43° (atan(10/30)).
+    #[test]
+    fn a_box_exported_as_stl_has_no_triangle_under_the_smallest_angle() {
+        let (_, m) = model();
+        let bytes = export(&m.state(), &[], Format::StlBinary, "t").unwrap();
+        let angles = stl_smallest_angles(&bytes);
+        let smallest = angles.iter().copied().fold(f64::INFINITY, f64::min);
+        let under = angles.iter().filter(|a| **a < EXPORT_MIN_ANGLE - F32_ANGLE_SLACK).count();
+        assert!(under == 0, "{under} of {} triangles under {EXPORT_MIN_ANGLE}°, smallest {smallest}°", angles.len());
+        assert!((stl_volume(&bytes) - 6000.0).abs() < 1e-2);
+    }
+
+    /// A cylinder (radius 6, height 15) exported as STL has no triangle sharper than the mesh
+    /// export's smallest angle, its side and caps alike. On the display path (`Body::mesh`,
+    /// before #15622) it was 4848 triangles, 4608 of them under 25°, the smallest 15.11°.
+    #[test]
+    fn a_cylinder_exported_as_stl_has_no_triangle_under_the_smallest_angle() {
+        let mut doc = Document::new("t");
+        doc.add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::ZERO),
+                axis: solidcraft_doc::Dir(Vec3::Z),
+                radius: "6".into(),
+                height: "15".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let bytes = export(&m.state(), &[], Format::StlBinary, "t").unwrap();
+        let angles = stl_smallest_angles(&bytes);
+        let smallest = angles.iter().copied().fold(f64::INFINITY, f64::min);
+        let under = angles.iter().filter(|a| **a < EXPORT_MIN_ANGLE - F32_ANGLE_SLACK).count();
+        assert!(under == 0, "{under} of {} triangles under {EXPORT_MIN_ANGLE}°, smallest {smallest}°", angles.len());
+    }
+
     /// OBJ is welded as STL and 3MF are: a filleted box, a cylinder and a torus written as OBJ
     /// open again closed, with their STL export's volume, every face keeping its normals
     /// (#9074). Before, each face wrote its edge points again, a few ulps apart, and the file
