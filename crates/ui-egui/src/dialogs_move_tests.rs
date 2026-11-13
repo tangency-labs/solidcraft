@@ -1767,6 +1767,8 @@ fn the_triad_turns_with_the_body_unless_fixed() {
         let Kind::Move { x, y, z, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
         assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("20 mm", "0 mm", "0 mm"), "fixed {fixed}");
         assert!((apply_point(&whole_move(&h), centre) - centre - by).len() < 1e-4, "fixed {fixed}");
+        let d = h.app.dialog.clone().unwrap();
+        assert_shown_where_ok_puts_it(&mut h.app, &d);
     }
 }
 
@@ -1783,6 +1785,8 @@ fn a_turn_after_a_distance_leaves_the_body_there() {
     let Kind::Move { x, y, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
     assert_eq!((x.as_str(), y.as_str()), ("0 mm", "-10 mm"));
     assert!((apply_point(&whole_move(&h), centre) - centre - Vec3::X * 10.0).len() < 1e-4);
+    let d = h.app.dialog.clone().unwrap();
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
 }
 
 /// Changing frames keeps the move; only the values start from zero on the new axes.
@@ -1800,6 +1804,8 @@ fn local_and_fixed_can_swap_mid_move() {
     let after = whole_move(&h);
     assert_turn(&after, &rows_of(&before));
     assert!((apply_point(&after, centre) - centre).len() < 1e-4);
+    let d = h.app.dialog.clone().unwrap();
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
 }
 
 /// Local axes are the body's own: as its component places it, and as earlier moves turned it.
