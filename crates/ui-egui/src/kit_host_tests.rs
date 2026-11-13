@@ -912,6 +912,7 @@ mod panel {
                 let ctx = crate::ui_kit::test_support::context();
                 let mut authored = Tokens::get();
                 authored.panel = egui::Color32::WHITE;
+                authored.toolbar = authored.panel;
                 authored.text = egui::Color32::BLACK;
                 authored.text_dim = egui::Color32::BLACK;
                 authored.form_ink = egui::Color32::BLACK;
@@ -923,7 +924,7 @@ mod panel {
                 let _authored = solidcraft_theme::scoped_panel_tokens(authored);
                 let style = crate::panel_runtime::HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
                 let appearance = style.appearance(PanelSurface::Translucent, floating);
-                let failed = matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. });
+                let failed = matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { .. }));
                 assert_eq!(failed, fallback, "exercise both authored paint and deliberately unreadable fallback");
                 let palette = failed.then(|| style.palette(appearance));
                 let font = egui::FontId::monospace(19.0);
