@@ -891,6 +891,7 @@ mod panel {
                 let ctx = crate::ui_kit::test_support::context();
                 let mut authored = Tokens::get();
                 authored.panel = egui::Color32::WHITE;
+                authored.toolbar = authored.panel;
                 authored.text = egui::Color32::BLACK;
                 authored.text_dim = egui::Color32::BLACK;
                 authored.form_ink = egui::Color32::BLACK;
