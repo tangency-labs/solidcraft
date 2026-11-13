@@ -1222,7 +1222,12 @@ impl FramePanelContent for ProductionFrame<'_> {
             )
         });
         match product {
-            Product::Browser | Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),
+            Product::Browser => {
+                // Keep the drawing chooser beside the Browser until it has its own panel.
+                crate::drawing_workspace::sheets_section(self.app, ui);
+                crate::browser::panel_contents(self.app, ui);
+            }
+            Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),
             Product::History if context.flow == Flow::Wide => crate::timeline::panel_inline(self.app, ui),
             Product::History => crate::timeline_left::panel_contents(self.app, ui),
             Product::Assistant => crate::agent_chat::shared_content(self.app, ui, context.flow),
