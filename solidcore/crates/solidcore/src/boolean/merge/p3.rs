@@ -1618,6 +1618,87 @@ mod tests {
         ));
     }
 
+    /// The bounded unit-square plane `x0 <= x <= x0 + 1`, `0 <= y <= 1`, `z = 0`.
+    fn square_plane_from(x0: f64) -> Surface {
+        Surface::from(crate::surface::plane::Plane::new(
+            crate::math::Vec3::new(x0, 0.0, 0.0),
+            crate::math::Vec3::new(1.0, 0.0, 0.0),
+            crate::math::Vec3::new(0.0, 1.0, 0.0),
+            crate::math::Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ))
+    }
+
+    /// `BooleanLists` copies its surface operands with the virtual `Copy` (WR-196): each
+    /// surface makes a face over its natural domain, a list of planes is recognised as
+    /// planar and takes the planar 2D path, whose outputs are copies of the derived
+    /// surfaces; a list with B-reps never reads its surfaces.
+    #[test]
+    fn surface_lists_copy_each_surface_whole() {
+        let mut k = Kernel::default();
+        let (brep, planar) =
+            list_operand(&mut k, &[], &[square_plane(0.0), square_plane(2.0)]).unwrap();
+        assert!(planar);
+        assert_eq!(bp::faces(&brep, None).unwrap().len(), 2);
+        // the last surface's kind decides (upstream: "we hope they are all the same")
+        let sphere = Surface::from(
+            crate::surface::sphere::Sphere::new(
+                &k,
+                crate::math::Vec3::ZERO,
+                crate::math::Vec3::new(1.0, 0.0, 0.0),
+                crate::math::Vec3::new(0.0, 1.0, 0.0),
+                Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+                1.0,
+                crate::surface::sphere::SphereOptions {
+                    swap_uv: false,
+                    inside_out: false,
+                    circle_nurb: None,
+                },
+            )
+            .unwrap(),
+        );
+        let (brep, planar) = list_operand(&mut k, &[], &[square_plane(0.0), sphere]).unwrap();
+        assert!(!planar);
+        assert_eq!(bp::faces(&brep, None).unwrap().len(), 2);
+        // two unit squares overlapping in [0.5, 1] x [0, 1]: the union and the
+        // intersection are one region each, the exclusive or two, the differences one
+        for (operation, regions) in [(0, 1), (1, 1), (2, 2), (3, 1), (4, 1)] {
+            let result = boolean_lists(
+                &mut k,
+                &[],
+                &[square_plane_from(0.0)],
+                &[],
+                &[square_plane_from(0.5)],
+                operation,
+                None,
+            )
+            .unwrap();
+            assert!(result.breps.is_empty(), "operation {operation}");
+            assert_eq!(result.surfaces.len(), regions, "operation {operation}");
+            for surface in &result.surfaces {
+                assert!(surface.is_kind_of(PLANE_TYPE).unwrap(), "operation {operation}");
+            }
+        }
+        // an operation BooleanLists does not know is refused once both lists are built
+        let result = boolean_lists(
+            &mut k,
+            &[],
+            &[square_plane(0.0)],
+            &[],
+            &[square_plane(1.0)],
+            -1,
+            None,
+        );
+        assert!(
+            matches!(result, Err(SolidError::InvalidInput { operation: OP, .. })),
+            "{result:?}"
+        );
+        // a list with a B-rep ignores its surfaces
+        let (brep, planar) = list_operand(&mut k, &[Brep::new()], &[square_plane(0.0)]).unwrap();
+        assert!(!planar);
+        assert!(bp::faces(&brep, None).unwrap().is_empty());
+    }
+
     #[test]
     fn fold_order_is_last_to_first_and_validation_preserves_input() {
         let mut k = Kernel::default();
