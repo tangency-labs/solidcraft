@@ -635,7 +635,9 @@ impl Rows<'_> {
         let visible = out.resp.is_some();
         if let Some(rect) = out.rect {
             if visible {
-                let fold_rect = out.fold_at.map(|at| Rect::from_center_size(pos2(at.x, rect.center().y), vec2(Tokens::get().space_16 + Tokens::get().space_3, rect.height())));
+                let fold_rect = out.fold_at.map(|at| {
+                    Rect::from_center_size(pos2(at.x, rect.center().y), vec2(Tokens::get().space_16 + Tokens::get().space_3, rect.height()))
+                });
                 self.done.drawn.push(Drawn { id, key: key.to_owned(), label: label.to_owned(), rect, fold: fold_rect, open });
                 self.done.pointer_owned |= out.hovered || out.resp.as_ref().is_some_and(egui::Response::contains_pointer);
             }
