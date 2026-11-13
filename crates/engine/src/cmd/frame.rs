@@ -3,11 +3,12 @@
 //! standard size or a profile sketch. `frame.profile.list` lists the built-in profiles and the
 //! standard sizes, `frame.profile.properties` works out a profile's section, and
 //! `frame.profile.insert` draws one into a sketch.
+//! `frame.remove_member` takes tubes out of a Frame Member (#15705).
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::construct::{DatumItem, GeoRef};
 use solidcraft_doc::expr::Kind;
@@ -22,8 +23,9 @@ use super::{CommandSpec, in_sketch, not_in_sketch};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec2};
 use crate::schema::features::FeatureResult;
 use crate::schema::frame::{
-    CreatedIds, FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo, ProfileListParams, ProfileListResult, ProfileOut,
-    ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, SizeFamilyInfo,
+    CreatedIds, FrameMemberParams, MemberFeatureDeleted, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo, ProfileListParams,
+    ProfileListResult, ProfileOut, ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, RemoveMemberParams, RemoveMemberResult,
+    SizeFamilyInfo, removed_members,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -36,6 +38,7 @@ const MEMBER_CONTRACT: TypedContract<FrameMemberParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<ProfileListParams> = TypedContract::new();
 const PROPERTIES_CONTRACT: TypedContract<ProfilePropertiesParams> = TypedContract::new();
 const INSERT_CONTRACT: TypedContract<ProfileInsertParams> = TypedContract::new();
+const REMOVE_CONTRACT: TypedContract<RemoveMemberParams> = TypedContract::new();
 
 /// The profile parameter, as every frame command documents it.
 macro_rules! profile_doc {
@@ -83,6 +86,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         "; at?: [x,y] (sketch mm, default the origin); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point placed on `at`: its origin, the default and a built-in profile's centre, its bounding box's centre, its centroid, or a corner or edge middle of its bounding box); angle?: radians, counter-clockwise; fixed?: bool (default true: the curves are locked, so solving the sketch keeps the shape); sketch?: id|name (default: the sketch being edited). Returns the section as frame.profile.properties does",
         created_doc!()
     )),
+    // Reached from menus and scripts: no ribbon button.
+    CommandSpec::new("frame.remove_member", "Remove Tube", crate::checked!("frame.remove_member", remove_member))
+        .icon("delete")
+        .enabled(not_in_sketch)
+        .contract(&REMOVE_CONTRACT)
+        .output(output_schema_for::<RemoveMemberResult>)
+        .params("members: [{feature: id|name, line: the tube's line or pair id}] (1…1000, all of one Frame Member). Takes those tubes out as one undo step: a pair goes from the feature's pairs, a sketch line from its lines (the line stays in its sketch; a feature on every line of its sketch lists the others from then on). Taking out the last tube deletes the Frame Member. Returns the edited feature as frame.member does, or {deleted: the feature's name}"),
 ];
 
 /// The `profile` parameter: its kind and each dimension as given, a number or an expression; or a
@@ -455,4 +465,55 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         o.remove("names");
     }
     add_feature(s, &p, kind)
+}
+
+fn remove_member(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "frame.remove_member";
+    let members = removed_members(p.get("members")).map_err(|e| bad(cmd, e))?;
+    let mut id = None;
+    for (feature, _) in &members {
+        let f = super::edit::feature_id(s, Some(feature), cmd)?;
+        if id.is_some_and(|id| id != f) {
+            return Err(bad(cmd, "`members` must all be tubes of one Frame Member"));
+        }
+        id = Some(f);
+    }
+    let f = id.and_then(|id| s.doc.feature(id)).cloned().ok_or_else(|| bad(cmd, "`members` must name a Frame Member"))?;
+    let mut kind = f.kind.clone();
+    let FeatureKind::FrameMember { path_sketch, lines, names, pairs, .. } = &mut kind else {
+        return Err(bad(cmd, format!("`{}` is not a Frame Member", f.name)));
+    };
+    let gone: std::collections::BTreeSet<&str> = members.iter().map(|(_, line)| line.as_str()).collect();
+    let is_pair = |line: &str, pairs: &[MemberPair]| pairs.iter().any(|p| p.id == line);
+    // No `lines` means every line of the sketch: they are listed as they are now before one goes,
+    // with the rule evaluation uses.
+    if lines.is_empty() && path_sketch.is_some() && gone.iter().any(|line| !is_pair(line, pairs)) {
+        let mut every = frame::member_line_ids(&s.model.state_before(f.id), &f.kind).map_err(|e| bad(cmd, e.to_string()))?;
+        every.truncate(every.len().saturating_sub(pairs.len()));
+        *lines = every;
+    }
+    if let Some(line) = gone.iter().find(|line| !is_pair(line, pairs) && !lines.iter().any(|l| l == *line)) {
+        return Err(bad(cmd, format!("`{line}` is not a tube of {}", f.name)));
+    }
+    let had_lines = !lines.is_empty();
+    lines.retain(|l| !gone.contains(l.as_str()));
+    pairs.retain(|p| !gone.contains(p.id.as_str()));
+    names.retain(|l, _| !gone.contains(l.as_str()));
+    // `next_pair` stays: a removed pair's id is never given again.
+    if had_lines && lines.is_empty() {
+        // No lines left, which an empty `lines` with a sketch would read as every line.
+        *path_sketch = None;
+    }
+    if path_sketch.is_none() && pairs.is_empty() {
+        // A Frame Member can't be without members: its last tube takes it, as Delete would.
+        let delete = super::find_command("timeline.delete").ok_or_else(|| bad(cmd, "no command `timeline.delete`"))?;
+        delete.run_nested(s, &json!({ "feature": f.id }))?;
+        return frame_reply(cmd, RemoveMemberResult::Deleted(MemberFeatureDeleted { deleted: f.name, param_warnings: Vec::new() }));
+    }
+    let before = s.model.state();
+    if let Some(slot) = s.doc_mut().feature_mut(f.id) {
+        slot.kind = kind;
+    }
+    s.refresh();
+    super::features::feature_reply(s, f.id, &before)
 }
