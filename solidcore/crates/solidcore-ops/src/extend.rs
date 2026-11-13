@@ -195,11 +195,13 @@ pub fn extend_sheet(
         // a surface that goes on past its trims (a plane) grows the trim within itself, the
         // same for every continuation; its face's holes are kept
         if surf.reaches_past_trims() {
+            // the trim grows past an edge of its outer loop, not of a hole
+            if !face_p4::edges(b, f, None, true, None)?.contains(&picked) {
+                return Ok(Err(Error::Argument));
+            }
             let made = match extend_trim(k, b, f, picked, distance) {
                 Ok(made) => made,
                 Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
-                // an edge of a hole, not of the outer loop
-                Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
                 Err(e) => return Ok(Err(refused(e))),
             };
             let mut r = made.brep;
