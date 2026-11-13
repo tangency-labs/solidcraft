@@ -1,5 +1,6 @@
 //! A face on a plane extended past one of its edges by growing its trim within the plane
-//! ([`extend_trim`]).
+//! ([`extend_trim`]), by a distance or, for a straight edge, through a point
+//! ([`extend_trim_through`]).
 //!
 //! Not upstream. A plane continued past any edge is the plane itself, its own tangent and
 //! curvature continuation, so extending its face moves the trim, not the surface: the picked
@@ -310,11 +311,50 @@ pub fn extend_trim(
     })
 }
 
-/// How far the picked edge moves.
+/// Face `f` of `b`, on a plane, with its straight edge `e` (on its outer loop) moved outward,
+/// parallel, until it passes through `through`, its neighbouring edges carried along their end
+/// tangents to meet it, as [`extend_trim`] moves it by a distance: the trim grown to a corner
+/// another face has moved to (an arch's leg grown to meet its extended top). One of the carried
+/// neighbours must meet the moved edge at `through`, within ten of the body's tolerance. `b` is
+/// unchanged.
+///
+/// # Errors
+///
+/// As [`extend_trim`], and `Unsupported` for a curved edge or one without two neighbours, a
+/// point not outside the edge, or no carried neighbour meeting the moved edge at the point.
+pub fn extend_trim_through(
+    k: &mut Kernel,
+    b: &Brep,
+    f: FaceId,
+    e: EdgeId,
+    through: Point3,
+) -> Result<TrimExtension> {
+    let g = grown(k, b, f, e, Move::Through(through))?;
+    let mut nb = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+    nb.set_tolerance(g.tol);
+    let (face, edges, added) = build_into(k, &mut nb, g)?;
+    let check = check_brep_with_keys(k, &mut nb, CheckLevel::Level2, &notify_ref)?;
+    if !check.is_valid() {
+        return Err(unsupported(
+            "the extended trim crosses the face's other edges or is not valid",
+        ));
+    }
+    Ok(TrimExtension {
+        brep: nb,
+        face,
+        edges,
+        added,
+    })
+}
+
+/// How far the picked edge moves: by a distance, or (a straight edge) to pass through a point.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Move {
     /// Outward by this distance.
     By(f64),
+    /// Outward, parallel, to pass through this point, which one of its carried neighbours must
+    /// meet it at.
+    Through(Point3),
 }
 
 /// A face's trim grown ([`grown`]), not yet built: the plane widened to hold it, its loops'
@@ -378,7 +418,23 @@ fn grown(k: &Kernel, b: &Brep, f: FaceId, e: EdgeId, how: Move) -> Result<Grown>
         .ok_or_else(|| SolidError::invalid_input(OP, "the picked edge"))?;
     let n = outer.len();
     let straight = is_straight(&picked.curve, tol)?;
-    let Move::By(distance) = how;
+    let distance = match how {
+        Move::By(d) => d,
+        Move::Through(p) => {
+            if !straight || n < 3 {
+                return Err(unsupported(
+                    "a curved edge, or one without two neighbours, moved through a point",
+                ));
+            }
+            let v0 = picked.start(k)?;
+            let (_, out) = outward(v0, picked.end(k)?, normal)?;
+            let d = (p - v0).dot(out);
+            if !(d.is_finite() && d > tol) {
+                return Err(unsupported("a point not outside the edge"));
+            }
+            d
+        }
+    };
 
     // the face's size, for how far a neighbour is followed
     let mut size = 0.0;
@@ -451,6 +507,14 @@ fn grown(k: &Kernel, b: &Brep, f: FaceId, e: EdgeId, how: Move) -> Result<Grown>
             let run = picked.direction(k, false)?;
             if (w1 - w0).dot(run) <= tol {
                 return Err(unsupported("the neighbours cross before the distance"));
+            }
+        }
+        if let Move::Through(p) = how {
+            let at = |w: Point3| (w - p).length() <= 10.0 * tol;
+            if !(at(w0) || at(w1)) {
+                return Err(unsupported(
+                    "a neighbour carried along its tangent does not meet the moved edge at the point",
+                ));
             }
         }
         corners.push(w0);
@@ -836,6 +900,55 @@ mod tests {
         );
         assert_eq!(out.added.len(), 1);
         assert_eq!(out.edges.len(), 3);
+    }
+
+    /// Moved through a point, an edge goes where the distance to that point would take it: the
+    /// rectangle's top through (3, 13) is its top moved up 5, edge for edge; a point inside the
+    /// face, or one off every carried neighbour's line, is refused, and so is a curved edge.
+    #[test]
+    fn an_edge_moved_through_a_point_is_the_edge_moved_by_its_distance() {
+        let mut k = Kernel::default();
+        let b = create_plane(&mut k, Point3::new(0.0, 0.0, 0.0), 9.0, 8.0).expect("plane");
+        let f = *b.face_list().first().expect("face");
+        let top = edge_between(&b, [9.0, 8.0], [0.0, 8.0]);
+        let by = extend_trim(&mut k, &b, f, top, 5.0).expect("by the distance");
+        // the corner the left side, carried up, meets the moved top at
+        let through =
+            extend_trim_through(&mut k, &b, f, top, Point3::new(0.0, 13.0, 0.0)).expect("through");
+        assert!(
+            near(bounds(&through.brep), bounds(&by.brep)),
+            "{:?}",
+            bounds(&through.brep)
+        );
+        assert_eq!(through.edges.len(), by.edges.len());
+        assert!(through.added.is_empty());
+        // inside the face
+        assert!(matches!(
+            extend_trim_through(&mut k, &b, f, top, Point3::new(3.0, 4.0, 0.0)),
+            Err(SolidError::Unsupported { .. })
+        ));
+        // outside, but on no carried neighbour: the sides run up x = 0 and x = 9
+        assert!(matches!(
+            extend_trim_through(&mut k, &b, f, top, Point3::new(3.0, 13.0, 0.0)),
+            Err(SolidError::Unsupported { .. })
+        ));
+        // a curved edge
+        let arc =
+            Curve::from(create_arc(Point3::new(5.0, 5.0, 0.0), 5.0, 0.0, 180.0).expect("arc"));
+        let (b, f) = planar(
+            &mut k,
+            &[
+                line([0.0, 0.0], [10.0, 0.0]),
+                line([10.0, 0.0], [10.0, 5.0]),
+                arc,
+                line([0.0, 5.0], [0.0, 0.0]),
+            ],
+        );
+        let e = edge_between(&b, [10.0, 5.0], [0.0, 5.0]);
+        assert!(matches!(
+            extend_trim_through(&mut k, &b, f, e, Point3::new(5.0, 15.0, 0.0)),
+            Err(SolidError::Unsupported { .. })
+        ));
     }
 
     #[test]
