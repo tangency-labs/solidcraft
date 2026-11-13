@@ -1,7 +1,7 @@
 //! Point clouds (#5151): scanned points (PLY, XYZ or PTS files) kept in the design as a reference
 //! to model from. They are drawn as points and never become bodies.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::Mat;
 use solidcraft_doc::point_cloud::{
     ColorBy, Colors, Complex, Filter, Keep, MAX_COORD, MAX_FILTERS, MAX_NAMES, MAX_POINTS, POINT_SIZE, PointCloud, Points, UNITS, unit_scale,
@@ -10,23 +10,30 @@ use solidcraft_doc::point_cloud::{
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_};
 use crate::schema::point_cloud::{
-    PointCloudDeleteParams, PointCloudDeleteResult, PointCloudFilter, PointCloudFilterKeeps, PointCloudInfo, PointCloudListParams,
-    PointCloudListResult, PointCloudProperty, PointCloudReloadParams, PointCloudReloadResult,
+    PointCloudDeleteParams, PointCloudDeleteResult, PointCloudEditParams, PointCloudEditResult, PointCloudFilter, PointCloudFilterKeeps,
+    PointCloudInfo, PointCloudInsertParams, PointCloudInsertResult, PointCloudListParams, PointCloudListResult, PointCloudProperty,
+    PointCloudReloadParams, PointCloudReloadResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const INSERT_CONTRACT: TypedContract<PointCloudInsertParams> = TypedContract::new();
+const EDIT_CONTRACT: TypedContract<PointCloudEditParams> = TypedContract::new();
 const RELOAD_CONTRACT: TypedContract<PointCloudReloadParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<PointCloudDeleteParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<PointCloudListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", insert)
+    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert))
         .at("SOLID", "INSERT")
         .icon("import")
+        .contract(&INSERT_CONTRACT)
+        .output(output_schema_for::<PointCloudInsertResult>)
         .params("path: .ply, .xyz or .pts file (its points join the design as a point cloud: drawn as points, never a body; a PLY's red, green and blue are its colours, its other properties can colour and filter it; its edge and face elements become segments and triangles, a segment with width and height properties drawn as a bead) → cloud, name, points, segments, triangles, source_points, bounds, warnings; name?; units?: mm|cm|m|in|ft (the file's length unit, default mm); max_points?: most points kept (default 5000000, at most 20000000; a larger file is thinned evenly); center?: bool (move the cloud so the middle of its base sits at the origin); point_size?: pixels (0.5…16, default 2); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown)"),
-    CommandSpec::new("pointcloud.edit", "Edit Point Cloud", edit)
+    CommandSpec::new("pointcloud.edit", "Edit Point Cloud", crate::checked!("pointcloud.edit", edit))
         .icon("edit")
+        .contract(&EDIT_CONTRACT)
+        .output(output_schema_for::<PointCloudEditResult>)
         .params("cloud: id or name; name?; visible?; point_size?: pixels (0.5…16); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; units?: mm|cm|m|in|ft (the file's length unit: the points are scaled from the unit they came in as); matrix?: [12 or 16 numbers] (where the cloud sits: a rigid row-major 3x4 or 4x4 matrix, as occurrence.move takes it); tolerance?; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown) → cloud"),
     CommandSpec::new("pointcloud.reload", "Reload Point Cloud", crate::checked!("pointcloud.reload", reload))
         .icon("import")
@@ -100,7 +107,7 @@ fn color_by(p: &Value, cmd: &str) -> Result<Option<(ColorBy, Option<String>)>> {
 
 /// `filters`: absent (`None`), null for none, or [{property, range: [low, high]} or
 /// {property, values: [whole numbers]}].
-fn filters(p: &Value, cmd: &str) -> Result<Option<Vec<Filter>>> {
+pub(crate) fn filters(p: &Value, cmd: &str) -> Result<Option<Vec<Filter>>> {
     let refuse = || {
         bad(
             cmd,
@@ -269,16 +276,18 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.doc_mut();
     let id = doc.allocate_id()?;
     cloud.id = id;
-    let out = json!({
-        "cloud": id,
-        "name": name,
-        "points": cloud.len(),
-        "segments": cloud.complex.segment_count(),
-        "triangles": cloud.complex.triangle_count(),
-        "source_points": cloud.source_points,
-        "bounds": bounds(&cloud),
-        "warnings": warnings,
-    });
+    let out = PointCloudInsertResult {
+        cloud: id,
+        name,
+        points: cloud.len(),
+        segments: cloud.complex.segment_count(),
+        triangles: cloud.complex.triangle_count(),
+        source_points: cloud.source_points,
+        bounds: bounds(&cloud),
+        warnings,
+        param_warnings: Vec::new(),
+    };
+    let out = serde_json::to_value(out).map_err(|e| EngineError::Other(e.to_string()))?;
     doc.point_clouds.push(cloud);
     Ok(out)
 }
@@ -342,7 +351,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let id = c.id;
     let slot = s.doc_mut().point_clouds.get_mut(i).ok_or_else(|| bad(cmd, "point cloud"))?;
     *slot = c;
-    Ok(json!({"cloud": id}))
+    serde_json::to_value(PointCloudEditResult { cloud: id, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// The most points a reload keeps: the limit the cloud was read under. A read is a function of

@@ -1,7 +1,8 @@
 use serde_json::json;
 
 use super::{
-    PointCloudDeleteParams, PointCloudDeleteResult, PointCloudListParams, PointCloudListResult, PointCloudReloadParams, PointCloudReloadResult,
+    PointCloudDeleteParams, PointCloudDeleteResult, PointCloudEditParams, PointCloudEditResult, PointCloudInsertParams, PointCloudInsertResult,
+    PointCloudListParams, PointCloudListResult, PointCloudReloadParams, PointCloudReloadResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -9,6 +10,14 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<PointCloudInsertParams>(),
+        &["center", "color", "color_by", "color_range", "filters", "height_range", "max_points", "name", "path", "point_size", "units"],
+    );
+    assert_keys(
+        input_schema_for::<PointCloudEditParams>(),
+        &["cloud", "color", "color_by", "color_range", "filters", "height_range", "matrix", "name", "point_size", "tolerance", "units", "visible"],
+    );
     assert_keys(input_schema_for::<PointCloudReloadParams>(), &["cloud"]);
     assert_keys(input_schema_for::<PointCloudDeleteParams>(), &["cloud"]);
     assert_keys(input_schema_for::<PointCloudListParams>(), &[]);
@@ -16,11 +25,35 @@ fn schemas_and_the_key_check_agree() {
 
 #[test]
 fn strict_keeps_todays_errors() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-pointcloud-strict-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("scan.ply");
+    std::fs::write(&path, SCAN).unwrap();
+    // The file is there, so a call that reaches reading it fails on what it asks for, not on it.
     assert_strict_keeps_todays_errors(&[
         ("pointcloud.reload", json!({"cloud": [1]})),
         ("pointcloud.delete", json!({"cloud": [1]})),
         ("pointcloud.delete", json!({"cloud": {"name": "scan"}})),
+        ("pointcloud.edit", json!({"cloud": [1]})),
+        ("pointcloud.edit", json!({"cloud": {"name": "scan"}})),
+        // A file we don't read is refused by the handler, which says which files it does.
+        ("pointcloud.insert", json!({"path": "scan.txt"})),
+        ("pointcloud.insert", json!({"path": ""})),
+        ("pointcloud.insert", json!({"path": path, "max_points": 0})),
+        ("pointcloud.insert", json!({"path": path, "max_points": 30_000_000})),
+        ("pointcloud.insert", json!({"path": path, "units": "furlong"})),
+        ("pointcloud.insert", json!({"path": path, "point_size": 0.1})),
+        ("pointcloud.insert", json!({"path": path, "color_by": 5})),
+        ("pointcloud.insert", json!({"path": path, "color": [1, 2]})),
+        ("pointcloud.insert", json!({"path": path, "color_range": [5, 1]})),
+        ("pointcloud.insert", json!({"path": path, "height_range": ["low", "high"]})),
+        ("pointcloud.insert", json!({"path": path, "filters": [{"property": "t"}]})),
+        ("pointcloud.insert", json!({"path": path, "filters": [{"property": "t", "range": [4.0, 1.0]}]})),
+        // The file has no `role`: only the handler knows that, and it says so the same way.
+        ("pointcloud.insert", json!({"path": path, "color_by": "nope"})),
+        ("pointcloud.insert", json!({"path": path, "filters": [{"property": "nope", "range": [0.0, 1.0]}]})),
     ]);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -46,6 +79,50 @@ const SCAN: &str = "ply\nformat ascii 1.0\ncomment role: 7 wall, -1 none\nelemen
     element edge 2\nproperty int vertex1\nproperty int vertex2\nproperty int role\n\
     element face 1\nproperty list uchar int vertex_indices\nend_header\n\
     0 0 0 200 60 60 0.5\n1 0 0 60 200 60 1.5\n1 1 0 60 60 200 2.5\n0 1 0 200 200 60 3.5\n0 1 7\n1 2 -1\n4 0 1 2 3\n";
+
+#[test]
+fn an_inserted_and_edited_cloud_matches_its_schema() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-pointcloud-insert-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("scan.ply");
+    std::fs::write(&path, SCAN).unwrap();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let insert = output_schema_for::<PointCloudInsertResult>();
+    let insert = insert.as_value();
+    let edit = output_schema_for::<PointCloudEditResult>();
+    let edit = edit.as_value();
+
+    let reply = s
+        .execute(
+            "pointcloud.insert",
+            &json!({"path": path, "name": "the scan", "units": "m", "center": true, "point_size": 3, "color_by": "role", "color_range": [0, 8], "filters": [{"property": "role", "values": [7]}]}),
+        )
+        .unwrap();
+    assert!(conforms(insert, insert, &reply), "{reply} doesn't match {insert}");
+    assert!(reply.get("param_warnings").is_none(), "{reply}");
+    // The interesting parts of the reply are really there, so the schema above describes them.
+    assert_eq!(reply["name"], "the scan", "{reply}");
+    assert_eq!((reply["points"].as_u64(), reply["source_points"].as_u64()), (Some(4), Some(4)), "{reply}");
+    assert_eq!((reply["segments"].as_u64(), reply["triangles"].as_u64()), (Some(2), Some(2)), "{reply}");
+    assert_eq!(reply["bounds"], json!([[-500.0, -500.0, 0.0], [500.0, 500.0, 0.0]]), "`center` centred it, `units` scaled it: {reply}");
+
+    let id = reply["cloud"].clone();
+    let reply = s
+        .execute(
+            "pointcloud.edit",
+            &json!({"cloud": id, "name": "the scan 2", "visible": false, "point_size": 1.5, "color_by": "height", "height_range": null, "matrix": [1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 0], "tolerance": 1e-6, "filters": null}),
+        )
+        .unwrap();
+    assert_eq!(reply, json!({"cloud": id}), "only the cloud's id comes back");
+    assert!(conforms(edit, edit, &reply), "{reply} doesn't match {edit}");
+
+    // A key the command doesn't take is reported in the warn mode and ignored, as everywhere.
+    let reply = s.execute("pointcloud.edit", &json!({"cloud": "the scan 2", "point_sizes": 2})).unwrap();
+    assert_eq!(reply["cloud"], id, "{reply}");
+    let warned = reply["param_warnings"].as_array().unwrap().iter().any(|w| w.as_str().is_some_and(|w| w.contains("point_sizes")));
+    assert!(warned, "the contract is the one enforced: {reply}");
+    let _ = std::fs::remove_dir_all(dir);
+}
 
 #[test]
 fn a_listed_cloud_and_a_deleted_one_match_their_schemas() {
