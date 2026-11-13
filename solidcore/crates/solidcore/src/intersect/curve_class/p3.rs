@@ -92,6 +92,7 @@ use crate::intersect::point_class::{
 };
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE};
+use crate::nurbs::math::gamma;
 use crate::surface::surface::Surface;
 use crate::topology::{edge as topo_edge, vertex as topo_vertex, VertexId};
 
@@ -2035,12 +2036,14 @@ impl<O: ClassObject> CurveClassification<O> {
     /// left as it is.
     ///
     /// Not upstream: an end the edge intersections left unclassified counts as on `E` when
-    /// its point is within the intersection tolerance of `E` and farther than that from both
-    /// vertices of `E`, and is then classified to `E`. A curve that runs along an edge and
-    /// ends on it without crossing it (an arc 1.4e-11 from another arc, ending 2.8e-5 short
-    /// of that arc's corner) has no intersection there. Such an interval can have one end on
-    /// a vertex and the other unclassified: `E` is then each edge of the classification's
-    /// face at that vertex in turn.
+    /// its point is within the intersection tolerance of `E`, farther than that from both
+    /// vertices of `E`, and the whole curve over the interval is proved within that
+    /// tolerance of `E` on control points ([`piece_within_band`]); it is then classified to
+    /// `E` with its parameter on `E`. A curve that runs along an edge and ends on it without
+    /// crossing it (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's
+    /// corner) has no intersection there. Such an interval can have one end on a vertex and
+    /// the other unclassified: `E` is then each edge of the classification's face at that
+    /// vertex in turn.
     ///
     /// # Errors
     ///
@@ -2112,14 +2115,17 @@ impl<O: ClassObject> CurveClassification<O> {
             let off = drop_onto_edge(k, geometry, edge, mid_pt, xsect_tol_3d)?;
 
             // when MidPt is within tol of edge - the interval runs along edge
-            if off.is_some_and(|d| d < xsect_tol_3d) {
+            if off.is_some_and(|(d, _)| d < xsect_tol_3d) {
                 let at = self.at_mut(index)?;
                 at.mid.set_class_object(PointClassType::Edge, Some(edge));
-                if unclassified[0] {
-                    at.start.set_class_object(PointClassType::Edge, Some(edge));
-                }
-                if unclassified[1] {
-                    at.end.set_class_object(PointClassType::Edge, Some(edge));
+                for (pc, param) in [
+                    (&mut at.start, unclassified[0]),
+                    (&mut at.end, unclassified[1]),
+                ] {
+                    if let Some(param) = param {
+                        pc.set_class_object(PointClassType::Edge, Some(edge));
+                        pc.set_t_param(param, false);
+                    }
                 }
                 return Ok(());
             }
@@ -2128,17 +2134,19 @@ impl<O: ClassObject> CurveClassification<O> {
     }
 
     /// Whether both ends of interval `ivl` lie on `edge` (see
-    /// [`Self::classify_edge_interval`]), and which of them, start and end, were unclassified
-    /// and lie on it. `None` when an end is elsewhere, when neither end is classified, or
-    /// when an unclassified end is within the intersection tolerance of a vertex of `edge`
-    /// (it would be on that vertex, not inside the edge).
+    /// [`Self::classify_edge_interval`]), and for each of them, start and end, that was
+    /// unclassified and lies on it its parameter on `edge`. `None` when an end is elsewhere,
+    /// when neither end is classified, when an unclassified end is within the intersection
+    /// tolerance of a vertex of `edge` (it would be on that vertex, not inside the edge), or
+    /// when with an unclassified end the curve over the interval is not proved within that
+    /// tolerance of `edge` as a whole ([`piece_within_band`]).
     fn ends_on_edge(
         &self,
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
         edge: O,
         ivl: &CurveInterval<O>,
-    ) -> Result<Option<[bool; 2]>> {
+    ) -> Result<Option<[Option<f64>; 2]>> {
         let (eb, e) = edge_of(geometry, edge, "SmEdge::GetStartVertex")?;
         let vertex_handle = |v: Option<VertexId>| {
             v.and_then(|v| geometry.topology_handle_in(eb, EntityRef::Vertex(v)))
@@ -2153,7 +2161,8 @@ impl<O: ClassObject> CurveClassification<O> {
             src_zone_tol_3d_of(k, Some(self)),
             object_zone_tol_3d(k, geometry, Some(edge))?,
         );
-        let mut unclassified = [false; 2];
+        let curve = cc_curve(self, geometry, OP_EDGE_INTERVAL)?;
+        let mut unclassified = [None; 2];
         let ends = [
             (&ivl.start, ivl.interval.min()),
             (&ivl.end, ivl.interval.max()),
@@ -2170,10 +2179,11 @@ impl<O: ClassObject> CurveClassification<O> {
                 return Ok(None);
             }
             // (not upstream) an unclassified end on the edge, clear of its vertices
-            let p = cc_curve(self, geometry, OP_EDGE_INTERVAL)?.evaluate_point(k, t)?;
-            let off = drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)?;
-            let near_edge = off.is_some_and(|d| d < xsect_tol_3d);
-            if !near_edge {
+            let p = curve.evaluate_point(k, t)?;
+            let Some((d, param)) = drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)? else {
+                return Ok(None);
+            };
+            if d.is_nan() || d >= xsect_tol_3d {
                 return Ok(None);
             }
             for v in [start_v, end_v].into_iter().flatten() {
@@ -2182,24 +2192,130 @@ impl<O: ClassObject> CurveClassification<O> {
                     return Ok(None);
                 }
             }
-            *flag = true;
+            *flag = Some(param);
         }
-        if unclassified == [true, true] {
-            return Ok(None);
-        }
-        Ok(Some(unclassified))
+        let (t0, t1) = (ivl.interval.min(), ivl.interval.max());
+        let params = match unclassified {
+            [None, None] => return Ok(Some(unclassified)),
+            [Some(_), Some(_)] => return Ok(None),
+            // the classified end's parameter on the edge, for the proof over the interval
+            [Some(s0), None] => {
+                let p = curve.evaluate_point(k, t1)?;
+                drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)?.map(|(_, s1)| [s0, s1])
+            }
+            [None, Some(s1)] => {
+                let p = curve.evaluate_point(k, t0)?;
+                drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)?.map(|(_, s0)| [s0, s1])
+            }
+        };
+        let edge_crv = edge_curve(geometry, edge)?
+            .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?;
+        let proved = params.is_some_and(|params| {
+            piece_within_band(curve, &ivl.interval, edge_crv, params, xsect_tol_3d)
+        });
+        Ok(proved.then_some(unclassified))
     }
 }
 
-/// The distance from `p` to the curve of edge handle `edge` over the edge's interval; `None`
-/// when the drop fails.
+/// Not upstream: whether `curve` over `interval` lies within `band` of `edge_curve` as a
+/// whole, where the two ends of `interval` drop onto `edge_curve` at `edge_params`; decided
+/// on control points, never on samples.
+///
+/// Each curve piece lies in the convex hull of its control points
+/// ([`Curve::piece_hull_points`]), whose first and last are its end points. Distance from a
+/// segment is convex, so every point of the curve over `interval` lies within `dev_c` of
+/// the chord `[a, b]` of its ends, `dev_c` the largest distance of a control point from it.
+/// The point of that chord at fraction `s` lies within `max(|a - a'|, |b - b'|)` of the
+/// point at `s` of the chord `[a', b']` of the edge piece between `edge_params` (the
+/// distance is convex in `s`). The edge piece runs from `a'` to `b'`, so its projection onto
+/// that chord's line covers the chord: every chord point is within `dev_e` of the edge
+/// piece, `dev_e` its control points' largest distance from `[a', b']`. The sum of the
+/// three bounds the distance of every point of the curve over `interval` from the edge.
+/// Each control point is within twice its coordinate error of the exact one, and every
+/// distance is widened for its rounding ([`segment_distance_bound`]); the sum must stay
+/// below `band`. A curve or edge curve of another kind, or with no certified piece, proves
+/// nothing.
+fn piece_within_band(
+    curve: &Curve,
+    interval: &Extent1d,
+    edge_curve: &Curve,
+    edge_params: [f64; 2],
+    band: f64,
+) -> bool {
+    let [s0, s1] = edge_params;
+    let (Some(c), Some(e)) = (
+        curve.piece_hull_points(interval),
+        edge_curve.piece_hull_points(&Extent1d::from_min_max(s0.min(s1), s0.max(s1))),
+    ) else {
+        return false;
+    };
+    let (Some(&(a, ea)), Some(&(b, eb))) = (c.first(), c.last()) else {
+        return false;
+    };
+    let (Some(&first), Some(&last)) = (e.first(), e.last()) else {
+        return false;
+    };
+    // the edge piece's end at the curve's start first
+    let ((a2, ea2), (b2, eb2)) = if s0 <= s1 {
+        (first, last)
+    } else {
+        (last, first)
+    };
+    // NaN propagates (a NaN distance proves nothing)
+    let chord_dev = |points: &[(Point3, f64)], a: Point3, b: Point3, e_ends: f64| {
+        points.iter().fold(0.0_f64, |m, &(q, eq)| {
+            let d = segment_distance_bound(q, a, b) + 2.0 * (eq + e_ends);
+            if d.is_nan() || d > m {
+                d
+            } else {
+                m
+            }
+        })
+    };
+    let dev_c = chord_dev(&c, a, b, ea.max(eb));
+    let dev_e = chord_dev(&e, a2, b2, ea2.max(eb2));
+    let gap_a = segment_distance_bound(a, a2, a2) + 2.0 * (ea + ea2);
+    let gap_b = segment_distance_bound(b, b2, b2) + 2.0 * (eb + eb2);
+    let ends = if gap_a.is_nan() || gap_a > gap_b {
+        gap_a
+    } else {
+        gap_b
+    };
+    let total = (dev_c + ends + dev_e) * (1.0 + gamma(3));
+    total < band
+}
+
+/// An upper bound of the distance from `q` to the segment `[a, b]`: the distance to its
+/// point at the clamped projection fraction `s` (any `s` in `[0, 1]` bounds it), widened by
+/// the rounding of that point and of the difference and norm (`γ_16` of the largest
+/// coordinate, `γ_4` relative). NaN for a NaN coordinate.
+fn segment_distance_bound(q: Point3, a: Point3, b: Point3) -> f64 {
+    let ab = b - a;
+    let len2 = ab.dot(ab);
+    let s = if len2 > 0.0 {
+        let s = (q - a).dot(ab) / len2;
+        if s.is_finite() {
+            s.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    let size = |v: Point3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+    let scale = size(q).max(size(a)).max(size(b));
+    ((q - (a + s * ab)).length() + gamma(16) * scale) * (1.0 + gamma(4))
+}
+
+/// The distance from `p` to the curve of edge handle `edge` over the edge's interval and
+/// the edge parameter of the closest point; `None` when the drop fails.
 fn drop_onto_edge<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ClassGeometry<O>,
     edge: O,
     p: Point3,
     tol: f64,
-) -> Result<Option<f64>> {
+) -> Result<Option<(f64, f64)>> {
     let dropped = edge_curve(geometry, edge)?
         .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?
         .drop_point(
@@ -2211,7 +2327,9 @@ fn drop_onto_edge<O: ClassObject>(
             None,
             SolverOperation::Minimize,
         )?;
-    Ok(dropped.success.then_some(dropped.distance))
+    Ok(dropped
+        .success
+        .then_some((dropped.distance, dropped.parameter)))
 }
 
 /// Whether `object` is an edge or vertex handle (used by the harness to keep stand-ins of
@@ -2455,6 +2573,16 @@ mod tests {
     /// (1, 0, 1); a classification of the line from `from` to (1, 0, 1) on that face, one
     /// interval, its start unclassified and its end on the vertex.
     fn along_top_edge(from: Point3) -> (Kernel, BoxGeo, CurveClassification<H>, H) {
+        along_top_edge_by(Curve::from(Line::from_points(
+            from,
+            Point3::new(1.0, 0.0, 1.0),
+            3,
+        )))
+    }
+
+    /// [`along_top_edge`] for `curve`, which ends at (1, 0, 1) at parameter 1 and is
+    /// classified over `[0, 1]`.
+    fn along_top_edge_by(curve: Curve) -> (Kernel, BoxGeo, CurveClassification<H>, H) {
         let mut k = Kernel::default();
         let brep = crate::primitive::api_primitives::create_box(
             &mut k,
@@ -2475,13 +2603,11 @@ mod tests {
             entities.push(EntityRef::Face(f));
         }
         let end = Point3::new(1.0, 0.0, 1.0);
-        let line = Line::from_points(from, end, 3);
-        let mut geo = BoxGeo {
+        let geo = BoxGeo {
             brep,
             entities,
-            curves: Vec::new(),
+            curves: vec![curve],
         };
-        geo.curves.push(Curve::from(line));
         let (corner, other, far) = (
             geo.vertex_at(end),
             geo.vertex_at(Point3::new(0.0, 0.0, 1.0)),
@@ -2530,6 +2656,48 @@ mod tests {
         assert_eq!(ivl.start.point_class(), PointClassType::Edge);
         assert_eq!(ivl.start.object(), Some(edge));
         assert_eq!(ivl.end.point_class(), PointClassType::Vertex);
+        // the start keeps its parameter on the edge: the edge's point there is the start's
+        // projection onto it
+        assert!(ivl.start.are_parameters_set());
+        let on_edge = edge_curve(&geo, edge)
+            .expect("edge")
+            .expect("curve")
+            .evaluate_point(&k, ivl.start.t_param())
+            .expect("point");
+        let off = on_edge.distance(Point3::new(0.5, 0.0, 1.0));
+        assert!(off < 1e-12, "{on_edge:?}");
+    }
+
+    #[test]
+    fn an_unclassified_end_of_a_curve_that_bows_out_of_the_band_is_left_alone() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        // y(t) = 1e-6 (1 - t) + 1.25e-3 t (1 - t) (1 - 2 t) from x = 0.5 to the vertex at
+        // x = 1: the start is 1e-6 off the edge and the middle 5e-7, both inside the band
+        // (2e-5), but at t = 0.25 the curve is 1.179375e-4 off it
+        let (k3, y3) = (1.25e-3 / 3.0, 1e-6 / 3.0);
+        let pw = vec![
+            CPoint::new(0.5, 3.0 * y3, 1.0, NOW),
+            CPoint::new(2.0 / 3.0, 2.0 * y3 + k3, 1.0, NOW),
+            CPoint::new(5.0 / 6.0, y3 - k3, 1.0, NOW),
+            CPoint::new(1.0, 0.0, 1.0, NOW),
+        ];
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let bezier =
+            BSplineCurve::from_nurb(NurbCurve::new(pw, 3, knots).expect("curve"), 3, false);
+        let (k, geo, mut cc, edge) = along_top_edge_by(Curve::from(bezier));
+        let curve = geo
+            .curve(H(geo.entities.len(), ClassObjectKind::Curve))
+            .expect("curve");
+        let off_edge = |t: f64| curve.evaluate_point(&k, t).expect("point").y.abs();
+        assert!((off_edge(0.5) - 5e-7).abs() < 1e-12);
+        assert!((off_edge(0.25) - 1.179375e-4).abs() < 1e-12);
+        cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        let ivl = cc.at(0).expect("interval");
+        assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
+        assert_eq!(ivl.start.point_class(), PointClassType::Unknown);
+        assert_ne!(ivl.mid.object(), Some(edge));
     }
 
     #[test]

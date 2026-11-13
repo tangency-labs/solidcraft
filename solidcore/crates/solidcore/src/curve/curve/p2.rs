@@ -911,6 +911,24 @@ impl Curve {
         }
     }
 
+    /// Not upstream: the points whose convex hull holds this curve over `interval`, whose
+    /// first and last are the curve's points at `interval`'s ends, each with the error bound
+    /// of its coordinates: a line's two ends, the control points of the piece over
+    /// `interval` of a B-spline or of the B-spline an ellipse, hyperbola or parabola
+    /// evaluates ([`BSplineCurve::piece_hull_points`]). `None` for the other kinds and when
+    /// no such piece is certain.
+    #[must_use]
+    pub(crate) fn piece_hull_points(&self, interval: &Extent1d) -> Option<Vec<(Point3, f64)>> {
+        match &self.kind {
+            CurveKind::Line(l) => l.segment_over(interval).map(Vec::from),
+            CurveKind::BSpline(b) => b.piece_hull_points(interval),
+            CurveKind::Ellipse(e) => e.base().piece_hull_points(interval),
+            CurveKind::Hyperbola(h) => h.base().piece_hull_points(interval),
+            CurveKind::Parabola(p) => p.base().piece_hull_points(interval),
+            _ => None,
+        }
+    }
+
     /// The B-spline (base) of the kinds derived from `SmBSplineCurve` (`SM_CAST_PTR`):
     /// the B-spline, line, ellipse or circle, hyperbola and parabola; `None` for the
     /// others.
