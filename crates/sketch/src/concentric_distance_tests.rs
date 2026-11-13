@@ -3,7 +3,7 @@
 //! The radial distance between concentric circles or arcs:
 //! solved numerically, measured, and refused on non-round curves or negative values.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 fn v(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)
