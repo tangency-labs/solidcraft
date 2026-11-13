@@ -7,7 +7,6 @@ render.aging.describe
 render.backends
 render.effects.describe
 render.scene
-sheet.export_dxf
 solid.draft
 solid.hole
 solid.loft
