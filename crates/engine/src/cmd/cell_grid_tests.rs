@@ -182,6 +182,55 @@ fn only_the_bodies_the_grid_reaches_decide_whether_it_meets_sheet_metal() {
 }
 
 #[test]
+fn a_margin_keeps_whole_cells_clear_of_the_edge_and_zero_is_plain_whole() {
+    // 10 mm cells centred 6 + 12k in a 62 mm field: the first column and row lie 1 mm from the
+    // field's edge, the last 3 mm.
+    let removed = |extra: Value| {
+        let mut s = plate(62.0, 3.0);
+        cut(&mut s, extra).unwrap();
+        62.0 * 62.0 * 3.0 - volume(&s)
+    };
+    let all = 25.0 * 100.0 * 3.0;
+    let plain = removed(json!({"through_all": true}));
+    assert!((plain - all).abs() < 1e-6, "{plain}");
+    assert!((removed(json!({"through_all": true, "margin": 0})) - plain).abs() < 1e-9);
+    assert!((removed(json!({"through_all": true, "margin": 0.5})) - all).abs() < 1e-6);
+    // Past 1 mm the first column and row go: 4 x 4 cells are left.
+    assert!((removed(json!({"through_all": true, "margin": 1.5})) - 16.0 * 100.0 * 3.0).abs() < 1e-6);
+    // Past 3 mm the last ones too: 3 x 3.
+    assert!((removed(json!({"through_all": true, "margin": 3.5})) - 9.0 * 100.0 * 3.0).abs() < 1e-6);
+}
+
+#[test]
+fn a_margin_follows_its_parameter() {
+    let mut s = plate(62.0, 3.0);
+    run(&mut s, "parameters.add", json!({"name": "clear", "expression": "0.5 mm"}));
+    cut(&mut s, json!({"through_all": true, "margin": "clear"})).unwrap();
+    assert!((volume(&s) - (62.0 * 62.0 * 3.0 - 25.0 * 100.0 * 3.0)).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name": "clear", "expression": "1.5 mm"}));
+    assert!((volume(&s) - (62.0 * 62.0 * 3.0 - 16.0 * 100.0 * 3.0)).abs() < 1e-6, "{}", volume(&s));
+}
+
+#[test]
+fn a_margin_that_is_negative_huge_or_without_whole_cells_is_refused() {
+    let mut s = plate(62.0, 3.0);
+    for extra in [
+        json!({"margin": -1}),
+        json!({"margin": "x"}),
+        json!({"margin": 1e300}),
+        json!({"margin": 1, "clip": "snap"}),
+        json!({"margin": 1, "clip": "free"}),
+    ] {
+        let mut p = json!({"through_all": true});
+        for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+            p[k] = v;
+        }
+        assert!(cut(&mut s, p.clone()).is_err(), "{p}");
+    }
+    assert!((volume(&s) - 62.0 * 62.0 * 3.0).abs() < 1e-6, "a refused grid cuts nothing");
+}
+
+#[test]
 fn the_grid_is_rebuilt_when_the_sketch_changes() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"}));

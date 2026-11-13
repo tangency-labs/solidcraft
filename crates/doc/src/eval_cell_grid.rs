@@ -31,6 +31,7 @@ pub(crate) fn tools(
         angle,
         anchor,
         clip,
+        margin,
         depth,
         through_all,
         direction,
@@ -80,6 +81,10 @@ pub(crate) fn tools(
         },
         anchor,
         clip: *clip,
+        margin: match margin {
+            Some(e) => val(vals, e, Kind::Length)?,
+            None => 0.0,
+        },
     };
     let loops: Vec<solidcore_record::Loop2> = regions.iter().flat_map(|r| r.loops().cloned()).collect();
     let plan = solidcore_ops::cell_grid::plan_cell_grid(&loops, &spec).map_err(|e| DocError::Invalid(e.to_string()))?;
