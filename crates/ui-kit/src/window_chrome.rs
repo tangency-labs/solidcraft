@@ -482,16 +482,18 @@ pub fn report_frame_press(ctx: &egui::Context) {
 /// app's own menus see it through [`frame_pressed`].
 pub fn begin_frame(ctx: &egui::Context) {
     if ctx.data_mut(|d| d.remove_temp::<bool>(frame_press_key().with("pending"))).unwrap_or(false) {
-        let frame = ctx.cumulative_frame_nr();
+        // Each window of the app counts its own frames: the press is this window's, this frame.
+        let frame = (ctx.viewport_id(), ctx.cumulative_frame_nr());
         ctx.data_mut(|d| d.insert_temp(frame_press_key(), frame));
         egui::Popup::close_all(ctx);
     }
 }
 
-/// The OS took a press on the window's frame or title bar this frame: a menu or popup closes, as
-/// for a press outside it.
+/// The OS took a press on this window's frame or title bar this frame: a menu or popup closes, as
+/// for a press outside it. Another window of the app, such as a shared panel in its own desktop
+/// window, sees no press.
 pub fn frame_pressed(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<u64>(frame_press_key())) == Some(ctx.cumulative_frame_nr())
+    ctx.data(|d| d.get_temp::<(egui::ViewportId, u64)>(frame_press_key())) == Some((ctx.viewport_id(), ctx.cumulative_frame_nr()))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -653,6 +655,25 @@ mod tests {
     use egui::{Event, PointerButton, Pos2, RawInput, Rect, ViewportCommand, ViewportId, pos2, vec2};
 
     const BAR: f32 = 34.0;
+
+    #[test]
+    fn a_frame_press_is_seen_in_the_window_it_came_from_only() {
+        let ctx = crate::test_support::context();
+        report_frame_press(&ctx);
+        let mut seen = None;
+        let _ = ctx.run_ui(RawInput::default(), |ui| {
+            begin_frame(ui.ctx());
+            seen = Some(frame_pressed(ui.ctx()));
+        });
+        assert_eq!(seen, Some(true));
+        // A shared panel in its own desktop window counts its own frames; at the frame number of
+        // the press it has no press.
+        let id = ViewportId::from_hash_of("panel");
+        let mut panel = RawInput { viewport_id: id, ..Default::default() };
+        panel.viewports.insert(id, egui::ViewportInfo { parent: Some(ViewportId::ROOT), ..Default::default() });
+        let _ = ctx.run_ui(panel, |ui| seen = Some(frame_pressed(ui.ctx())));
+        assert_eq!(seen, Some(false));
+    }
 
     /// A headless window `width` pt wide that draws only a title bar, from plain inputs.
     struct Bar {
