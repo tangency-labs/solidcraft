@@ -138,11 +138,10 @@ fn capture_id() -> egui::Id {
     egui::Id::unique("sc_semantic_content_eye_owner")
 }
 
+/// The presentation an eye drag began in: only it lights the view until the drag ends.
 #[derive(Clone, Copy)]
 struct EyeCapture {
     source: ContentSource,
-    widget: egui::Id,
-    target: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -335,24 +334,6 @@ pub(crate) fn render_scope(
     app.tree.content.active = None;
 }
 
-pub(crate) fn record_row(ui: &Ui, row: DrawnRow, response: &crate::ui_kit::RowResp) {
-    if !presented(ui) {
-        return;
-    }
-    let Some(source) = ui.ctx().data(|data| data.get_temp::<ContentSource>(active_id())) else { return };
-    let owner = source.owner;
-    ui.ctx().data_mut(|data| {
-        let output = data.get_temp_mut_or_default::<Output>(output_id(owner));
-        output.rows.push(row);
-        output.pointer_owned |= response.hovered || response.resp.as_ref().is_some_and(|response| response.contains_pointer());
-    });
-    if !response.on_control
-        && let Some(response) = &response.resp
-    {
-        record_capture(ui, response);
-    }
-}
-
 /// The rows the panel drew for the presentation being drawn: its geometry for automation, and
 /// whether the pointer is over them.
 pub(crate) fn record_drawn(ui: &Ui, drawn: &crate::ui_kit::browser::Output) {
@@ -365,11 +346,6 @@ pub(crate) fn record_drawn(ui: &Ui, drawn: &crate::ui_kit::browser::Output) {
         output.rows.extend(drawn.drawn.iter().map(|row| (row.label.clone(), row.rect, row.fold, row.open)));
         output.pointer_owned |= drawn.pointer_owned;
     });
-}
-
-/// The panel's drag source for a presentation's rows.
-pub(crate) fn panel_source(source: ContentSource) -> crate::ui_kit::browser::Source {
-    crate::ui_kit::browser::Source { scope: source.session, presentation: source.owner.0 }
 }
 
 /// A presentation's rows dragged, as the panel names their source.
@@ -405,56 +381,23 @@ pub(crate) fn record_occurrence(ui: &Ui, row: DrawnOccurrence) {
     ui.ctx().data_mut(|data| data.get_temp_mut_or_default::<Output>(output_id(owner)).occurrences.push(row));
 }
 
-/// The kit's eye gesture keeps its existing shared target value; its capture belongs to the
-/// presentation where it began, so another copy of a body cannot apply the same drag again.
-pub(crate) fn route_response(ui: &Ui, widget: egui::Id, response: &mut crate::ui_kit::RowResp) {
+/// An eye drag began or ended in the presentation being drawn ([`crate::ui_kit::browser::Gesture`]).
+pub(crate) fn eye_gesture(ui: &Ui, gesture: crate::ui_kit::browser::Gesture) {
     let Some(source) = ui.ctx().data(|data| data.get_temp::<ContentSource>(active_id())) else { return };
-    response.hovered &= response.resp.as_ref().is_some_and(|response| response.contains_pointer());
-    let action =
-        response.clicked || response.double || response.secondary.is_some() || response.fold || response.eye || response.radio || response.action;
-    let visible = presented(ui);
-    if !visible {
-        response.hovered = false;
-        response.resp = None;
-    }
-    if !visible || (action && !claim_action(ui, widget)) {
-        response.clicked = false;
-        response.double = false;
-        response.secondary = None;
-        response.fold = false;
-        response.eye = false;
-        response.radio = false;
-        response.action = false;
-    }
-    let capture = ui.ctx().data(|data| data.get_temp::<EyeCapture>(capture_id()));
-    if let Some(capture) = capture {
-        // A layout repeat may run the kit's drag-start branch again after visibility changed.
-        // Keep the gesture's original target rather than letting that branch invert it.
-        ui.ctx().data_mut(|data| data.insert_temp(crate::ui_kit::eye_drag_id(), capture.target));
-    }
-    if capture.is_some_and(|capture| capture.source != source) {
-        response.eye = false;
-    } else if response.eye
-        && let Some(response) = response.resp.as_ref().filter(|response| response.drag_started())
-    {
-        ui.ctx().data_mut(|data| {
-            if let Some(target) = data.get_temp::<bool>(crate::ui_kit::eye_drag_id()) {
-                data.insert_temp(capture_id(), EyeCapture { source, widget: response.id, target });
-            }
-        });
-    }
+    ui.ctx().data_mut(|data| match gesture {
+        crate::ui_kit::browser::Gesture::Begin => data.insert_temp(capture_id(), EyeCapture { source }),
+        crate::ui_kit::browser::Gesture::End => data.remove::<EyeCapture>(capture_id()),
+    });
 }
 
+/// The eye drag under way ends: the presentation it began in.
 pub(crate) fn release_eye(ctx: &egui::Context) -> Option<ContentSource> {
-    let capture = ctx.data_mut(|data| {
+    ctx.data_mut(|data| {
         let capture = data.get_temp::<EyeCapture>(capture_id());
         data.remove::<EyeCapture>(capture_id());
         capture
-    })?;
-    if ctx.dragged_id() == Some(capture.widget) {
-        ctx.stop_dragging();
-    }
-    Some(capture.source)
+    })
+    .map(|capture| capture.source)
 }
 
 /// A reveal is acknowledged only after its row is presented in the scroll viewport. An
