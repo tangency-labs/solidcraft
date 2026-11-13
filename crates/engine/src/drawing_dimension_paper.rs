@@ -17,7 +17,7 @@ use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{DimFrame, DimSizes, Outcome, PaperFonts, TextStyle, dim_layout_sized};
+use solidcraft_sketch::{DimFrame, DimSizes, DimText, Outcome, PaperFonts, TextStyle, dim_layout_sized};
 
 /// A dimension's sizes on paper, with its text above an unbroken line (ISO 129-1).
 const SIZES: DimSizes = DimSizes { arrow: 3.0, gap: 1.0, overshoot: 2.0, offset: 10.0, above: true };
@@ -32,7 +32,7 @@ const SAME_POINT_MM: f64 = 1e-6;
 struct Piece {
     frame: DimFrame,
     /// Where the layout puts its text, from the frame's own origin.
-    at: Vec2,
+    at: DimText,
     text: Text,
 }
 
@@ -89,7 +89,7 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
     let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
     for piece in pieces(dimension, resolved, &on, &set)? {
-        let layout = dim_layout_sized(&piece.frame, Some(piece.at), &SIZES, piece.text.half, [None, None]);
+        let layout = dim_layout_sized(&piece.frame, piece.at, &SIZES, piece.text.half, [None, None]);
         texts.extend(placed(piece.text.runs, piece.text.half, TEXT_MM, layout.text, layout.text_dir));
         fonts.extend(piece.text.fonts);
         why = why.or(piece.text.why);
@@ -168,10 +168,17 @@ pub(crate) fn line_direction(direction: LinearDirection, seen: Vec2) -> Option<V
     Some(if forward { dir } else { -dir })
 }
 
-/// A line from `a` to `b` along `dir`, `across` from their middle.
+/// A line from `a` to `b` along `dir`, `across` from their middle. Its text is at its `place`, or
+/// in the middle when it fits there, or else beyond an arrow ([`DimText::Across`]).
 fn linear(a: Vec2, b: Vec2, dir: Vec2, across: f64, place: &TextPlace, text: Text) -> Piece {
-    let along = at_of(place).map_or(0.0, |at| (at - (a + b) * 0.5).dot(dir));
-    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir }, at: Vec2::new(along, across), text }
+    let at = at_of(place).map_or(DimText::Across(across), |at| DimText::At(Vec2::new((at - (a + b) * 0.5).dot(dir), across)));
+    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir }, at, text }
+}
+
+/// A line from `a` to `b` along `dir`, `across` from their middle, with its text in the middle
+/// whether it fits there or not: a set's member, whose texts beside each other need a rule of their own.
+fn centred(a: Vec2, b: Vec2, dir: Vec2, across: f64, text: Text) -> Piece {
+    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir }, at: DimText::At(Vec2::new(0.0, across)), text }
 }
 
 /// A chain's members, each a line from one point to the next, all on one line `offset` from the
@@ -183,7 +190,7 @@ fn chain(points: &[Vec2], direction: LinearDirection, offset: f64, resolved: &Re
     let line = ((first + last) * 0.5).dot(n) + offset;
     let member = |(i, (a, b)): (usize, (&Vec2, &Vec2))| {
         let text = resolved.members.get(i).map(|m| m.text.as_str());
-        linear(*a, *b, dir, line - ((*a + *b) * 0.5).dot(n), &TextPlace::Centred, set(text))
+        centred(*a, *b, dir, line - ((*a + *b) * 0.5).dot(n), set(text))
     };
     Some(points.iter().zip(points.iter().skip(1)).enumerate().map(member).collect())
 }
@@ -220,7 +227,7 @@ fn angular(a: [Vec2; 2], b: [Vec2; 2], other_side: bool, offset: f64, place: &Te
     let sweep = cross.abs().atan2(from_a.dot(from_b));
     let middle = Vec2::from_angle(d0.angle() + sweep * 0.5);
     let towards = at_of(place).and_then(|at| (at - vertex).normalized()).unwrap_or(middle);
-    Some(Piece { frame: DimFrame::Angular { vertex, d0, sweep }, at: towards * offset.abs(), text })
+    Some(Piece { frame: DimFrame::Angular { vertex, d0, sweep }, at: DimText::At(towards * offset.abs()), text })
 }
 
 /// A circle's or an arc's radius or diameter, from its centre and the arc's start, middle and end,
@@ -239,7 +246,11 @@ fn radial(centre: Vec2, arc: [Vec2; 3], diameter: bool, offset: f64, place: &Tex
     };
     let default = if whole { Some(Vec2::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2)) } else { (mid - centre).normalized() };
     let towards = at_of(place).and_then(|at| (at - centre).normalized()).or(default)?;
-    Some(Piece { frame: DimFrame::Radial { center: centre, radius, diameter, arc: turned }, at: towards * (radius + offset).max(0.0), text })
+    Some(Piece {
+        frame: DimFrame::Radial { center: centre, radius, diameter, arc: turned },
+        at: DimText::At(towards * (radius + offset).max(0.0)),
+        text,
+    })
 }
 
 /// A text's place on paper, when it has its own.

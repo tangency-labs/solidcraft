@@ -450,6 +450,55 @@ fn a_texts_place_keeps_the_span() {
     assert!(close((tips[1].x - tips[0].x).abs(), 40.0) && close(tips[0].y, 10.0), "{tips:?}");
 }
 
+/// A number longer than its span goes outside the extension lines, beyond the arrow at the right (or
+/// top) end, a gap past the arrow's tail, with the line run on under it, so no line crosses it
+/// (#13393, ISO 129-1): a 10 mm edge at 1:1 and its "10.00", level and upright.
+#[test]
+fn a_number_too_long_for_its_span_goes_beyond_an_arrow() {
+    let width = measured("10.00");
+    let beyond = 10.0 + SIZES.arrow * 1.8 + SIZES.gap;
+    let group = drawn(length(LinearDirection::Horizontal), 10.0, &[[0.0, 0.0], [10.0, 0.0]], "10.00", "1:1");
+    let run = runs(&group)[0];
+    assert!(close(run.origin.x, beyond) && close(run.angle, 0.0), "{run:?}");
+    let (lines, tips) = parts(&group);
+    assert!(close(tips[0].x, 0.0) && close(tips[1].x, 10.0), "{tips:?}");
+    let upright: Vec<&Vec<Vec2>> = lines.iter().filter(|l| close(l[0].x, l[1].x)).collect();
+    assert_eq!(upright.len(), 2, "{lines:?}");
+    assert!(upright.iter().all(|l| l[0].x < run.origin.x), "no extension line crosses it: {lines:?}");
+    let under = |l: &Vec<Vec2>| l.iter().all(|p| close(p.y, 10.0)) && l[0].x.min(l[1].x) <= beyond && l[0].x.max(l[1].x) >= beyond + width;
+    assert!(lines.iter().any(under), "a line runs on under it: {lines:?}");
+
+    let group = drawn(length(LinearDirection::Vertical), 10.0, &[[0.0, 0.0], [0.0, 10.0]], "10.00", "1:1");
+    let run = runs(&group)[0];
+    assert!(close(run.origin.y, beyond) && close(run.angle, std::f64::consts::FRAC_PI_2), "{run:?}");
+    let level: Vec<Vec<Vec2>> = parts(&group).0.into_iter().filter(|l| close(l[0].y, l[1].y)).collect();
+    assert!(level.len() == 2 && level.iter().all(|l| l[0].y < run.origin.y), "{level:?}");
+}
+
+/// A number the user placed keeps its place, even where it doesn't fit between the extension lines.
+#[test]
+fn a_placed_number_keeps_its_place_on_a_short_span() {
+    let at = TextPlace::At([5.0, 30.0]);
+    let group =
+        laid(&dimension(length(LinearDirection::Horizontal), 10.0, at), &read(&[[0.0, 0.0], [10.0, 0.0]], "10.00"), &view_at("1:1")).unwrap().group;
+    let run = runs(&group)[0];
+    assert!(close(run.origin.x, 5.0 - measured("10.00") * 0.5), "{run:?}");
+}
+
+/// A chain's short members keep their numbers in their middles: a number beyond an arrow would land
+/// on its neighbour's span, so a set's numbers need a rule of their own.
+#[test]
+fn a_chains_short_members_keep_their_numbers_between_their_lines() {
+    let kind = DimensionKind::Chain { points: Vec::new(), direction: LinearDirection::Horizontal };
+    let member = |text: &str| Member { measured: Measured { value: 10.0, foreshortened: false }, text: text.into() };
+    let mut r = read(&[[0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0]], "30");
+    r.text = None;
+    r.members = vec![member("10.00"), member("10.00"), member("10.00")];
+    let group = laid(&dimension(kind, 10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().group;
+    let middles: Vec<f64> = runs(&group).iter().map(|run| run.origin.x + measured("10.00") * 0.5).collect();
+    assert!(middles.len() == 3 && middles.iter().zip([5.0, 15.0, 25.0]).all(|(x, mid)| close(*x, mid)), "{middles:?}");
+}
+
 /// Any measured points and offsets, at the sizes and shapes that break layouts (zero spans, equal
 /// points, reversed or parallel lines, huge and tiny values), lay out or say no without a panic; a
 /// scene that takes the group either holds it or says why.
