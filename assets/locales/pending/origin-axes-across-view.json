@@ -1,37 +1,46 @@
 {
   "en": {
+    "cmd.view.origin_axes_across_view": "Origin Axes Across the Whole View",
     "prefs.origin_axes_across_view": "Origin axes across the whole view",
     "prefs.origin_axes_across_view_help": "Draw the X, Y and Z origin axes through the origin to the edges of the view, in both directions. Off: short axes at the origin."
   },
   "ar": {
+    "cmd.view.origin_axes_across_view": "محاور نقطة الأصل عبر العرض كله",
     "prefs.origin_axes_across_view": "محاور نقطة الأصل عبر العرض كله",
     "prefs.origin_axes_across_view_help": "رسم محاور نقطة الأصل X وY وZ عبر نقطة الأصل حتى حواف العرض في الاتجاهين. عند الإيقاف: محاور قصيرة عند نقطة الأصل."
   },
   "de": {
+    "cmd.view.origin_axes_across_view": "Ursprungsachsen über die ganze Ansicht",
     "prefs.origin_axes_across_view": "Ursprungsachsen über die ganze Ansicht",
     "prefs.origin_axes_across_view_help": "Die X-, Y- und Z-Ursprungsachsen durch den Ursprung bis an die Ränder der Ansicht zeichnen, in beide Richtungen. Aus: kurze Achsen am Ursprung."
   },
   "fr": {
+    "cmd.view.origin_axes_across_view": "Axes de l'origine sur toute la vue",
     "prefs.origin_axes_across_view": "Axes de l'origine sur toute la vue",
     "prefs.origin_axes_across_view_help": "Dessine les axes X, Y et Z de l'origine à travers l'origine jusqu'aux bords de la vue, dans les deux sens. Désactivé : axes courts à l'origine."
   },
   "he": {
+    "cmd.view.origin_axes_across_view": "צירי הראשית לאורך כל התצוגה",
     "prefs.origin_axes_across_view": "צירי הראשית לאורך כל התצוגה",
     "prefs.origin_axes_across_view_help": "ציור צירי הראשית X,‏ Y ו-Z דרך הראשית עד קצות התצוגה, בשני הכיוונים. כבוי: צירים קצרים בראשית."
   },
   "ja": {
+    "cmd.view.origin_axes_across_view": "原点軸をビュー全体に表示",
     "prefs.origin_axes_across_view": "原点軸をビュー全体に表示",
     "prefs.origin_axes_across_view_help": "X、Y、Z の原点軸を原点から両方向にビューの端まで描きます。オフ: 原点に短い軸を表示します。"
   },
   "ko": {
+    "cmd.view.origin_axes_across_view": "원점 축을 뷰 전체에 표시",
     "prefs.origin_axes_across_view": "원점 축을 뷰 전체에 표시",
     "prefs.origin_axes_across_view_help": "X, Y, Z 원점 축을 원점을 지나 양방향으로 뷰 가장자리까지 그립니다. 끄기: 원점에 짧은 축을 표시합니다."
   },
   "vi": {
+    "cmd.view.origin_axes_across_view": "Trục gốc tọa độ trải hết khung nhìn",
     "prefs.origin_axes_across_view": "Trục gốc tọa độ trải hết khung nhìn",
     "prefs.origin_axes_across_view_help": "Vẽ các trục gốc tọa độ X, Y và Z đi qua gốc tới mép khung nhìn theo cả hai hướng. Tắt: trục ngắn tại gốc tọa độ."
   },
   "zh": {
+    "cmd.view.origin_axes_across_view": "原点轴贯穿整个视图",
     "prefs.origin_axes_across_view": "原点轴贯穿整个视图",
     "prefs.origin_axes_across_view_help": "将 X、Y、Z 原点轴穿过原点向两个方向绘制到视图边缘。关闭：在原点显示短轴。"
   }

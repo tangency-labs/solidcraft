@@ -1680,6 +1680,9 @@ impl SolveApp {
             if id == "view.angle_readout" {
                 self.preferences.show_view_angles = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            if id == "view.origin_axes_across_view" {
+                self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            }
             if matches!(id, "view.ambient_occlusion" | "view.graphics_preset") {
                 self.preferences.ambient_occlusion = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
                 if id == "view.graphics_preset" {
@@ -2137,6 +2140,10 @@ impl SolveApp {
         }
         if id == "view.angle_readout" {
             let _ = self.run(id, json!({"enabled": !self.preferences.show_view_angles}));
+            return;
+        }
+        if id == "view.origin_axes_across_view" {
+            let _ = self.run(id, json!({"enabled": !self.preferences.origin_axes_across_view}));
             return;
         }
         // Another command ends Edit Text (its dialog is not a feature edit to keep).
