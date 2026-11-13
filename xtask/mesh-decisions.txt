@@ -137,7 +137,6 @@ crates/kernel/src/blend_smlib.rs:imp::corner_vertices finds the vertices nearest
 crates/kernel/src/blend_smlib.rs:imp::reblend finds a blend's new edges by a mesh
 crates/kernel/src/blend_smlib.rs:imp::resolve resolves edge picks for SMLib by a mesh
 crates/kernel/src/body.rs:Body::edges gives edge points and lengths from a mesh
-crates/kernel/src/body.rs:Body::faces gives face areas and centroids from a mesh
 crates/kernel/src/body.rs:Body::meets decides whether bodies meet by meshes
 crates/kernel/src/body.rs:Body::meets_each decides whether tools meet a body by meshes
 crates/kernel/src/distance.rs:DistanceShape::on_face decides whether a point lies on a face by its mesh
