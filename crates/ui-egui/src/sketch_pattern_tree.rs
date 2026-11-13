@@ -5,7 +5,7 @@ use solidcraft_engine::{Sel, sketch::SketchPatternKind};
 
 use crate::{
     SolveApp,
-    browser::{Row, Spec, draw_row, node_row},
+    browser::{Row, Spec, node_row},
     ui_kit::browser::Rows,
 };
 
@@ -98,7 +98,7 @@ pub(crate) fn browser_rows(app: &mut SolveApp, rows: &mut Rows<'_>, sketch: u64,
 /// The patterns under their sketch in the vertical feature history.
 pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: usize, scope: &str, occurrence: Option<(u64, &[u64])>, dim: bool) {
     for pattern in patterns(app, sketch) {
-        let response = draw_row(
+        let response = crate::ui_kit::tree_row(
             ui,
             ui.scope_id().with(("sketch_pattern", sketch, &pattern.id)),
             &Row { depth, icon: pattern.icon, label: &pattern.label, name: true, selected: pattern.selected, dim, ..Default::default() },

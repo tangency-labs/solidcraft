@@ -818,7 +818,6 @@ pub fn group_action(app: &mut SolveApp, action: &str, p: &Value) {
 /// The floating card's inner margin: the header highlight sits this far from the card's top, left
 /// and right edges, so its corners are concentric with the card's.
 const INDENT: f32 = 14.0;
-use crate::ui_kit::RowResp;
 use crate::ui_kit::browser::{self as panel, Dragged, How, NodeId, Payload, Rows, Selectable, Zone};
 
 fn row_rect(ui: &egui::Ui) -> Rect {
@@ -847,78 +846,6 @@ fn dialog_open(ui: &egui::Ui) -> bool {
 
 fn eye_left(ui: &egui::Ui) -> bool {
     ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_eye_left"))).unwrap_or(false)
-}
-
-pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowResp {
-    let compact = compact_tree(ui);
-    let mut out = crate::ui_kit::tree_row(ui, id, &Row { compact, eye_left: eye_left(ui), ..*row });
-    crate::semantic_content::route_response(ui, id, &mut out);
-    if let Some(r) = out.rect.filter(|r| ui.is_rect_visible(*r)) {
-        let x = r.left() + if compact { Tokens::get().space_8 } else { 2.0 } + row.depth as f32 * INDENT;
-        let fold = row.fold.map(|_| Rect::from_min_max(pos2(x - 4.0, r.top()), pos2(x + 15.0, r.bottom())));
-        crate::semantic_content::record_row(ui, (row.label.to_string(), r, fold, row.fold), &out);
-    }
-    let clicked = out.resp.as_ref().is_some_and(|resp| resp.clicked());
-    // Only a plain click: Ctrl and Shift keep adding to and extending the selection.
-    let plain = !ui.input(|i| i.modifiers.command || i.modifiers.ctrl || i.modifiers.shift);
-    let name_click = row.rename && out.clicked && !out.double && plain && !dialog_open(ui);
-    out.slow_rename = slow_rename_click(ui, id, clicked, name_click, &mut out);
-    out
-}
-
-/// A second click on the same name later than this is a new gesture, not a rename.
-const SLOW_RENAME_WINDOW: f64 = 3.0;
-
-/// A slower second click on a row's name renames it, once the double-click delay has passed
-/// with no further click: the click is held back until then, so the first click of a
-/// double-click never starts a rename and the double-click keeps editing or opening the row.
-/// The held click comes back as `clicked` with `slow_rename` set. A double-click, or a press
-/// anywhere else, drops it.
-fn slow_rename_click(ui: &egui::Ui, row: egui::Id, clicked: bool, name_click: bool, out: &mut RowResp) -> bool {
-    let last_key = egui::Id::unique("sc_browser_last_name_click");
-    let pending_key = egui::Id::unique("sc_browser_pending_rename");
-    let now = ui.input(|i| i.time);
-    if !now.is_finite() {
-        return false;
-    }
-    let delay = ui.ctx().options(|options| options.input_options.max_double_click_delay);
-    let pressed = ui.input(|i| i.pointer.any_pressed());
-    // (row, due, made)
-    if let Some((pending_row, due, made)) = ui.ctx().data(|data| data.get_temp::<(egui::Id, f64, f64)>(pending_key)) {
-        let stale = !(due.is_finite() && made.is_finite()) || now > due + SLOW_RENAME_WINDOW;
-        if stale || (pressed && now > made) || (pending_row == row && out.double) {
-            ui.ctx().data_mut(|data| data.remove::<(egui::Id, f64, f64)>(pending_key));
-        } else if pending_row == row {
-            if now >= due {
-                ui.ctx().data_mut(|data| data.remove::<(egui::Id, f64, f64)>(pending_key));
-                out.clicked = true;
-                return true;
-            }
-            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((due - now).clamp(0.0, SLOW_RENAME_WINDOW)));
-        }
-    }
-    if !clicked {
-        return false;
-    }
-    let previous = ui.ctx().data_mut(|data| {
-        let previous = data.get_persisted::<(egui::Id, f64, bool)>(last_key);
-        data.insert_persisted(last_key, (row, now, name_click));
-        previous
-    });
-    let slow = name_click
-        && previous.is_some_and(|(previous_row, previous_time, previous_was_name)| {
-            previous_row == row
-                && previous_was_name
-                && previous_time.is_finite()
-                && now - previous_time > delay
-                && now - previous_time <= SLOW_RENAME_WINDOW
-        });
-    if slow {
-        ui.ctx().data_mut(|data| data.insert_temp(pending_key, (row, now + delay, now)));
-        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(delay.clamp(0.0, SLOW_RENAME_WINDOW)));
-        out.clicked = false;
-    }
-    false
 }
 
 /// A Browser row's identity in the panel: its tree key, hashed.
@@ -1086,6 +1013,11 @@ pub(crate) fn present(
         .show(ui, |rows| draw(app, rows, acts));
     app.tree.content.current_mut().browser = state;
     crate::semantic_content::record_drawn(ui, &output);
+    for event in &output.events {
+        if let panel::Event::EyeGesture(gesture) = event {
+            crate::semantic_content::eye_gesture(ui, *gesture);
+        }
+    }
     output
 }
 
