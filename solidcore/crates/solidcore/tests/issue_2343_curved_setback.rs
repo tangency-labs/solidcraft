@@ -1,7 +1,7 @@
 //! tangency-labs/solidcore#2343 (smlib#85 part C, built in solidcore; the fork's work in
 //! progress at tangency-labs/smlib 37c9e1d is the reference, not the target): three unequal
 //! rounds at a vertex where a face is a cylinder, cone or sphere, convex or concave, end on a
-//! Setback (`Kernel::fixes.fillet_setback_beside_curved_faces`, WR-697), its fill certified no more concave than what each patch is G1 to (the owner's
+//! Setback (WR-697), its fill certified no more concave than what each patch is G1 to (the owner's
 //! ruling (a) on #85, `II >= k G`).
 //!
 //! The cases are the fork's capi `setback` cases `curved_d_prism_corner`,
@@ -208,6 +208,21 @@ fn round_asked(
     v: Point3,
     asked: Option<f64>,
 ) -> Rounded {
+    round_set_back(k, b, edges, radii, v, asked, false)
+}
+
+/// [`round_asked`], the setback asked through the fill's door (`set_set_back_fill`), or with
+/// `marked` through the made corner's (`add_set_back_vertex`, then `set_corner_setback` on
+/// the corner once made), as SolidCraft and `solidcore-ops` ask one.
+fn round_set_back(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    radii: &[f64],
+    v: Point3,
+    asked: Option<f64>,
+    marked: bool,
+) -> Rounded {
     let xs = vec![FilletSurfaceGeneratorType::Circular; edges.len()];
     let vid = vertex_at(b, v);
     let rounded = {
@@ -215,7 +230,11 @@ fn round_asked(
         s.prepare_per_edge_constant_radius(k, edges, radii, &xs, 1, 1.0)
             .unwrap();
         if let Some(sb) = asked {
-            s.set_set_back_fill(vid, sb, 0.0, false);
+            if marked {
+                s.add_set_back_vertex(vid);
+            } else {
+                s.set_set_back_fill(vid, sb, 0.0, false);
+            }
         }
         s.create_corners(k, None).unwrap();
         let mut event = None;
@@ -237,6 +256,9 @@ fn round_asked(
                 );
             }
         }
+        if let (true, Some(sb), Some(c)) = (marked, asked, this) {
+            s.set_corner_setback(c, sb).unwrap();
+        }
         let result = s.do_filleting(k, None);
         let (mut setbacks, mut room, mut springs) = (Vec::new(), Vec::new(), Vec::new());
         let mut tol = 0.0;
@@ -244,6 +266,14 @@ fn round_asked(
             let fc = s.corner(c).unwrap();
             if this == Some(c) {
                 tol = fc.approx_tol_3d;
+            }
+            // a corner's setback set on it is classified when the corners are filleted
+            if this == Some(c) && marked {
+                event = Some(
+                    fc.blend
+                        .as_ref()
+                        .map_or(BlendCornerEvent::None, |bc| bc.event),
+                );
             }
             if let Some(sb) = fc.setback.as_ref() {
                 eprintln!("setbacks {:?}", sb.setbacks);
@@ -836,31 +866,6 @@ fn d_prism_corner_far_from_the_origin_is_a_setback() {
     }
 }
 
-/// Without `fillet_setback_beside_curved_faces` (as a design made before it), a corner beside a curved face is the corner it was: not a Setback
-/// (the N-by-N convex corner), and built, asked for a setback or not. The D prism's corner
-/// (beside a cylinder) and the countersink's (beside a cone).
-#[test]
-fn without_its_flag_a_corner_beside_a_curved_face_builds_as_before() {
-    for asked in [None, Some(3.05)] {
-        let (mut k, mut b, edges, case) = d_prism_case();
-        k.fixes.fillet_setback_beside_curved_faces = false;
-        let r = round_asked(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v, asked);
-        assert_eq!(
-            r.event,
-            Some(BlendCornerEvent::None),
-            "{asked:?}: {}",
-            r.reason
-        );
-        assert!(r.ok, "{asked:?}: {}", r.reason);
-    }
-    let mut k = all_fixes();
-    k.fixes.fillet_setback_beside_curved_faces = false;
-    let (mut b, edges, radii, case) = countersink_case(&mut k);
-    let r = round_each(&mut k, &mut b, &edges, &radii, case.v);
-    assert_eq!(r.event, Some(BlendCornerEvent::None), "{}", r.reason);
-    assert!(r.ok, "{}", r.reason);
-}
-
 /// A 40 x 40 x 20 block with a D-shaped pocket 10 deep (R 8 about (20, 20), flat x = 24,
 /// floor z = 10), its floor corner V = (24, 20 + sqrt 48, 10), where the floor, the flat and
 /// the concave cylinder meet: the floor's chord, the upright and the floor's arc rounded 2,
@@ -1285,6 +1290,32 @@ fn the_named_setback_builds() {
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "asked {named}: {}", r.reason);
     graded(&mut k, &mut b, &case, 3);
+}
+
+/// The D prism's corner with three equal rounds, r 2.5, set back 4 on the made corner
+/// (`add_set_back_vertex`, then `set_corner_setback`, the door SolidCraft and
+/// `solidcore-ops` use): a set-back vertex is no Ball, so the corner is made the N x N corner
+/// and classified when the corners are filleted. Beside the cylinder it is the Setback, as one
+/// asked through the fill's door is, set back 4 along each edge and graded as above. Before,
+/// such a corner stayed the N x N corner with its uncertified `N_FillNSidedHole` patch.
+#[test]
+fn a_setback_set_on_the_corner_beside_a_curved_face_is_the_setback() {
+    let (mut k, mut b, edges, mut case) = d_prism_case();
+    let s2 = 2.0f64.sqrt();
+    let r = 2.5;
+    case.on_rounds[0] = Point3::new(4.0 - r + r / s2, 0.0, 10.0 - r + r / s2);
+    case.on_rounds[2] = Point3::new(-(10.0 - r) - r / s2, 0.0, 10.0 - r + r / s2);
+    let rounded = round_set_back(&mut k, &mut b, &edges, &[r; 3], case.v, Some(4.0), true);
+    assert_eq!(
+        rounded.event,
+        Some(BlendCornerEvent::Setback),
+        "{}",
+        rounded.reason
+    );
+    assert!(rounded.ok, "{}", rounded.reason);
+    assert_eq!(rounded.setbacks, vec![4.0; 3]);
+    graded(&mut k, &mut b, &case, 3);
+    springs_are_the_fills(&k, &b, &rounded, case.name, 3);
 }
 
 /// The D prism with flat a 8 (R 10, H 20), bored about its axis with radius `bore` where

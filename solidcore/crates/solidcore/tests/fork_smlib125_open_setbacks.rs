@@ -400,7 +400,6 @@ fn nxn_corner_builds_the_setback_set_on_it() {
     ];
     for (fill, dist) in [(false, true), (true, true), (true, false)] {
         let mut k = all_fixes();
-        k.fixes.fillet_setback_beside_curved_faces = false;
         let bx = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 20.0).unwrap();
         let cyl = create_cylinder(&mut k, Point3::new(40.0, 40.0, -5.0), 20.0, 30.0).unwrap();
         let b = boolean_difference(&mut k, bx, cyl).unwrap();
