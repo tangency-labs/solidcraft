@@ -128,20 +128,29 @@ fn a_balloon_is_refused_on_a_part_its_view_leaves_out() {
 }
 
 /// A balloon added before its view's settings left its part out stays where it is, and inspect
-/// warns, until the edit is undone.
+/// warns, until the edit is undone. The sheet doesn't draw it meanwhile and says why, in the same
+/// words: the one rule dimensions and notes follow.
 #[test]
 fn a_balloon_warns_when_its_view_leaves_its_part_out_later() {
     let (mut s, view, [_, bracket]) = placed();
     let v = ids::encode(view);
     let id = add(&mut s, view, bracket)["balloon"].clone();
+    let on_sheet = |s: &mut Session| {
+        let scene = run(s, "drawing.scene", json!({"sheet": "Sheet 1"}));
+        scene["balloons"].as_array().unwrap().iter().find(|b| b["balloon"] == id).cloned().unwrap()
+    };
     assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null());
+    assert_eq!(on_sheet(&mut s)["drawn"], json!(true));
     run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[bracket]]}}));
     let warned = run(&mut s, INSPECT, json!({"balloon": id}));
     let words = format!("view {v} doesn't draw this part now: its hide leaves out occurrence path [{bracket}]");
     assert_eq!(warned["warnings"], json!([words]), "{warned}");
     assert_eq!(warned["status"], "ok", "it still points at its part");
+    let hidden = on_sheet(&mut s);
+    assert_eq!((&hidden["drawn"], &hidden["why"]), (&json!(false), &json!(words)), "{hidden}");
     run(&mut s, "edit.undo", json!({}));
     assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null());
+    assert_eq!(on_sheet(&mut s)["drawn"], json!(true));
 }
 
 /// An edit moves a balloon and names what changed, as one undo step; the same place again changes

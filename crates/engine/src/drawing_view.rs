@@ -9,14 +9,14 @@
 
 use std::borrow::Cow;
 use std::cell::OnceCell;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
 use solidcraft_doc::drawing::cutting_line::SectionKind;
-use solidcraft_doc::drawing::view::{Cut, ResolvedView, View, ViewKind, chosen};
+use solidcraft_doc::drawing::view::{Cut, ResolvedView, Shows, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
@@ -176,12 +176,9 @@ impl ShownSet {
         self.state.bodies.get(shown.index)
     }
 
-    /// The bodies under one of the `source` occurrence paths (all of them when there is none;
-    /// `[]` takes the design's own bodies) and under no `hide` path, in the same order.
-    pub fn keep(mut self, source: Option<&[Vec<u64>]>, hide: &[Vec<u64>]) -> ShownSet {
-        let source: Option<HashSet<&[u64]>> = source.map(|paths| paths.iter().map(Vec::as_slice).collect());
-        let hide: HashSet<&[u64]> = hide.iter().map(Vec::as_slice).collect();
-        self.bodies.retain(|b| chosen(&b.path, source.as_ref(), &hide));
+    /// The bodies `shows` draws ([`Shows::draws`]), in the same order.
+    pub fn keep(mut self, shows: &Shows) -> ShownSet {
+        self.bodies.retain(|b| shows.draws(&b.path));
         self
     }
 
@@ -189,7 +186,7 @@ impl ShownSet {
     /// view that chooses nothing skips. Paths no occurrence makes any more match no body.
     pub fn of_view(&self, view: &ResolvedView) -> Cow<'_, ShownSet> {
         let (source, hide) = (view.occurrences.value.as_deref(), view.hide.value.as_deref().unwrap_or_default());
-        if source.is_none() && hide.is_empty() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(source, hide)) }
+        if source.is_none() && hide.is_empty() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(&view.shows())) }
     }
 }
 

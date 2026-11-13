@@ -1366,3 +1366,44 @@ fn seeded_choices_agree_with_the_rule() {
         assert_eq!(chosen(&body, source.as_ref(), &hide), long_way, "seed {seed}: {body:?} {sources:?} {hides:?}");
     }
 }
+
+/// Seeded paths and choices: what [`Shows`] says of a path agrees with the rule worked out the long
+/// way, a hidden path names the hide path that covers it, and the first of several paths left out
+/// is the one asked about.
+#[test]
+fn seeded_shows_agree_with_the_rule_and_name_the_hide() {
+    let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
+    let path = |seed: u64, salt: u64| -> Vec<u64> { (0..pick(seed, salt, 4)).map(|i| 1 + pick(seed, salt + 10 + i, 3)).collect() };
+    for seed in 1..=500u64 {
+        let sources: Vec<Vec<u64>> = (0..pick(seed, 1, 3)).map(|i| path(seed, 100 + i * 20)).collect();
+        let hides: Vec<Vec<u64>> = (0..pick(seed, 2, 3)).map(|i| path(seed, 200 + i * 20)).filter(|p| !p.is_empty()).collect();
+        let body = path(seed, 3);
+        let shows = Shows::new((pick(seed, 4, 2) == 0).then_some(sources.as_slice()), &hides);
+        let under = |p: &Vec<u64>| if p.is_empty() { body.is_empty() } else { body.starts_with(p) };
+        let source_takes = pick(seed, 4, 2) != 0 || sources.iter().any(under);
+        let long_way = source_takes && !hides.iter().any(under);
+        assert_eq!((shows.draws(&body), shows.left_out(&body).is_none()), (long_way, long_way), "seed {seed}: {body:?} {sources:?} {hides:?}");
+        if let Some(LeftOut::Hidden { by, .. }) = shows.left_out(&body) {
+            assert!(hides.contains(&by) && body.starts_with(&by), "seed {seed}: {by:?}");
+        }
+        // The design's own bodies first: when they are drawn, the body's answer is the first.
+        let own: &[u64] = &[];
+        let want = if shows.draws(own) { shows.left_out(&body) } else { shows.left_out(own) };
+        assert_eq!(shows.first_left_out([own, body.as_slice()]), want, "seed {seed}");
+    }
+}
+
+/// A part the view leaves out says where the setting was set, for each kind of setter a resolved
+/// setting can name (#4896): a parent names its view, a sheet and a drawing say so, and a view's own
+/// setting and the default add nothing. The warning an annotation gives names its view.
+#[test]
+fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
+    let said = |set_by| LeftOut::NotChosen { set_by }.to_string();
+    let plain = "its source draws only the occurrences it chose";
+    assert_eq!(said(SetBy::Parent(7)), format!("{plain} (set on view {})", ids::encode(7)));
+    assert_eq!(said(SetBy::Sheet), format!("{plain} (set on its sheet)"));
+    assert_eq!(said(SetBy::Drawing), format!("{plain} (set on the drawing)"));
+    assert_eq!((said(SetBy::This), said(SetBy::Default)), (plain.to_string(), plain.to_string()));
+    let hidden = LeftOut::Hidden { by: vec![3], set_by: SetBy::This };
+    assert_eq!(hidden.warning(9), format!("view {} doesn't draw this part now: its hide leaves out occurrence path [3]", ids::encode(9)));
+}

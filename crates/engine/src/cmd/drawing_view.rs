@@ -55,7 +55,7 @@ use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_si
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
 use solidcraft_doc::drawing::view::{
-    Beside, LeftOut, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose,
+    Beside, ResolvedView, SetBy, Setting, Shows, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose,
 };
 use solidcraft_doc::drawing_view::{
     Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
@@ -245,7 +245,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
 
     let source = request.source.as_ref().map(|chosen| chosen.occurrences.as_slice());
     check_paths(s, source, &request.hide, CMD)?;
-    let set = crate::drawing_view::shown(s).map_err(|why| bad(CMD, why.to_string()))?.keep(source, &request.hide);
+    let set = crate::drawing_view::shown(s).map_err(|why| bad(CMD, why.to_string()))?.keep(&Shows::new(source, &request.hide));
     if set.bodies.is_empty() {
         return Err(bad(CMD, NOTHING_CHOSEN));
     }
@@ -422,40 +422,17 @@ pub(super) fn check_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoItera
     {
         return Err(bad(cmd, why));
     }
-    match not_drawn(record, view, paths) {
-        Some(why) => Err(bad(cmd, format!("view {} doesn't draw that part: {why}", ids::encode(view)))),
+    match record.left_out(view, paths) {
+        Some(left) => Err(bad(cmd, format!("view {} doesn't draw that part: {left}", ids::encode(view)))),
         None => Ok(()),
     }
 }
 
-/// Why view `view` of `record` doesn't draw the first of `paths` it leaves out, in words ([`ResolvedView::left_out`]);
-/// nothing when it draws them all, or for a view that can't be resolved, which its own reply reports.
-/// The view is resolved once, however many paths there are.
-fn not_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Option<String> {
-    let resolved = record.resolve_view(view).ok()?;
-    let left = paths.into_iter().find_map(|path| resolved.left_out(path))?;
-    Some(match left {
-        LeftOut::Hidden { by, set_by } => format!("its hide leaves out occurrence path {by:?}{}", set_on(set_by)),
-        LeftOut::NotChosen { set_by } => format!("its source draws only the occurrences it chose{}", set_on(set_by)),
-    })
-}
-
-/// Where a setting that leaves a part out was set, in words for [`not_drawn`]: nothing when the view
-/// itself or the default set it. Hide and the chosen occurrences come from a view's chain today, but
-/// a sheet and a drawing can set other settings (its line group), so each says where.
-fn set_on(set_by: SetBy) -> String {
-    match set_by {
-        SetBy::Parent(parent) => format!(" (set on view {})", ids::encode(parent)),
-        SetBy::Sheet => " (set on its sheet)".to_string(),
-        SetBy::Drawing => " (set on the drawing)".to_string(),
-        SetBy::This | SetBy::Default => String::new(),
-    }
-}
-
 /// The warning for an annotation on view `view` that points through `paths`, when the view's
-/// settings were changed to leave one of them out after it was added: it stays, and says so.
+/// settings were changed to leave one of them out after it was added: it stays, and says so
+/// ([`LeftOut::warning`], the words the sheet gives too).
 pub(super) fn drawn_warning<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Vec<String> {
-    not_drawn(record, view, paths).map(|why| format!("view {} doesn't draw this part now: {why}", ids::encode(view))).into_iter().collect()
+    record.left_out(view, paths).map(|left| left.warning(view)).into_iter().collect()
 }
 
 /// Refused when `view` would show nothing of a design that has bodies to show. One with nothing to

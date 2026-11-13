@@ -312,6 +312,10 @@ pub struct DimensionStatusResult {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
+    /// Why its sheet doesn't draw it: its view was set to leave out a part it measures after it was
+    /// added. Its status stays, as what it measures is still in the model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub not_drawn: Option<String>,
     /// Its sheet shows it as it last was, or not at all: its view is out of date, or it was read from
     /// another model or record than it has now.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
