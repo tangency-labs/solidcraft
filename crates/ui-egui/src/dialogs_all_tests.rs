@@ -1189,6 +1189,27 @@ fn apply_dogbone_editor(mut h: Harness, id: u64) {
     assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
 }
 
+/// A bit diameter and gap typed as bare numbers in an inch design are inches: OK hands the
+/// command 3.175 mm and 0.254 mm, not 0.125 mm and 0.01 mm.
+#[test]
+fn dogbone_editor_reads_bare_lengths_in_the_design_unit() {
+    let (mut h, id) = resized_pocket_dogbone_editor(json!({"faces":[[20,10,10]],"diameter":3}));
+    h.app.dialog = None;
+    h.app.run("document.units", json!({"units":"in"})).unwrap();
+    h.app.edit_feature(id);
+    let Some(crate::dialogs::Kind::Dogbone(k)) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no Dogbone editor") };
+    k.diameter = "0.125".into();
+    // Minimal, the style with a gap.
+    k.style = 1;
+    k.gap = "0.01".into();
+    let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().into_iter().next().unwrap();
+    for (key, mm) in [("diameter", 3.175), ("gap", 0.254)] {
+        let text = params[key].as_str().unwrap_or_default();
+        let got = h.app.session.doc.eval(text, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+        assert!(text.ends_with(" in") && (got - mm).abs() < 1e-9, "{key}: {text} is {got} mm");
+    }
+}
+
 #[test]
 fn dogbone_editor_refills_named_edges_after_sketch_resize() {
     let (h, id) = resized_pocket_dogbone_editor(json!({"edges":[[10,5,15],[30,5,15],[30,15,15],[10,15,15]],"diameter":3}));

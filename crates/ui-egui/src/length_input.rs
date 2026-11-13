@@ -169,6 +169,14 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             lengths
         }
         D::Shell { thickness } => vec![thickness],
+        D::Dogbone(k) => {
+            // A gap not typed stands for the command's default and stays so.
+            let mut lengths = vec![&mut k.diameter];
+            if !k.gap.trim().is_empty() {
+                lengths.push(&mut k.gap);
+            }
+            lengths
+        }
         D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
