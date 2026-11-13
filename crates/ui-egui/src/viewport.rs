@@ -4710,7 +4710,8 @@ fn light_whole_body(
         return true;
     }
     // After the placements, as the copy it replaces was: a highlight without depth (Wireframe
-    // draws no faces) shows whichever lit face is drawn last, so the order is kept.
+    // draws no faces) shows whichever lit face is drawn last. Evaluated bodies are drawn before
+    // the copied triangles, so a face lit over the body stays on top (see the renderer).
     if let Some(plan) = wireframe_highlight_plan(app, b) {
         feedback.planned.push(crate::gpu::PlannedBody {
             plan,

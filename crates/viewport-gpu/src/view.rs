@@ -4380,7 +4380,10 @@ impl Renderer {
             tally.triangles(r.vertices.len() as u32, 1);
         }
         // Whole lit bodies the highlight evaluates from their plans itself (the model draws no
-        // faces of them to draw again: Wireframe), where their copies were drawn.
+        // faces of them to draw again: Wireframe). With the other whole bodies, before the
+        // copied triangles: a face lit over the body keeps its own colour, as above. A whole body
+        // still copied (no plan, or a plan too large for one batch) now comes after an evaluated
+        // one it overlaps, where the old copy order could put it before.
         for d in &h.planned {
             pass.set_pipeline(&res.tri_hl_planned);
             pass.set_vertex_buffer(0, d.mesh.vertices.slice(..));
