@@ -4377,13 +4377,17 @@ fn reference_line(sc: &mut GpuScene, a: [f32; 3], b: [f32; 3], col: [u8; 4], wid
     }
 }
 
-/// What the highlight draws of the hovered item. A face or a plane is lit the same wherever on it
-/// the pointer is, so the point under the pointer is left out: the highlight (a whole scanned
-/// mesh is one face) is not built again at every move of the pointer across it.
+/// What the highlight draws of the hovered item. A face, a plane, an edge or a sketch curve is lit
+/// the same wherever on it the pointer is, so the point under the pointer is left out: the
+/// highlight (a whole scanned mesh is one face) is not built again, and the cached scene not
+/// drawn again, at every move of the pointer across it. An edge keeps its `mid`, which picks the
+/// part of a split edge that is lit (`edge_of`); a vertex or a sketch point is its position.
 fn hover_drawn(hover: &Option<Hit>) -> String {
     match hover {
         Some(Hit::Face { body, index, .. }) => format!("face {body:?} {index}"),
         Some(Hit::Plane { name, .. }) => format!("plane {name:?}"),
+        Some(Hit::Edge { body, index, mid, .. }) => format!("edge {body:?} {index} {mid:?}"),
+        Some(Hit::SketchCurve { sketch, id, straight, .. }) => format!("curve {sketch} {id:?} {straight}"),
         other => format!("{other:?}"),
     }
 }
@@ -11550,8 +11554,15 @@ mod tests {
         assert_ne!(highlight_key(&app), key, "another face");
         app.viewport.hover = Some(Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::ZERO, point: Vec3::ZERO });
         let edge = highlight_key(&app);
+        app.viewport.hover = Some(Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::ZERO, point: Vec3::new(0.5, 0.0, 0.0) });
+        assert_eq!(highlight_key(&app), edge, "the same edge, the pointer elsewhere on it: nothing to build again");
         app.viewport.hover = Some(Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::X, point: Vec3::X });
         assert_ne!(highlight_key(&app), edge, "an edge's middle picks which part of it is lit");
+        let curve = |x: f64| Hit::SketchCurve { sketch: 1, id: "L1".into(), straight: true, point: Vec3::new(x, 0.0, 0.0) };
+        app.viewport.hover = Some(curve(0.0));
+        let on_curve = highlight_key(&app);
+        app.viewport.hover = Some(curve(3.0));
+        assert_eq!(highlight_key(&app), on_curve, "the same sketch curve, the pointer elsewhere on it");
         app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::ZERO });
         let plane = highlight_key(&app);
         app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::X });
