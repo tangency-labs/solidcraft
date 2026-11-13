@@ -405,8 +405,9 @@ fn a_revealed_row_is_scrolled_into_view_and_reported_once() {
     rig.frame(Vec::new());
     rig.state.borrow_mut().reveal(129);
     let mut revealed = Vec::new();
-    for _ in 0..6 {
-        revealed.extend(rig.frame(Vec::new()).into_iter().filter(|e| matches!(e, Event::Revealed(_))));
+    // The scroll is animated: give it well over its longest run (a third of a second).
+    for _ in 0..12 {
+        revealed.extend(rig.wait(0.1).into_iter().filter(|e| matches!(e, Event::Revealed(_))));
     }
     assert_eq!(revealed, vec![Event::Revealed(129)]);
     assert!(rig.rect(129).bottom() <= 600.0);

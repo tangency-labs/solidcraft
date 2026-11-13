@@ -439,9 +439,12 @@ impl<'s> Browser<'s> {
         self
     }
 
+    /// Draw the panel in `ui`. Its widget ids (rows, scroll offset, editor) come from `ui`'s scope
+    /// id, stable from frame to frame: a host showing two presentations in one scope gives each its
+    /// own (`ui.push_id`).
     pub fn show(self, ui: &mut egui::Ui, rows: impl FnOnce(&mut Rows<'_>)) -> Output {
         let Browser { state, style, scope, accept, header, keyboard, shrink } = self;
-        let base = ui.id().with("sc_browser");
+        let base = ui.scope_id().with("sc_browser");
         let hint = header.and_then(|h| h.search);
         if hint.is_none() {
             state.search_open = false;
@@ -632,7 +635,7 @@ impl Rows<'_> {
         let visible = out.resp.is_some();
         if let Some(rect) = out.rect {
             if visible {
-                let fold_rect = out.fold_at.map(|at| Rect::from_center_size(pos2(at.x, rect.center().y), vec2(19.0, rect.height())));
+                let fold_rect = out.fold_at.map(|at| Rect::from_center_size(pos2(at.x, rect.center().y), vec2(Tokens::get().space_16 + Tokens::get().space_3, rect.height())));
                 self.done.drawn.push(Drawn { id, key: key.to_owned(), label: label.to_owned(), rect, fold: fold_rect, open });
                 self.done.pointer_owned |= out.hovered || out.resp.as_ref().is_some_and(egui::Response::contains_pointer);
             }
@@ -830,7 +833,7 @@ impl Rows<'_> {
         } else {
             Zone::Into
         };
-        if !self.accept.is_none_or(|accept| accept(&*dragged, id, zone)) {
+        if !self.accept.is_none_or(|accept| accept(&dragged, id, zone)) {
             return;
         }
         let t = Tokens::get();
@@ -991,7 +994,7 @@ fn header_band(ui: &mut egui::Ui, header: &Header<'_>, state: &mut BrowserState)
     }
     if header.collapsible {
         let fold = Rect::from_min_max(band.min, pos2(right.max(band.left()), band.bottom()));
-        let response = ui.interact(fold, ui.id().with("sc_browser_header"), Sense::click());
+        let response = ui.interact(fold, ui.scope_id().with("sc_browser_header"), Sense::click());
         if response.hovered() || response.has_focus() {
             crate::panel_header_hover(ui.painter(), fold);
         }
