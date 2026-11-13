@@ -1574,6 +1574,9 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);
     let top = ui.cursor().top();
+    // The rows are the kit panel's (#15942), with the panel's own search off: this search is the
+    // engine's (`browser_find`, also `browser.find`), and the rows leave out what it doesn't list
+    // before they reach the panel, so a search costs only the rows it shows.
     // The card may animate all the way down to its header: the panel's scroll area shrinks to none.
     let output = present(app, ui, acts, (true, shrink_height), |app, rows, acts| {
         if crate::render_workspace::active(app) {
@@ -3396,7 +3399,7 @@ fn entry_row(
         Spec {
             key: &e.row_key,
             item: true,
-            drag: (!app.tree.search.on()).then_some(DRAG_ITEMS),
+            drag: unsearched.then_some(DRAG_ITEMS),
             drops: panel::Drops { before: true, into: false },
             accept: Some(&accept),
         },
