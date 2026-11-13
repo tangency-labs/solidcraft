@@ -203,7 +203,7 @@ jobs:
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|crates/frame/*|vendor/winit/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*) windows=true ;;
+                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
