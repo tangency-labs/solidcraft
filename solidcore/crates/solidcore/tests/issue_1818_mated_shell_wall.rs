@@ -302,7 +302,6 @@ fn write_issue_1818_operand() {
 /// SolidCraft's `core::fixes()` as `issue_1476_swept_bar_shell.rs` lists them.
 fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
-    f.fillet_retry_radius_as_first = true;
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;

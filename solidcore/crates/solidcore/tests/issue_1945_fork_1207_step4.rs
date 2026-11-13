@@ -35,7 +35,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.temporary_radius_setup_errors = true;
     k.fixes.fillet_trim_status = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.fillet_retry_radius_as_first = true;
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
