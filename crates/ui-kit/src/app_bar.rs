@@ -99,8 +99,9 @@ pub struct AppBar<'a> {
     pub file: &'a str,
     pub file_open: bool,
     /// The Plugins menu's text button after File, and whether its menu is open; `None` leaves it
-    /// out (the web build, which runs no plugins).
-    pub plugins: Option<(&'a str, bool)>,
+    /// out (the web build, which runs no plugins). Its accessible name is the third member
+    /// ("Plugins menu"), which contains the visible label but is not the Preferences page's name.
+    pub plugins: Option<(&'a str, bool, &'a str)>,
     /// The file actions after File.
     pub actions: Vec<BarButton<'a>>,
     /// How many quick-access buttons the app draws after them (one `step` each).
@@ -121,12 +122,13 @@ pub struct AppBar<'a> {
 
 /// A menu's text button (File, Plugins), its label starting 5 before `x`: its rect, and whether it
 /// was clicked while `idle`. Drawn held while its menu is `open`.
-fn text_button(ui: &mut egui::Ui, r: Rect, x: f32, label: &str, open: bool, idle: bool, salt: &str) -> (Rect, bool) {
+/// It shows `label`; `name` is its accessible name.
+fn text_button(ui: &mut egui::Ui, r: Rect, x: f32, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text);
     let rect = Rect::from_min_size(pos2(x - 13.0, r.center().y - 13.0), vec2(galley.size().x + 16.0, 26.0));
     let resp = ui.interact(rect, ui.scope_id().with(("ab", salt)), if idle { Sense::click() } else { Sense::hover() });
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, name));
     if idle && (resp.hovered() || resp.has_focus() || open) {
         ui.painter().rect_filled(rect, t.radius_sm, t.app_bar_hover);
     }
@@ -266,7 +268,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     let left = content.left();
     // The Plugins button takes its width from the room the rest of the bar had, so the bar turns
     // compact that much sooner and the document tabs keep their room.
-    let plugins_width = data.plugins.map_or(0.0, |(label, _)| {
+    let plugins_width = data.plugins.map_or(0.0, |(label, _, _)| {
         ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text).size().x + 18.0
     });
     let compact = r.right() - left < COMPACT + plugins_width;
@@ -308,7 +310,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     separator(ui, r, x, "brand", h);
     x += 16.0;
     // The File menu's text button, then the Plugins menu's.
-    let (file, clicked) = text_button(ui, r, x, data.file, data.file_open, idle, "file");
+    let (file, clicked) = text_button(ui, r, x, (data.file, data.file), data.file_open, idle, "file");
     x = file.right() + 17.0;
     for name in h.file {
         solidcraft_ui_registry::publish_handle(name, file.center());
@@ -319,8 +321,8 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     if clicked {
         actions.push(BarAction::File { rect: file });
     }
-    if let Some((label, open)) = data.plugins {
-        let (plugins, clicked) = text_button(ui, r, x - 2.0, label, open, idle, "plugins");
+    if let Some((label, open, name)) = data.plugins {
+        let (plugins, clicked) = text_button(ui, r, x - 2.0, (label, name), open, idle, "plugins");
         x = plugins.right() + 17.0;
         solidcraft_ui_registry::publish_rect(h.plugins, plugins);
         solidcraft_ui_registry::publish_handle(h.plugins, plugins.center());

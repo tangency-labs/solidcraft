@@ -64,7 +64,7 @@ impl BarRig {
             home: BarButton { id: "home", icon: "home", tip: "Home", enabled: true, narrow: false, wide_only: false },
             file: "File",
             file_open: false,
-            plugins: self.plugins.then_some(("Plugins", false)),
+            plugins: self.plugins.then_some(("Plugins", false, "Plugins menu")),
             actions: vec![button("save", true, false), button("undo", false, true)],
             quick: 2,
             help: BarButton { id: "help", icon: "help", tip: "Help", enabled: true, narrow: false, wide_only: false },

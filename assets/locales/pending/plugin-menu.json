@@ -14,7 +14,8 @@
     "ui.plugin_dialog_running": "Running…",
     "ui.plugin_dialog_unsupported": "This entry needs to be run from the agent or CLI.",
     "ui.plugin_menu_empty": "No plugins installed",
-    "ui.plugin_menu_install": "Install plugin…"
+    "ui.plugin_menu_install": "Install plugin…",
+    "ui.plugin_menu_name": "Plugins menu"
   },
   "ar": {
     "ui.plugin_dialog_choose": "اختر…",
@@ -31,7 +32,8 @@
     "ui.plugin_dialog_running": "جارٍ التشغيل…",
     "ui.plugin_dialog_unsupported": "يجب تشغيل نقطة الدخول هذه من الوكيل أو سطر الأوامر.",
     "ui.plugin_menu_empty": "لا توجد إضافات مثبتة",
-    "ui.plugin_menu_install": "تثبيت إضافة…"
+    "ui.plugin_menu_install": "تثبيت إضافة…",
+    "ui.plugin_menu_name": "قائمة الإضافات"
   },
   "de": {
     "ui.plugin_dialog_choose": "Auswählen…",
@@ -48,7 +50,8 @@
     "ui.plugin_dialog_running": "Wird ausgeführt…",
     "ui.plugin_dialog_unsupported": "Dieser Eintrag muss über den Agenten oder die CLI ausgeführt werden.",
     "ui.plugin_menu_empty": "Keine Plugins installiert",
-    "ui.plugin_menu_install": "Plugin installieren…"
+    "ui.plugin_menu_install": "Plugin installieren…",
+    "ui.plugin_menu_name": "Plugin-Menü"
   },
   "he": {
     "ui.plugin_dialog_choose": "בחירה…",
@@ -65,7 +68,8 @@
     "ui.plugin_dialog_running": "מופעל…",
     "ui.plugin_dialog_unsupported": "יש להפעיל את נקודת הכניסה הזו מהסוכן או משורת הפקודה.",
     "ui.plugin_menu_empty": "לא מותקנים תוספים",
-    "ui.plugin_menu_install": "התקנת תוסף…"
+    "ui.plugin_menu_install": "התקנת תוסף…",
+    "ui.plugin_menu_name": "תפריט התוספים"
   },
   "ja": {
     "ui.plugin_dialog_choose": "選択…",
@@ -82,7 +86,8 @@
     "ui.plugin_dialog_running": "実行中…",
     "ui.plugin_dialog_unsupported": "このエントリはエージェントまたは CLI から実行する必要があります。",
     "ui.plugin_menu_empty": "プラグインがインストールされていません",
-    "ui.plugin_menu_install": "プラグインをインストール…"
+    "ui.plugin_menu_install": "プラグインをインストール…",
+    "ui.plugin_menu_name": "プラグインメニュー"
   },
   "ko": {
     "ui.plugin_dialog_choose": "선택…",
@@ -99,7 +104,8 @@
     "ui.plugin_dialog_running": "실행 중…",
     "ui.plugin_dialog_unsupported": "이 항목은 에이전트나 CLI에서 실행해야 합니다.",
     "ui.plugin_menu_empty": "설치된 플러그인 없음",
-    "ui.plugin_menu_install": "플러그인 설치…"
+    "ui.plugin_menu_install": "플러그인 설치…",
+    "ui.plugin_menu_name": "플러그인 메뉴"
   },
   "vi": {
     "ui.plugin_dialog_choose": "Chọn…",
@@ -116,7 +122,8 @@
     "ui.plugin_dialog_running": "Đang chạy…",
     "ui.plugin_dialog_unsupported": "Mục này cần được chạy từ tác tử hoặc CLI.",
     "ui.plugin_menu_empty": "Chưa cài plugin nào",
-    "ui.plugin_menu_install": "Cài plugin…"
+    "ui.plugin_menu_install": "Cài plugin…",
+    "ui.plugin_menu_name": "Menu plugin"
   },
   "zh": {
     "ui.plugin_dialog_choose": "选择…",
@@ -133,6 +140,7 @@
     "ui.plugin_dialog_running": "正在运行…",
     "ui.plugin_dialog_unsupported": "此入口需要通过智能体或命令行运行。",
     "ui.plugin_menu_empty": "未安装插件",
-    "ui.plugin_menu_install": "安装插件…"
+    "ui.plugin_menu_install": "安装插件…",
+    "ui.plugin_menu_name": "插件菜单"
   }
 }
