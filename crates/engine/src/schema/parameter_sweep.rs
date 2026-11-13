@@ -1,6 +1,6 @@
 //! Contract and result types for `inspect.parameter_sweep` in `cmd/parameter_sweep.rs` (#10977).
 
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
@@ -12,16 +12,89 @@ use super::types::{not_blank_pattern, present};
 
 /// Values swept by one command, at most.
 pub const MAX_VALUES: usize = 200;
+pub const MAX_VARIANTS: usize = 12;
+pub const MAX_VARIANT_PARAMETERS: usize = 16;
+
+/// Compare independent sets of parameter values without editing the design.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterVariantsParams {
+    /// Candidates to evaluate, in order, each starting from the open design.
+    #[schemars(length(min = 1, max = 12))]
+    pub variants: Vec<ParameterVariant>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterVariant {
+    /// A unique nonblank label, at most 80 bytes.
+    #[schemars(length(min = 1, max = 80))]
+    pub name: String,
+    /// One to 16 existing parameters. Expressions are evaluated together.
+    #[schemars(schema_with = "variant_set_schema")]
+    pub set: BTreeMap<String, VariantValue>,
+}
+
+fn variant_set_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "object",
+        "minProperties": 1,
+        "maxProperties": MAX_VARIANT_PARAMETERS,
+        "additionalProperties": generator.subschema_for::<VariantValue>(),
+    })
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum VariantValue {
+    Number(f64),
+    /// A nonblank expression, at most 1000 bytes.
+    Expression(#[schemars(length(min = 1, max = 1000))] String),
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ParameterVariants {
+    pub baseline: VariantMetrics,
+    pub results: Vec<VariantResult>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct VariantMetrics {
+    pub bodies: u64,
+    /// Open bodies are not included in volume or mass.
+    pub open_bodies_skipped: u64,
+    /// Bodies the measurement could not evaluate are not included in the totals.
+    pub unmeasured_bodies: usize,
+    pub volume_mm3: f64,
+    pub mass_g: f64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct VariantResult {
+    pub name: String,
+    /// The time spent rebuilding, in ms.
+    pub ms: f64,
+    /// Whether the candidate rebuilt, was measurable and introduced no regressions.
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<SweepChanges>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<VariantMetrics>,
+}
 
 /// Rebuild the design in a copy at each value of a parameter and report what fails, turns over
 /// or loses its reference there, against the design as it is. The design itself isn't changed.
 /// Give `values`, or `from` and `to`.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[schemars(deny_unknown_fields, transform = parameter_required)]
 pub struct ParameterSweepParams {
     /// The parameter, by name, as `parameters.list` lists it.
+    // Optional in the type, required in the schema (`parameter_required`): left out, the
+    // handler refuses the call with its own message. Text only, as `parameter_name` reads it.
     #[serde(default, deserialize_with = "parameter_name")]
-    #[schemars(required, transform = drop_default)]
+    #[schemars(with = "String", transform = drop_default)]
     pub parameter: Option<String>,
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SweepValues")]
@@ -43,6 +116,22 @@ pub struct ParameterSweepParams {
 /// `serde(default)` makes schemars publish `"default": null` on a required string; drop it.
 fn drop_default(schema: &mut Schema) {
     schema.remove("default");
+}
+
+/// Puts `parameter` in the schema's `required` list. The type has it optional so that the
+/// handler, not the check, refuses a call without it, with its own message; a field's
+/// `#[schemars(required)]` doesn't do this for a key with `serde(default)`.
+fn parameter_required(schema: &mut Schema) {
+    match schema.get_mut("required") {
+        Some(Value::Array(required)) => {
+            if !required.iter().any(|k| k == "parameter") {
+                required.push("parameter".into());
+            }
+        }
+        _ => {
+            schema.insert("required".into(), Value::Array(vec!["parameter".into()]));
+        }
+    }
 }
 
 /// The parameter's name, with the handler's message for anything that isn't text.

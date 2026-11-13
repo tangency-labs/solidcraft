@@ -6,8 +6,8 @@ use solidcraft_engine::doc::{DocError, Document, expr};
 use std::collections::BTreeMap;
 
 use crate::dialogs::{Dialog, Kind};
-use crate::i18n::tr;
 use crate::ui_kit::{self, Button, Text};
+use solidcraft_ui_text::tr;
 
 const MAX_PRESETS: usize = 64;
 const MAX_NAME: usize = 96;
@@ -64,6 +64,19 @@ fn named_runout(text: &str) -> bool {
     matches!(text, "standard" | "short")
 }
 
+/// A clearance hole for a bolt (the Clearance tap type): the size and fit the command takes,
+/// the diameter only when it is not the table's for them, and a counterbore's cap screw head
+/// (the command's `head`) when it is sized to one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct Clearance {
+    size: String,
+    fit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    diameter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    head: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Preset {
     name: String,
@@ -82,6 +95,9 @@ struct Preset {
     thread: String,
     #[serde(default)]
     thread_options: ThreadOptions,
+    /// Older presets have none: a simple or tapped hole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    clearance: Option<Clearance>,
 }
 
 fn valid_text(text: &str, max: usize) -> bool {
@@ -93,6 +109,9 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Preset {
+    /// The shape of a saved preset: a valid name, bounded texts, and a value for every field
+    /// the style, extent and tap type use (a clearance preset names a size and fit the table
+    /// has, and a thread never).
     fn validate(&self) -> Result<(), &'static str> {
         if !valid_name(&self.name) {
             return Err("hole_presets.invalid_name");
@@ -102,7 +121,16 @@ impl Preset {
         if expressions.into_iter().any(|text| !valid_text(text, MAX_EXPRESSION)) {
             return Err("hole_presets.invalid_parameters");
         }
-        let mut required = if self.tapped { Vec::new() } else { vec![&self.diameter] };
+        let mut required = if self.tapped || self.clearance.is_some() { Vec::new() } else { vec![&self.diameter] };
+        if let Some(clearance) = &self.clearance
+            && (self.tapped
+                || !crate::dialogs_hole::CLEARANCE_FITS.iter().any(|f| f.1 == clearance.fit)
+                || solidcraft_engine::cmd::clearance_diameter(&clearance.size, &clearance.fit).is_none()
+                || clearance.diameter.as_ref().is_some_and(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION))
+                || clearance.head.as_deref().is_some_and(|head| !crate::dialogs_hole::SCREW_HEADS.iter().any(|h| h.1 == Some(head))))
+        {
+            return Err("hole_presets.invalid_parameters");
+        }
         if self.extent == Extent::Distance {
             required.push(&self.depth);
         }
@@ -143,6 +171,9 @@ impl Preset {
         Ok(())
     }
 
+    /// The open Hole dialog as a preset: lengths made portable across designs (a bare number
+    /// takes this design's unit), the thread or clearance options as the command takes them,
+    /// and no geometry references.
     fn capture(d: &Dialog, name: &str, doc: &Document) -> Result<Self, &'static str> {
         let Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &d.kind else {
             return Err("hole_presets.invalid_parameters");
@@ -193,7 +224,7 @@ impl Preset {
             } else {
                 Extent::Distance
             },
-            diameter: portable_length(diameter, !opts.tapped)?,
+            diameter: portable_length(diameter, !opts.tapped && !opts.clearance)?,
             depth: portable_length(depth, !opts.all && !d.inputs.iter().any(|input| input.label == "To Object"))?,
             cb_diameter: portable_length(cb_diameter, *kind == 1)?,
             cb_depth: portable_length(cb_depth, *kind == 1)?,
@@ -220,6 +251,16 @@ impl Preset {
             } else {
                 ThreadOptions::default()
             },
+            clearance: if opts.clearance {
+                Some(Clearance {
+                    size: opts.clearance_size.trim().into(),
+                    fit: crate::dialogs_hole::CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| f.1).into(),
+                    diameter: opts.clearance_diameter.as_deref().filter(|d| !d.trim().is_empty()).map(|d| portable_length(d, true)).transpose()?,
+                    head: crate::dialogs_hole::SCREW_HEADS.get(opts.head).and_then(|h| h.1).map(Into::into),
+                })
+            } else {
+                None
+            },
         };
         preset.validate()?;
         Ok(preset)
@@ -245,6 +286,9 @@ impl Preset {
         normalized(self) == normalized(other)
     }
 
+    /// Whether the values a preset would run with evaluate in `doc`: only the fields its
+    /// style, extent and tap type use, so an unfinished edit in a hidden field (the Simple
+    /// diameter behind a clearance or tapped hole) does not block saving.
     fn validate_active(&self, doc: &Document) -> Result<(), &'static str> {
         let length = |text: &str| doc.eval(text, expr::Kind::Length).is_ok_and(|v| v.is_finite() && v > 0.0);
         let angle = |text: &str| doc.eval(text, expr::Kind::Angle).is_ok_and(|v| v.is_finite() && v > 0.0 && v < std::f64::consts::PI);
@@ -254,7 +298,8 @@ impl Preset {
             Style::Simple | Style::Drilled => true,
         };
         if !style_valid
-            || (!self.tapped && !length(&self.diameter))
+            || (!self.tapped && self.clearance.is_none() && !length(&self.diameter))
+            || self.clearance.as_ref().and_then(|c| c.diameter.as_deref()).is_some_and(|text| !length(text))
             || (self.extent == Extent::Distance && !length(&self.depth))
             || (self.extent != Extent::All && (self.angled_bottom || self.style == Style::Drilled) && !angle(&self.tip_angle))
             || (self.tapped && solidcraft_engine::doc::parse_tapped_thread(&self.thread).is_none())
@@ -270,6 +315,9 @@ impl Preset {
         Ok(())
     }
 
+    /// Fills the open Hole dialog from the preset: every size, the style, extent, tap type and
+    /// thread or clearance options; the dialog's picks stay. A preset with options this build
+    /// does not know is refused rather than recalled in part.
     fn recall(&self, d: &mut Dialog) -> Result<(), &'static str> {
         self.validate()?;
         if !self.thread_options.unknown.is_empty() {
@@ -296,6 +344,18 @@ impl Preset {
         opts.tapped = self.tapped;
         opts.thread.clone_from(&self.thread);
         opts.custom_thread = None;
+        opts.clearance = self.clearance.is_some();
+        opts.head = 0;
+        opts.head_filled = None;
+        if let Some(clearance) = &self.clearance {
+            opts.clearance_size.clone_from(&clearance.size);
+            opts.clearance_fit =
+                crate::dialogs_hole::CLEARANCE_FITS.iter().position(|f| f.1 == clearance.fit).unwrap_or(crate::dialogs_hole::NORMAL_FIT);
+            opts.clearance_diameter.clone_from(&clearance.diameter);
+            opts.head = crate::dialogs_hole::SCREW_HEADS.iter().position(|h| h.1.is_some() && h.1 == clearance.head.as_deref()).unwrap_or(0);
+            // The preset's own counterbore sizes stay: they count as filled for this head and size.
+            opts.head_filled = (opts.head != 0).then(|| (opts.head, opts.clearance_size.trim().to_string()));
+        }
         opts.thread_full_depth = self.thread_options.full_length;
         opts.hand = if self.thread_options.handedness == "left" {
             solidcraft_engine::doc::thread_forms::ThreadHand::Left
@@ -422,7 +482,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
     if !matches!(d.kind, Kind::Hole { .. }) {
         return;
     }
-    let id = egui::Id::new("personal_hole_presets_panel");
+    let id = egui::Id::unique("personal_hole_presets_panel");
     let mut state = if reset { PanelState::default() } else { ui.ctx().data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default() };
     ui_kit::section(ui, "personal_hole_presets", "hole_presets.title", false, |ui| {
         ui.label(tr("hole_presets.scope"));
@@ -454,7 +514,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
                     }
                 });
                 response.widget_info(|| {
-                    let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), tr("hole_presets.preset"));
+                    let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr("hole_presets.preset"));
                     info.current_text_value = Some(display.clone());
                     info
                 });
@@ -521,7 +581,9 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
 /// when Escape has already blurred its text field. Stale state cannot block other tools.
 pub(crate) fn name_prompt_open(ctx: &egui::Context, dialog: Option<&Dialog>) -> bool {
     dialog.is_some_and(|d| matches!(&d.kind, Kind::Hole { .. }))
-        && ctx.data_mut(|data| data.get_temp::<PanelState>(egui::Id::new("personal_hole_presets_panel"))).is_some_and(|state| state.prompt.is_some())
+        && ctx
+            .data_mut(|data| data.get_temp::<PanelState>(egui::Id::unique("personal_hole_presets_panel")))
+            .is_some_and(|state| state.prompt.is_some())
 }
 
 /// Draw after the Hole card so the modal owns input and its footer handles. `true` also
@@ -530,12 +592,12 @@ pub(crate) fn name_prompt(ctx: &egui::Context, d: &mut Dialog, library: &mut Lib
     if !matches!(d.kind, Kind::Hole { .. }) {
         return false;
     }
-    let id = egui::Id::new("personal_hole_presets_panel");
+    let id = egui::Id::unique("personal_hole_presets_panel");
     let mut state = ctx.data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default();
     let Some(mut prompt) = state.prompt.take() else { return false };
     let title = tr(if prompt.renaming { "hole_presets.rename" } else { "hole_presets.save" });
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("personal_hole_preset_name"), "save", title)
-        .actions(if prompt.renaming { tr("hole_presets.rename") } else { crate::i18n::tr_label("Save") }, "Cancel", None)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("personal_hole_preset_name"), "save", title)
+        .actions(if prompt.renaming { tr("hole_presets.rename") } else { solidcraft_ui_text::tr_label("Save") }, "Cancel", None)
         .show(ctx, true, |ui| {
             ui_kit::row(ui, "hole_presets.name", |ui| ui_kit::focused_text_field(ui, &mut prompt.name, tr("hole_presets.name_hint")));
             // Retain over-limit names for a clear validation error, but bound UI storage too.
@@ -588,6 +650,91 @@ mod tests {
         let Kind::Hole { opts, .. } = &dialog.kind else { panic!("expected Hole") };
         assert_eq!(*opts.refs, *references);
         assert_eq!(dialog.inputs, inputs);
+    }
+
+    /// A clearance preset keeps the bolt size, the fit and a diameter typed over the table's;
+    /// saved, read back and recalled, the dialog is a clearance hole again. An older preset
+    /// without the field is a simple hole, and a clearance preset with a size the table lacks
+    /// is refused.
+    #[test]
+    fn hole_presets_round_trip_a_clearance_hole() {
+        let harness = crate::scenario::Harness::new();
+        let doc = Document::default();
+        for (size, fit, typed) in [("M4", 1, None), ("M10", 0, Some("11 mm")), ("M1.6", 2, None)] {
+            let mut dialog = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+            let Kind::Hole { opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+            opts.clearance = true;
+            opts.clearance_size = size.into();
+            opts.clearance_fit = fit;
+            opts.clearance_diameter = typed.map(str::to_string);
+            let preset = Preset::capture(&dialog, "Bolt", &doc).unwrap();
+            let saved = serde_json::to_value(&preset).unwrap();
+            assert_eq!(saved["clearance"]["size"], size, "{saved}");
+            assert_eq!(saved["clearance"]["fit"], crate::dialogs_hole::CLEARANCE_FITS[fit].1, "{saved}");
+            assert_eq!(saved["clearance"].get("diameter").and_then(serde_json::Value::as_str), typed, "{saved}");
+            let read: Preset = serde_json::from_value(saved).unwrap();
+            let mut fresh = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+            read.recall(&mut fresh).unwrap();
+            let Kind::Hole { opts, .. } = &fresh.kind else { panic!("expected Hole") };
+            assert!(opts.clearance && !opts.tapped);
+            assert_eq!((opts.clearance_size.as_str(), opts.clearance_fit, opts.clearance_diameter.as_deref()), (size, fit, typed));
+        }
+        // What a clearance preset runs with is its size, fit and override, not the Simple
+        // diameter hidden behind it: an unfinished edit there does not block saving, while an
+        // override that is no length does.
+        let mut dialog = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+        let Kind::Hole { diameter, opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+        *diameter = "4.".into();
+        opts.clearance = true;
+        let hidden = Preset::capture(&dialog, "Hidden", &doc).unwrap();
+        assert_eq!(hidden.validate_active(&doc), Ok(()), "the hidden diameter is not checked");
+        let Kind::Hole { opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+        opts.clearance_diameter = Some("0 mm".into());
+        let zero = Preset::capture(&dialog, "Zero", &doc).unwrap();
+        assert_eq!(zero.validate_active(&doc), Err("hole_presets.invalid_parameters"), "a zero override is refused");
+        let mut older =
+            serde_json::to_value(Preset::capture(&Dialog::for_command(&harness.app, "solid.hole").unwrap(), "Plain", &doc).unwrap()).unwrap();
+        assert!(older.get("clearance").is_none(), "a simple hole saves no clearance: {older}");
+        older["clearance"] = serde_json::json!({"size": "M7", "fit": "normal"});
+        let bad: Preset = serde_json::from_value(older).unwrap();
+        assert_eq!(bad.recall(&mut Dialog::for_command(&harness.app, "solid.hole").unwrap()), Err("hole_presets.invalid_parameters"));
+    }
+
+    /// A clearance counterbore sized to a cap screw's head keeps the head (the command's
+    /// `head`) and its counterbore sizes: recalled, the head comes back and the sizes are not
+    /// filled again over the preset's. A head that is not in the list is refused, and a preset
+    /// without a clearance recalls no head.
+    #[test]
+    fn hole_presets_round_trip_a_clearance_counterbore_head() {
+        let harness = crate::scenario::Harness::new();
+        let doc = Document::default();
+        let mut dialog = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+        let Kind::Hole { kind, cb_diameter, cb_depth, opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+        *kind = 1;
+        *cb_diameter = "8 mm".into();
+        *cb_depth = "6 mm".into();
+        opts.clearance = true;
+        opts.clearance_size = "M4".into();
+        opts.head = 2;
+        let saved = serde_json::to_value(Preset::capture(&dialog, "Button", &doc).unwrap()).unwrap();
+        assert_eq!(saved["clearance"]["head"], "ISO 7380-1", "{saved}");
+        let read: Preset = serde_json::from_value(saved.clone()).unwrap();
+        let mut fresh = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+        read.recall(&mut fresh).unwrap();
+        let Kind::Hole { cb_depth, opts, .. } = &fresh.kind else { panic!("expected Hole") };
+        assert_eq!((opts.head, cb_depth.as_str()), (2, "6 mm"));
+        assert_eq!(opts.head_filled, Some((2, "M4".to_string())), "the preset's sizes count as filled");
+        let mut odd = saved;
+        odd["clearance"]["head"] = serde_json::json!("DIN 912");
+        let bad: Preset = serde_json::from_value(odd).unwrap();
+        assert_eq!(bad.recall(&mut Dialog::for_command(&harness.app, "solid.hole").unwrap()), Err("hole_presets.invalid_parameters"));
+        let plain = Preset::capture(&Dialog::for_command(&harness.app, "solid.hole").unwrap(), "Plain", &doc).unwrap();
+        let mut headed = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+        let Kind::Hole { opts, .. } = &mut headed.kind else { panic!("expected Hole") };
+        opts.head = 1;
+        plain.recall(&mut headed).unwrap();
+        let Kind::Hole { opts, .. } = &headed.kind else { panic!("expected Hole") };
+        assert_eq!((opts.head, opts.head_filled.as_ref()), (0, None));
     }
 
     /// A tapped preset keeps the thread's form and options: an Rc and an NPT size, modelled,

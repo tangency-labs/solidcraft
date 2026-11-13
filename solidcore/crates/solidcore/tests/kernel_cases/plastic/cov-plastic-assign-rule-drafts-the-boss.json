@@ -1,0 +1,167 @@
+{
+  "area": "plastic",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "cov-plastic-assign-rule-drafts-the-boss",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        60,
+        15
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the boss takes the draft of its body's rule: a cone frustum r 5 to 5 - 12 tan 3 deg = 4.371106649, 12 high, less its straight hole r 2, 12 deep (inside the top's radius). V = 60*60*3 + (pi*12/3)(5^2 + 5 r1 + r1^2) - pi*2^2*12 = 11478.107830",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 11478.107830371639,
+    "what": "plastic.assign_rule gives the plate a 3 degree rule; a boss on it with no draft of its own takes it"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 10,
+      "vertices": 12
+    }
+  },
+  "records": "cov-plastic-assign-rule-drafts-the-boss.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8406.048924771827,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 10,
+      "vertices": 12,
+      "volume_mm3": 11478.107830398763
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "plastic.assign_rule gives the plate a 3 degree rule; a boss on it with no draft of its own takes it",
+  "why_not": []
+}

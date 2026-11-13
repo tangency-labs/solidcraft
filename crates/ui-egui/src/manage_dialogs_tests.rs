@@ -2,11 +2,11 @@
 use crate::{
     dialogs,
     scenario::{self, Harness},
-    shell::LayoutMode,
-    theme::Tokens,
+    ui_kit::LayoutMode,
 };
 use serde_json::json;
 use solidcraft_engine::Sel;
+use solidcraft_theme::Tokens;
 
 fn fixture() -> Harness {
     let mut h = Harness::new();
@@ -379,7 +379,7 @@ fn appearance_card_keeps_the_approved_width_with_no_preselection() {
     h.app.start("appearance.assign");
     h.frames(4);
     let header = scenario::rect_of("dialog:header").unwrap();
-    let card = h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dialog", "APPEARANCE")))).unwrap();
+    let card = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "APPEARANCE")))).unwrap();
     let t = Tokens::get();
     let approved = t.form_card_width + t.form_label_width + t.space_6;
     assert!((card.width() - approved).abs() <= t.space_2, "card {card:?}, header {header:?}");
@@ -418,7 +418,7 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.step(&json!({"text":"missing_parameter"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(scenario::count_of("param:new:valid"), Some(0.0));
-    assert!(h.app.params.as_ref().unwrap().error.is_some());
+    assert!(h.app.params.as_ref().unwrap().banner().is_some());
     assert_eq!(h.app.session.doc.params.iter().filter(|p| !p.model).count(), 2);
     h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
     assert!(!h.app.params.as_ref().unwrap().adding, "an abandoned nameless draft disappears");
@@ -801,6 +801,53 @@ fn physical_material_discard_and_invalid_save_leave_document_and_history_unchang
     assert_eq!(revision, h.app.session.revision);
 }
 
+#[test]
+fn physical_material_refused_save_keeps_its_message_until_the_draft_changes() {
+    let mut h = fixture();
+    h.app.start("material.assign");
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"material:new"}})).unwrap();
+    physical_type(&mut h, "name", "Steel");
+    physical_type(&mut h, "density", "7.8");
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing(), "a built-in name is refused");
+    let refused = physical_editor(&mut h).error().map(str::to_owned);
+    assert!(refused.as_deref().is_some_and(|e| e.contains("Steel")), "{refused:?}");
+    h.frames(3);
+    assert_eq!(physical_editor(&mut h).error().map(str::to_owned), refused, "the message stays while the draft does");
+    // Renaming the draft takes the refusal away before Save is clicked again.
+    physical_type(&mut h, "name", "Steel 2");
+    h.frames(2);
+    assert_eq!(physical_editor(&mut h).error(), None, "the message was about the name Steel, which is gone");
+    // The message is about the command Save ran (#641): the same draft again is refused again.
+    physical_type(&mut h, "name", "Steel");
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing());
+    assert_eq!(physical_editor(&mut h).error().map(str::to_owned), refused, "the same reason again");
+}
+
+/// A refusal that depends on the design (the name is taken) goes once the design changes under
+/// the same draft (#641): after an undo, Save would succeed.
+#[test]
+fn physical_material_refused_save_goes_when_the_design_changes() {
+    let mut h = fixture();
+    h.app.run("material.create", json!({"name":"Alu","density_g_cm3":2.7})).unwrap();
+    h.app.start("material.assign");
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"material:new"}})).unwrap();
+    physical_type(&mut h, "name", "Alu");
+    physical_type(&mut h, "density", "2.7");
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing(), "a taken name is refused");
+    let refused = physical_editor(&mut h).error().map(str::to_owned);
+    assert!(refused.as_deref().is_some_and(|e| e.contains("Alu")), "{refused:?}");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    assert!(physical_editor(&mut h).editing(), "the draft stays open");
+    assert_eq!(physical_editor(&mut h).error(), None, "the design no longer has an Alu, so the message is stale");
+}
+
 fn complete_physical_card() -> serde_json::Value {
     let mut data = vec![
         json!({"kind":"density","kg_m3":750.1234567890123}),
@@ -926,4 +973,74 @@ fn physical_material_draft_rejects_invalid_constants_and_stale_edits_atomically(
     assert!(editor.save(&mut h.app, &mut 0).is_err());
     assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
     assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+}
+
+fn configuration_cells() -> Harness {
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name":"height","expression":"5 mm"})).unwrap();
+    h.app.run("config.configure", json!({"params":["width","height"]})).unwrap();
+    for name in ["Small", "Large"] {
+        h.app.run("config.row", json!({"name":name})).unwrap();
+    }
+    h.app.start("config.table");
+    h.frames(4);
+    h
+}
+
+fn config_cell(h: &Harness, row: &str, column: usize) -> String {
+    h.app.session.doc.configs.rows.iter().find(|r| r.name == row).and_then(|r| r.cells.get(column).cloned()).unwrap_or_default()
+}
+
+/// Enter commits a configuration cell and moves down its column with the text selected,
+/// Shift+Enter moves up, the last row's Enter only commits, and arrows stay with the caret.
+#[test]
+fn configuration_enter_moves_down_the_column_and_shift_enter_up() {
+    let mut h = configuration_cells();
+    let rows: Vec<String> = h.app.session.doc.configs.rows.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    let (first, second, third) = (&rows[0], &rows[1], &rows[2]);
+    h.run(&json!([{"click":{"handle":format!("config:cell:{first}:param:width")}}, {"key":"A","cmd":true}, {"text":"11 mm"}, {"key":"Enter"}]))
+        .unwrap();
+    h.frames(2);
+    assert_eq!(config_cell(&h, first, 0), "11 mm", "Enter commits the cell");
+    h.run(&json!([{"text":"12 mm"}, {"key":"ArrowDown"}, {"key":"ArrowUp"}, {"key":"Enter"}])).unwrap();
+    h.frames(2);
+    assert_eq!(config_cell(&h, second, 0), "12 mm", "the cell below took the keyboard with its text selected; arrows stayed in it");
+    h.run(&json!([{"text":"13 mm"}, {"key":"Enter"}])).unwrap();
+    h.frames(2);
+    assert_eq!(config_cell(&h, third, 0), "13 mm");
+    assert!(h.app.dialog.is_some(), "Enter leaves the table open");
+    h.run(&json!([{"click":{"handle":format!("config:cell:{third}:param:width")}}, {"key":"A","cmd":true}, {"text":"14 mm"}, {"key":"Enter","shift":true}])).unwrap();
+    h.frames(2);
+    assert_eq!(config_cell(&h, third, 0), "14 mm", "Shift+Enter commits");
+    h.run(&json!([{"text":"15 mm"}, {"key":"Enter"}])).unwrap();
+    h.frames(2);
+    assert_eq!(config_cell(&h, second, 0), "15 mm", "Shift+Enter moved up the column");
+}
+
+/// Tab and Shift+Tab move along a configuration row and wrap to the next or previous row, each
+/// cell's text selected.
+#[test]
+fn configuration_tab_moves_along_the_row_and_wraps() {
+    let mut h = configuration_cells();
+    let rows: Vec<String> = h.app.session.doc.configs.rows.iter().map(|r| r.name.clone()).collect();
+    let (first, second) = (&rows[0], &rows[1]);
+    h.run(&json!([{"click":{"handle":format!("config:cell:{first}:param:width")}}, {"frames":2}, {"key":"Tab"}, {"frames":2}, {"text":"6 mm"}, {"frames":1}, {"key":"Tab"}, {"frames":2}])).unwrap();
+    assert_eq!(config_cell(&h, first, 1), "6 mm", "Tab went to the row's next cell with its text selected");
+    h.run(&json!([{"text":"20 mm"}, {"frames":1}, {"key":"Tab","shift":true}, {"frames":2}])).unwrap();
+    assert_eq!(config_cell(&h, second, 0), "20 mm", "Tab at the row's end wrapped to the next row");
+    h.run(&json!([{"text":"7 mm"}, {"frames":1}, {"key":"Enter"}, {"frames":2}])).unwrap();
+    assert_eq!(config_cell(&h, first, 1), "7 mm", "Shift+Tab wrapped back to the end of the row above");
+}
+
+/// Escape in a configuration cell leaves the saved value alone.
+#[test]
+fn configuration_escape_discards_a_cell_edit() {
+    let mut h = configuration_cells();
+    let first = h.app.session.doc.configs.rows[0].name.clone();
+    let before = config_cell(&h, &first, 0);
+    h.run(&json!([{"click":{"handle":format!("config:cell:{first}:param:width")}}, {"key":"A","cmd":true}, {"text":"99 mm"}, {"key":"Escape"}]))
+        .unwrap();
+    h.frames(3);
+    assert_eq!(config_cell(&h, &first, 0), before, "Escape discards");
 }

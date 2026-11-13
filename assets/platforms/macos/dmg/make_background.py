@@ -23,7 +23,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).resolve().parent
-FONTS = HERE.parents[2] / "fonts"
+FONTS = HERE.parents[3] / "crates/look/fonts"
 LAYOUT = json.loads((HERE / "layout.json").read_text())
 W, H = LAYOUT["window"]
 ICON = LAYOUT["icon_size"]

@@ -351,7 +351,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
     let view = Tokens::view();
     let to_screen = |p: [f64; 2]| image.min + vec2(p[0] as f32 * step, p[1] as f32 * step);
     let painter = ui.painter_at(outer);
-    let shared: Shared = ui.ctx().data_mut(|d| d.get_temp_mut_or_default::<Shared>(egui::Id::new("body_gizmo_cache")).clone());
+    let shared: Shared = ui.ctx().data_mut(|d| d.get_temp_mut_or_default::<Shared>(egui::Id::unique("body_gizmo_cache")).clone());
     let (hovered, handles) = shared
         .lock()
         .ok()
@@ -430,7 +430,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::render::{StandardView, UpAxis};
+    use solidcraft_viewport::{StandardView, UpAxis};
 
     fn boxed() -> crate::scenario::Harness {
         let mut h = crate::scenario::Harness::new();

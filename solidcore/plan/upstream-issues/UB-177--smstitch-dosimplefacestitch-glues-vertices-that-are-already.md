@@ -1,0 +1,14 @@
+#### UB-177. `SmStitch::DoSimpleFaceStitch` glues vertices that are already freed [PSIRT]
+- **Severity:** Wrong result
+- **Area:** Healing
+- **Location:** `source/SMLib/src/SmStitch.cpp:680`-`681` (`sKVertices.Add` / `sDVertices.Add` across all face pairs), `:785` (`pBrepToStitch->RemoveFaces(cpFacesToDelete)`), then the glue loop at `:840`-`916` (`pV1->IsLaminaVertex()`, `SelectTopologyToKeep`, `GlueVertices` / `SqueezeEdge`).
+- **What happens:** The vertex pair lists are built with plain `Add` over every face pair, and the pair validation is per pair. Once it passes:
+  - `RemoveFaces` deletes every vertex used only by the delete faces, and the glue loop then reads those freed `sDVertices` (use after free).
+  - A face repeated in the delete list is freed twice.
+  - A vertex that appears in more than one list entry is glued (the other vertex deleted by `GlueVertices` / `SqueezeEdge`) at its first entry and read again at the next (use after free). Nothing checks that a vertex is still alive. That happens for a vertex shared by two keep faces or by two delete faces, for a keep face repeated in the keep list, and for a vertex shared by a keep and a delete face (which pairs with itself, `GlueVertices(v, v)`).
+  - Upstream's own comment calls the routine "never called" and its scenario (laminar copies of manifold faces) "questionable".
+- **Trigger:** delete faces whose vertices no other face uses (any lamina face pair); a repeated delete face; or face lists whose faces share a vertex across pairs. The last case needs no bad argument: two distinct keep faces that are adjacent in a B-rep read from a file, stitched onto the two coincident faces of another shell (the laminar-copy scenario the routine is written for), put their common vertices in two entries.
+- **How found:** source review while porting `heal.stitch_p1` (PR #196); the cross-pair repeat was found by the #196 delta review.
+- **Confirmed:** no (source inspection only; the shim never runs the undefined part).
+- **Severity:** crash/UB. **[PSIRT]:** the cross-pair repeat is reachable from geometry read from a file with well-formed `SmApiSimpleFaceStitch` face lists.
+- **Rust port:** `heal::stitch::p1::Stitch::do_simple_face_stitch` refuses those inputs with `deref` (`InvalidInput`, the null-dereference guard) before removing any face: a repeated delete face, a vertex in more than one entry of the two vertex lists, or a delete vertex no other face uses. The difftest shim refuses exactly the same inputs after a read-only copy of the validation. A repeated vertex whose first entry would free nothing (squeeze skipped, a short manifold common edge, the `m_bMakingManifoldSolid` non-lamina skip, or the loop ending first with upstream's defined `SM_ERR`) is refused too, a deliberate over-refusal.

@@ -13,6 +13,7 @@ use solidcraft_io::Format;
 use super::easyprint::{Exported, export_bodies};
 use super::export_laid_to;
 use crate::params::bad;
+use crate::schema::save_mesh::SlicerDelivery;
 use crate::slicers::{self, Slicer, TargetKind};
 use crate::{EngineError, Result, Session};
 
@@ -120,18 +121,24 @@ fn deliver_via(
     out: &mut Value,
 ) {
     let Some(obj) = out.as_object_mut() else { return };
+    // What happened, as the typed value the reply's schema describes; only its one key is set.
+    let mut say = |delivery: SlicerDelivery| {
+        if let Ok(Value::Object(keys)) = serde_json::to_value(delivery) {
+            obj.extend(keys);
+        }
+    };
     // A target that drops a file given at a cold start is started alone, and sent the file once it is ready.
     if wait != Wait::No && target.waits_for_ready().is_some() && target.ready_via(busctl, slicers::PROBE_LIMIT) == Some(false) {
         if let Err(e) = target.start(single_instance) {
-            obj.insert("slicer_error".into(), json!(e));
+            say(SlicerDelivery { slicer_error: Some(e), ..Default::default() });
             return;
         }
         if wait == Wait::Return {
-            obj.insert("starting".into(), json!(target.name));
+            say(SlicerDelivery { starting: Some(target.name.clone()), ..Default::default() });
             return;
         }
         if !slicers::wait_for_ready_via(target, busctl, limit, poll) {
-            obj.insert("slicer_timeout".into(), json!(target.name));
+            say(SlicerDelivery { slicer_timeout: Some(target.name.clone()), ..Default::default() });
             return;
         }
         // After a start the file has to reach the instance that is now running, so the flag goes
@@ -140,8 +147,8 @@ fn deliver_via(
     }
     // The file is saved either way; a program that won't start is reported, not fatal.
     match target.open(path, single_instance) {
-        Ok(()) => obj.insert("slicer".into(), json!(target.name)),
-        Err(e) => obj.insert("slicer_error".into(), json!(e)),
+        Ok(()) => say(SlicerDelivery { slicer: Some(target.name.clone()), ..Default::default() }),
+        Err(e) => say(SlicerDelivery { slicer_error: Some(e), ..Default::default() }),
     };
 }
 

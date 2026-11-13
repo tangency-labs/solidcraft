@@ -10,10 +10,11 @@
 //! rather than holding the call. The shared part is measured as `solidcraft_kernel::measure`
 //! measures it (its mass properties alone).
 
-use std::collections::HashSet;
+use solidcraft_geom::MeshGeom;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_geom::mesh_distance::TriangleSet;
 use solidcraft_geom::{Aabb3, Mesh};
@@ -21,6 +22,8 @@ use solidcraft_kernel::Body;
 use solidcraft_kernel::profile::KernelTimes;
 
 use crate::params::{bad, num, string_list};
+use crate::schema::clearance::{Overlap, OverlapBounds, Unchecked};
+use crate::schema::interference::{InterferenceResult, PairTime, PlacedOverlap, PlacedUnchecked};
 use crate::{Result, Session};
 
 /// Most pairs with overlapping bounding boxes one call intersects.
@@ -49,7 +52,7 @@ struct Job {
 
 /// What an exact check of one pair came to.
 enum Outcome {
-    Hit(Value),
+    Hit(Overlap),
     Clear,
     Unchecked(String),
 }
@@ -103,6 +106,23 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     let (pairs, skipped) = super::joints::overlapping_pairs(&boxes, MAX_INTERFERENCE_PAIRS);
+    // Where each body sits (#5963): its occurrence path, for `exclude_pairs` and the reply.
+    let paths: HashMap<String, Vec<u64>> = s.doc.body_frames(&s.model.state()).into_iter().map(|(name, _, path, _)| (name, path)).collect();
+    let path_of = |name: &str| paths.get(name).map_or(&[][..], Vec::as_slice);
+    let excluded = excluded_pairs(s, p, &st, cmd)?;
+    let matches = |side: &Side, name: &str| match side {
+        Side::Body(n) => n == name,
+        Side::Occurrence(o) => path_of(name).contains(o),
+    };
+    let left_out = |i: usize, j: usize| {
+        let (Some(a), Some(b)) = (bodies.get(i), bodies.get(j)) else { return false };
+        excluded.iter().any(|(x, y)| (matches(x, &a.name) && matches(y, &b.name)) || (matches(x, &b.name) && matches(y, &a.name)))
+    };
+    let before = pairs.len();
+    let pairs: Vec<(usize, usize)> = pairs.into_iter().filter(|&(i, j)| !left_out(i, j)).collect();
+    let pairs_excluded = before - pairs.len();
+    let place = |name: &str| super::motion::part_place(&s.doc, path_of(name));
+    let placed = |u: Unchecked| PlacedUnchecked { a_part: place(&u.a), b_part: u.b.as_deref().map(place), unchecked: u };
 
     // Then by the meshes: pairs whose meshes stay apart (and neither holds the other) are clear.
     let used: Vec<bool> = {
@@ -159,26 +179,30 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let waited_ms = waited.elapsed().as_secs_f64() * 1000.0;
 
     // Mesh bodies are not intersected: say so, rather than let `count: 0` read as "no overlap".
-    let mut unchecked: Vec<Value> = meshes_left.iter().map(|b| json!({"a": b.name, "b": null, "reason": MESH_NOT_CHECKED})).collect();
+    let mut unchecked: Vec<PlacedUnchecked> =
+        meshes_left.iter().map(|b| placed(Unchecked { a: b.name.clone(), b: None, reason: MESH_NOT_CHECKED.to_string() })).collect();
     let (mut hits, mut timed) = (Vec::new(), Vec::new());
     let (mut not_checked, mut boolean_ms, mut tessellate_ms) = (0usize, 0.0, 0.0);
     for ((a, b), d) in done {
         let Some(d) = d else {
             not_checked += 1;
-            unchecked.push(json!({"a": a, "b": b, "reason": format!("not checked: the time budget of {budget_s} s ran out (budget_s)")}));
+            unchecked.push(placed(Unchecked { a, b: Some(b), reason: format!("not checked: the time budget of {budget_s} s ran out (budget_s)") }));
             continue;
         };
         boolean_ms += d.kernel.boolean_ms;
         tessellate_ms += d.kernel.tessellate_ms;
-        timed.push((
-            d.ms,
-            json!({"a": a, "b": b, "ms": round_ms(d.ms), "boolean_ms": round_ms(d.kernel.boolean_ms),
-            "tessellate_ms": round_ms(d.kernel.tessellate_ms)}),
-        ));
+        let time = PairTime {
+            a: a.clone(),
+            b: b.clone(),
+            ms: round_ms(d.ms),
+            boolean_ms: round_ms(d.kernel.boolean_ms),
+            tessellate_ms: round_ms(d.kernel.tessellate_ms),
+        };
+        timed.push((d.ms, time));
         match d.outcome {
-            Outcome::Hit(v) => hits.push(v),
+            Outcome::Hit(overlap) => hits.push(PlacedOverlap { a_part: place(&overlap.a), b_part: place(&overlap.b), overlap }),
             Outcome::Clear => {}
-            Outcome::Unchecked(reason) => unchecked.push(json!({"a": a, "b": b, "reason": reason})),
+            Outcome::Unchecked(reason) => unchecked.push(placed(Unchecked { a, b: Some(b), reason })),
         }
     }
     // A timing profile of the command (`--profile`) counts the kernel time the workers spent,
@@ -189,15 +213,29 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_kernel::profile::credit(KernelTimes { boolean_ms: boolean_ms * share, tessellate_ms: tessellate_ms * share });
     }
     timed.sort_by(|x, y| y.0.total_cmp(&x.0));
-    let slowest: Vec<Value> = timed.into_iter().take(SLOWEST).map(|t| t.1).collect();
-    Ok(json!({
-        "interferences": hits, "count": hits.len(), "checked": bodies.len(), "unchecked": unchecked,
-        "truncated": skipped > 0, "skipped_pairs": skipped,
-        "pairs_candidate": pairs.len(), "pairs_cleared": cleared, "pairs_intersected": intersected,
-        "pairs_not_checked": not_checked, "budget_s": budget_s, "budget_exceeded": not_checked > 0,
-        "threads": threads, "boolean_ms": round_ms(boolean_ms), "tessellate_ms": round_ms(tessellate_ms),
-        "slowest": slowest, "ms": round_ms(started.elapsed().as_secs_f64() * 1000.0),
-    }))
+    let slowest: Vec<PairTime> = timed.into_iter().take(SLOWEST).map(|t| t.1).collect();
+    let reply = InterferenceResult {
+        count: hits.len(),
+        interferences: hits,
+        checked: bodies.len(),
+        unchecked,
+        truncated: skipped > 0,
+        skipped_pairs: skipped,
+        pairs_candidate: pairs.len(),
+        pairs_cleared: cleared,
+        pairs_intersected: intersected,
+        pairs_not_checked: not_checked,
+        pairs_excluded,
+        budget_s,
+        budget_exceeded: not_checked > 0,
+        threads,
+        boolean_ms: round_ms(boolean_ms),
+        tessellate_ms: round_ms(tessellate_ms),
+        slowest,
+        ms: round_ms(started.elapsed().as_secs_f64() * 1000.0),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
 fn round_ms(ms: f64) -> f64 {
@@ -284,9 +322,14 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
         Err(e) => return Outcome::Unchecked(e.to_string()),
     };
     if m.volume > threshold {
-        let hit = json!({"a": na, "b": nb, "volume_mm3": m.volume, "area_mm2": m.area, "center": m.centroid,
-            "bbox": {"min": m.bbox.min, "max": m.bbox.max}});
-        return Outcome::Hit(hit);
+        return Outcome::Hit(Overlap {
+            a: na.clone(),
+            b: nb.clone(),
+            volume_mm3: m.volume,
+            area_mm2: m.area,
+            bbox: OverlapBounds { min: m.bbox.min.into(), max: m.bbox.max.into() },
+            center: m.centroid.into(),
+        });
     }
     Outcome::Clear
 }
@@ -380,3 +423,41 @@ fn run_here(jobs: &[Job], deadline: web_time::Instant) -> Vec<Option<Done>> {
 #[cfg(test)]
 #[path = "interference_tests.rs"]
 mod tests;
+
+/// One side of an `exclude_pairs` pair: a body by its world name, or every body under an
+/// occurrence.
+enum Side {
+    Body(String),
+    Occurrence(u64),
+}
+
+/// Most pairs `exclude_pairs` may list.
+const MAX_EXCLUDED: usize = 10_000;
+
+/// `exclude_pairs`: `[[a, b]…]`, each a body's world name or an occurrence's id or name (#5963).
+fn excluded_pairs(s: &Session, p: &Value, st: &solidcraft_doc::ModelState, cmd: &str) -> Result<Vec<(Side, Side)>> {
+    let list = match p.get("exclude_pairs") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(list)) if list.len() <= MAX_EXCLUDED => list,
+        Some(Value::Array(_)) => return Err(bad(cmd, format!("`exclude_pairs` lists more than {MAX_EXCLUDED} pairs"))),
+        Some(_) => return Err(bad(cmd, "`exclude_pairs` must list pairs: [[a, b]…]")),
+    };
+    let side = |v: &Value| -> Result<Side> {
+        if let Some(n) = v.as_str()
+            && st.body(n).is_some()
+        {
+            return Ok(Side::Body(n.to_string()));
+        }
+        match super::joints::occurrence_id(s, Some(v), cmd) {
+            Ok(0) => Err(bad(cmd, "the root is not an occurrence")),
+            Ok(id) => Ok(Side::Occurrence(id)),
+            Err(_) => Err(bad(cmd, format!("`exclude_pairs`: {v} is neither a body nor an occurrence"))),
+        }
+    };
+    list.iter()
+        .map(|pair| match pair.as_array().map(Vec::as_slice) {
+            Some([a, b]) => Ok((side(a)?, side(b)?)),
+            _ => Err(bad(cmd, "each of `exclude_pairs` is a pair: [a, b]")),
+        })
+        .collect()
+}

@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "real-box-single-edge-linear-radius-half-to-two",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2142 (actual variable-radius public API with SmLinearFilletLaw; complete result geometry and mass)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [10, 20, 30],
+          "radius": 0.5,
+          "radius_end": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [2]
+        }
+      }
+    }
+  ]
+}

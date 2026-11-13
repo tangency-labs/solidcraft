@@ -1,0 +1,1259 @@
+{
+ "cases": [
+  {
+   "name": "my_test_extent2d_e1_from_points",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2693",
+   "inputs": {
+    "op": "from_points",
+    "a": [
+     1,
+     2
+    ],
+    "b": [
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_from_points_swapped",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2693",
+   "inputs": {
+    "op": "from_points",
+    "a": [
+     3,
+     4
+    ],
+    "b": [
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_e2_new",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2706",
+   "inputs": {
+    "op": "new"
+   }
+  },
+  {
+   "name": "my_test_extent2d_e3_queries",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2715",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     11,
+     12,
+     13,
+     14
+    ],
+    "tol": 0
+   }
+  },
+  {
+   "name": "my_test_extent2d_e4_from_point",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2722",
+   "inputs": {
+    "op": "from_point",
+    "p": [
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_e6_from_extent3d",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2737",
+   "inputs": {
+    "op": "from_extent3d",
+    "x": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_add_point",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2760",
+   "inputs": {
+    "op": "add_points",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "pts": [
+     [
+      5,
+      6
+     ]
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_add_points_init",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2760",
+   "inputs": {
+    "op": "add_points",
+    "e": [
+     1e+20,
+     1e+20,
+     -1e+20,
+     -1e+20
+    ],
+    "pts": [
+     [
+      5,
+      6
+     ],
+     [
+      1,
+      -2
+     ],
+     [
+      3,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_set_min_max_coords",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2766",
+   "inputs": {
+    "op": "set_min_max_coords",
+    "e": [
+     1,
+     2,
+     5,
+     6
+    ],
+    "c": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_set_min_max_coords_bad",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2766",
+   "inputs": {
+    "op": "set_min_max_coords",
+    "e": [
+     1,
+     2,
+     5,
+     6
+    ],
+    "c": [
+     3,
+     2,
+     1,
+     4
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_set_min_max",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2771",
+   "inputs": {
+    "op": "set_min_max",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "min": [
+     1,
+     2
+    ],
+    "max": [
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_set_min_max_bad",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2771",
+   "inputs": {
+    "op": "set_min_max",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "min": [
+     1,
+     5
+    ],
+    "max": [
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_are_disjoint_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2777",
+   "inputs": {
+    "op": "compare",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "f": [
+     -3,
+     -2,
+     0,
+     1
+    ],
+    "tol": 2.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_are_disjoint",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2782",
+   "inputs": {
+    "op": "compare",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "f": [
+     -3,
+     -2,
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_union",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2807",
+   "inputs": {
+    "op": "union",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "f": [
+     -4,
+     -2,
+     -3,
+     -1
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2815",
+   "inputs": {
+    "op": "intersect",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "f": [
+     0,
+     0,
+     4,
+     3
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_intersect_disjoint",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2815",
+   "inputs": {
+    "op": "intersect",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "f": [
+     -4,
+     -2,
+     -3,
+     -1
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_set_intervals",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2822",
+   "inputs": {
+    "op": "intervals",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "u": [
+     7,
+     8
+    ],
+    "v": [
+     4,
+     5
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_transpose",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2867",
+   "inputs": {
+    "op": "transpose",
+    "e": [
+     2,
+     3,
+     5,
+     6
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_expand_absolute",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2872",
+   "inputs": {
+    "op": "expand_absolute",
+    "e": [
+     3,
+     2,
+     6,
+     5
+    ],
+    "amount": 1.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_expand_relative",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2877",
+   "inputs": {
+    "op": "expand_relative",
+    "e": [
+     2,
+     1,
+     7,
+     6
+    ],
+    "factor": 1.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_queries_e2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2882",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     -3,
+     -4,
+     12,
+     11
+    ],
+    "tol": 0
+   }
+  },
+  {
+   "name": "my_test_extent2d_are_equal_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2920",
+   "inputs": {
+    "op": "compare",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "f": [
+     1,
+     2.1,
+     3,
+     4
+    ],
+    "tol": 0.2
+   }
+  },
+  {
+   "name": "my_test_extent2d_are_equal",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2925",
+   "inputs": {
+    "op": "compare",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "f": [
+     1,
+     2.1,
+     3,
+     4
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_operator_eq",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2929",
+   "inputs": {
+    "op": "compare",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "f": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_is_degenerate_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2934",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     4,
+     5,
+     4.1,
+     5.1
+    ],
+    "tol": 0.2
+   }
+  },
+  {
+   "name": "my_test_extent2d_is_degenerate",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2939",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     4,
+     5,
+     4.1,
+     5.1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_has_negative_area",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2943",
+   "inputs": {
+    "op": "expand_absolute",
+    "e": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "amount": -0.1
+   }
+  },
+  {
+   "name": "my_test_extent2d_has_negative_area_q",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2945",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     0.1,
+     0.1,
+     -0.1,
+     -0.1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_is_contained_by_expand",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2950",
+   "inputs": {
+    "op": "expand_absolute",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "amount": 0.01
+   }
+  },
+  {
+   "name": "my_test_extent2d_is_contained_by_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2951",
+   "inputs": {
+    "op": "compare",
+    "e": [
+     0.99,
+     1.99,
+     3.01,
+     4.01
+    ],
+    "f": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "my_test_extent2d_is_contained_by",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2957",
+   "inputs": {
+    "op": "compare",
+    "e": [
+     0.99,
+     1.99,
+     3.01,
+     4.01
+    ],
+    "f": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_contains_point_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2962",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     0.9,
+     3
+    ],
+    "tol": 0.2,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_contains_point",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2966",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     0.9,
+     3
+    ],
+    "tol": 0.0,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_classify_point_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2971",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     4,
+     5,
+     4.1,
+     5.1
+    ],
+    "p": [
+     1.1,
+     2.1
+    ],
+    "tol": 0.2,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_classify_point_e1_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2971",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     1.1,
+     2.1
+    ],
+    "tol": 0.2,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_classify_point",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2978",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     1.1,
+     2.1
+    ],
+    "tol": 1e-12,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_classify_point_tol_v",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2978",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     1.1,
+     2.1
+    ],
+    "tol": 1e-12,
+    "tol_v": 0.2
+   }
+  },
+  {
+   "name": "my_test_extent2d_on_boundary_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:2995",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     1.1,
+     2.1
+    ],
+    "tol": 0.2,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_contains_periodic_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3009",
+   "inputs": {
+    "op": "contains_periodic",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     8.9,
+     3.0
+    ],
+    "u_period": 4,
+    "v_period": 0,
+    "tol": 0.2
+   }
+  },
+  {
+   "name": "my_test_extent2d_contains_periodic",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3018",
+   "inputs": {
+    "op": "contains_periodic",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     8.9,
+     3.0
+    ],
+    "u_period": 4,
+    "v_period": 0,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_evaluate",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3041",
+   "inputs": {
+    "op": "evaluate",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "n": [
+     0.5,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent2d_inversion_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3045",
+   "inputs": {
+    "op": "inversion",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2,
+     3
+    ],
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "my_test_extent2d_inversion",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3050",
+   "inputs": {
+    "op": "inversion",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2,
+     3
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "my_test_extent2d_clamp_point",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3055",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     0,
+     0
+    ],
+    "tol": 1e-12,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_clip_line",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3060",
+   "inputs": {
+    "op": "clip_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2,
+     3
+    ],
+    "v": [
+     0,
+     1
+    ],
+    "t": 4.0
+   }
+  },
+  {
+   "name": "my_test_extent2d_intersect_line_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3066",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     0,
+     3.1
+    ],
+    "v": [
+     1,
+     1
+    ],
+    "tol_u": 0.2,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_intersect_line",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3074",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     0,
+     3.1
+    ],
+    "v": [
+     1,
+     1
+    ],
+    "tol_u": null,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_left_eval",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3079",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2.5,
+     2.5
+    ],
+    "tol": 1e-12,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "my_test_extent2d_map_to_domain",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3089",
+   "inputs": {
+    "op": "map_to_domain",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2,
+     3
+    ],
+    "f": [
+     4,
+     0,
+     10,
+     8
+    ],
+    "switch": false
+   }
+  },
+  {
+   "name": "my_test_extent2d_map_to_domain_switch",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3089",
+   "inputs": {
+    "op": "map_to_domain",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2,
+     3
+    ],
+    "f": [
+     4,
+     0,
+     10,
+     8
+    ],
+    "switch": true
+   }
+  },
+  {
+   "name": "my_test_extent2d_scaled_zero",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3099",
+   "inputs": {
+    "op": "scaled_zero",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "edge_inversion_degenerate_u",
+   "inputs": {
+    "op": "inversion",
+    "e": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "p": [
+     0,
+     0.5
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_inversion_degenerate_off",
+   "inputs": {
+    "op": "inversion",
+    "e": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "p": [
+     1e-07,
+     0.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "edge_inversion_outside",
+   "inputs": {
+    "op": "inversion",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     5,
+     3
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_map_outside",
+   "inputs": {
+    "op": "map_to_domain",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     5,
+     3
+    ],
+    "f": [
+     4,
+     0,
+     10,
+     8
+    ],
+    "switch": false
+   }
+  },
+  {
+   "name": "edge_clip_on_boundary_out",
+   "inputs": {
+    "op": "clip_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     1,
+     3
+    ],
+    "v": [
+     -1,
+     0
+    ],
+    "t": 1.0
+   }
+  },
+  {
+   "name": "edge_clip_neg_param",
+   "inputs": {
+    "op": "clip_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2,
+     3
+    ],
+    "v": [
+     1,
+     0
+    ],
+    "t": -4.0
+   }
+  },
+  {
+   "name": "edge_clip_parallel_outside",
+   "inputs": {
+    "op": "clip_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     0,
+     3
+    ],
+    "v": [
+     0,
+     1
+    ],
+    "t": 5.0
+   }
+  },
+  {
+   "name": "edge_clip_corner",
+   "inputs": {
+    "op": "clip_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2,
+     3
+    ],
+    "v": [
+     1,
+     1
+    ],
+    "t": 10.0
+   }
+  },
+  {
+   "name": "edge_line_vertical",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2,
+     0
+    ],
+    "v": [
+     0,
+     1
+    ],
+    "tol_u": null,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "edge_line_zero_dir",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     2,
+     3
+    ],
+    "v": [
+     0,
+     0
+    ],
+    "tol_u": null,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "edge_line_corner_touch",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "p": [
+     0,
+     1
+    ],
+    "v": [
+     1,
+     1
+    ],
+    "tol_u": null,
+    "tol_v": null
+   }
+  },
+  {
+   "name": "edge_periodic_unbounded",
+   "inputs": {
+    "op": "contains_periodic",
+    "e": [
+     0,
+     0,
+     360,
+     1
+    ],
+    "p": [
+     -10,
+     0.5
+    ],
+    "u_period": 360,
+    "v_period": 0,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "edge_queries_unbounded",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     -1234567.0,
+     0,
+     1234567.0,
+     1111.111
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "edge_queries_init",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     1e+20,
+     1e+20,
+     -1e+20,
+     -1e+20
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "edge_expand_unbounded",
+   "inputs": {
+    "op": "expand_relative",
+    "e": [
+     -1234567.0,
+     0,
+     3,
+     1234567.0
+    ],
+    "factor": 0.5
+   }
+  },
+  {
+   "name": "edge_evaluate_inverted",
+   "inputs": {
+    "op": "evaluate",
+    "e": [
+     3,
+     4,
+     1,
+     2
+    ],
+    "n": [
+     0.25,
+     0.75
+    ]
+   }
+  },
+  {
+   "name": "edge_classify_both",
+   "inputs": {
+    "op": "point_ops",
+    "e": [
+     1,
+     1,
+     1,
+     2
+    ],
+    "p": [
+     1,
+     1.5
+    ],
+    "tol": 1e-12,
+    "tol_v": null
+   }
+  }
+ ]
+}

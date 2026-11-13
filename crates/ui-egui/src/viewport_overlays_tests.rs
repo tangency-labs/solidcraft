@@ -1,5 +1,5 @@
 use super::*;
-use crate::{scenario::Harness, shell::LayoutMode};
+use crate::{scenario::Harness, ui_kit::LayoutMode};
 
 #[test]
 fn details_descriptions_are_pure_and_live_edits_preserve_custom_companions() {
@@ -185,7 +185,7 @@ fn details_native_value_edits_run_real_commands_without_design_history() {
         h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:setting")}})).unwrap();
         h.frames(3);
         let rect = crate::scenario::rect_of(&format!("details:field:{field}")).unwrap();
-        let at = if field == "stripes" { rect.right_center() - vec2(crate::theme::Tokens::get().space_24, 0.0) } else { rect.center() };
+        let at = if field == "stripes" { rect.right_center() - vec2(solidcraft_theme::Tokens::get().space_24, 0.0) } else { rect.center() };
         h.call("ui.click", json!({"x":at.x,"y":at.y,"double":true}));
         h.step(&json!({"key":"A","ctrl":true})).unwrap();
         h.step(&json!({"text":text})).unwrap();
@@ -370,7 +370,7 @@ fn details_grouped_continuity_key_contains_the_actual_sharp_and_gap_tokens() {
             let effect = h.app.session.status_items().remove(0);
             let details = crate::viewport_details::description(&h.app, &effect);
             let key = &details.key[2];
-            let tokens = crate::theme::Tokens::get();
+            let tokens = solidcraft_theme::Tokens::get();
             assert_eq!(key.value, "12");
             assert_eq!(key.colour, tokens.continuity[2], "actual cube creases use the Sharp scene token");
             assert_eq!(key.pattern_colour, Some(tokens.continuity[3]), "the grouped key also carries the actual Gap scene token");
@@ -462,13 +462,13 @@ fn viewport_status_specimens_clear_and_open_keys_without_engine_changes() {
 #[test]
 fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
     use crate::ui_kit::{StatusItem, StatusKind, StatusPresentation, viewport_status_item};
-    let previous = (crate::theme::is_dark(), crate::theme::vision());
+    let previous = (solidcraft_theme::is_dark(), solidcraft_theme::vision());
     assert_ne!(StatusKind::Mode.icon(), StatusKind::Result.icon());
     assert_ne!(StatusKind::Result.icon(), StatusKind::Attention.icon());
     for dark in [false, true] {
-        for vision in crate::theme::ColorVision::ALL {
-            crate::theme::set_dark(dark);
-            crate::theme::set_vision(vision);
+        for vision in solidcraft_theme::ColorVision::ALL {
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(vision);
             let t = Tokens::get();
             for (kind, outline) in [(StatusKind::Mode, t.accent), (StatusKind::Result, t.border), (StatusKind::Attention, t.warning)] {
                 let ctx = crate::fonts::test_context();
@@ -484,7 +484,12 @@ fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
                             mono = text.galley.job.sections.first().is_some_and(|s| s.format.font_id.family == egui::FontFamily::Monospace);
                         }
                         Shape::Text(text) if text.galley.job.text == item.name => {
-                            name = text.galley.job.sections.first().is_some_and(|s| s.format.font_id == crate::fonts::semibold(t.font_label));
+                            name = text
+                                .galley
+                                .job
+                                .sections
+                                .first()
+                                .is_some_and(|s| s.format.font_id == crate::ui_kit::type_face::semibold(t.font_label));
                         }
                         _ => {}
                     });
@@ -493,18 +498,18 @@ fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
             }
         }
     }
-    crate::theme::set_dark(previous.0);
-    crate::theme::set_vision(previous.1);
+    solidcraft_theme::set_dark(previous.0);
+    solidcraft_theme::set_vision(previous.1);
 }
 
 #[test]
 fn viewport_status_every_part_is_centred_within_its_pill_in_every_theme() {
     use crate::ui_kit::{StatusItem, StatusKind, StatusPresentation, viewport_status_item};
-    let previous = (crate::theme::is_dark(), crate::theme::vision());
+    let previous = (solidcraft_theme::is_dark(), solidcraft_theme::vision());
     for dark in [false, true] {
-        for vision in crate::theme::ColorVision::ALL {
-            crate::theme::set_dark(dark);
-            crate::theme::set_vision(vision);
+        for vision in solidcraft_theme::ColorVision::ALL {
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(vision);
             for kind in [StatusKind::Mode, StatusKind::Result, StatusKind::Attention] {
                 for (name, setting, has_key, editable) in [
                     ("Zebra", "12 stripes", false, false),
@@ -550,8 +555,8 @@ fn viewport_status_every_part_is_centred_within_its_pill_in_every_theme() {
             }
         }
     }
-    crate::theme::set_dark(previous.0);
-    crate::theme::set_vision(previous.1);
+    solidcraft_theme::set_dark(previous.0);
+    solidcraft_theme::set_vision(previous.1);
 }
 
 // These tests inspect shapes without submitting their texture uploads to a renderer.
@@ -585,11 +590,11 @@ fn viewport_status_close_hover_has_a_theme_fill_and_native_space_action_in_every
         found
     }
 
-    let previous = (crate::theme::is_dark(), crate::theme::vision());
+    let previous = (solidcraft_theme::is_dark(), solidcraft_theme::vision());
     for dark in [false, true] {
-        for vision in crate::theme::ColorVision::ALL {
-            crate::theme::set_dark(dark);
-            crate::theme::set_vision(vision);
+        for vision in solidcraft_theme::ColorVision::ALL {
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(vision);
             let t = Tokens::get();
             let ctx = crate::fonts::test_context();
             let item = StatusItem {
@@ -616,8 +621,8 @@ fn viewport_status_close_hover_has_a_theme_fill_and_native_space_action_in_every
             assert_eq!(keyboard, Some(StatusAction::Clear(item.id.clone())), "hover decoration must preserve native Space activation");
         }
     }
-    crate::theme::set_dark(previous.0);
-    crate::theme::set_vision(previous.1);
+    solidcraft_theme::set_dark(previous.0);
+    solidcraft_theme::set_vision(previous.1);
 }
 
 fn draw(ctx: &egui::Context, paint: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
@@ -678,14 +683,14 @@ fn compass_keeps_signed_targets_hover_and_clicks_at_both_scales() {
 #[test]
 fn compass_negative_ends_are_hollow_and_positive_ends_are_chunkier() {
     for dark in [false, true] {
-        let t = Tokens::themed(dark, crate::theme::ColorVision::Off);
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::Off);
         for (name, direction, positive) in [("x", Vec3::X, true), ("-x", -Vec3::X, false)] {
             let ctx = crate::fonts::test_context();
             let c = pos2(100.0, 100.0);
             let original = c + vec2(38.0, 0.0);
             let painted = c + (original - c) * 0.84;
             let output = draw(&ctx, |ui| {
-                crate::icons::navigation::axis_tip(ui.painter(), c, name, &direction, painted, 0.5, false, t);
+                solidcraft_look::compass::axis_tip_scaled(ui.painter(), c, name, direction.into(), painted, 0.5, false, t, 1.0);
             });
             let circles: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Circle(c) = &s.shape { Some(c) } else { None }).collect();
             let end = circles.iter().find(|circle| circle.center == painted).unwrap();
@@ -702,7 +707,7 @@ fn compass_negative_ends_are_hollow_and_positive_ends_are_chunkier() {
                     .collect();
                 assert_eq!(letters.len(), 1, "each axis letter is painted once");
                 let letter = letters[0];
-                assert_eq!(letter.galley.job.sections[0].format.font_id, crate::fonts::bold(Tokens::get().font_compass));
+                assert_eq!(letter.galley.job.sections[0].format.font_id, crate::ui_kit::type_face::bold(Tokens::get().font_compass));
                 assert_eq!(letter.pos.x.fract(), 0.0);
                 assert_eq!(letter.pos.y.fract(), 0.0);
             } else {
@@ -769,7 +774,11 @@ fn toast_stays_in_free_content_above_history_and_navigation() {
                     }
                     h.app.status = Some(("Viewport message".into(), crate::now_ms(), false));
                     h.frames(3);
-                    let layout = h.app.viewport.layout.as_ref().unwrap();
+                    let Some(layout) = h.app.viewport.layout.as_ref() else {
+                        assert_eq!((width, height), (1, 1), "only a window without a viewport skips notices");
+                        assert!(crate::scenario::rect_of("toast").is_none());
+                        continue;
+                    };
                     let content = crate::shell::content_rect(&h.app, layout.viewport);
                     let mut obstacles = crate::shell::covered_rects(&h.app);
                     obstacles.extend([layout.navigation, layout.axis_view]);
@@ -788,6 +797,7 @@ fn toast_stays_in_free_content_above_history_and_navigation() {
                     }
                 }
             }
+            h.call("ui.resize", json!({"width":900,"height":720}));
             h.app.status = Some(("Expired".into(), crate::now_ms() - 6001.0, true));
             h.frame();
             assert!(h.app.status.is_none());
@@ -888,11 +898,11 @@ fn sketch_previews_selection_band_and_number_focus_follow_sketch_accent() {
             }
             h.app.ui.tab = "MODEL".into(); // A sketch remains open when another ribbon tab is selected.
             h.app.tool = crate::tools::Tool::for_command("sketch.line");
-            crate::theme::TabAccent::publish(&h.app, &h.ctx);
+            h.app.publish_tab_accent(&h.ctx);
             let output = draw(&h.ctx, |ui| {
                 let r = ui.add(egui::TextEdit::singleline(&mut String::from("20")));
                 r.request_focus();
-                crate::theme::TabAccent::number_focus(ui, &r);
+                solidcraft_theme::TabAccent::number_focus(ui, &r);
             });
             assert!(output.shapes.iter().any(|s| matches!(&s.shape, Shape::Rect(r) if r.stroke.color == t.sketch_accent)));
         }
@@ -922,14 +932,14 @@ fn three_dimensional_sketch_rubber_band_uses_sketch_accent() {
 #[test]
 fn a_hovered_compass_end_turns_white_and_its_letter_takes_the_axis_colour() {
     for dark in [false, true] {
-        let t = Tokens::themed(dark, crate::theme::ColorVision::Off);
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::Off);
         for (name, direction, positive) in [("x", Vec3::X, true), ("-x", -Vec3::X, false)] {
             let ctx = crate::fonts::test_context();
             let c = pos2(100.0, 100.0);
             let original = c + vec2(38.0, 0.0);
             let painted = c + (original - c) * 0.84;
             let output = draw(&ctx, |ui| {
-                crate::icons::navigation::axis_tip(ui.painter(), c, name, &direction, painted, 0.5, true, t);
+                solidcraft_look::compass::axis_tip_scaled(ui.painter(), c, name, direction.into(), painted, 0.5, true, t, 1.0);
             });
             let circles: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Circle(c) = &s.shape { Some(c) } else { None }).collect();
             assert!(circles.iter().any(|circle| circle.center == painted && circle.fill == t.on_accent), "{name}: the hovered end is filled white");
@@ -991,7 +1001,8 @@ fn the_shared_toast_draws_old_callers_exactly_as_before() {
             draw(&ctx, |ui| {
                 let t = Tokens::get();
                 let text = "A message that is long enough to wrap in the narrow cases, and not in the wide ones".to_string();
-                let galley = ui.painter().layout(text.clone(), crate::fonts::medium(t.font_label), t.text, (free.width() - 40.0).min(440.0));
+                let galley =
+                    ui.painter().layout(text.clone(), crate::ui_kit::type_face::medium(t.font_label), t.text, (free.width() - 40.0).min(440.0));
                 let size = galley.size() + vec2(40.0, 16.0);
                 let expected = Rect::from_center_size(pos2(free.center().x, free.bottom() - size.y * 0.5), size);
                 let got = paint_toast(ui, free, text, error, computing);
@@ -1012,7 +1023,7 @@ fn toast_buttons_wrap_inside_the_card_and_are_dead_behind_an_issue_report() {
     let labels = [("Calibrate…", ToastKind::Primary), ("Use Direct Driver", ToastKind::Secondary), ("Never show again", ToastKind::Dismiss)];
     for width in [260.0_f32, 360.0, 600.0, 1000.0] {
         for blocked in [false, true] {
-            crate::issue_report::set_cad_input_blocked_for_test(blocked);
+            crate::ui_kit::set_input_blocked(blocked);
             let ctx = crate::fonts::test_context();
             let free = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 300.0));
             let run = |events: Vec<egui::Event>| {
@@ -1048,7 +1059,7 @@ fn toast_buttons_wrap_inside_the_card_and_are_dead_behind_an_issue_report() {
                     }
                 }
             }
-            crate::issue_report::set_cad_input_blocked_for_test(false);
+            crate::ui_kit::set_input_blocked(false);
             if blocked {
                 assert!(hits.is_empty(), "width {width}: a button worked behind a report: {hits:?}");
             } else {
@@ -1136,12 +1147,11 @@ fn bottom_readouts_clear_floating_history_on_the_first_frame() {
     h.frame();
     h.app.ui.layout = LayoutMode::Docked;
     h.frame();
-    let viewport = h.app.viewport.layout.as_ref().unwrap().viewport;
     let history = crate::scenario::rect_of("history:strip").unwrap();
     for name in ["analysis:legend", "viewport:frame_rate"] {
         let readout = crate::scenario::rect_of(name).unwrap();
         assert!(!readout.intersects(history));
-        assert!((readout.bottom() - (viewport.bottom() - 12.0)).abs() < 0.01);
+        assert!((readout.bottom() - (history.top() - solidcraft_theme::Tokens::get().space_8 - 12.0)).abs() < 0.01);
     }
 }
 
@@ -1167,7 +1177,7 @@ fn left_history_sidebar_leaves_bottom_readouts_at_the_bottom() {
     h.app.preferences.viewport_analysis_status = false;
     h.app.home.open = false;
     h.app.ui.layout = LayoutMode::Floating;
-    h.app.preferences.timeline_left = true;
+    h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
     h.app.preferences.show_frame_rate = true;
     h.app.ui.show_timeline = true;
     h.app.run("inspect.draft", json!({})).unwrap();
@@ -1218,7 +1228,10 @@ fn frame_rate_readout_stays_beside_a_right_pane() {
             assert!(viewport.contains_rect(readout), "{mode:?}, {width}: {readout:?} outside {viewport:?}");
             assert!(readout.right() <= pane.left() - 12.0 + 0.01, "{mode:?}, {width}: {readout:?} under {pane:?}");
             if mode == LayoutMode::Floating {
-                assert!((readout.right() - (pane.left() - 12.0)).abs() < 0.01, "{width}: {readout:?} not just left of {pane:?}");
+                let frame = h.app.universal_panel_frame().unwrap();
+                let section = frame.layout.sections.iter().find(|section| section.instance.0 == "assistant").unwrap();
+                let card = crate::panel_runtime::egui_rect(section.outer);
+                assert!((readout.right() - (card.left() - 12.0)).abs() < 0.01, "{width}: {readout:?} not just left of {card:?}");
             }
             for covered in crate::shell::covered_rects(&h.app) {
                 assert!(!readout.intersects(covered), "{mode:?}, {width}: {readout:?} under {covered:?}");
@@ -1365,7 +1378,7 @@ fn view_analysis_buttons_are_one_toggle_group() {
 /// through `view.apply`, without touching the design or its history.
 #[test]
 fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
-    use solidcraft_engine::render::ViewAngles;
+    use solidcraft_viewport::ViewAngles;
     for style in ["axes", "cube"] {
         let mut h = Harness::new();
         h.call("ui.prefs", json!({"navigator_style": style}));
@@ -1432,7 +1445,7 @@ fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
 /// while only the pitch is adjusted.
 #[test]
 fn view_angles_card_zero_buttons_and_axis_locks() {
-    use solidcraft_engine::render::ViewAngles;
+    use solidcraft_viewport::ViewAngles;
     let mut h = Harness::new();
     h.app.preferences.look_at_anim = false;
     h.call("engine.execute", json!({"command": "view.angle_readout", "params": {"enabled": true}}));
@@ -1622,31 +1635,6 @@ fn corner_toast_keeps_its_width_beside_a_docked_dialog() {
         let toast = rect_of("toast").expect("the toast is drawn");
         assert!((toast.right() - (content.right() - t.space_8)).abs() < 0.5, "{mode:?}: back in the corner: {toast:?} in {content:?}");
         assert!((toast.width() - TOAST_WIDTH).abs() < 0.5, "{mode:?}: {toast:?}");
-    }
-}
-
-/// A dashed line reaching far off screen is cut to the view before it is dashed: epaint makes a
-/// shape per dash and steps along in f32, so one a trillion points long made billions of them,
-/// or never finished. A line in view is dashed exactly as before, and a cut one keeps its
-/// dashes in phase with its start.
-#[test]
-fn a_dashed_line_far_off_screen_is_cut_to_the_view() {
-    let view = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0));
-    let stroke = Stroke::new(1.0, Color32::WHITE);
-    let near = [pos2(100.0, 100.0), pos2(700.0, 400.0), pos2(900.0, 100.0)];
-    assert_eq!(dashed_line(&near, view, stroke, 5.0, 3.0), Shape::dashed_line(&near, stroke, 5.0, 3.0));
-    let far = dashed_line(&[pos2(100.0, 500.0), pos2(1e12, 500.0)], view, stroke, 5.0, 3.0);
-    assert!(!far.is_empty() && far.len() < 250, "{} dashes", far.len());
-    for s in &far {
-        let Shape::LineSegment { points, .. } = s else { panic!("{s:?}") };
-        let periods = (points[0].x - 100.0) / 8.0;
-        assert!((periods - periods.round()).abs() < 1e-3, "a dash starts at {points:?}, off the line's pattern");
-    }
-    let across = dashed_line(&[pos2(-1e12, 500.0), pos2(1e12, 500.0)], view, stroke, 5.0, 3.0);
-    assert!(across.len() < 250, "{} dashes", across.len());
-    assert!(across.iter().any(|s| matches!(s, Shape::LineSegment { points, .. } if (700.0..900.0).contains(&points[0].x))), "the line shows in view");
-    for missing in [[pos2(f32::NAN, 0.0), pos2(10.0, 10.0)], [pos2(f32::INFINITY, 0.0), pos2(10.0, 10.0)], [pos2(-1e9, -1e9), pos2(-1e9, 1e9)]] {
-        assert!(dashed_line(&missing, view, stroke, 5.0, 3.0).is_empty(), "{missing:?}");
     }
 }
 
@@ -2028,7 +2016,7 @@ fn analysis_status_preferences_take_first_escape_and_release_the_next_frame() {
         }
     });
     h.step(&json!({"key":"Escape"})).unwrap();
-    assert!(!h.app.prefs_window.open);
+    assert!(!h.app.prefs_window.shell.open);
     assert!(h.app.session.analysis.is_some(), "Preferences owns the first Escape even without text focus");
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.session.analysis.is_none(), "the next idle frame may end the effect");
@@ -2093,7 +2081,7 @@ fn analysis_status_escape_owner_survives_egui_layout_repasses() {
         );
         assert!(passes >= 2, "the frame must actually repeat its layout");
         assert_eq!(h.app.session.status_items(), before, "{owner} owns one Escape over every pass");
-        assert!(!h.app.prefs_window.open && h.app.dialog.is_none() && h.app.tool.is_none() && !h.app.ui.palette_open);
+        assert!(!h.app.prefs_window.shell.open && h.app.dialog.is_none() && h.app.tool.is_none() && !h.app.ui.palette_open);
         assert!(h.app.viewport_status.open_key.is_none());
         h.frame();
         h.step(&json!({"key":"Escape"})).unwrap();
@@ -2128,12 +2116,12 @@ fn analysis_status_row_and_key_stay_below_preferences_and_cannot_steal_its_click
             assert!(window.contains(at), "the real Preferences window must overlap {target}");
             let layer = h.ctx.layer_id_at(at).unwrap();
             assert_eq!(layer.order, egui::Order::Middle, "Preferences stays above {target}");
-            assert_ne!(layer.id, egui::Id::new("viewport_status_row"));
-            assert_ne!(layer.id, egui::Id::new("viewport_status_key"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_row"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_key"));
         }
         let at = crate::scenario::handle_at(&format!("viewport_status:{}:close", item.id)).unwrap();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
-        assert!(h.app.prefs_window.open);
+        assert!(h.app.prefs_window.shell.open);
         assert!(h.app.session.analysis.is_some(), "an occluded HUD close never receives the window's click");
     }
 }
@@ -2238,7 +2226,7 @@ fn analysis_status_preferences_cancel_can_restore_either_policy_without_reusing_
         h.call("ui.prefs", json!({"open":"Interface"}));
         h.call("ui.prefs", json!({"viewport_analysis_status":!saved}));
         analysis_escape_relayout_frame(&mut h, |app| {
-            assert!(!app.prefs_window.open);
+            assert!(!app.prefs_window.shell.open);
             assert_eq!(app.preferences.viewport_analysis_status, saved, "Cancel restores policy in pass one");
             assert!(app.session.analysis.is_some());
         });
@@ -2261,7 +2249,7 @@ fn analysis_status_preferences_restore_false_keeps_underlying_dialog_through_the
     h.call("ui.prefs", json!({"open":"Interface"}));
     h.call("ui.prefs", json!({"viewport_analysis_status":true}));
     analysis_escape_relayout_frame(&mut h, |app| {
-        assert!(!app.prefs_window.open);
+        assert!(!app.prefs_window.shell.open);
         assert!(!app.preferences.viewport_analysis_status, "Cancel restores false before pass two");
         assert!(app.dialog.is_some(), "Preferences shields the existing command dialog in pass one");
     });
@@ -2335,10 +2323,10 @@ fn the_status_toast_closes_with_its_x_and_shows_its_time_left() {
     assert!((swept(&arc, close) - 0.5).abs() < 0.05, "about half a turn left: {}", swept(&arc, close));
     assert!(h.widget("Close").is_some(), "the × has an accessible name");
     // Behind an issue report it does nothing.
-    crate::issue_report::set_cad_input_blocked_for_test(true);
+    crate::ui_kit::set_input_blocked(true);
     h.step(&json!({"click": {"handle": "toast:status:close"}})).unwrap();
     h.frames(2);
-    crate::issue_report::set_cad_input_blocked_for_test(false);
+    crate::ui_kit::set_input_blocked(false);
     assert!(h.app.status.is_some(), "not closed behind a report");
     h.step(&json!({"click": {"handle": "toast:status:close"}})).unwrap();
     h.frames(2);
@@ -2377,7 +2365,7 @@ fn section_only_status_modal_owners_take_first_escape_across_real_layout_repasse
         let cut = h.app.session.section;
         analysis_escape_relayout_frame(&mut h, |app| {
             assert_eq!(app.session.section, cut, "{owner} owns the tap in pass one");
-            assert!(!app.prefs_window.open && app.dialog.is_none() && app.tool.is_none() && !app.ui.palette_open);
+            assert!(!app.prefs_window.shell.open && app.dialog.is_none() && app.tool.is_none() && !app.ui.palette_open);
         });
         assert_eq!(h.app.session.section, cut, "{owner} keeps the cut through the discarded frame");
         h.step(&json!({"key":"Escape"})).unwrap();
@@ -2446,7 +2434,7 @@ fn section_only_preferences_cancel_restores_either_policy_and_shields_existing_d
         h.call("ui.prefs", json!({"viewport_section_status":!saved}));
         let cut = h.app.session.section;
         analysis_escape_relayout_frame(&mut h, |app| {
-            assert!(!app.prefs_window.open);
+            assert!(!app.prefs_window.shell.open);
             assert_eq!(app.preferences.viewport_section_status, saved);
             assert!(!app.preferences.viewport_analysis_status);
             assert_eq!(app.dialog.is_some(), !saved, "enabled routing protects the existing form in pass one");
@@ -2477,7 +2465,7 @@ fn section_only_status_stays_below_preferences_for_paint_and_hit_testing() {
     assert!(crate::scenario::rect_of("prefs:window").unwrap().contains(at));
     assert_eq!(h.ctx.layer_id_at(at).unwrap().order, egui::Order::Middle);
     h.call("ui.click", json!({"x":at.x,"y":at.y}));
-    assert!(h.app.prefs_window.open && h.app.session.section.is_some());
+    assert!(h.app.prefs_window.shell.open && h.app.session.section.is_some());
 }
 
 // Summary fixtures below exercise component kinds unavailable from current production producers.
@@ -2641,7 +2629,7 @@ fn summary_menu_yields_to_preferences_and_command_dialog_without_resuming_or_ste
         h.frames(frames);
         assert!(!egui::Popup::is_any_open(&h.ctx), "{owner} dismisses the lower Summary popup");
         assert!(crate::scenario::rect_of("menu:viewport_status_clear_all").is_none());
-        let heading = crate::i18n::tr("ui.viewport_status_summary_heading").to_uppercase();
+        let heading = solidcraft_ui_text::tr("ui.viewport_status_summary_heading").to_uppercase();
         assert!(!h.shapes.iter().any(|shape| contains_text(&shape.shape, &heading)), "no Summary list paints over {owner}");
         if owner != "command" {
             h.step(&json!({"click":{"handle":"prefs:search"}})).unwrap();
@@ -2651,7 +2639,7 @@ fn summary_menu_yields_to_preferences_and_command_dialog_without_resuming_or_ste
             assert!(!h.app.viewport_status.owns_focus(&h.ctx));
         }
         h.step(&json!({"key":"Escape"})).unwrap();
-        assert!(!h.app.prefs_window.open);
+        assert!(!h.app.prefs_window.shell.open);
         assert_eq!(h.app.dialog.is_some(), owner == "stacked", "one Escape closes only the highest owner");
         assert_eq!(h.app.session.status_items(), effects);
         assert_eq!(h.app.session.newest_status_item(&eligible), newest);
@@ -2818,4 +2806,37 @@ fn a_section_card_shows_every_row_and_reads_like_its_pill() {
             assert!(description.settings.iter().any(|s| matches!(&s.value, V::Axis { current, .. } if current == normal)), "{plane}");
         }
     }
+}
+
+/// Notes (#1631): the callout is laid out in screen space at the projected anchor, so it
+/// faces the camera at any rotation, follows the anchor, and hidden notes are not drawn.
+#[test]
+fn note_callouts_are_screen_facing_and_follow_the_anchor() {
+    fn shot(h: &Harness) -> Vec<DrawnNote> {
+        let proj = display_proj(&h.app);
+        let mut out = Vec::new();
+        draw(&h.ctx, |ui| out = note_callouts(&h.app, ui.painter(), &proj));
+        out
+    }
+    let mut h = Harness::new();
+    h.app.run("note.add", json!({"anchor": [10.0, 5.0, 20.0], "text": "Check clearance here."})).unwrap();
+    h.settle();
+    let first = shot(&h);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].text, "Check clearance here.");
+    assert!(first[0].text_rect.width() > 0.0 && first[0].text_rect.height() > 0.0);
+
+    // Another rotation: the same text, drawn at a new place — the callout faces the screen.
+    h.call("ui.view", json!({"view": "front"}));
+    h.settle();
+    let second = shot(&h);
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].text, first[0].text);
+    assert_ne!(second[0].anchor, first[0].anchor, "the anchor follows the model as it turns");
+
+    // A hidden note is kept but not drawn.
+    let id = h.app.session.doc.notes[0].id;
+    h.app.run("note.update", json!({"note": id, "hidden": true})).unwrap();
+    h.settle();
+    assert!(shot(&h).is_empty());
 }

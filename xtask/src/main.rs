@@ -18,15 +18,21 @@ mod layers;
 mod licences;
 mod lists;
 mod mesh_decisions;
+mod parallel;
+mod params;
 mod pending;
 mod render_assets;
+mod rustfmt;
+mod shared;
 mod skills;
+mod solidcore_paths;
 mod test;
 mod test_nextest;
 mod ui_containers;
 mod web_offline;
 mod web_offline_test;
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -34,13 +40,19 @@ const USAGE: &str = "\
 usage: cargo xtask <command>
 
 commands:
-  ui-containers   enforce the universal container for all UI hosts
+  ui-containers   enforce the universal container for all UI hosts and the kit's tooltips
   layers          enforce the crate dependency layering (plan/architecture.md §3)
+                  and the per-crate count of paths into solidcore internals (xtask/solidcore-paths.txt);
+                  `layers --paths [crate]` lists those paths
+  shared          check that each shared crate (layers' Shared class) has workspace lints, a licence,
+                  a README and no includes from outside its directory, then build and test it in a
+                  scratch workspace holding only it and the shared crates it uses
+                  (target/xtask-shared): it would build after extraction
   assets          check that every non-code asset file is attributed in ATTRIBUTION.md
   app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
   icons           validate UI icon standards, discovery and review-tool behavior (Python 3.11+)
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
-  i18n [--check | --add-missing]
+  i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
                   which messages a locale has not translated and which command labels the English
                   catalog cannot translate (so they stay English everywhere). --check fails when
@@ -75,7 +87,7 @@ commands:
                   kernel operations, operand records, fix set and expected values in
                   DIR/<area>/<case>.json and DIR/manifest.json, every case not expressible as
                   kernel input listed with its reasons; with --ladder too
-  known-failing --junit PATH... [--list FILE]
+  known-failing --junit PATH... [--list FILE] [--quarantine FILE]
                   grade a nextest run's junit report (a file, or every .xml under a directory)
                   against the tests known to fail today on the default kernel,
                   tests/KNOWN_FAILING_TESTS (or FILE): fails
@@ -104,6 +116,9 @@ commands:
   fold-pending    fold assets/locales/pending/*.json into the catalogs and attribution/pending/*.md
                   into ATTRIBUTION.md, and delete them (the Generated files workflow runs this on
                   main; pull requests add the pending files instead of editing the shared ones)
+  fmt [--check]   rustfmt over the workspace and its path dependencies (what `cargo fmt --all`
+                  formats), a few files at a time: `cargo fmt --all` itself cannot start on
+                  Windows, where its one command line is too long; --check only reports
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales, tests/KNOWN_FAILING_TESTS); --fix sorts
                   the catalogs
@@ -128,8 +143,8 @@ commands:
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
-  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, ui-containers,
-                  mesh-decisions, clippy -D warnings, then the tests
+  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
+                  ui-containers, mesh-decisions, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
 ";
@@ -138,7 +153,11 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let result = match args.first().map(String::as_str) {
-        Some("layers") => cmd_layers(),
+        Some("layers") => match rest.first() {
+            Some(&"--paths") => cmd_solidcore_paths(rest.get(1).copied()),
+            _ => cmd_layers(),
+        },
+        Some("shared") => shared::run(&root()),
         Some("ui-containers") => ui_containers::run(&root()),
         Some("assets") => assets::run(&root()),
         Some("icons") => icons::run(&root()),
@@ -158,6 +177,12 @@ fn main() -> ExitCode {
         Some("fold-pending") => pending::run(&root()),
         Some("skills") => skills::run(&root()),
         Some("mesh-decisions") => mesh_decisions::run(&root()),
+        Some("fmt") => match rest[..] {
+            [] => rustfmt::run(&root(), false),
+            ["--check"] => rustfmt::run(&root(), true),
+            // A mistyped --check must not rewrite files.
+            _ => Err("usage: cargo xtask fmt [--check]".into()),
+        },
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
@@ -190,9 +215,23 @@ fn main() -> ExitCode {
 }
 
 /// Workspace root (parent of the xtask crate).
+///
+/// `cargo xtask` (`cargo run`) sets `CARGO_MANIFEST_DIR` for the process, so that names the
+/// checkout the command runs in. The compile-time value is only a fallback for running the
+/// binary directly: git worktrees that share one `CARGO_TARGET_DIR` share one `xtask` binary,
+/// and its baked-in path names whichever worktree built it last.
 pub fn root() -> PathBuf {
-    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-    here.parent().unwrap_or(here).to_path_buf()
+    root_from(std::env::var_os("CARGO_MANIFEST_DIR"), Path::new(env!("CARGO_MANIFEST_DIR")))
+}
+
+/// The workspace root from the runtime `CARGO_MANIFEST_DIR` (when set and not empty), else from
+/// the compile-time one.
+fn root_from(runtime: Option<OsString>, compiled: &Path) -> PathBuf {
+    let here = match runtime.filter(|dir| !dir.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => compiled.to_path_buf(),
+    };
+    here.parent().map(Path::to_path_buf).unwrap_or(here)
 }
 
 pub fn cargo() -> Command {
@@ -201,7 +240,7 @@ pub fn cargo() -> Command {
     c
 }
 
-fn run(mut cmd: Command, what: &str) -> Result<(), String> {
+pub(crate) fn run(mut cmd: Command, what: &str) -> Result<(), String> {
     eprintln!("$ {what}");
     let status = cmd.status().map_err(|e| format!("{what}: failed to spawn: {e}"))?;
     if status.success() { Ok(()) } else { Err(format!("{what}: exited with {status}")) }
@@ -247,7 +286,7 @@ fn cmd_action_matrix(bless: bool, results: Option<&str>, from: Option<&str>) -> 
 }
 
 fn cmd_layers() -> Result<(), String> {
-    let crates = layers::from_metadata(&metadata()?)?;
+    let crates = layers::from_metadata(&metadata()?, Some(&root()))?;
     println!("Dependency layering (plan/architecture.md §3)\n");
     println!("{:<28} {:<14} workspace deps", "crate", "layer");
     for c in &crates {
@@ -266,10 +305,24 @@ fn cmd_layers() -> Result<(), String> {
             .collect();
         println!("{:<28} {:<14} {}", c.name, layers::describe(layers::classify(&c.name)), ws.join(", "));
     }
-    let violations = layers::check(&crates);
+    let mut violations: Vec<String> = layers::check(&crates).iter().map(ToString::to_string).collect();
+    let allow = std::fs::read_to_string(root().join(layers::SEAM_LIST)).map_err(|e| format!("{}: {e}", layers::SEAM_LIST))?;
+    violations.extend(layers::seam_check(&crates, &allow, &layers::read_public(&root())?));
+    violations.extend(layers::standalone_check(&layers::read_solidcore_manifests(&root())?));
+    let paths = solidcore_paths::counts(&solidcore_paths::scan(
+        &root(),
+        &solidcore_paths::solidcore_idents(&layers::read_solidcore_manifests(&root())?),
+        &layers::parse_public(&layers::read_public(&root())?),
+    )?);
+    let baseline = std::fs::read_to_string(root().join(solidcore_paths::BASELINE)).map_err(|e| format!("{}: {e}", solidcore_paths::BASELINE))?;
+    println!("\nPaths into solidcore internals, by crate ({}):", solidcore_paths::BASELINE);
+    for (c, n) in &paths {
+        println!("  {c:<26} {n}");
+    }
+    violations.extend(solidcore_paths::check(&paths, &baseline));
     println!();
     if violations.is_empty() {
-        println!("OK: {} crates, no layering violations.", crates.len());
+        println!("OK: {} crates, no layering or solidcore seam violations.", crates.len());
         Ok(())
     } else {
         println!("{} violation(s):", violations.len());
@@ -278,6 +331,26 @@ fn cmd_layers() -> Result<(), String> {
         }
         Err(format!("{} layering violation(s)", violations.len()))
     }
+}
+
+/// `cargo xtask layers --paths [crate path]`: every path into solidcore internals the layers check
+/// counts, `file:line path`, for one crate or all.
+fn cmd_solidcore_paths(only: Option<&str>) -> Result<(), String> {
+    let sites = solidcore_paths::scan(
+        &root(),
+        &solidcore_paths::solidcore_idents(&layers::read_solidcore_manifests(&root())?),
+        &layers::parse_public(&layers::read_public(&root())?),
+    )?;
+    for (c, list) in &sites {
+        if only.is_some_and(|o| o.trim_end_matches('/') != c) {
+            continue;
+        }
+        println!("{c}: {}", list.len());
+        for s in list {
+            println!("  {}:{} {}", s.file, s.line, s.path);
+        }
+    }
+    Ok(())
 }
 
 /// Features with no reference case yet, and the tests that check them against hand-computed
@@ -423,9 +496,12 @@ fn cmd_wasm() -> Result<(), String> {
 /// The wasm check and how many crates it covers. It uses the ci profile so the host build
 /// scripts and proc macros built for clippy and the tests are reused.
 fn wasm_check() -> Result<(Command, usize), String> {
-    let crates = layers::from_metadata(&metadata()?)?;
-    let mut set: Vec<String> =
-        crates.iter().filter(|c| matches!(layers::classify(&c.name), Some(layers::Class::Layer(_)))).map(|c| c.name.clone()).collect();
+    let crates = layers::from_metadata(&metadata()?, Some(&root()))?;
+    let mut set: Vec<String> = crates
+        .iter()
+        .filter(|c| matches!(layers::classify(&c.name), Some(layers::Class::Layer(_) | layers::Class::Shared)))
+        .map(|c| c.name.clone())
+        .collect();
     set.push("solidcraft-web".into());
     let mut c = cargo();
     c.args(["check", "--target", "wasm32-unknown-unknown", "--profile", "ci"]);
@@ -438,15 +514,14 @@ fn wasm_check() -> Result<(Command, usize), String> {
 /// The quick gates first, so they fail fast; the wasm check (and doc tests) run while the test
 /// binaries do, which leaves cargo's build lock free.
 fn cmd_ci() -> Result<(), String> {
-    let mut c = cargo();
-    c.args(["fmt", "--all", "--", "--check"]);
-    run(c, "cargo fmt --check")?;
+    rustfmt::run(&root(), true)?;
     assets::run(&root())?;
     icons::run(&root())?;
     licences::run(&root(), true)?;
     lists::run(&root(), false)?;
     skills::run(&root())?;
     cmd_layers()?;
+    shared::run(&root())?;
     ui_containers::run(&root())?;
     mesh_decisions::run(&root())?;
     let mut c = cargo();
@@ -457,4 +532,23 @@ fn cmd_ci() -> Result<(), String> {
     web_offline_test::run(&root(), None, false)?;
     eprintln!("ci: all gates passed");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn root_prefers_the_runtime_manifest_dir() {
+        let compiled = Path::new("/built/here/xtask");
+        let runtime = Some(OsString::from("/run/there/xtask"));
+        assert_eq!(root_from(runtime, compiled), PathBuf::from("/run/there"));
+    }
+
+    #[test]
+    fn root_falls_back_to_the_compiled_manifest_dir() {
+        let compiled = Path::new("/built/here/xtask");
+        assert_eq!(root_from(None, compiled), PathBuf::from("/built/here"));
+        assert_eq!(root_from(Some(OsString::new()), compiled), PathBuf::from("/built/here"));
+    }
 }

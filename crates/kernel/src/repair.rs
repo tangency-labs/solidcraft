@@ -256,7 +256,7 @@ fn rebuild_refused(record: &mut Brep, report: &mut RepairReport) -> Result<()> {
 /// trims it has no closed form for). The face's edges and loops stay as they were. `None` for a
 /// face on another surface.
 fn rebuilt_face(r: &Brep, f: usize) -> Result<Option<b::Face>> {
-    use solidcraft_geom::brep::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
+    use solidcore_ops::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     let face = r.faces.get(f).ok_or_else(|| invalid(format!("no face {f}")))?;
     if !matches!(face.surface, b::Surface::Cylinder { .. } | b::Surface::Cone { .. } | b::Surface::Sphere { .. } | b::Surface::Torus { .. }) {
         return Ok(None);

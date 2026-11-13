@@ -2,6 +2,7 @@
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{Extent, FeatureKind};
+use solidcraft_engine::geom::MeshGeom;
 
 fn make(params: Value) -> Harness {
     make_in(Harness::new(), params)
@@ -378,7 +379,7 @@ fn rotated_second_occurrence_keeps_saved_from_and_to_points_exact() {
 fn dragging_to_update_value_reselects_whole_value_box_text() {
     let mut h = make(json!({"distance":"4 mm"}));
     open(&mut h);
-    let id = egui::Id::new("sc_canvas_value");
+    let id = egui::Id::unique("sc_canvas_value");
     let selection = |h: &Harness| {
         let range = egui::text_edit::TextEditState::load(&h.ctx, id).unwrap().cursor.char_range().unwrap();
         let (a, b) = (range.primary.index, range.secondary.index);
@@ -387,8 +388,11 @@ fn dragging_to_update_value_reselects_whole_value_box_text() {
     assert_eq!(selection(&h), (0, 4), "the pick selects all of \"4 mm\"");
     h.step(&json!({"drag":[{"handle":"arrow"},{"world":[5,5,15]}]})).unwrap();
     let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance, .. }, .. }) = &h.app.dialog else { panic!("extrude dialog") };
-    assert_eq!(distance, "15 mm");
-    assert_eq!(selection(&h), (0, 5), "the drag grew the text length; the selection must cover all of it");
+    // Snapped drag writes Length decimals (and enough places for the snap step) (#9035).
+    assert!(distance.starts_with("15"), "{distance}");
+    assert!(distance.ends_with(" mm"), "{distance}");
+    assert_ne!(distance, "15 mm", "snapped drag pads to Length decimals: {distance}");
+    assert_eq!(selection(&h), (0, distance.len()), "the drag grew the text length; the selection must cover all of it ({distance})");
 }
 
 #[test]
@@ -466,7 +470,7 @@ fn extrusion_arrow_tracks_the_current_drag_frame() {
     open(&mut h);
     let at = h.at(&json!({"handle":"arrow"})).unwrap();
     let at = egui::pos2(at[0] as f32, at[1] as f32);
-    h.app.synthetic_mods.ctrl = true;
+    hold_free_drag_key(&mut h);
     h.app.synthetic.push(egui::Event::PointerMoved(at));
     h.frame();
     h.app.synthetic.push(egui::Event::PointerButton {
@@ -597,6 +601,49 @@ fn two_sides_with_all_shows_distance_2_and_reverse_swaps_the_sides() {
     assert_eq!(extent(&h), e);
 }
 
+/// Two Sides with a negative Distance 1: its side turns over, but Distance 2 stays where Direction
+/// puts it, and has its own value box like Distance 1.
+#[test]
+fn two_sides_second_arrow_stays_put_when_the_first_distance_turns_negative() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Disc"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":2})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":"Disc","distance":"-5 mm","distance2":"3 mm","name":"Depth"})).unwrap();
+    h.frames(4);
+    open(&mut h);
+    assert!(h.widget("Distance 2").is_some(), "Two Sides shows the second side's distance");
+    let centre = h.at(&json!({"world":[10,10,0]})).unwrap()[1] as f32;
+    let tips = || (crate::scenario::handle_at("arrow").unwrap().y - centre, crate::scenario::handle_at("arrow2").unwrap().y - centre);
+    let (first, second) = tips();
+    assert!(first > 0.0 && second > 0.0, "the first arrow turned below the sketch, the second stayed below it: {first} {second}");
+}
+
+/// Distance 2's box in the view stays while its text does not evaluate, so a cleared box or a
+/// `-` typed first can be finished there.
+#[test]
+fn two_sides_second_value_box_stays_while_its_text_is_incomplete() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Disc"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":2})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":"Disc","distance":"5 mm","distance2":"3 mm","name":"Depth"})).unwrap();
+    h.frames(4);
+    open(&mut h);
+    let area = || egui::Id::unique("sc_canvas_area2");
+    assert!(h.ctx.memory(|m| m.area_rect(area())).is_some(), "Distance 2's box in the view");
+    for text in ["-", ""] {
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance2, .. }, .. }) = &mut h.app.dialog else {
+            panic!("extrude dialog")
+        };
+        *distance2 = text.into();
+        h.frames(3);
+        assert!(h.ctx.read_response(egui::Id::unique("sc_canvas_value2")).is_some(), "Distance 2's box went away at {text:?}");
+    }
+}
+
 /// Without value boxes in the view (Preferences, #9479), nothing covers the model: the command
 /// window's Distance takes the keyboard instead, its text selected, and the arrow still drags it.
 #[test]
@@ -604,15 +651,15 @@ fn without_value_boxes_in_the_view_the_distance_is_typed_in_the_window() {
     let mut h = make(json!({"distance":"4 mm"}));
     h.app.preferences.value_boxes_in_view = false;
     open(&mut h);
-    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).is_none(), "a value box in the view");
+    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).is_none(), "a value box in the view");
     let focused = h.ctx.memory(|m| m.focused());
-    assert!(focused.is_some() && focused != Some(egui::Id::new("sc_canvas_value")), "{focused:?}");
+    assert!(focused.is_some() && focused != Some(egui::Id::unique("sc_canvas_value")), "{focused:?}");
     h.step(&json!({"text":"25 mm"})).unwrap();
     h.frames(2);
     assert!((dialog_distance(&h) - 25.0).abs() < 1e-9, "{}", dialog_distance(&h));
     h.step(&json!({"drag":[{"handle":"arrow"},on_arrow(&h, 30.0)]})).unwrap();
     assert!((dialog_distance(&h) - 30.0).abs() < 0.5, "{}", dialog_distance(&h));
-    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).is_none(), "a value box in the view");
+    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).is_none(), "a value box in the view");
 }
 
 #[test]
@@ -665,4 +712,214 @@ fn failed_face_extrusion_edit_keeps_context_until_escape_and_preserves_visibilit
     assert!(h.app.dialog.is_none());
     assert!(!h.app.body_visible("Source"));
     assert_eq!(h.app.session.visibility, visibility);
+}
+
+/// Hold the free-drag key, the platform's primary modifier: Ctrl on Windows and Linux, Cmd on
+/// macOS (#13274). Physical Ctrl alone is not the primary key on macOS.
+fn hold_free_drag_key(h: &mut Harness) {
+    use crate::tool_modifiers::{Held, Platform};
+    h.app.synthetic_mods.command = true;
+    for platform in [Platform::Mac, Platform::Other] {
+        assert!(Held::new(h.app.synthetic_mods, platform).primary, "{platform:?} sees no primary key in {:?}", h.app.synthetic_mods);
+    }
+}
+
+/// A block 12.345678 mm thick under XY (so no round step lands on its underside), a 10 mm
+/// square sketched on its top and cut 5 mm into it, a second block beside it whose underside is
+/// at -7.777 mm, and the cut open in its editor.
+fn cut_into_block() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":12.345678,"corner":[-10,-10,-12.345678],"body_name":"Block"})).unwrap();
+    h.app
+        .run("solid.box", json!({"length":10,"width":10,"height":7.777,"corner":[40,0,-7.777],"body_name":"Beside","operation":"new_body"}))
+        .unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Pocket"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let cut = json!({"sketch":"Pocket","direction":"negative","distance":"5 mm","operation":"cut","targets":["Block"],"name":"Depth"});
+    h.app.run("solid.extrude", cut).unwrap();
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(4);
+    open(&mut h);
+    h
+}
+
+/// Presses the arrow's tip and holds it at the world point `to`, frame by frame, without letting
+/// go; returns the face the arrow stopped at then.
+fn hold_arrow_at(h: &mut Harness, to: Value) -> Option<crate::extrude_face_snap::Stop> {
+    let from = h.at(&json!({"handle":"arrow"})).unwrap();
+    let from = egui::pos2(from[0] as f32, from[1] as f32);
+    let to = h.at(&to).unwrap();
+    let to = egui::pos2(to[0] as f32, to[1] as f32);
+    h.app.synthetic.push(egui::Event::PointerMoved(from));
+    h.frame();
+    h.app.synthetic.push(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: h.app.synthetic_mods,
+    });
+    h.frame();
+    for k in 1..=4 {
+        h.app.synthetic.push(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 4.0)));
+        h.frame();
+    }
+    crate::extrude_face_snap::current()
+}
+
+fn let_go(h: &mut Harness) {
+    let at = h.ctx.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+    h.app.synthetic.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: h.app.synthetic_mods,
+    });
+    h.frames(2);
+}
+
+/// Extrude Cut depth stops at the far face (#2398): dragged near the block's underside, the
+/// cut's arrow takes its exact depth (not a round step) and outlines that face; OK cuts through.
+#[test]
+fn the_extrude_arrow_stops_at_a_parallel_face_and_outlines_it() {
+    let mut h = cut_into_block();
+    let stop = hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]}));
+    let stop = stop.expect("the arrow stops at the block's underside");
+    assert_eq!((stop.body.as_str(), (stop.distance - 12.345678).abs() < 1e-9), ("Block", true), "{stop:?}");
+    assert!((dialog_distance(&h) - 12.345678).abs() < 1e-9, "{}", dialog_distance(&h));
+    let_go(&mut h);
+    assert!(crate::extrude_face_snap::current().is_none(), "no outline once the arrow is let go");
+    assert!((dialog_distance(&h) - 12.345678).abs() < 1e-9, "{}", dialog_distance(&h));
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let expected = 30.0 * 30.0 * 12.345678 - 10.0 * 10.0 * 12.345678;
+    assert!((volume(&h, "Block") - expected).abs() < 1e-6, "{} for {expected}", volume(&h, "Block"));
+}
+
+/// The free drag (Ctrl held) passes the face by, and a face beside the profile never catches the
+/// arrow: the distance stays the pointer's or a round step.
+#[test]
+fn the_extrude_arrow_passes_faces_beside_the_profile_and_in_a_free_drag() {
+    let mut h = cut_into_block();
+    // The other block's underside at -7.777 is not under the square.
+    assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-7.75]})), None);
+    assert!((dialog_distance(&h) - 7.777).abs() > 1e-6, "{}", dialog_distance(&h));
+    let_go(&mut h);
+    hold_free_drag_key(&mut h);
+    assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]})), None);
+    assert!((dialog_distance(&h) - 12.345678).abs() > 1e-3, "{}", dialog_distance(&h));
+    let_go(&mut h);
+}
+
+/// With Preferences › Design › "Extrude arrow stops at faces" off, the arrow keeps the old
+/// behaviour (#2398): dragged near the block's underside it takes a round step, not the face's
+/// distance, and nothing is outlined.
+#[test]
+fn without_face_stops_the_extrude_arrow_moves_in_round_steps() {
+    let mut h = cut_into_block();
+    h.app.preferences.extrude_arrow_face_stops = false;
+    assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]})), None);
+    let d = dialog_distance(&h);
+    assert!((d - 12.345678).abs() > 1e-3, "{d}");
+    let step = crate::canvas::snap_step(h.app.cam.half_height());
+    assert!(((d / step).round() * step - d).abs() < 1e-9, "{d} is not a multiple of the {step} mm step");
+    let_go(&mut h);
+}
+
+/// The extrude "Depth" (a 10 x 10 x 10 block) and a later box "Pad" beside it, both in view.
+fn two_features() -> Harness {
+    let mut h = make(json!({}));
+    h.app.run("solid.box", json!({"corner":[30,0,0],"length":8,"width":8,"height":4,"name":"Pad"})).unwrap();
+    h.app.animate_fit_all();
+    h.frames(30);
+    h
+}
+
+fn editing_feature(h: &Harness) -> Option<u64> {
+    h.app.dialog.as_ref().and_then(|d| d.editing).map(|(id, _)| id)
+}
+
+fn feature_id(h: &Harness, name: &str) -> u64 {
+    h.app.session.doc.find_feature(name).unwrap().id
+}
+
+// Double-clicking a body's face in the view opens the editor of the feature that made the face,
+// as a double-click on that feature's row does (#10989).
+#[test]
+fn double_clicking_a_face_edits_the_feature_that_made_it() {
+    let mut h = two_features();
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true})).unwrap();
+    h.frames(8);
+    assert!(h.app.dialog.is_some(), "the extrude's editor opens");
+    assert_eq!(editing_feature(&h), Some(feature_id(&h, "Depth")));
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    h.settle();
+    h.frames(30);
+    assert!(h.app.dialog.is_none());
+    // A face of the later feature opens that feature, not the extrude.
+    h.step(&json!({"click":{"world":[34,4,4]},"double":true})).unwrap();
+    h.frames(8);
+    assert_eq!(editing_feature(&h), Some(feature_id(&h, "Pad")));
+}
+
+// It is the same editor the timeline row opens.
+#[test]
+fn double_clicking_a_face_opens_what_the_timeline_row_opens() {
+    let mut h = two_features();
+    open(&mut h);
+    let from_row = h.app.dialog.as_ref().map(|d| (format!("{:?}", d.kind), d.editing.map(|e| e.0)));
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true})).unwrap();
+    h.frames(8);
+    assert_eq!(h.app.dialog.as_ref().map(|d| (format!("{:?}", d.kind), d.editing.map(|e| e.0))), from_row);
+}
+
+// A single click only selects the face, and a double-click with Shift held is left to the selection.
+#[test]
+fn a_single_click_on_a_face_only_selects_it() {
+    let mut h = two_features();
+    h.step(&json!({"click":{"world":[5,5,10]}})).unwrap();
+    h.frames(30);
+    assert!(h.app.dialog.is_none() && h.app.pending_feature_edit.is_none());
+    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Face { .. })), "{:?}", h.app.session.selection);
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true,"shift":true})).unwrap();
+    h.frames(8);
+    assert!(h.app.dialog.is_none(), "a double-click with a modifier is left to the selection");
+}
+
+// Inside a dialog or tool the double-click does what it did: it does not swap the dialog.
+#[test]
+fn double_clicking_a_face_inside_an_open_dialog_leaves_it() {
+    let mut h = two_features();
+    h.app.start("solid.box");
+    h.frames(4);
+    let primitive = |h: &Harness| h.app.dialog.as_ref().is_some_and(|d| format!("{:?}", d.kind).starts_with("Primitive { cmd: \"solid.box\""));
+    assert!(primitive(&h));
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true})).unwrap();
+    h.frames(8);
+    assert!(primitive(&h), "the Box dialog stays open");
+    assert_eq!(editing_feature(&h), None);
+    assert!(h.app.pending_feature_edit.is_none());
+}
+
+// In a component placed away from the origin the face is found in the component's own frame,
+// so a later feature beside it is not opened instead: placed for good, or moved and not captured.
+#[test]
+fn double_clicking_a_face_of_a_moved_component_edits_its_feature() {
+    for capture in [true, false] {
+        let mut h = make(json!({}));
+        let part = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+        let occurrence = part["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"corner":[0,0,0],"length":4,"width":4,"height":4,"name":"Inner"})).unwrap();
+        h.app.run("solid.box", json!({"corner":[20,0,0],"length":4,"width":4,"height":4,"name":"Later"})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[40,0,0],"capture":capture})).unwrap();
+        h.app.animate_fit_all();
+        h.frames(30);
+        h.step(&json!({"click":{"world":[42,2,4]},"double":true})).unwrap();
+        h.frames(8);
+        assert_eq!(editing_feature(&h), Some(feature_id(&h, "Inner")), "capture: {capture}");
+    }
 }

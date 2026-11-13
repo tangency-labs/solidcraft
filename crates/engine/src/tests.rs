@@ -1,10 +1,11 @@
+use solidcraft_geom::MeshGeom;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
 
 use crate::*;
 
-mod mesh_convert;
+pub(crate) mod mesh_convert;
 
 /// Counts the copies `Session::doc_mut` makes of a shared document.
 pub(crate) mod doc_copies {
@@ -96,6 +97,74 @@ fn edge_picks_at_a_corner_are_refused() {
     }
 }
 
+/// Edge picks on bodies apart: one pick keeps its body on the feature (the model has two), and
+/// picks on both keep none, each found where it lies.
+#[test]
+fn edge_picks_on_bodies_apart_keep_the_body_they_lie_on() {
+    let boxes = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Low"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 50], "operation": "new", "body_name": "High"}));
+        s
+    };
+    let kept = |s: &Session| match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Chamfer { body, .. } => body.as_ref().map(|b| b.0.clone()),
+        k => panic!("{k:?}"),
+    };
+    let each = |s: &Session| ["Low", "High"].map(|b| s.model.state().body(b).unwrap().measure().unwrap().volume);
+    let mut s = boxes();
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}));
+    assert_eq!(kept(&s).as_deref(), Some("Low"));
+    let [low, high] = each(&s);
+    assert!((low - 11980.0).abs() < 0.02 && high == 12000.0, "{low} {high}");
+    let mut s = boxes();
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0], [20, 0, 60]], "distance": 1}));
+    assert_eq!(kept(&s), None);
+    let [low, high] = each(&s);
+    assert!((low - 11980.0).abs() < 0.02 && (high - 11980.0).abs() < 0.02, "{low} {high}");
+}
+
+/// The halves of a split box share the edges along the cut: a pick on one is refused naming both
+/// halves, and `body` cuts the half named.
+#[test]
+fn edge_picks_on_the_cut_of_a_split_body_name_both_halves() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Box"}));
+    run(&mut s, "solid.split_body", json!({"body": "Box", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    let features = s.doc.features.len();
+    let err = s.execute("solid.chamfer", &json!({"edges": [[20, 15, 10]], "distance": 1})).unwrap_err().to_string();
+    assert!(err.contains("[20, 15, 10] lies on edges of 2 bodies, Box and Box (1)") && err.contains("with `body`"), "{err}");
+    assert_eq!(s.doc.features.len(), features);
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 15, 10]], "distance": 1, "body": "Box (1)"}));
+    let half = |s: &Session, b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    assert!((half(&s, "Box (1)") - 5985.0).abs() < 0.02 && (half(&s, "Box") - 6000.0).abs() < 1e-6, "{} {}", half(&s, "Box"), half(&s, "Box (1)"));
+}
+
+/// A box touching a cylinder along the cylinder's seam: the seam is not an edge to blend, so the
+/// box's edge there is cut.
+#[test]
+fn an_edge_along_another_bodys_seam_is_picked() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "body_name": "Rod"}));
+    let rod = s.model.state().body("Rod").unwrap().body.clone();
+    let mesh = rod.mesh(&solidcraft_kernel::MeshTolerance::chord(0.06)).unwrap();
+    let seam = mesh.edges.iter().zip(&mesh.seams).find(|(_, seam)| **seam).unwrap().0[0];
+    // The box's quarter past the seam's line is outside the cylinder: they touch along it.
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": 10, "corner": [seam.x, seam.y, 0], "operation": "new", "body_name": "Block"}),
+    );
+    run(&mut s, "solid.chamfer", json!({"edges": [[seam.x, seam.y, 5]], "distance": 1}));
+    let kept = match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Chamfer { body, .. } => body.as_ref().map(|b| b.0.clone()),
+        k => panic!("{k:?}"),
+    };
+    assert_eq!(kept.as_deref(), Some("Block"));
+    let v = |b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    assert!((v("Block") - 3995.0).abs() < 0.02 && (v("Rod") - PI * 1000.0).abs() < 1.0, "{} {}", v("Block"), v("Rod"));
+}
+
 #[test]
 fn fillet_as_wide_as_a_face_rounds_it_off() {
     // #199: 14 x 6 x 10 box, the four vertical edges at r = 3 (half the 6 mm end faces).
@@ -109,11 +178,10 @@ fn fillet_as_wide_as_a_face_rounds_it_off() {
 
 /// The owner's ruling of 2026-10-30: two edges of a 20 mm box rounded r2 in one fillet (they
 /// meet in a mitre at the corner (20, 0, 20), the upright edge there sharp), then the upright edge
-/// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is the
-/// one solidcore 8ddce9016 builds for three rounds of different radii there: one patch, 10
-/// faces, 7928.743041456134 mm³ (the fork's setback corner, 15 faces and 7928.142563938, waits
-/// for solidcore#2310). The r2 rounds keep their names, and the r3 round and the corner's patch
-/// are the second fillet's.
+/// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is
+/// solidcore's setback corner for three rounds of different radii there (solidcore#2382): 15
+/// faces, 7927.724282512234 mm³. The r2 rounds keep their names, and the r3 round and the
+/// corner's six patches are the second fillet's.
 #[test]
 fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let mut s = Session::default();
@@ -131,21 +199,21 @@ fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
         faces.iter().find(|f| f["index"].as_u64() == Some(index as u64)).and_then(|f| f["name"].as_str()).unwrap_or_default().to_string()
     };
     let before: Vec<String> = rounds.iter().map(|p| named(&mut s, *p)).collect();
-    assert!(before.iter().all(|n| n.starts_with(&format!("F{first}:blend:"))), "{before:?}");
+    assert!(before.iter().all(|n| n.starts_with(&format!("F{first}:blend("))), "{before:?}");
     let second = run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 3}))["feature"].as_u64().unwrap();
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let v = volume(&mut s);
-    assert!((v - 7928.743041456134).abs() < 1e-6, "{v}");
+    assert!((v - 7927.724282512234).abs() < 1e-6, "{v}");
     let faces = run(&mut s, "model.faces", json!({"body": "Box"}))["faces"].as_array().cloned().unwrap_or_default();
-    assert_eq!(faces.len(), 10);
+    assert_eq!(faces.len(), 15);
     let after: Vec<String> = rounds.iter().map(|p| named(&mut s, *p)).collect();
     assert_eq!(after, before);
     // The r3 round (halfway up, at 45°) and the corner's patches: the faces the second fillet made.
     let k3 = 3.0 - 4.5_f64.sqrt();
-    assert!(named(&mut s, solidcore_record::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend:")));
+    assert!(named(&mut s, solidcore_record::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend(")));
     let made = faces.iter().filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with(&format!("F{second}:")))).count();
-    // the r3 round and the corner's patch
-    assert_eq!(made, 2, "{faces:?}");
+    // the r3 round and the corner's six patches
+    assert_eq!(made, 7, "{faces:?}");
 }
 
 #[test]
@@ -945,6 +1013,13 @@ fn a_copy_with_history_undoes_like_the_session_it_copies() {
 /// no command panics internally.
 #[test]
 fn hostile_params_never_panic() {
+    // `file.slicers` gets every hostile value like every command, but lists made-up slicers (none)
+    // instead of searching this machine's programs on each of its ~5,600 calls: a third of a second
+    // a call on Windows, half an hour in all. The tests that make slicers up take turns, and
+    // `MadeUp` puts the real search back.
+    let _turn = mesh_convert::CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _reset = mesh_convert::MadeUp;
+    *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
     let keys = [
         "plane",
         "offset",
@@ -1050,6 +1125,7 @@ fn hostile_params_never_panic() {
         "favorites",
         "filter",
         "kind",
+        "detail",
         "prefix",
         "orientation",
         "seam",
@@ -1070,6 +1146,15 @@ fn hostile_params_never_panic() {
         "density",
         "names",
         "references",
+        "head",
+        "head_gap",
+        "shape",
+        "size",
+        "web",
+        "clip",
+        "through_all",
+        "depth",
+        "dot_grid",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
@@ -1919,9 +2004,17 @@ fn measure_items() {
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(fb, [20.0, 15.0, 0.0])]}));
     assert!((r["distance_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{r}");
     assert!((r["angle_deg"].as_f64().unwrap() - 180.0).abs() < 1e-6, "{r}");
+    // The ends of a distance are real points (#11833: NaN ends hid the Distance row): one on
+    // each face, straight across.
+    let end = |k: &str| -> Vec3 { serde_json::from_value(r[k].clone()).unwrap_or_else(|e| panic!("{k}: {e} in {r}")) };
+    let (from, to) = (end("from"), end("to"));
+    assert!((from.z - 20.0).abs() < 1e-9 && to.z.abs() < 1e-9 && (to - from).cross(Vec3::Z).len() < 1e-9, "{r}");
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(ff, [20.0, 0.0, 10.0])]}));
     assert!(r["distance_mm"].as_f64().unwrap() < 1e-9);
     assert!((r["angle_deg"].as_f64().unwrap() - 90.0).abs() < 1e-6);
+    for k in ["from", "to"] {
+        assert!(serde_json::from_value::<Vec3>(r[k].clone()).is_ok_and(|p| p.is_finite()), "{k} in {r}");
+    }
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0])]}));
     assert!((r["items"][0]["area_mm2"].as_f64().unwrap() - 1200.0).abs() < 1e-6, "{r}");
     let v = json!({"type": "vertex", "body": "Body1", "point": [0, 0, 0]});
@@ -2087,12 +2180,105 @@ fn threemf_export_open_insert() {
     assert_eq!(s.model.state().bodies.len(), 3);
     assert!(rel(volume(&mut s), 2.0 * want) < 2e-3);
     assert!(s.execute("file.insert_mesh", &json!({"path": dir.join("x.step").to_string_lossy()})).is_err());
+    // An STL's unit scales it to millimetres as it is read: inches are 25.4 mm each. 3MF states its own.
+    let mut inch = Session::default();
+    let r = run(&mut inch, "file.insert_mesh", json!({"path": stl.to_string_lossy(), "units": "in"}));
+    assert_eq!(r["units"], "in", "{r}");
+    assert!(rel(volume(&mut inch), want * 25.4f64.powi(3)) < 2e-3);
+    for bad_units in [json!("furlong"), json!(7), json!("")] {
+        assert!(inch.execute("file.insert_mesh", &json!({"path": stl.to_string_lossy(), "units": bad_units})).is_err());
+    }
+    assert!(inch.execute("file.insert_mesh", &json!({"path": p.to_string_lossy(), "units": "in"})).is_err());
     let junk = dir.join("junk.3mf");
     std::fs::write(&junk, b"PK\x03\x04 not really").unwrap();
     let before = s.doc.clone();
     assert!(s.execute("file.insert_mesh", &json!({"path": junk.to_string_lossy()})).is_err());
     assert!(s.execute("doc.open", &json!({"path": junk.to_string_lossy()})).is_err());
     assert_eq!(*s.doc, *before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A cube one unit across comes in as that unit in millimetres, for every unit: the sizes are
+/// written out here, not read from the table that scales the file.
+#[test]
+fn stl_cube_of_one_unit_comes_in_as_that_many_millimetres() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-stl-units-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("one.stl");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "file.save_mesh", json!({"path": stl.to_string_lossy()}));
+    for (units, edge) in [("mm", 1.0_f64), ("cm", 10.0), ("m", 1000.0), ("in", 25.4), ("ft", 304.8)] {
+        let mut t = Session::default();
+        let r = run(&mut t, "file.insert_mesh", json!({"path": stl.to_string_lossy(), "units": units}));
+        assert_eq!(r["units"], units, "{r}");
+        let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &t.doc.features[0].kind else { panic!("{units}: not a mesh import") };
+        for axis in 0..3 {
+            let along: Vec<f64> = meshes[0].positions.chunks(3).map(|p| p[axis]).collect();
+            let (lo, hi) = (along.iter().cloned().fold(f64::MAX, f64::min), along.iter().cloned().fold(f64::MIN, f64::max));
+            assert!(((hi - lo) - edge).abs() <= edge * 1e-12, "{units}: edge {} along axis {axis}, want {edge}", hi - lo);
+        }
+        assert!(rel(volume(&mut t), edge.powi(3)) < 1e-9, "{units}: volume {}", volume(&mut t));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A unit given on import and a Scale feature after an import in millimetres make the same body,
+/// within floating-point precision, for each unitless mesh format: STL, OBJ and PLY (with faces).
+#[test]
+fn a_unit_on_import_matches_importing_in_millimetres_then_scaling() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-unit-vs-scale-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // A cube one unit across, as the three formats write it.
+    let corners = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]];
+    let triangles =
+        [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [3, 7, 6], [3, 6, 2], [0, 4, 7], [0, 7, 3], [1, 2, 6], [1, 6, 5]];
+    let vertex = |i: usize| format!("{} {} {}", corners[i][0], corners[i][1], corners[i][2]);
+    let mut stl = String::from("solid cube\n");
+    for t in triangles {
+        stl += "facet normal 0 0 0\nouter loop\n";
+        for i in t {
+            stl += &format!("vertex {}\n", vertex(i));
+        }
+        stl += "endloop\nendfacet\n";
+    }
+    stl += "endsolid cube\n";
+    let mut obj = String::from("o Cube\n");
+    for i in 0..8 {
+        obj += &format!("v {}\n", vertex(i));
+    }
+    for t in triangles {
+        obj += &format!("f {} {} {}\n", t[0] + 1, t[1] + 1, t[2] + 1);
+    }
+    let mut ply = String::from("ply\nformat ascii 1.0\nelement vertex 8\nproperty float x\nproperty float y\nproperty float z\n");
+    ply += "element face 12\nproperty list uchar int vertex_indices\nend_header\n";
+    for i in 0..8 {
+        ply += &format!("{}\n", vertex(i));
+    }
+    for t in triangles {
+        ply += &format!("3 {} {} {}\n", t[0], t[1], t[2]);
+    }
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0);
+    for (extension, text) in [("stl", stl), ("obj", obj), ("ply", ply)] {
+        let path = dir.join(format!("cube.{extension}"));
+        std::fs::write(&path, text).unwrap();
+        for (units, mm) in [("mm", 1.0_f64), ("cm", 10.0), ("m", 1000.0), ("in", 25.4), ("ft", 304.8)] {
+            let mut with_unit = Session::default();
+            run(&mut with_unit, "file.insert_mesh", json!({"path": path.to_string_lossy(), "units": units}));
+            let mut scaled = Session::default();
+            let inserted = run(&mut scaled, "file.insert_mesh", json!({"path": path.to_string_lossy()}));
+            let body = inserted["bodies"][0].as_str().unwrap().to_string();
+            run(&mut scaled, "solid.scale", json!({"bodies": [body], "factor": mm.to_string()}));
+            let (a, b) = (with_unit.model.state().bodies[0].mesh().bounds(), scaled.model.state().bodies[0].mesh().bounds());
+            let (a, b) = ([a.min.x, a.min.y, a.min.z, a.max.x, a.max.y, a.max.z], [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z]);
+            for (x, y) in a.into_iter().zip(b) {
+                assert!(close(x, y), "{extension} {units}: bounds {a:?} against {b:?}");
+            }
+            let (va, vb) = (volume(&mut with_unit), volume(&mut scaled));
+            assert!(rel(va, vb) < 1e-9, "{extension} {units}: volume {va} against {vb}");
+            assert!(rel(va, mm.powi(3)) < 1e-9, "{extension} {units}: volume {va}, want {}", mm.powi(3));
+        }
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -2242,6 +2428,35 @@ fn a_used_up_or_dropped_checkpoint_says_why() {
     let dropped = s.execute("edit.restore_checkpoint", &json!({"checkpoint": first})).unwrap_err().to_string();
     assert!(dropped.contains("16"), "{dropped}");
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first + 1}));
+}
+
+/// Regression (#15865): forgetting a checkpoint dropped every later one too, so a batch that
+/// forgot its own rollback checkpoint took the checkpoint one of its steps had returned with it.
+#[test]
+fn forgetting_a_checkpoint_keeps_the_later_ones() {
+    let mut s = Session::default();
+    let empty = s.doc.clone();
+    let earlier = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let outer = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"name": "Kept", "length": 10, "width": 10, "height": 10}));
+    let inner = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let doc = s.doc.clone();
+    let undo = s.undo.len();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": outer, "forget": true}));
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": outer})).is_err());
+    run(&mut s, "solid.box", json!({"name": "Later", "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+    let back = run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": inner}));
+    assert_eq!(back["restored"], true, "{back}");
+    assert!(Arc::ptr_eq(&s.doc, &doc) && s.doc.find_feature("Kept").is_some() && s.doc.find_feature("Later").is_none());
+    assert_eq!(s.undo.len(), undo);
+    // Restoring still uses up every later checkpoint: they hold states after the one restored.
+    let first = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let second = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first}));
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": second})).is_err());
+    // Neither forgetting a later checkpoint nor restoring one used up the earlier one.
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": earlier}));
+    assert!(Arc::ptr_eq(&s.doc, &empty) && s.undo.is_empty());
 }
 
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a
@@ -2555,6 +2770,34 @@ fn split_body_by_a_face() {
     assert!(s.execute("solid.split_body", &json!({"body": "Block", "tool": {"body": "Tool", "point": [100, 0, 0]}})).is_err());
 }
 
+/// Split Body by a face follows the face when a parameter moves it (#11674): the tool face is
+/// named when it is picked, as other face picks are, and found again where it went.
+#[test]
+fn split_body_by_a_face_follows_the_face() {
+    let build = |h: &str, z: f64| {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "h", "expression": h}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 200, "center": [0, 0, 100], "body_name": "Post"}));
+        run(&mut s, "solid.cylinder", json!({"diameter": 42, "height": 300, "base": [-150, 0, "h"], "axis": "X", "body_name": "Rail"}));
+        run(&mut s, "solid.split_body", json!({"body": "Post", "tool": {"body": "Rail", "point": [0, 0, z]}}));
+        s
+    };
+    let volumes = |s: &Session| {
+        let st = s.world_state().unwrap();
+        let mut v: Vec<f64> =
+            st.bodies.iter().filter(|b| b.name.starts_with("Post")).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    let mut s = build("100 mm", 79.0);
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "150 mm"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{}: {e}", r.name))).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    // As if the rail had been at 150 mm when the face was picked.
+    let (got, want) = (volumes(&s), volumes(&build("150 mm", 129.0)));
+    assert!(got.len() >= 2 && got.len() == want.len() && got.iter().zip(&want).all(|(a, b)| rel(*a, *b) < 1e-9), "{got:?} against {want:?}");
+}
+
 /// Split Body by a sketch line (#1552): the plane through the line along the sketch's normal
 /// splits a box; the split follows the line when the sketch changes, the design saves the line,
 /// and anything but a straight line of a sketch is refused.
@@ -2594,6 +2837,34 @@ fn split_body_by_a_sketch_line() {
     let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     let split = saved["features"].as_array().and_then(|f| f.iter().find(|f| f["type"] == "split")).cloned().unwrap();
     assert_eq!((split["sketch"].as_u64(), split["line"].as_str()), (Some(sk), Some("cut")), "{split}");
+}
+
+/// Split Body of a body of two separate pieces joined into one (#6738): a plane through both
+/// pieces splits it, and each half keeps the half of both pieces. The reporter's flow: one
+/// sketch with two squares 20 mm across and 30 mm apart, both extruded 10 mm as New Body, then
+/// Combine (join). The split used to stop with "the tool does not split the body".
+#[test]
+fn split_body_of_a_body_of_two_pieces_splits_both() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch1"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [70, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch1", "distance": 10, "operation": "new"}));
+    run(&mut s, "solid.combine", json!({"target": "Body1", "tools": ["Body2"], "operation": "join"}));
+    // One body of two pieces before the split.
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 1, "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 2);
+    // A plane through the middle of both squares (the extrusion is 10 mm tall).
+    run(&mut s, "solid.split_body", json!({"body": "Body1", "plane": {"origin": [0, 0, 5], "normal": [0, 0, 1]}}));
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 2, "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    for b in &st.bodies {
+        // Each half holds the half of both squares: two pieces, half the body each.
+        assert!(rel(solidcraft_kernel::measure(&b.body).unwrap().volume, 4000.0) < 1e-6, "{}", b.name);
+        assert_eq!(b.body.lumps().unwrap().len(), 2, "{}", b.name);
+    }
 }
 
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the
@@ -2832,6 +3103,7 @@ fn fillet_follows_its_edge_after_an_upstream_resize() {
 
 mod naming {
     use serde_json::{Value, json};
+    use solidcraft_geom::MeshGeom;
 
     use super::run;
     use crate::Session;
@@ -2880,7 +3152,7 @@ mod naming {
             assert!(names.contains(&want), "{want} in {names:?}");
         }
         assert!(names.iter().any(|n| n.starts_with("F4:side:c1")), "{names:?}");
-        assert!(names.iter().any(|n| n.starts_with("F5:blend:")), "{names:?}");
+        assert!(names.iter().any(|n| n.starts_with("F5:blend(")), "{names:?}");
         let round = s.doc.find_feature("Round").cloned().unwrap();
         assert_eq!(round.edge_names, vec!["F2:side:l2|F2:top".to_string()]);
     }
@@ -3044,7 +3316,7 @@ mod naming {
         run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "B"}));
         run(&mut s, "solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2}));
         let n = face_names(&mut s, "B");
-        for want in ["F2:inner:F1:-z", "F2:inner:F1:+x", "F2:inner:F1:-x", "F2:inner:F1:+y", "F2:inner:F1:-y"] {
+        for want in ["F2:inner(F1:-z)", "F2:inner(F1:+x)", "F2:inner(F1:-x)", "F2:inner(F1:+y)", "F2:inner(F1:-y)"] {
             assert!(n.contains(&want.to_string()), "{want} in {n:?}");
         }
     }
@@ -3081,6 +3353,48 @@ fn tapped_and_clearance_holes() {
     assert!(rel(v2 - volume(&mut s), PI * 2.15 * 2.15 * 10.0) < 1e-3);
     assert!(s.execute("solid.hole", &json!({"position": [20, 25, 10], "clearance": "M7"})).is_err());
     assert!(s.execute("solid.hole", &json!({"position": [20, 25, 10]})).is_err());
+}
+
+/// A counterbore sized to the screw's head: `head` names the standard and `clearance` the size.
+/// ISO 4762 M4 has dk 7 and k 4; with the default 0.5 mm gap the recess is Ø8, 4.5 deep.
+#[test]
+fn counterbore_for_a_cap_screw_head() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 30, "height": 10}));
+    let v0 = volume(&mut s);
+    // The material a through hole of diameter `hole` with a counterbore `dk` wide and `k` deep removes.
+    let removed = |hole: f64, dk: f64, k: f64| PI * hole * hole / 4.0 * (10.0 - k) + PI * dk * dk / 4.0 * k;
+    let recess = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Hole { hole: solidcraft_doc::HoleKind::Counterbore { cb_diameter, cb_depth, .. }, .. }) => {
+            (cb_diameter.as_str().to_string(), cb_depth.as_str().to_string())
+        }
+        other => panic!("not a counterbore: {other:?}"),
+    };
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "clearance": "M4", "head": "ISO 4762"}));
+    let v1 = volume(&mut s);
+    assert!(rel(v0 - v1, removed(4.5, 8.0, 4.5)) < 1e-3, "{}", v0 - v1);
+    assert_eq!(recess(&s), ("8 mm".to_string(), "4.5 mm".to_string()));
+    // A button head (ISO 7380-1 M4: dk 7.6, k 2.2), a closer gap, and the depth given by hand.
+    run(&mut s, "solid.hole", json!({"position": [30, 15, 10], "clearance": "M4", "head": "ISO 7380-1", "head_gap": 0.25, "cb_depth": 3}));
+    let v2 = volume(&mut s);
+    assert!(rel(v1 - v2, removed(4.5, 8.1, 3.0)) < 1e-3, "{}", v1 - v2);
+    assert_eq!(recess(&s), ("8.1 mm".to_string(), "3".to_string()));
+    // The family name parts.insert takes, a close fit, the pitch written out, and no gap at all.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [50, 15, 10], "clearance": "M5x0.8", "fit": "close", "head": "socket_head_cap_screw", "head_gap": "0 mm"}),
+    );
+    let v3 = volume(&mut s);
+    assert!(rel(v2 - v3, removed(5.3, 8.5, 5.0)) < 1e-3, "{}", v2 - v3);
+    // A gap that names a parameter: the recess follows the parameter.
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "0.5 mm"}));
+    run(&mut s, "solid.hole", json!({"position": [70, 15, 10], "clearance": "M4", "head": "ISO 4762", "head_gap": "gap"}));
+    let v4 = volume(&mut s);
+    assert!(rel(v3 - v4, removed(4.5, 8.0, 4.5)) < 1e-3, "{}", v3 - v4);
+    assert_eq!(recess(&s), ("7 mm + 2 * (gap)".to_string(), "4 mm + (gap)".to_string()));
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
+    assert!(rel(v3 - volume(&mut s), removed(4.5, 9.0, 5.0)) < 1e-3);
 }
 
 /// In an inch design, a bare length typed into a feature means inches (stored with the unit);
@@ -3122,7 +3436,7 @@ fn press_pull_on_curved_faces() {
     run(&mut s, "solid.press_pull", json!({"face": [25, 15, 10], "distance": 1}));
     let v1 = volume(&mut s);
     assert!(rel(v1 - v0, PI * (25.0 - 16.0) * 20.0) < 1e-3, "{v0} {v1}");
-    // A shell's inner wall behind a fillet (`F3:inner:F2:blend:…`) only names the fillet: it is
+    // A shell's inner wall behind a fillet (`F3:inner(F2:blend(…))`) only names the fillet: it is
     // offset like any curved face, not taken for the shell's fillet. Pulled 0.5 into the cavity
     // (radius 3 to 2.5), the wall alone moves, stepping in from its tangent neighbours: the
     // quarter ring between the radii, 18 high, is added.
@@ -3432,6 +3746,169 @@ fn hole_as_deep_as_the_plate() {
     }
 }
 
+/// #7520: a hole that names no bodies leaves hidden ones alone, as a cut does (#3961), and keeps
+/// doing so once they are shown again. Its face is named on the body it drills, not on a hidden
+/// one whose face lies in the same plane; with nothing hidden, it still drills every body.
+#[test]
+fn a_hole_leaves_hidden_bodies_alone() {
+    let setup = |hide: bool| {
+        let mut s = Session::default();
+        // Two bodies whose bottom faces share the plane z = 0, the hidden one made first.
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Plate"}));
+        if hide {
+            run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        }
+        // The name of the plate's face that is picked, before the hole takes the point away.
+        let picked =
+            solidcraft_doc::naming::face_name_at_body(s.world_state().unwrap().body("Plate").unwrap(), solidcore_record::Vec3::new(20.0, 20.0, 0.0));
+        let r = s.execute("solid.hole", &json!({"position": [20, 20, 0], "diameter": 5, "depth": 10, "name": "Hole1"})).unwrap();
+        (s, r, picked)
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
+    let (block, plate) = (40.0 * 40.0 * 20.0, 40.0 * 40.0 * 5.0);
+    let (mut hidden, r, picked) = setup(true);
+    assert_eq!(r["changed_bodies"], json!(["Plate"]));
+    assert!((vol(&hidden, "Block") - block).abs() < 1e-6, "the hidden body is not drilled");
+    assert!(vol(&hidden, "Plate") < plate - 1.0, "the shown one is");
+    let hole = hidden.doc.find_feature("Hole1").unwrap();
+    assert!(picked.is_some());
+    assert_eq!((hole.participants.clone(), hole.face_names.first().cloned()), (vec!["Plate".to_string()], picked));
+    run(&mut hidden, "browser.visibility", json!({"items": ["Block"], "visible": true}));
+    assert!((vol(&hidden, "Block") - block).abs() < 1e-6, "shown again, it stays as it was");
+    let (shown, r, _) = setup(false);
+    assert_eq!(r["changed_bodies"], json!(["Block", "Plate"]), "with nothing hidden, both are drilled");
+    assert!(vol(&shown, "Block") < block - 1.0 && vol(&shown, "Plate") < plate - 1.0);
+}
+
+/// #7520 (review): the body whose face is picked is drilled even while it is hidden (picked
+/// through Select Other, or hidden with the dialog open), and editing a hole made with nothing
+/// hidden keeps drilling every body, though one is hidden at the time of the edit.
+#[test]
+fn a_hole_drills_its_picked_body_and_an_edit_keeps_its_scope() {
+    let stack = || {
+        let mut s = Session::default();
+        // Two plates stacked: Lower z 0..5, Upper z 5..10.
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Lower"}));
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 5], "length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Upper"}));
+        s
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
+    let plate = 40.0 * 40.0 * 5.0;
+    let hole = |d: f64| json!({"position": [20, 20, 10], "direction": [0, 0, -1], "diameter": d, "depth": 20, "name": "Hole1"});
+
+    // The picked face is on the hidden Upper: it is drilled, and so is the shown Lower below.
+    let mut s = stack();
+    run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": false}));
+    let r = s.execute("solid.hole", &hole(5.0)).unwrap();
+    assert_eq!(r["changed_bodies"], json!(["Lower", "Upper"]), "the picked body is drilled though hidden");
+    assert!(vol(&s, "Upper") < plate - 1.0 && vol(&s, "Lower") < plate - 1.0);
+
+    // Made with nothing hidden, then edited with Lower hidden: both stay drilled, at the new size.
+    let mut s = stack();
+    run(&mut s, "solid.hole", hole(5.0));
+    let small = vol(&s, "Lower");
+    assert!(small < plate - 1.0);
+    run(&mut s, "browser.visibility", json!({"items": ["Lower"], "visible": false}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "Hole1", "command": "solid.hole", "params": {"position": [20, 20, 10], "direction": [0, 0, -1], "diameter": 6, "depth": 20}}),
+    );
+    assert!(s.doc.find_feature("Hole1").unwrap().participants.is_empty(), "the edit keeps the hole's scope");
+    assert!(vol(&s, "Lower") < small - 1.0, "the hidden Lower keeps its hole, now wider");
+    assert!(vol(&s, "Upper") < small - 1.0);
+}
+
+/// #7520 (history): a hole made with a body hidden stores the bodies it drills, so it replays
+/// the same way: volumes match exactly after a save and reopen, a rebuild from scratch, undo and
+/// redo, showing the hidden body, renaming bodies and editing an earlier feature.
+#[test]
+fn a_hole_made_with_a_hidden_body_replays_the_same() {
+    let build = |plate_height: f64| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": plate_height, "operation": "new", "body_name": "Plate"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        run(&mut s, "solid.hole", json!({"position": [20, 20, 0], "diameter": 5, "depth": 3, "name": "Hole1"}));
+        s
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
+    // A new session evaluated from the saved text alone, as a rebuild from scratch does.
+    let scratch = |s: &Session| Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let s = build(5.0);
+    let (block, plate) = (vol(&s, "Block"), vol(&s, "Plate"));
+    assert_eq!(block, 40.0 * 40.0 * 20.0, "the hidden body is not drilled");
+    assert!(plate < 40.0 * 40.0 * 5.0 - 1.0, "the shown one is");
+    let same = |s: &Session, what: &str| {
+        assert_eq!(vol(s, "Block"), block, "{what}: Block");
+        assert_eq!(vol(s, "Plate"), plate, "{what}: Plate");
+    };
+    // (1) Save and reopen.
+    let dir = std::env::temp_dir().join(format!("solidcraft-hole-history-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("hole.solidcraft");
+    let mut saved = build(5.0);
+    run(&mut saved, "file.save_as", json!({"path": file.to_string_lossy()}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": file.to_string_lossy()}));
+    same(&reopened, "reopened");
+    let _ = std::fs::remove_dir_all(&dir);
+    // (2) Rebuild from scratch.
+    same(&scratch(&s), "rebuilt");
+    // (3) Undo and redo.
+    let mut u = build(5.0);
+    run(&mut u, "edit.undo", json!({}));
+    assert_eq!(vol(&u, "Plate"), 40.0 * 40.0 * 5.0, "undone: no hole");
+    run(&mut u, "edit.redo", json!({}));
+    same(&u, "redone");
+    same(&scratch(&u), "redone and rebuilt");
+    // (4) Show the hidden body, then rebuild.
+    let mut shown = build(5.0);
+    run(&mut shown, "browser.visibility", json!({"items": ["Block"], "visible": true}));
+    same(&shown, "shown");
+    same(&scratch(&shown), "shown and rebuilt");
+    // (5) Rename the drilled body (and the hidden one), then rebuild.
+    let mut renamed = build(5.0);
+    run(&mut renamed, "body.rename", json!({"body": "Plate", "name": "Slab"}));
+    run(&mut renamed, "body.rename", json!({"body": "Block", "name": "Core"}));
+    for r in [&renamed, &scratch(&renamed)] {
+        assert_eq!(vol(r, "Slab"), plate, "renamed: Slab");
+        assert_eq!(vol(r, "Core"), block, "renamed: Core");
+    }
+    // (6) Edit an earlier feature (the plate's own box, then the hidden block's), then rebuild:
+    // the same as a design made with the new size from the start.
+    let feature = |s: &Session, body: &str| {
+        let id = s.world_state().unwrap().body(body).unwrap().feature;
+        s.doc.features.iter().find(|f| f.id == id).unwrap().name.clone()
+    };
+    let mut edited = build(5.0);
+    let (plate_box, block_box) = (feature(&edited, "Plate"), feature(&edited, "Block"));
+    run(&mut edited, "timeline.edit", json!({"feature": plate_box, "set": {"height": "8"}}));
+    let fresh = build(8.0);
+    for r in [&edited, &scratch(&edited)] {
+        assert_eq!(vol(r, "Plate"), vol(&fresh, "Plate"), "plate edited");
+        assert_eq!(vol(r, "Block"), block, "plate edited: Block");
+    }
+    run(&mut edited, "timeline.edit", json!({"feature": block_box, "set": {"height": "30"}}));
+    for r in [&edited, &scratch(&edited)] {
+        assert_eq!(vol(r, "Block"), 40.0 * 40.0 * 30.0, "block edited stays undrilled");
+        assert_eq!(vol(r, "Plate"), vol(&fresh, "Plate"), "block edited: Plate");
+    }
+}
+
+/// #7520 (review): with every body hidden, a hole still drills all of them, as before.
+#[test]
+fn a_hole_with_every_body_hidden_drills_them_all() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "browser.visibility", json!({"items": ["Block", "Plate"], "visible": false}));
+    let r = s.execute("solid.hole", &json!({"position": [20, 20, 0], "diameter": 5, "depth": 3, "name": "Hole1"})).unwrap();
+    assert_eq!(r["changed_bodies"], json!(["Block", "Plate"]));
+    assert!(s.doc.find_feature("Hole1").unwrap().participants.is_empty());
+}
+
 /// Appearances outlive later features: a coloured face keeps its colour after a fillet on a
 /// neighbouring edge; an imported STEP's body and face colours survive a hole.
 #[test]
@@ -3681,6 +4158,62 @@ fn hole_to_object_and_at_sketch_points() {
     let w0 = volume(&mut t);
     let r = run(&mut t, "solid.hole", json!({"sketch": "Spots", "diameter": 3}));
     assert!(rel(w0 - volume(&mut t), 3.0 * PI * 2.25 * 10.0) < 1e-3, "{r} {}", w0 - volume(&mut t));
+}
+
+/// #8087: deleting one sketch point of a Hole drilled at several points drops only that point's
+/// hole, and the Hole's warning names it; the feature keeps the point's id, so undo brings the hole
+/// back. With every point gone the Hole fails, naming them.
+#[test]
+fn a_deleted_sketch_point_drops_only_its_own_hole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 20, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 10], "id": "a"}));
+    run(&mut s, "sketch.point", json!({"point": [45, 10], "id": "b"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["a", "b"], "diameter": 8, "name": "Holes"}));
+    let bore = PI * 16.0 * 10.0;
+    assert!(rel(volume(&mut s), 12000.0 - 2.0 * bore) < 1e-4, "{}", volume(&mut s));
+    let delete = |s: &mut Session, points: Value| {
+        run(s, "sketch.edit", json!({"sketch": "Pts"}));
+        run(s, "sketch.delete", json!({ "entities": points }));
+        run(s, "sketch.finish", json!({}));
+    };
+    let holes = |s: &Session| s.model.results.iter().find(|r| r.name == "Holes").cloned().unwrap();
+
+    delete(&mut s, json!(["b"]));
+    assert!(rel(volume(&mut s), 12000.0 - bore) < 1e-4, "one Ø8 hole is left: {}", volume(&mut s));
+    let h = holes(&s);
+    assert_eq!(h.error, None);
+    assert_eq!(h.warning.as_deref(), Some("sketch point(s) `b` no longer in the sketch: not drilled there (edit the Hole to drop them)"));
+    assert!(
+        s.model.state().bodies.iter().all(|b| b
+            .body
+            .classify_point(solidcore_record::Vec3::new(15.0, 10.0, 5.0))
+            .expect("classify the point at `a`")
+            == solidcraft_kernel::PointClass::Outside),
+        "the hole at `a` is drilled"
+    );
+    assert!(
+        s.model.state().bodies.iter().any(|b| b
+            .body
+            .classify_point(solidcore_record::Vec3::new(45.0, 10.0, 5.0))
+            .expect("classify the point at `b`")
+            == solidcraft_kernel::PointClass::Inside),
+        "`b`'s spot is solid"
+    );
+    let f = s.doc.find_feature("Holes").unwrap();
+    assert!(matches!(&f.kind, solidcraft_doc::FeatureKind::Hole { points: Some(sp), .. } if sp.ids == ["a", "b"]), "{:?}", f.kind);
+
+    // Undo puts `b` back, and its hole with it.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(rel(volume(&mut s), 12000.0 - 2.0 * bore) < 1e-4, "{}", volume(&mut s));
+    assert_eq!(holes(&s).warning, None);
+
+    delete(&mut s, json!(["a", "b"]));
+    let h = holes(&s);
+    assert_eq!(h.error.as_deref(), Some("unknown sketch point(s) `a`, `b` (none of the hole's points is left in its sketch)"));
+    assert!(rel(volume(&mut s), 12000.0) < 1e-9, "{}", volume(&mut s));
 }
 
 /// Combine keeps its tools on request and can put its result in a new component.
@@ -4962,6 +5495,49 @@ fn renaming_a_body_later_features_change_evaluates_nothing() {
     assert_eq!(s.evaluations, 0, "nor do its undo and redo");
 }
 
+/// #12657: renaming a body that a split cut in two, after many features changed it, evaluates
+/// nothing: the split's other piece (`Caisson (1)`) keeps its name, which the split stores, so
+/// the model is the one evaluating the renamed design gives. Undo and redo do the same.
+#[test]
+fn renaming_a_split_body_evaluates_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 300, "width": 200, "height": 160, "center": [0, 0, 80], "body_name": "Caisson"}));
+    run(&mut s, "solid.shell", json!({"faces": [[0, 0, 160]], "thickness": 4, "body": "Caisson"}));
+    for i in 0..3 {
+        let base = [-140 + i * 14, -103, 20];
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"diameter": 4.5, "height": 10, "base": base, "axis": [0, 1, 0], "operation": "cut", "targets": ["Caisson"]}),
+        );
+    }
+    run(&mut s, "solid.split_body", json!({"body": "Caisson", "plane": {"origin": [0, 0, 80], "normal": [0, 0, 1]}}));
+    let looks = |st: &solidcraft_doc::ModelState| {
+        st.bodies.iter().map(|b| (b.name.clone(), (*solidcraft_doc::naming::face_names(b)).clone())).collect::<Vec<_>>()
+    };
+    let before = looks(&s.model.state());
+    assert!(before.iter().any(|b| b.0 == "Caisson (1)"), "{:?}", before.iter().map(|b| &b.0).collect::<Vec<_>>());
+    let v = body_volume(&s.model.state());
+    s.evaluations = 0;
+    run(&mut s, "body.rename", json!({"body": "Caisson", "name": "Haut"}));
+    assert_eq!(s.evaluations, 0, "a rename evaluates nothing");
+    let after = looks(&s.model.state());
+    assert!(
+        after.iter().any(|b| b.0 == "Haut") && after.iter().any(|b| b.0 == "Caisson (1)"),
+        "{:?}",
+        after.iter().map(|b| &b.0).collect::<Vec<_>>()
+    );
+    let mut fresh = Session::new((*s.doc).clone());
+    fresh.refresh();
+    assert_eq!(looks(&fresh.model.state()), after, "the bodies and face names evaluating the renamed design gives");
+    assert!(rel(body_volume(&fresh.model.state()), v) < 1e-9);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(looks(&s.model.state()), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(looks(&s.model.state()), after);
+    assert_eq!(s.evaluations, 0, "nor do its undo and redo");
+}
+
 /// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) keeps
 /// the same copies and face names as opening the renamed design.
 #[test]
@@ -5210,4 +5786,60 @@ fn a_command_check_that_panics_refuses_the_command() {
     let r = s.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1}));
     assert!(matches!(r, Err(EngineError::Internal(..))), "{r:?}");
     assert!(s.doc.features.is_empty());
+}
+
+/// #4153, #11901: the other ISO 261 metric sizes (M33, M39, M45, M3.5…) are known by name with
+/// their ISO 262 coarse pitch, as the first-choice ones are, and a thread named so is cut with
+/// it. The size chosen automatically for a face is still one of the first-choice sizes, as
+/// before they were added: a 33 mm shaft is sized M30 on main and here.
+#[test]
+fn second_choice_metric_threads_are_known_by_name() {
+    use solidcraft_doc::thread_forms::ThreadForm;
+    for (name, dia, pitch) in [("M3.5", 3.5, 0.6), ("M7", 7.0, 1.0), ("M33", 33.0, 3.5), ("M39", 39.0, 4.0), ("M45", 45.0, 4.5), ("M64", 64.0, 6.0)] {
+        assert_eq!(solidcraft_doc::parse_metric_thread(name), Some((dia, pitch)), "{name}");
+        assert_eq!(ThreadForm::Metric.format(dia, pitch, pitch), name);
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"diameter": dia, "height": 4.0 * dia, "body_name": "Shaft"}));
+        let named = run(&mut s, "solid.thread", json!({"face": [dia / 2.0, 0.0, 2.0 * dia], "designation": name}));
+        assert!((named["thread"]["pitch"].as_f64().unwrap() - pitch).abs() < 1e-9, "{named}");
+    }
+    // The smallest second-choice size, by name only (no shaft that thin is cut here).
+    assert_eq!(solidcraft_doc::parse_metric_thread("M1.1"), Some((1.1, 0.25)));
+    assert_eq!(ThreadForm::Metric.format(1.1, 0.25, 0.25), "M1.1");
+    assert_eq!(ThreadForm::Metric.fit(33.0, false), Some((30.0, 3.5)));
+    assert_eq!(ThreadForm::Metric.fit(7.0, false), Some((6.0, 1.0)));
+    assert_ne!(ThreadForm::Metric.fit(39.0, true).map(|(d, _)| d), Some(39.0), "a 39 mm hole is not sized M39 automatically");
+}
+
+/// The ISO 273 table a dialog lists: every size `clearance` takes, M1.6 to M64, each with its
+/// three fits, and a size with its pitch finds the same row.
+#[test]
+fn clearance_sizes_are_the_iso_273_table() {
+    let sizes = cmd::clearance_sizes();
+    assert_eq!(sizes.len(), 21);
+    assert_eq!((sizes.first().map(String::as_str), sizes.last().map(String::as_str)), (Some("M1.6"), Some("M64")));
+    assert!(sizes.iter().any(|s| s == "M4") && sizes.iter().any(|s| s == "M2"), "{sizes:?}");
+    for size in &sizes {
+        for fit in ["close", "normal", "loose"] {
+            assert!(cmd::clearance_diameter(size, fit).is_some(), "{size} {fit}");
+        }
+    }
+    assert_eq!(cmd::clearance_diameter("M4", "normal"), Some(4.5));
+    assert_eq!(cmd::clearance_diameter("M4x0.7", "close"), Some(4.3));
+    assert_eq!(cmd::clearance_diameter("m4", "loose"), Some(4.8));
+    assert_eq!(cmd::clearance_diameter("M7", "normal"), None, "no M7 in ISO 273");
+    assert_eq!(cmd::clearance_diameter("M4", "snug"), None, "no such fit");
+}
+
+/// The counterbore `head` makes, as the Hole dialog shows it before running the command: the
+/// head's diameter and height from the standard's table plus the default 0.5 mm gap each side
+/// and below. A size with its pitch finds the same head; a size or standard the tables do not
+/// have gives none.
+#[test]
+fn head_counterbore_is_the_head_plus_the_default_gap() {
+    assert_eq!(cmd::head_counterbore("ISO 4762", "M4"), Some((8.0, 4.5)), "socket head dk 7, k 4");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M4x0.7"), Some((8.6, 2.7)), "button head dk 7.6, k 2.2");
+    assert_eq!(cmd::head_counterbore("socket_head_cap_screw", "M4"), Some((8.0, 4.5)), "the family name parts.insert takes");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M2"), None, "ISO 7380-1 has no M2");
+    assert_eq!(cmd::head_counterbore("DIN 912", "M4"), None);
 }

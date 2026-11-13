@@ -480,7 +480,7 @@ fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel
 
 /// The word a `surface_types` check names a face's surface by, as the record holds it: an
 /// analytic kind, `ball_patch` (a corner's patch on a sphere), `bspline` (a B-spline or NURBS
-/// surface) or `revolution` (a revolved curve).
+/// surface), `revolution` (a revolved curve) or `blend` (a round by its definition, on its net).
 fn surface_word(s: &solidcore_record::brep::Surface) -> &'static str {
     use solidcore_record::brep::Surface as S;
     match s {
@@ -492,12 +492,14 @@ fn surface_word(s: &solidcore_record::brep::Surface) -> &'static str {
         S::Torus { .. } => "torus",
         S::Spline { .. } | S::RationalSpline { .. } => "bspline",
         S::PlacedRevolution { .. } => "revolution",
+        S::Blend { .. } => "blend",
     }
 }
 
 /// A B-spline face's two directions as `[degree, spans]` (spans: the distinct knot intervals of
 /// the modelled range), the lower first, so a surface parameterised the other way round reads the
-/// same. `None` for a surface that is not a B-spline.
+/// same. `None` for a surface that is not a B-spline. A blend face is read on its net, its NURBS
+/// form.
 fn spline_shape(s: &solidcore_record::brep::Surface) -> Option<[[u64; 2]; 2]> {
     use solidcore_record::brep::Surface as S;
     let (u, v, nu, nv) = match s {
@@ -815,7 +817,12 @@ fn check_case_in(
         let record = b.body.record();
         for f in &record.faces {
             kinds.insert(surface_word(&f.surface));
-            spline_faces.extend(spline_shape(&f.surface));
+            // A blend face's net is its NURBS form: the spline check reads its degrees there.
+            let net = match &f.surface {
+                solidcore_record::brep::Surface::Blend { .. } => f.nurbs.as_ref(),
+                _ => None,
+            };
+            spline_faces.extend(spline_shape(net.unwrap_or(&f.surface)));
         }
         boundary += record.edges.iter().filter(|e| e.uses.len() == 1).count() as u64;
     }

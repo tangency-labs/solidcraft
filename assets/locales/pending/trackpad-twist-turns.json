@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.trackpad_twist_turns": "Two-finger twist turns the view",
+    "prefs.trackpad_twist_turns_tip": "Rotating two fingers on the trackpad turns the view about the up axis, around the point Orbit around sets. Off: the twist does nothing"
+  },
+  "ar": {
+    "prefs.trackpad_twist_turns": "التدوير بإصبعين يُدير العرض",
+    "prefs.trackpad_twist_turns_tip": "تدوير إصبعين على لوحة اللمس يُدير العرض حول المحور العلوي، حول النقطة التي يحددها خيار «التدوير حول». عند الإيقاف: لا يفعل التدوير شيئًا"
+  },
+  "de": {
+    "prefs.trackpad_twist_turns": "Drehen mit zwei Fingern dreht die Ansicht",
+    "prefs.trackpad_twist_turns_tip": "Das Drehen zweier Finger auf dem Trackpad dreht die Ansicht um die Hochachse, um den Punkt, den „Umkreisen um“ festlegt. Aus: Die Drehgeste bewirkt nichts"
+  },
+  "he": {
+    "prefs.trackpad_twist_turns": "סיבוב בשתי אצבעות מסובב את התצוגה",
+    "prefs.trackpad_twist_turns_tip": "סיבוב שתי אצבעות על משטח המגע מסובב את התצוגה סביב הציר האנכי, סביב הנקודה שנקבעת באפשרות „סיבוב מבט סביב”. כבוי: הסיבוב לא עושה דבר"
+  },
+  "ja": {
+    "prefs.trackpad_twist_turns": "2本指の回転でビューを回す",
+    "prefs.trackpad_twist_turns_tip": "トラックパッド上で2本指を回すと、「回転中心」で設定した点を中心に、上方向の軸の周りでビューが回転します。オフ：回転ジェスチャーは何もしません"
+  },
+  "ko": {
+    "prefs.trackpad_twist_turns": "두 손가락 회전으로 뷰 돌리기",
+    "prefs.trackpad_twist_turns_tip": "트랙패드에서 두 손가락을 돌리면 ‘궤도 회전 기준’에서 정한 점을 기준으로 위쪽 축을 중심으로 뷰가 회전합니다. 끄기: 회전 동작은 아무것도 하지 않습니다"
+  },
+  "vi": {
+    "prefs.trackpad_twist_turns": "Xoay hai ngón tay để xoay khung nhìn",
+    "prefs.trackpad_twist_turns_tip": "Xoay hai ngón tay trên bàn di chuột sẽ xoay khung nhìn quanh trục hướng lên, quanh điểm do tùy chọn “Xoay quanh” đặt. Tắt: thao tác xoay không làm gì"
+  },
+  "zh": {
+    "prefs.trackpad_twist_turns": "双指旋转可转动视图",
+    "prefs.trackpad_twist_turns_tip": "在触控板上旋转两根手指，视图会绕向上轴、围绕“环绕”设定的点转动。关闭：旋转手势不起作用"
+  }
+}

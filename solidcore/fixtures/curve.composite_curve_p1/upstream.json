@@ -1,0 +1,1448 @@
+{
+ "cases": [
+  {
+   "name": "cci_outer_info",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "info",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "types": [
+     11001,
+     12060,
+     12070,
+     14001,
+     14010,
+     14032,
+     14033,
+     14034,
+     14038,
+     14040,
+     14200,
+     16016
+    ]
+   }
+  },
+  {
+   "name": "cci_outer_bbox",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "b_box",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "ivl": [
+     0,
+     4
+    ],
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "cci_outer_bbox_part",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "b_box",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "ivl": [
+     0.5,
+     2.5
+    ],
+    "pseudo": true,
+    "polar": false
+   }
+  },
+  {
+   "name": "cci_outer_orient",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "orient",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        -2,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        3,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        3,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        -2,
+        0
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "bounds": true
+   }
+  },
+  {
+   "name": "cci_outer_orient_down",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "orient",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        -2,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        3,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        3,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        -2,
+        0
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "normal": [
+     0,
+     0,
+     -1
+    ],
+    "bounds": false
+   }
+  },
+  {
+   "name": "cci_outer_copy",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "copy",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    }
+   }
+  },
+  {
+   "name": "cci_outer_eq_self",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "b": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    }
+   }
+  },
+  {
+   "name": "cci_outer_transform",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "transform",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "origin": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     0,
+     0
+    ],
+    "scale": [
+     2,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "cci_outer_approx",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "approx",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "tol": 0.0025
+   }
+  },
+  {
+   "name": "cci_lines_info",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "info",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4,
+         0.1,
+         0
+        ],
+        "b": [
+         -3,
+         -1,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -3,
+         -1,
+         0
+        ],
+        "b": [
+         -3,
+         0.1,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -0.2,
+         0.5,
+         0
+        ],
+        "b": [
+         -2,
+         2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -2,
+         2,
+         0
+        ],
+        "b": [
+         -4,
+         0.1,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "types": [
+     11001,
+     12060,
+     12070,
+     14001,
+     14010,
+     14032,
+     14033,
+     14034,
+     14038,
+     14040,
+     14200,
+     16016
+    ]
+   }
+  },
+  {
+   "name": "cci_lines_bbox",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "b_box",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4,
+         0.1,
+         0
+        ],
+        "b": [
+         -3,
+         -1,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -3,
+         -1,
+         0
+        ],
+        "b": [
+         -3,
+         0.1,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -0.2,
+         0.5,
+         0
+        ],
+        "b": [
+         -2,
+         2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -2,
+         2,
+         0
+        ],
+        "b": [
+         -4,
+         0.1,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "ivl": [
+     0,
+     4
+    ],
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "cci_hole_info",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "info",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "circle": {
+        "center": [
+         -2.3,
+         1,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "radius": 0.3,
+        "a0": 0,
+        "a1": 360
+       }
+      }
+     ],
+     "closed": true
+    },
+    "types": [
+     11001,
+     12060,
+     12070,
+     14001,
+     14010,
+     14032,
+     14033,
+     14034,
+     14038,
+     14040,
+     14200,
+     16016
+    ]
+   }
+  },
+  {
+   "name": "cci_hole_knots",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "knots",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "circle": {
+        "center": [
+         -2.3,
+         1,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "radius": 0.3,
+        "a0": 0,
+        "a1": 360
+       }
+      }
+     ],
+     "closed": true
+    }
+   }
+  },
+  {
+   "name": "cci_hole_bbox",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "b_box",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "circle": {
+        "center": [
+         -2.3,
+         1,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "radius": 0.3,
+        "a0": 0,
+        "a1": 360
+       }
+      }
+     ],
+     "closed": true
+    },
+    "ivl": [
+     0,
+     360
+    ],
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "cci_hole_orient",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "orient",
+    "curves": [
+     {
+      "circle": {
+       "center": [
+        -2.3,
+        1,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "radius": 0.3,
+       "a0": 0,
+       "a1": 360
+      }
+     }
+    ],
+    "senses": [
+     true
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "bounds": true
+   }
+  },
+  {
+   "name": "cci_hole_orient_reversed",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "orient",
+    "curves": [
+     {
+      "circle": {
+       "center": [
+        -2.3,
+        1,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "radius": 0.3,
+       "a0": 0,
+       "a1": 360
+      }
+     }
+    ],
+    "senses": [
+     false
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "bounds": true
+   }
+  },
+  {
+   "name": "build_square_gaps_same_only",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:5535 (my_test_global_curve_solve, disabled block)",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        1,
+        5,
+        0
+       ],
+       "b": [
+        1,
+        8,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        4.1,
+        7.9,
+        0
+       ],
+       "b": [
+        4.1,
+        5.1,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        8,
+        0
+       ],
+       "b": [
+        4,
+        8,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        4,
+        5,
+        0
+       ],
+       "b": [
+        1,
+        5,
+        0
+       ]
+      }
+     }
+    ],
+    "same": 1e-05,
+    "line": 0.0
+   }
+  },
+  {
+   "name": "build_square_gaps_lines",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:5535 (my_test_global_curve_solve, disabled block)",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        1,
+        5,
+        0
+       ],
+       "b": [
+        1,
+        8,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        4.1,
+        7.9,
+        0
+       ],
+       "b": [
+        4.1,
+        5.1,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        8,
+        0
+       ],
+       "b": [
+        4,
+        8,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        4,
+        5,
+        0
+       ],
+       "b": [
+        1,
+        5,
+        0
+       ]
+      }
+     }
+    ],
+    "same": 1e-05,
+    "line": 0.2
+   }
+  },
+  {
+   "name": "build_square_gaps_wide_same",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:5535 (my_test_global_curve_solve, disabled block)",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        1,
+        5,
+        0
+       ],
+       "b": [
+        1,
+        8,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        4.1,
+        7.9,
+        0
+       ],
+       "b": [
+        4.1,
+        5.1,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        8,
+        0
+       ],
+       "b": [
+        4,
+        8,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        4,
+        5,
+        0
+       ],
+       "b": [
+        1,
+        5,
+        0
+       ]
+      }
+     }
+    ],
+    "same": 0.2,
+    "line": 0.0
+   }
+  },
+  {
+   "name": "build_cci_offsets_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        1,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        3,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        -2,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        -2,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        3,
+        0
+       ]
+      }
+     }
+    ],
+    "same": 0.001,
+    "line": 0.002
+   }
+  },
+  {
+   "name": "build_cci_lines_tol",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3261 (my_test_cci_self)",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        -4,
+        0.1,
+        0
+       ],
+       "b": [
+        -3,
+        -1,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        -3,
+        -1,
+        0
+       ],
+       "b": [
+        -3,
+        0.1,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        -0.2,
+        0.5,
+        0
+       ],
+       "b": [
+        -2,
+        2,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        -2,
+        2,
+        0
+       ],
+       "b": [
+        -4,
+        0.1,
+        0
+       ]
+      }
+     }
+    ],
+    "same": 0.001,
+    "line": 0.002
+   }
+  }
+ ]
+}
