@@ -202,6 +202,8 @@ pub struct StepFeature {
     pub kind: solidcraft_doc::FeatureKind,
     /// Body names from the file, as [`StepNames`] chose them (automatic by default).
     pub body_names: Vec<String>,
+    /// By body, whether the file marks it invisible: the design starts with it hidden.
+    pub invisible: Vec<bool>,
     pub warnings: Vec<String>,
     /// The file as read. Hold it until the feature has been evaluated: the timeline then reuses
     /// it instead of reading the file again (it is freed with the last holder).
@@ -278,6 +280,8 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     let hidden = hidden_items(file, bytes, &text);
     let skip: Vec<u64> = imp.bodies.iter().zip(0u64..).filter(|(b, _)| hidden.contains(&b.source_item)).map(|(_, i)| i).collect();
     let skip = if skip.len() == imp.bodies.len() { Vec::new() } else { skip };
+    // A body the STEP file itself marks invisible is still built, and starts hidden.
+    let invisible: Vec<bool> = imp.bodies.iter().map(|b| b.hidden).collect();
     // The root product's name; else the only body's name; else the file name.
     let name = match (imp.tree.as_slice(), body_names.as_slice()) {
         ([root], _) if !generic_name(&root.name) => root.name.clone(),
@@ -288,6 +292,7 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     Ok(StepFeature {
         name,
         body_names,
+        invisible,
         kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip },
         warnings: iges_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
         import: imp,

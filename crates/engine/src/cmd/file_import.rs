@@ -328,6 +328,7 @@ pub(crate) fn add_in_component(
     mut kind: FeatureKind,
     feature_name: &str,
     body_names: Vec<String>,
+    hidden: &[bool],
     name: &str,
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
@@ -379,6 +380,10 @@ pub(crate) fn add_in_component(
         (FeatureKind::MeshImport { .. }, _) => body_names.iter().cloned().map(Some).collect(),
         _ => Vec::new(),
     };
+    let names_to_hide = |names: &[Option<String>]| -> Vec<String> {
+        names.iter().enumerate().filter(|(k, _)| hidden.get(*k).copied().unwrap_or(false)).filter_map(|(_, name)| name.clone()).collect()
+    };
+    let mut hidden_names = names_to_hide(&names);
     let id = s.doc_mut().add_feature(kind, Some(feature_name))?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.component = top;
@@ -407,7 +412,19 @@ pub(crate) fn add_in_component(
             }
             put_bodies(s, &actual, &moves);
             s.refresh();
+            hidden_names = names_to_hide(&actual);
         }
+    }
+    // The file's invisible bodies start hidden; they are still in the model, so Show brings
+    // them back like any other body.
+    hidden_names.retain(|name| s.model.state().bodies.iter().any(|b| &b.name == name));
+    if !hidden_names.is_empty() {
+        for name in hidden_names {
+            if !s.visibility.hidden_bodies.contains(&name) {
+                s.visibility.hidden_bodies.push(name);
+            }
+        }
+        s.refresh_display();
     }
     let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
     Ok((id, Placed { component: top, occurrence: top_occ, name, components: comps.len(), joints: joint_ids }))
