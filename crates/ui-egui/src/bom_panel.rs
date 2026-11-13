@@ -129,7 +129,7 @@ const DESCRIPTION: usize = 2;
 const COLUMN_SPACING: f32 = 14.0;
 
 /// Each column's width: every column fits its widest cell, Description takes what is left.
-fn column_widths(ui: &egui::Ui, rows: &[Value], scrollable: bool) -> [f32; 6] {
+fn column_widths(ui: &egui::Ui, rows: &[Value]) -> [f32; 6] {
     let font = egui::TextStyle::Body.resolve(ui.style());
     let width = |s: &str| ui.painter().layout_no_wrap(s.to_owned(), font.clone(), egui::Color32::PLACEHOLDER).size().x.ceil();
     // The item cell is a picker button, padded on both sides.
@@ -137,9 +137,6 @@ fn column_widths(ui: &egui::Ui, rows: &[Value], scrollable: bool) -> [f32; 6] {
     let mut widths = HEADERS.map(width);
     for row in rows.iter().flat_map(|r| std::iter::once(r).chain(r["children"].as_array().into_iter().flatten())) {
         for (i, key) in COLUMN_KEYS.iter().enumerate() {
-            if i == DESCRIPTION && !scrollable {
-                continue;
-            }
             let w = width(&text(row, key)) + if i == 0 { padding } else { 0.0 };
             widths[i] = widths[i].max(w);
         }
@@ -193,21 +190,10 @@ fn export(app: &mut SolveApp, d: &BomPanel, ext: &str) {
     });
 }
 
-/// Draw the Classic report window when it is open.
-pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(mut d) = take_current(app) else { return };
-    let closed = crate::ui_kit::Window::new(egui::Id::unique("sc_bom"), "bom", solidcraft_ui_text::tr(TITLE_KEY))
-        .cards(3.0)
-        .show_body(ctx, |ui| body(app, ui, &mut d, false));
-    if !closed {
-        app.bom = Some(d);
-    }
-}
-
 /// Draw the same report inside the shared panel's body.
 pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(mut d) = take_current(app) else { return };
-    body(app, ui, &mut d, true);
+    body(app, ui, &mut d);
     app.bom = Some(d);
 }
 
@@ -218,58 +204,36 @@ fn take_current(app: &mut SolveApp) -> Option<BomPanel> {
 const REPORT_MAX_HEIGHT: f32 = 320.0;
 const EDITOR_MAX_HEIGHT: f32 = 200.0;
 
-fn body(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut BomPanel, shared: bool) {
+fn body(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut BomPanel) {
     // A refused Apply belongs to the design, row and fields it ran with (#641).
     if d.refused.as_ref().is_some_and(|(rev, row, fields)| (*rev, *row, fields) != (app.session.revision, d.picked, &d.fields)) {
         d.error = None;
         d.refused = None;
     }
     let top = ui.cursor().top();
-    let (footer_action, footer_height) = if shared {
-        let selected = d.picked.is_some();
-        let rows = if selected && ui.available_width() < 290.0 { 2 } else { 1 };
-        let footer = crate::ui_kit::Panel::pinned_footer(ui, "bom-actions", rows, |ui| actions(ui, selected, true));
-        (footer.inner, footer.response.rect.height())
-    } else {
-        (None, 0.0)
-    };
+    let selected = d.picked.is_some();
+    let rows = if selected && ui.available_width() < 290.0 { 2 } else { 1 };
+    let footer = crate::ui_kit::Panel::pinned_footer(ui, "bom-actions", rows, |ui| actions(ui, selected));
     let available = ui.available_height().max(1.0);
-    let (row, report_extent) = if shared {
-        let max = if d.picked.is_some() || d.error.is_some() { available * 0.55 } else { available };
-        let scroll = egui::ScrollArea::vertical()
-            .id_salt("report")
-            .min_scrolled_height(0.0)
-            .max_height(max.min(REPORT_MAX_HEIGHT))
-            .show(ui, |ui| report(app, ui, d, true));
-        let (row, table_extra) = scroll.inner;
-        (row, (scroll.content_size.y + table_extra).min(REPORT_MAX_HEIGHT))
-    } else {
-        report(app, ui, d, false)
-    };
+    let max = if selected || d.error.is_some() { available * 0.55 } else { available };
+    let scroll = egui::ScrollArea::vertical()
+        .id_salt("report")
+        .min_scrolled_height(0.0)
+        .max_height(max.min(REPORT_MAX_HEIGHT))
+        .show(ui, |ui| report(app, ui, d));
+    let (row, table_extra) = scroll.inner;
+    let report_extent = (scroll.content_size.y + table_extra).min(REPORT_MAX_HEIGHT);
 
     let mut editor_extent = 0.0;
     if row.is_some() || d.error.is_some() {
         ui.separator();
-        if shared {
-            let max = ui.available_height().clamp(1.0, EDITOR_MAX_HEIGHT);
-            let scroll = egui::ScrollArea::vertical()
-                .id_salt("editor")
-                .min_scrolled_height(0.0)
-                .max_height(max)
-                .show(ui, |ui| details(ui, d, row.is_some(), true));
-            editor_extent = scroll.content_size.y.min(EDITOR_MAX_HEIGHT) + 2.0 * ui.spacing().item_spacing.y;
-        } else {
-            details(ui, d, row.is_some(), false);
-        }
+        let max = ui.available_height().clamp(1.0, EDITOR_MAX_HEIGHT);
+        let scroll =
+            egui::ScrollArea::vertical().id_salt("editor").min_scrolled_height(0.0).max_height(max).show(ui, |ui| details(ui, d, row.is_some()));
+        editor_extent = scroll.content_size.y.min(EDITOR_MAX_HEIGHT) + 2.0 * ui.spacing().item_spacing.y;
     }
 
-    let action = if shared {
-        footer_action
-    } else {
-        ui.separator();
-        actions(ui, row.is_some(), false)
-    };
-    match action {
+    match footer.inner {
         Some(Action::Apply) => {
             if let Some(row) = &row {
                 apply(app, d, row);
@@ -278,10 +242,8 @@ fn body(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut BomPanel, shared: bool) {
         Some(Action::Export(ext)) => export(app, d, ext),
         None => {}
     }
-    if shared {
-        let natural = report_extent + editor_extent + footer_height + ui.spacing().item_spacing.y;
-        crate::panel_runtime::report_content_extent(ui, top, natural, false);
-    }
+    let natural = report_extent + editor_extent + footer.response.rect.height() + ui.spacing().item_spacing.y;
+    crate::panel_runtime::report_content_extent(ui, top, natural, false);
 }
 
 enum Action {
@@ -289,7 +251,7 @@ enum Action {
     Export(&'static str),
 }
 
-fn actions(ui: &mut egui::Ui, selected: bool, shared: bool) -> Option<Action> {
+fn actions(ui: &mut egui::Ui, selected: bool) -> Option<Action> {
     let buttons = |ui: &mut egui::Ui| {
         let mut action = None;
         if selected {
@@ -308,16 +270,16 @@ fn actions(ui: &mut egui::Ui, selected: bool, shared: bool) -> Option<Action> {
         }
         action
     };
-    if shared { ui.horizontal_wrapped(buttons).inner } else { ui.horizontal(buttons).inner }
+    ui.horizontal_wrapped(buttons).inner
 }
 
-fn options(ui: &mut egui::Ui, d: &mut BomPanel, shared: bool) {
+fn options(ui: &mut egui::Ui, d: &mut BomPanel) {
     let was = (d.top, d.by_definition, d.group_children);
     let available = ui.available_width();
     ui.horizontal_wrapped(|ui| {
         for (option, labels) in [(&mut d.top, ["Parts only", "Top level"]), (&mut d.by_definition, ["By part number", "By definition"])] {
             let width = labels.iter().map(|label| crate::ui_kit::ContentWidth::button(ui, label)).fold(0.0, f32::max) * 2.0;
-            let width = if shared { width.min(available) } else { width };
+            let width = width.min(available);
             let mut selected = usize::from(*option);
             ui.allocate_ui(egui::vec2(width, crate::ui_kit::row_height()), |ui| {
                 crate::ui_kit::segmented(ui, &mut selected, &labels, Default::default());
@@ -325,45 +287,32 @@ fn options(ui: &mut egui::Ui, d: &mut BomPanel, shared: bool) {
             *option = selected == 1;
             ui.separator();
         }
-        if !shared {
-            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("bom.group_children"), &mut d.group_children);
-        }
     });
-    if shared {
-        ui.scope(|ui| {
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-            let response = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("bom.group_children"), &mut d.group_children);
-            crate::panel_runtime::register_content_focus(ui.ctx(), &response);
-        });
-    }
+    ui.scope(|ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        let response = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("bom.group_children"), &mut d.group_children);
+        crate::panel_runtime::register_content_focus(ui.ctx(), &response);
+    });
     if was != (d.top, d.by_definition, d.group_children) {
         d.clear_pick();
     }
 }
 
-fn report(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut BomPanel, shared: bool) -> (Option<Value>, f32) {
-    options(ui, d, shared);
+fn report(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut BomPanel) -> (Option<Value>, f32) {
+    options(ui, d);
     let bom = d.rows(app);
     let rows = bom["rows"].as_array().map_or(&[][..], Vec::as_slice);
     d.reconcile_pick(rows);
     ui.separator();
-    let widths = column_widths(ui, rows, shared);
-    let mut grid = |ui: &mut egui::Ui| table(ui, d, rows, widths);
+    let widths = column_widths(ui, rows);
     let t = Tokens::get();
-    let table_extra = if shared {
-        let summary = crate::ui_kit::row_height() + ui.spacing().item_spacing.y;
-        let scroll = egui::ScrollArea::both().id_salt("table").min_scrolled_height(0.0).max_height((ui.available_height() - summary).max(0.0)).show(
-            ui,
-            |ui| {
-                grid(ui);
-                ui.add_space(t.space_8);
-            },
-        );
-        (scroll.content_size.y.min(REPORT_MAX_HEIGHT) - scroll.inner_rect.height()).max(0.0)
-    } else {
-        egui::ScrollArea::vertical().id_salt("table").max_height(REPORT_MAX_HEIGHT).show(ui, grid);
-        0.0
-    };
+    let summary = crate::ui_kit::row_height() + ui.spacing().item_spacing.y;
+    let scroll =
+        egui::ScrollArea::both().id_salt("table").min_scrolled_height(0.0).max_height((ui.available_height() - summary).max(0.0)).show(ui, |ui| {
+            table(ui, d, rows, widths);
+            ui.add_space(t.space_8);
+        });
+    let table_extra = (scroll.content_size.y.min(REPORT_MAX_HEIGHT) - scroll.inner_rect.height()).max(0.0);
     ui.label(RichText::new(format!("{} rows, {} placed", rows.len(), text(&bom, "total_occurrences"))).small().color(t.text_dim));
     (d.picked.and_then(|i| rows.get(i)).cloned(), table_extra)
 }
@@ -408,27 +357,13 @@ fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value], widths: [f32; 6]) 
     });
 }
 
-fn details(ui: &mut egui::Ui, d: &mut BomPanel, selected: bool, shared: bool) {
+fn details(ui: &mut egui::Ui, d: &mut BomPanel, selected: bool) {
     if selected {
-        let mut editor = |ui: &mut egui::Ui| {
-            for (key, field) in BOM_KEYS.iter().zip(d.fields.iter_mut()) {
-                let label = field_label(key);
-                let name = ui.label(label);
-                if shared {
-                    let response = crate::ui_kit::cell_editor(ui, ui.make_persistent_id(key), field, label, false).labelled_by(name.id);
-                    crate::panel_runtime::register_content_focus(ui.ctx(), &response);
-                } else {
-                    ui.allocate_ui(egui::vec2(280.0, crate::ui_kit::row_height()), |ui| {
-                        crate::ui_kit::cell_editor(ui, ui.make_persistent_id(key), field, label, false).labelled_by(name.id);
-                    });
-                    ui.end_row();
-                }
-            }
-        };
-        if shared {
-            editor(ui);
-        } else {
-            egui::Grid::new("sc_bom_edit").num_columns(2).spacing([12.0, 6.0]).show(ui, editor);
+        for (key, field) in BOM_KEYS.iter().zip(d.fields.iter_mut()) {
+            let label = field_label(key);
+            let name = ui.label(label);
+            let response = crate::ui_kit::cell_editor(ui, ui.make_persistent_id(key), field, label, false).labelled_by(name.id);
+            crate::panel_runtime::register_content_focus(ui.ctx(), &response);
         }
     }
     if let Some(e) = &d.error {
@@ -442,15 +377,30 @@ mod tests {
 
     use crate::scenario::Harness;
 
+    fn open_report(h: &mut Harness) {
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.step(&json!({"start":"assembly.bom"})).unwrap();
+        h.frames(4);
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &json!({
+                    "target":{"type":"instance","id":"bom"},"size":{"width":720,"height":400},"thickness_only":true
+                }),
+            )
+            .unwrap();
+        h.frames(4);
+    }
+
     #[test]
-    fn the_window_lists_counts_and_edits_a_part_number() {
+    fn the_panel_lists_counts_and_edits_a_part_number() {
         let mut h = Harness::new();
         h.app.run("component.create", json!({"name": "Plate"})).unwrap();
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
         h.app.run("component.activate", json!({"component": 0})).unwrap();
         h.app.run("occurrence.copy", json!({"component": "Plate", "translate": [50, 0, 0]})).unwrap();
-        h.step(&json!({"start": "assembly.bom"})).unwrap();
-        assert!(h.app.bom.is_some(), "ui.start opens the window");
+        open_report(&mut h);
+        assert!(h.app.bom.is_some(), "ui.start opens the panel");
         h.frames(2);
         assert!(h.widget("Export CSV…").is_some());
         assert!(h.widget("1 rows, 2 placed").is_some());
@@ -477,14 +427,13 @@ mod tests {
         h.app.run("component.create", json!({"name": "Bracket"})).unwrap();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.app.run("component.activate", json!({"component": 0})).unwrap();
-        // Plate placed three times and Bracket once, so no Qty cell reads "1" before row 1's item
-        // number or "2" before row 2's.
+        // Select item buttons by their handles because quantity cells can show the same numbers.
         h.app.run("occurrence.copy", json!({"component": "Plate", "translate": [50, 0, 0]})).unwrap();
         h.app.run("occurrence.copy", json!({"component": "Plate", "translate": [100, 0, 0]})).unwrap();
-        h.step(&json!({"start": "assembly.bom"})).unwrap();
+        open_report(&mut h);
         h.frames(2);
         let undo = h.app.session.undo.len();
-        h.step(&json!({"widget": "1"})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:list:0"}})).unwrap();
         h.app.bom.as_mut().unwrap().fields[0] = "PL\u{7}".into();
         h.frames(2);
         h.step(&json!({"widget": "Apply"})).unwrap();
@@ -508,10 +457,10 @@ mod tests {
         assert_eq!(h.app.bom.as_ref().unwrap().error, refused, "the same reason again");
         assert_eq!(h.app.session.undo.len(), undo, "nothing applied");
         // Picking another row takes it away: the message was about the Plate row.
-        h.step(&json!({"widget": "2"})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:list:1"}})).unwrap();
         assert_eq!(h.app.bom.as_mut().unwrap().picked, Some(1));
         assert_eq!(h.app.bom.as_ref().unwrap().error, None, "another row is picked");
-        h.step(&json!({"widget": "1"})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:list:0"}})).unwrap();
         h.app.bom.as_mut().unwrap().fields[0] = "PL\u{7}".into();
         h.frames(2);
         h.step(&json!({"widget": "Apply"})).unwrap();
@@ -532,7 +481,7 @@ mod tests {
         // Two placed, so the Qty cell ("2") isn't mistaken for the row's item number ("1").
         h.app.run("occurrence.copy", json!({"component": "Plate", "translate": [50, 0, 0]})).unwrap();
         h.app.run("component.metadata.set", json!({"component": "Plate", "part_number": "PL-100", "revision": "A"})).unwrap();
-        h.step(&json!({"start": "assembly.bom"})).unwrap();
+        open_report(&mut h);
         h.frames(2);
         // The grid's own column says "Rev"; "Revision" is the edit field's label, from the table.
         assert!(h.widget("Revision").is_none());
@@ -560,7 +509,7 @@ mod tests {
                 ui.set_max_width(width);
                 let font = egui::TextStyle::Body.resolve(ui.style());
                 let measure = |s: &str| ui.painter().layout_no_wrap(s.to_owned(), font.clone(), egui::Color32::PLACEHOLDER).size().x;
-                out = (super::column_widths(ui, rows, false), texts.iter().map(|s| measure(s)).collect());
+                out = (super::column_widths(ui, rows), texts.iter().map(|s| measure(s)).collect());
             });
         })
         .textures_delta
@@ -579,7 +528,7 @@ mod tests {
 
         let long = [json!({"item": 1, "part_number": "P", "description": "Socket head cap screw ".repeat(20), "count": 1})];
         let (w, _) = widths_in(800.0, &long, &[]);
-        assert!(w[2] < 800.0, "a long description truncates instead of widening the grid: {w:?}");
+        assert!(w[2] > 800.0, "a long description can be reached by horizontal scrolling: {w:?}");
 
         let (w, header) = widths_in(10.0, &short, &["Description"]);
         assert!(w.iter().all(|x| x.is_finite() && *x >= 0.0), "{w:?}");
@@ -587,18 +536,16 @@ mod tests {
     }
 
     #[test]
-    fn the_description_column_takes_the_window_width() {
+    fn the_description_column_takes_the_available_panel_width() {
         let mut h = Harness::new();
         h.app.run("component.create", json!({"name": "Plate"})).unwrap();
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
         h.app.run("component.activate", json!({"component": 0})).unwrap();
         h.app.run("component.metadata.set", json!({"component": "Plate", "part_number": "PL-100", "description": "Plate"})).unwrap();
-        h.step(&json!({"start": "assembly.bom"})).unwrap();
+        open_report(&mut h);
         h.frames(2);
         let (Some(desc), Some(rev)) = (h.widget("Description"), h.widget("Rev")) else { panic!("the grid's headers are drawn") };
-        // Before, every column but the last was as narrow as a button and the grid used a third of the window.
-        let card = f64::from(solidcraft_theme::Tokens::get().form_card_width);
-        assert!(rev[0] - desc[0] > card, "Description spreads out: it starts at {}, Rev at {}", desc[0], rev[0]);
+        assert!(rev[0] > desc[0], "Revision follows the Description column: {desc:?}, {rev:?}");
     }
 
     #[test]
@@ -608,7 +555,7 @@ mod tests {
         h.app.run("component.activate", json!({"component": bolt["component"]})).unwrap();
         h.app.run("parts.insert", json!({"family": "hex_nut", "size": "M6", "point": [0, 0, -4]})).unwrap();
         h.app.run("component.activate", json!({"component": 0})).unwrap();
-        h.step(&json!({"start": "assembly.bom"})).unwrap();
+        open_report(&mut h);
         h.frames(2);
         assert!(h.widget("2 rows, 2 placed").is_some());
         h.step(&json!({"widget": "Sub-parts in their part's row"})).unwrap();

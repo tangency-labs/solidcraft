@@ -1,6 +1,4 @@
-//! The agent chat panel: docked left or right (switched by dragging its header to the other side,
-//! or in Preferences), resizable, folded to a thin strip with Minimise, closed with ×. Its side,
-//! width and fold are preferences, so they come back next time.
+//! Assistant content for the shared panel and the standalone desktop window.
 
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::type_face::RichTextExt as _;
@@ -12,52 +10,24 @@ use super::*;
 use crate::ui_kit;
 use solidcraft_theme::Tokens;
 
-pub const MIN_WIDTH: f32 = 280.0;
-pub const MAX_WIDTH: f32 = 760.0;
-/// The folded panel's width.
-const STRIP: f32 = 30.0;
+const MIN_WIDTH: f32 = 280.0;
 
-/// Where the panel is and how it is folded: the panel's own preferences. The host keeps them (in
-/// SolidCraft, its Preferences, so they come back next time); the panel reads and changes this copy.
+/// Standalone window placement.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AgentPanelPrefs {
-    /// Docked on the left edge (else the right).
-    pub left: bool,
-    /// The docked panel's width (points), kept within [`MIN_WIDTH`]..=[`MAX_WIDTH`] when drawn.
-    pub width: f32,
-    /// Folded to a thin strip.
-    pub minimized: bool,
-    /// In a window of its own.
     pub popped: bool,
-    /// That window's last place and size: x, y, width, height.
     pub window: Option<[f32; 4]>,
 }
 
 impl AgentPanelPrefs {
     pub fn read(p: &crate::prefs::Prefs) -> Self {
-        AgentPanelPrefs {
-            left: p.agent_chat_side == "left",
-            width: p.agent_chat_width,
-            minimized: p.agent_chat_minimized,
-            popped: p.agent_chat_popped,
-            window: p.agent_chat_window,
-        }
+        Self { popped: p.agent_chat_popped, window: p.agent_chat_window }
     }
 
-    /// Store what changed; a side the panel did not move keeps its stored spelling.
-    pub fn write(&self, p: &mut crate::prefs::Prefs) {
-        if (p.agent_chat_side == "left") != self.left {
-            p.agent_chat_side = if self.left { "left" } else { "right" }.into();
-        }
-        p.agent_chat_width = self.width;
-        p.agent_chat_minimized = self.minimized;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn write(&self, p: &mut crate::prefs::Prefs) {
         p.agent_chat_popped = self.popped;
         p.agent_chat_window = self.window;
-    }
-
-    /// The width the docked or floating panel is drawn at.
-    fn shown_width(&self) -> f32 {
-        if self.minimized { STRIP } else { self.width.clamp(MIN_WIDTH, MAX_WIDTH) }
     }
 }
 
@@ -217,9 +187,7 @@ pub struct PanelView {
     /// AI features are on: otherwise nothing of the chat is drawn.
     pub shown: bool,
     /// The app's layout (floating panels, and the frame a feature panel gets).
-    pub layout: ui_kit::LayoutMode,
     /// The history bar when it is on the right: the floating panel stops above it.
-    pub history: Option<Rect>,
     /// The open design's name, for the chat window's title.
     pub document: String,
     /// The open design's revision: a message's changes can be undone from the chat while they
@@ -244,7 +212,6 @@ pub struct PanelView {
     /// Why the chosen model may not work, if it may not.
     pub model_warning: Option<String>,
     /// The chat buttons' tooltip: name and shortcut.
-    pub tip: String,
     /// The keys that show or hide the chat, and whether the keymap editor is taking keys.
     pub toggle_keys: Vec<String>,
     pub capturing_keys: bool,
@@ -266,8 +233,6 @@ impl PanelView {
         let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_for(&app.preferences, id));
         PanelView {
             shown: shown(app),
-            layout: app.ui.layout,
-            history: app.shell.history.filter(|_| app.ui.show_timeline && !app.preferences.timeline_left),
             document: app.session.doc.name.clone(),
             revision: super::Revision::of(&app.session.doc),
             units: app.session.doc.units.clone(),
@@ -280,17 +245,12 @@ impl PanelView {
             dialog_open: app.dialog.is_some(),
             turn_limit: app.preferences.agent_chat_turn_limit,
             model_warning: settings::model_warning(app),
-            tip: tip(app),
             toggle_keys: crate::keymap::keys(app, "ui.assistant"),
             capturing_keys: crate::keymap::capturing(app),
             rtl: crate::i18n::panel_direction(&app.preferences.language) == solidcraft_engine::panels::Direction::Rtl,
             shared: crate::panel_runtime::shared_content_measurement(ctx),
             composer_height: crate::panel_runtime::shared_content_composer_height(ctx),
         }
-    }
-
-    fn floating(&self) -> bool {
-        Container::for_layout(self.layout, Surface::Panel).floating()
     }
 }
 
@@ -356,11 +316,6 @@ fn toggle_pressed(ctx: &egui::Context, keys: &[String]) -> bool {
     })
 }
 
-fn panel_salt(left: bool) -> &'static str {
-    if left { "sc_agent_chat_left" } else { "sc_agent_chat_right" }
-}
-
-/// The largest thumbnail of a message's picture, and its largest preview while hovered (points).
 #[cfg(not(target_arch = "wasm32"))]
 const THUMB_MAX: (f32, f32) = (150.0, 56.0);
 #[cfg(not(target_arch = "wasm32"))]
@@ -370,8 +325,7 @@ const PREVIEW_MAX: (f32, f32) = (560.0, 380.0);
 pub fn toggle(app: &mut SolveApp) {
     use solidcraft_engine::panels::{LayoutAction, Mutation};
 
-    let mut prefs = AgentPanelPrefs::read(&app.preferences);
-    let shared = app.panel_runtime().filter(|_| !prefs.popped).and_then(|runtime| {
+    let shared = app.panel_runtime().filter(|_| !app.preferences.agent_chat_popped).and_then(|runtime| {
         let layout = runtime.layout().layout();
         let panel = layout.instances.iter().find(|panel| panel.kind.0 == "solidcraft.assistant")?;
         let section = layout.containing(&panel.id).ok();
@@ -402,20 +356,7 @@ pub fn toggle(app: &mut SolveApp) {
         }
         return;
     }
-    toggle_panel(&mut app.agent_chat.open, &mut prefs);
-    prefs.write(&mut app.preferences);
-}
-
-/// [`toggle`] on the panel's state alone, when no shared panel host holds it.
-pub fn toggle_panel(open: &mut bool, prefs: &mut AgentPanelPrefs) {
-    if !*open {
-        *open = true;
-        prefs.minimized = false;
-    } else if prefs.minimized {
-        prefs.minimized = false;
-    } else {
-        *open = false;
-    }
+    app.agent_chat.open = !app.agent_chat.open;
 }
 
 /// The tooltip of the chat's buttons: its name and shortcut.
@@ -431,9 +372,9 @@ pub fn tip(app: &SolveApp) -> String {
 /// panel in this window, never label selections belonging to another native viewport.
 /// Called before layout so even a click and a shortcut in the same frame are routed here.
 pub(crate) fn owns_keyboard_input(app: &mut SolveApp, ctx: &egui::Context) -> bool {
-    let prefs = AgentPanelPrefs::read(&app.preferences);
-    let shared = app.universal_panel_host_enabled() && !prefs.popped;
-    let rect = app.agent_chat.panel_rect.filter(|_| shown(app) && app.agent_chat.open && (shared || !prefs.minimized));
+    let visible =
+        shown(app) && app.agent_chat.open && (app.preferences.agent_chat_popped || shared_section(app).is_some_and(|section| !section.collapsed));
+    let rect = app.agent_chat.panel_rect.filter(|_| visible);
     let Some(rect) = rect else {
         app.agent_chat.keyboard_owned = false;
         return false;
@@ -448,113 +389,34 @@ pub(crate) fn owns_keyboard_input(app: &mut SolveApp, ctx: &egui::Context) -> bo
     app.agent_chat.keyboard_owned
 }
 
-/// The panel, when the chat is turned on and open. Call before the central viewport is laid out.
+/// Draw the Assistant's standalone desktop window.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     poll(app, &ctx);
-    let mut prefs = AgentPanelPrefs::read(&app.preferences);
-    let shown = shown(app);
-    if begin(&mut app.agent_chat, shown, &prefs, &ctx) {
-        // Look for installed agents the first time the panel opens (in the background), before
-        // it is drawn, so its first frame says they are being looked for.
-        #[cfg(not(target_arch = "wasm32"))]
+    let visible = shown(app) && app.agent_chat.open && app.preferences.agent_chat_popped;
+    app.agent_chat.drop_rect = None;
+    app.agent_chat.hovered = None;
+    app.agent_chat.hover.clear();
+    if !visible {
+        app.agent_chat.panel_rect = None;
+        app.agent_chat.window_placed = false;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if visible {
+        new_chat_shortcut(&mut app.agent_chat, &ctx);
         if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
             refresh(app, &ctx);
         }
-        // Which chips and pills stand for things that left the design: plain state the panel reads.
         refresh_gone(app);
-        // Read only when the panel is drawn: a hidden or closed chat costs nothing.
         let view = PanelView::of(app, &ctx);
-        draw(&mut app.agent_chat, &view, &mut prefs, ui);
+        let mut prefs = AgentPanelPrefs::read(&app.preferences);
+        window(&mut app.agent_chat, &view, &ctx, &mut prefs);
         prefs.write(&mut app.preferences);
         hand_over(app, ui);
-        // Before the model view is laid out, so it lights the pill's target this frame.
         light_hovered(app);
+        show_drop_hint(&app.agent_chat, &ctx);
     }
     run_actions(app, &ctx);
-}
-
-/// The panel's frame before it is drawn: what is not drawn this frame is forgotten and the New
-/// chat shortcut is taken. `shown`: AI features are on. Whether the panel is drawn ([`draw`]).
-pub fn begin(chat: &mut AgentChat, shown: bool, prefs: &AgentPanelPrefs, ctx: &egui::Context) -> bool {
-    // Set again when the chat is drawn this frame.
-    chat.drop_rect = None;
-    // The pill or chip the pointer is on lights its target for this frame only.
-    chat.hovered = None;
-    chat.hover.clear();
-    // Retain the previous card for shortcut hover routing below; clear it when hidden.
-    if !shown || !chat.open {
-        chat.panel_rect = None;
-    }
-    // With AI features off nothing of the chat is drawn, and the shortcut does nothing.
-    if !shown {
-        return false;
-    }
-    // A window that isn't drawn this frame closes; the next one opens at the saved place.
-    if !(chat.open && prefs.popped) {
-        chat.window_placed = false;
-    }
-    new_chat_shortcut(chat, ctx);
-    chat.open
-}
-
-/// The open panel drawn from the chat's state, the host's view and the panel's own preferences,
-/// once [`begin`] says it is drawn; what was asked is left in `chat.actions`.
-pub fn draw(chat: &mut AgentChat, view: &PanelView, prefs: &mut AgentPanelPrefs, ui: &mut egui::Ui) {
-    let ctx = ui.ctx().clone();
-    #[cfg(not(target_arch = "wasm32"))]
-    if prefs.popped {
-        window(chat, view, &ctx, prefs);
-        show_drop_hint(chat, &ctx);
-        return;
-    }
-    if view.floating() {
-        floating(chat, view, ui, prefs);
-        show_drop_hint(chat, &ctx);
-        return;
-    }
-    let available = ui.available_rect_before_wrap();
-    let screen = ctx.content_rect();
-    chat.dock_space = Some(Rect::from_x_y_ranges(screen.x_range(), available.y_range()));
-    let t = Tokens::get();
-    let left = prefs.left;
-    let host = Container::new(ui.ctx(), Surface::Panel);
-    let side = |salt: &'static str| host.edge(salt, if left { Edge::Left } else { Edge::Right });
-    if prefs.minimized {
-        let r = host.show_edge(ui, side("sc_agent_chat_strip").exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| {
-            strip(chat, view, ui, prefs)
-        });
-        chat.drop_rect = Some(r.response.rect);
-        show_drop_hint(chat, &ctx);
-        return;
-    }
-    let width = prefs.width.clamp(MIN_WIDTH, MAX_WIDTH);
-    if std::mem::take(&mut chat.forget_width) {
-        // A panel's state is keyed by the Ui it is shown in and its salt; either side's would
-        // override the preference once the panel moves there.
-        let scope = ui.scope_id();
-        ctx.data_mut(|d| {
-            for side in [true, false] {
-                d.remove::<egui::containers::panel::PanelState>(scope.with(panel_salt(side)));
-            }
-        });
-    }
-    let r = host.show_edge(
-        ui,
-        side(panel_salt(left)).default_size(width).size_range(MIN_WIDTH..=MAX_WIDTH).resizable(true),
-        host.edge_frame(t.dialog_body),
-        |ui| ui_kit::scope(ui, |ui| body(chat, view, ui, left, prefs)),
-    );
-    solidcraft_ui_registry::publish_rect("agent_chat:panel", r.response.rect);
-    chat.panel_rect = Some(r.response.rect);
-    #[cfg(not(target_arch = "wasm32"))]
-    gallery_window(chat, &ctx);
-    chat.drop_rect = Some(r.response.rect);
-    show_drop_hint(chat, &ctx);
-    let w = r.response.rect.width();
-    if w.is_finite() && (MIN_WIDTH..=MAX_WIDTH).contains(&w) {
-        prefs.width = w;
-    }
 }
 
 /// Prepare the shared docked presentation without polling its retained service.
@@ -574,7 +436,6 @@ pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
     }
     app.agent_chat.panel_rect = None;
     app.agent_chat.drop_rect = None;
-    app.agent_chat.dock_space = None;
     app.agent_chat.window_placed = false;
 }
 
@@ -623,106 +484,33 @@ pub fn draw_content(chat: &mut AgentChat, view: &PanelView, prefs: &AgentPanelPr
     ui_kit::scope(ui, |ui| content(chat, view, ui, flow, prefs));
 }
 
-/// Horizontal room reserved before the history and browser when Assistant is on the left.
-pub(crate) fn left_inset(app: &SolveApp, available: Rect) -> f32 {
-    let prefs = AgentPanelPrefs::read(&app.preferences);
-    if Container::for_layout(app.ui.layout, Surface::Panel).floating() && shown(app) && app.agent_chat.open && !prefs.popped && prefs.left {
-        (prefs.shown_width() + crate::ui_kit::SHELL_GAP).min(available.width().max(0.0))
-    } else {
-        0.0
-    }
+fn shared_section(app: &SolveApp) -> Option<&solidcraft_engine::panels::Section> {
+    let layout = app.panel_runtime()?.layout().layout();
+    let instance = layout.instances.iter().find(|instance| instance.kind.0 == "solidcraft.assistant")?;
+    let section = layout.containing(&instance.id).ok()?;
+    (section.active == instance.id).then_some(section)
 }
 
-/// Assistant-specific precedence over tool sheets. Keep this out of the shared container:
-/// ordinary tool panels never reserve an outside rail for themselves.
+/// Keep feature editors clear of the Assistant when it occupies an outer side.
 pub(crate) fn tool_space(app: &SolveApp, mut available: Rect) -> Rect {
-    let prefs = AgentPanelPrefs::read(&app.preferences);
-    if Container::for_layout(app.ui.layout, Surface::Panel).floating()
-        && shown(app)
-        && app.agent_chat.open
-        && !prefs.popped
-        && let Some(chat) = app.agent_chat.panel_rect.filter(|r| r.is_finite() && r.is_positive())
-    {
-        if prefs.left {
-            available.min.x = crate::ui_kit::within(chat.right() + crate::ui_kit::SHELL_GAP, available.left(), available.right());
-        } else {
-            available.max.x = crate::ui_kit::within(chat.left() - crate::ui_kit::SHELL_GAP, available.left(), available.right());
+    use solidcraft_engine::panels::{SectionLocation, Zone};
+
+    let Some(section) = shared_section(app) else { return available };
+    if !shown(app) || !app.agent_chat.open || app.preferences.agent_chat_popped || section.collapsed {
+        return available;
+    }
+    let Some(chat) = app.agent_chat.panel_rect.filter(|r| r.is_finite() && r.is_positive()) else { return available };
+    let gap = crate::ui_kit::SHELL_GAP;
+    match section.location {
+        SectionLocation::Dock { zone: Zone::Left } => {
+            available.min.x = crate::ui_kit::within(chat.right() + gap, available.left(), available.right());
         }
+        SectionLocation::Dock { zone: Zone::Right } => {
+            available.max.x = crate::ui_kit::within(chat.left() - gap, available.left(), available.right());
+        }
+        _ => {}
     }
     available
-}
-
-/// The same outer rectangle is used for the floating sheet and its docking preview.
-fn floating_bounds(view: &PanelView, prefs: &AgentPanelPrefs, available: Rect, left: bool) -> Rect {
-    let t = Tokens::get();
-    let gap = crate::ui_kit::SHELL_GAP;
-    let mut bounds = available.shrink(gap);
-    // The ribbon already supplies the top gap shared by browser and history cards.
-    bounds.min.y = available.top();
-    if let Some(history) = view.history {
-        bounds.max.y = (history.top() - gap).min(bounds.bottom()).max(bounds.top());
-    }
-    // Assistant owns the outside edge on either side. Tool sheets reserve space beside it.
-    if !left {
-        // Match the shared Panel's right-edge clearance.
-        bounds.max.x = bounds.right().min(available.right() - t.space_8).max(bounds.left());
-    }
-    let width = prefs.shown_width();
-    let height = if prefs.minimized { (t.space_24 * 3.0 + t.space_16).min(bounds.height()) } else { bounds.height() };
-    let width = width.min(bounds.width().max(0.0));
-    Rect::from_min_size(pos2(if left { bounds.left() } else { bounds.right() - width }, bounds.top()), vec2(width, height.max(0.0)))
-}
-
-/// Use the same bounded, rounded floating surface as feature panels. The sheet overlays
-/// the viewport, leaving the model's rendering and picking projection unchanged.
-fn floating(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
-    let ctx = ui.ctx().clone();
-    let t = Tokens::get();
-    let available = ui.available_rect_before_wrap();
-    chat.dock_space = Some(available);
-    let left = prefs.left;
-    let side = if left { crate::frame::Side::Left } else { crate::frame::Side::Right };
-    let minimized = prefs.minimized;
-    let bounds = floating_bounds(view, prefs, available, left);
-    if !bounds.is_positive() {
-        chat.panel_rect = None;
-        return;
-    }
-    let width = bounds.width();
-    let height = bounds.height();
-    let anchor = if left { bounds.left_top() } else { bounds.right_top() };
-    let frame = ui_kit::Panel::feature_frame(&ctx, view.layout, side);
-    let inner = (vec2(width, height) - frame.total_margin().sum()).max(egui::Vec2::ZERO);
-    let panel = ui_kit::Panel::new(tr("ui.assistant"), Id::unique("sc_agent_chat_floating"), anchor, available, side, frame).width(width);
-    if let Some(card) = panel.fixed_window(&ctx, inner).show(&ctx, |ui| {
-        ui.set_min_size(inner);
-        ui.set_max_size(inner);
-        ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, inner)));
-        ui_kit::scope(ui, |ui| if minimized { strip(chat, view, ui, prefs) } else { body(chat, view, ui, left, prefs) });
-        if !minimized {
-            let rect = ui.max_rect();
-            let rail = if left {
-                Rect::from_x_y_ranges(rect.right() - t.space_4..=rect.right(), rect.y_range())
-            } else {
-                Rect::from_x_y_ranges(rect.left()..=rect.left() + t.space_4, rect.y_range())
-            };
-            let response = ui.interact(rail, Id::unique("sc_agent_chat_resize"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-            solidcraft_ui_registry::publish_handle("agent_chat:resize", rail.center());
-            if response.dragged() {
-                let delta = ui.input(|i| i.pointer.delta().x) * if left { 1.0 } else { -1.0 };
-                if delta.is_finite() {
-                    prefs.width = (width + delta).clamp(MIN_WIDTH, MAX_WIDTH);
-                }
-            }
-        }
-    }) {
-        let rect = card.response.rect;
-        chat.panel_rect = Some(rect);
-        chat.drop_rect = Some(rect);
-        solidcraft_ui_registry::publish_rect("agent_chat:panel", rect);
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    gallery_window(chat, &ctx);
 }
 
 /// The most chips one group shows before "+N more".
@@ -1020,7 +808,7 @@ pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> 
     }
     match window_place(prefs.window) {
         Some((pos, size)) => builder.with_position(pos).with_inner_size(size),
-        None => builder.with_inner_size([prefs.width.clamp(MIN_WIDTH, MAX_WIDTH), 720.0]),
+        None => builder.with_inner_size([380.0, 720.0]),
     }
 }
 
@@ -1039,12 +827,12 @@ fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &m
         // The window holds the panel, not the shared host, so the toggle works on the panel's
         // own state (the copy being drawn from).
         if class != egui::ViewportClass::EmbeddedWindow && view.shown && !view.capturing_keys && toggle_pressed(ui.ctx(), &view.toggle_keys) {
-            toggle_panel(&mut chat.open, prefs);
+            chat.open = !chat.open;
         }
         let t = Tokens::get();
         let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(t.dialog_body);
         let panel = Container::new(ui.ctx(), Surface::Viewport).central();
-        let r = Container::show_central(ui, panel, frame, |ui| ui_kit::scope(ui, |ui| body(chat, view, ui, false, prefs)));
+        let r = Container::show_central(ui, panel, frame, |ui| ui_kit::scope(ui, |ui| body(chat, view, ui, prefs)));
         // The picture viewer opens over this window, where the click was, not over the main one.
         gallery_window(chat, ui.ctx());
         if class == egui::ViewportClass::EmbeddedWindow {
@@ -1087,7 +875,8 @@ pub fn take_focus_for_text(popped: bool, over_text: bool, chat_active: Option<bo
     popped && over_text && chat_active == Some(false) && main_active == Some(true)
 }
 
-/// A small drawn button: `kind` is `minimize`, `close`, `newchat`, `stopturn`, `pop_out` or `dock`.
+/// A small drawn button for the standalone window.
+#[cfg(not(target_arch = "wasm32"))]
 fn glyph_button(ui: &mut egui::Ui, kind: &str, tip: &str) -> egui::Response {
     let t = Tokens::get();
     let (r, resp) = ui.allocate_exact_size(vec2(t.form_close_size, t.form_close_size), Sense::click());
@@ -1098,22 +887,9 @@ fn glyph_button(ui: &mut egui::Ui, kind: &str, tip: &str) -> egui::Response {
     let s = Stroke::new(1.4, t.text);
     let p = ui.painter();
     match kind {
-        "minimize" => {
-            ui_kit::disclosure(p, c, true, t.text);
-        }
         "close" => {
             p.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], s);
             p.line_segment([c + vec2(-4.5, 4.5), c + vec2(4.5, -4.5)], s);
-        }
-        // A window with an arrow leaving it by its top right corner.
-        "pop_out" => {
-            p.line_segment([c + vec2(-1.0, -5.0), c + vec2(-5.0, -5.0)], s);
-            p.line_segment([c + vec2(-5.0, -5.0), c + vec2(-5.0, 5.0)], s);
-            p.line_segment([c + vec2(-5.0, 5.0), c + vec2(5.0, 5.0)], s);
-            p.line_segment([c + vec2(5.0, 5.0), c + vec2(5.0, 1.0)], s);
-            p.line_segment([c + vec2(-1.0, 1.0), c + vec2(5.5, -5.5)], s);
-            p.line_segment([c + vec2(1.5, -5.5), c + vec2(5.5, -5.5)], s);
-            p.line_segment([c + vec2(5.5, -5.5), c + vec2(5.5, -1.5)], s);
         }
         // A window with its right side filled: the panel docked.
         "dock" => {
@@ -1126,9 +902,6 @@ fn glyph_button(ui: &mut egui::Ui, kind: &str, tip: &str) -> egui::Response {
             ui.painter().line_segment([c + vec2(-2.5, 0.0), c + vec2(2.5, 0.0)], Stroke::new(1.2, t.text));
             ui.painter().line_segment([c + vec2(0.0, -2.5), c + vec2(0.0, 2.5)], Stroke::new(1.2, t.text));
         }
-        "stopturn" => {
-            ui.painter().rect_filled(Rect::from_center_size(c, vec2(9.0, 9.0)), 1.5, t.error);
-        }
         _ => {}
     }
     solidcraft_ui_registry::publish_rect(&format!("agent_chat:{kind}"), r);
@@ -1136,58 +909,15 @@ fn glyph_button(ui: &mut egui::Ui, kind: &str, tip: &str) -> egui::Response {
     resp.backing_on_hover_text(tip)
 }
 
-fn state_color(state: State) -> Color32 {
-    let t = Tokens::get();
-    match state {
-        State::Ready | State::Busy => t.accent,
-        State::NeedsAuth | State::Exited | State::Failed => t.warning,
-        _ => t.text_dim,
-    }
-}
-
-/// The folded panel: the chat icon (unfolds it), the agent's state, and a mark while something
-/// waits for the user.
-fn strip(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
-    let t = Tokens::get();
-    let r = ui.max_rect();
-    let button = Rect::from_center_size(pos2(r.center().x, r.top() + 22.0), vec2(26.0, 26.0));
-    let resp = ui.interact(button, Id::unique("sc_agent_chat_unfold"), Sense::click());
-    solidcraft_ui_registry::publish_handle("agent_chat:unfold", button.center());
-    if resp.hovered() {
-        ui.painter().rect_filled(button, t.radius_sm, t.hover);
-    }
-    ui_kit::disclosure(ui.painter(), button.center(), false, t.text);
-    let state = chat.state();
-    let dot = if chat.without_design() { t.warning } else { state_color(state) };
-    ui.painter().circle_filled(pos2(r.center().x, button.bottom() + 10.0), 3.5, dot);
-    let waiting = chat.waiting();
-    if waiting > 0 {
-        ui_kit::attention_mark(ui.painter(), button, Some(waiting));
-    }
-    ui.painter()
-        .line_segment(if prefs.left { [r.right_top(), r.right_bottom()] } else { [r.left_top(), r.left_bottom()] }, t.primary_border(t.border));
-    let label = if chat.without_design() { tr("ui.agent_chat_state_no_design") } else { state.label() };
-    let tip = format!("{} · {}", view.tip, label);
-    if resp.backing_on_hover_text(tip).clicked() {
-        prefs.minimized = false;
-    }
-}
-
-/// The header: a grip to drag the panel to the other side, the title and state, Connect or Stop,
-/// Pop out (or Dock, in its own window), Minimise and Close. In its own window the system moves
-/// and minimises it, so there is no grip and no Minimise.
-fn header(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPanelPrefs) {
+/// The standalone Assistant window title and actions.
+#[cfg(not(target_arch = "wasm32"))]
+fn header(chat: &mut AgentChat, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
     let t = Tokens::get();
     let state = chat.state();
-    let popped = prefs.popped;
     ui_kit::assistant_header(ui, |ui| {
         ui.horizontal(|ui| {
-            let title = {
-                let grip =
-                    if popped { ui.allocate_exact_size(vec2(0.0, t.space_16 + t.space_2), Sense::hover()).0 } else { ui_kit::panel_grip(ui).rect };
-                let l = ui.label(RichText::new(tr("ui.assistant")).semibold().color(t.text).size(t.font_heading));
-                grip.union(l.rect)
-            };
+            ui.allocate_exact_size(vec2(0.0, t.space_16 + t.space_2), Sense::hover());
+            ui.label(RichText::new(tr("ui.assistant")).semibold().color(t.text).size(t.font_heading));
             let waiting = chat.waiting();
             // Ready without SolidCraft's tools can't reach the design: say so, and how to fix it (#12283).
             let without_design = waiting == 0 && chat.without_design();
@@ -1218,20 +948,10 @@ fn header(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, left: bool,
                     badge.backing_on_hover_text(chat.no_design_hint());
                 }
             }
-            // Drag the header across the window to dock on the other side.
-            if !popped {
-                let drag = ui.interact(title, Id::unique("sc_agent_chat_grip"), Sense::drag());
-                solidcraft_ui_registry::publish_handle("agent_chat:grip", title.center());
-                dock_drag(chat, view, ui, &drag, left, prefs);
-            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if glyph_button(ui, "close", tr("ui.agent_chat_close")).clicked() {
                     chat.open = false;
                 }
-                if !popped && glyph_button(ui, "minimize", tr("ui.agent_chat_minimize")).clicked() {
-                    prefs.minimized = true;
-                }
-                #[cfg(not(target_arch = "wasm32"))]
                 if glyph_button(
                     ui,
                     "newchat",
@@ -1241,60 +961,17 @@ fn header(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, left: bool,
                 {
                     chat.actions.push(PanelAction::RequestNewChat);
                 }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let (kind, tip) = if popped { ("dock", "ui.agent_chat_dock") } else { ("pop_out", "ui.agent_chat_pop_out") };
-                    if glyph_button(ui, kind, tr(tip)).clicked() {
-                        prefs.popped = !popped;
-                    }
+                if glyph_button(ui, "dock", tr("ui.agent_chat_dock")).clicked() {
+                    prefs.popped = false;
                 }
             });
         });
     });
 }
 
-/// While the header is dragged: the cursor grabs and the side it would dock on lights up; on
-/// release over the other half of the window the panel moves there.
-fn dock_drag(chat: &mut AgentChat, view: &PanelView, ui: &egui::Ui, drag: &egui::Response, left: bool, prefs: &mut AgentPanelPrefs) {
-    if drag.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-    }
-    let screen = ui.ctx().content_rect();
-    let target = |x: f32| x < screen.center().x;
-    if drag.dragged()
-        && let Some(p) = ui.ctx().pointer_interact_pos()
-    {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        let to_left = target(p.x);
-        let available = chat.dock_space.unwrap_or(screen);
-        let zone = if view.floating() {
-            floating_bounds(view, prefs, available, to_left)
-        } else {
-            let w = prefs.width.clamp(MIN_WIDTH, MAX_WIDTH).min(available.width());
-            Rect::from_min_size(pos2(if to_left { available.left() } else { available.right() - w }, available.top()), vec2(w, available.height()))
-        };
-        solidcraft_ui_registry::publish_rect("agent_chat:dock_hint", zone);
-        let t = Tokens::get();
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::unique("sc_agent_chat_dock_hint")));
-        painter.rect(zone, t.radius_xl, t.accent.gamma_multiply(0.18), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
-        painter.text(
-            zone.center(),
-            Align2::CENTER_CENTER,
-            tr(if to_left { "ui.agent_chat_dock_left" } else { "ui.agent_chat_dock_right" }),
-            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_heading),
-            t.text,
-        );
-    }
-    if drag.drag_stopped()
-        && let Some(p) = ui.ctx().pointer_interact_pos().or_else(|| ui.ctx().pointer_latest_pos())
-        && target(p.x) != left
-    {
-        prefs.left = !left;
-    }
-}
-
-fn body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPanelPrefs) {
-    header(chat, view, ui, left, prefs);
+#[cfg(not(target_arch = "wasm32"))]
+fn body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
+    header(chat, ui, prefs);
     content(chat, view, ui, Flow::Tall, prefs);
 }
 
@@ -3343,8 +3020,6 @@ mod tests {
     fn plain_view(shared: bool) -> PanelView {
         PanelView {
             shown: true,
-            layout: ui_kit::LayoutMode::default(),
-            history: None,
             document: "Plate".into(),
             revision: Revision::of(&solidcraft_engine::Session::default().doc),
             units: "mm".into(),
@@ -3357,7 +3032,6 @@ mod tests {
             dialog_open: false,
             turn_limit: 0,
             model_warning: None,
-            tip: "Assistant".into(),
             toggle_keys: Vec::new(),
             capturing_keys: false,
             rtl: false,
@@ -3384,12 +3058,12 @@ mod tests {
         let ctx = crate::fonts::test_context();
         let mut chat = plain_chat();
         let view = plain_view(false);
-        let mut prefs = AgentPanelPrefs { left: false, width: 420.0, minimized: false, popped: false, window: None };
+        let mut prefs = AgentPanelPrefs { popped: false, window: None };
         let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 800.0));
         let frame = |chat: &mut AgentChat, prefs: &mut AgentPanelPrefs, events: Vec<egui::Event>| {
             solidcraft_ui_registry::clear_handles();
             let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
-            let mut output = ctx.run_ui(input, |ui| draw(chat, &view, prefs, ui));
+            let mut output = ctx.run_ui(input, |ui| draw_content(chat, &view, prefs, ui, Flow::Tall));
             output.textures_delta.clear();
         };
         for _ in 0..3 {
@@ -3411,7 +3085,7 @@ mod tests {
         let ctx = crate::fonts::test_context();
         let mut chat = plain_chat();
         let view = plain_view(true);
-        let prefs = AgentPanelPrefs { left: false, width: 420.0, minimized: false, popped: false, window: None };
+        let prefs = AgentPanelPrefs { popped: false, window: None };
         let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(440.0, 720.0));
         let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
         let mut layer = None;
@@ -3436,51 +3110,17 @@ mod tests {
     fn the_first_frame_after_opening_shows_the_agents_being_detected() {
         let ctx = crate::fonts::test_context();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        app.ui.layout = ui_kit::LayoutMode::Docked;
         toggle(&mut app);
         assert!(app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none());
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 800.0))), ..Default::default() };
-        let mut output = ctx.run_ui(input, |ui| show(&mut app, ui));
+        let mut output = ctx.run_ui(input, |ui| {
+            prepare_shared(&mut app, ui.ctx());
+            shared_content(&mut app, ui, Flow::Tall);
+        });
         let detecting = tr("ui.agent_chat_detecting");
         let shown = crate::test_support::text_shapes(&output).any(|text| text.galley.text() == detecting);
         output.textures_delta.clear();
         assert!(shown, "the first frame says it is detecting");
-    }
-
-    /// The panel's place and fold are its own state: toggled and stored without the app.
-
-    #[test]
-    fn the_panel_prefs_toggle_and_round_trip_without_the_app() {
-        let mut prefs = AgentPanelPrefs { left: false, width: 420.0, minimized: true, popped: false, window: None };
-        let mut open = true;
-        toggle_panel(&mut open, &mut prefs);
-        assert!(open && !prefs.minimized, "a folded panel unfolds");
-        toggle_panel(&mut open, &mut prefs);
-        assert!(!open);
-        toggle_panel(&mut open, &mut prefs);
-        assert!(open);
-
-        let mut stored = crate::prefs::Prefs { agent_chat_side: "Right".into(), ..Default::default() };
-        prefs.window = Some([10.0, 20.0, 400.0, 600.0]);
-        prefs.write(&mut stored);
-        assert_eq!(stored.agent_chat_side, "Right", "a side the panel did not move keeps its spelling");
-        assert_eq!(AgentPanelPrefs::read(&stored), prefs);
-        prefs.left = true;
-        prefs.write(&mut stored);
-        assert_eq!(stored.agent_chat_side, "left");
-        assert_eq!(AgentPanelPrefs::read(&stored), prefs);
-    }
-
-    #[test]
-    fn the_shortcut_shows_folds_and_hides() {
-        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        toggle(&mut app);
-        assert!(app.agent_chat.open);
-        app.preferences.agent_chat_minimized = true;
-        toggle(&mut app);
-        assert!(app.agent_chat.open && !app.preferences.agent_chat_minimized, "a folded panel unfolds");
-        toggle(&mut app);
-        assert!(!app.agent_chat.open);
     }
 
     #[test]
@@ -3504,13 +3144,13 @@ mod tests {
                         ui_kit::scope(ui, |ui| {
                             let mut prefs = AgentPanelPrefs::read(&app.preferences);
                             let view = PanelView::of(&mut app, ui.ctx());
-                            header(&mut app.agent_chat, &view, ui, false, &mut prefs);
+                            header(&mut app.agent_chat, ui, &mut prefs);
                             desktop_body(&mut app.agent_chat, &view, ui, Flow::Tall, &prefs);
                         });
                     });
                     output.textures_delta.clear();
                 }
-                let controls: Vec<_> = ["close", "minimize", "newchat", "pop_out", "permissions", "send"]
+                let controls: Vec<_> = ["close", "newchat", "dock", "permissions", "send"]
                     .into_iter()
                     .map(|name| {
                         let key = format!("agent_chat:{name}");

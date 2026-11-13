@@ -96,6 +96,21 @@ fn aliases_and_defaults_choose_the_accent() {
     assert_eq!(TEST_SET.primary("warm_bar", true, solidcraft_theme::ColorVision::Off), Color32::from_rgb(0xd0, 0x60, 0x20));
 }
 
+/// An id resolves the same the first time and once remembered, and the icon audit still hears
+/// of an id asked for again after it was remembered.
+#[test]
+fn a_remembered_icon_resolves_the_same_and_is_still_audited() {
+    for name in ["bar", "warm_bar", "lost", "no_such_icon"] {
+        let (first, again) = (TEST_SET.resolve(name), TEST_SET.resolve(name));
+        assert_eq!((first.master, first.accent, first.placeholder), (again.master, again.accent, again.placeholder), "{name}");
+    }
+    audit::start();
+    let _ = TEST_SET.resolve("warm_bar");
+    let heard: Vec<String> = audit::take().into_iter().map(|r| r.name).collect();
+    audit::stop();
+    assert_eq!(heard, ["warm_bar"]);
+}
+
 #[test]
 fn a_set_without_artwork_draws_nothing() {
     static EMPTY: IconSet = IconSet::new(IconData::EMPTY);

@@ -455,6 +455,7 @@ fn a_body_pick_goes_on_to_the_point_or_axis() {
 fn ctrl_or_shift_click_adds_bodies_after_move_has_gone_on() {
     for mode in [POINT_TO_POINT, POINT_TO_POSITION, ROTATE] {
         let mut h = three_bodies_in_move(mode);
+        h.call("ui.camera", json!({"target":[40,10,0],"distance":200}));
         let body = |name: &str| Sel::Body { name: name.into() };
         let (a, b, c) = (body("A"), body("B"), body("C"));
         h.step(&json!({ "click": { "world": [10, 10, 10] } })).unwrap();

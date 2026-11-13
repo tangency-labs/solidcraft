@@ -1,6 +1,8 @@
 //! One-shot plugins share the engine's command surface, file scope and undo history.
 use super::CommandSpec;
-use crate::schema::plugin::{InspectParams, InspectResult, ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, RunParams, RunResult};
+use crate::schema::plugin::{
+    InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, RunParams, RunResult,
+};
 use crate::{
     Result, Session, checked,
     params::bad,
@@ -16,6 +18,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("plugin.inspect", "Inspect Plugin", checked!("plugin.inspect", inspect)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<InspectParams>::new()).output(output_schema_for::<InspectResult>)
         .params("path: plugin package folder; returns inert manifest and approval hash covering manifest and component; runs no plugin code"),
+    CommandSpec::new("plugin.install", "Install Plugin", checked!("plugin.install", install)).icon("import").noundo().doc_only()
+        .contract(&TypedContract::<InstallParams>::new()).output(output_schema_for::<InstallResult>)
+        .params("path: plugin .zip, replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool; checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
     CommandSpec::new("plugin.list", "List Plugins", checked!("plugin.list", list)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<ListParams>::new()).output(output_schema_for::<ListResult>)
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
@@ -37,6 +42,48 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: vec![],
     })
     .map_err(|e| bad("plugin.inspect", e.to_string()))
+}
+fn install(s: &mut Session, p: &Value) -> Result<Value> {
+    use plugin::install::{InstallError, MAX_ZIP_BYTES, unpack};
+    let p: InstallParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.install", e.to_string()))?;
+    let failed = |e: InstallError| match e {
+        InstallError::Manifest(e) => crate::EngineError::Plugin(e),
+        e => crate::EngineError::Other(e.to_string()),
+    };
+    let dir = s.plugin_state.plugins_dir().ok_or_else(|| failed(InstallError::NoPluginsFolder))?;
+    let zip = solidcraft_io::vfs::read(&p.path, MAX_ZIP_BYTES).map_err(|e| crate::EngineError::Other(format!("could not read {}: {e}", p.path)))?;
+    let plugin = unpack(&zip).map_err(failed)?;
+    let manifest = &plugin.manifest;
+    let folder = dir.join(&manifest.id);
+    #[cfg(not(target_arch = "wasm32"))]
+    let replaces = plugin::install::installed(&dir, &manifest.id).map(|(name, version)| format!("{name} {version}").trim().to_string());
+    #[cfg(target_arch = "wasm32")]
+    let replaces: Option<String> = None;
+    let installed = !p.dry_run;
+    if installed {
+        // The plugins folder is the app's own, but a scoped caller must have been given it.
+        solidcraft_io::vfs::check(&folder.to_string_lossy()).map_err(|e| crate::EngineError::Other(e.to_string()))?;
+        #[cfg(not(target_arch = "wasm32"))]
+        plugin::install::install(&plugin, &dir, p.replace).map_err(failed)?;
+        // Its entries resolve at once, as an inspected package's do.
+        s.plugin_state.packages.insert(manifest.id.clone(), folder.to_string_lossy().into_owned());
+    }
+    let runtime = manifest.runtime.as_ref();
+    serde_json::to_value(InstallResult {
+        id: manifest.id.clone(),
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        description: manifest.description.clone(),
+        capabilities: manifest.capabilities.clone(),
+        permissions: runtime.map(|r| r.permissions.clone()).unwrap_or_default(),
+        commands: runtime.map(|r| r.commands.iter().cloned().collect()).unwrap_or_default(),
+        entries: runtime.map(|r| r.entries.iter().map(|e| format!("{}.{}", manifest.id, e.name)).collect()).unwrap_or_default(),
+        replaces,
+        installed,
+        folder: folder.to_string_lossy().into_owned(),
+        param_warnings: vec![],
+    })
+    .map_err(|e| bad("plugin.install", e.to_string()))
 }
 fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let p: RunParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.run", e.to_string()))?;
@@ -74,7 +121,7 @@ fn mesh(s: &mut Session, p: &Value) -> Result<Value> {
 fn list(s: &mut Session, _p: &Value) -> Result<Value> {
     // Discovery is inert, and uses the caller's file scope when reading each package.
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(root) = crate::recovery::data_dir().map(|p| p.join("plugins"))
+    if let Some(root) = s.plugin_state.plugins_dir()
         && let Ok(folders) = std::fs::read_dir(root)
     {
         for folder in folders.flatten().take(1024) {

@@ -80,7 +80,8 @@ pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
 /// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, a
 /// sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's),
 /// and the design's planes, axes and construction points.
-pub const SNAPS: crate::selection::Accept = FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS;
+pub const SNAPS: crate::selection::Accept =
+    FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS | crate::selection::SNAP_POINTS;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
 const MOVES: &[&str] = &[
     "joint.create",
@@ -951,6 +952,35 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         }
     }
     Some(snap)
+}
+
+/// A woken snap point picked in a joint origin input (#11227) stands for the edge or face that
+/// woke it when that item's own snap is there (a hole's centre, an edge's middle, a face's
+/// centre): the joint keeps it by name, as a pick of the item itself would. Any other woken point
+/// (an arc's end, a cylinder's far end) stays a point.
+/// `snaps`: whether the dialog's active input takes joint snaps ([`takes_snaps`]).
+pub(crate) fn woken_pick(app: &SolveApp, snaps: bool, sel: Sel) -> Sel {
+    let Sel::Vertex { body, point } = &sel else { return sel };
+    let tol = 1e-4 * (1.0 + point.len());
+    let woken = &app.viewport.woken;
+    // Only the woken item's own body: another body's point there is that body's.
+    let of_body = |i: &&Sel| matches!(i, Sel::Edge { body: b, .. } | Sel::Face { body: b, .. } if b == body);
+    if !snaps || !woken.points.iter().any(|p| p.at.dist(*point) <= tol) {
+        return sel;
+    }
+    // The rim's item, or a face of its body crossed on the way to its centre.
+    [&woken.item, &woken.face]
+        .into_iter()
+        .flatten()
+        .filter(of_body)
+        .find(|item| picked_snap(app, item).is_some_and(|s| s.at.dist(*point) <= tol))
+        .cloned()
+        .unwrap_or(sel)
+}
+
+/// Whether a dialog's active input takes joint snaps (a joint's origin, a trace's point).
+pub(crate) fn takes_snaps(d: &Dialog) -> bool {
+    d.active_input().is_some_and(|i| i.accept == SNAPS)
 }
 
 /// Each pick's snap, measured once for the world state, design and open sketch it was measured in.
@@ -2029,7 +2059,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     }
     // The snap under the cursor (found again only when the hovered item changes).
     let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS);
-    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting);
+    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting).map(|s| woken_pick(app, accepting, s));
     match under {
         Some(sel) => {
             let fresh = !matches!(hover, Some((s, _)) if *s == sel);
@@ -2221,8 +2251,9 @@ pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter,
 pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: &[u64], set: JointRun) -> f32 {
     let t = Tokens::get();
     let wanted: HashSet<u64> = ids.iter().copied().collect();
-    let joints: Vec<(u64, String, JointKind, bool)> =
-        app.session.doc.assembly.joints.iter().filter(|j| wanted.contains(&j.id)).map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
+    // The design held, not its joints copied: this runs at every frame, for every joint.
+    let doc = app.session.doc.clone();
+    let joints: Vec<&solidcraft_engine::doc::joints::Joint> = doc.assembly.joints.iter().filter(|j| wanted.contains(&j.id)).collect();
     if joints.is_empty() {
         return x;
     }
@@ -2240,9 +2271,18 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
     }
     let mut open: Option<Dialog> = None;
     let mut run: Option<(&'static str, Value)> = None;
-    for (id, name, kind, suppressed) in joints {
+    // Only the chips in the strip's view are made: a large assembly's hundreds of joints were
+    // each hit-tested, painted and given a tooltip and a menu at every frame, the History bar's
+    // scroll area showing a few dozen. A chip out of view keeps its place and its handle.
+    let shown = ui.clip_rect();
+    for j in joints {
         let br = egui::Rect::from_min_size(egui::pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
-        crate::scenario::publish_handle(&format!("timeline-joint:{name}"), br.center());
+        crate::scenario::publish_handle(&format!("timeline-joint:{}", j.name), br.center());
+        if !br.intersects(shown) {
+            x += 32.0;
+            continue;
+        }
+        let (id, name, kind, suppressed) = (j.id, j.name.as_str(), j.kind, j.suppressed);
         let resp = ui.interact(br, ui.scope_id().with(("joint", id)), egui::Sense::click());
         let bg = if app.tree.picked_joints.contains(&id) {
             t.accent_soft
@@ -2501,7 +2541,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
     let folder_shown = !app.session.folder_hidden("c0/joints");
     let mut dialog: Option<Dialog> = None;
     let mut hovered = None;
-    for j in joints {
+    for j in joints.iter().cloned() {
         let id = j.id;
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
@@ -2561,23 +2601,40 @@ pub(crate) struct PlacementJoint {
 
 /// The joints that attach the placement at `path` (its last occurrence is one of the two a
 /// joint joins), in the design's joint order.
-pub(crate) fn placement_joints(doc: &solidcraft_engine::doc::Document, path: &[u64]) -> Vec<PlacementJoint> {
-    let Some(&occ) = path.last() else { return Vec::new() };
-    let name_of = |o: u64| doc.occurrences.iter().find(|x| x.id == o).map(|x| x.name.clone()).unwrap_or_default();
-    doc.assembly
-        .joints
-        .iter()
-        .filter_map(|j| {
-            let other = if j.a.occurrence == occ {
-                j.b.occurrence
-            } else if j.b.occurrence == occ {
-                j.a.occurrence
-            } else {
-                return None;
-            };
-            Some(PlacementJoint { id: j.id, name: j.name.clone(), kind: j.kind, suppressed: j.suppressed, other: name_of(other) })
-        })
-        .collect()
+/// Made once per design version for every placement (see [`placement_joints`]): the Browser asks
+/// for each expanded placement's joints at every frame, and each ask went through every joint of
+/// the design, naming the other placement by a search of every occurrence.
+pub(crate) fn placement_joints(doc: &std::sync::Arc<solidcraft_engine::doc::Document>, path: &[u64]) -> std::sync::Arc<[PlacementJoint]> {
+    let Some(&occ) = path.last() else { return std::sync::Arc::from([]) };
+    PLACEMENT_JOINTS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if !cache.as_ref().is_some_and(|(held, _)| std::sync::Arc::ptr_eq(held, doc)) {
+            *cache = Some((doc.clone(), placement_joint_index(doc)));
+        }
+        cache.as_ref().and_then(|(_, by)| by.get(&occ).cloned()).unwrap_or_else(|| std::sync::Arc::from([]))
+    })
+}
+
+thread_local! {
+    /// [`placement_joint_index`] of the document it holds.
+    #[allow(clippy::type_complexity)]
+    static PLACEMENT_JOINTS: std::cell::RefCell<Option<(std::sync::Arc<solidcraft_engine::doc::Document>, std::collections::HashMap<u64, std::sync::Arc<[PlacementJoint]>>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Each occurrence's joints, in the design's joint order, in one pass over the joints.
+fn placement_joint_index(doc: &solidcraft_engine::doc::Document) -> std::collections::HashMap<u64, std::sync::Arc<[PlacementJoint]>> {
+    let names: std::collections::HashMap<u64, &str> = doc.occurrences.iter().rev().map(|o| (o.id, o.name.as_str())).collect();
+    let name_of = |o: u64| names.get(&o).map(|n| (*n).to_string()).unwrap_or_default();
+    let mut by: std::collections::HashMap<u64, Vec<PlacementJoint>> = std::collections::HashMap::new();
+    for j in &doc.assembly.joints {
+        let joint = |other: u64| PlacementJoint { id: j.id, name: j.name.clone(), kind: j.kind, suppressed: j.suppressed, other: name_of(other) };
+        by.entry(j.a.occurrence).or_default().push(joint(j.b.occurrence));
+        if j.b.occurrence != j.a.occurrence {
+            by.entry(j.b.occurrence).or_default().push(joint(j.a.occurrence));
+        }
+    }
+    by.into_iter().map(|(o, list)| (o, list.into())).collect()
 }
 
 #[cfg(test)]
@@ -2688,6 +2745,9 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
 /// isn't drawn (it still constrains and moves the parts), except while it is picked in the
 /// browser: then it shows highlighted until the pick goes away.
 pub fn drawn_joints(app: &SolveApp) -> Vec<(u64, bool)> {
+    // `Session::joint_drawn` for each joint, with the Joints folder looked up once: it was looked
+    // up again for every joint of the design at every frame.
+    let folder_shown = !app.session.folder_hidden("c0/joints");
     app.session
         .doc
         .assembly
@@ -2695,7 +2755,7 @@ pub fn drawn_joints(app: &SolveApp) -> Vec<(u64, bool)> {
         .iter()
         .filter_map(|j| {
             let picked = app.tree.picked_joints.contains(&j.id);
-            (picked || app.session.joint_drawn(j.id)).then_some((j.id, picked))
+            (picked || (folder_shown && app.session.joint_visible(j.id))).then_some((j.id, picked))
         })
         .collect()
 }
