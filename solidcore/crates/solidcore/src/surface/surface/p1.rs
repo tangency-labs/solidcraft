@@ -57,6 +57,12 @@
 //! | [`CsIntersectEnfo`], [`CsNormalizeEnfo`], [`FindPsNormalEnfo`], [`SspIntersectEnfo`], [`SsiNormalizeEnfo`], [`SsNormalizeEnfo`], [`SssIntersectEnfo`] | the constructors of `SmCSIntersectENFO`, `SmCSNormalizeENFO`, `SmFindPSNormalENFO`, `SmSSPIntersectENFO`, `SmSSINormalizeENFO`, `SmSSNormalizeENFO`, `SmSSSIntersectENFO` |
 //!
 //! Deviations:
+//! - **Degenerate curve.** [`base_is_degenerate_curve`] takes `Su` (`Sv`) as vanishing when
+//!   `|Su|` times the domain's u span (`|Sv|` times the v span) is within the tolerance, a
+//!   length, not `|Su|` itself as upstream, so an analytic surface and its NURBS form
+//!   agree (tangency-labs/solidcraft#15350). At the 13 sample points it estimates the
+//!   iso-curve's length rather than enclosing it; an exactly zero derivative is degenerate
+//!   on any span.
 //! - **Nesting.** `StepSurface::new` returns `InvalidInput` when the base surface would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
@@ -3498,8 +3504,11 @@ pub fn base_is_degenerate_point(
 
 /// `SmSurface::IsDegenerateCurve` (base body): the domain is an iso-parameter line,
 /// or the corners, four interior points, four diagonal points and the centre all have
-/// parallel first derivatives, or all have a vanishing `Su` (or all a vanishing `Sv`)
-/// to `max(scaled zero, opt_3d_tol)`. A domain that is a point is not a curve.
+/// parallel first derivatives, or all have a vanishing `Su` (or all a vanishing `Sv`):
+/// `|Su|` times the domain's u span (`|Sv|` times its v span) at most
+/// `max(scaled zero, opt_3d_tol)`, a length, so the answer does not depend on the
+/// parametrisation (not upstream, #15350: upstream compares `|Su|` itself). A domain
+/// that is a point is not a curve.
 ///
 /// # Errors
 ///
@@ -3622,10 +3631,13 @@ pub fn base_is_degenerate_curve(
     }
     let tol_square = tol * tol;
 
-    // Surface degenerates to Curve when all Su (then all Sv) values are zero
-    for (i, j) in [(1, 0), (0, 1)] {
-        let zero =
-            |d: &[[Vec3; 2]; 2]| is_zero_to_tol(block_at(d, i, j).length_squared(), tol_square);
+    // Surface degenerates to Curve when all Su (then all Sv) values span no length
+    // ([`spans_no_length`]; not upstream, #15350)
+    let spans = [uv_domain.x_length(), uv_domain.y_length()];
+    for ((i, j), span) in [(1, 0), (0, 1)].into_iter().zip(spans) {
+        let zero = |d: &[[Vec3; 2]; 2]| {
+            spans_no_length(block_at(d, i, j).length_squared(), span, tol_square)
+        };
         if d0.iter().all(zero) {
             // check sample points
             if d1.is_none() {
@@ -3663,6 +3675,25 @@ pub fn base_is_degenerate_curve(
 
     // arrive here when any of the checked points are not Degenerate Curve points
     Ok(false)
+}
+
+/// Whether a first derivative of squared length `derivative_squared`, over a parameter
+/// span `span`, spans no length to `tol_squared` (a squared length), for
+/// [`base_is_degenerate_curve`]. Not upstream (#15350): upstream compares `|Su|` itself
+/// with the length tolerance, so its answer depended on the parametrisation (an analytic
+/// cylinder 5e-7 high, its height parameter of span 5e-7 and `|Sv| = 1`, was not
+/// degenerate, while its NURBS form, span 1 and `|Sv| = 5e-7`, was). `|Su|` times the
+/// span is the length of the iso-curve through the point were `|Su|` constant along
+/// it, the same for every parametrisation. At a sample point it is an estimate of that
+/// length, not an enclosure: the test samples 13 points, as upstream's does. An exactly
+/// zero derivative spans no length on any span, an unbounded one included (`0 * inf`
+/// counts as 0); a nonzero one over an infinite span spans a length.
+fn spans_no_length(derivative_squared: f64, span: f64, tol_squared: f64) -> bool {
+    if derivative_squared == 0.0 {
+        return true;
+    }
+    let extent_squared = derivative_squared * (span * span);
+    extent_squared.is_finite() && is_zero_to_tol(extent_squared, tol_squared)
 }
 
 // ---- standalone helpers ---------------------------------------------------------------------
@@ -4816,6 +4847,25 @@ pub(super) fn ignored_surface_result<T>(r: Result<T>) -> Result<Option<T>> {
 
 #[cfg(test)]
 mod tests {
+    /// #15350: `spans_no_length` multiplies the derivative by its span, and an exactly
+    /// zero derivative spans no length even over an unbounded domain.
+    #[test]
+    fn a_derivative_spans_its_length_over_its_span() {
+        let tol_squared = 1e-6 * 1e-6;
+        // |Sv| = 1 over a span 5e-7 (the analytic cylinder 5e-7 high): 5e-7 long
+        assert!(spans_no_length(1.0, 5e-7, tol_squared));
+        // |Sv| = 5e-7 over a span 1 (its NURBS form): the same
+        assert!(spans_no_length(5e-7 * 5e-7, 1.0, tol_squared));
+        // |Sv| = 1 over a span 2e-6: 2e-6 long
+        assert!(!spans_no_length(1.0, 2e-6, tol_squared));
+        // |Sv| = 1e-9 over a span 1e4: 1e-5 long (upstream took it as zero)
+        assert!(!spans_no_length(1e-9 * 1e-9, 1e4, tol_squared));
+        // an exactly zero derivative over an unbounded span: 0 * inf counts as 0
+        assert!(spans_no_length(0.0, f64::INFINITY, tol_squared));
+        // a nonzero derivative over an unbounded span spans a length
+        assert!(!spans_no_length(1e-30, f64::INFINITY, tol_squared));
+    }
+
     use super::*;
 
     #[test]
