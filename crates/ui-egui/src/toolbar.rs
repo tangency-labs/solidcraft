@@ -189,6 +189,7 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     home_rect: &["titlebar:home", "appbar:home"],
     file: &["appbar:file", "appbar:folder"],
     file_rect: &["appbar:file"],
+    plugins: "appbar:plugins",
     button: &["appbar:", "titlebar:"],
     separator: "titlebar:separator:",
     search: "titlebar:search",
@@ -234,6 +235,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
+                // The web build runs no plugins: no Plugins menu there. Its accessible name says
+                // "menu", so it is not taken for Preferences' Plugins page.
+                plugins: (!cfg!(target_arch = "wasm32")).then(|| (app.tr("ui.plugins"), app.plugin_menu.open, app.tr("ui.plugin_menu_name"))),
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
@@ -258,8 +262,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
+                    app_bar::BarAction::Plugins { rect } => {
+                        app.ui.palette_open = false;
+                        crate::plugin_menu::toggle(app, &ui.ctx().clone(), *rect);
+                    }
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
+                        app.plugin_menu.open = false;
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -313,6 +322,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     file_menu(app, ui.ctx());
+    crate::plugin_menu::menu(app, &ui.ctx().clone());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::unique("sc_help_anchor")).unwrap_or(300.0));
     crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
 }
@@ -4113,9 +4123,7 @@ mod dropdown_toggle_tests {
             let folded = rect_of("ribbon:folded").unwrap();
             assert!(folded.height() <= super::TAB_ROW_HEIGHT + 1.0, "{layout}: only the tab row is left: {folded:?}");
             assert!(rect_of("panel:MODEL:CREATE").is_none(), "{layout}: no panels while folded");
-            if layout == "compact" {
-                assert!(h.app.viewport.rect.unwrap().top() < whole_view.top() - 50.0, "{layout}: the view takes the panels' room");
-            }
+            assert_eq!(h.app.viewport.rect.unwrap(), whole_view, "{layout}: folding preserves the canvas domain");
 
             // A tab's click opens its panels over the view, as tall as the whole ribbon.
             let tab = rect_of("toolbar_tab:SURFACE").unwrap().center();
@@ -4126,10 +4134,7 @@ mod dropdown_toggle_tests {
             let open = rect_of("ribbon:open").unwrap();
             assert!((open.height() - whole.height()).abs() <= 2.0 * crate::ui_kit::SHELL_GAP + 1.0, "{layout}: {open:?} vs {whole:?}");
             assert!(rect_of("panel:SURFACE:CREATE").is_some(), "{layout}: the panels are drawn");
-            if layout == "compact" {
-                let top = h.app.viewport.rect.unwrap().top();
-                assert!((top - folded.bottom()).abs() <= 2.0, "{layout}: over the view, not pushing it down: {top} {folded:?}");
-            }
+            assert_eq!(h.app.viewport.rect.unwrap(), whole_view, "{layout}: the open ribbon overlays the canvas");
 
             // The pointer leaving the panels closes them.
             let away = h.app.viewport.rect.unwrap().center() + egui::vec2(0.0, 150.0);

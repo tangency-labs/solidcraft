@@ -25,10 +25,25 @@ solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.m
 `skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
-A kernel pull request targets `main` like any other; a change that touches the kernel and the app is one
-pull request. A big feature in several steps goes as stacked pull requests into `main`, each one landing in order
-on top of the one before.
+A kernel pull request targets `main` like any other; there is no kernel branch, and the
+[tangency-labs/solidcore](https://github.com/tangency-labs/solidcore) repository is a mirror, so don't open pull requests there.
+A change that touches the kernel and the app is one pull request. A big feature in several steps goes
+as stacked pull requests into `main`, each one landing in order on top of the one before. When a
+series sets a shape (a type, an error shape, an API, a file format or a schema), its first pull request gets
+a design review before the later parts are accepted, so open it first and say it is the first of a series.
 Crashes and data loss are still taken first.
+
+A kernel pull request follows [`solidcore/docs/layers.md`](solidcore/docs/layers.md) (apps go through
+`solidcore-ops`; one implementation per job) and §7 of
+[`solidcore/docs/definitions-and-certificates.md`](solidcore/docs/definitions-and-certificates.md):
+
+- No acceptance is decided by sampled checks.
+- No test expectation is loosened and no test input is edited to make a result pass.
+- A refusal is a typed error that names the cause and, where one exists, the size that fits.
+- Every golden the change moves is explained in the pull request: the cases, the old and new values,
+  and why the new ones are right.
+
+Drawings work targets the `drawings` branch, not `main`.
 
 ### Updating a PR that was moved from solidcore
 
@@ -234,10 +249,11 @@ no LTO, and debug assertions off. It
 builds several times faster than `--release`. If a test fails only in a plain debug build, say so
 in the PR. `cargo xtask test` builds the tests with it and then runs every test binary at once
 (`cargo test` runs them one after another); arguments after `--` go to each binary, e.g.
-`cargo xtask test -- shell`. Set `SOLIDCRAFT_TEST_JOBS` to a positive integer to opt into a
-shared bound on top-level test/side commands for `cargo xtask test` and `cargo xtask ci`.
-For example, `SOLIDCRAFT_TEST_JOBS=2` allows two commands at once; the sequential wasm/doc
-worker consumes one of those slots. Every binary and side check still runs after failures.
+`cargo xtask test -- shell`. Builds and tests use all your cores by default; nothing in the
+repo limits them. Only if you want fewer (say, to keep a shared machine usable), set
+`SOLIDCRAFT_TEST_JOBS` to a positive integer: it bounds how many top-level test/side commands
+`cargo xtask test` and `cargo xtask ci` run at once, and the sequential wasm/doc worker
+consumes one of those slots. Every binary and side check still runs after failures.
 Without the variable the existing concurrency is unchanged. With it set, each test binary
 inherits `RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / jobs)` — the machine's
 parallelism shared between the binaries in flight — unless you set either one explicitly;
@@ -386,11 +402,12 @@ and a fresh CI run:
    Heavy CI runs after review: a pull request gets the formatting and repository checks and a
    quick compile (`cargo check`) when you push. Once a maintainer has reviewed it they add the
    `approved-for-ci` label when the PR is ready to merge, which runs the full CI (build, tests,
-   goldens, Clippy); every push after that runs the full set again. Maintainers merge approved
-   PRs in groups by area, so PRs that touch the same code meet a conflict at most once. The one
-   exception is the pull request that first vendored SolidCore: it must land with a real merge
-   commit, because a squash merge drops the subtree parent and the mirror can no longer
-   fast-forward SolidCore (`.github/workflows/solidcore-mirror.yml`).
+   goldens, Clippy); every push after that runs the full set again. Contributors don't queue or
+   merge their own pull requests. A maintainer or steward adds `ready to merge` (and `approved-for-ci`
+   for a pull request from a fork), and the merge shepherd then enqueues it once it is green and
+   passes the review gates: CodeRabbit's threads are resolved, and a change to CI or workflow files
+   has the owner's approval. The merge queue tests each group of queued PRs together before it
+   lands on `main`.
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
    the expected ones).
 5. Write the PR title and first sentence for someone who hasn't seen your chat, the issue or the
@@ -425,6 +442,10 @@ capture the evidence themselves; please don't ask a human for evidence the agent
 Show the actual failure or result, preferably before and after, with brief steps and
 expected/actual behavior. An arrow or annotation can help identify the detail that matters.
 
+A pull request that adds to the UI (a row, an option, an icon, a button or an entry in an existing
+dialog, toolbar, ribbon or menu) needs screenshots of the whole flow at 1280×720, plus a check at a
+small window, so a maintainer can see that nothing is clipped or pushed out of view.
+
 Flowcharts and Mermaid diagrams cannot replace evidence of visible behavior. Diagrams are
 useful for architectural reasoning when actual screenshots cannot illustrate the point.
 Changes with no useful observable behavior do not need screenshot or video evidence. Use a
@@ -441,12 +462,14 @@ pull request. A command-line agent without a browser session usually cannot atta
 upload needs write access to this repository). Say so in the pull request, and the person running
 the agent or a maintainer can attach it.
 
-Keep an eye on your PR's status, but don't push to it only to catch up with `main` (no merge of
-`main`, no Update branch button, no rebase for that alone): every push restarts the whole CI
-run for everyone waiting behind it, and `main`'s own run catches what lands in between. When you
-push a change anyway, or GitHub reports a conflict, rebase onto the latest `main` (push your
-branch with `--force-with-lease`) or merge `main` in once, and resolve conflicts without losing
-others' changes. Don't re-run CI on an unchanged commit either: a real failure fails again.
+Keep an eye on your PR's status, but don't push to it only to catch up with `main`: every push
+restarts the whole CI run for everyone waiting behind it, and `main`'s own run catches what lands in
+between. When you push a change anyway, or GitHub reports a conflict, bring your branch up to date
+with the latest `main` by rebasing or by merging `main` in; both are fine. Rebasing is preferred for
+your own branch (push it with `--force-with-lease`). Never force-push `main` or a branch someone else
+works on. When the project's automation updates your pull request, it merges `main` into your branch
+and never force-pushes over your history. Resolve conflicts without losing others' changes.
+Don't re-run CI on an unchanged commit either: a real failure fails again.
 Re-run only a job that runner trouble cancelled, with "Re-run failed jobs". While a task remains
 active, follow an open PR through its status changes; at handoff, clearly identify anything
 still awaiting merge.

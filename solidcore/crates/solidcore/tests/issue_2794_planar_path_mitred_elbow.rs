@@ -1,8 +1,10 @@
-//! #2794: a circle swept along two perpendicular lines (the shape of difftest
-//! `primitive.primitive_creation_p2` `gen0092`/`gen0189`, 100 times larger: those have radius 1e-3,
-//! legs 1e-2, and their body is not valid, see `plan/findings/`). The elbow's net is its
-//! definition exactly and the mitre's union succeeds (the fitted net failed it with status 1001).
-//! The result is checked directly: a valid closed body of the closed-form volume.
+//! #2794, #13687: a circle swept along two perpendicular lines (the shape of difftest
+//! `primitive.primitive_creation_p2` `gen0092`/`gen0189`, which have radius 1e-3 and legs
+//! 1e-2). The elbow's net is its definition exactly and the mitre's union succeeds (the
+//! fitted net failed it with status 1001). The mitre trim names the side to delete by a
+//! point that stays within the reach of its cutting line, so a small profile is trimmed
+//! like a large one. The result is checked directly: a valid closed body of the
+//! closed-form volume.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -49,24 +51,42 @@ fn elbow(k: &mut Kernel, radius: f64, leg: f64, tol: f64) -> solidcore::Brep {
 
 #[test]
 fn elbow_of_two_lines_is_a_valid_body_of_the_closed_form_volume() {
-    let (radius, leg) = (1e-1, 1.);
-    let mut k = Kernel::default();
-    let mut b = elbow(&mut k, radius, leg, 1e-7);
-    let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-    assert!(check.is_valid(), "{:?}", check.lines());
-    let store = AttributeStore::default();
-    let v = brep_volume(
-        &k,
-        &mut b,
-        1e-12,
-        &PropertyAttributes {
-            store: &store,
-            key_of: &|_| ObjectKey(0),
-        },
-    )
-    .unwrap();
-    // the mitre plane passes through the bend's centre point, so the volume is the straight
-    // pipe of the summed leg lengths
-    let exact = std::f64::consts::PI * radius * radius * 2. * leg;
-    assert!((v - exact).abs() < exact * 1e-4, "{v} != {exact}");
+    // the first is the size that always worked; the others returned an invalid body or
+    // none (#13687), the last is `gen0092`/`gen0189`
+    for (radius, leg, tol) in [
+        (1e-1, 1., 1e-7),
+        (1.85e-2, 0.5, 1e-7),
+        (1e-2, 1e-1, 1e-5),
+        (1e-3, 1., 1e-7),
+        (1e-3, 1e-2, 1e-7),
+    ] {
+        let mut k = Kernel::default();
+        let mut b = elbow(&mut k, radius, leg, tol);
+        // two caps and the two legs' walls: the mitre removed all of each wall beyond it
+        assert_eq!(b.face_list().len(), 4, "radius {radius} leg {leg}");
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(
+            check.is_valid(),
+            "radius {radius} leg {leg}: {:?}",
+            check.lines()
+        );
+        let store = AttributeStore::default();
+        let v = brep_volume(
+            &k,
+            &mut b,
+            1e-12,
+            &PropertyAttributes {
+                store: &store,
+                key_of: &|_| ObjectKey(0),
+            },
+        )
+        .unwrap();
+        // the mitre plane passes through the bend's centre point, so the volume is the
+        // straight pipe of the summed leg lengths
+        let exact = std::f64::consts::PI * radius * radius * 2. * leg;
+        assert!(
+            (v - exact).abs() < exact * 1e-4,
+            "radius {radius} leg {leg}: {v} != {exact}"
+        );
+    }
 }

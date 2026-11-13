@@ -8,7 +8,7 @@ use std::sync::Arc;
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_color::AnalysisColors;
 use solidcraft_geom::Aabb3;
-use solidcraft_sketch::Sketch;
+use solidcraft_sketch::{CurveKind, Sketch};
 use solidcraft_viewport::{Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 
 use crate::{Result, Sel, Session};
@@ -695,6 +695,9 @@ fn sketch_lines_in(
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
+        if c.spline_handle_of.is_some() {
+            continue;
+        }
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -751,10 +754,59 @@ fn sketch_lines_in(
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
+    if c.spline_handle_of.is_some() {
+        return false;
+    }
     if c.link.is_some() && !sk.is_text_curve(i) {
         return !sk.view.hide_projected;
     }
     !(c.construction && sk.view.hide_construction)
+}
+
+/// One tangent guide of a selected fit spline: the guide runs from `mirror` through `fit` to
+/// `handle`. `point` is the stored handle point, `None` while the spline only shows where its
+/// handles start (they are stored by the first drag of one, #6502).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SplineGuide {
+    pub fit: Vec2,
+    pub handle: Vec2,
+    pub mirror: Vec2,
+    pub point: Option<usize>,
+}
+
+/// The tangent guides spline `curve` shows while it is selected: one per fit point, from its
+/// stored handles, or else from where [`Sketch::spline_handle_preview`] would start them. Empty
+/// for a curve that is not a fit spline or cannot take handles.
+pub fn spline_tangent_guides(sk: &Sketch, curve: usize) -> Vec<SplineGuide> {
+    let Some(CurveKind::Spline { pts, control: false, handles, .. }) = sk.curves.get(curve).map(|c| &c.kind) else {
+        return Vec::new();
+    };
+    let guide = |fit: Vec2, handle: Vec2, point| SplineGuide { fit, handle, mirror: fit * 2.0 - handle, point };
+    if !handles.is_empty() {
+        return pts.iter().zip(handles).filter_map(|(fit, handle)| Some(guide(sk.point(*fit)?, sk.point(*handle)?, Some(*handle)))).collect();
+    }
+    let Some(preview) = sk.spline_handle_preview(curve) else { return Vec::new() };
+    pts.iter().zip(preview).filter_map(|(fit, handle)| Some(guide(sk.point(*fit)?, handle, None))).collect()
+}
+
+/// The full, two-sided display segment for a spline's tangent construction line.
+pub fn spline_handle_display_line(sk: &Sketch, i: usize) -> Option<(Vec2, Vec2)> {
+    let helper = sk.curves.get(i)?;
+    let parent = helper.spline_handle_of.as_deref()?;
+    let (CurveKind::Line { a, b }, parent_index) = (&helper.kind, sk.curve_index(parent)?) else {
+        return None;
+    };
+    let CurveKind::Spline { pts, handles, .. } = &sk.curves.get(parent_index)?.kind else {
+        return None;
+    };
+    let (fit_point, handle_point) = pts
+        .iter()
+        .zip(handles)
+        .find_map(|(fit, handle)| ((*fit == *a && *handle == *b) || (*fit == *b && *handle == *a)).then_some((*fit, *handle)))?;
+    let origin = sk.point(fit_point)?;
+    let handle = sk.point(handle_point)?;
+    let direction = handle - origin;
+    Some((origin - direction, handle))
 }
 
 /// Point roles shown and picked individually. Associated offsets keep their generated
@@ -782,6 +834,14 @@ impl<'a> SketchPointVisibility<'a> {
             let ends = curve.kind.ends();
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
             hidden.extend(interior.filter_map(|i| sk.points.get(i).map(|p| p.id.as_str())));
+        }
+        for handle in sk.curves.iter().flat_map(|curve| match &curve.kind {
+            CurveKind::Spline { handles, .. } => handles.as_slice(),
+            _ => &[],
+        }) {
+            if let Some(point) = sk.points.get(*handle) {
+                hidden.insert(point.id.as_str());
+            }
         }
         Self { hidden }
     }

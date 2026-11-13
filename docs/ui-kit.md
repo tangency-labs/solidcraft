@@ -341,7 +341,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | --- | --- | --- |
 | compare: `comparison_divider`, `comparison_divider_chrome`, `comparison_badge` | Clamped vertical image wipe handle and bounded corner labels. The caller owns commands, shared framing and navigation suppression while the handle captures input; the paint-only chrome can be raised above source callbacks. | `control_height/radius/border`, `space_2/6/8/16/24`, `font_label`, `form_ink`, `panel`, active `TabAccent` |
 | assistant: `assistant_header`, `assistant_controls`, `assistant_badge`, `assistant_bubble`, `assistant_prose`, `assistant_tool_frame/row/detail/status`, `AssistantToolState`, `assistant_approval/actions`, `assistant_composer/footer`, `assistant_input`, `assistant_send`, `assistant_empty`, `assistant_banner`/`banner`, `AssistantTone` | Shared Assistant presentation: 40 pt header, 22 pt state pill, right-aligned user messages limited to 86% width, unboxed assistant prose, bordered tool groups and command detail, tinted approval heading, rounded focused composer with one unframed growing editor and pinned footer, centred setup copy and semantic notices. Closures preserve existing permission choices, protocol routing, queue actions and scenario handles. | `form_header_height/close_size`, `font_label/small/body`, `dialog_body/footer/rule`, `control_fill/border/radius`, `form_ink/dim/primary/success/error`, `accent_soft/selected_ink`, `warning`, radii and spacing |
-| history: `StripHeading`, `HistoryChip`, `HistoryStyle`, `history_drop_bar`, `history_marker`, `HistorySeam`, `history_seam` | Shared strip headings use semibold `font_heading`, `text`, a centred baseline and `space_12` trailing gap. One painter family for bottom chips, 38 pt vertical icon chips and single-line 26 pt name rows (the browser's shared `TREE_ROW_HEIGHT`). Selected items use the active tab tint/ink/border; all variants retain multi-tone feature artwork using one shared kind-to-accent rule (Sketch green, Surface orange, Mesh yellow, Form purple, solids base blue); rolled-back items have 42% opacity; a reference row (a sketch listed under another feature, #6489) has its name in secondary text. Error/warning badges, suppression strikes, horizontal/vertical drop bars and rollback line/hollow circle are shared. No connector lines. | `control_height`, `space_2/3/4/6/8/10/12/14/16/24`, radii, typography, `TabAccent`, `timeline_item`, `control_border`, `text/dim`, `form_error/fill` |
+| history: `StripHeading`, `HistoryChip`, `HistoryStyle`, `history_drop_bar`, `history_marker` | Shared strip headings use semibold `font_heading`, `text`, a centred baseline and `space_12` trailing gap. One painter family for bottom chips, 38 pt vertical icon chips and single-line 26 pt name rows (the browser's shared `TREE_ROW_HEIGHT`). Selected items use the active tab tint/ink/border; all variants retain multi-tone feature artwork using one shared kind-to-accent rule (Sketch green, Surface orange, Mesh yellow, Form purple, solids base blue); rolled-back items have 42% opacity; a reference row (a sketch listed under another feature, #6489) has its name in secondary text. Error/warning badges, suppression strikes, horizontal/vertical drop bars and rollback line/hollow circle are shared. No connector lines. | `control_height`, `space_2/3/4/6/8/10/12/14/16/24`, radii, typography, `TabAccent`, `timeline_item`, `control_border`, `text/dim`, `form_error/fill` |
 | tree: `tree_row`, `Row`, `TreeAction` | Shared Browser rows with disclosure, visibility (an eye column at the row's end, clear of a floating scroll bar, with a gap between the disclosure and the activation radio; or beside the disclosure with `eye_left`), activation, selection, appearance swatches, optional subtitle and trailing actions. Compact scene rows are 28 pt, with inline right-aligned summaries, circular swatches, trailing eyes and full-width selection tint. Actions use quiet icons and can appear on hover. Disabled actions retain their reasons and cannot select or fold the row. Browser automation records the same row geometry. | `TREE_ROW_HEIGHT`, `font_label/small`, spacing, control radius/border, `text/dim`, workspace selection tint |
 | search: `CommandSearch`, `MenuItem::search_row` | Ribbon search composition: one persistent ribbon editor expands from 28 to 40 pt and to 520 pt wide with its right edge anchored, magnifier and S/Esc keycap, 38 pt two-line menu row with 26 pt icon tile, accent bold substring, path, shortcut/kind keycap, counts, JSON detail box and footer. The ordinary 30 pt menu row cannot fit a second line; this variant keeps its enabled/selected states and scenario IDs. Ranking and dispatch stay with the caller. | `form_card_width × 2 − space_8` (520 pt), `control_height`, `space_2/3/4/6/8/10/12/14/16/24`, `radius_xl/control_radius`, `control_fill`, `dialog_body/footer/rule/border`, `form_ink/dim/primary/error/error_fill/success/success_fill`, `selected_ink`, `accent_soft`, typography |
 | icons: `IconSet`, `IconData`, `IconExtension`, `install`, `paint_icon`, `paint_on`, `paint_ink` (`_flipped`, `_mirrored`), `paint_app_bar`, `paint_accented`, `paint_danger`, `resolve`, `primary`, `render` | The kit ships no artwork. The host compiles its SVG masters, colour roles, accents and aliases into a `static` `IconSet` and `install`s it once, before the first frame and in its test contexts (SolidCraft: `solidcraft_look::icons::install`). A host that draws another host's icons plus a few masters of its own installs `IconSet::extended(data, extension)`: the other host's `IconData` (the same static tables, not a copy) with an `IconExtension` of its masters, aliases and default accents, drawn in the data's colour roles and accents and taking precedence for a name both have. The painters rasterise a master per (master, look, pixel size) in the set's roles for the theme, accent and colour vision, with theme-file overrides (`set_theme_palette`); an unknown name draws the set's `placeholder` master, and nothing is drawn before a set is installed. The code-drawn glyphs (`glyphs`: transport, caption, badge, pin, cross, breadcrumb, compass axis tip and radius, agent pointer, brand mark) are host painters too, in a `Glyphs` the host installs beside the set (SolidCraft: `solidcraft_look::glyphs::GLYPHS`). | `app_bar_text`, colour vision, the set's palette |
@@ -418,37 +418,12 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `progress` | Clamped determinate progress | `space_3/6`, `dialog_rule`, `accent` |
 | `steps` | A running operation's steps: ticked when done, a text-high spinner on the current one with how far it is, a ring for those to come | `font_label`, `control_height`, `form_ink/dim/primary`, `space_2/8` |
 
-History contents are selected from measured panel width. A 56 pt thin strip shows icons
-and four vertical transport controls: beginning, back, forward and end. The minimum named
-width is 130 pt; it adds horizontal transport and the same six-dot window grip as Assistant.
-When the remaining header space fits its measured text, **History** appears between grip
-and transport. No names-mode flag
-or command selects these layouts. The seam snaps between 56 and 130 pt; widths from 130
-through 624 pt remain continuous and persist as `timeline_left_width`.
-
-Drag the grip or title to dock along the bottom, at the full-height left edge, or beneath
-the browser. Either card's right edge resizes their shared width. This position divides
-available column height equally. Folding either card leaves its header visible and gives the remainder to
-the other. If both are folded, their headers sit together at the top of the column.
-Expansion and collapse share a smooth cubic transition capped at 120 ms, respecting
-the interface’s instant-animation setting. Their collapse controls share the same active-tab blue hover tint. Browser resizing also resizes History.
-The `view.history_layout` command validates width, docking and collapse requests without
-altering the design or opening dialogs. Floating mode preserves viewport projection.
-
-The seam handle overlays the strip's right edge without taking layout space. Its grip is
-visible at rest; the arrow appears only on hover. Click, double-click the edge, or use
-Enter/Space on the focused handle to resize between thin and minimum named widths. Drag
-freely above the named minimum; resizing draws no dotted guide or name label. Header/title dragging
-and the edge width gesture are separate from feature/folder and rollback dragging.
-The rollback marker is 12 pt high.
-Its 2 pt line uses the active tab fill and ends in a 10 pt hollow circle with a 2 pt accent
-border and the card/panel surface inside. The circle overlaps the line end by 1 pt. The bottom
-strip uses the same painter, rotated. Folder selection, range selection, context menus,
-sketch-pattern children, drag reordering and command JSON retain their existing behavior and handles.
-`history_icons`, `history_names`, `history_marker` and the `history_seam_rest/hover/drag` states
-have light/dark gallery references. The CPU
-board test captures both strip widths with expanded and collapsed browsers
-(`SOLIDCRAFT_HISTORY_EVIDENCE`).
+History uses the shared panel header, sizing, docking and collapse controls. The
+bottom position is a fixed-height row with transport and features. Side and floating
+positions use the vertical content with names and folder controls as available space
+allows. Feature and folder selection, context menus and rollback stay with History.
+The `view.history_layout` compatibility command updates the shared layout without
+altering the design or opening dialogs.
 
 `text(ui, text, options)` supports the existing text behaviors and the new error band:
 

@@ -296,10 +296,29 @@ pub fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[IconSegment
     clicked
 }
 
+/// How many columns of a checkbox grid fit their labels: `wanted`, or fewer, down to one,
+/// when the widest label (`label_widths`, each with its box and gap in `lead`) is wider than a
+/// column of `available` width with `gap` between columns (#11089).
+fn fitting_columns(label_widths: &[f32], lead: f32, available: f32, gap: f32, wanted: usize) -> usize {
+    let widest = label_widths.iter().copied().fold(0.0_f32, f32::max);
+    (2..=wanted.max(1)).rev().find(|&columns| (available - gap * (columns - 1) as f32) / columns as f32 + 1e-3 >= lead + widest).unwrap_or(1)
+}
+
 /// Compact checkbox options in bounded columns. Tokens: `form_checkbox_height, control_fill/border, radius_sm, accent, on_accent, font_body, text, space_2/3/6/8/14`.
 pub fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], columns: usize) {
     let t = Tokens::get();
     let columns = columns.clamp(1, items.len().max(1));
+    // Fewer columns for labels (a translation can be much longer) that would be cut in these.
+    let font = egui::FontId::proportional(t.font_body);
+    let widths: Vec<f32> = items
+        .iter()
+        .map(|(label, _)| {
+            let translated = solidcraft_ui_text::tr_label(label);
+            let text = if translated == "Tangent Chain" { "Tangent chain" } else { translated };
+            ui.painter().layout_no_wrap(text.to_string(), font.clone(), t.form_ink).size().x
+        })
+        .collect();
+    let columns = fitting_columns(&widths, t.space_14 / 2.0 + t.space_6 + t.space_14 / 2.0, dimension(ui.available_width()), t.space_8, columns);
     let width = ((dimension(ui.available_width()) - t.space_8 * columns.saturating_sub(1) as f32) / columns as f32).max(0.0);
     for chunk in items.chunks_mut(columns) {
         ui.horizontal(|ui| {

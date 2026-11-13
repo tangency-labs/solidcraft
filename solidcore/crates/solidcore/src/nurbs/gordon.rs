@@ -119,7 +119,7 @@ fn bad(reason: &'static str) -> SolidError {
 /// equal is the polynomial curve on its points divided by that weight, exactly (a record
 /// spline's kernel curve carries a weight of 1 on every point). Only unequal weights make it
 /// rational.
-fn nurb_of(c: &BSplineCurve) -> Result<Curve> {
+pub(crate) fn nurb_of(c: &BSplineCurve) -> Result<Curve> {
     let mut nurb = c
         .nurb
         .clone()
@@ -182,7 +182,7 @@ fn surface(net: Vec<Vec<Vec3>>, p: usize, q: usize, u: &[f64], v: &[f64]) -> Res
 }
 
 /// `c` moved by minus `o`, into the network's own frame.
-fn moved(c: &Curve, o: CPoint) -> Result<Curve> {
+pub(crate) fn moved(c: &Curve, o: CPoint) -> Result<Curve> {
     let pw = c
         .cpts()
         .iter()
@@ -192,7 +192,7 @@ fn moved(c: &Curve, o: CPoint) -> Result<Curve> {
 }
 
 /// `s` moved by minus `o`, into the network's own frame.
-fn moved_surface(s: &Surface, o: CPoint) -> Result<Surface> {
+pub(crate) fn moved_surface(s: &Surface, o: CPoint) -> Result<Surface> {
     let net = s
         .rows()
         .map(|row| {
@@ -206,7 +206,7 @@ fn moved_surface(s: &Surface, o: CPoint) -> Result<Surface> {
 }
 
 /// The largest coordinate of `points`.
-fn largest<'a>(points: impl Iterator<Item = &'a CPoint>) -> f64 {
+pub(crate) fn largest<'a>(points: impl Iterator<Item = &'a CPoint>) -> f64 {
     points
         .map(|c| c.x.abs().max(c.y.abs()).max(c.z.abs()))
         .fold(0.0_f64, f64::max)
@@ -226,7 +226,7 @@ fn room<T>(count: usize) -> Result<Vec<T>> {
 }
 
 /// Whether `x` is at most `tol`; a NaN is not.
-fn within(x: f64, tol: f64) -> bool {
+pub(crate) fn within(x: f64, tol: f64) -> bool {
     matches!(x.partial_cmp(&tol), Some(Ordering::Less | Ordering::Equal))
 }
 

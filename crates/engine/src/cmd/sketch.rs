@@ -228,7 +228,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SLOT_OVERALL_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
         .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
         .at("SKETCH", "CREATE")
         .icon("dimension")
@@ -372,13 +372,13 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("sketch.chain", "Chain", crate::checked!("sketch.chain", chain_cmd)).icon("chain")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
         .contract(&CHAIN_CONTRACT)
         .output(output_schema_for::<ChainResult>)
         .params("curve: id: the curves joined to it end to end (what a double-click selects)"),
     CommandSpec::new("sketch.solve", "Solve Sketch", crate::checked!("sketch.solve", solve_cmd)).icon("compute")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
         .contract(&SOLVE_CONTRACT)
         .output(output_schema_for::<SolveResult>)
         .params("reports the solver status and degrees of freedom"),
@@ -2179,11 +2179,12 @@ fn slot_overall(s: &mut Session, p: &Value) -> Result<Value> {
 fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.point";
     let id = named_id(cmd, str_(p, "id"))?;
-    // A point snapped while drawing (`"mid:<line>"`, `"on:<curve>:x,y"`, a model vertex or edge):
-    // the snap makes it, held by its constraint, as it does for a line's end. Taken as bare
-    // coordinates it was free to move off the midpoint it was put on (#4691).
+    // A point snapped while drawing (`"mid:<line>"`, `"on:<curve>:x,y"`, `"x:<a>+<b>:x,y"`, a
+    // model vertex or edge): the snap makes it, held by its constraint, as it does for a line's
+    // end. Taken as bare coordinates it was free to move off the midpoint or crossing it was put
+    // on (#4691, #15387).
     let snapped = p.get("point").is_some_and(|v| {
-        v.as_str().is_some_and(|t| ["mid:", "on:", "vertex:"].iter().any(|k| t.starts_with(k)))
+        v.as_str().is_some_and(|t| ["mid:", "on:", "vertex:", "x:"].iter().any(|k| t.starts_with(k)))
             || v.get("vertex").is_some()
             || v.get("on_edge").is_some()
     });
@@ -2205,7 +2206,7 @@ fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(
                 cmd,
                 format!(
-                    "`point` {given} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
+                    "`point` {given} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
                 ),
             ));
         };

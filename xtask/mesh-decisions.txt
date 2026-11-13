@@ -5,12 +5,9 @@
 # pull request. Never add a line: decide with exact geometry (`Body::exact_bounds`,
 # `kernel::apart`, the B-rep's faces and edges). These are truck-era uses SMLib answers exactly.
 crates/doc/src/appearance.rs:nearest_face picks the face nearest a point by the display mesh's triangles
-crates/doc/src/config_styles.rs:Document::configuration_face_indices checks a configuration's named faces against the display mesh
 crates/doc/src/construct.rs:GeoRef::name_picks names picked faces and edges through the display mesh
 crates/doc/src/construct.rs:named_vertex finds where named edges meet through the display mesh
-crates/doc/src/document.rs:MeshData::eq compares imported mesh payloads by their triangles
 crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
-crates/doc/src/eval.rs:body_at picks the body whose surface is nearest a point by the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
 crates/doc/src/eval.rs:eval_feature places features by the display mesh (faces, edges, nearness)
 crates/doc/src/eval.rs:face_plane finds a sketch's face plane again on a mesh
@@ -18,7 +15,6 @@ crates/doc/src/eval.rs:face_samples takes a point on each face from its mesh tri
 crates/doc/src/eval.rs:faces_near finds the faces near a point by the display mesh
 crates/doc/src/eval.rs:feature_tools_with_constructor reaches a To Object extent by the display mesh
 crates/doc/src/eval.rs:height_at measures a point's height on a face by the display mesh
-crates/doc/src/eval.rs:hole_axis_size sizes a hole's tools by the bodies its axis meets on the display mesh
 crates/doc/src/eval.rs:hole_depth_to works out a hole's To Object depth on the display mesh
 crates/doc/src/eval.rs:hole_on_surface_in moves a hole back onto its face by the display mesh
 crates/doc/src/eval.rs:hole_reaches decides whether a drill reaches material by the display mesh
@@ -27,7 +23,6 @@ crates/doc/src/eval.rs:off_the_ends moves an edge point off the edge's ends by t
 crates/doc/src/eval.rs:parallel_tapped_wall finds a tapped hole's parallel wall on the display mesh
 crates/doc/src/eval.rs:resolve_edges finds edge references again on a mesh
 crates/doc/src/eval.rs:tangent_face_chain grows a face pick across tangent edges on the display mesh
-crates/doc/src/eval.rs:through_all_distance sizes a Through All extent by the display mesh
 crates/doc/src/eval.rs:trim_to_body keeps the tool pieces touching the start by a mesh
 crates/doc/src/eval.rs:unrecorded_touches finds touching pieces by a mesh
 crates/doc/src/eval_more.rs:FaceSlice::outline finds the wall an outline runs along by mesh triangles
@@ -39,20 +34,15 @@ crates/doc/src/eval_more.rs:plastic_eval places plastic features by a mesh
 crates/doc/src/eval_more.rs:rib_tool runs a rib to the body by the display mesh
 crates/doc/src/eval_more.rs:rib_tool_normal runs a rib to the body by the display mesh
 crates/doc/src/eval_more.rs:sheet_eval places sheet-metal features by a mesh
-crates/doc/src/history_names.rs:OperandNames::edge names an operand's edge by the display mesh
 crates/doc/src/hole_reference.rs:on_reference_face decides whether a point lies on a hole's reference face by the display mesh
 crates/doc/src/hole_reference.rs:reference_frame finds a hole's reference edges on the display mesh
-crates/doc/src/joints.rs:nearest_plane picks a joint's planar face by the display mesh
 crates/doc/src/joints_cam.rs:default_reverse picks a cam follower's side by the display mesh
 crates/doc/src/joints_cam.rs:profile_points samples a cam profile's edges from a mesh
 crates/doc/src/joints_edge.rs:edge_frame places an edge snap by the display mesh
 crates/doc/src/joints_edge.rs:edge_snap places an edge snap by the display mesh
-crates/doc/src/joints_edge.rs:face_of picks the planar face beside an edge by the display mesh
 crates/doc/src/joints_edge.rs:nearest_edge picks the edge nearest a point by the display mesh
 crates/doc/src/joints_face.rs:NamedFace::own_cylinder reads a named face's cylinder from the display mesh
-crates/doc/src/joints_face.rs:NamedFace::plane reads a named face's centre and normal from the display mesh
 crates/doc/src/joints_face.rs:face_name_at names the face at a pick by its mesh triangles
-crates/doc/src/joints_face.rs:outline_centre finds a planar face's centre from mesh triangles
 crates/doc/src/joints_face.rs:rim_neighbour finds the face across a cylinder's rim by the display mesh
 crates/doc/src/joints_face.rs:round_end_at finds a cylinder's round end by the display mesh
 crates/doc/src/lineage.rs:order_legacy_family orders a face family by the display mesh
@@ -79,8 +69,6 @@ crates/doc/src/naming.rs:mesh_adjacency finds neighbouring faces from mesh edges
 crates/doc/src/naming.rs:normals takes face normals from mesh triangles
 crates/doc/src/naming.rs:roomiest takes a sample point per face from mesh triangles
 crates/doc/src/naming.rs:samples_up_to takes sample points per face from mesh triangles
-crates/doc/src/placement_reuse.rs:same_feature compares imported mesh payloads by their triangles
-crates/doc/src/print_face.rs:Document::locate_print_face finds a print face by the display mesh
 crates/doc/src/project.rs:body_mesh finds a projection's body nearest a point by the display mesh
 crates/doc/src/project.rs:cache_key keys projections by the display mesh
 crates/doc/src/project.rs:exact_edges finds the picked edges by the display mesh
@@ -106,7 +94,6 @@ crates/engine/src/cmd/compare.rs:compare_bodies compares two B-rep bodies by mes
 crates/engine/src/cmd/compare.rs:enclosed_volume measures a B-rep body's volume from mesh triangles
 crates/engine/src/cmd/component_clone.rs:build places pasted bodies by meshes
 crates/engine/src/cmd/component_clone.rs:mesh_distance compares pasted bodies by mesh triangles
-crates/engine/src/cmd/component_properties.rs:measure_placed measures a placed component by its display mesh
 crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::depth finds bodies passing through each other by mesh triangles
 crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::gap measures gaps by mesh triangles
 crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::gaps measures gaps by mesh triangles
@@ -121,9 +108,7 @@ crates/engine/src/cmd/face.rs:in_a_planar_face_outline decides whether a point l
 crates/engine/src/cmd/face.rs:on_a_face decides whether a point lies on a face by the display mesh
 crates/engine/src/cmd/face.rs:sketch_of_face finds the planar face a sketch starts on by mesh triangles
 crates/engine/src/cmd/face.rs:sketch_of_faces groups coplanar picked faces by mesh triangles
-crates/engine/src/cmd/features.rs:auto_operation_in chooses a feature's operation by probing the display mesh
 crates/engine/src/cmd/features.rs:edge_points turns edge references into points on a mesh
-crates/engine/src/cmd/features.rs:through_all_reach sizes a Through All reach by the display mesh
 crates/engine/src/cmd/features_more.rs:emboss places an emboss by the display mesh
 crates/engine/src/cmd/features_more.rs:snap_point snaps a feature's point by the display mesh
 crates/engine/src/cmd/inspect.rs:dist_to measures a distance on the display mesh
@@ -132,14 +117,12 @@ crates/engine/src/cmd/interference.rs:interference finds interference between B-
 crates/engine/src/cmd/interference.rs:meshes_apart decides two bodies are apart by mesh triangles
 crates/engine/src/cmd/join_pieces.rs:adds_nothing decides a join adds no material by display mesh volumes
 crates/engine/src/cmd/join_pieces.rs:mesh_volume measures the volume a closed mesh encloses
-crates/engine/src/cmd/joints.rs:body_centre centres an occurrence by the display mesh's box
 crates/engine/src/cmd/joints.rs:cam_profile samples a cam's picked edges from the display mesh
 crates/engine/src/cmd/measure_sel.rs:closest measures closest points on mesh triangles
 crates/engine/src/cmd/measure_sel.rs:describe measures a selection on the display mesh
 crates/engine/src/cmd/measure_sel.rs:face_slot finds a slot from mesh triangles
 crates/engine/src/cmd/measure_sel.rs:face_tris reads a face's mesh triangles for measuring
 crates/engine/src/cmd/measure_sel.rs:resolve_pick resolves a face or edge pick by the display mesh
-crates/engine/src/cmd/motion.rs:centres centres occurrences by meshes
 crates/engine/src/cmd/motion.rs:overlap measures how deep bodies overlap by meshes
 crates/engine/src/cmd/motion.rs:tris reads mesh triangles for motion contact
 crates/engine/src/cmd/motion_analysis.rs:shared_volume measures the volume parts share by the display mesh

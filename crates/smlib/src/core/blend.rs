@@ -25,12 +25,10 @@ use std::sync::PoisonError;
 use solidcore::EntityRef;
 use solidcore::SolidError;
 use solidcore::blend::blend_corner::BlendCornerEvent;
-use solidcore::blend::blend_refusal::{BlendRefusal, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::faces_along;
 use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
-use solidcore::blend::fillet_executive::p3::{ErrorInfo, FitKind, NoRoomReason};
-use solidcore::blend::fillet_executive::session::{FilletObject, FilletSession};
+use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -57,6 +55,8 @@ use solidcore::topology::face::p4 as face_p4;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, VertexId, edge, vertex};
 
+use solidcore_ops::blend::{Refusal, SessionCall, SessionRefusal};
+
 use super::{Body, answer};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
 
@@ -74,27 +74,48 @@ type Out<T> = std::result::Result<T, Error>;
 const INVALID_INPUT: i32 = 1007;
 
 /// An SMLib status as the capi passes it on (`status`, smlib_shim.h): solidcore's upstream
-/// status codes as they are; its refusals of code it has not ported as not supported.
+/// status codes as they are; its refusals of code it has not ported as not supported; a refusal
+/// or a blend failure solidcore-ops types as that ([`Error::Refused`]: an offset refused with
+/// its reason, a blend failed with the kernel's statement of why); the rest as solidcore's text.
 pub(super) fn status(e: SolidError) -> Error {
+    if let Some(failed) = solidcore_ops::blend::failure(&e) {
+        return Error::Refused(failed);
+    }
     match e {
         SolidError::Upstream { code, .. } => Error::Status(code),
-        e if is_b_spline_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_intersect_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_primitive_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_mass_heal_or_geom_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_sweep_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_query_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_topology_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_curve_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_surface_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_offset_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        e if is_blend_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if stands_for_status(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
         e if e.is_unported() => Error::Unsupported,
-        e => Error::Solidcore(e.to_string()),
+        e => match solidcore_ops::offset::refusal(&e) {
+            Some(r @ solidcore_ops::Error::OffsetRefused { .. }) => Error::Refused(r),
+            _ => Error::Solidcore(e.to_string()),
+        },
     }
+}
+
+/// The kernel failures SolidCraft still passes on as the status they stand for ([`Error::Status`]),
+/// because solidcore-ops gives them no type of their own yet: each replaced a status its routine
+/// returned (`Upstream` before solidcore described it), whether or not it names an entity. A
+/// B-spline method's (`NurbsFailure::BSpline`); an intersection or classification, primitive
+/// (extrusion, revolution, skin, taper), mass-property, healing, geometry-utility, query,
+/// topology or surface routine's; and a sweep, curve or offset routine's that replaced a status
+/// (a railed loft's, a length bracket's and an offset's refusals replaced none and pass on
+/// otherwise). A blend routine's is solidcore-ops' blend failure ([`status`]). `tests::status_sites_only_shrink` counts the sites that make a status, a set that only shrinks.
+fn stands_for_status(e: &SolidError) -> bool {
+    matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_)))
+        || e.intersect_failure().is_some()
+        || e.primitive_failure().is_some()
+        || e.mass_failure().is_some()
+        || e.heal_failure().is_some()
+        || e.geom_failure().is_some()
+        || e.sweep_failure().is_some_and(|w| w.replaces_upstream_status())
+        || e.query_failure().is_some()
+        || e.topology_failure().is_some()
+        || e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
+        || e.surface_failure().is_some()
+        || e.offset_failure().is_some_and(|o| o.replaces_upstream_status())
 }
 
 /// A failure of the Boolean engine (which slice, sweep and the other users of the merge engine
@@ -114,79 +135,6 @@ fn boolean_status(e: SolidError) -> Error {
         _ if e.root_cause().is_unported() => Error::Unsupported,
         _ => Error::Solidcore(e.to_string()),
     }
-}
-
-/// A B-spline method's failure (solidcore's `BSplineFailure`): it stands for the status the
-/// method returned (`Upstream` before solidcore described it), and passes on as that status.
-fn is_b_spline_failure(e: &SolidError) -> bool {
-    matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_)))
-}
-
-/// An intersection or classification failure (solidcore's `IntersectFailure`): it stands for the
-/// status the routine returned (`Upstream` before solidcore described it), and passes on as that
-/// status.
-fn is_intersect_failure(e: &SolidError) -> bool {
-    e.intersect_failure().is_some()
-}
-
-/// A primitive, extrusion, revolution, skin or taper failure (solidcore's `PrimitiveFailure`): it
-/// stands for the status the routine returned (`Upstream` before solidcore described it), and
-/// passes on as that status.
-fn is_primitive_failure(e: &SolidError) -> bool {
-    e.primitive_failure().is_some()
-}
-
-/// A mass-property, healing or geometry-utility failure (solidcore's `MassFailure`,
-/// `HealFailure`, `GeomFailure`): it stands for the status the routine returned (`Upstream`
-/// before solidcore described it), and passes on as that status.
-fn is_mass_heal_or_geom_failure(e: &SolidError) -> bool {
-    e.mass_failure().is_some() || e.heal_failure().is_some() || e.geom_failure().is_some()
-}
-
-/// A sweep routine's failure (solidcore's `SweepFailure`) that replaced a status the routine
-/// returned (`Upstream` before solidcore described it): it passes on as that status. A railed
-/// loft's refusal replaced none and passes on as solidcore's text, as before.
-fn is_sweep_failure(e: &SolidError) -> bool {
-    e.sweep_failure().is_some_and(|w| w.replaces_upstream_status())
-}
-
-/// A query's failure (solidcore's `QueryFailure`): it stands for the status the query returned
-/// (`Upstream` before solidcore described it), and passes on as that status.
-fn is_query_failure(e: &SolidError) -> bool {
-    e.query_failure().is_some()
-}
-
-/// A topology routine's failure (solidcore's `TopologyFailure`): it stands for the status the
-/// routine returned (`Upstream` before solidcore described it), and passes on as that status.
-fn is_topology_failure(e: &SolidError) -> bool {
-    e.topology_failure().is_some()
-}
-
-/// A curve routine's failure (solidcore's `CurveFailure`) that replaced a status the routine
-/// returned (`Upstream` before solidcore described it): it passes on as that status. A length
-/// bracket's refusal replaced none and passes on as solidcore's text, as before.
-fn is_curve_failure(e: &SolidError) -> bool {
-    e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
-}
-
-/// A surface routine's failure (solidcore's `SurfaceFailure`): it stands for the status the
-/// routine returned (`Upstream` before solidcore described it), and passes on as that status.
-fn is_surface_failure(e: &SolidError) -> bool {
-    e.surface_failure().is_some()
-}
-
-/// An offset routine's failure (solidcore's `OffsetFailure`) that replaced a status the routine
-/// returned (`Upstream` before solidcore described it): it passes on as that status. An offset's
-/// refusals replaced none and pass on as before.
-fn is_offset_failure(e: &SolidError) -> bool {
-    e.offset_failure().is_some_and(|o| o.replaces_upstream_status())
-}
-
-/// A blend routine's failure (solidcore's `BlendFailure`) that replaced a status the routine
-/// returned (`Upstream` before solidcore described it): it passes on as that status, whether or
-/// not it names an entity.
-fn is_blend_failure(e: &SolidError) -> bool {
-    e.blend_failure().is_some_and(|b| b.replaces_upstream_status())
 }
 
 /// `size_ok`.
@@ -359,96 +307,40 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
     Ok(brep_p1::faces(b, None)?.into_iter().collect())
 }
 
-/// `blend_failure`: a blend the executive found larger than its faces allow
-/// (`SM_FILERR_NO_ROOM`) is [`Error::NoRoom`]; a filleted vertex no corner type handles
-/// (`SM_FILERR_CORNER_UNSUPPORTED`, which solidcore notes under
-/// `fixes.fillet_vertex_error_diagnostics`) is [`Error::CornerUnsupported`]; any other failure
-/// its status. `corner` says `CreateFilletCorners` noted such a vertex: the corner it could not
-/// make is why a later step fails, so that note stands for it whatever the later step noted
-/// (as solidcore's own `FilletSession::do_fillet` keeps it).
-///
-/// Except a blend whose rail leaves its face refused as [`NoRoomReason::RailLeavesFace`]: that
-/// is solidcore without `fixes.fillet_cliff_overflow`, refusing every such blend where the fork
-/// decides between building it over the cliff (`SmFilletCliffOverflow.cpp`, fork 8ba4667) and
-/// refusing it. Its answer is the fork's only by chance, so it is [`Error::Unsupported`]. With
-/// the cliff overflow on, solidcore makes the fork's choice, and its refusals (each with its own
-/// reason) are [`Error::NoRoom`] like the fork's.
-///
-/// A setback too short for its corner's fill, which solidcore refuses as data naming the least
-/// setback its fill takes (`BlendRefusal::SetbackTooShort`, from the fill's convex or concave
-/// test), is [`Error::SetbackTooShort`] with that setback and the corner's point; `replaced`
-/// (the session marks the corners' patches for another patch to replace) says the setback is
-/// only what solidcore's corner needs, not one shown to build. Its other reason, a setback
-/// short of where the rails cross, names a setback that passes that test only, so it stays
-/// unsized.
-///
-/// A blend too large that solidcore sizes (the session's fit, as the fork's capi reads it with
-/// `smlib_blend_fit_size`, or [`SolidError::FilletRefused`] carrying it) is
-/// [`Error::TooLarge`] with that size, its edge's point
-/// filled in by the caller from the edge returned with it ([`sized_on`]); a corner solidcore
-/// refuses as not supported (the mixed corner whose rails cross, solidcore#2256) is
-/// [`Error::Unported`] naming it.
-fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool, replaced: bool) -> (Error, Option<EdgeId>) {
-    let info = s.error_info();
-    if let SolidError::BlendRefused {
-        refusal: BlendRefusal::SetbackTooShort { least, why: SetbackTooShortWhy::ConvexFill | SetbackTooShortWhy::ConcaveFill, .. },
-        ..
-    } = e
-    {
-        return (Error::SetbackTooShort { least, at: info.location.map(|p| [p.x, p.y, p.z]), builds: !replaced }, None);
-    }
-    let (fit, reason) = match &e {
-        SolidError::FilletRefused { fit, reason, .. } => (Some(*fit), reason.or(info.no_room_reason())),
-        _ if info.code == FilletErrorType::NoRoom as i32 => (s.fit_size(), info.no_room_reason()),
-        _ => (None, None),
-    };
-    if e.is_unported() || matches!(e, SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS) {
-        (status(e), None)
-    } else if let Some(fit) = fit
-        && !corner
-        && info.no_room_reason() != Some(NoRoomReason::RailLeavesFace)
-        && fit.size.is_finite()
-        && fit.size > 0.0
-    {
-        let kind = match fit.kind {
-            FitKind::Radius => crate::FitKind::Radius,
-            FitKind::Scale => crate::FitKind::Scale,
-            FitKind::Chord => crate::FitKind::Chord,
-        };
-        (Error::TooLarge { size: fit.size, kind, at: None, why: reason.and_then(room_reason) }, fit.edge)
-    } else {
-        (blend_failure_unsized(info, e, corner), None)
-    }
+/// `blend_failure`: a failure `e` of the session `s` as SolidCraft's error. The refusals are
+/// ops' ([`solidcore_ops::blend::session_refusal`], one implementation for ops and SolidCraft),
+/// taken as they are: a blend too large with the largest size that builds ([`Error::TooLarge`]),
+/// a setback too short ([`Error::SetbackTooShort`], `builds` only where the corner fill's test
+/// named it), a blend larger than its faces allow, unsized ([`Error::NoRoom`]), a vertex no
+/// corner kind handles ([`Error::CornerUnsupported`]), and a rail leaving its face without the
+/// cliff overflow fix ([`Error::Unsupported`]: the fork decides between building it over the
+/// cliff and refusing it, so an answer here is the fork's only by chance). `corner`:
+/// `CreateFilletCorners` noted a vertex it made no corner for, which stands for a later step's
+/// failure. `replaced`: the session marks the corners' patches for another patch to replace,
+/// so a setback named is only what solidcore's corner needs. A failure that is no refusal of
+/// the blend, including one solidcore itself types as not supported or not ported, passes on
+/// as solidcore's ([`status`]). A sized refusal's point is read once the session lets the body
+/// go ([`solidcore_ops::blend::SessionRefusal::on`]).
+fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool, replaced: bool, chamfer: bool) -> Result<SessionRefusal> {
+    solidcore_ops::blend::session_refusal(s, e, SessionCall { corner, patches: replaced, chamfer }).map_err(status)
 }
 
-/// solidcore's reason for a blend too large, as SolidCraft words it; `None` for the reasons it
-/// does not name (the cliff overflow's own refusals).
-fn room_reason(r: NoRoomReason) -> Option<crate::RoomReason> {
-    use crate::RoomReason as R;
-    Some(match r {
-        NoRoomReason::BallDoesNotFit => R::BallDoesNotFit,
-        NoRoomReason::RailLeavesFace
-        | NoRoomReason::ConcaveOverflow
-        | NoRoomReason::OverflowWithConcaveBlend
-        | NoRoomReason::OverflowWithRollover
-        | NoRoomReason::OverflowWithGlobalMerge => R::RailLeavesFace,
-        NoRoomReason::FaceConsumed => R::FaceConsumed,
-        NoRoomReason::BandsOverlap => R::BandsOverlap,
-        NoRoomReason::BallsFold => R::BallsFold,
-        NoRoomReason::OffsetFolds => R::OffsetFolds,
-        NoRoomReason::CutsThePart => R::CutsThePart,
-        NoRoomReason::BreaksThrough => R::BreaksThrough,
-        NoRoomReason::OffsetCollapses => R::OffsetCollapses,
-        NoRoomReason::CornersTakeWholeEdge => R::CornersTakeWholeEdge,
-        NoRoomReason::RoundIntoMaterial | NoRoomReason::RailRunsPastFaceIntoMaterial => R::RunsIntoMaterial,
-        _ => return None,
-    })
+/// An ops refusal of the session ([`blend_failure`]) as SolidCraft's error, its fields as they are.
+fn refusal(r: Refusal) -> Error {
+    match r {
+        Refusal::TooLarge { size, kind, at, why } => Error::TooLarge { size, kind, at, why },
+        Refusal::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
+        Refusal::NoRoom => Error::NoRoom,
+        Refusal::CornerUnsupported => Error::CornerUnsupported,
+        Refusal::RailLeavesFace(_) => Error::Unsupported,
+    }
 }
 
 /// The refusal of a swept turn `CreateFilletCorners` noted at its vertex (`SmBlendCorner::Classify`
 /// with `GetSweptTurns()`): [`Error::TurnRefused`] with solidcore's reason, without its "Fillet
 /// Error: " prefix, and where it is; `None` for a note of another kind.
-fn turn_refusal(info: &ErrorInfo<FilletObject>) -> Option<Error> {
+fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
+    let info = s.error_info();
     let room = match info.code {
         c if c == FilletErrorType::NoRoom as i32 => true,
         c if c == FilletErrorType::CornerUnsupported as i32 => false,
@@ -460,59 +352,6 @@ fn turn_refusal(info: &ErrorInfo<FilletObject>) -> Option<Error> {
     }
     let why = why.strip_prefix("Fillet Error:").map_or(why, str::trim_start).to_owned();
     Some(Error::TurnRefused { room, why, at: info.location.map(|p| [p.x, p.y, p.z]) })
-}
-
-/// [`blend_failure`] where solidcore gives no size.
-fn blend_failure_unsized(info: &ErrorInfo<FilletObject>, e: SolidError, corner: bool) -> Error {
-    if e.is_unported() {
-        status(e)
-    } else if corner || info.code == FilletErrorType::CornerUnsupported as i32 {
-        Error::CornerUnsupported
-    } else if info.code != FilletErrorType::NoRoom as i32 {
-        status(e)
-    } else if info.no_room_reason() == Some(NoRoomReason::RailLeavesFace) {
-        Error::Unsupported
-    } else {
-        Error::NoRoom
-    }
-}
-
-/// `e` ([`Error::TooLarge`]) with the point at the middle of `edge` of `b`, the edge its size was
-/// found for; an equal chamfer's size (an offset, [`Section::Chamfer`]) as its distance, by the
-/// edge's own ratio of the distance asked to the offset the kernel made of it (`chamfered`: per
-/// edge of an equal chamfer, the two). Where the edge or its point can't be read the size stays
-/// as it is, with no point (a chamfer's size then is not a distance, so it is left a plain
-/// refusal).
-fn sized_on(
-    k: &Kernel,
-    b: &mut Brep,
-    edge: Option<EdgeId>,
-    section: Section<'_>,
-    chamfered: &[(EdgeId, f64, f64)],
-    e: Error,
-) -> solidcore::Result<Error> {
-    let Error::TooLarge { size, kind, why, .. } = e else { return Ok(e) };
-    let chamfer = matches!(section, Section::Chamfer { .. }) && kind == crate::FitKind::Radius;
-    let Some(edge) = edge else {
-        return Ok(if chamfer { Error::NoRoom } else { e });
-    };
-    let at = match b.edge(edge) {
-        Ok(rec) => match rec.curve.as_ref() {
-            Some(c) => answer(c.evaluate_point(k, rec.interval.evaluate(0.5)))?.map(|p| [p.x, p.y, p.z]),
-            None => None,
-        },
-        Err(_) => None,
-    };
-    if chamfer {
-        // The offset is linear in the distance along an edge.
-        return Ok(match chamfered.iter().find(|(e, ..)| *e == edge) {
-            Some(&(_, distance, offset)) if offset > 0.0 => {
-                Error::TooLarge { size: size / offset * distance, kind: crate::FitKind::Distance, at, why }
-            }
-            _ => Error::NoRoom,
-        });
-    }
-    Ok(Error::TooLarge { size, kind, at, why })
 }
 
 /// `round_edges`' `overflow_first` argument: with it the session stops, nothing built, when blends
@@ -551,6 +390,13 @@ fn blend_edges(
     blend_edges_stopping(k, b, edges, sizes, section, law, setbacks, patches, None)
 }
 
+/// Why [`blend_edges_stopping`]'s session stopped: a set-back corner it does not set back (its
+/// index among the setbacks), or a failure (ops' refusal, or SolidCraft's error).
+enum Stop {
+    Corner(usize),
+    Failed(Result<SessionRefusal>),
+}
+
 /// [`blend_edges`], with `round_edges`' `overflow_first` argument.
 #[allow(clippy::too_many_arguments)] // the capi's round_edges
 fn blend_edges_stopping(
@@ -565,10 +411,6 @@ fn blend_edges_stopping(
     overflow_first: Option<OverflowFirst<'_>>,
 ) -> solidcore::Result<std::result::Result<(), std::result::Result<usize, Error>>> {
     let before = face_set(b)?;
-    // The edge a sized refusal names ([`blend_failure`]), read after the session lets `b` go.
-    let mut fit_edge = None;
-    // An equal chamfer's edges, each with its distance and the offset the kernel made of it.
-    let mut chamfered: Vec<(EdgeId, f64, f64)> = Vec::new();
     let done = {
         let mut s = FilletSession::new(k, b)?;
         // `SetSweptTurns`: read as the corners are made (`fixes.fillet_blend_corner`).
@@ -590,16 +432,7 @@ fn blend_edges_stopping(
                 s.prepare_per_edge_constant_radius(k, edges, sizes, &[FilletSurfaceGeneratorType::BlendCurve], 2, GN_THUMBWEIGHT_EQUAL_AREA)
             }
             (Section::Chord, _) => s.prepare_per_edge_constant_distance(k, edges, sizes, &[FilletSurfaceGeneratorType::Circular], 1, 1.0),
-            (Section::Chamfer { sizes, along }, _) => s.prepare_chamfers_along(k, edges, sizes, along).map(|offsets| {
-                for (i, (&e, [r, _])) in edges.iter().zip(offsets).enumerate() {
-                    let size = sizes.get(if sizes.len() == 1 { 0 } else { i });
-                    if let Some(&ChamferSize::Distances([d, d2])) = size
-                        && d == d2
-                    {
-                        chamfered.push((e, d, r));
-                    }
-                }
-            }),
+            (Section::Chamfer { sizes, along }, _) => s.prepare_chamfers_along(k, edges, sizes, along).map(|_| ()),
         };
         // `AddSetBackVertex` for each set-back vertex, before the corners are made: a set-back
         // vertex is no Ball (`IsSetBackVertex`, read by `ClassifyBall`), so its corner is the one
@@ -612,7 +445,7 @@ fn blend_edges_stopping(
         let prepared_ok = prepared.is_ok();
         let mut step = prepared.and_then(|()| s.create_corners(k, None)).map(|()| Ok(Vec::new()));
         // A swept turn `CreateFilletCorners` refused, with solidcore's reason ([`turn_refusal`]).
-        let refused_turn = if swept && prepared_ok && step.is_err() { turn_refusal(s.error_info()) } else { None };
+        let refused_turn = if swept && prepared_ok && step.is_err() { turn_refusal(&s) } else { None };
         // A vertex `CreateFilletCorners` made no corner for, noted before a later step notes its
         // own failure over it ([`blend_failure`]).
         let corner = step.is_ok() && s.error_info().code == FilletErrorType::CornerUnsupported as i32;
@@ -625,6 +458,7 @@ fn blend_edges_stopping(
         // the corners' patches marked for another patch to replace: solidcore's fill is then
         // not the corner ([`blend_failure`])
         let replaced = patches.is_some();
+        let chamfer = matches!(section, Section::Chamfer { .. });
         match step {
             // The marks go with the session: read them before it drops.
             Ok(Ok(set_back)) => match s.do_filleting(k, None) {
@@ -638,30 +472,27 @@ fn blend_edges_stopping(
                             *m = s.mitred_edges();
                         }
                     }
-                    let (why, edge) = blend_failure(&s, e, corner, replaced);
-                    fit_edge = edge;
-                    Ok(Err(Err(why)))
+                    Ok(Err(Stop::Failed(blend_failure(&s, e, corner, replaced, chamfer))))
                 }
             },
-            Ok(Err(refusal)) => Ok(Err(refusal)),
+            Ok(Err(Ok(j))) => Ok(Err(Stop::Corner(j))),
+            Ok(Err(Err(e))) => Ok(Err(Stop::Failed(Err(e)))),
             Err(e) => match refused_turn {
-                Some(why) => Ok(Err(Err(why))),
-                None => {
-                    let (why, edge) = blend_failure(&s, e, corner, replaced);
-                    fit_edge = edge;
-                    Ok(Err(Err(why)))
-                }
+                Some(why) => Ok(Err(Stop::Failed(Err(why)))),
+                None => Ok(Err(Stop::Failed(blend_failure(&s, e, corner, replaced, chamfer)))),
             },
         }
     };
-    let done: solidcore::Result<std::result::Result<(Vec<usize>, Vec<(usize, FaceId)>), std::result::Result<usize, Error>>> = done;
+    let done: solidcore::Result<std::result::Result<(Vec<usize>, Vec<(usize, FaceId)>), Stop>> = done;
     let (set_back, marked) = match done? {
         Ok(d) => d,
-        Err(refusal) => {
+        Err(stop) => {
             b.refresh_cached_topology();
-            return Ok(Err(match refusal {
-                Err(e @ Error::TooLarge { .. }) => Err(sized_on(k, b, fit_edge, section, &chamfered, e)?),
-                r => r,
+            return Ok(Err(match stop {
+                Stop::Corner(j) => Ok(j),
+                Stop::Failed(Err(e)) => Err(e),
+                // ops' refusal, its point read now the session has let the body go
+                Stop::Failed(Ok(r)) => Err(refusal(r.on(k, b)?)),
             }));
         }
     };
@@ -1667,23 +1498,67 @@ mod tests {
         assert!(!matches!(status(folds), Error::Status(_)));
     }
 
-    /// A blend routine's failure passes on as the status it replaced, as the `Upstream` it
-    /// replaced did, whether or not it names an edge.
+    /// An offset's refusal that stands for no status reaches SolidCraft as ops' typed refusal
+    /// ([`Error::Refused`]), its reason and sizes as data, not as solidcore's text (#15032); the
+    /// refusals with kinds of their own keep their errors.
     #[test]
-    fn blend_failures_pass_on_as_their_status() {
+    fn offset_refusals_pass_on_as_ops_refusals() {
+        use solidcore::error::Failure;
+        use solidcore::error::offset::{LoopCrossing, OffsetFailure};
+        use solidcore_ops::{Error as Ops, OffsetRefusal};
+        let face = solidcore::topology::FaceId::from_index(3);
+        let offset = |o| Failure::new("offset::offset_executive::crossing_loops", o).into_error();
+        let refused = |why| Error::Refused(Ops::OffsetRefused { face: None, why });
+        assert_eq!(
+            status(offset(OffsetFailure::Collapses { face, distance: -2.0, radius: 1.5 })),
+            refused(OffsetRefusal::Collapses { distance: -2.0, radius: 1.5 })
+        );
+        assert_eq!(status(offset(OffsetFailure::NotCertified { face, distance: -1.0 })), refused(OffsetRefusal::NotCertified { distance: -1.0 }));
+        let crossing = LoopCrossing::ThreeAtOnePoint;
+        let e = status(offset(OffsetFailure::LoopsCross { face: Some(face), crossing }));
+        assert_eq!(e, refused(OffsetRefusal::LoopsCross { crossing }));
+        assert_eq!(
+            e.to_string(),
+            "the offset is refused: its offset's loops cross in a way the offset cannot resolve: three loops cross at one point"
+        );
+        assert_eq!(status(offset(OffsetFailure::SeamOpened { face })), refused(OffsetRefusal::SeamOpened));
+        // A fold is the offset module's own error (`Error::WallFolds`), never ops' general refusal.
+        assert!(!matches!(status(offset(OffsetFailure::Folds { face, distance: 2.0, largest: 1.0 })), Error::Refused(_) | Error::Status(_)));
+    }
+
+    /// A blend routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// replaced did, whether or not it names an edge, and keeps solidcore's reason for it
+    /// ([`Error::BlendFailed`]): a bare status names no cause the user or a report can act on.
+    #[test]
+    fn blend_failures_pass_on_as_their_status_with_their_reason() {
         use solidcore::error::Failure;
         use solidcore::error::blend::BlendFailure;
         let blend = |b| Failure::new("blend::feature_executive", b).into_error();
-        assert!(matches!(status(blend(BlendFailure::Failed("x"))), Error::Status(1001)));
-        assert!(matches!(status(blend(BlendFailure::Missing("the edge use's edge"))), Error::Status(1006)));
-        assert!(matches!(status(blend(BlendFailure::InvalidValue("x"))), Error::Status(1007)));
-        assert!(matches!(status(blend(BlendFailure::Inconsistent("x"))), Error::Status(1005)));
-        assert!(matches!(status(blend(BlendFailure::BadIntersections("x"))), Error::Status(1027)));
-        assert!(matches!(status(blend(BlendFailure::NotConverged("x"))), Error::Status(1022)));
-        assert!(matches!(status(blend(BlendFailure::PassedOn { what: "x", status: 1020 })), Error::Status(1020)));
+        // the status and the reason the failure carries, and its class (the kernel's own)
+        let carried = |e: Error| match e {
+            Error::Refused(solidcore_ops::Error::BlendFailed { class, status, phrase }) => (status, phrase, class),
+            e => panic!("not a typed blend failure: {e:?}"),
+        };
+        let x = |status: i32, phrase: &str| (status, phrase.to_owned());
+        let cases = [
+            (BlendFailure::Failed("x"), x(1001, "x")),
+            (BlendFailure::Missing("the edge use's edge"), x(1006, "the edge use's edge is missing")),
+            (BlendFailure::InvalidValue("x"), x(1007, "x")),
+            (BlendFailure::Inconsistent("x"), x(1005, "a consistency check failed: x")),
+            (BlendFailure::BadIntersections("x"), x(1027, "x")),
+            (BlendFailure::NotConverged("x"), x(1022, "x")),
+            (BlendFailure::PassedOn { what: "x", status: 1020 }, x(1020, "x")),
+        ];
+        for (failure, (want_status, want_phrase)) in cases {
+            let (status, phrase, class) = carried(status(blend(failure)));
+            assert_eq!((status, phrase.as_str(), class), (want_status, want_phrase.as_str(), failure.class()), "{failure:?}");
+        }
         let at = Failure::new("blend::fillet_executive::p3", BlendFailure::Failed("x"))
             .at(solidcore::EntityRef::Edge(solidcore::topology::EdgeId::from_index(2)))
             .into_error();
-        assert!(matches!(status(at), Error::Status(1001)));
+        assert_eq!(carried(status(at)).0, 1001);
+        // the trim of a blend whose faces leak past its rails, as the message says it
+        let leak = blend(BlendFailure::Failed("the faces the rails enclose reach past the rails"));
+        assert_eq!(status(leak).to_string(), "the blend failed (status 1001): the faces the rails enclose reach past the rails");
     }
 }

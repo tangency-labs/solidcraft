@@ -30,6 +30,9 @@
 //! parallel planes at their planes' distances (`SectionPlanes`) where the chord-length
 //! skin's control points leave the slab between the first and last planes, so the skin
 //! stays between them; every other skin keeps the chord-length parameters.
+//! Not upstream (#15263): turning planar sections carry their winding along the
+//! centroid travel and align their cyclic seams by exact curve evaluations before
+//! joining. Parallel sections with coherent winding retain their correspondence.
 //! **Statuses pass on** (opt-in `Kernel::fixes.sweep_statuses_pass_on`, WR-662;
 //! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
 //! are returned instead (`SER`).
@@ -46,7 +49,7 @@ use crate::error::{ignore_status, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector2d::Point2;
-use crate::math::{Vec3, EFF_ZERO_SQRT};
+use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
@@ -60,9 +63,189 @@ use crate::surface::surface::{
 use crate::sweep::topology_sweep::access::{FaceRef, RegionRef};
 use crate::topology::{BrepId, EdgeuseId, FaceId};
 
-use super::skin_sources::{layer_sources, LoopSpans, NotTraced, SkinSources, SkinTrace};
+use super::skin_sources::{layer_sources, LoopSpans, NotTraced, Segment, SkinSources, SkinTrace};
 
 const OP: &str = "primitive::primitive_creation::p3";
+
+/// Exact polygon area moments for degree-one profile curves. A whole polygon may
+/// be one B-spline edge: its control points are exact corners, not display vertices.
+fn linear_section_centroid(
+    loops: &[(CompositeCurve, Vec<crate::topology::EdgeId>)],
+    normal: Vec3,
+) -> Result<Option<Point3>> {
+    let mut origin = None;
+    let mut twice_area = 0.0;
+    let mut moment = Vec3::ZERO;
+    for (composite, _) in loops {
+        let curve = composite.clone().make_composite_nurb()?;
+        if curve.degree()? != 1 {
+            return Ok(None);
+        }
+        let points = curve.control_points()?;
+        let Some((first, last)) = points.first().zip(points.last()) else {
+            return Ok(None);
+        };
+        let first = first.to_euclid();
+        if first != last.to_euclid() {
+            return Ok(None);
+        }
+        let reference = *origin.get_or_insert(first);
+        for pair in points.windows(2) {
+            let Some((p, q)) = pair.first().zip(pair.get(1)) else {
+                continue;
+            };
+            let p = p.to_euclid() - reference;
+            let q = q.to_euclid() - reference;
+            let area = p.cross(q).dot(normal);
+            twice_area += area;
+            moment += (p + q) * area;
+        }
+    }
+    let Some(origin) = origin else {
+        return Ok(None);
+    };
+    if !twice_area.is_finite() || twice_area == 0.0 {
+        return Ok(None);
+    }
+    let centroid = origin + moment / (3.0 * twice_area);
+    if ![centroid.x, centroid.y, centroid.z]
+        .iter()
+        .all(|v| v.is_finite())
+    {
+        return Err(SolidError::primitive_failed(
+            OP,
+            "a section centroid is non-finite",
+        ));
+    }
+    Ok(Some(centroid))
+}
+
+/// Carry the winding through a turn before joining the section's constituent curves.
+/// Reorder the edge provenance with the curves, so skin history follows the new seam.
+fn align_section_loop(
+    k: &crate::kernel::Kernel,
+    composite: &mut CompositeCurve,
+    edges: &mut Vec<crate::topology::EdgeId>,
+    previous: &BSplineCurve,
+    reverse: bool,
+) -> Result<()> {
+    // A closed B-spline can hold an entire loop in one edge. Its knot parameters
+    // are seam candidates too; every piece retains that edge's source.
+    if composite.num_segments() == 1 {
+        let joined = composite.make_composite_nurb()?;
+        let domain = joined.natural_interval();
+        let (knots, _) = joined.knots(None)?;
+        let mut remainder = Curve::from(joined);
+        let mut pieces = Vec::new();
+        for t in knots {
+            if t > domain.min() && t < domain.max() {
+                let interval = remainder.natural_interval();
+                let mut head = remainder.copy(k)?;
+                // These are existing exact knots. Trim directly rather than using
+                // SplitCurve's proximity rejection for arbitrary split parameters.
+                head.trim(
+                    k,
+                    &mut crate::geom::extent1d::Extent1d::from_min_max(interval.min(), t),
+                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                )?;
+                remainder.trim(
+                    k,
+                    &mut crate::geom::extent1d::Extent1d::from_min_max(t, interval.max()),
+                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                )?;
+                pieces.push(head);
+            }
+        }
+        if !pieces.is_empty() {
+            pieces.push(remainder);
+            for piece in &mut pieces {
+                let interval = piece.natural_interval();
+                piece.edit_parameterization(
+                    k,
+                    &crate::geom::extent1d::Extent1d::from_min_max(
+                        domain.min(),
+                        domain.min() + interval.max() - interval.min(),
+                    ),
+                )?;
+            }
+            if let Some(&edge) = edges.first() {
+                edges.resize(pieces.len(), edge);
+            }
+            *composite = CompositeCurve::with_curves(3, pieces, true, None, None)?;
+        }
+    }
+    let mut segments = composite.segments().to_vec();
+    if reverse {
+        segments.reverse();
+        edges.reverse();
+        for segment in &mut segments {
+            segment.same_sense = !segment.same_sense;
+            std::mem::swap(&mut segment.gap_start, &mut segment.gap_end);
+        }
+    }
+    let make = |segments: &[crate::curve::composite_curve::CompositeCurveSegment]| {
+        let mut candidate = composite.clone();
+        for (i, segment) in segments.iter().enumerate() {
+            candidate.set_segment(i, segment.clone())?;
+        }
+        Ok::<_, SolidError>(candidate)
+    };
+    let mut best = make(&segments)?;
+    let mut best_score = f64::INFINITY;
+    let mut best_shift = 0;
+    let previous_domain = previous.natural_interval();
+    // Compare exact curve evaluations at the joined curves' knot-span ends and
+    // midpoints. This uses neither a tessellation nor a nearest display vertex.
+    for shift in 0..segments.len() {
+        let mut candidate = make(&segments)?;
+        let joined = candidate.make_composite_nurb()?;
+        let domain = joined.natural_interval();
+        let range = domain.max() - domain.min();
+        if !range.is_finite() || range <= 0.0 {
+            return Err(SolidError::primitive_failed(
+                OP,
+                "a section loop has no finite parameter interval",
+            ));
+        }
+        let (knots, _) = joined.knots(None)?;
+        let mut score = 0.0;
+        for span in knots.windows(2) {
+            let Some((&start, &end)) = span.first().zip(span.get(1)) else {
+                continue;
+            };
+            for t in [start, (start + end) * 0.5] {
+                let fraction = (t - domain.min()) / range;
+                let p = previous.evaluate_point(previous_domain.evaluate(fraction))?;
+                score += (joined.evaluate_point(t)? - p).length();
+            }
+        }
+        if !score.is_finite() {
+            return Err(SolidError::primitive_failed(
+                OP,
+                "section correspondence has a non-finite distance",
+            ));
+        }
+        if score < best_score {
+            best_score = score;
+            best_shift = shift;
+            best = candidate;
+        }
+        // Move the first segment to the end, without a call that can panic.
+        let mut rest = std::mem::take(&mut segments).into_iter();
+        let first = rest.next();
+        segments = rest.chain(first).collect();
+    }
+    if edges.len() == segments.len() {
+        let mut rest = std::mem::take(edges).into_iter();
+        let head: Vec<_> = rest.by_ref().take(best_shift).collect();
+        *edges = rest.chain(head).collect();
+    } else {
+        // Missing provenance must only disable the trace, never the geometry.
+        edges.clear();
+    }
+    *composite = best;
+    Ok(())
+}
 
 pub(super) fn target(primitive: &PrimitiveCreation, brep: BrepId) -> Result<RegionRef> {
     Ok((
@@ -88,7 +271,7 @@ fn face_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
 /// with that cap fails. [`SectionPlanes::leaves`] finds that on the chord-length skin's
 /// control points; only then is the skin built again at [`SectionPlanes::params`].
 struct SectionPlanes {
-    origin: crate::math::Point3,
+    origin: Point3,
     unit: Vec3,
     /// The last plane's height above the first along `unit` (non-zero).
     last: f64,
@@ -361,7 +544,7 @@ impl PrimitiveCreation {
         approx_tol: f64,
         degree: usize,
         new_faces: &mut Vec<FaceId>,
-        trace: Option<&mut SkinTrace>,
+        mut trace: Option<&mut SkinTrace>,
     ) -> Result<()> {
         self.init_entity_maps();
         new_faces.clear();
@@ -372,15 +555,54 @@ impl PrimitiveCreation {
         // (the trace: each section loop's spans, by layer, and the first reason it fails)
         let mut loop_spans: Vec<(usize, LoopSpans)> = Vec::new();
         let mut untraced: Option<NotTraced> = None;
+        let mut previous_section: Option<(Point3, Vec3)> = None;
+        let mut previous_loops: Vec<BSplineCurve> = Vec::new();
         for (i, &face) in faces.iter().enumerate() {
             let domain = crate::topology::face::p2::uv_domain(a.brep(face.0)?, face.1)?;
-            face_surface(a, face)?.evaluate_normal(
+            let normal = face_surface(a, face)?.evaluate_normal(
                 a.kernel(brep)?,
                 domain.evaluate(0.5, 0.5),
                 Side::Left,
                 Side::Left,
             )?;
+            let planar = matches!(
+                face_surface(a, face)?.kind(),
+                crate::surface::surface::SurfaceKind::Plane(_)
+            );
             let composites = a.face_composites_with_edges(face)?;
+            let mut section = if planar {
+                let centroid = match linear_section_centroid(&composites, normal)? {
+                    Some(centroid) => centroid,
+                    None => {
+                        a.with_primitive_brep(face.0, |k, b| {
+                            // Integration accuracy is independent of the skin's zero
+                            // approximation tolerance for exact section interpolation.
+                            crate::mass::integrator::properties::face_centroid(k, b, face.1, 1e-9)
+                        })?
+                        .1
+                    }
+                };
+                Some((centroid, normal))
+            } else {
+                None
+            };
+            let mut reverse = false;
+            let mut align = false;
+            if let (Some((point, previous_normal)), Some((centroid, normal))) =
+                (previous_section, section)
+            {
+                let direction = centroid - point;
+                let before = previous_normal.dot(direction);
+                let after = normal.dot(direction);
+                reverse = (before < 0.0 && after > 0.0) || (before > 0.0 && after < 0.0);
+                // Preserve the caller's correspondence byte for byte on ordinary
+                // parallel sections. Turns need a new seam as well as winding.
+                align =
+                    reverse || !previous_normal.is_parallel_to(normal, crate::math::EFF_ZERO_DEG);
+                if reverse {
+                    section = Some((centroid, -normal));
+                }
+            }
             if i == 0 {
                 layer_count = composites.len();
             } else if layer_count != composites.len() {
@@ -389,27 +611,51 @@ impl PrimitiveCreation {
                     "the faces have different numbers of layers",
                 ));
             }
-            for (j, (mut composite, edges)) in composites.into_iter().enumerate() {
-                let (joined, breaks) = composite.make_composite_nurb_with_breaks()?;
-                if trace.is_some() && untraced.is_none() {
-                    match LoopSpans::of(&joined, breaks, edges) {
-                        Ok(spans) => loop_spans.push((j, spans)),
-                        Err(_) => untraced = Some(NotTraced::JoinedCurveUnreadable),
+            let mut current_loops = Vec::new();
+            for (j, (mut composite, mut edges)) in composites.into_iter().enumerate() {
+                if align {
+                    if let Some(previous) = previous_loops.get(j) {
+                        align_section_loop(
+                            a.kernel(brep)?,
+                            &mut composite,
+                            &mut edges,
+                            previous,
+                            reverse,
+                        )?;
                     }
                 }
+                let (joined, breaks) = composite.make_composite_nurb_with_breaks()?;
+                if trace.is_some() && untraced.is_none() {
+                    let segments = edges.into_iter().map(Segment::Edge).collect();
+                    loop_spans.push((j, LoopSpans { breaks, segments }));
+                }
+                current_loops.push(joined.clone());
                 skin_curves.push(joined);
                 layers.push(j);
             }
+            previous_section = section;
+            previous_loops = current_loops;
         }
         if faces.is_empty() {
             skin_curves.extend_from_slice(profiles);
             layer_count = 1;
             layers.resize(skin_curves.len(), 0);
-            untraced = Some(NotTraced::OpenProfiles);
+            // (the trace: the open loops the skin recorded, one per profile, all one layer)
+            if let Some(t) = trace.as_deref_mut() {
+                let open = std::mem::take(&mut t.open_loops);
+                if open.len() == profiles.len() {
+                    loop_spans.extend(open.into_iter().map(|l| (0, l)));
+                } else {
+                    untraced = Some(NotTraced::OpenProfiles);
+                }
+            }
         }
+        // (the trace: where each section's knots went, when asked; the surface is the same
+        // either way)
+        let want_maps = trace.is_some() && untraced.is_none();
         // Each layer's skin at chord-length parameters, as upstream.
         let skin = |k: &crate::kernel::Kernel, curves: &[BSplineCurve], params: Option<&[f64]>| {
-            BSplineSurface::create_skinned_surface(
+            BSplineSurface::create_skinned_surface_mapped(
                 k,
                 curves,
                 SkinnedSurfaceOptions {
@@ -419,6 +665,7 @@ impl PrimitiveCreation {
                     section_params: params,
                     ..Default::default()
                 },
+                want_maps,
             )
         };
         let mut layer_curves = Vec::new();
@@ -439,7 +686,7 @@ impl PrimitiveCreation {
         if let Some(planes) = SectionPlanes::of(&*a, faces)? {
             let tol = a.brep(brep)?.tolerance();
             let mut leaves = false;
-            for s in &surfaces {
+            for (s, _) in &surfaces {
                 leaves = leaves || planes.leaves(s, tol)?;
             }
             if leaves {
@@ -451,7 +698,7 @@ impl PrimitiveCreation {
         }
         let mut traced: Vec<(FaceId, Vec<usize>)> = Vec::new();
         let mut made = Vec::new();
-        for (layer, surface) in surfaces.into_iter().enumerate() {
+        for (layer, (surface, maps)) in surfaces.into_iter().enumerate() {
             // (the trace: the surface's knots across the sections, V)
             let surface_knots = trace
                 .is_some()
@@ -477,7 +724,8 @@ impl PrimitiveCreation {
                         let edge_curves = trace
                             .as_deref()
                             .map_or(&[][..], |t| t.edge_curves.as_slice());
-                        layer_sources(edge_curves, &sections, &knots, &intervals)
+                        let maps = maps.as_deref().unwrap_or(&[]);
+                        layer_sources(edge_curves, &sections, maps, &knots, &intervals)
                     }
                     (Some(Err(_)) | None, _) => Err(NotTraced::SurfaceKnotsUnreadable),
                     (_, None) => Err(NotTraced::FaceDomainUnreadable),
@@ -489,8 +737,7 @@ impl PrimitiveCreation {
             }
         }
         if let Some(t) = trace {
-            let why = untraced.or_else(|| t.open_profiles.then_some(NotTraced::OpenProfiles));
-            t.sources = Some(match why {
+            t.sources = Some(match untraced {
                 Some(why) => SkinSources::NotTraced { why },
                 None => SkinSources::Traced(traced),
             });

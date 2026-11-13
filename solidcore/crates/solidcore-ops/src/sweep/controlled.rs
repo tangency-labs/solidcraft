@@ -360,9 +360,6 @@ fn build(
 fn not_traced(why: NotTraced) -> &'static str {
     match why {
         NotTraced::OpenProfiles => "a skin not traced to its profile curves: open profiles",
-        NotTraced::SectionsNotKnotIdentical => {
-            "a skin not traced to its profile curves: sections whose knots differ"
-        }
         NotTraced::SkinMovedKnots => {
             "a skin not traced to its profile curves: its knots are not the sections'"
         }
@@ -372,8 +369,11 @@ fn not_traced(why: NotTraced) -> &'static str {
         NotTraced::EdgeUntraced => {
             "a skin not traced to its profile curves: a profile edge with no recorded curve"
         }
-        NotTraced::JoinedCurveUnreadable => {
-            "a skin not traced to its profile curves: a section's curve could not be read"
+        NotTraced::SegmentMerged => {
+            "a skin not traced to its profile curves: a curve merged into one knot"
+        }
+        NotTraced::KnotMapBroken => {
+            "a skin not traced to its profile curves: where a section's knots went is not known"
         }
         NotTraced::SurfaceKnotsUnreadable => {
             "a skin not traced to its profile curves: its knots could not be read"

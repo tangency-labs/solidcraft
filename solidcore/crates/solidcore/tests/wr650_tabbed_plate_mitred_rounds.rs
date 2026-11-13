@@ -156,7 +156,6 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.approximate_surface_bezier_starter = true;
     k.fixes.boolean2d_plane_covers_far_faces = true;
     k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.boolean_lists_virtual_surface_copies = true;
@@ -165,7 +164,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.boolean_skips_faces_apart = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
-    k.fixes.boolean_wire_edge_keeps_faceuse_shell = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_check_min_radius = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
@@ -184,7 +182,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.edge_check_orders_tangent_faces = true;
-    k.fixes.edge_reversal_keeps_failed_edge = true;
     k.fixes.ellipse_adjust_step_interval_keeps_turns = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.extrusion_origin_scaled_zero = true;
@@ -197,7 +194,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;
     k.fixes.fillet_corner_ball_patch = true;
-    k.fixes.fillet_corner_sphere_from_four_arcs = true;
     k.fixes.fillet_half_degree_crease = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
@@ -209,7 +205,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_rail_rim_on_face = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_non_manifold_result = true;
@@ -219,11 +214,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_retry_radius_as_first = true;
     k.fixes.fillet_run_on_past_far_end_only = true;
     k.fixes.fillet_split_edge_keeps_near_half = true;
-    k.fixes.fillet_tangent_point_one_sided_step = true;
-    k.fixes.fillet_torus_center_on_axis = true;
-    k.fixes.fillet_torus_rail_on_axis = true;
-    k.fixes.fillet_torus_span_from_start_section = true;
-    k.fixes.fillet_trace_from_tangent_point_toward_next = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_trim_status = true;
@@ -236,7 +226,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.heal_stage3_failures_propagate = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
-    k.fixes.imprint_trims_edge_to_proto_vertex = true;
     k.fixes.internal_pole_row_through_knot = true;
     k.fixes.iso_curve_sliver_domain_is_degenerate = true;
     k.fixes.join_touching_loops = true;
@@ -270,13 +259,11 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.refine_cc_range_ends = true;
-    k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;
-    k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
@@ -288,10 +275,8 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.stitch_solid_nests_cavities = true;
-    k.fixes.sweep_frame_on_planar_path_normal = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
-    k.fixes.topology_failed_evaluations_propagate = true;
     k.fixes.torus_check_reads_v_interval = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
@@ -302,8 +287,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_checks_on_surface = true;
     k.fixes.uv_trim_corner_end_points_only = true;
-    k.fixes.uv_trim_joins_drop_pieces = true;
-    k.fixes.uv_trim_reversal_on_surface = true;
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let edges = top_edges(&k, &b);
