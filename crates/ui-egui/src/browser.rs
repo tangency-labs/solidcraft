@@ -848,9 +848,10 @@ fn eye_left(ui: &egui::Ui) -> bool {
     ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_eye_left"))).unwrap_or(false)
 }
 
-/// A Browser row's identity in the panel: its tree key, hashed.
+/// A Browser row's identity in the panel: its tree key, hashed the same way every frame. Tree keys
+/// are unique in the Browser, so the hash is too.
 pub(crate) fn node_id(key: &str) -> NodeId {
-    egui::Id::new(("sc_browser_row", key)).value()
+    egui::Id::unique(("sc_browser_row", key)).value()
 }
 
 /// The kinds of rows the Browser drags: a folder's items or groups, and placements.

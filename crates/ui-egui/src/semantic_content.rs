@@ -385,8 +385,12 @@ pub(crate) fn record_occurrence(ui: &Ui, row: DrawnOccurrence) {
 pub(crate) fn eye_gesture(ui: &Ui, gesture: crate::ui_kit::browser::Gesture) {
     let Some(source) = ui.ctx().data(|data| data.get_temp::<ContentSource>(active_id())) else { return };
     ui.ctx().data_mut(|data| match gesture {
-        crate::ui_kit::browser::Gesture::Begin => data.insert_temp(capture_id(), EyeCapture { source }),
-        crate::ui_kit::browser::Gesture::End => data.remove::<EyeCapture>(capture_id()),
+        crate::ui_kit::browser::Gesture::Begin => {
+            data.insert_temp(capture_id(), EyeCapture { source });
+        }
+        crate::ui_kit::browser::Gesture::End => {
+            data.remove::<EyeCapture>(capture_id());
+        }
     });
 }
 
