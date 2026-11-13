@@ -595,9 +595,18 @@ pub(crate) fn names(b: &ModelBody) -> Arc<Names> {
         .clone()
 }
 
-/// Pairs of faces of a body that share an edge (from its mesh's edges).
+/// Pairs of faces of a body that share an edge (from its exact B-rep edges).
 pub(crate) fn mesh_adjacency(b: &ModelBody) -> Vec<(usize, usize)> {
-    crate::history_names::face_pairs(b.mesh().edge_faces.iter().map(|fs| fs.iter().map(|f| *f as usize)))
+    crate::history_names::face_pairs(b.body.record().edges.iter().map(|e| {
+        let mut faces: Vec<usize> = Vec::with_capacity(e.uses.len());
+        for u in &e.uses {
+            let f = u.face as usize;
+            if !faces.contains(&f) {
+                faces.push(f);
+            }
+        }
+        faces.into_iter()
+    }))
 }
 
 /// Work out a body's face names from the feature that made it and the model before it, by
@@ -1709,5 +1718,13 @@ mod tests {
         }
         assert_eq!(curves.nearest(Vec2::new(5., 0.)).map(|(_, id)| id).as_deref(), Some("c0_0"), "a tie keeps the first curve");
         assert!(curves.segs.iter().all(|(id, ..)| id != "guide"), "construction curves name nothing");
+    }
+
+    #[test]
+    fn mesh_adjacency_uses_exact_brep_edges() {
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+        let body = ModelBody::new("Cube".into(), body, 1);
+        let pairs = mesh_adjacency(&body);
+        assert_eq!(pairs.len(), 12);
     }
 }

@@ -1144,7 +1144,7 @@ pub struct UnlockResult {
 // ---------------------------------------------------------------------------------------------
 
 /// The message of a handler's refusal, to give whole.
-fn refusal(e: crate::EngineError) -> String {
+pub(crate) fn refusal(e: crate::EngineError) -> String {
     match e {
         crate::EngineError::BadParams { msg, .. } => msg,
         e => e.to_string(),

@@ -21,6 +21,7 @@ use std::f64::consts::PI;
 
 use solidcore::curve::arc::{self, ArcDefinition};
 use solidcore::curve::curve::{Curve as KCurve, CurveKind};
+use solidcore::curve::from_parameters::record_of;
 use solidcore::curve::line::Line;
 use solidcore::curve::path::{self, PathDoubt, PathPiece, PathShape, PathTolerances};
 use solidcore::geom::tol::{context_zone_tol_3d, SmallTopoType, USE_DEFAULT};
@@ -31,6 +32,7 @@ use solidcore::math::Transform;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::prism::profile as kp;
+use solidcore::surface::surface::p4::NoObject;
 use solidcore::sweep::api_brep::{
     create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
@@ -253,7 +255,7 @@ pub enum DraftCorner {
 }
 
 /// Which sweep a [`sweep_placed`] took.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SweepRoute {
     /// The linear sweep along a path proved straight: exact.
     Line,
@@ -264,18 +266,27 @@ pub enum SweepRoute {
     Segments,
     /// The kernel's curve sweep along the path joined into one curve, carried as the frame
     /// says. With [`SweepFrame::Translate`] it is exact for the joined curve; with
-    /// [`SweepFrame::Follow`] it is fitted to a tolerance and carries no certified bound (see
-    /// [`sweep_placed`]).
+    /// [`SweepFrame::Follow`] or [`SweepFrame::Upright`] it is fitted to a tolerance and
+    /// carries no certified bound (see [`sweep_placed`]).
     Curve(SweepFrame),
 }
 
 /// How the profile is carried along a [`sweep_placed`] path.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SweepFrame {
-    /// It turns with the path, keeping its attitude to the path's tangent.
+    /// It turns with the path, keeping its attitude to the path's tangent: the path's
+    /// rotation-minimising frame (exact along lines and arcs; the kernel's projection-normal
+    /// frame along any other path, which the kernel brings back to its start round a closed
+    /// one, so the sheet closes).
     Follow,
     /// It only moves along the path, keeping its orientation.
     Translate,
+    /// It stays upright: square to the path, keeping the up direction (any length; the
+    /// kernel makes it unit) made square to the path's tangent, so it turns only about the up
+    /// direction as the path turns (a screen or a canopy along an outline). Drawn at the
+    /// path's start, it is swept as drawn there. A path running along the up direction is
+    /// refused.
+    Upright([f64; 3]),
 }
 
 /// How the ends of a [`sweep_stations`] close.
@@ -774,6 +785,9 @@ fn unplaced() -> [Affine; 3] {
 /// piece. Any other path takes the kernel's curve sweep, once every join of the path is proved
 /// to meet (to the path gap).
 ///
+/// With [`SweepFrame::Upright`] a straight path is the linear sweep as with any frame, and any
+/// other path the kernel's curve sweep kept upright.
+///
 /// The curve sweep is exact for [`SweepFrame::Translate`] (for the path joined into one curve)
 /// but not for [`SweepFrame::Follow`]: there it samples the path and skins the sections it
 /// places, to a tolerance its own sampling can widen, and returns no bound (the kernel's curve
@@ -783,16 +797,23 @@ fn unplaced() -> [Affine; 3] {
 /// closed path), keeps the curve sweep until that issue is fixed.
 ///
 /// # Errors
-/// [`Error::Argument`] for a curve list refused; [`Error::PathUndecided`] for a `Follow` path
+/// [`Error::Argument`] for a curve list refused or an up direction not finite;
+/// [`Error::PathUndecided`] for a `Follow` path
 /// left undecided; [`Error::PathGap`] for a curve-sweep path whose join is not proved to meet,
 /// or whose ends neither meet to the path gap nor are proved apart (the closing join, the last);
-/// the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+/// the kernel's status (an upright path running along its up direction: [`Error::Unsupported`]);
+/// [`Error::Empty`], [`Error::NotSolid`].
 pub fn sweep_placed(
     profile: &[Curve],
     path: &[Curve],
     frame: SweepFrame,
     cap: bool,
 ) -> Result<(Body, [Affine; 3], SweepRoute)> {
+    if let SweepFrame::Upright(u) = frame {
+        if !u.iter().all(|x| x.is_finite()) {
+            return Err(Error::Argument);
+        }
+    }
     let mut placed = unplaced();
     let mut route = SweepRoute::Curve(frame);
     let expect = if cap { Expect::SOLID } else { Expect::FACES };
@@ -893,6 +914,10 @@ pub fn sweep_placed(
             cap_ends: cap && !closed,
             translational_sweep: frame == SweepFrame::Translate,
             profile_at_path_start: true,
+            up: match frame {
+                SweepFrame::Upright(u) => Some(v3(u)),
+                SweepFrame::Follow | SweepFrame::Translate => None,
+            },
             ..SweepOptions::default()
         };
         let r = match create_curve_sweep_with_placements(
@@ -913,7 +938,9 @@ pub fn sweep_placed(
         if closed {
             let tol = b.tolerance();
             match stitch_faces(k, &mut b, tol, None, false) {
-                Ok(s) if s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
+                // a solid asked for has no free edge left; a sheet (an open profile, or one
+                // not capped) keeps the profile's own ends free
+                Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
                 Ok(_) => b.refresh_cached_topology(),
                 Err(e) => return Ok(Err(status(e))),
             }
@@ -1346,6 +1373,120 @@ pub fn face_section(
             Ok(out)
         })
     })?
+}
+
+/// `curves` dropped onto record face `face` of `body` (through `order`, its record's [`Order`])
+/// square to its surface: the kernel's surface drop of a curve (`DropAndTrimCurve` over the
+/// face's parameter box, every piece kept, on a standalone copy of the face's surface: the face's
+/// trims do not cut it) lifted back to 3D (`LiftCurve`), each within
+/// `tolerance`, as NURBS with their intervals. A curve over the face lands on the foot of each of
+/// its points.
+///
+/// # Errors
+/// [`Error::Argument`] for a number or curve list refused, or an index past the record's faces
+/// or naming a face the body does not have; the kernel's status; [`Error::Empty`] when no curve
+/// lands on the face.
+pub fn drop_curves(
+    body: &Body,
+    order: &Order,
+    face: usize,
+    curves: &[Curve],
+    tolerance: f64,
+) -> Result<Vec<(Curve, [f64; 2])>> {
+    if !tolerance_ok(tolerance) {
+        return Err(Error::Argument);
+    }
+    with_body("drop_curves", body, |k, b| {
+        let given = parsed!(parse(k, curves));
+        let face = parsed!(face_of(b, order, face));
+        let domain = b.face(face)?.uv_domain;
+        let Some(owned) = b.face(face)?.surface.as_ref() else {
+            return Ok(Err(Error::Argument));
+        };
+        // A standalone copy (its owner not copied): the drop and lift work over the face's
+        // parameter box, and a face-owned surface's solves would ask for the face's trimmed
+        // cache, which they are not given here.
+        let surface = owned.copy(k)?;
+        let mut out = Vec::new();
+        for c in &given.curves {
+            let dropped = match surface.drop_and_trim_curve::<NoObject>(
+                k,
+                &domain,
+                c,
+                &c.natural_interval(),
+                tolerance,
+                true,
+                false,
+                None,
+            ) {
+                Ok(d) => d,
+                Err(e) => return Ok(Err(status(e))),
+            };
+            for uv in &dropped.uv_curves {
+                let lifted = match surface.lift_curve(
+                    k,
+                    &domain,
+                    uv,
+                    &uv.natural_interval(),
+                    tolerance,
+                    false,
+                ) {
+                    Ok(l) => l,
+                    Err(e) => return Ok(Err(status(e))),
+                };
+                match put_curve(&lifted.curve)? {
+                    Ok(x) => out.push(x),
+                    Err(e) => return Ok(Err(e)),
+                }
+            }
+        }
+        Ok(if out.is_empty() {
+            Err(Error::Empty)
+        } else {
+            Ok(out)
+        })
+    })?
+}
+
+/// A curve's record form ([`Curve::to_record`]): what it is, the NURBS form a circle's
+/// parameter is on, and its interval in the record's parameter.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecordedCurve {
+    /// A line or circle label, or the spline (rational or not) itself.
+    pub curve: solidcore_record::brep::Curve,
+    /// The NURBS form of a circle, which `interval` is on.
+    pub nurbs: Option<solidcore_record::brep::Curve>,
+    /// The curve's interval in the record's parameter.
+    pub interval: [f64; 2],
+}
+
+impl Curve {
+    /// The record form of this curve over its natural range: the kernel's record of the curve it
+    /// makes ([`solidcore::curve::from_parameters::record_of`]: a line as itself, an arc as its
+    /// circle with that circle's NURBS form and the arc's interval, a NURBS as a spline, or as a
+    /// rational spline of homogeneous points when weighted), converted as the record holds it.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a curve refused (as the sweeps refuse it); [`Error::Record`] for a
+    /// curve the record cannot hold; the kernel's status.
+    pub fn to_record(&self) -> Result<RecordedCurve> {
+        let made = run("sweep::Curve::to_record", |k| {
+            let given = parsed!(parse(k, std::slice::from_ref(self)));
+            let Some(c) = given.curves.first() else {
+                return Ok(Err(Error::Argument));
+            };
+            Ok(match record_of(k, c, &c.natural_interval()) {
+                Ok(r) => Ok(r),
+                Err(e) => Err(status(e)),
+            })
+        })??;
+        let back = |c| convert::record_curve(c).map_err(|why| Error::Record(why.0.to_owned()));
+        Ok(RecordedCurve {
+            curve: back(made.curve)?,
+            nurbs: made.nurbs.map(back).transpose()?,
+            interval: made.interval,
+        })
+    }
 }
 
 #[cfg(test)]

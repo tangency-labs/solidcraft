@@ -40,6 +40,7 @@ pub mod path;
 pub mod plane_of;
 pub mod projected_curve;
 pub mod step_edge;
+pub mod stretch;
 pub mod tangent_field;
 
 use crate::error::{Result, SolidError};

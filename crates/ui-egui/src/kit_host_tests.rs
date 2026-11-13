@@ -445,15 +445,27 @@ mod fields {
         for not_a_value in ["width", "width + 2 mm", "2 * 3 mm", "", "1e3", "1e400 mm", "20 bananas"] {
             assert_eq!(literal(not_a_value), None, "{not_a_value:?} is left alone");
         }
+        assert_eq!(crate::ui_kit::snap_to_125(0.12), 0.1);
+        assert_eq!(crate::ui_kit::snap_to_125(0.23), 0.2);
+        assert_eq!(crate::ui_kit::snap_to_125(0.48), 0.5);
+        assert_eq!(crate::ui_kit::snap_to_125(0.85), 1.0);
         assert_eq!(crate::ui_kit::scrub_step(20.0), 0.1);
         assert_eq!(crate::ui_kit::scrub_step(250.0), 1.0);
         assert_eq!(crate::ui_kit::scrub_step(0.0), 0.01);
         assert_eq!(crate::ui_kit::scrub_step(-45.0), 0.1);
-        assert!((crate::ui_kit::scrubbed(20.0, 30.0, 0.1) - 23.0).abs() < 1e-9);
-        assert!((crate::ui_kit::scrubbed(20.37, 1.0, 0.1) - 20.5).abs() < 1e-9, "the value lands on the step's grid");
-        assert_eq!(crate::ui_kit::scrubbed(2.0, -500.0, 0.1), 0.0, "a size stops at zero");
-        assert!((crate::ui_kit::scrubbed(-2.0, -10.0, 0.1) + 3.0).abs() < 1e-9, "a negative offset keeps moving");
-        assert_eq!(crate::ui_kit::scrubbed(1.0, f32::MAX, 1e8), 1.0, "an overflowing drag keeps the value");
+        let expr = crate::params_dialog::DocExpressions;
+        use crate::ui_kit::Expressions;
+        // Length steps adapt to the camera viewport zoom:
+        assert_eq!(expr.scrub_step(" mm", Some(1.0), 0.05), 0.001, "zoomed in (1% scale) uses micrometre-scale step");
+        assert_eq!(expr.scrub_step(" mm", Some(100.0), 20.0), 0.1, "standard view uses 0.1 mm step");
+        assert_eq!(expr.scrub_step(" mm", Some(1000.0), 250.0), 1.0, "zoomed out (10x scale) uses 1 mm step");
+        assert_eq!(expr.scrub_step(" deg", Some(100.0), 45.0), 1.0, "angles use a fixed 1 deg step");
+        assert!((crate::ui_kit::scrubbed(20.0, 30.0, 0.1, false) - 23.0).abs() < 1e-9);
+        assert!((crate::ui_kit::scrubbed(20.37, 1.0, 0.1, false) - 20.5).abs() < 1e-9, "the value lands on the step's grid");
+        assert_eq!(crate::ui_kit::scrubbed(2.0, -500.0, 0.1, true), 0.0, "a positive-only size stops at zero");
+        assert_eq!(crate::ui_kit::scrubbed(0.0, -20.0, 0.1, false), -2.0, "an unconstrained field scrubs into negative from zero");
+        assert!((crate::ui_kit::scrubbed(-2.0, -10.0, 0.1, false) + 3.0).abs() < 1e-9, "a negative offset keeps moving");
+        assert_eq!(crate::ui_kit::scrubbed(1.0, f32::MAX, 1e8, false), 1.0, "an overflowing drag keeps the value");
         let text =
             |n, step, typed: &str| crate::ui_kit::scrub_text(n, step, &crate::ui_kit::literal(&crate::params_dialog::DocExpressions, typed).unwrap());
         assert_eq!(text(23.0, 0.1, "20 mm"), "23.0 mm");
@@ -464,7 +476,7 @@ mod fields {
 
     #[test]
     fn dragging_a_value_rows_label_changes_its_literal_and_leaves_expressions_alone() {
-        fn frame(ctx: &egui::Context, events: Vec<egui::Event>, modifiers: egui::Modifiers, values: &mut [String; 2]) {
+        fn frame(ctx: &egui::Context, events: Vec<egui::Event>, modifiers: egui::Modifiers, values: &mut [String; 3]) {
             registry::clear_handles();
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
@@ -475,26 +487,31 @@ mod fields {
             crate::ui_kit::test_support::raw_frame(ctx, input, |ui| {
                 ui.set_width(280.0);
                 scope(ui, |ui| {
-                    let [distance, offset] = &mut *values;
+                    let [distance, offset, scale] = &mut *values;
                     expr_row(ui, "Distance", distance);
                     expr_row(ui, "Offset", offset);
+                    expr_row_positive(ui, "Scale factor", scale);
                 });
             });
         }
-        fn drag(ctx: &egui::Context, row: &str, dx: f32, modifiers: egui::Modifiers, values: &mut [String; 2]) {
+        fn drag(ctx: &egui::Context, row: &str, dx: f32, modifiers: egui::Modifiers, values: &mut [String; 3]) {
             let start = registry::rect_of(&format!("dialog:label:{row}")).unwrap().center();
             let end = start + egui::vec2(dx, 0.0);
             let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers };
             frame(ctx, vec![egui::Event::PointerMoved(start), button(start, true)], modifiers, values);
             for step in 1..=4 {
                 frame(ctx, vec![egui::Event::PointerMoved(start + egui::vec2(dx * step as f32 / 4.0, 0.0))], modifiers, values);
+                if row == "Distance" {
+                    assert!(crate::ui_kit::is_scrubbing(ctx), "scrubbing state is active during label drag");
+                }
             }
             frame(ctx, vec![button(end, false)], modifiers, values);
             frame(ctx, vec![], modifiers, values);
+            assert!(!crate::ui_kit::is_scrubbing(ctx), "scrubbing state clears upon release");
         }
         let ctx = crate::ui_kit::test_support::context();
         crate::params_dialog::install_expressions(&ctx);
-        let mut values = ["20 mm".to_owned(), "depth + 2 mm".to_owned()];
+        let mut values = ["20 mm".to_owned(), "depth + 2 mm".to_owned(), "1.0".to_owned()];
         frame(&ctx, vec![], Default::default(), &mut values);
         drag(&ctx, "Distance", 40.0, Default::default(), &mut values);
         assert_eq!(values[0], "24.0 mm", "40 points at 0.1 mm a point");
@@ -502,8 +519,12 @@ mod fields {
         assert_eq!(values[0], "24.40 mm", "Shift is ten times finer");
         drag(&ctx, "Distance", -20.0, egui::Modifiers::COMMAND, &mut values);
         assert_eq!(values[0], "4 mm", "Ctrl is ten times coarser");
+        drag(&ctx, "Distance", -45.0, Default::default(), &mut values);
+        assert_eq!(values[0], "-0.5 mm", "unconstrained expr_row scrubs into negative");
         drag(&ctx, "Offset", 60.0, Default::default(), &mut values);
         assert_eq!(values[1], "depth + 2 mm", "an expression keeps its parameter");
+        drag(&ctx, "Scale factor", -150.0, Default::default(), &mut values);
+        assert_eq!(values[2], "0.00", "Scale factor stops at zero");
     }
 }
 
@@ -891,6 +912,7 @@ mod panel {
                 let ctx = crate::ui_kit::test_support::context();
                 let mut authored = Tokens::get();
                 authored.panel = egui::Color32::WHITE;
+                authored.toolbar = authored.panel;
                 authored.text = egui::Color32::BLACK;
                 authored.text_dim = egui::Color32::BLACK;
                 authored.form_ink = egui::Color32::BLACK;
@@ -902,7 +924,7 @@ mod panel {
                 let _authored = solidcraft_theme::scoped_panel_tokens(authored);
                 let style = crate::panel_runtime::HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
                 let appearance = style.appearance(PanelSurface::Translucent, floating);
-                let failed = matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. });
+                let failed = matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { .. }));
                 assert_eq!(failed, fallback, "exercise both authored paint and deliberately unreadable fallback");
                 let palette = failed.then(|| style.palette(appearance));
                 let font = egui::FontId::monospace(19.0);

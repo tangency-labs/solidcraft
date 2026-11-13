@@ -67,8 +67,7 @@
 //!   `MakeCurvesCompatible`, the curve evaluations of the n-sided blend, `Scale`,
 //!   `GetKnots`, `N_CrvElevateDegree`, `SetMinMax`).
 //! - **Not upstream: a Coons corner patch tangent to its sides** (WR-547, the fork's
-//!   tangency-labs/smlib@cae8618), only with
-//!   `Kernel::fixes.corner_blend_coons_patch_tangent_to_sides`: the four-sided
+//!   tangency-labs/smlib@cae8618): the four-sided
 //!   `CreateCornerBlend` (not bilinear) replaces its Coons patch by
 //!   `make_coons_patch_tangent_to_sides` (`sm_MakeCoonsPatchTangentToSides` and its
 //!   helpers `sm_CoonsSideNormal`, `sm_CoonsSideAngle`, `sm_RefineToSpans` and
@@ -2223,7 +2222,7 @@ fn corner_blend_4(
 
     // Not upstream (WR-547; tangency-labs/smlib@cae8618): the patch tangent to its sides'
     // surfaces
-    if k.fixes.corner_blend_coons_patch_tangent_to_sides && !create_bilinear_patch {
+    if !create_bilinear_patch {
         if let Some(tangent) =
             make_coons_patch_tangent_to_sides(k, &coons, &uv_crvs, surfaces, tangency_tol_radians)?
         {
@@ -2740,13 +2739,7 @@ fn corner_blend_n(
 
     // pass the call along to create the NSidedPatch
     let mut ders: Vec<Option<BSplineCurve>> = tan_curves.into_iter().map(Some).collect();
-    BSplineSurface::create_n_sided_patch_with(
-        &mut boundaries,
-        &mut ders,
-        tangency_tol_radians,
-        None,
-        k.fixes.corner_blend_stays_inside_neighbours,
-    )
+    BSplineSurface::create_n_sided_patch(&mut boundaries, &mut ders, tangency_tol_radians, None)
 }
 
 #[cfg(test)]

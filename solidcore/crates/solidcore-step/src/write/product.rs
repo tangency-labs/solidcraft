@@ -810,4 +810,77 @@ mod tests {
         w.add_complex(&[("B", vec![Param::Typed("T".into(), vec![Param::Real(f64::INFINITY)])])]);
         assert_eq!(w.non_finite(), 3);
     }
+
+    /// The round of a cylinder's rim (R 10, round 2.5), as the application's kernel builds it, is
+    /// a round of an exact class (a revolution, a torus in all but its label) in the record, whose net a reader measures a little
+    /// off (volume, bounding box). STEP gets the torus (major radius 7.5, minor 2.5) the net
+    /// proves as, and the record is unchanged.
+    #[test]
+    fn a_cylinder_rims_round_is_written_as_its_torus() {
+        use solidcore_ops::blend::{Blend, Corners, blend};
+        use solidcore_record::brep::Surface;
+        use solidcore_record::brep::blend::{BlendDefinition, ExactNetKindRecord};
+        solidcore_ops::session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+        let mut found = None;
+        for edge in 0..3 {
+            let puck = solidcore_ops::make_cylinder([0.0; 3], 10.0, 8.0).unwrap();
+            if blend(&puck, Blend::Round, &[edge], &[2.5], &[], Corners::Filled).is_ok() {
+                found = Some(puck);
+                break;
+            }
+        }
+        let puck = found.unwrap();
+        let (record, _) = puck.to_record().unwrap();
+        let exact_torus = |f: &solidcore_record::brep::Face| match &f.surface {
+            Surface::Blend { definition } => {
+                matches!(&**definition, BlendDefinition::ExactRound(e) if e.radius == 2.5 && matches!(e.net_kind, ExactNetKindRecord::Torus | ExactNetKindRecord::Revolution))
+            }
+            _ => false,
+        };
+        let shown = || record.faces.iter().map(|f| format!("{:.80?}", f.surface)).collect::<Vec<_>>();
+        assert_eq!(record.faces.iter().filter(|f| exact_torus(f)).count(), 1, "{:?}", shown());
+        let text = solidcore_bodies(&[("Puck", &puck)], &Header::default()).unwrap();
+        assert_eq!(text.matches("TOROIDAL_SURFACE(").count(), 1, "{text}");
+        assert_eq!(text.matches("B_SPLINE_SURFACE").count(), 0, "{text}");
+        let torus = text.split("TOROIDAL_SURFACE(").nth(1).and_then(|t| t.split(");").next()).unwrap_or_default();
+        let radii: Vec<f64> = torus.split(',').skip(2).filter_map(|v| v.trim().parse().ok()).collect();
+        assert!(matches!(radii.as_slice(), [major, minor] if (major - 7.5).abs() < 1e-9 && (minor - 2.5).abs() < 1e-9), "{torus}");
+        assert_eq!(text.matches("CYLINDRICAL_SURFACE(").count(), 1, "{text}");
+    }
+
+    /// A rounded rim whose round is bent off its torus by one control point is no quadric: its
+    /// form proves as no kind, and the face stays the B-spline surface it is.
+    #[test]
+    fn a_free_form_round_stays_a_b_spline_surface() {
+        use solidcore_ops::blend::{Blend, Corners, blend};
+        use solidcore_record::brep::Surface;
+        solidcore_ops::session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+        let mut found = None;
+        for edge in 0..3 {
+            let puck = solidcore_ops::make_cylinder([0.0; 3], 10.0, 8.0).unwrap();
+            if blend(&puck, Blend::Round, &[edge], &[2.5], &[], Corners::Filled).is_ok() {
+                found = Some(puck);
+                break;
+            }
+        }
+        let (mut record, _) = found.unwrap().to_record().unwrap();
+        let mut bent = 0;
+        for face in &mut record.faces {
+            if !matches!(face.surface, Surface::Blend { .. }) {
+                continue;
+            }
+            let Some(Surface::RationalSpline { u_knots, v_knots, mut homogeneous }) = face.nurbs.take() else { continue };
+            if let Some(p) = homogeneous.get_mut(2).and_then(|row| row.get_mut(1)) {
+                p[0] += 0.3;
+            }
+            face.surface = Surface::RationalSpline { u_knots, v_knots, homogeneous };
+            bent += 1;
+        }
+        let shown = record.faces.iter().map(|f| format!("{:.50?} nurbs {}", f.surface, f.nurbs.is_some())).collect::<Vec<_>>();
+        assert_eq!(bent, 1, "{shown:?}");
+        let text = bodies(vec![body("Bent", &record)], &Header::default()).unwrap();
+        // one rational B-spline surface (a complex entity naming its several parts), no torus
+        assert_eq!(text.matches("(BOUNDED_SURFACE()B_SPLINE_SURFACE(").count(), 1, "{text}");
+        assert_eq!(text.matches("TOROIDAL_SURFACE(").count(), 0, "{text}");
+    }
 }

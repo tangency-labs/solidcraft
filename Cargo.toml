@@ -80,6 +80,16 @@ schemars = "1.2"
 serde_path_to_error = "0.1"
 log = "0.4"
 sha2 = "0.10"
+# Provenance: the CBOR manifest encoding (RFC 8949), COSE_Sign1 records (RFC 9052) and Ed25519
+# (RFC 8032). All pure Rust and permissive (Apache-2.0; BSD-3-Clause), so the browser build and
+# `cargo xtask licences --check` keep working.
+ciborium = { version = "0.2", default-features = false, features = ["std"] }
+serde_bytes = "0.11"
+coset = "0.4"
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "zeroize"] }
+# OpenPGP detached-signature verification (MIT OR Apache-2.0; pure Rust, builds for wasm with
+# its `wasm` feature). GnuPG signs for a key on a smartcard; no key material is copied out.
+pgp = { version = "=0.21.1", default-features = false, features = ["wasm"] }
 moxcms = { version = "0.8.1", default-features = false, features = ["extended_range"] }
 semver = "1"
 

@@ -416,6 +416,55 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
 }
 
 #[test]
+fn origin_axes_display_menu_and_preferences_share_an_opt_in_setting() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    assert!(!h.app.preferences.origin_axes_across_view);
+    let design = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let camera = h.app.cam;
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    for enabled in [true, false] {
+        let log = h.app.session.log.len();
+        h.step(&json!({"click":{"handle":"view:origin_axes_across_view"}})).unwrap();
+        assert_eq!(h.app.preferences.origin_axes_across_view, enabled);
+        let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
+        let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label("view.origin_axes_across_view")))]);
+        assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the Display menu runs the command");
+    }
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    let result = h.call("engine.execute", json!({"command":"view.origin_axes_across_view","params":{"enabled":true}}));
+    assert_eq!(result["ok"], true, "{result}");
+    assert!(h.app.preferences.origin_axes_across_view);
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    h.step(&json!({"click":{"handle":"view:origin_axes_across_view"}})).unwrap();
+    assert!(!h.app.preferences.origin_axes_across_view, "the menu uses the value set by the control command");
+
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    h.call("ui.prefs", json!({"open":"Design"}));
+    h.app.prefs_window.shell.filter = "Origin axes".into();
+    h.frames(5);
+    crate::prefs::reveal_preference(&mut h, "prefs:origin_axes_across_view");
+    h.step(&json!({"click":{"handle":"prefs:origin_axes_across_view"}})).unwrap();
+    assert!(h.app.preferences.origin_axes_across_view);
+    h.call("ui.prefs", json!({"button":"ok"}));
+    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    assert!(restored.preferences.origin_axes_across_view, "opting in survives a settings reload");
+
+    h.call("ui.prefs", json!({"open":"Design"}));
+    h.call("ui.prefs", json!({"button":"defaults"}));
+    assert!(!h.app.preferences.origin_axes_across_view, "Design reset restores short axes");
+    h.call("ui.prefs", json!({"button":"ok"}));
+    restored.load_prefs(&h.app.prefs());
+    assert!(!restored.preferences.origin_axes_across_view);
+    assert_eq!(h.app.cam, camera);
+    assert_eq!(h.app.session.doc.to_json(), design);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+}
+
+#[test]
 fn navigation_bar_toggle_slots_apply_commands_and_projection_compatibility() {
     let mut h = Harness::new();
     moved_block(&mut h);

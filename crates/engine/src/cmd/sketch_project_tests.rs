@@ -2102,3 +2102,37 @@ fn a_mesh_face_keeps_its_straight_sides_on_a_slanted_plane() {
     assert_eq!(round[0], "ellipse", "the cylinder's round top, seen at a slant: {round:?}");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// A component's origin axis, as the Browser names it (`o:<id>/origin/Z`), projects into a sketch of
+/// another component as its line, where that component now stands (#15086).
+#[test]
+fn a_component_origin_axis_projects_where_the_component_stands() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Anchor"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.create", json!({"name": "Part", "parent": 0}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "operation": "new"}));
+    let anchor_component = s.doc.find_component("Anchor").unwrap();
+    let anchor = s.doc.occurrence_of(anchor_component).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": anchor, "translate": [100, 0, 0], "move_grounded": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"axis": format!("o:{anchor}/origin/Z")}]}));
+    let line = r["links"][0]["curves"][0].clone();
+    let si = inspect(&mut s);
+    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == line).cloned().unwrap();
+    let n = |v: &Value| v.as_f64().unwrap();
+    let (x0, x1, length) = (n(&c["start_at"][0]), n(&c["end_at"][0]), (n(&c["end_at"][1]) - n(&c["start_at"][1])).abs());
+    assert!((x0 - 100.0).abs() < 1e-6 && (x1 - 100.0).abs() < 1e-6 && length > 10.0, "{x0} {x1} {length}");
+    // A sketch made after the component moved again reads where it stands now.
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "occurrence.move", json!({"occurrence": anchor, "translate": [150, 0, 0], "move_grounded": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"axis": format!("o:{anchor}/origin/Z")}]}));
+    let line = r["links"][0]["curves"][0].clone();
+    let si = inspect(&mut s);
+    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == line).cloned().unwrap();
+    assert!((n(&c["start_at"][0]) - 250.0).abs() < 1e-6, "a new projection reads the current placement: {}", n(&c["start_at"][0]));
+    // A key that names no component origin is still refused, with the existing message.
+    let err = s.execute("sketch.project", &json!({"refs": [{"axis": "o:9999/origin/Z"}]})).unwrap_err().to_string();
+    assert!(err.contains("unknown axis"), "{err}");
+}

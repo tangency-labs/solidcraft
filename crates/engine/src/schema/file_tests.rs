@@ -23,7 +23,10 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<ExportParams>(),
         &["bodies", "effort", "format", "lay_on_print_faces", "mesh_prefix", "objects", "path", "quality", "velocity"],
     );
-    assert_keys(input_schema_for::<OpenParams>(), &["folder", "max_points", "names", "origin", "path", "read_only", "reuse_import", "units", "up"]);
+    assert_keys(
+        input_schema_for::<OpenParams>(),
+        &["folder", "history", "max_points", "names", "origin", "path", "read_only", "reuse_import", "units", "up", "verify"],
+    );
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);
@@ -152,6 +155,7 @@ fn replies_match_the_output_schema() {
         newer_file: None,
         warnings: None,
         param_warnings: Vec::new(),
+        signature: None,
     };
     matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(busy)).unwrap_or_default());
     // A design a newer SolidCraft saved: the notice and what wasn't read.
@@ -171,6 +175,7 @@ fn replies_match_the_output_schema() {
         }),
         warnings: Some(vec!["Saved by a newer SolidCraft".into(), "Not read: feature 3. Saving keeps it.".into()]),
         param_warnings: Vec::new(),
+        signature: None,
     };
     matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(newer)).unwrap_or_default());
     let warned = run(&mut s, "doc.open", json!({"path": at("part.sc"), "pathh": 1}));

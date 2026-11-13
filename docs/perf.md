@@ -706,6 +706,59 @@ What is left is mostly what is on screen: about 100 joint chips, the Browser's r
 toolbar, and egui's tessellation and painting. With nothing moving, the window draws no frames
 (0.8 % of a core idle with the assembly open).
 
+## Whole-body highlights: edges drawn from the model's own lines (2026-11-11, #5646)
+
+Hovering a Browser row that holds a whole assembly lights every body under it. The faces were
+already lit from what the model has on the GPU (its plans, blocks and placements), but the
+edges were not: the highlight built a copy of every edge of every lit body on the CPU (a halo, a
+line and a dimmed hidden line for each segment) and uploaded it, at each change of the hovered
+row.
+
+Now each body's edge lines are recorded where the model's blocks hold them, and the highlight
+draws those same lines again in its own colours and widths (`LitEdges`, the `vs_line_lit`
+shader entry, which reads the style from the draw's first vertex). Nothing is built or uploaded.
+Where the view draws no edges (Shaded), the highlight still copies them.
+
+Measured on a 561-body STEP printer assembly (194 parts, 2.8 million triangles, 600,000 edge
+segments), NVIDIA GB10, 3774 × 2094 viewport, release build, Shaded with edges: the pointer
+moved on and off the assembly's row 20 times through the control channel, `SOLIDCRAFT_PROFILE_FRAMES=1`
+reporting each highlight build.
+
+| | highlight build | edge bytes built and uploaded |
+|---|---|---|
+| before (`main`) | 20–24 ms (median 22) | 57 MB (38 MB lines, 19 MB hidden) |
+| after | 1–2 ms | 0 |
+
+The GPU draws the same segments as before. The few edges a body can be picked by that the view
+does not draw (smooth edges between tangent faces, in a shaded view) are still copied, so the
+highlight lights the same edges as before. `whole_body_hover_edges_look_as_their_copies_did`
+renders the hover both ways.
+
+In Wireframe the model draws no faces, so a whole hovered body's faces are still copied (239 MB
+and about 150 ms for this assembly): the next section removes that copy.
+
+## Whole-body highlights in Wireframe: faces evaluated from plans (2026-11-12)
+
+In Wireframe the model draws no faces, so a whole hovered or selected body's faces could not be
+drawn again from the model's own triangles, as they are when the view shades: the highlight
+copied every triangle of every lit body on the CPU and uploaded it, at each change of the
+hovered row. Now the highlight hands the GPU each body's display plan and draws the triangles
+the GPU evaluates from it (the highlight scene's own `planned` bodies), as the model does when
+it shades. Without GPU evaluation the triangles are copied as before.
+
+Measured on the 561-body STEP printer assembly (2.8 million triangles), NVIDIA GB10, 3774 × 2094
+viewport, release build, Wireframe: the pointer moved on and off the assembly's Browser row 20
+times through the control channel, `SOLIDCRAFT_PROFILE_FRAMES=1` reporting each highlight build.
+
+| | highlight build | triangle bytes built and uploaded |
+|---|---|---|
+| before (`main`) | 178–190 ms, each a frame over 180 ms | 239 MB |
+| after | 21–36 ms (median 22) | 0 |
+
+The GPU evaluates the 561 plans in under 5 ms (the longest GPU workload in an `nsys` trace of
+the same hovers). The remaining CPU time was the copy of the bodies' edges, which drawing the
+model's own edge lines again (the section above) removes as well.
+
 # Recompute performance
 
 `solidcraft-cli bench-edit <script> <param> "(<old>) * 1.02"` builds a design from its script

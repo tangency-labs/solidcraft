@@ -3971,6 +3971,29 @@ fn coincident_takes_a_selected_point_and_origin_axis() {
     }
 }
 
+/// #15461: a selected line or circle and an origin axis, either way round, go to Collinear and
+/// Tangent from the toolbar: the line lands on the axis, the circle touches it.
+#[test]
+fn curve_constraints_take_a_selected_origin_axis() {
+    for reverse in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[5, 8], [25, 11]], "infer": false, "connect": false})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [-20, 9], "radius": 3})).unwrap();
+        for (command, curve) in [("sketch.constraint.collinear", "l1"), ("sketch.constraint.tangent", "c1")] {
+            let (picked, axis) = (Sel::SketchCurve { id: curve.into(), sketch: None }, Sel::Axis { name: "X".into() });
+            h.app.session.selection = if reverse { vec![axis, picked] } else { vec![picked, axis] };
+            h.app.start(command);
+            assert!(h.app.tool.is_none(), "reverse {reverse}: {command} applied from the selection, no tool left waiting ({:?})", h.app.status);
+        }
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let y = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap().y;
+        assert!(y("l1.start").abs() < 1e-6 && y("l1.end").abs() < 1e-6, "reverse {reverse}: line at y {} / {}", y("l1.start"), y("l1.end"));
+        let r = sk.radius(sk.curve_index("c1").unwrap()).unwrap();
+        assert!((y("c1.center").abs() - r).abs() < 1e-6, "reverse {reverse}: circle centre at y {} with radius {r}", y("c1.center"));
+    }
+}
+
 /// #10311: a selected line midpoint and another line, either way round, go to Coincident from the
 /// toolbar and from the context menu: the line's middle lands on the other line.
 #[test]

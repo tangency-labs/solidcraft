@@ -43,6 +43,10 @@ pub trait Expressions: Send + Sync {
     /// The length typed as `text` in millimetres: a bare number is in the display unit (`scale`
     /// units per millimetre), an explicit unit is honoured. None when `text` is not a length.
     fn parse_length_mm(&self, text: &str, scale: f64) -> Option<f64>;
+    /// Step size in this unit for a label drag, given the viewport's half-height in millimetres and current value.
+    fn scrub_step(&self, _unit: &str, _half_height_mm: Option<f64>, current_value: f64) -> f64 {
+        scrub_step(current_value)
+    }
 }
 
 /// Where a context keeps its installed [`Expressions`].
@@ -58,6 +62,60 @@ pub fn install_expressions(ctx: &egui::Context, expressions: Arc<dyn Expressions
 /// The expression language installed in `ctx`, if any.
 pub fn expressions(ctx: &egui::Context) -> Option<Arc<dyn Expressions>> {
     ctx.data(|data| data.get_temp::<Arc<dyn Expressions>>(expressions_id()))
+}
+
+/// Where a context keeps its active viewport view scale (view half-height in millimetres).
+fn view_scale_id() -> egui::Id {
+    egui::Id::unique("sc_kit_view_scale")
+}
+
+/// Set the viewport half-height in millimetres for scale-adaptive scrubbing.
+pub fn set_viewport_half_height(ctx: &egui::Context, half_height: f64) {
+    if half_height.is_finite() && half_height > 0.0 {
+        ctx.data_mut(|d| d.insert_temp(view_scale_id(), half_height));
+    }
+}
+
+/// The viewport half-height in millimetres, if installed in `ctx`.
+pub fn viewport_half_height(ctx: &egui::Context) -> Option<f64> {
+    ctx.data(|d| d.get_temp::<f64>(view_scale_id()))
+}
+
+/// Where a context keeps the ID of the row currently being scrubbed, if any.
+fn scrub_active_id() -> egui::Id {
+    egui::Id::unique("sc_kit_scrub_active")
+}
+
+pub fn set_scrubbing(ctx: &egui::Context, id: egui::Id, active: bool) {
+    ctx.data_mut(|d| {
+        if active {
+            d.insert_temp(scrub_active_id(), id);
+        } else if d.get_temp::<egui::Id>(scrub_active_id()) == Some(id) {
+            d.remove::<egui::Id>(scrub_active_id());
+        }
+    });
+}
+
+/// Whether a value label scrub drag is currently active in `ctx`.
+pub fn is_scrubbing(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<egui::Id>(scrub_active_id())).is_some()
+}
+
+/// Quantize `raw` to the nearest 1, 2, or 5 in its power of ten.
+pub fn snap_to_125(raw: f64) -> f64 {
+    let raw = raw.max(1e-9);
+    let p = 10f64.powf(raw.log10().floor());
+    let m = raw / p;
+    let mantissa = if m < 1.5 {
+        1.0
+    } else if m < 3.5 {
+        2.0
+    } else if m < 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+    mantissa * p
 }
 
 /// A plain number typed into a field, with a decimal point or a decimal comma (#1347): "2.5"
@@ -232,11 +290,11 @@ pub fn scrub_step(number: f64) -> f64 {
     10f64.powf(decade - 2.0)
 }
 
-/// `anchor` moved by `points` of drag at `step` per point, on the step's grid. A value that
-/// starts at zero or above stays there: a drag never turns a size negative.
-pub fn scrubbed(anchor: f64, points: f32, step: f64) -> f64 {
+/// `anchor` moved by `points` of drag at `step` per point, on the step's grid.
+/// When `clamp_positive` is true, a value that starts at zero or above stops at zero.
+pub fn scrubbed(anchor: f64, points: f32, step: f64, clamp_positive: bool) -> f64 {
     let moved = ((anchor + f64::from(points) * step) / step).round() * step;
-    let moved = if anchor >= 0.0 { moved.max(0.0) } else { moved };
+    let moved = if clamp_positive && anchor >= 0.0 { moved.max(0.0) } else { moved };
     // Literal values are capped where `literal` reads them; a drag never leaves that range.
     if moved.is_finite() && moved.abs() < LITERAL_CAP { moved } else { anchor }
 }
@@ -266,9 +324,15 @@ struct Scrub {
 /// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
 /// follow, and the dialog's OK still makes the one command (and the one undo step). A field
 /// holding an expression or a parameter is left alone. Returns whether the text changed.
-pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
+pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String, clamp_positive: bool) -> bool {
     let id = label.id.with("sc_scrub");
-    let Some(now) = expressions(ui.ctx()).and_then(|e| literal(e.as_ref(), value)).filter(|_| ui.is_enabled()) else {
+    let Some(expr) = expressions(ui.ctx()) else {
+        set_scrubbing(ui.ctx(), id, false);
+        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        return false;
+    };
+    let Some(now) = literal(expr.as_ref(), value).filter(|_| ui.is_enabled()) else {
+        set_scrubbing(ui.ctx(), id, false);
         ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
         return false;
     };
@@ -276,9 +340,11 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
     if !label.dragged() {
+        set_scrubbing(ui.ctx(), id, false);
         ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
         return false;
     }
+    set_scrubbing(ui.ctx(), id, true);
     let factor = ui.input(|i| {
         if i.modifiers.shift {
             0.1
@@ -293,14 +359,16 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
         return false;
     };
     let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
+    let base_step = expr.scrub_step(&now.unit, viewport_half_height(ui.ctx()), now.number);
+    let target_step = base_step * factor;
     // A new drag starts from where it was pressed; a changed modifier starts over from here.
     let state = match base {
-        Some(state) if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 => state,
-        Some(_) => Scrub { anchor: now.number, origin: x, step: scrub_step(now.number) * factor },
-        None => Scrub { anchor: now.number, origin: pressed, step: scrub_step(now.number) * factor },
+        Some(state) if (state.step - target_step).abs() <= state.step * 1e-9 => state,
+        Some(_) => Scrub { anchor: now.number, origin: x, step: target_step },
+        None => Scrub { anchor: now.number, origin: pressed, step: target_step },
     };
     let points = x - state.origin;
-    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step), state.step, &now);
+    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step, clamp_positive), state.step, &now);
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
     if text == *value {
         return false;
@@ -1337,11 +1405,13 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                 if ui.is_sizing_pass() {
                     response.request_focus();
                 }
-                // It wraps but stays one line: Enter ends the edit as in a single-line field.
+                // It wraps but stays one line: Enter (or Shift+Enter, which moves up a row) ends the
+                // edit as in a single-line field.
                 // Raw events, as the table reads them: an accepted completion has already taken its Enter.
                 let enter = ui.input(|i| {
                     i.raw.events.iter().any(|e| {
-                        matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE)
+                        matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. }
+                            if *modifiers == egui::Modifiers::NONE || modifiers.shift_only())
                     })
                 });
                 if response.has_focus() && enter {

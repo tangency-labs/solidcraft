@@ -364,9 +364,18 @@ pub(crate) fn create_rot_srf(
     axis: Vec3,
     angle_deg: f64,
 ) -> Result<BSplineSurface> {
-    // only support BSpline Curves for now
-    let bsc = bspline_curve_of(curve)
-        .ok_or_else(|| SolidError::sweep_missing(OP_ROT_SRF, "the curve's B-spline form"))?;
+    // only support BSpline Curves for now (`SM_CAST_PTR(SmBSplineCurve, pCurveArg)`, handed
+    // to CreateSurfOfRevolution, whose GetOrCreateGwNurbPointer runs a line's own MakeNurb:
+    // a two-point line's part comes with its NURB, which it has none of yet)
+    let line_with_nurb;
+    let bsc = match curve.kind() {
+        CurveKind::Line(l) => {
+            line_with_nurb = l.base_with_nurb()?;
+            &*line_with_nurb
+        }
+        _ => bspline_curve_of(curve)
+            .ok_or_else(|| SolidError::sweep_missing(OP_ROT_SRF, "the curve's B-spline form"))?,
+    };
 
     // pass the call along (an SmLine generator parallel to the axis gets an arc
     // length sweep parameterisation)
@@ -1416,6 +1425,85 @@ mod tests {
         assert!((p - Vec3::Y).length() < 1e-12);
         // a vertex on the axis does not move
         assert!(g.vertex_sweep_same(&b, v1).is_err());
+    }
+
+    /// Lazy lines (`Line::from_points`, no NURB yet, as upstream's two-point `SmLine`) as
+    /// swept edges, with the default kernel and every fix on:
+    /// - turned a full turn about Z from the axis, `(0, 0, 0)`–`(1, 0, 0)` makes the planar
+    ///   surface of an eager line (`create_line_segment`) the same, point for point: the
+    ///   square `S(u, v) = (2.2 v − 1.1, 2.2 u − 1.1, 0)` holding the unit disc
+    ///   (`create_rot_srf`), trimmed by its one trim curve, the unit circle in `z = 0`;
+    /// - swept along `(0, 0, 2)` (translational), `(0, 0, 0)`–`(1, 0, 0)` is the rectangle
+    ///   with corners `(0, 0, 0)`, `(1, 0, 0)`, `(0, 0, 2)`, `(1, 0, 2)`.
+    ///
+    /// Upstream hands the line itself to `CreateSurfOfRevolution` / `CreateLinearSweep`,
+    /// whose `GetOrCreateGwNurbPointer` runs the line's own `MakeNurb`.
+    #[test]
+    fn lazy_line_edges_sweep() {
+        for fixes in [
+            crate::kernel::UpstreamFixes::default(),
+            crate::kernel::UpstreamFixes::all(),
+        ] {
+            let k = Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let lazy = || {
+                let l = Line::from_points(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 3);
+                assert!(l.base().gw_nurb().is_none());
+                Curve::from(l)
+            };
+            let unit = Extent1d::from_min_max(0.0, 1.0);
+
+            let disc_of = |c: Curve| {
+                let (b, e) = wire_on(c, Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), unit);
+                let s = z_sweep(360.0).edge_sweep_higher(&k, &b, e).unwrap();
+                // the face's one trim curve is the unit circle in z = 0
+                assert_eq!(s.trim_curves.len(), 1);
+                let rim = &s.trim_curves[0];
+                let ivl = rim.natural_interval();
+                for f in [0.0, 0.2, 0.45, 0.7, 1.0] {
+                    let p = rim.evaluate_point(&k, ivl.evaluate(f)).unwrap();
+                    assert!(
+                        p.z.abs() <= 1e-12 && (p.x.hypot(p.y) - 1.0).abs() <= 1e-12,
+                        "rim {p:?}"
+                    );
+                }
+                s.surface.unwrap()
+            };
+            let disc = disc_of(lazy());
+            let eager = disc_of(Curve::from(
+                Line::create_line_segment(3, Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), None).unwrap(),
+            ));
+            assert_eq!(disc.type_code(), eager.type_code());
+            let dom = disc.natural_uv_domain_with_nurb(&k).unwrap();
+            assert_eq!(dom, eager.natural_uv_domain_with_nurb(&k).unwrap());
+            for (fu, fv) in [(0.0, 0.0), (0.3, 0.6), (1.0, 1.0), (0.5, 0.25)] {
+                let uv = dom.evaluate(fu, fv);
+                let p = disc.evaluate_point(&k, uv).unwrap();
+                assert_eq!(p, eager.evaluate_point(&k, uv).unwrap());
+                let want = Vec3::new(2.2 * uv.y - 1.1, 2.2 * uv.x - 1.1, 0.0);
+                assert!((p - want).length() <= 1e-12, "{uv:?}: {p:?}, want {want:?}");
+            }
+
+            let (b, e) = wire_on(lazy(), Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), unit);
+            let mut t = crate::sweep::trans_sweep_geometry::TranslationalSweepGeometry::new(
+                Vec3::new(0.0, 0.0, 2.0),
+            );
+            t.base.make_analytics = false;
+            let s = t.edge_sweep_higher(&k, &b, e).unwrap();
+            let dom = s.surface.natural_uv_domain_with_nurb(&k).unwrap();
+            let want = [
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 2.0),
+                Vec3::new(1.0, 0.0, 2.0),
+            ];
+            for (fu, fv) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+                let p = s.surface.evaluate_point(&k, dom.evaluate(fu, fv)).unwrap();
+                assert!(want.iter().any(|w| (p - *w).length() <= 1e-12), "{p:?}");
+            }
+        }
     }
 
     #[test]

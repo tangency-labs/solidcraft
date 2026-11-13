@@ -1027,7 +1027,7 @@ pub(super) fn appearance_look(cmd: &str, p: &Value) -> Result<Option<solidcraft_
 }
 
 fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcore_record::Vec3) -> f64 {
-    let bb = b.mesh().bounds();
+    let bb = b.body.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
     let c = solidcore_record::Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
     c.dist(p)
 }

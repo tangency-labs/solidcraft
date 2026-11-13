@@ -32,7 +32,9 @@
 //!   `InvalidInput` with reason [`BARE_FLAG_REASON`].
 //! - `ST_GetRotationRateOfChange`'s optional pointers become a [`ZSource`]: a curve, or
 //!   a vector with its optional neighbours (both missing is the bare error). The rate
-//!   matrix `RM[i][j]` is a `[[f64; 3]; 3]` (rows `i`).
+//!   matrix `RM[i][j]` is a `[[f64; 3]; 3]` (rows `i`). Not upstream (the SolidCraft
+//!   fork's upright sweep): [`ZSource::Up`], z the up direction made square to the
+//!   trajectory's tangent, its derivative in closed form.
 //! - `N_SweepCrossTangentCrv` ignores failures of `N_CrvEval` on the cross section
 //!   (the accumulated sample parameter can round past the last knot) and keeps the
 //!   previous sample, as does the Rust function; only a failure on the very first
@@ -458,6 +460,10 @@ pub enum ZSource<'a> {
         /// `nextZ` and its parameter.
         next: Option<(Vec3, f64)>,
     },
+    /// Not upstream (the fork's upright sweep): the unit up direction `up`, z its part
+    /// square to the trajectory's unit tangent `x`, `w = up - (up . x) x`, made unit, and
+    /// `z'` from `w' = -(up . x') x - (up . x) x'`.
+    Up(Vec3),
 }
 
 /// Rate of change `[x' | y' | z']` of the sweep frame `M = [x | y | z]` at `u`
@@ -471,6 +477,22 @@ pub enum ZSource<'a> {
 /// [`ZSource::Samples`] without neighbours (upstream's return code 1).
 pub fn rotation_rate_of_change(traj: &Curve, u: f64, zsrc: ZSource<'_>) -> Result<Mat3> {
     const OP: &str = OP_ROT;
+    // Get sweep trajectory evaluations.
+    let t = traj.derivs(u, Side::Left, 2)?;
+    let (t1, t2) = (at(&t, 1, OP)?, at(&t, 2, OP)?);
+    let mag = (t1.x * t1.x + t1.y * t1.y + t1.z * t1.z).sqrt();
+    let mag3 = mag * mag * mag;
+    let d12 = t1.x * t2.x + t1.y * t2.y + t1.z * t2.z;
+
+    // X = t'/|t'|.
+    let x = Vec3::new(t1.x / mag, t1.y / mag, t1.z / mag);
+    // dX = t''/|t'| - t' (t'.t'')/|t'|**3.
+    let dx = Vec3::new(
+        t2.x / mag - t1.x * d12 / mag3,
+        t2.y / mag - t1.y * d12 / mag3,
+        t2.z / mag - t1.z * d12 / mag3,
+    );
+
     let (m_z, dm_z) = match zsrc {
         ZSource::Curve(cur_z) => {
             // Evaluate z and z'.
@@ -508,23 +530,24 @@ pub fn rotation_rate_of_change(traj: &Curve, u: f64, zsrc: ZSource<'_>) -> Resul
             );
             (z, dm_z)
         }
+        ZSource::Up(up) => {
+            // w = up - (up . x) x and w' = -(up . x') x - (up . x) x'
+            let (ux, udx) = (up.dot(x), up.dot(dx));
+            let w = up - x * ux;
+            let dw = -(x * udx) - dx * ux;
+            let mag = w.length();
+            #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+            if !(mag > 0.0) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "an up direction along the trajectory",
+                ));
+            }
+            let mag3 = mag * mag * mag;
+            let d = w.dot(dw);
+            (w * (1.0 / mag), dw * (1.0 / mag) - w * (d / mag3))
+        }
     };
-
-    // Get sweep trajectory evaluations.
-    let t = traj.derivs(u, Side::Left, 2)?;
-    let (t1, t2) = (at(&t, 1, OP)?, at(&t, 2, OP)?);
-    let mag = (t1.x * t1.x + t1.y * t1.y + t1.z * t1.z).sqrt();
-    let mag3 = mag * mag * mag;
-    let d12 = t1.x * t2.x + t1.y * t2.y + t1.z * t2.z;
-
-    // X = t'/|t'|.
-    let x = Vec3::new(t1.x / mag, t1.y / mag, t1.z / mag);
-    // dX = t''/|t'| - t' (t'.t'')/|t'|**3.
-    let dx = Vec3::new(
-        t2.x / mag - t1.x * d12 / mag3,
-        t2.y / mag - t1.y * d12 / mag3,
-        t2.z / mag - t1.z * d12 / mag3,
-    );
 
     // dy = cross_product(z',x) + cross_product(z,x').
     let dy = Vec3::new(
@@ -1421,6 +1444,78 @@ mod tests {
                 &bad,
             );
             assert!(r.is_err());
+        }
+    }
+
+    /// The upright frame `[x | y | z]` of `traj` at `u` with the unit up direction `up`: `x` the
+    /// unit tangent, `z` the up direction made square to it and unit, `y = z x x`.
+    fn upright_frame(traj: &Curve, u: f64, up: Vec3) -> [Vec3; 3] {
+        let (_, x) = traj.eval_tangent(u, Side::Left).unwrap();
+        let w = up - x * up.dot(x);
+        let z = w * (1.0 / w.length());
+        [x, z.cross(x), z]
+    }
+
+    /// The closed-form rate of the upright frame ([`ZSource::Up`]) against central differences
+    /// of the frame itself, at five parameters round a closed saddle loop (sixteen points of
+    /// `(10 cos t, 10 sin t, 3 cos 2t)` interpolated closed, chord-length parameters on
+    /// `[a, b]`).
+    ///
+    /// Step and tolerance: the step is `h = 1e-5 (b - a)`. A central difference is off by
+    /// `h^2 |M3| / 6` (`M3` the frame's third derivative) plus its rounding, about
+    /// `eps |M| / h`. The loop's radius of curvature stays above about 5 mm and its
+    /// parameter runs over about 70 mm of arc, so per unit of the parameter `|M'| <~ 14` and
+    /// `|M3| <~ 14^3 ~ 3e3`: truncation below `(1e-5)^2 3e3 / 6 ~ 5e-8` and rounding below
+    /// `2.2e-16 / 1e-5 ~ 2e-11`. The tolerance, `1e-5` of the rate's largest entry (at least
+    /// 1), stands above both, and far below what a dropped or flipped term costs: the loop's
+    /// slope `up . x` reaches about 0.5 and its turn `|x'|` about 14, so either term of
+    /// `w' = -(up . x') x - (up . x) x'`, or the `w (w . w')` term of the unit's derivative,
+    /// is of the rate's own order, and a sign flip changes the rate by twice the term.
+    #[test]
+    fn the_upright_rate_is_the_frames_derivative() {
+        let points: Vec<Vec3> = (0..16)
+            .map(|i| {
+                let t = std::f64::consts::TAU * f64::from(i) / 16.0;
+                Vec3::new(10.0 * t.cos(), 10.0 * t.sin(), 3.0 * (2.0 * t).cos())
+            })
+            .collect();
+        let traj = crate::nurbs::b_spline_curve::BSplineCurve::interpolate_points(
+            &points,
+            None,
+            3,
+            None,
+            None,
+            true,
+            crate::nurbs::crv_fit::p1::ParamMethod::ChordLength,
+        )
+        .unwrap()
+        .nurb
+        .clone()
+        .unwrap();
+        let up = Vec3::Z;
+        let (a, b) = traj.param_bounds();
+        let h = 1e-5 * (b - a);
+        for f in [0.1, 0.27, 0.45, 0.62, 0.81] {
+            let u = a + f * (b - a);
+            let rate = rotation_rate_of_change(&traj, u, ZSource::Up(up)).unwrap();
+            let (lo, hi) = (
+                upright_frame(&traj, u - h, up),
+                upright_frame(&traj, u + h, up),
+            );
+            let mut size = 1.0_f64;
+            for row in &rate {
+                for v in row {
+                    size = size.max(v.abs());
+                }
+            }
+            for (j, (p, q)) in lo.iter().zip(&hi).enumerate() {
+                let fd = (*q - *p) * (1.0 / (2.0 * h));
+                let closed = Vec3::new(rate[0][j], rate[1][j], rate[2][j]);
+                assert!(
+                    (closed - fd).length() <= 1e-5 * size,
+                    "at {f} of the loop, column {j}: closed form {closed:?}, differences {fd:?}"
+                );
+            }
         }
     }
 }

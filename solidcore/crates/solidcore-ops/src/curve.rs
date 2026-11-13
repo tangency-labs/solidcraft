@@ -1,24 +1,30 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
-//! blend from one curve's end to another's, circles and arcs, and a curve extended at an end.
+//! blend from one curve's end to another's, circles and arcs, a curve extended at an end, two
+//! curves joined end to end, and the point of a curve nearest a given point.
 //! The curve is the record's ([`Curve`]); the knots, the map's carrying of the control points,
-//! the views' meeting, the curvature, the blend, the circles and the extension are the
-//! kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
+//! the views' meeting, the curvature, the blend, the circles, the extension and the nearest point
+//! are the kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
 //! [`solidcore::nurbs::crv_basic::Curve::transform`],
 //! [`solidcore::intersect::views::curves_from_views`],
 //! [`solidcore::query::continuity::curve_comb`], [`solidcore::curve::blend::blend_curve`],
 //! [`solidcore::curve::ellipse::Ellipse::arc`],
 //! [`solidcore::curve::ellipse::Ellipse::circle_from_3_points`],
-//! [`solidcore::nurbs::crv_basic::Curve::extend_by_dist`]). Ops checks the inputs and converts.
+//! [`solidcore::nurbs::crv_basic::Curve::extend_by_dist`],
+//! [`solidcore::nurbs::b_spline_curve::BSplineCurve::join_with`],
+//! [`solidcore::curve::curve::Curve::drop_point`]). Ops checks the inputs and
+//! converts.
 
 use solidcore::curve::arc::ArcDefinition;
 use solidcore::curve::blend::{self as kblend, BlendEnd};
 use solidcore::curve::curve::Curve as KCurve;
 use solidcore::curve::ellipse::Ellipse;
-use solidcore::curve::from_parameters::{from_parameters, EdgeCurve};
+use solidcore::curve::from_parameters::{from_parameters, record_parameter, EdgeCurve};
 use solidcore::geom::certified::Verdict;
+use solidcore::geom::global_solver::SolverOperation;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_adv::p1::{Continuity, CurveEnd};
 use solidcore::nurbs::crv_geom::ToleranceKind;
 use solidcore::nurbs::geom::Interval;
@@ -348,6 +354,45 @@ pub fn circle(centre: [f64; 3], normal: [f64; 3], x_dir: [f64; 3], radius: f64) 
     on_unit(&made)
 }
 
+/// The arc about `centre`, right-handed about `normal`, from `start` to the direction of `end`
+/// (the kernel's [`ArcDefinition::from_points`]: its radius `start`'s distance from the axis, its
+/// sweep the anticlockwise angle to `end`'s direction in `(0, 2 pi]`, a full turn where `end` is in
+/// `start`'s direction; `start` and `end` taken into the plane through `centre` square to
+/// `normal`), as [`circle`] gives it: the exact rational quadratic on `[0, 1]`, from the start.
+///
+/// # Errors
+/// [`Error::Argument`] for a number not finite or past the coordinate bound, a `normal` of no
+/// length, or a start or end on the axis; [`Error::Record`] for an arc the record cannot hold;
+/// the kernel's status otherwise.
+pub fn arc_about(
+    centre: [f64; 3],
+    normal: [f64; 3],
+    start: [f64; 3],
+    end: [f64; 3],
+) -> Result<Curve> {
+    if ![centre, normal, start, end].iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    let made = run("curve::arc_about", |k| {
+        let definition = match ArcDefinition::from_points(
+            point(centre),
+            point(normal),
+            point(start),
+            point(end),
+        ) {
+            Ok(d) => d,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        match Ellipse::arc(k, &definition) {
+            Ok(arc) => exact_record(k, &KCurve::from(arc)),
+            Err(SolidError::InvalidInput { .. }) => Ok(Err(Error::Argument)),
+            Err(e) => Err(e),
+        }
+    })??;
+    on_unit(&made)
+}
+
 /// The full circle through `points`, starting at `points[0]` and running from it through
 /// `points[1]` to `points[2]` ([`Ellipse::circle_from_3_points`], closed), as [`circle`] gives
 /// it: the exact rational quadratic on `[0, 1]`, closed.
@@ -441,6 +486,11 @@ pub enum CurveExtension {
     /// A straight piece along the end tangent, joined to the curve as one spline of its
     /// degree (G1; the kernel's [`Continuity::G1`]).
     Linear,
+    /// The same knots and control points, the control polygon stretched along itself from the
+    /// other end so each point keeps its share of it (the kernel's
+    /// [`solidcore::nurbs::crv_basic::Curve::extend_keeping_proportion`]): the curve grows by the
+    /// length to the kernel's stop, its shape slides along the polygon.
+    Proportion,
 }
 
 /// `curve` made longer by `length` (mm, of arc length) at `at`, continued as `how` says
@@ -469,14 +519,27 @@ pub fn extend_curve(
     if nurb.is_closed() {
         return Err(Error::Argument);
     }
-    let continuity = match how {
-        CurveExtension::Natural => Continuity::Cmax,
-        CurveExtension::Linear => Continuity::G1,
-    };
     let ends: &[CurveEnd] = match at {
         CurveEndAt::Start => &[CurveEnd::Start],
         CurveEndAt::End => &[CurveEnd::End],
         CurveEndAt::Both => &[CurveEnd::Start, CurveEnd::End],
+    };
+    let continuity = match how {
+        CurveExtension::Natural => Continuity::Cmax,
+        CurveExtension::Linear => Continuity::G1,
+        CurveExtension::Proportion => {
+            return run("curve::extend_curve", |_| {
+                let mut extended = nurb;
+                for &end in ends {
+                    extended = match extended.extend_keeping_proportion(length, end) {
+                        Ok((curve, _)) => curve,
+                        Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                        Err(e) => return Err(e),
+                    };
+                }
+                Ok(record_of(&extended))
+            })?;
+        }
     };
     run("curve::extend_curve", |_| {
         let mut extended = nurb;
@@ -485,6 +548,276 @@ pub fn extend_curve(
         }
         Ok(record_of(&extended))
     })?
+}
+
+/// `a` and `b` joined end to end into one spline (the kernel's `JoinWith`): the end of `a` that
+/// meets an end of `b` within `tolerance` (mm) is joined to it, and the joined curve runs from
+/// `a`'s other end to `b`'s other end. Both are brought to the higher degree and `b` follows on
+/// in parameter, so the joined curve is both curves exactly, with a knot of full multiplicity at
+/// the joint: it is as smooth there as the two curves meet (G1 where their tangents line up, as
+/// a half section and its mirror do). Two lines that continue each other become one line. The
+/// kernel tries `a`'s end first, then its start, each against `b`'s start, then its end.
+/// A clamped spline or rational spline each.
+///
+/// # Errors
+/// [`Error::Argument`] for a `tolerance` not finite and above 0, a curve that is not a valid
+/// clamped spline or rational spline, or a joined curve the record cannot hold (a spline joined
+/// to a rational spline, past the record's size); [`Error::Unsupported`] when no end of `a`
+/// meets an end of `b` within `tolerance` (or the kernel could not join the two there); the
+/// kernel's unported and cancelled statuses.
+pub fn join_curves(a: &Curve, b: &Curve, tolerance: f64) -> Result<Curve> {
+    if !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(Error::Argument);
+    }
+    let (na, nb) = (nurb_of(a)?, nurb_of(b)?);
+    run("curve::join_curves", |k| {
+        for (a_end, b_end) in [(true, false), (true, true), (false, false), (false, true)] {
+            let mut first = BSplineCurve::from_nurb(na.clone(), 3, false);
+            let mut second = BSplineCurve::from_nurb(nb.clone(), 3, false);
+            match first.join_with(k, a_end, &mut second, b_end, Some(tolerance)) {
+                Ok(()) => {
+                    let Some(joined) = first.gw_nurb() else {
+                        return Ok(Err(Error::Unsupported(
+                            "the joined curve has no NURBS form",
+                        )));
+                    };
+                    return Ok(record_of(joined));
+                }
+                Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
+                Err(_) => {}
+            }
+        }
+        Ok(Err(Error::Unsupported(
+            "no end of one curve meets an end of the other within the tolerance",
+        )))
+    })?
+}
+
+/// How far one curve strays from another curve or from a sheet ([`curve_deviation`],
+/// [`curve_surface_deviation`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Deviation {
+    /// The largest distance found at the stations.
+    pub max: f64,
+    /// Where on the first curve it is.
+    pub at: [f64; 3],
+    /// Its foot on the other curve or the sheet.
+    pub to: [f64; 3],
+    /// Each station's point and its foot, in order along the first curve: a comb.
+    pub comb: Vec<([f64; 3], [f64; 3])>,
+    /// The kernel's certified bound of the largest distance, where it applies (two
+    /// non-rational splines on one domain); `None` elsewhere.
+    pub bound: Option<f64>,
+}
+
+fn deviation_of(d: solidcore::query::deviation::Deviation) -> Deviation {
+    let a = |p: Point3| [p.x, p.y, p.z];
+    Deviation {
+        max: d.max,
+        at: a(d.at),
+        to: a(d.to),
+        comb: d.comb.into_iter().map(|(p, q)| (a(p), a(q))).collect(),
+        bound: d.bound,
+    }
+}
+
+/// How far curve `a` strays from curve `b`: `samples` stations at even steps of `a`'s range,
+/// each dropped on `b` (the kernel's [`solidcore::query::deviation::curve_deviation`]), the
+/// largest distance found with where it is, the station pairs, and the certified bound where it
+/// applies. The curves are splines, rational splines or polylines, each over its whole range.
+///
+/// # Errors
+/// [`Error::Argument`] for another kind of curve, one the record refuses, or a station count
+/// outside 2..=10000; the kernel's status otherwise (no station dropping onto `b`).
+pub fn curve_deviation(a: &Curve, b: &Curve, samples: usize) -> Result<Deviation> {
+    run("curve::curve_deviation", |k| {
+        let ka = match blend_input(k, a)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        let kb = match blend_input(k, b)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        Ok(
+            match solidcore::query::deviation::curve_deviation(k, &ka.curve, &kb.curve, samples) {
+                Ok(d) => Ok(deviation_of(d)),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })?
+}
+
+/// How far curve `c` strays from the one-face `sheet`: as [`curve_deviation`], each station
+/// dropped on the face's surface over its parameter box (the kernel's
+/// [`solidcore::query::deviation::curve_surface_deviation`]); no certified bound.
+///
+/// # Errors
+/// As [`curve_deviation`]; [`Error::Argument`] for a sheet that is not one face; those of
+/// [`crate::Body::from_record`].
+pub fn curve_surface_deviation(
+    c: &Curve,
+    sheet: &solidcore_record::brep::Brep,
+    samples: usize,
+) -> Result<Deviation> {
+    let (body, _) = crate::Body::from_record(sheet, true)?;
+    crate::session::read_body("curve::curve_surface_deviation", &body, |k, b| {
+        let [f] = b.face_list() else {
+            return Ok(Err(Error::Argument));
+        };
+        let face = b.face(*f)?;
+        let Some(surface) = face.surface.as_ref() else {
+            return Ok(Err(Error::Argument));
+        };
+        let kc = match blend_input(k, c)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        Ok(
+            match solidcore::query::deviation::curve_surface_deviation(
+                k,
+                &kc.curve,
+                surface,
+                &face.uv_domain,
+                samples,
+            ) {
+                Ok(d) => Ok(deviation_of(d)),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })?
+}
+
+/// The point of a free curve nearest a given point ([`closest_point`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurvePoint {
+    /// The curve's parameter there, the record's.
+    pub parameter: f64,
+    /// The curve's point there.
+    pub point: [f64; 3],
+    /// Its distance from the given point: the kernel solve's (not certified). A solution
+    /// within the tolerance of an end is snapped to that end and keeps the solve's distance, so
+    /// it is the distance to `point` within the tolerance.
+    pub distance: f64,
+}
+
+/// The record parameter range [`closest_point`] drops over: a line's segment from its start
+/// (0) to its end (1), a circle's or ellipse's one turn from its frame's x axis, any other
+/// curve's own range; `None` for an unbounded range.
+fn own_range(curve: &Curve) -> Option<[f64; 2]> {
+    match (curve, curve.natural()) {
+        (Curve::Line { .. }, _) => Some([0.0, 1.0]),
+        (_, Natural::Periodic) => Some([0.0, std::f64::consts::TAU]),
+        (_, Natural::Range(lo, hi)) => (lo.is_finite() && hi.is_finite()).then_some([lo, hi]),
+    }
+}
+
+/// The point of `curve` nearest `p` over the record's own range (a line between its two
+/// points, a circle or ellipse its whole turn, a polyline or spline its whole range): the
+/// curve as the kernel's ([`from_parameters`]), the kernel's global minimising drop of `p` onto
+/// it ([`KCurve::drop_point`], no guess; a solution within `tolerance` of an end snapped to
+/// that end), the curve's point at the parameter it finds ([`KCurve::evaluate_point`]) and that
+/// parameter as the record's
+/// ([`solidcore::curve::from_parameters::record_parameter`]: radians on a circle or ellipse).
+/// `None` where the drop finds no point.
+///
+/// # Errors
+/// [`Error::Argument`] for a point not finite or past the coordinate bound, a tolerance not
+/// finite and positive, or a curve the record or the kernel's constructors refuse; the kernel's
+/// status otherwise (a traced intersection curve, which has no constructor yet).
+pub fn closest_point(curve: &Curve, p: [f64; 3], tolerance: f64) -> Result<Option<CurvePoint>> {
+    if !coord_ok(&p) || !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Error::Argument);
+    }
+    if check_curve(curve, &mut Budget::input()).is_err() {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::closest_point", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let dropped = match made.curve.drop_point(
+            k,
+            &made.interval,
+            point(p),
+            None,
+            tolerance,
+            None,
+            SolverOperation::Minimize,
+        ) {
+            Ok(dropped) => dropped,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        if !dropped.success {
+            return Ok(Ok(None));
+        }
+        let at = made.curve.evaluate_point(k, dropped.parameter)?;
+        Ok(Ok(Some(CurvePoint {
+            parameter: record_parameter(&record, range, dropped.parameter, at),
+            point: [at.x, at.y, at.z],
+            distance: dropped.distance,
+        })))
+    })?
+}
+
+pub use solidcore::curve::stretch::Stretch;
+
+/// `curve` with the control points `picked` stretched by a drag `delta` of point `handle` from
+/// point `pivot` (the kernel's [`solidcore::curve::stretch::stretch_points`]): with
+/// [`Stretch::Linear`] each moves by `delta` times the control polygon's length from the pivot to
+/// it over its length from the pivot to the handle (the pivot stays, the handle moves by `delta`
+/// whole); with [`Stretch::None`] each by `delta`. With `plane` (as
+/// [`crate::curve_plane::plane_of`] gives it), `delta` is first taken into the plane, so a
+/// planar curve stays planar. A closed periodic spline's repeated points move with their twins.
+///
+/// # Errors
+/// [`Error::Argument`] for another kind of curve than a spline or polyline, an index past its
+/// points, the handle at the pivot, no polygon length from the pivot to the handle, a number not
+/// finite or a moved point past the coordinate bound.
+#[allow(clippy::too_many_arguments)]
+pub fn stretch_cvs(
+    curve: &Curve,
+    picked: &[usize],
+    pivot: usize,
+    handle: usize,
+    delta: [f64; 3],
+    how: Stretch,
+    plane: Option<crate::curve_plane::CurvePlane>,
+) -> Result<Curve> {
+    let (Curve::Spline { points, .. } | Curve::Polyline { points }) = curve else {
+        return Err(Error::Argument);
+    };
+    let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
+    let given: Vec<Point3> = points.iter().map(|p| v(*p)).collect();
+    let stretched = solidcore::curve::stretch::stretch_points(
+        &given,
+        picked,
+        pivot,
+        handle,
+        v(delta),
+        how,
+        plane.map(|p| v(p.normal)),
+    )
+    .map_err(|_| Error::Argument)?;
+    let mut out = curve.clone();
+    for &i in picked {
+        let to = stretched
+            .get(i)
+            .map(|p| [p.x, p.y, p.z])
+            .ok_or(Error::Argument)?;
+        if !coord_ok(&to) {
+            return Err(Error::Argument);
+        }
+        out = move_cv(&out, i, to)?;
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

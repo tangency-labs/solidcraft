@@ -517,7 +517,7 @@ These are the pairs solved in closed form; every other pair is traced.
 | plane/surface of revolution | plane through the axis; square to it | the generator rotated in; circles | `surface/surf_of_revolution/p1.rs` |
 | revolution/revolution | same axis, planar generators | circles at the generators' intersections | `surf_of_revolution/p3.rs` |
 | plane/extrusion, extrusion/extrusion or cylinder | extrusion parallel to the plane or to the other | lines along the extrusion | `surface/surf_of_extrusion/p2.rs` |
-| plane/torus | square to the axis; through it | circles; meridian circles | `surface/torus.rs` (plane side: `plane_first_torus_section_exact`, WR-721) |
+| plane/torus | square to the axis; through it | circles; meridian circles | `surface/torus.rs` (plane side: `surface/plane/p2.rs`, WR-721) |
 
 How each is made exactly: the curve's defining data (a centre, axes and radii, or a line's points)
 are computed from the two surfaces' frames, and the curve is stored as its rational form (an
@@ -616,11 +616,11 @@ and why the approximation tolerance is half of it.
 | small loop, nearly tangent (#17 gap 2) | every seed below the 5°/2° thresholds | missed (#396); found with `ssi_low_angle_start_on_probation` | loop-free pairs cannot hide it; closed form for plane/sphere and degree-2 | flag on by default |
 | small circle taken as a point | gap to tangency within tolerance though the circle is not | fixed (WR-79): the sphere's closed forms collapse a circle only when its radius is within the tolerance; `FaceIntersect` takes a circle whose cap lies within the tolerance as a touch (§4.6) | the radius from √((R − \|d\|)(R + \|d\|)) | |
 | coincident faces | normals parallel everywhere | closed forms for planes, coaxial revolutions, parallel cylinders; else the boolean's coincidence check before SSI | region boundary from the field's zero coefficients | |
-| near-coincident strip | two planes within tolerance across a strip; the crossing is fixed only to tol / sin θ | `boolean_coincident_strip_drops_crossing` (WR-614) | patches 1e-8 apart, separating only at second order: refused (`y23_fig1d_two_quads`) | |
+| near-coincident strip | two planes within tolerance across a strip; the crossing is fixed only to tol / sin θ | the crossing is dropped (WR-614, by default) | patches 1e-8 apart, separating only at second order: refused (`y23_fig1d_two_quads`) | |
 | grazing | boxes just touch; a boundary meets the other surface tangentially | `grazing_box_process`, `do_boundary_plane_test` | the pair is apart or refused | |
 | plane a hair off a cylinder wall | two lines microns apart instead of one tangent line | fixed (WR-510): within either face's zone tolerance it is one tangent line when that line lies in the face's sweep, else the crossings are tested | | |
 | near-miss seam | an intersection runs within tolerance of a closed surface's seam | the curve and its trims end near but not on the seam: `SmFace::Test #36` "Face Near missing Seam", or `make_faceuse` 1001 | curves split at the seam by `solidcore-ssi` | #2538, #2537, cause not traced |
-| curve across a pole | the UV coordinate along a collapsed edge names no point | `ssi_pole_point_keeps_its_tangent` | split at the pole; placed by its approach; the pole divided out of the field | |
+| curve across a pole | the UV coordinate along a collapsed edge names no point | `ssi_pole_point_keeps_its_tangent`; a trace point on the degenerate boundary is the pole, with the pole's foot on the other surface (`place_at_pole`), and its singular parameter is the limit along the curve's tangent (`pole_singular_parameter`), also where the pole lies only within the tolerance of the curve | split at the pole; placed by its approach; the pole divided out of the field | |
 | empty trace reversed (#17 gap 4) | `SM_ERR_NULL_POINTER` | not traced back: a trace that produced no points is not reversed (WR-80, `surface_intersector/p4.rs`, `p5.rs`) | | `adv_surface_intersector.rs`'s own trace-back is unchecked; no known case reaches it (WR-80 addendum 2026-11-05) |
 | trace that never ends | 5000 points, or a creeping boundary trace | an error at 5000; `ssi_start_loop_trace_budget` bounds all start points | `Error::Unfinished` at 100,000 steps; pair budget 2,000,000 | |
 

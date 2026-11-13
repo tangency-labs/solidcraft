@@ -267,7 +267,6 @@ fn analysis_shader_colours_come_from_the_uniform() {
     assert_eq!(
         literals,
         [
-            "vec3<f32>(0.0, 0.0, 1.0)",
             "vec3<f32>(1.0, 0.0, 0.0)",
             "vec3<f32>(c)",
             "vec3<f32>(0.32, 0.34, 0.38)",

@@ -97,10 +97,11 @@
 //!   ([`ProtoBrep::face_coincident_edge`], `SmTools::FindCoincidentEdge`) as the
 //!   definition's edge there instead of making a second one (the SMLib fork's
 //!   tangency-labs/smlib@81cd61a).
-//! - **Opt-in fix (WR-619, #1794; own design).** With `Kernel::fixes.imprint_skips_collapsed_definition`,
+//! - **Not upstream (WR-619, #1794; own design).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] makes no edge for a definition whose ends
 //!   are one proto vertex and one vertex in each B-rep, along a speck within that vertex's
-//!   tolerance and the definition's own, when another definition of its proto edge is
+//!   tolerance and the definition's own (an enclosure over the curve's control points, never
+//!   samples), when another definition of its proto edge is
 //!   imprinted between two distinct vertices in each B-rep (`collapsed_beside_sibling`);
 //!   upstream makes a closed edge on that vertex.
 //! - **Not upstream: ends fitted to proto vertices (WR-452, WR-453, #435, #410).**
@@ -144,6 +145,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, max3, max4, min2, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::gamma;
 use crate::query::face::p2::proto_vertex_containment_radius;
 use crate::surface::surface::exact_pieces::{common_trim_interval, trim_unsnapped};
 use crate::topology::brep::p5::{make_edge_in_face_in, EdgeInFace};
@@ -511,15 +513,26 @@ fn xsect_tol_of<O: ClassObject>(
     Ok(xsect_tol3d(k, t1 + t2))
 }
 
-/// The curve behind `o` (a `NULL` dereference upstream for none).
-/// Not upstream (WR-619, condition 3 of `collapsed_beside_sibling`): when every one of
-/// `SAMPLES` points of `curve` over `interval`, its ends included, lies within `tol` of
-/// `vertex` (the curve is a speck on that vertex; a real closed curve on it leaves it),
-/// returns the largest of those distances together with the curve's start and end points.
+/// Not upstream (WR-619, condition 3 of `collapsed_beside_sibling`): when the whole of
+/// `curve` over `interval` lies within `tol` of `vertex` (the curve is a speck on that
+/// vertex; a real closed curve on it leaves it), returns a certified upper bound of its
+/// distance from `vertex` together with the curve's start and end points.
+///
+/// Decided on an enclosure, never on samples: the curve over `interval` lies in the convex
+/// hull of the points `Curve::hull_points_over` gives (a line's ends, a B-spline's control
+/// points of the knot spans that meet `interval`), and the distance from `vertex` is convex,
+/// so its largest value over those points is its largest value over the curve. Every hull
+/// point must be within `tol` (the tolerance comparison itself, like every capture of an end
+/// by its vertex, is on the computed distance: the ends of a speck between two corners
+/// `tol` apart sit on that bound). The returned gap widens each point's distance by its
+/// coordinates' error `e` (at most `2 e` farther) and by the rounding of the difference
+/// (`γ_1`) and the norm (`γ_3`), so it bounds the whole curve; `ImprintIntersections` grows
+/// the vertex's tolerance to cover twice it. A curve of another kind proves nothing: `None`,
+/// and the definition is imprinted.
 ///
 /// # Errors
 ///
-/// Those of the curve evaluations.
+/// Those of the end evaluations.
 fn speck_on_vertex(
     k: &Kernel,
     curve: &Curve,
@@ -527,28 +540,24 @@ fn speck_on_vertex(
     vertex: Point3,
     tol: f64,
 ) -> Result<Option<(f64, Point3, Point3)>> {
-    const SAMPLES: u32 = 9;
+    let Some(hull) = curve.hull_points_over(&interval) else {
+        return Ok(None);
+    };
     let mut max_gap = 0.0_f64;
-    let mut start_pt = Point3::ZERO;
-    let mut end_pt = Point3::ZERO;
-    for i in 0..SAMPLES {
-        let t = interval.evaluate(f64::from(i) / f64::from(SAMPLES - 1));
-        let pt = curve.evaluate_point(k, t)?;
-        let gap = pt.distance(vertex);
-        if gap > tol {
+    for (q, e) in hull {
+        let dist = q.distance(vertex);
+        // a NaN distance is refused too
+        if dist.is_nan() || dist > tol {
             return Ok(None);
         }
-        max_gap = max2(max_gap, gap);
-        if i == 0 {
-            start_pt = pt;
-        }
-        if i == SAMPLES - 1 {
-            end_pt = pt;
-        }
+        max_gap = max2(max_gap, (dist + 2.0 * e) * (1.0 + gamma(6)));
     }
+    let start_pt = curve.evaluate_point(k, interval.min())?;
+    let end_pt = curve.evaluate_point(k, interval.max())?;
     Ok(Some((max_gap, start_pt, end_pt)))
 }
 
+/// The curve behind `o` (a `NULL` dereference upstream for none).
 fn curve_of<O: Copy>(brep: &impl ProtoBrep<O>, o: Option<O>) -> Result<&Curve> {
     o.and_then(|o| brep.curve(o))
         .ok_or(dangling("curve handle is null or unknown"))
@@ -920,9 +929,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         (result, edited)
     }
 
-    /// Not upstream (WR-619, opt-in `fixes.imprint_skips_collapsed_definition`): when the
+    /// Not upstream (WR-619): when the
     /// definition `ed`, with proto vertices `pvs` and final vertices `vertices` (start, end in
-    /// B-reps 1 and 2), is a collapsed speck, returns each B-rep vertex's maximum sampled
+    /// B-reps 1 and 2), is a collapsed speck, returns a bound of each B-rep vertex's maximum
     /// distance to the speck and the speck's start and end points. All must hold, else `None`:
     /// its ends are one proto vertex; they are one vertex in each B-rep; its curve is a speck
     /// on those vertices ([`speck_on_vertex`] in each B-rep, within both that vertex's
@@ -1023,22 +1032,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let brep1 = self.which_brep(1);
         let brep2 = self.which_brep(2);
 
-        // Not upstream (WR-619, #1794; opt-in, own design): a definition that would be a closed
+        // Not upstream (WR-619, #1794; own design): a definition that would be a closed
         // edge on one vertex in each B-rep along a speck within that vertex's tolerance and its
         // own, beside a sibling definition imprinted between distinct vertices, makes no edge;
         // each vertex's tolerance covers the skipped speck's span in `ImprintIntersections`.
-        if k.fixes.imprint_skips_collapsed_definition {
-            if let Some(([gap1, gap2], p0, p1)) = self.collapsed_beside_sibling(
-                k,
-                &*brep,
-                ed,
-                (start_pv, end_pv),
-                [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
-            )? {
-                self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
-                self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
-                return Ok(());
-            }
+        if let Some(([gap1, gap2], p0, p1)) = self.collapsed_beside_sibling(
+            k,
+            &*brep,
+            ed,
+            (start_pv, end_pv),
+            [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
+        )? {
+            self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
+            self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
+            return Ok(());
         }
 
         // not upstream (WR-452, WR-453, #435, #410): fit the ends to the proto vertices
@@ -4146,5 +4153,74 @@ mod tests {
             &[ed0, ed1, ed2]
         );
         assert_eq!(m.proto_edge(pe2).unwrap().edge_definitions(), &[]);
+    }
+
+    /// A degree-1 B-spline over `[0, 1]` with 17 control points at uniform knots: the even
+    /// ones (the points at `t = i / 8`) are `vertex`, the odd ones `vertex + bump`.
+    fn zigzag(vertex: Point3, bump: Vec3) -> Curve {
+        use crate::nurbs::b_spline_curve::{
+            BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+        };
+        let points: Vec<Point3> = (0..17)
+            .map(|i| if i % 2 == 0 { vertex } else { vertex + bump })
+            .collect();
+        let knots: Vec<f64> = (0..17).map(|i| f64::from(i) / 16.0).collect();
+        let mut mults = vec![1; 17];
+        mults[0] = 2;
+        mults[16] = 2;
+        Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 1,
+                control_points: &points,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &mults,
+                knots: &knots,
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        )
+    }
+
+    /// WR-619 review: a closed curve on a vertex that is back on it at every one of the nine
+    /// parameters the speck test once sampled but leaves the vertex's tolerance in between is
+    /// no speck: the enclosure over its control points refuses it, so it is imprinted.
+    #[test]
+    fn a_curve_leaving_the_vertex_between_samples_is_no_speck() {
+        let k = Kernel::default();
+        let vertex = Point3::new(1.0, 2.0, 3.0);
+        let tol = 1e-5;
+        let curve = zigzag(vertex, Vec3::new(0.0, 100.0 * tol, 0.0));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        for i in 0..9 {
+            let pt = curve.evaluate_point(&k, f64::from(i) / 8.0).unwrap();
+            assert!(pt.distance(vertex) <= tol, "sample {i} is on the vertex");
+        }
+        let between = curve.evaluate_point(&k, 1.0 / 16.0).unwrap();
+        assert!(between.distance(vertex) > 50.0 * tol);
+        assert_eq!(speck_on_vertex(&k, &curve, ivl, vertex, tol).unwrap(), None);
+    }
+
+    /// A speck whose control points all lie within the tolerance is proved one, and the gap
+    /// it reports bounds the curve's distance from the vertex.
+    #[test]
+    fn a_speck_within_tolerance_is_proved() {
+        let k = Kernel::default();
+        let vertex = Point3::new(1.0, 2.0, 3.0);
+        let tol = 1e-5;
+        let curve = zigzag(vertex, Vec3::new(0.0, 0.5 * tol, 0.0));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let (gap, p0, p1) = speck_on_vertex(&k, &curve, ivl, vertex, tol)
+            .unwrap()
+            .unwrap();
+        // the bump is 0.5 tol, give or take the rounding of `vertex + bump`
+        assert!(gap >= 0.499 * tol && gap <= 0.51 * tol, "gap {gap}");
+        assert!(p0.distance(vertex) <= tol && p1.distance(vertex) <= tol);
+        for i in 0..=64 {
+            let pt = curve.evaluate_point(&k, f64::from(i) / 64.0).unwrap();
+            assert!(pt.distance(vertex) <= gap);
+        }
     }
 }

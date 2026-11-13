@@ -23,6 +23,8 @@ pub struct RecentRow<'a> {
     /// The design's picture could not be made (empty or unreadable). Draws a dimmed placeholder,
     /// so it reads as "no preview" rather than as one still loading.
     pub thumbnail_failed: bool,
+    /// What hovering the row says about the file's signing provenance, when it has any.
+    pub security: Option<&'a str>,
 }
 
 /// A picture the host gives a kit surface: a name in the kit's icon set, a texture the host made
@@ -416,7 +418,10 @@ impl FileView {
                 false,
             );
         }
-        response.backing_on_hover_text(row.path)
+        match row.security {
+            Some(security) => response.backing_on_hover_text(format!("{}\n{security}", row.path)),
+            None => response.backing_on_hover_text(row.path),
+        }
     }
 
     pub fn sample_grid(ui: &mut Ui, id: &str, samples: &[SampleCard<'_>]) -> Vec<Response> {

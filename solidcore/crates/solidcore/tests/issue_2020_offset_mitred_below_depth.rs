@@ -219,13 +219,10 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
-    k.fixes.bspline_check_min_radius = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.corner_blend_coons_patch_tangent_to_sides = true;
-    k.fixes.corner_blend_stays_inside_neighbours = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.curve_contacts_at_curve_ends = true;
@@ -276,7 +273,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.internal_pole_row_through_knot = true;
-    k.fixes.iso_curve_sliver_domain_is_degenerate = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
@@ -331,6 +327,5 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.torus_signed_gen_curve_interval = true;
     k.fixes.transform_model_size_from_body_box = true;
     k.fixes.transform_scales_each_tolerance = true;
-    k.fixes.uv_trim_checks_on_surface = true;
     k.fixes.uv_trim_corner_end_points_only = true;
 }

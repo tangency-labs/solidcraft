@@ -22,7 +22,7 @@ const STRAIGHTEN_CONTRACT: TypedContract<CanvasStraightenParams> = TypedContract
 const DELETE_CONTRACT: TypedContract<CanvasDeleteParams> = TypedContract::new();
 
 /// A canvas command's reply, built from its schema's type so the two can't drift apart.
-fn canvas_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
+pub(super) fn canvas_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
 }
 

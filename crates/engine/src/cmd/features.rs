@@ -165,7 +165,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false); continuous_flanks?: bool (default true; false keeps the historical half-turn faces and groove-before-chamfer construction). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so; a shaft thicker than the thread is refused with the size to make it, never turned down"),
+        .params("face: [x,y,z] on a cylindrical face; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false); continuous_flanks?: bool (default true; false keeps the historical half-turn faces and groove-before-chamfer construction). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so, unless its wall is open along the thread (a cross hole, a cut through the side, a slanted end), which is refused with the drill to use; a shaft thicker than the thread is refused with the size to make it, never turned down"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -1069,7 +1069,7 @@ fn profiles_or_default(s: &Session, p: &Value, sketch: u64, cmd: &str) -> Result
 /// Without nesting this is `All`, as before. When the pick cannot be stored so that it finds the
 /// same profiles again (the sketch is not solved, or two profiles share their curves), it stays
 /// `All` too.
-fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
+pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
     let st = s.model.state();
     let Some(ss) = st.sketch(sketch) else { return ProfileSel::All };
     let drawn = solidcraft_sketch::find_drawn_profiles(&ss.sketch);
@@ -3107,8 +3107,8 @@ pub(super) fn brief(text: &str) -> String {
     }
 }
 
-/// ISO 273 clearance hole diameters (close, normal, loose fit) for metric bolts.
-fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
+/// ISO 273's clearance holes for metric bolts: (size, close, normal, loose fit), M1.6 to M64.
+fn clearance_table() -> &'static [(f64, f64, f64, f64)] {
     const TABLE: [(f64, f64, f64, f64); 21] = [
         (1.6, 1.7, 1.8, 2.0),
         (2.0, 2.2, 2.4, 2.6),
@@ -3132,15 +3132,40 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
         (60.0, 62.0, 66.0, 70.0),
         (64.0, 66.0, 70.0, 74.0),
     ];
+    &TABLE
+}
+
+/// The bolt sizes [`clearance_diameter`] knows, as `clearance` takes them (`M1.6` to `M64`), for a
+/// size list in a dialog.
+pub fn clearance_sizes() -> Vec<String> {
+    clearance_table().iter().map(|r| format!("M{}", r.0)).collect()
+}
+
+/// ISO 273 clearance hole diameter (mm) for a metric bolt size (`M4`, or `M4x0.7` with the pitch)
+/// and a fit: `close`, `normal` or `loose` (`fine`, `medium`, `coarse` are older names). `None` for
+/// a size or fit outside the table.
+pub fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
     let t = size.trim().trim_start_matches(['M', 'm']);
     let d: f64 = t.split(['x', 'X']).next()?.trim().parse().ok()?;
-    let row = TABLE.iter().find(|r| (r.0 - d).abs() < 1e-9)?;
+    let row = clearance_table().iter().find(|r| (r.0 - d).abs() < 1e-9)?;
     match fit {
         "close" | "fine" => Some(row.1),
         "normal" | "medium" => Some(row.2),
         "loose" | "coarse" => Some(row.3),
         _ => None,
     }
+}
+
+/// `head_gap`'s default: the room left each side of a cap screw's head and below it, in mm.
+const HEAD_GAP_MM: f64 = 0.5;
+
+/// The counterbore `head` makes for a cap screw of `size` (`M4`) with the default `head_gap`:
+/// its diameter and depth in mm, as the Hole dialog shows them before the command runs. `None`
+/// for a standard or a size the head tables do not have.
+pub fn head_counterbore(standard: &str, size: &str) -> Option<(f64, f64)> {
+    let (dk, k) = super::parts::cap_screw_head(standard, size).ok()?;
+    let round = |x: f64| (x * 1e6).round() / 1e6;
+    Some((round(dk + 2.0 * HEAD_GAP_MM), round(k + HEAD_GAP_MM)))
 }
 
 /// The counterbore a cap screw's head sits in (`head` with `clearance`): its diameter and depth.
@@ -3157,7 +3182,7 @@ fn head_recess(s: &Session, cmd: &str, p: &Value) -> Result<Option<(Expr, Expr)>
     let (dk, k) = super::parts::cap_screw_head(head, size).map_err(|e| bad(cmd, e))?;
     let gap = match (expr(p, "head_gap"), p.get("head_gap")) {
         (Some(g), _) => g,
-        (None, None | Some(Value::Null)) => Expr::new("0.5 mm"),
+        (None, None | Some(Value::Null)) => Expr::new(format!("{HEAD_GAP_MM} mm")),
         (None, v) => return Err(bad(cmd, format!("`head_gap` {}", expr_problem(v)))),
     };
     let g = s.doc.eval(gap.as_str(), Kind::Length).map_err(|e| bad(cmd, format!("head_gap: {e}")))?;

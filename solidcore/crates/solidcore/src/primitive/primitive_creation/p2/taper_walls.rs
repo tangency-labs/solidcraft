@@ -55,7 +55,9 @@
 //!
 //! Deviations: out-params become return values (a refusal is
 //! `Ok(Err(CornerRefusal))`, the fork's `SM_ERR_INVALID_INPUT` with its refusal set);
-//! a profile curve is matched to its input by index into the caller's list. No
+//! a profile curve is matched to its input by index into the caller's list; a cone
+//! wall's seam pcurve has its weights scaled to start at 1 (the fork's grow with the
+//! arc's radius, past the weight range of a B-spline, so a large arc's draft was refused). No
 //! recursion; every loop is bounded by the profile's curve count or a fixed sample
 //! count (the arc span count is at most the arc's angle over a quarter turn).
 
@@ -469,8 +471,9 @@ fn seam_angles(w: &Wall, seam: &Seam, n: Vec3, h: Vec3, near: f64) -> (f64, f64)
 /// The seam's pcurve on wall `w`, whose surface parameters are
 /// `(u0 + f (u1 - u0), v0 + (t - t0) * v_scale)` for the wall's fraction `f` and curve
 /// parameter `t` (`sm_DraftSeamPcurve`). On an arc's wall the seam is cut where it
-/// crosses from one span to the next, each piece the rational quartic of its span.
-/// `SM_ERR` when a piece leaves its span or a weight is not positive.
+/// crosses from one span to the next, each piece the rational quartic of its span, its
+/// weights scaled to start at 1. `SM_ERR` when a piece leaves its span or a weight is not
+/// positive.
 #[allow(clippy::too_many_arguments)] // the fork's arguments, and the WR-571 mode
 fn seam_pcurve(
     w: &Wall,
@@ -639,9 +642,13 @@ fn seam_pcurve(
         let d4 = quartic(wt, den);
         let u4 = quartic(su, den);
         let t4 = quartic(num, wt);
-        // the pieces join with one weight: scale this piece's to the last one's end
-        let scale = if piece == 0 || !(d4[0] > 0.0) {
+        // the pieces join with one weight: scale this piece's to the last one's end, and the
+        // first piece's to start at 1 (scaled by one factor the curve is the same; as built
+        // the weights grow with the arc's radius, past the range a B-spline takes)
+        let scale = if !(d4[0] > 0.0) {
             1.0
+        } else if piece == 0 {
+            1.0 / d4[0]
         } else {
             prev_w / d4[0]
         };

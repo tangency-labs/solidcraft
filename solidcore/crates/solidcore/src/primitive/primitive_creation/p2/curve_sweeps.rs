@@ -222,6 +222,7 @@ impl PrimitiveCreation {
             orient_profile_perpendicular_to_path: true,
             move_to_profile: false,
             profile_at_path_start: false,
+            up: None,
         };
         self.create_curve_sweep(
             a,

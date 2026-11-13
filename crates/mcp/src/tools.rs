@@ -116,7 +116,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              after a delete (undo rewinds the counters with the design), usable right away \
              in sketch.dimension, sketch.constraint.* and sketch.delete. Feature commands return the feature's id \
              and name, every body (bodies) and the bodies the feature created, changed and removed (created_bodies, changed_bodies, removed_bodies). \
-             view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot (read-only; docs/control-protocol.md). \
+             When connected to the running SolidCraft app, view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot. \
+             view.pick is unavailable in headless MCP, including with frame: \"model\". It is handled by the app and absent from list_commands and describe_command \
+             (read-only; docs/control-protocol.md). \
              `expect` {volume_mm3, tol, bodies, bbox} checks the design after the command (as `batch` does) and flags a mismatch.",
             object(
                 json!({
@@ -1935,7 +1937,40 @@ fn compact(mut v: Value) -> Value {
             created.insert(count.into(), json!(n));
         }
     }
+    compact_moved_points(o);
     v
+}
+
+/// `sketch.move_points` answers one `{point, to, at, reached}` row per move (#15864). A compact
+/// reply counts the moves, says whether all of them reached their targets, and lists only the
+/// moves that did not, under `not_reached`. Its empty `created` is left out too. A `moved` that
+/// is not such a list (a count, a flag or names, as other commands answer) stays as it is.
+fn compact_moved_points(o: &mut Map<String, Value>) {
+    let Some(rows) = o.get("moved").and_then(Value::as_array) else { return };
+    if rows.is_empty() || !rows.iter().all(|r| r.get("reached").is_some_and(Value::is_boolean) && r.get("to").is_some()) {
+        return;
+    }
+    let count = rows.len();
+    let missed: Vec<Value> = rows.iter().filter(|r| r.get("reached") != Some(&Value::Bool(true))).cloned().collect();
+    o.remove("moved");
+    o.insert("moved_count".into(), json!(count));
+    o.insert("reached".into(), json!(missed.is_empty()));
+    if !missed.is_empty() {
+        let missed: Vec<Value> = missed
+            .into_iter()
+            .map(|mut r| {
+                if let Some(m) = r.as_object_mut() {
+                    m.remove("reached");
+                }
+                r
+            })
+            .collect();
+        o.insert("not_reached".into(), Value::Array(missed));
+    }
+    let empty = |c: &Value| c.as_object().is_some_and(|m| m.values().all(|x| x.as_array().is_some_and(Vec::is_empty)));
+    if o.get("created").is_some_and(empty) {
+        o.remove("created");
+    }
 }
 
 /// `check_parameters`: try parameter values and put the design back (#3380). The checkpoint is

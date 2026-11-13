@@ -33,11 +33,13 @@
 //! | [`is_ncrv_degenerate`]             | `sm_IsNCrvDegenerate`                       |
 //! | [`MAX_DEGREE`], [`MAX_DERIV`]      | `GW_MAX_DEGREE`, `GW_MAX_DERIV`             |
 //! | [`crv_span_boxes`]                 | none (not upstream)                         |
+//! | [`crv_hull_points`]                | none (not upstream)                         |
 //!
 //! Deviations:
 //! - [`crv_span_boxes`] and its helpers are not upstream: the boxes of the control
 //!   points of every knot span, a certified cover of the curve used to prune coincidence
-//!   queries.
+//!   queries; [`crv_hull_points`] gives the control points themselves, whose convex hull
+//!   holds the curve over an interval.
 //! - Out-params become return values. Routines that fill caller-allocated curves
 //!   (`sm_CreateBezSegments`, `sm_CrvSplit`, `sm_CrvTrim` with `pExisting*`) allocate
 //!   their outputs with exactly the sizes upstream checks for, so the size-mismatch
@@ -2189,6 +2191,50 @@ pub fn crv_span_boxes(cur: &Curve, ivl: &Extent1d) -> Option<Vec<Extent3d>> {
         }
     }
     Some(boxes)
+}
+
+/// The Euclidean control points `i-p..=i` of the non-empty knot spans of `cur` that meet
+/// `ivl`, each once and each with the error bound of its coordinates (`0` for a
+/// polynomial point, `γ_1` of its largest coordinate for a rational point, the division
+/// by its weight): the curve over `ivl` lies in their convex hull (the piece on a span is
+/// a convex combination of that span's points, see [`crv_span_boxes`]).
+///
+/// `None` under the conditions of [`crv_span_boxes`].
+///
+/// Not upstream.
+#[must_use]
+pub(crate) fn crv_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(Vec3, f64)>> {
+    let (p, n) = (cur.degree(), cur.n());
+    let knots = cur.knots();
+    let spans = nonempty_spans(knots, p, n)?;
+    let (lo, hi) = (ivl.min(), ivl.max());
+    if !(lo.is_finite() && hi.is_finite() && lo <= hi)
+        || lo < *knots.get(p)?
+        || hi > *knots.get(n.checked_add(1)?)?
+    {
+        return None;
+    }
+    let mut range: Option<(usize, usize)> = None;
+    for i in spans {
+        if *knots.get(i)? <= hi && *knots.get(i + 1)? >= lo {
+            let first = i.checked_sub(p)?;
+            range = Some(range.map_or((first, i), |(a, b)| (a.min(first), b.max(i))));
+        }
+    }
+    let (first, last) = range?;
+    cur.cpts()
+        .get(first..=last)?
+        .iter()
+        .map(|&c| {
+            let q = hull_point(c)?;
+            let e = if c.w == NOW {
+                0.0
+            } else {
+                crate::nurbs::math::gamma(1) * q.x.abs().max(q.y.abs()).max(q.z.abs())
+            };
+            Some((q, e))
+        })
+        .collect()
 }
 
 /// Rounding allowance for boxes of pieces made by `levels` convex-combination steps

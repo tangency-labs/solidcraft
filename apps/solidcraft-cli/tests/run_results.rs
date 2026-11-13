@@ -898,3 +898,35 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
         assert!(!o.status.success());
     }
 }
+
+/// `run --save` over a design another SolidCraft has open (#16199): the save still happens, and
+/// stderr names who has it open. A stale lock (its app is gone) and no lock say nothing.
+#[test]
+fn run_save_warns_when_another_solidcraft_has_the_design_open() {
+    let scratch = Scratch::new();
+    let script = scratch.script();
+    let design = scratch.0.join("b.sc");
+    let lock = scratch.0.join(".~b.sc.lock");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let save = || cli().arg("run").arg(&script).arg("--save").arg(&design).arg("--quiet").output().unwrap();
+
+    let none = save();
+    assert!(none.status.success(), "{}", String::from_utf8_lossy(&none.stderr));
+    assert!(none.stderr.is_empty(), "no lock: {}", String::from_utf8_lossy(&none.stderr));
+
+    let held = |refreshed: u64| {
+        let other = json!({"host": "WORKSHOP-PC", "user": "ada", "app": "0.41.0", "pid": 1, "opened": refreshed, "refreshed": refreshed});
+        std::fs::write(&lock, other.to_string()).unwrap();
+    };
+    held(now);
+    std::fs::remove_file(&design).unwrap();
+    let open = save();
+    assert!(open.status.success(), "{}", String::from_utf8_lossy(&open.stderr));
+    assert!(design.exists(), "saved all the same");
+    let warning = String::from_utf8_lossy(&open.stderr);
+    assert!(warning.contains("warning") && warning.contains("ada") && warning.contains("WORKSHOP-PC") && warning.contains("0.41.0"), "{warning}");
+
+    held(now - 3600);
+    let stale = save();
+    assert!(stale.status.success() && stale.stderr.is_empty(), "a stale lock: {}", String::from_utf8_lossy(&stale.stderr));
+}

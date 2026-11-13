@@ -279,6 +279,14 @@ impl TranslationalSweepGeometry {
                 "the sweep is shorter than twice the edge or vertex tolerances",
             ));
         }
+        // `CreateLinearSweep(.., pBSC2, ..)` on the trimmed copy itself: its
+        // GetOrCreateGwNurbPointer runs a line's own MakeNurb (a two-point line has no NURB
+        // yet, and a trim to its whole interval makes none), status ignored
+        if let crate::curve::curve::CurveKind::Line(l) = start.kind_mut() {
+            if l.base().gw_nurb().is_none() {
+                ignore_status(l.make_nurb())?;
+            }
+        }
         let base = gen_base_mut(&mut start)
             .ok_or_else(|| SolidError::sweep_missing(OP, "the trimmed curve's B-spline form"))?;
         let surface = BSplineSurface::create_linear_sweep(base, self.sweep_vector)?;

@@ -157,6 +157,7 @@ fn sweep_profiles_along_path(
         orient_profile_perpendicular_to_path: false,
         move_to_profile: false,
         profile_at_path_start: false,
+        up: None,
     };
     let region = a.infinite_region(brep)?;
     let mut primitive = PrimitiveCreation::new(Some(region), 0, false);
@@ -306,7 +307,7 @@ impl PrimitiveCreation {
         let mut bspline_paths = Vec::with_capacity(paths.len());
         for path in paths {
             bspline_paths
-                .push(as_bspline(path).ok_or_else(|| {
+                .push(as_bspline(a.kernel(context_of)?, path)?.ok_or_else(|| {
                     SolidError::invalid_input(OP, "path curve is not a B-spline")
                 })?);
         }

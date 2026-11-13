@@ -489,14 +489,17 @@ pub fn check_face_complimentary_corner_concavity(
 }
 
 /// The `SmBSplineCurve` part of `curve` (`SmTArray<SmBSplineCurve*>` elements: the
-/// analytic curves derive from it upstream).
-fn bspline_part(curve: &Curve) -> Result<&BSplineCurve> {
+/// analytic curves derive from it upstream). Upstream hands the curve object itself to
+/// `CreateSurfOfRevolution`, whose `GetOrCreateGwNurbPointer` runs a line's own
+/// `MakeNurb`: a line's part comes with its NURB ([`Line::base_with_nurb`]), where a
+/// two-point line has none yet.
+fn bspline_part(curve: &Curve) -> Result<std::borrow::Cow<'_, BSplineCurve>> {
     match curve.kind() {
-        CurveKind::BSpline(c) => Ok(c),
-        CurveKind::Line(c) => Ok(&c.base),
-        CurveKind::Ellipse(c) => Ok(c.base()),
-        CurveKind::Hyperbola(c) => Ok(c.base()),
-        CurveKind::Parabola(c) => Ok(c.base()),
+        CurveKind::BSpline(c) => Ok(std::borrow::Cow::Borrowed(c)),
+        CurveKind::Line(c) => c.base_with_nurb(),
+        CurveKind::Ellipse(c) => Ok(std::borrow::Cow::Borrowed(c.base())),
+        CurveKind::Hyperbola(c) => Ok(std::borrow::Cow::Borrowed(c.base())),
+        CurveKind::Parabola(c) => Ok(std::borrow::Cow::Borrowed(c.base())),
         _ => Err(SolidError::invalid_input(
             OP_REVOLUTION,
             "boundary curve is not an SmBSplineCurve",
@@ -583,7 +586,7 @@ pub fn create_srf_of_revolution(
     // Sweep GenCurve about MajorArcCurve AxisOfRevolution to make the fillet surface
     let surface = Surface::from(BSplineSurface::create_surf_of_revolution_with_line_vector(
         k,
-        gen_curve,
+        &gen_curve,
         gen_line_vector,
         origin,
         ref_z_axis,
@@ -3762,5 +3765,49 @@ mod tests {
         assert_eq!(face_by_two_edgeuses(&b, None, None, None).unwrap(), None);
         let k = Kernel::default();
         assert!(create_srf_of_revolution(&k, &[], 0, 0.0).is_err());
+    }
+
+    /// A corner loop of a quarter circle, `(1, 0, 0)` to `(0, 1, 0)` about Z, and two
+    /// lazy lines (`Line::from_points`, no NURB yet, as upstream's two-point `SmLine`):
+    /// `(0, 1, 0)`–`(0, 0, 1)` after the arc and the generator `(0, 0, 1)`–`(1, 0, 0)`
+    /// before it. The generator revolved about the arc's axis is the cone
+    /// `sqrt(x² + y²) + z = 1`, and the line after the arc lies on it.
+    #[test]
+    fn a_lazy_line_generator_fills_a_corner_by_revolution() {
+        for fixes in [
+            crate::kernel::UpstreamFixes::default(),
+            crate::kernel::UpstreamFixes::all(),
+        ] {
+            let k = Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let h = 0.5_f64.sqrt();
+            let arc = crate::curve::ellipse::Ellipse::circle_from_3_points(
+                &k,
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(h, h, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                3,
+                false,
+            )
+            .unwrap();
+            let after =
+                Line::from_points(Point3::new(0.0, 1.0, 0.0), Point3::new(0.0, 0.0, 1.0), 3);
+            let gen = Line::from_points(Point3::new(0.0, 0.0, 1.0), Point3::new(1.0, 0.0, 0.0), 3);
+            assert!(gen.base().gw_nurb().is_none());
+            let curves = [Curve::from(arc), Curve::from(after), Curve::from(gen)];
+            let s = create_srf_of_revolution(&k, &curves, 0, 1e-6).unwrap();
+            let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+            for (fu, fv) in [(0.25, 0.5), (0.5, 0.25), (0.75, 0.75)] {
+                let uv = Point2::new(
+                    dom.min().x + fu * (dom.max().x - dom.min().x),
+                    dom.min().y + fv * (dom.max().y - dom.min().y),
+                );
+                let p = s.evaluate_point(&k, uv).unwrap();
+                let on = p.x.hypot(p.y) + p.z - 1.0;
+                assert!(on.abs() <= 1e-9, "{p:?} is {on:e} off the cone");
+            }
+        }
     }
 }

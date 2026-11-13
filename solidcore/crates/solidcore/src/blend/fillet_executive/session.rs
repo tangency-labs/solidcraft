@@ -53,7 +53,7 @@ pub mod insertion;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::p1::{CornerCreation, ExecutiveObjects, SolverLoadingAccess};
-use super::p2::{EdgeMapAccess, FilletParameters, FilletParametersAccess, SolverSpec};
+use super::p2::{EdgeMapAccess, FilletParameters, FilletParametersAccess, RunOn, SolverSpec};
 use super::p3::{
     BrepCreationAccess, CornerAdjustmentAccess, CornerEdgeAccess, CornerVertexAccess, CornerView,
     ErrorInfo, FaceConstructionAccess, FaceShrinkAccess, FaceStitchAccess, FilletExecutive,
@@ -285,6 +285,10 @@ struct SecondBase<'target> {
         Option<crate::boolean::topology_intersector::p1::TopologyIntersector<FilletObject>>,
 }
 
+/// WR-459: the target's edges before filleting, each with its end vertices
+/// (`edge::vertices`): the clean-up keeps an edge by its id only while it has those ends.
+type CleanupKeptEdges = BTreeMap<EdgeId, Vec<Option<VertexId>>>;
+
 /// Owned objects and the target borrowed by the executive.
 #[derive(Debug)]
 struct SessionObjects<'target> {
@@ -303,8 +307,9 @@ struct SessionObjects<'target> {
     /// session took them, put back by `Drop` if handing the session's back fails.
     attributes_before: (AttributeStore, AttributeStore),
     merge_attributes: Option<Vec<AttributeHandle>>,
-    /// WR-459: the target's edges and faces before filleting, kept by the clean-up.
-    cleanup_kept: Option<(BTreeSet<EdgeId>, BTreeSet<FaceId>)>,
+    /// WR-459: the target's edges, each with its end vertices, and faces before filleting,
+    /// kept by the clean-up.
+    cleanup_kept: Option<(CleanupKeptEdges, BTreeSet<FaceId>)>,
     extended_surfaces: BTreeMap<FaceId, Surface>,
     edge_caches: BTreeMap<EdgeId, CurveCache<FilletObject>>,
     target_serial: u64,
@@ -341,6 +346,26 @@ struct SessionObjects<'target> {
 }
 
 impl SessionObjects<'_> {
+    /// The edges of the session's blends other than solver `id`'s: where a chain runs on into
+    /// the next round.
+    fn other_blends_edges(&mut self, id: FilletSolverId) -> Result<Vec<EdgeId>> {
+        let mut joined = Vec::new();
+        for (index, other) in self.solvers.iter_mut().enumerate() {
+            let Some(other) = other.as_mut() else {
+                continue;
+            };
+            if index == id.0 as usize {
+                continue;
+            }
+            if let Some(use0) = ball_regular::ops_of(other).solver().edgeuse(0)? {
+                if let Some(e) = crate::topology::edgeuse::p1::edge(self.target, use0)? {
+                    joined.push(e);
+                }
+            }
+        }
+        Ok(joined)
+    }
+
     fn intermediate_identity(&self, entity: EntityRef) -> Result<crate::geom::object::ObjectRef> {
         let body = self
             .intermediate
@@ -3997,20 +4022,7 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         };
         // the other blends' edges, where a chain runs on into the next round (#2403's ball
         // triangle)
-        let mut joined = Vec::new();
-        for (index, other) in self.solvers.iter_mut().enumerate() {
-            let Some(other) = other.as_mut() else {
-                continue;
-            };
-            if index == id.0 as usize {
-                continue;
-            }
-            if let Some(use0) = ball_regular::ops_of(other).solver().edgeuse(0)? {
-                if let Some(e) = crate::topology::edgeuse::p1::edge(self.target, use0)? {
-                    joined.push(e);
-                }
-            }
-        }
+        let joined = self.other_blends_edges(id)?;
         let current = self
             .solvers
             .get_mut(id.0 as usize)
@@ -4021,6 +4033,35 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             return Ok(None);
         }
         crate::blend::fillet_exact::ball_zone_open_at_an_end(
+            ball_regular::ops_of(current),
+            k,
+            self.target,
+            radius,
+            &joined,
+        )
+    }
+
+    fn creation_ball_past_an_end(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        radius: Option<f64>,
+    ) -> Result<Option<crate::blend::fillet_exact::PastAnEnd>> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        // the other blends' edges, where a chain runs on into the next round
+        let joined = self.other_blends_edges(id)?;
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let (rolls, law) = ball_regular::rolls_a_ball(current);
+        if !rolls || law {
+            return Ok(None);
+        }
+        crate::blend::fillet_exact::ball_past_an_end(
             ball_regular::ops_of(current),
             k,
             self.target,
@@ -6116,6 +6157,95 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
         }
         Ok(points)
     }
+    fn parameters_runs_on_across_seams(
+        &mut self,
+        k: &Kernel,
+        edges: &[FilletObject],
+        ang_tol_deg: f64,
+    ) -> Result<Vec<RunOn<FilletObject>>> {
+        let mut ids = Vec::new();
+        for &edge in edges {
+            match edge {
+                FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)) => ids.push(id),
+                _ => return Err(invalid("edge is not in the target")),
+            }
+        }
+        Ok(runs_on_across_seams(k, self.target, &ids, ang_tol_deg)?
+            .into_iter()
+            .map(|run_on| RunOn {
+                source: run_on.source,
+                edge: FilletObject::Topology(FilletBody::Target, EntityRef::Edge(run_on.edge)),
+                flipped: run_on.flipped,
+            })
+            .collect())
+    }
+}
+
+/// The edges of `target` that continue `edges` across seams' vertices
+/// ([`FilletParametersAccess::parameters_runs_on_across_seams`]): from each end of each
+/// picked edge, each next piece of its curve while a seam's vertex splits it, up to
+/// `SIDE_EDGE_CHAIN_STEPS` pieces, each named once and none of them picked.
+///
+/// # Errors
+/// Those of the topology walks and the seam and tangency tests.
+fn runs_on_across_seams(
+    k: &Kernel,
+    target: &mut Brep,
+    edges: &[EdgeId],
+    ang_tol_deg: f64,
+) -> Result<Vec<RunOn<EdgeId>>> {
+    use crate::blend::blend_corner::end::{side_edgeuse_across_seam_vertex, SIDE_EDGE_CHAIN_STEPS};
+    use crate::topology::edgeuse::p1 as eu1;
+    let mut taken: BTreeSet<EdgeId> = edges.iter().copied().collect();
+    let mut run_ons = Vec::new();
+    for (source, &id) in edges.iter().enumerate() {
+        // any of its edge uses walks the curve (the blend edge use, which evaluates the
+        // faces, is chosen only for an edge that runs on)
+        let Some(&eu) = crate::topology::edge::edgeuses(target, id, None, None)?.first() else {
+            continue;
+        };
+        let mut face = None;
+        let (start, end) = crate::topology::vertex::edge_vertex_pair(target, id)?;
+        for at in [start, end].into_iter().flatten() {
+            // along the curve from `at`: each next piece while a seam's vertex splits it
+            let (mut curr, mut at) = (eu, at);
+            for _ in 0..SIDE_EDGE_CHAIN_STEPS {
+                let Some(next) = side_edgeuse_across_seam_vertex(k, target, curr, at, ang_tol_deg)?
+                else {
+                    break;
+                };
+                let next_edge =
+                    eu1::edge(target, next)?.ok_or_else(|| invalid("edge use without edge"))?;
+                if !taken.insert(next_edge) {
+                    break;
+                }
+                // the faces each blend edge use lies on; an edge with none is refused when
+                // its solver is made
+                if face.is_none() {
+                    face = match crate::topology::edge::blend_edgeuse(k, target, id)? {
+                        Some(u) => Some(eu1::face(target, u)?),
+                        None => Some(None),
+                    };
+                }
+                let blended = crate::topology::edge::blend_edgeuse(k, target, next_edge)?;
+                let flipped = match (blended, face.flatten()) {
+                    (Some(u), Some(f)) => eu1::face(target, u)? != Some(f),
+                    _ => false,
+                };
+                run_ons.push(RunOn {
+                    source,
+                    edge: next_edge,
+                    flipped,
+                });
+                let (s, e) = crate::topology::vertex::edge_vertex_pair(target, next_edge)?;
+                let Some(far) = (if s == Some(at) { e } else { s }) else {
+                    break;
+                };
+                (curr, at) = (next, far);
+            }
+        }
+    }
+    Ok(run_ons)
 }
 
 impl SessionObjects<'_> {

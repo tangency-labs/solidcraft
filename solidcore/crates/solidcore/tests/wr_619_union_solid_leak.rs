@@ -1,9 +1,11 @@
 //! tangency-labs/solidcore#1794 (WR-619): two 4 mm cubes, B turned atan(0.1) (5.71 deg)
-//! about z, whose faces y = 20 (A) and F1 (B's y' = 0) stay within 5e-6 of each other
-//! across the strip x in [1.9999, 2]. SMLib's union deletes two of A's faces (on y = 20 and
-//! on its bottom z = 0) each between a solid region and the outside, so both solids merge
-//! into the infinite region and the union has no solid region (as the pinned C++,
-//! `boolean.api_brep` case `wr614_strip_union_d5e-06`). The opt-in
+//! about z, whose faces y = 20 (A) and F1 (B's y' = 0) cross with B's corner edge 1.5e-5
+//! below A's face, past the 1e-5 tolerance. The union deletes faces of A each between a
+//! solid region and the outside, so both solids merge into the infinite region and the
+//! union has no solid region (`boolean.api_brep` case `wr614_strip_union_d1.5e-05`, known
+//! failing). At 5e-6 apart (SMLib's case, `wr614_strip_union_d5e-06`) the union is one solid
+//! since the coincident-strip rule (WR-614) and the speck skip (WR-619) became the default,
+//! so this test moved to 1.5e-5, where neither applies. The opt-in
 //! `Kernel::fixes.boolean_union_refuses_solid_leak` refuses such a union with `SM_ERR`.
 #![allow(
     clippy::unwrap_used,
@@ -25,7 +27,7 @@ use solidcore::{Brep, EntityRef, Kernel, SolidError};
 const SIDE: f64 = 4.0;
 const SLOPE: f64 = 0.1;
 /// How far each strip edge lies off the other cube's face.
-const D: f64 = 5e-6;
+const D: f64 = 1.5e-5;
 
 /// A: [-2, 2] x [16, 20] x [0, 4]. B: a 4 mm cube turned about z so that its face F1
 /// crosses y = 20 at x = 2 - D / SLOPE, with its corner edge at x = 2 - 2 D / SLOPE,
@@ -64,7 +66,7 @@ fn wr_619_union_refuses_solid_leak_is_off_by_default() {
 }
 
 #[test]
-fn wr_619_upstream_union_has_no_solid() {
+fn wr_619_union_has_no_solid_by_default() {
     let mut k = Kernel::default();
     let (a, b) = operands(&mut k);
     let u = boolean_union(&mut k, a, b).unwrap();

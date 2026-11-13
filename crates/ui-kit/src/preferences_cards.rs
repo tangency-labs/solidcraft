@@ -1,5 +1,5 @@
 //! The controls the redesigned Preferences pages share: picture cards, toggle tiles, preset cards,
-//! the hover-help icon and the carousel. Sizes follow `docs/design/preferences/measurements.md`;
+//! the help icon and the carousel. Sizes follow `docs/design/preferences/measurements.md`;
 //! every colour comes from `Tokens`. A card sizes to the width its container gives it and its
 //! figure keeps the figure's aspect ratio.
 use super::{metrics::dimension, preferences::centred_text};
@@ -370,19 +370,32 @@ pub fn preset_card(
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
-/// The (i) icon after a label: shows `text` as a tooltip and tells assistive technology the same.
+/// The (i) icon after a label: shows `text` as a tooltip on hover, and in a popover after a click,
+/// Enter or Space, so a click, a touch or the keyboard reaches it too. Assistive technology reads
+/// the same text. A click on the icon or outside the popover, or Escape, closes the popover.
 pub fn help_icon(ui: &mut Ui, text: &str) -> Response {
     let t = Tokens::get();
     let size = t.space_12 + 1.0;
-    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
-    let ink = if response.hovered() { t.form_ink } else { t.form_dim };
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    let popover = super::Container::new(ui.ctx(), super::Surface::Popup)
+        .menu(&response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .width(ui.spacing().tooltip_width);
+    let open = popover.is_open();
+    let ink = if open || response.hovered() || response.has_focus() { t.form_ink } else { t.form_dim };
     let p = ui.painter();
     p.circle_stroke(rect.center(), size * 0.5 - 0.5, Stroke::new(1.0, ink));
     p.circle_filled(pos2(rect.center().x, rect.top() + size * 0.3), 0.9, ink);
     p.line_segment([pos2(rect.center().x, rect.top() + size * 0.46), pos2(rect.center().x, rect.bottom() - size * 0.24)], Stroke::new(1.2, ink));
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), text));
     solidcraft_ui_registry::publish_target("prefs:help_icon", rect);
-    response.backing_on_hover_text(text)
+    popover.show(|ui| {
+        let label = ui.label(text);
+        solidcraft_ui_registry::publish_rect("prefs:help_icon:popover", label.rect);
+    });
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    // The popover already shows the text; a tooltip on top of it would say it twice.
+    if open { response } else { response.backing_on_hover_text(text) }
 }
 
 /// The host's text on a plugin card: its folder action and the enable check's name.

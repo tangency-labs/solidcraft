@@ -732,7 +732,7 @@ impl FilletRemoval {
             }
             let reach = (p0.distance(new_vtx_pt) + 10.0 * tol) / speed;
             let far = if high_end { end + reach } else { end - reach };
-            let side_part = ner(bspline_part(&side_curve))?;
+            let side_part = ner(bspline_part_with_nurb(&side_curve)?)?;
             let longer = Curve::from(ner(side_part.create_extended_curve(
                 far,
                 ContinuityType::CInfinity,
@@ -807,7 +807,7 @@ impl FilletRemoval {
                 if side_edge_extent.is_contained_by(&uv_extent, EFF_ZERO) {
                     continue;
                 }
-                let extended = match bspline_part(curve) {
+                let extended = match bspline_part_with_nurb(curve)? {
                     Some(bs) => ignored(bs.create_extended_curve(
                         crv_param,
                         ContinuityType::CInfinity,
@@ -1449,6 +1449,19 @@ fn max3(a: f64, b: f64, c: f64) -> f64 {
     }
 }
 
+/// [`bspline_part`] for a call on it: upstream calls `CreateExtendedCurve` on the curve
+/// object itself, whose `GetOrCreateGwNurbPointer` runs a line's own `MakeNurb`, so a
+/// line's part comes with its NURB ([`crate::curve::line::Line::base_with_nurb`]), where
+/// a two-point line has none yet.
+fn bspline_part_with_nurb(
+    c: &Curve,
+) -> Result<Option<std::borrow::Cow<'_, crate::nurbs::b_spline_curve::BSplineCurve>>> {
+    if let CurveKind::Line(l) = c.kind() {
+        return Ok(Some(l.base_with_nurb()?));
+    }
+    Ok(bspline_part(c).map(std::borrow::Cow::Borrowed))
+}
+
 /// The `SmBSplineCurve` part of a curve (`SM_CAST_PTR(SmBSplineCurve, ..)`).
 fn bspline_part(c: &Curve) -> Option<&crate::nurbs::b_spline_curve::BSplineCurve> {
     match c.kind() {
@@ -1894,6 +1907,33 @@ pub fn delete_fillet_face(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A lazy line (`Line::from_points`, no NURB yet, as upstream's two-point `SmLine`)
+    /// as a side edge's curve: its part for `CreateExtendedCurve` comes with its NURB, and
+    /// the line `(0, 0, 0)`–`(1, 0, 0)` on `[0, 1]` continued to the parameter `2` ends at
+    /// `(2, 0, 0)`. The bare part has no NURB and makes no extension.
+    #[test]
+    fn a_lazy_line_side_curve_extends() {
+        let line = crate::curve::line::Line::from_points(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            3,
+        );
+        assert!(line.base().gw_nurb().is_none());
+        let c = Curve::from(line);
+        let bare =
+            bspline_part(&c)
+                .unwrap()
+                .create_extended_curve(2.0, ContinuityType::CInfinity, true);
+        assert!(!matches!(bare, Ok(Some(_))), "{bare:?}");
+        let part = bspline_part_with_nurb(&c).unwrap().unwrap();
+        let longer = part
+            .create_extended_curve(2.0, ContinuityType::CInfinity, true)
+            .unwrap()
+            .unwrap();
+        let end = longer.ends().unwrap().end;
+        assert!(end.distance(Point3::new(2.0, 0.0, 0.0)) <= 1e-12, "{end:?}");
+    }
 
     /// #13790: removing a face while editing is off is refused with a typed blend failure
     /// that keeps the `SM_ERR` status of the bare `Upstream` it replaced, and the body is

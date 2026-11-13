@@ -76,6 +76,7 @@ fn wall(k: &mut Kernel, turn: (Vec3, f64), radius: f64, start: f64, end: f64) ->
         orient_profile_perpendicular_to_path: false,
         move_to_profile: false,
         profile_at_path_start: false,
+        up: None,
     };
     create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
         .unwrap()

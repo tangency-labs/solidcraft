@@ -222,7 +222,7 @@ impl TabsRig {
             focused: true,
             ..Default::default()
         };
-        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet" };
+        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None };
         let mut strip = TabStrip {
             tabs: vec![tab("One"), tab("Two"), tab("Three")],
             selected: 0,
