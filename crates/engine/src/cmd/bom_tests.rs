@@ -216,6 +216,37 @@ fn a_csv_field_a_spreadsheet_would_run_opens_as_text() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A configuration row that suppresses the pin's only feature switches the pin off: it leaves the
+/// rows and the CSV, `show_suppressed_parts` lists it as placed, and the other row brings it back.
+#[test]
+fn a_part_a_configuration_switches_off_leaves_the_bill_of_materials() {
+    let dir = scratch("switched-off");
+    let mut s = assembly();
+    let pin = s.doc.find_component("Pin").unwrap();
+    let cylinder = s.doc.features.iter().find(|f| f.component == pin).map(|f| f.name.clone()).unwrap();
+    run(&mut s, "config.configure", json!({"features": [cylinder]}));
+    run(&mut s, "config.row", json!({"name": "No pins", "values": {format!("suppress:{cylinder}"): true}}));
+    let plate = ("PL-100".to_string(), "Plate".to_string(), 3);
+    let pins = ("PN-040".to_string(), "Pin".to_string(), 2);
+    let csv = dir.join("bom.csv");
+    let header = "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\"\n\
+                  \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\"\n";
+    let pin_line = "\"2\",\"PN-040\",\"Pin 4 x 30\",\"\",\"2\",\"Pin\",\"Default\",\"\"\n";
+    for (row, listed) in [("No pins", false), ("Default", true)] {
+        run(&mut s, "config.activate", json!({"row": row}));
+        let r = run(&mut s, "assembly.bom", json!({"path": csv}));
+        let want = if listed { vec![plate.clone(), pins.clone()] } else { vec![plate.clone()] };
+        assert_eq!((summary(&r), &r["show_suppressed_parts"]), (want, &json!(false)), "{row}: {r}");
+        let text = std::fs::read_to_string(&csv).unwrap();
+        assert_eq!(text, if listed { format!("{header}{pin_line}") } else { header.to_string() }, "{row}");
+        let shown = run(&mut s, "assembly.bom", json!({"show_suppressed_parts": true}));
+        assert_eq!((summary(&shown), &shown["show_suppressed_parts"]), (vec![plate.clone(), pins.clone()], &json!(true)), "{row}: {shown}");
+        // The hinge places the pin, so it is a row of its own in the first level either way.
+        assert_eq!(summary(&run(&mut s, "assembly.bom", json!({"levels": "top"})))[1], (String::new(), "Hinge".into(), 2), "{row}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn standard_parts_carry_a_part_number_that_follows_a_resize() {
     let mut s = Session::default();
@@ -1522,6 +1553,7 @@ fn assembly_bom_presents_the_typed_rows() {
         (json!({"levels": "all", "show_purchased_contents": true}), Request { purchased_contents: true, ..all }),
         (json!({"levels": "all", "show_purchased_contents": true, "mass": true}), Request { purchased_contents: true, mass: true, ..all }),
         (json!({"levels": "all", "group_by": ["definition"]}), Request { group: Group::Definition, ..all }),
+        (json!({"levels": "all", "show_suppressed_parts": true}), Request { suppressed_parts: true, ..all }),
     ];
     let mut numbered_frame = frame();
     run(&mut numbered_frame, "component.metadata.set", json!({"component": "Frame", "part_number": "FR-1"}));

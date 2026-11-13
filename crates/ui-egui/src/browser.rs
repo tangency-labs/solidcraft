@@ -1551,6 +1551,7 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     // Only the floating card folds; the docked column keeps its full height.
     let render = crate::render_workspace::active(app);
     if !render {
+        crate::drawing_workspace::sheets_section(app, ui);
         browser_header(app, ui, collapsible);
     }
     let stacked = !render && !crate::drawing_workspace::active(app) && crate::timeline_left::stacked(app);
@@ -1631,7 +1632,17 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         right -= 18.0;
     }
     let count = if crate::drawing_workspace::active(app) {
-        solidcraft_ui_text::tr_label("0 objects").to_string()
+        let count = app.session.drawing("drawing.inspect").map_or(0, |drawing| {
+            drawing.views.len()
+                + drawing.dimensions.len()
+                + drawing.balloons.len()
+                + drawing.notes.len()
+                + drawing.tables.len()
+                + drawing.sheet_images.len()
+                + drawing.revisions.tags().len()
+        });
+        let key = if count == 1 { "ui.drawing_browser_count_one" } else { "ui.drawing_browser_count_other" };
+        solidcraft_ui_text::format(key, &[("count", &count.to_string())])
     } else {
         let bodies = listed_bodies(&app.session);
         let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };

@@ -8,14 +8,14 @@
 //! reference part: it doesn't set the view's extents when model parts are there too ([`measure`]).
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy};
 use solidcraft_doc::drawing::{Drawing, Sheet};
-use solidcraft_doc::drawing_view::{Exploded, Pose};
+use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
 use solidcraft_geom::{Aabb2, EPS};
@@ -193,27 +193,30 @@ pub fn left_out(view: &ResolvedView, path: &[u64]) -> Option<LeftOut> {
 
 /// The state of its assembly a view draws (#13048): its exploded choice and its position, the one key
 /// of the session it draws from. A position's values are kept as their bits, by joint, so views with
-/// the same position share one copy (`-0.0` is kept as `0.0`).
+/// the same position share one copy (`-0.0` is kept as `0.0`); a study step as itself, so views of one
+/// step share one copy. A step and the values it gives, typed as joints, make two copies that draw alike.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Choice {
     exploded: Exploded,
     pose: Vec<(u64, Vec<u64>)>,
+    study: Option<StudyStep>,
 }
 
 impl Choice {
     /// What saved view `view` draws.
     pub fn of(view: &ResolvedView) -> Choice {
         let mut pose: Vec<(u64, Vec<u64>)> = match &view.pose.value {
-            Pose::Designed => Vec::new(),
+            Pose::Designed | Pose::Study(_) => Vec::new(),
             Pose::Joints(joints) => joints.iter().map(|j| (j.joint, j.values.iter().map(|v| (v + 0.0).to_bits()).collect())).collect(),
         };
         pose.sort();
-        Choice { exploded: view.exploded.value, pose }
+        let study = if let Pose::Study(at) = view.pose.value { Some(at) } else { None };
+        Choice { exploded: view.exploded.value, pose, study }
     }
 
     /// Whether it draws the design as it places its parts, as the default choice does.
     pub fn is_placed(&self) -> bool {
-        self.exploded == Exploded::Assembled && self.pose.is_empty()
+        self.exploded == Exploded::Assembled && self.pose.is_empty() && self.study.is_none()
     }
 }
 
@@ -255,23 +258,30 @@ impl<'a> ViewSessions<'a> {
 
 /// A copy of `placed` as a view drawing `choice` draws it: its position's joints driven to their
 /// values as `joint.drive` drives them (the limits, closed loops, motion links and contact sets
-/// alike), skipping a joint the design no longer has, then its exploded view's parts moved out from
-/// there, as `explode.show` shows them. Or why it can't be: the exploded view is no longer in the
-/// design or moves a part out of range (a hostile file), or the joints can't be driven.
+/// alike), or to a study step's as `motion.play` drives them (a step past the study's end at its
+/// last), skipping a joint or study the design no longer has, then its exploded view's parts moved
+/// out from there, as `explode.show` shows them. Or why it can't be: the exploded view is no longer
+/// in the design or moves a part out of range (a hostile file), or the joints can't be driven.
 pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Session, Unmeasured> {
-    use crate::cmd::motion::{drive_with_contact, explode_moves, exploded_at};
+    use crate::cmd::motion::{drive_with_contact, explode_moves, exploded_at, keyed, values_at};
     // From where the design places its parts: an occurrence move not captured yet is left out.
     let mut copy = placed.scratch();
     copy.pending_moves.clear();
+    // A study sets the values it keys, and the joints' other values follow the solve; joint values
+    // set every value they give.
+    let study = choice.study.and_then(|at| at.drawn(&copy.doc.assembly.studies));
+    let (want, given): (Vec<(u64, Vec<f64>)>, BTreeSet<(u64, usize)>) = match study {
+        Some((m, step)) => (values_at(&copy, m, f64::from(step)), keyed(m)),
+        None => {
+            let want: Vec<(u64, Vec<f64>)> =
+                choice.pose.iter().map(|(joint, bits)| (*joint, bits.iter().map(|b| f64::from_bits(*b)).collect())).collect();
+            let given = want.iter().flat_map(|(joint, values)| (0..values.len()).map(move |i| (*joint, i))).collect();
+            (want, given)
+        }
+    };
     let joints = &copy.doc.assembly.joints;
-    let want: Vec<(u64, Vec<f64>)> = choice
-        .pose
-        .iter()
-        .filter(|(joint, _)| joints.iter().any(|j| j.id == *joint))
-        .map(|(joint, bits)| (*joint, bits.iter().map(|b| f64::from_bits(*b)).collect()))
-        .collect();
+    let want: Vec<(u64, Vec<f64>)> = want.into_iter().filter(|(joint, _)| joints.iter().any(|j| j.id == *joint)).collect();
     if !want.is_empty() {
-        let given = want.iter().flat_map(|(joint, values)| (0..values.len()).map(move |i| (*joint, i))).collect();
         drive_with_contact(&mut copy, &want, &given).map_err(|_| Unmeasured::NotPosed)?;
     }
     if let Exploded::View(id) = choice.exploded {
@@ -292,9 +302,15 @@ pub fn gone_joints(s: &Session, view: &ResolvedView) -> Vec<u64> {
     joints.iter().map(|j| j.joint).filter(|id| !s.doc.assembly.joints.iter().any(|joint| joint.id == *id)).collect()
 }
 
-/// What the sheet says beside a view whose position names `gone` joints the design no longer has
-/// (#13048), as a drawn note says why. With none of its joints left it draws the design's placement.
-pub fn gone_joints_reason(gone: usize) -> Option<String> {
+/// What the sheet says beside saved view `view` when its position names joints or a motion study
+/// `s`'s design no longer has (#13048), as a drawn note says why. With none of its joints left, or
+/// its study gone, it draws the design's placement.
+pub fn position_reason(s: &Session, view: &ResolvedView) -> Option<String> {
+    if let Pose::Study(at) = view.pose.value {
+        let gone = at.drawn(&s.doc.assembly.studies).is_none();
+        return gone.then(|| "its position names a motion study the design no longer has".into());
+    }
+    let gone = gone_joints(s, view).len();
     (gone > 0).then(|| format!("its position names {gone} joint{} the design no longer has", if gone == 1 { "" } else { "s" }))
 }
 

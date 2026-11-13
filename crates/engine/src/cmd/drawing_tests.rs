@@ -424,12 +424,32 @@ fn a_drawings_line_group_is_set_as_one_undo_step_and_saved() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(run(&mut s, "drawing.inspect", json!({}))["line_group"], "0.5");
     for bad in [json!("0.6"), json!(0.5), json!("Mm0_5"), json!(null)] {
-        assert!(
-            refused(&mut s, "drawing.set", json!({"line_group": bad})).contains("`line_group` is one of 0.25, 0.35, 0.5, 0.7, 1, 1.4, 2"),
-            "{bad}"
-        );
+        assert!(refused(&mut s, "drawing.set", json!({"line_group": bad})).ends_with(LINE_GROUP_REFUSED), "{bad}");
     }
     assert_eq!(run(&mut design(), "drawing.create", json!({"line_group": "1.4"}))["line_group"], "1.4");
+}
+
+const LINE_GROUP_REFUSED: &str = "`line_group` must be one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2";
+
+/// A line group that isn't one of ISO 128's is refused in one wording, after its key, whether the
+/// parameters are checked or not: a drawing's, a sheet's or a view's.
+#[test]
+fn a_line_group_outside_iso_128_is_refused_in_one_wording() {
+    for level in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+        let (mut s, [front, ..]) = crate::cmd::drawing_view::tests::three_views();
+        s.param_check = level;
+        let view = json!({"view": ids::encode(front), "set": {"line_group": "0.6"}});
+        for (id, p) in [
+            ("drawing.create", json!({"line_group": "0.6"})),
+            ("drawing.set", json!({"line_group": "0.6"})),
+            ("drawing.sheet.add", json!({"line_group": "0.6"})),
+            ("drawing.sheet.set", json!({"sheet": "Sheet 1", "line_group": "0.6"})),
+            ("drawing.view.edit", view.clone()),
+        ] {
+            let words = if id == "drawing.view.edit" { format!("`set.{}", &LINE_GROUP_REFUSED[1..]) } else { LINE_GROUP_REFUSED.to_string() };
+            assert!(refused(&mut s, id, p).ends_with(&words), "{level:?} {id}");
+        }
+    }
 }
 
 /// A drawing's font is a family named by `drawing.create` or `drawing.set` (one undo step), saved
@@ -460,6 +480,17 @@ fn a_drawings_font_is_a_family_by_name() {
         assert!(refused(&mut s, "drawing.create", json!({"font": path})).contains("by family"), "{path}");
     }
     assert!(refused(&mut s, "drawing.set", json!({"font": 3})).contains("`font` must be text"));
+    // The font is checked as given, before it is trimmed, and again as the drawing keeps it: a
+    // control character or an overlong name is refused even where trimming would hide it.
+    let (drawings, steps) = (s.doc.drawings.len(), s.undo.len());
+    for id in ["drawing.create", "drawing.set"] {
+        let file = refused(&mut s, id, json!({"font": "a.ttf"}));
+        assert_eq!(file, format!("invalid parameters for `{id}`: invalid value: `a.ttf` is a file: drawings name fonts by family, so they travel"));
+        let one_line = format!("invalid parameters for `{id}`: invalid value: a font family's name is at most 1024 bytes on one line");
+        assert_eq!(refused(&mut s, id, json!({"font": " \tArial\n"})), one_line);
+        assert_eq!(refused(&mut s, id, json!({"font": format!("Arial{}", " ".repeat(1024))})), one_line);
+    }
+    assert_eq!((s.doc.drawings.len(), s.undo.len()), (drawings, steps), "nothing refused is kept");
     assert_eq!(open_one(&s).font, "");
 }
 

@@ -929,7 +929,8 @@ fn check(s: &mut Session, _p: &Value) -> Result<Value> {
 
 // ---- Motion studies ----
 
-fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+/// The index of the study `p`'s `study` names, by its id or name.
+pub(crate) fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     // A number is an id first, text a name first: a study may be named like another's id.
     let (key, id_first) = match p.get("study") {
         Some(Value::Number(n)) => (n.to_string(), true),
@@ -1017,7 +1018,7 @@ fn study(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Joint values of a study at a step: (joint, full value vector).
-fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
+pub(crate) fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
     let mut out: Vec<(u64, Vec<f64>)> = Vec::new();
     for k in &m.keys {
         let Some(v) = k.value_at(step) else { continue };
@@ -1042,7 +1043,7 @@ fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
 }
 
 /// The values a study keys: (joint, index).
-fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
+pub(crate) fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
     m.keys.iter().map(|k| (k.joint, k.index)).collect()
 }
 

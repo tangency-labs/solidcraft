@@ -993,7 +993,7 @@ fn slider_crank_moves_the_piston() {
 /// (Slot: its frame at the shaft, x along the slot towards the pin). Every joint of the loop
 /// moves when it does, the slot's included. The pin's face sits `gap` mm off the arm's along
 /// the axes: a gap no value of the loop takes out, within the conflict check.
-fn slotted_arm(yaw_first: bool, gap: f64) -> Session {
+pub(crate) fn slotted_arm(yaw_first: bool, gap: f64) -> Session {
     let mut s = Session::default();
     for (name, x) in [("Ground", 0.0), ("Clamp", 26.0), ("Motor", 52.0), ("Arm", 40.0)] {
         part(&mut s, name, [x - 1.0, -1.0, -5.0]);

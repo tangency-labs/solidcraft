@@ -217,10 +217,19 @@ impl JsonSchema for TangentEdgesParam {
     }
 }
 
-/// An ISO 128 line group, by its wide line.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
-#[serde(transparent)]
+/// An ISO 128 line group, by its wide line. Every command that takes one refuses anything else in
+/// these words, after the key.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LineGroupParam(pub LineGroup);
+
+impl<'de> Deserialize<'de> for LineGroupParam {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value(Value::deserialize(d)?).map(LineGroupParam).map_err(|_| {
+            let (last, rest) = LineGroup::NAMES.split_last().map_or(("", &[][..]), |(last, rest)| (*last, rest));
+            serde::de::Error::custom(format!("must be one of {} or {last}", rest.join(", ")))
+        })
+    }
+}
 
 impl JsonSchema for LineGroupParam {
     fn schema_name() -> Cow<'static, str> {
@@ -270,12 +279,13 @@ impl JsonSchema for ExplodedParam {
     }
 }
 
-/// The position of its assembly a view draws (#13048), as given: `"designed"`, or some of the design's
-/// joints at values of their own.
+/// The position of its assembly a view draws (#13048), as given: `"designed"`, some of the design's
+/// joints at values of their own, or a step of one of its motion studies.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PoseParam {
     Designed,
     Joints(Vec<JointPoseParam>),
+    Study(StudyPoseParam),
 }
 
 /// One joint of a position, as given: the joint by its id or name, and its values as `joint.drive` takes
@@ -287,6 +297,15 @@ pub struct JointPoseParam {
     pub values: Vec<Value>,
 }
 
+/// A step of a motion study, as given: the study by its id or name, as `motion.play` finds it, and a
+/// whole step of its timeline.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StudyPoseParam {
+    pub study: Value,
+    pub step: Value,
+}
+
 impl<'de> Deserialize<'de> for PoseParam {
     /// One message for anything that is neither, rather than serde's "did not match any variant".
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<PoseParam, D::Error> {
@@ -295,12 +314,15 @@ impl<'de> Deserialize<'de> for PoseParam {
         enum Either {
             Name(String),
             Joints(Vec<JointPoseParam>),
+            Study(StudyPoseParam),
         }
-        let message = "pose is \"designed\", or a list of joints, each {\"joint\": its id or name, \"values\": [...]}";
+        let message = "pose is \"designed\", a list of joints, each {\"joint\": its id or name, \"values\": [...]}, \
+                       or a motion study's step, {\"study\": its id or name, \"step\": n}";
         match Either::deserialize(d).map_err(|_| serde::de::Error::custom(message))? {
             Either::Name(name) if name.eq_ignore_ascii_case("designed") => Ok(PoseParam::Designed),
             Either::Name(_) => Err(serde::de::Error::custom(message)),
             Either::Joints(joints) => Ok(PoseParam::Joints(joints)),
+            Either::Study(study) => Ok(PoseParam::Study(study)),
         }
     }
 }
@@ -325,9 +347,18 @@ impl JsonSchema for PoseParam {
             "required": ["joint", "values"],
             "additionalProperties": false
         });
+        let study = json!({
+            "type": "object",
+            "properties": {
+                "study": {"description": "The motion study, by its id or name.", "oneOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]},
+                "step": {"description": "A whole step of its timeline, 0 to its steps.", "type": "integer", "minimum": 0}
+            },
+            "required": ["study", "step"],
+            "additionalProperties": false
+        });
         json_schema!({
-            "description": "The position of its assembly the view draws: \"designed\" (as the design places its parts), or some of the design's joints at values of their own, driven as `joint.drive` drives them (limits, closed loops and motion links alike). The design never changes.",
-            "oneOf": [{"type": "string", "enum": ["designed"]}, {"type": "array", "items": joint, "minItems": 1, "maxItems": MAX_POSE_JOINTS}]
+            "description": "The position of its assembly the view draws: \"designed\" (as the design places its parts), some of the design's joints at values of their own, driven as `joint.drive` drives them (limits, closed loops and motion links alike), or a step of one of its motion studies, driven as `motion.play` drives it. A study step follows the study when it changes. The design never changes.",
+            "oneOf": [{"type": "string", "enum": ["designed"]}, {"type": "array", "items": joint, "minItems": 1, "maxItems": MAX_POSE_JOINTS}, study]
         })
     }
 }
@@ -539,8 +570,8 @@ pub struct SettingsResult {
     pub hide: SettingResult<Option<Vec<Vec<u64>>>>,
     /// The state of the assembly it draws: `"assembled"`, or `{"view": id}` for an exploded view.
     pub exploded: SettingResult<Value>,
-    /// The position of its assembly it draws: `"designed"`, or `{"joints": [...]}` as saved (radians
-    /// and mm).
+    /// The position of its assembly it draws: `"designed"`, `{"joints": [...]}` as saved (radians
+    /// and mm), or `{"study": {"id": .., "step": ..}}`.
     pub pose: PoseResult,
 }
 
@@ -556,6 +587,18 @@ pub struct PoseResult {
     /// The ids of the joints it names that the design no longer has.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skipped: Option<Vec<u64>>,
+    /// The motion study step it draws, for a step of a study the design has: a saved step past the
+    /// study's end draws its last.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub study: Option<StudyStepResult>,
+}
+
+/// A motion study's step as a view draws it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct StudyStepResult {
+    pub id: u64,
+    pub name: String,
+    pub step: u32,
 }
 
 /// One joint as a view in a position of its own draws it.

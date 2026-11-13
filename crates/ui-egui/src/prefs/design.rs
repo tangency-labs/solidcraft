@@ -148,7 +148,16 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     });
                 }
+                let label = app.tr("ui.sheet_page.colour").to_owned();
+                ui_kit::row(ui, &label, |ui| crate::drawing_sheet_page::colour_choice(app, ui));
+                let label = app.tr("ui.drawing_backdrop.label").to_owned();
+                ui_kit::row(ui, &label, |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
+                let label = app.tr("ui.drawing_sheets.visibility").to_string();
+                ui_kit::row(ui, &label, |ui| crate::drawing_workspace::sheets_visibility_choice(app, ui));
+                setting::drawing_calibration(app, ui);
             });
+            crate::drawing_sheet_page::calibration_bar(app, ui);
+            ui_kit::text(ui, app.tr("ui.sheet_page.calibration_note"), ui_kit::Text::Hint("drawing_calibration"));
         });
         ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {
             ui.horizontal_wrapped(|ui| {

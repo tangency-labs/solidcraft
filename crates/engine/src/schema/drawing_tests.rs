@@ -51,6 +51,8 @@ fn strict_keeps_todays_errors() {
         ("drawing.set", json!({"language": "e"})),
         ("drawing.set", json!({"revision_numbering": {"start": 2}})),
         ("drawing.set", json!({"revision_numbering": {"begin": 1}})),
+        ("drawing.sheet.add", json!({"line_group": "0.6"})),
+        ("drawing.sheet.set", json!({"sheet": "Sheet 1", "line_group": "0.6"})),
     ];
     for (id, p) in calls {
         let error = |level| drawing_session(level).0.execute(id, &p).err().map(|e| e.to_string());

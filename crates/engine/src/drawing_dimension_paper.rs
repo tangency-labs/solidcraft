@@ -17,7 +17,7 @@ use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{DimFrame, DimSizes, Outcome, PaperFonts, TextStyle, dim_layout_sized};
+use solidcraft_sketch::{DimFrame, DimSizes, DimText, Outcome, PaperFonts, TextStyle, dim_layout_sized};
 
 /// A dimension's sizes on paper, with its text above an unbroken line (ISO 129-1).
 const SIZES: DimSizes = DimSizes { arrow: 3.0, gap: 1.0, overshoot: 2.0, offset: 10.0, above: true };
@@ -32,7 +32,7 @@ const SAME_POINT_MM: f64 = 1e-6;
 struct Piece {
     frame: DimFrame,
     /// Where the layout puts its text, from the frame's own origin.
-    at: Vec2,
+    at: DimText,
     text: Text,
 }
 
@@ -67,6 +67,28 @@ impl Text {
     }
 }
 
+/// What a line of a dimension's layout is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineRole {
+    /// From near what it measures to past the dimension line.
+    Extension,
+    /// A dimension line or arc, from arrow tip to arrow tip, with any run-on to a text outside.
+    Dimension,
+}
+
+/// Where a dimension's parts sit, centred on its view as its group is: its lines as laid out, before
+/// an arrowhead stops one at its base, a chain's shared extension line once.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Layout {
+    pub lines: Vec<(LineRole, Vec<Vec2>)>,
+    /// Each arrowhead's tip and the unit direction it points in.
+    pub arrows: Vec<(Vec2, Vec2)>,
+    /// Each set text's box: its cap height and measured width, as the arrows fit by, its corners
+    /// in reading order: start and end on the line's side, then end and start on the far side. A
+    /// text that isn't set has none.
+    pub text_boxes: Vec<[Vec2; 4]>,
+}
+
 /// A dimension on paper.
 pub struct OnPaper {
     pub group: Group,
@@ -76,6 +98,8 @@ pub struct OnPaper {
     pub why: Option<String>,
     /// Whether its text isn't there only until the search for a font to fall back to answers.
     pub pending: bool,
+    /// Where its parts sit ([`Layout`]): a note's is empty.
+    pub layout: Layout,
 }
 
 /// `dimension`, read as `resolved`, on the view through `frame` (centred on the view), its lines in
@@ -87,19 +111,26 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut arrows = Vec::new();
     let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
+    let mut laid = Layout::default();
     let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
     for piece in pieces(dimension, resolved, &on, &set)? {
-        let layout = dim_layout_sized(&piece.frame, Some(piece.at), &SIZES, piece.text.half, [None, None]);
+        let layout = dim_layout_sized(&piece.frame, piece.at, &SIZES, piece.text.half, [None, None]);
+        if !piece.text.runs.is_empty() {
+            laid.text_boxes.push(text_box(layout.text, layout.text_dir, piece.text.half));
+        }
         texts.extend(placed(piece.text.runs, piece.text.half, TEXT_MM, layout.text, layout.text_dir));
         fonts.extend(piece.text.fonts);
         why = why.or(piece.text.why);
         pending |= piece.text.pending;
         // A chain's neighbours share an extension line.
-        for line in layout.lines {
+        for (i, line) in layout.lines.into_iter().enumerate() {
             if !lines.iter().any(|other| same_line(other, &line)) {
+                let role = if i < layout.extensions { LineRole::Extension } else { LineRole::Dimension };
+                laid.lines.push((role, line.clone()));
                 lines.push(line);
             }
         }
+        laid.arrows.extend(&layout.arrows);
         arrows.extend(layout.arrows);
     }
     for (tip, dir) in &arrows {
@@ -110,7 +141,14 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
         items.extend(ARROW.place(*tip, *tip - *dir, line_mm).ok()?.0);
     }
     items.extend(texts);
-    Some(OnPaper { group: Group { object: dimension.id, kind: ObjectKind::Dimension, items }, fonts, why, pending })
+    Some(OnPaper { group: Group { object: dimension.id, kind: ObjectKind::Dimension, items }, fonts, why, pending, layout: laid })
+}
+
+/// The box of a text `half` in size centred on `centre` and running along `dir`, its corners as
+/// [`Layout::text_boxes`] has them. For one line, its first corner is where [`placed`] starts the run.
+fn text_box(centre: Vec2, dir: Vec2, half: Vec2) -> [Vec2; 4] {
+    let (along, up) = (dir * half.x, dir.perp() * half.y);
+    [centre - along - up, centre + along - up, centre + along + up, centre - along + up]
 }
 
 /// `runs` of a text `half` in size, its capitals `cap_mm` high, centred on `centre` and running along
@@ -168,10 +206,17 @@ pub(crate) fn line_direction(direction: LinearDirection, seen: Vec2) -> Option<V
     Some(if forward { dir } else { -dir })
 }
 
-/// A line from `a` to `b` along `dir`, `across` from their middle.
+/// A line from `a` to `b` along `dir`, `across` from their middle. Its text is at its `place`, or
+/// in the middle when it fits there, or else beyond an arrow ([`DimText::Across`]).
 fn linear(a: Vec2, b: Vec2, dir: Vec2, across: f64, place: &TextPlace, text: Text) -> Piece {
-    let along = at_of(place).map_or(0.0, |at| (at - (a + b) * 0.5).dot(dir));
-    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir }, at: Vec2::new(along, across), text }
+    let at = at_of(place).map_or(DimText::Across(across), |at| DimText::At(Vec2::new((at - (a + b) * 0.5).dot(dir), across)));
+    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir }, at, text }
+}
+
+/// A line from `a` to `b` along `dir`, `across` from their middle, with its text in the middle
+/// whether it fits there or not: a set's member, whose texts beside each other need a rule of their own.
+fn centred(a: Vec2, b: Vec2, dir: Vec2, across: f64, text: Text) -> Piece {
+    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir }, at: DimText::At(Vec2::new(0.0, across)), text }
 }
 
 /// A chain's members, each a line from one point to the next, all on one line `offset` from the
@@ -183,7 +228,7 @@ fn chain(points: &[Vec2], direction: LinearDirection, offset: f64, resolved: &Re
     let line = ((first + last) * 0.5).dot(n) + offset;
     let member = |(i, (a, b)): (usize, (&Vec2, &Vec2))| {
         let text = resolved.members.get(i).map(|m| m.text.as_str());
-        linear(*a, *b, dir, line - ((*a + *b) * 0.5).dot(n), &TextPlace::Centred, set(text))
+        centred(*a, *b, dir, line - ((*a + *b) * 0.5).dot(n), set(text))
     };
     Some(points.iter().zip(points.iter().skip(1)).enumerate().map(member).collect())
 }
@@ -220,7 +265,7 @@ fn angular(a: [Vec2; 2], b: [Vec2; 2], other_side: bool, offset: f64, place: &Te
     let sweep = cross.abs().atan2(from_a.dot(from_b));
     let middle = Vec2::from_angle(d0.angle() + sweep * 0.5);
     let towards = at_of(place).and_then(|at| (at - vertex).normalized()).unwrap_or(middle);
-    Some(Piece { frame: DimFrame::Angular { vertex, d0, sweep }, at: towards * offset.abs(), text })
+    Some(Piece { frame: DimFrame::Angular { vertex, d0, sweep }, at: DimText::At(towards * offset.abs()), text })
 }
 
 /// A circle's or an arc's radius or diameter, from its centre and the arc's start, middle and end,
@@ -239,7 +284,11 @@ fn radial(centre: Vec2, arc: [Vec2; 3], diameter: bool, offset: f64, place: &Tex
     };
     let default = if whole { Some(Vec2::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2)) } else { (mid - centre).normalized() };
     let towards = at_of(place).and_then(|at| (at - centre).normalized()).or(default)?;
-    Some(Piece { frame: DimFrame::Radial { center: centre, radius, diameter, arc: turned }, at: towards * (radius + offset).max(0.0), text })
+    Some(Piece {
+        frame: DimFrame::Radial { center: centre, radius, diameter, arc: turned },
+        at: DimText::At(towards * (radius + offset).max(0.0)),
+        text,
+    })
 }
 
 /// A text's place on paper, when it has its own.
@@ -283,4 +332,4 @@ fn stroke(line: &[Vec2], width_mm: f64) -> Option<Item> {
 
 #[cfg(test)]
 #[path = "drawing_dimension_paper_tests.rs"]
-mod tests;
+pub(crate) mod tests;
