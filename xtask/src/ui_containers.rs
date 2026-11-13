@@ -1,5 +1,5 @@
 //! Mandatory source-level boundary for the universal UI container. Runs in fast CI.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use syn::visit::{self, Visit};
 
 /// Every production UI host, including nested modules and platform apps, goes through the
@@ -356,37 +356,44 @@ fn violations(source: &str) -> Result<Vec<String>, String> {
 /// Scan current and future crates/apps, including nested source and examples.
 /// The implementation module is the sole exception; feature-specific allowances are forbidden.
 pub fn run(root: &Path) -> Result<(), String> {
-    fn scan(root: &Path, dir: &Path, failures: &mut Vec<String>, warnings: &mut Vec<String>) -> Result<(), String> {
+    fn scan(root: &Path, dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
         for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
             let kind = entry.file_type().map_err(|e| e.to_string())?;
             if kind.is_dir() {
                 if !matches!(entry.file_name().to_str(), Some("target" | ".git")) {
-                    scan(root, &path, failures, warnings)?;
+                    scan(root, &path, files)?;
                 }
             } else if path.extension().is_some_and(|e| e == "rs")
                 && path.components().any(|c| c.as_os_str() == "src" || c.as_os_str() == "examples")
                 && path != root.join("crates/ui-kit/src/container.rs")
             {
-                let source = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                let found = violations(&source).map_err(|e| format!("{}: {e}", path.display()))?;
-                let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-                let (tooltips, hosts): (Vec<String>, Vec<String>) = found.into_iter().partition(|f| f.starts_with("raw tooltip"));
-                if !hosts.is_empty() {
-                    failures.push(format!("{relative}: {}", hosts.join(", ")));
-                }
-                if !tooltips.is_empty() {
-                    warnings.push(format!("{relative}: {}", tooltips.join(", ")));
-                }
+                files.push(path);
             }
         }
         Ok(())
     }
+    let mut files = Vec::new();
+    for dir in ["crates", "apps"] {
+        scan(root, &root.join(dir), &mut files)?;
+    }
+    // Parsing is the cost, so the files are read and parsed on every core.
+    let found = crate::parallel::map(&files, |path| {
+        let source = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        violations(&source).map_err(|e| format!("{}: {e}", path.display()))
+    })?;
     let mut failures = Vec::new();
     let mut warnings = Vec::new();
-    for dir in ["crates", "apps"] {
-        scan(root, &root.join(dir), &mut failures, &mut warnings)?;
+    for (path, found) in files.iter().zip(found) {
+        let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+        let (tooltips, hosts): (Vec<String>, Vec<String>) = found?.into_iter().partition(|f| f.starts_with("raw tooltip"));
+        if !hosts.is_empty() {
+            failures.push(format!("{relative}: {}", hosts.join(", ")));
+        }
+        if !tooltips.is_empty() {
+            warnings.push(format!("{relative}: {}", tooltips.join(", ")));
+        }
     }
     failures.sort();
     warnings.sort();

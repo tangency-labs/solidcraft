@@ -5,8 +5,6 @@
 # pull request. Never add a line: decide with exact geometry (`Body::exact_bounds`,
 # `kernel::apart`, the B-rep's faces and edges). These are truck-era uses SMLib answers exactly.
 crates/doc/src/appearance.rs:nearest_face picks the face nearest a point by the display mesh's triangles
-crates/doc/src/construct.rs:GeoRef::name_picks names picked faces and edges through the display mesh
-crates/doc/src/construct.rs:named_vertex finds where named edges meet through the display mesh
 crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
 crates/doc/src/eval.rs:eval_feature places features by the display mesh (faces, edges, nearness)
@@ -65,7 +63,6 @@ crates/doc/src/naming.rs:face_names_at names the faces holding points by the dis
 crates/doc/src/naming.rs:face_spot finds where a face is by the display mesh
 crates/doc/src/naming.rs:face_spots finds where faces are by the display mesh
 crates/doc/src/naming.rs:geometric_names names faces from sample points on the display mesh
-crates/doc/src/naming.rs:mesh_adjacency finds neighbouring faces from mesh edges
 crates/doc/src/naming.rs:normals takes face normals from mesh triangles
 crates/doc/src/naming.rs:roomiest takes a sample point per face from mesh triangles
 crates/doc/src/naming.rs:samples_up_to takes sample points per face from mesh triangles
@@ -115,8 +112,6 @@ crates/engine/src/cmd/inspect.rs:dist_to measures a distance on the display mesh
 crates/engine/src/cmd/interference.rs:face_points takes a point per face from mesh triangles
 crates/engine/src/cmd/interference.rs:interference finds interference between B-rep bodies by display meshes
 crates/engine/src/cmd/interference.rs:meshes_apart decides two bodies are apart by mesh triangles
-crates/engine/src/cmd/join_pieces.rs:adds_nothing decides a join adds no material by display mesh volumes
-crates/engine/src/cmd/join_pieces.rs:mesh_volume measures the volume a closed mesh encloses
 crates/engine/src/cmd/joints.rs:cam_profile samples a cam's picked edges from the display mesh
 crates/engine/src/cmd/measure_sel.rs:closest measures closest points on mesh triangles
 crates/engine/src/cmd/measure_sel.rs:describe measures a selection on the display mesh
@@ -136,7 +131,6 @@ crates/engine/src/frames.rs:frame_at picks the body a point lies on by the displ
 crates/kernel/src/blend_smlib.rs:imp::corner_vertices finds the vertices nearest points by a mesh
 crates/kernel/src/blend_smlib.rs:imp::reblend finds a blend's new edges by a mesh
 crates/kernel/src/blend_smlib.rs:imp::resolve resolves edge picks for SMLib by a mesh
-crates/kernel/src/body.rs:Body::edges gives edge points and lengths from a mesh
 crates/kernel/src/body.rs:Body::faces gives face areas and centroids from a mesh
 crates/kernel/src/body.rs:Body::meets decides whether bodies meet by meshes
 crates/kernel/src/body.rs:Body::meets_each decides whether tools meet a body by meshes

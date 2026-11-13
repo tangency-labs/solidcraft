@@ -6,13 +6,17 @@
 //! a spline's points are evenly spaced along it however its fit or control points are spread.
 //! The curve itself is left as it is. Curves of 3D sketches and model edges are not divided yet.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch, point_along};
 
 use super::sketch::{add_c, edit};
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, string_list};
-use crate::{Result, Session};
+use crate::schema::sketch_divide::{DivideParams, DivideResult};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, Result, Session};
+
+const CONTRACT: TypedContract<DivideParams> = TypedContract::new();
 
 /// Most segments one curve is divided into.
 pub(crate) const MAX_SEGMENTS: usize = 500;
@@ -21,10 +25,12 @@ const MAX_CURVES: usize = 200;
 /// Most points one command adds.
 const MAX_POINTS: usize = 2_000;
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("sketch.point.divide", "Divide Curve", divide)
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("sketch.point.divide", "Divide Curve", crate::checked!("sketch.point.divide", divide))
     .at("SKETCH", "CREATE")
     .icon("point")
     .enabled(in_sketch)
+    .contract(&CONTRACT)
+    .output(output_schema_for::<DivideResult>)
     .params(concat!(
         "curve: id | curves: [ids] (each divided on its own); segments: whole number from 2 to 500. Places points that divide each curve into `segments` pieces of equal length along it (arc length): segments − 1 points on an open curve (line, arc, spline, conic), `segments` points on a closed one (a circle from its point on sketch +X, an ellipse from its major-axis end, a closed spline from its first point). Each point is constrained to its share of the curve's length, so it stays on the curve and keeps equal spacing as the curve changes; the curve is not changed. Infinite lines are refused. Returns points: [ids], per curve in order, and constraints: [ids]",
         created_doc!()
@@ -82,7 +88,8 @@ fn divide(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok((points, constraints))
     })?;
-    Ok(json!({"points": points, "constraints": constraints, "sketch": info}))
+    let reply = DivideResult { points, constraints, sketch: info, created: None, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(test)]

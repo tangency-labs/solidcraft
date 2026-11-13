@@ -24,7 +24,7 @@ use solidcore_convert as convert;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
 pub use solidcore::prism::measure::Interval;
-pub use solidcore::prism::profile::ProfileRefusal;
+pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
 
 use crate::body::{finish, Body, Expect};
 use crate::boolean::{union_all, BooleanOp};
