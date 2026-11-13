@@ -555,7 +555,10 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Custom instructions (#8220): text every new chat's system note carries.
 fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "instructions", tr("ai.prefs.instructions"), |ui| {
-        let id = egui::Id::unique("prefs_agent_instructions");
+        // The shown field keeps one fixed id, so its focus and cursor survive a search. Preferences
+        // search also lays the section out unseen first; that copy takes an id of its own place,
+        // or egui sees one id twice in the frame (#15902).
+        let id = if ui.is_visible() { egui::Id::unique("prefs_agent_instructions") } else { ui.scope_id().with("prefs_agent_instructions") };
         let text = &mut app.preferences.agent_instructions;
         let response = ui_kit::text_area(ui, tr("ai.prefs.instructions"), id, text, 6, acp::INSTRUCTIONS_LIMIT);
         if response.has_focus() {
