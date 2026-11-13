@@ -49,6 +49,42 @@ impl TriMesh {
         out
     }
 
+    /// Face info for a mesh body.
+    pub(crate) fn faces(&self) -> Vec<crate::body::FaceInfo> {
+        let m = self.to_mesh();
+        let mut acc: Vec<(f64, Vec3, Vec3, bool)> = vec![(0.0, Vec3::ZERO, Vec3::ZERO, true); self.face_count()];
+        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+            let Some([a, b, c]) = m.tri(t) else { continue };
+            let cr = (b - a).cross(c - a);
+            let ar = cr.len() * 0.5;
+            if let Some(slot) = acc.get_mut(*f as usize) {
+                slot.0 += ar;
+                slot.1 += (a + b + c) * (ar / 3.0);
+                if let Some(n) = cr.normalized() {
+                    if slot.2 == Vec3::ZERO {
+                        slot.2 = n;
+                    } else if slot.2.dot(n) < 1.0 - 1e-6 {
+                        slot.3 = false;
+                    }
+                }
+            }
+        }
+        acc.into_iter()
+            .enumerate()
+            .map(|(index, (area, c, n, planar))| crate::body::FaceInfo {
+                index,
+                area,
+                centroid: if area > 0.0 { c / area } else { Vec3::ZERO },
+                plane_normal: (planar && n != Vec3::ZERO).then_some(n),
+            })
+            .collect()
+    }
+
+    /// Triangle count.
+    pub(crate) fn face_count(&self) -> usize {
+        self.triangles.len()
+    }
+
     /// Distinct undirected triangle sides.
     pub(crate) fn edge_count(&self) -> usize {
         let mut set = std::collections::HashSet::new();

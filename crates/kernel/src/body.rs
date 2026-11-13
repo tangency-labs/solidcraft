@@ -1,6 +1,6 @@
 use serde::Serialize;
-use solidcore_record::Vec3;
 use solidcore_record::brep::{self, Brep, Curve, Loop, Shell, Surface};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb3, Mesh};
 
@@ -1329,35 +1329,69 @@ impl Body {
 
     /// Faces with area and centroid.
     pub fn faces(&self, tol: f64) -> Result<Vec<FaceInfo>> {
-        let m = self.mesh(&MeshTolerance::chord(tol))?;
+        if let Some(mb) = &self.mesh {
+            return Ok(mb.faces());
+        }
         let nf = self.face_count();
-        let mut acc: Vec<(f64, Vec3, Vec3, bool)> = vec![(0.0, Vec3::ZERO, Vec3::ZERO, true); nf];
-        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-            let Some([a, b, c]) = m.tri(t) else { continue };
-            let cr = (b - a).cross(c - a);
-            let ar = cr.len() * 0.5;
-            if let Some(slot) = acc.get_mut(*f as usize) {
-                slot.0 += ar;
-                slot.1 += (a + b + c) * (ar / 3.0);
-                if let Some(n) = cr.normalized() {
-                    if slot.2 == Vec3::ZERO {
-                        slot.2 = n;
-                    } else if slot.2.dot(n) < 1.0 - 1e-6 {
-                        slot.3 = false;
+        if let Some((ops, order)) = self.ops_body() {
+            let mut out = Vec::with_capacity(nf);
+            for f in 0..nf {
+                let plane_normal = ops.face_plane_normal(order, f).ok().flatten().map(|n| Vec3::new(n.value[0], n.value[1], n.value[2]));
+                let (area, centroid) = if let Ok(c) = ops.face_centroid(order, f, 1e-4) {
+                    (c.area, Vec3::new(c.centroid[0], c.centroid[1], c.centroid[2]))
+                } else {
+                    (0.0, Vec3::ZERO)
+                };
+                out.push(FaceInfo { index: f, area, centroid, plane_normal });
+            }
+            return Ok(out);
+        }
+        let rec = self.record();
+        let mut out = Vec::with_capacity(nf);
+        for f in 0..nf {
+            let face = &rec.faces[f];
+            if let Some(plane) = self.planar_face(f) {
+                let n = plane.normal();
+                let mut total_2d_area = 0.0f64;
+                let mut total_c_acc = Vec2::ZERO;
+                for lp in &face.loops {
+                    let Loop::Edges { edges } = lp else { continue };
+                    let mut pts: Vec<Vec2> = Vec::new();
+                    for u in edges {
+                        let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                        let mut edge_pts = edge_points(edge, tol)?;
+                        if !u.forward {
+                            edge_pts.reverse();
+                        }
+                        if !pts.is_empty() {
+                            pts.pop();
+                        }
+                        pts.extend(edge_pts.into_iter().map(|p| plane.to_local(p)));
+                    }
+                    if pts.len() >= 3 {
+                        for i in 0..pts.len() {
+                            let p = pts[i];
+                            let q = pts[(i + 1) % pts.len()];
+                            let cr = p.x * q.y - q.x * p.y;
+                            total_2d_area += cr;
+                            total_c_acc += (p + q) * cr;
+                        }
                     }
                 }
+                let signed_area = total_2d_area * 0.5;
+                let area = signed_area.abs();
+                let centroid = if area > 1e-12 {
+                    let c2 = total_c_acc / (6.0 * signed_area);
+                    plane.to_world(c2)
+                } else {
+                    plane.origin
+                };
+                out.push(FaceInfo { index: f, area, centroid, plane_normal: Some(n) });
+            } else {
+                out.push(FaceInfo { index: f, area: 0.0, centroid: Vec3::ZERO, plane_normal: None });
             }
         }
-        Ok(acc
-            .into_iter()
-            .enumerate()
-            .map(|(index, (area, c, n, planar))| FaceInfo {
-                index,
-                area,
-                centroid: if area > 0.0 { c / area } else { Vec3::ZERO },
-                plane_normal: (planar && n != Vec3::ZERO).then_some(n),
-            })
-            .collect())
+        Ok(out)
     }
 
     /// Index of the edge closest to `p` (by polyline distance).
