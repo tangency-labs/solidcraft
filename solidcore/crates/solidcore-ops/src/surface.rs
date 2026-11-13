@@ -370,18 +370,21 @@ pub fn ruled(a: &Curve, b: &Curve, reversed: bool) -> Result<Record> {
     }))
 }
 
-/// `sheet` turned over ([`Body::turn_over`]): each face's side the other way, so each face's
-/// normal in its shell is the other way. The record reads the other way: each face's `forward` in
-/// its shell is negated, its surface, domain and loops and the edges as they were (still shared
-/// between faces). Turning a sheet over twice gives it back.
+/// `sheet` turned over ([`Body::turn_over`], `SmFace::SwapUV` on each face): each face's normal
+/// is the other way, its surface's u and v swapped (a spline's net transposed, its box and
+/// pcurves swapped to match), each face used in its shell as it was, the edges the same edges.
+/// Returns the turned record and, for each record edge of `sheet`, its index in it: the record
+/// numbers edges by its canonical walk, which a turned face's loops take the other way round, so
+/// picks and history held by edge index go through this map. Turning a sheet over twice gives it
+/// back.
 ///
 /// # Errors
 /// [`Error::Unsupported`] for a body with a closed shell (turned over, it would be inside out);
-/// those of [`Body::from_record`], [`Body::turn_over`] and [`Body::to_record`].
-pub fn reverse_sheet(sheet: &Record) -> Result<Record> {
-    let (body, _) = Body::from_record(sheet, true)?;
-    body.turn_over()?;
-    body.to_record().map(|(r, _)| r)
+/// those of [`Body::from_record`] and [`Body::turn_over`].
+pub fn reverse_sheet(sheet: &Record) -> Result<(Record, Vec<u32>)> {
+    let (body, order) = Body::from_record(sheet, true)?;
+    let turned = body.turn_over(&order)?;
+    Ok((turned.record, turned.edges))
 }
 
 #[cfg(test)]
