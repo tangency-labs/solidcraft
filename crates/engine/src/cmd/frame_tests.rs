@@ -1325,3 +1325,51 @@ fn a_pasted_frame_member_with_pairs_lands_with_its_source() {
         assert_eq!(all.iter().filter(|(l, h)| near3(*l, *lo) && near3(*h, *hi)).count(), 2, "{all:?}");
     }
 }
+
+/// The stored `pairs` of a frame member, as JSON.
+fn stored_pairs(s: &Session, id: &Value) -> Value {
+    serde_json::to_value(&s.doc.feature(id.as_u64().unwrap()).unwrap().kind).unwrap()["pairs"].clone()
+}
+
+#[test]
+fn editing_a_frame_member_keeps_pair_ids_and_never_reuses_one() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let before = stored_pairs(&s, &fid);
+    let solidcraft_doc::FeatureKind::FrameMember { names, .. } = member_kind(&s, &fid) else { panic!() };
+    // timeline.edit: the feature is edited in place, so a removed pair's id stays spent.
+    run(&mut s, "timeline.edit", json!({"feature": fid, "set": {"pairs": [before[1].clone()]}}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, names: after, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2"]);
+    assert_eq!(serde_json::to_value(&pairs[0]).unwrap(), before[1]);
+    assert_eq!(next_pair, 3);
+    assert_eq!(after["pair2"], names["pair2"]);
+    // timeline.redefine without `next_pair`: the same.
+    let kept = json!({"id": "pair2", "a": top_rail()["a"], "b": top_rail()["b"]});
+    let params = json!({"profile": tube(), "pairs": [kept, upright()]});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2", "pair3"]);
+    assert_eq!(next_pair, 4);
+    // Dropping the newest pair and adding another still never reuses `pair3`.
+    let params = json!({"profile": tube(), "pairs": [{"id": "pair2", "a": top_rail()["a"], "b": top_rail()["b"]}]});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let params = json!({"profile": tube(), "pairs": [{"id": "pair2", "a": top_rail()["a"], "b": top_rail()["b"]}, upright()]});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2", "pair4"]);
+    assert_eq!(next_pair, 5);
+}
+
+#[test]
+fn a_member_id_used_twice_is_refused() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rails"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 500]], "ids": ["pair1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e =
+        s.execute("frame.member", &json!({"sketch": "Rails", "lines": ["pair1"], "profile": tube(), "pairs": [upright()]})).unwrap_err().to_string();
+    assert!(e.contains("`pair1` is used twice"), "{e}");
+}
