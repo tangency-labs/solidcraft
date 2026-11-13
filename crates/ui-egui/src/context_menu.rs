@@ -194,6 +194,9 @@ pub struct MenuState {
     pub over_geometry: bool,
     /// The plane under the cursor when the viewport menu opened: it offers a sketch on it.
     pub plane: Option<String>,
+    /// The construction axis under the cursor when the viewport menu opened. A right-click leaves
+    /// it unselected, as it does a plane; the menu offers Find in Browser for it (#15355).
+    pub axis: Option<String>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
     /// them).
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
@@ -723,13 +726,13 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             }
             None => v.push(sketch),
         }
-        // A construction plane under the pointer, or a construction axis or point picked, has a
-        // row in its component's Construction folder (#15355).
+        // A construction plane or axis under the pointer, or one picked, or a construction point
+        // picked, has a row in its component's Construction folder (#15355).
         let picked = match sel.as_slice() {
             [Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name }] => Some(name.as_str()),
             _ => None,
         };
-        if let Some(id) = app.menu.plane.as_deref().or(picked).and_then(|name| construction_feature(app, name)) {
+        if let Some(id) = app.menu.plane.as_deref().or(app.menu.axis.as_deref()).or(picked).and_then(|name| construction_feature(app, name)) {
             v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "construction": id })));
         }
         v.push(Item::sep());
@@ -2386,10 +2389,15 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     let before = app.session.selection.clone();
     app.menu.over_geometry = app.viewport.hover.is_some();
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
-    app.menu.plane = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).and_then(|(_, sel)| match sel {
-        Sel::Plane { name } => Some(name),
+    let under = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).map(|(_, sel)| sel);
+    app.menu.plane = match &under {
+        Some(Sel::Plane { name }) => Some(name.clone()),
         _ => None,
-    });
+    };
+    app.menu.axis = match under {
+        Some(Sel::Axis { name }) => Some(name),
+        _ => None,
+    };
     crate::select_other::close(app);
     if let Some(sel) = crate::viewport::sketch_constraint_at(app, at, app.viewport.hover.as_ref()) {
         if !in_selection(app, &sel) {

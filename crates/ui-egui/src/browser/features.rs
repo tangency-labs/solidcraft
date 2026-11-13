@@ -1141,6 +1141,18 @@ mod tests {
         Sel::Face { body: body.into(), index: 0, point: solidcore_record::Vec3::ZERO }
     }
 
+    fn browser_section_collapsed(app: &SolveApp) -> bool {
+        use solidcraft_engine::panels::InstanceId;
+        app.panel_runtime().unwrap().layout().layout().containing(&InstanceId::new("browser").unwrap()).unwrap().collapsed
+    }
+
+    fn set_browser_section_collapsed(app: &mut SolveApp, collapsed: bool) {
+        use solidcraft_engine::panels::{InstanceId, LayoutAction, Mutation};
+        let section = app.panel_runtime().unwrap().layout().layout().containing(&InstanceId::new("browser").unwrap()).unwrap().id.clone();
+        app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed }] })
+            .unwrap();
+    }
+
     /// Find in Browser on a construction plane, axis or point (#15355): from the plane under the
     /// pointer, from a picked axis, or from the plane's own Find in Browser in the Timeline, the
     /// rows down to it in its component's Construction folder open (they start closed here) and
@@ -1157,7 +1169,7 @@ mod tests {
         h.app.run("component.activate", json!({"component":0})).unwrap();
         h.app.ui.show_browser = true;
         let folder = format!("{}/construction", occurrence_key(&[part]));
-        let finds: [(&str, Box<dyn Fn(&mut SolveApp)>); 3] = [
+        let finds: [(&str, Box<dyn Fn(&mut SolveApp)>); 4] = [
             (
                 "Datum",
                 Box::new(|app: &mut SolveApp| {
@@ -1166,6 +1178,17 @@ mod tests {
                     app.menu.plane = Some("Datum".into());
                     let item = crate::context_menu::items(app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
                     app.menu.plane = None;
+                    crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
+                }),
+            ),
+            (
+                "Spindle",
+                Box::new(|app: &mut SolveApp| {
+                    // A right-click on the axis leaves it unpicked too: the menu knows it as `menu.axis`.
+                    app.session.selection.clear();
+                    app.menu.axis = Some("Spindle".into());
+                    let item = crate::context_menu::items(app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
+                    app.menu.axis = None;
                     crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
                 }),
             ),
@@ -1178,9 +1201,12 @@ mod tests {
                 h.app.tree.collapsed.insert(key.clone());
                 h.app.tree.expanded.remove(&key);
             }
+            // A collapsed Browser section opens again too.
+            set_browser_section_collapsed(&mut h.app, true);
             h.frames(2);
             assert!(!drawn_rows().iter().any(|(l, ..)| l == label), "{label} starts hidden");
             find(&mut h.app);
+            assert!(!browser_section_collapsed(&h.app), "{label}");
             let id = if label == "Datum" { plane } else { axis };
             assert_eq!(h.app.tree.reveal_construction, Some(id), "{label}");
             h.frames(2);

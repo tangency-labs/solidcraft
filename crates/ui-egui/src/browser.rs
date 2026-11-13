@@ -118,7 +118,7 @@ pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
     let (component, sel) = (f.component, construction_sel(f));
     let _ = app.run("select.set", json!({ "items": [sel] }));
     app.ui.show_browser = true;
-    app.preferences.timeline_left_browser_collapsed = false;
+    reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
     app.tree.reveal_feature = None;
     app.tree.found = None;
