@@ -534,10 +534,11 @@ mod tests {
     use super::*;
     use crate::kernel::KernelOptions;
     use crate::primitive::api_primitives::create_plane;
-    use crate::topology::face::p1::flip_face_orientation;
+    use crate::topology::face::p1::turn_over;
 
     /// A point above a flat sheet and one below are on its two sides, one on it is on it; the
-    /// sheet turned over swaps the two sides.
+    /// sheet turned over ([`turn_over`]) swaps the two sides, the point on it still on it, and
+    /// turned over again they are as they were.
     #[test]
     fn points_above_and_below_a_sheet_are_on_its_two_sides() {
         let mut k = Kernel::new(&KernelOptions::default());
@@ -557,8 +558,11 @@ mod tests {
             "{up:?} {down:?}"
         );
         assert_eq!(at(&b, 0.0), FaceSide::On);
-        flip_face_orientation(&mut b, f).unwrap();
-        assert_eq!((at(&b, 3.0), at(&b, -3.0)), (down, up));
+        turn_over(&mut b, f).unwrap();
+        assert_eq!((at(&b, 3.0), at(&b, -3.0)), (down, up), "point_side swaps");
+        assert_eq!(at(&b, 0.0), FaceSide::On);
+        turn_over(&mut b, f).unwrap();
+        assert_eq!((at(&b, 3.0), at(&b, -3.0)), (up, down));
         assert!(point_side(&k, &b, f, Point3::new(f64::NAN, 0.0, 0.0), 1e-9).is_err());
     }
 }
