@@ -48,9 +48,11 @@ pub struct Member {
     pub name: String,
     /// The path's items as last synced ([`Member::sync`]); `refs` and `pair_ids` are parallel to it.
     pub path: Vec<Sel>,
-    /// For each path item, the point reference (GeoRef JSON) an edit loaded it from, sent back
-    /// verbatim so an untouched point is never found again from a pick; `None` for new picks and
-    /// lines. Change the path's items, then [`Member::sync`] realigns this to them.
+    /// For each path item, the lasting point reference (GeoRef JSON) sent back verbatim: the one an
+    /// edit loaded it from, or the one a pick was turned into when it was taken, so a point is
+    /// never found again from a pick (a snap point is forgotten as others wake); `None` for lines
+    /// and for points that came in otherwise (`commands` turns those then). Change the path's
+    /// items, then [`Member::sync`] realigns this to them.
     pub refs: Vec<Option<Value>>,
     /// For each path item, the id of the pair an edit loaded it in: a pair whose two points are
     /// still those two keeps its id.
@@ -158,9 +160,19 @@ pub(crate) fn pick(app: &SolveApp, d: &mut Dialog, sel: Sel) {
         if let Some(path) = d.inputs.first_mut() {
             path.items = before;
         }
-        d.error = Some(solidcraft_ui_text::format("frame.pick_refused", &[("reason", &why)]));
-    } else {
-        prompt(d);
+        d.error = Some(solidcraft_ui_text::format("frame.pick_refused", &[("reason", tr(&why))]));
+        return;
+    }
+    prompt(d);
+    // Each new point's reference is fixed as it is taken: a snap point is known only while it
+    // stays among the woken ones (`snap_wake::snapped`), which a long session of picks outlives.
+    let items = crate::selection::items(&d.inputs, 0);
+    if let Kind::Frame(m) = &mut d.kind {
+        for (i, item) in items.iter().enumerate().skip(before.len()).filter(|(_, item)| is_point(item)) {
+            if let Some(r) = m.refs.get_mut(i).filter(|r| r.is_none()) {
+                *r = point_ref(app, item).ok();
+            }
+        }
     }
 }
 
@@ -289,8 +301,8 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
             _ => {}
         }
     }
-    // A point goes back as the reference an edit loaded it from, and a pair whose two points an
-    // edit loaded together keeps its id.
+    // A point goes back as the reference it was loaded or picked as, and a pair whose two points
+    // an edit loaded together keeps its id.
     let (refs, ids) = m.aligned(picks);
     let end = |i: usize| match refs.get(i).cloned().flatten() {
         Some(r) => Ok(r),
