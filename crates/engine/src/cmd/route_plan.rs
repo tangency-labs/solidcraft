@@ -120,6 +120,11 @@ fn same(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
 }
 
+/// Whether `n` can name a route: its pieces are `<n>_<kind>_<i>`, so it is one component name.
+pub fn name_ok(n: &str) -> bool {
+    !n.is_empty() && n.len() <= 64 && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 fn look(t: &[(f64, f64)], n: f64) -> Option<f64> {
     t.iter().find(|(k, _)| same(*k, n)).map(|(_, v)| *v)
 }
@@ -451,8 +456,7 @@ impl Spec {
 
     /// Hostile input first: names, counts, sizes, finite coordinates.
     pub fn check(&self) -> Result<(), String> {
-        let ok_name = |n: &str| !n.is_empty() && n.len() <= 64 && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-        if !ok_name(&self.name) {
+        if !name_ok(&self.name) {
             return Err("`name` must be 1…64 letters, digits, `-` or `_`".into());
         }
         if self.points.len() == 1 {
@@ -566,6 +570,11 @@ impl Spec {
                 }
                 Fitting::Cap { at } | Fitting::Weld { at } | Fitting::Open { at } => mv(at),
             }
+        }
+        // The anchor is a route node too: when the move takes it, it goes with the points so the
+        // next carried move still finds it.
+        if let Some(start) = &mut s.start {
+            mv(start);
         }
         s
     }
@@ -749,6 +758,16 @@ pub fn plan(spec: &Spec) -> Result<Vec<Piece>, String> {
                 let other = |k: usize| g.inc(k).into_iter().find(|x| x.0 != e).map(|x| g.nps(x.0));
                 let n1 = nps.or_else(|| other(ia)).ok_or("a reducer at an open end needs its `nps`")?;
                 let n2 = nps_small.or_else(|| other(ib)).ok_or("a reducer at an open end needs its `nps_small`")?;
+                if let (Some(given), Some(pipe)) = (*nps, other(ia))
+                    && !same(given, pipe)
+                {
+                    return Err(format!("the reducer at {pa:?}: its large end is NPS {given} but the pipe there is NPS {pipe}"));
+                }
+                if let (Some(given), Some(pipe)) = (*nps_small, other(ib))
+                    && !same(given, pipe)
+                {
+                    return Err(format!("the reducer at {pb:?}: its small end is NPS {given} but the pipe there is NPS {pipe}"));
+                }
                 let h = reducer_h(n1, n2).ok_or_else(|| format!("no {n1} × {n2} reducer in the library"))?;
                 if (span - h).abs() > FIND {
                     return Err(format!("reducer {n1} × {n2}: its span {span:.2} mm is not its length H {h} mm"));
@@ -814,6 +833,11 @@ pub fn plan(spec: &Spec) -> Result<Vec<Piece>, String> {
                 let straight = matches!(all.as_slice(), [x, y] if (dot(x.1, y.1) + 1.0).abs() <= 1e-9);
                 if !straight {
                     return Err(format!("the weld at {p:?} is not between two straight segments"));
+                }
+                if let [x, y] = all.as_slice()
+                    && !same(g.nps(x.0), g.nps(y.0))
+                {
+                    return Err(format!("the weld at {p:?} joins NPS {} and {}: a weld joins pipes of one size", g.nps(x.0), g.nps(y.0)));
                 }
                 continue;
             }
@@ -889,6 +913,23 @@ pub fn plan(spec: &Spec) -> Result<Vec<Piece>, String> {
             occ.insert((k, r2.0), Some(c));
             occ.insert((k, br.0), Some(m));
             pieces.push(pc);
+        } else if all.len() == 3 {
+            // A fitting (a valve or a reducer) owns one of the three arms: no free span is left
+            // for a tee, so the junction cannot be connected.
+            return Err(format!("a fitting occupies an arm of the junction at {p:?}: no tee fits there"));
+        } else if all.len() == 2 && free.len() == 1 {
+            // One arm is a fitting's port: a pipe can only run straight into it.
+            let Some(f) = free.first() else { continue };
+            let Some(o) = all.iter().find(|x| x.0 != f.0) else { continue };
+            if (dot(f.1, o.1) + 1.0).abs() > 1e-9 {
+                return Err(format!("the fitting at {p:?} meets a pipe at an angle: no elbow fits between them"));
+            }
+        } else if all.len() == 2 && free.is_empty() {
+            // Two fittings meet at the node: their ports must be in line.
+            let (Some(a), Some(b)) = (all.first(), all.get(1)) else { continue };
+            if (dot(a.1, b.1) + 1.0).abs() > 1e-9 {
+                return Err(format!("the fittings at {p:?} meet at an angle: no elbow fits between them"));
+            }
         } else if all.len() > 3 {
             return Err(format!("{} segments meet at {p:?}", all.len()));
         }
@@ -933,7 +974,7 @@ pub fn plan(spec: &Spec) -> Result<Vec<Piece>, String> {
             // between the fitting's centre and the reducer's large end is the overlap, not a pipe.
             let overlap = spec.fittings.iter().any(|f| {
                 let Fitting::Reducer { large, small, joint: Some(j), .. } = f else { return false };
-                if !near(*large, g.pt(*kb), FIND) {
+                if !near(*large, g.pt(*ka), FIND) && !near(*large, g.pt(*kb), FIND) {
                     return false;
                 }
                 let s = sub(*small, *large);
@@ -1096,7 +1137,9 @@ pub fn fitting_commands(p: &Piece, sched: Schedule, elbow: Elbow, body: &str) ->
         Kind::Cap => {
             // A 2:1 elliptical head on a straight skirt: a sphere scaled to half its depth.
             let e = cap_e(n).ok_or_else(miss)?;
-            let (o, i) = (od_b3610(n).ok_or_else(miss)?, bore_b3610(n, sched).ok_or_else(miss)?);
+            // The cap takes the pipe's own outside diameter and bore: a Schedule EN or ACR
+            // route's tube size is not the B36.10 size.
+            let (o, i) = (od(n, sched).ok_or_else(miss)?, bore(n, sched).ok_or_else(miss)?);
             let x0 = e - o / 4.0;
             for (dia, nm) in [(o, body.to_string()), (i, format!("{body}_bore"))] {
                 let h = format!("{nm}_h");

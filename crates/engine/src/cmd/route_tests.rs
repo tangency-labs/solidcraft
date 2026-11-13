@@ -135,6 +135,61 @@ fn hostile_specs_are_refused_with_the_reason() {
 }
 
 #[test]
+fn a_weld_between_two_sizes_is_refused() {
+    // The weld's node is excluded from the straight-run check, so the sizes must be compared
+    // there too: a butt weld joins two pipes of one size.
+    let spec: Spec = serde_json::from_value(json!({"name": "W", "segments": [
+        {"a": [0, 0, 0], "b": [300, 0, 0], "nps": 2.0},
+        {"a": [300, 0, 0], "b": [600, 0, 0], "nps": 1.0}
+    ], "fittings": [{"kind": "weld", "at": [300, 0, 0]}]}))
+    .unwrap();
+    let e = rp::plan(&spec).unwrap_err();
+    assert!(e.contains("weld") && e.contains("NPS"), "{e}");
+}
+
+#[test]
+fn a_reducer_must_match_the_pipe_at_each_end() {
+    // An explicit reducer size may not disagree with the pipe it is welded to.
+    let spec: Spec = serde_json::from_value(json!({"name": "R", "segments": [
+        {"a": [0, 0, 0], "b": [300, 0, 0], "nps": 2.0},
+        {"a": [300, 0, 0], "b": [376.2, 0, 0], "nps": 2.0},
+        {"a": [376.2, 0, 0], "b": [600, 0, 0], "nps": 1.0}
+    ], "fittings": [{"kind": "reducer", "large": [300, 0, 0], "small": [376.2, 0, 0], "nps": 1.5, "nps_small": 1.0}]}))
+    .unwrap();
+    let e = rp::plan(&spec).unwrap_err();
+    assert!(e.contains("reducer") && e.contains("NPS 1.5") && e.contains("NPS 2"), "{e}");
+}
+
+#[test]
+fn a_fitting_that_meets_a_pipe_at_an_angle_is_refused() {
+    // A valve whose port sits on the end of a pipe at 90 deg: no elbow covers the junction, so
+    // it is refused instead of welding two perpendicular ports.
+    let spec: Spec = serde_json::from_value(json!({"name": "J", "segments": [
+        {"a": [0, 0, 0], "b": [300, 0, 0], "nps": 1.0},
+        {"a": [300, 0, 0], "b": [300, 200, 0], "nps": 1.0}
+    ], "fittings": [{"kind": "valve", "lib": "v", "a": [300, 0, 0], "b": [300, 200, 0], "up": [0, 0, 1]}],
+       "valves": {"v": {"step": "/tmp/valve.step", "port_a": [0, 0, 0], "port_b": [0, 200, 0], "up": [0, 0, 1]}}}))
+    .unwrap();
+    let e = rp::plan(&spec).unwrap_err();
+    assert!(e.contains("fitting") && e.contains("angle"), "{e}");
+}
+
+#[test]
+fn a_carried_move_of_the_anchor_moves_the_anchor_too() {
+    let spec: Spec = serde_json::from_value(json!({"name": "A", "nps": 1.0, "start": [0, 0, 0],
+                                                      "points": [[0, 0, 0], [1000, 0, 0], [1000, 500, 0]]}))
+    .unwrap();
+    let (after, moved) = rp::move_point(&spec, [0.0, 0.0, 0.0], [10.0, 0.0, 0.0], true).unwrap();
+    assert_eq!(moved, 3);
+    assert_eq!(after.start, Some([10.0, 0.0, 0.0]), "the anchor follows the node it names");
+    assert_eq!(rp::nodes(&after).unwrap()[0], [10.0, 0.0, 0.0]);
+    // A second carried move from the moved anchor finds it.
+    let (again, moved) = rp::move_point(&after, [1010.0, 0.0, 0.0], [0.0, 10.0, 0.0], true).unwrap();
+    assert_eq!(moved, 2, "the corner and the point beyond it");
+    assert_eq!(again.start, Some([10.0, 0.0, 0.0]), "the anchor stays where the first move put it");
+}
+
+#[test]
 fn a_sloped_corner_takes_a_bend_of_its_own_angle() {
     // A 1 in Sch 40 line whose second leg turns 92.86 deg: the bend is cut to the turn it makes.
     let a: f64 = 92.86_f64.to_radians();
@@ -171,26 +226,29 @@ fn a_copper_acr_route_builds_its_own_tube_and_bend() {
 
 #[test]
 fn a_reducer_fitted_onto_a_tee_outlet_records_its_overlap() {
-    // A 2 in tee whose left run outlet carries a 2 x 1 in reducer set 33.5 mm into the tee.
-    let spec = json!({"name": "O", "schedule": "10S", "segments": [
-        {"a": [0, 0, 0], "b": [0, 200, 0], "nps": 2.0},
-        {"a": [0, 0, 0], "b": [300, 0, 0], "nps": 2.0},
-        {"a": [0, 0, 0], "b": [-30, 0, 0], "nps": 2.0},
-        {"a": [-30, 0, 0], "b": [-106.2, 0, 0], "nps": 2.0},
-        {"a": [-106.2, 0, 0], "b": [-300, 0, 0], "nps": 1.0}
-    ], "fittings": [{"kind": "reducer", "large": [-30, 0, 0], "small": [-106.2, 0, 0], "nps": 2.0,
-                     "nps_small": 1.0, "joint": [-63.5, 0, 0]}]});
-    let pieces = rp::plan(&serde_json::from_value(spec).unwrap()).unwrap();
-    let red = pieces.iter().find(|p| p.kind == Kind::Reducer).unwrap();
-    assert!((red.overlap.unwrap() - 33.5).abs() < 1e-6, "{:?}", red.overlap);
-    assert!(red.ports.iter().any(|p| (p[0] + 63.5).abs() < 1e-6), "{:?}", red.ports);
-    let l: Vec<f64> = lengths(&pieces).into_iter().map(|x| x.1).collect();
-    assert_eq!(l.len(), 3, "{l:?}");
-    assert!(l.contains(&(200.0 - 63.5)) && l.contains(&(300.0 - 63.5)) && l.contains(&(300.0 - 106.2)), "{l:?}");
-    // The reducer is held to the tee at the outlet inside its body.
-    let (welds, unjoined) = rp::welds(&pieces);
-    assert_eq!(unjoined, Vec::<usize>::new());
-    assert_eq!(welds.len(), pieces.len() - 1);
+    // A 2 in tee whose left run outlet carries a 2 x 1 in reducer set 33.5 mm into the tee. The
+    // short edge is given both ways round: its ends are the tee and the reducer's large end.
+    for (a, b) in [([0, 0, 0], [-30, 0, 0]), ([-30, 0, 0], [0, 0, 0])] {
+        let spec = json!({"name": "O", "schedule": "10S", "segments": [
+            {"a": [0, 0, 0], "b": [0, 200, 0], "nps": 2.0},
+            {"a": [0, 0, 0], "b": [300, 0, 0], "nps": 2.0},
+            {"a": a, "b": b, "nps": 2.0},
+            {"a": [-30, 0, 0], "b": [-106.2, 0, 0], "nps": 2.0},
+            {"a": [-106.2, 0, 0], "b": [-300, 0, 0], "nps": 1.0}
+        ], "fittings": [{"kind": "reducer", "large": [-30, 0, 0], "small": [-106.2, 0, 0], "nps": 2.0,
+                         "nps_small": 1.0, "joint": [-63.5, 0, 0]}]});
+        let pieces = rp::plan(&serde_json::from_value(spec).unwrap()).unwrap();
+        let red = pieces.iter().find(|p| p.kind == Kind::Reducer).unwrap();
+        assert!((red.overlap.unwrap() - 33.5).abs() < 1e-6, "{:?}", red.overlap);
+        assert!(red.ports.iter().any(|p| (p[0] + 63.5).abs() < 1e-6), "{:?}", red.ports);
+        let l: Vec<f64> = lengths(&pieces).into_iter().map(|x| x.1).collect();
+        assert_eq!(l.len(), 3, "{l:?}");
+        assert!(l.contains(&(200.0 - 63.5)) && l.contains(&(300.0 - 63.5)) && l.contains(&(300.0 - 106.2)), "{l:?}");
+        // The reducer is held to the tee at the outlet inside its body.
+        let (welds, unjoined) = rp::welds(&pieces);
+        assert_eq!(unjoined, Vec::<usize>::new());
+        assert_eq!(welds.len(), pieces.len() - 1);
+    }
 }
 
 // ---- the commands ---------------------------------------------------------------------------
@@ -268,6 +326,39 @@ fn moving_a_point_rebuilds_the_route_with_the_new_cut_lengths() {
     assert_eq!(r["free_dof"], json!([]));
     let comps = run(&mut s, "component.list", json!({"compact": true}));
     assert_eq!(comps["components"].as_array().unwrap().len(), 1 + 1 + 3, "the root, the route and its three pieces, nothing left over");
+}
+
+#[test]
+fn a_renamed_route_keeps_its_component_name_in_the_list_and_after_an_edit() {
+    let mut s = Session::default();
+    run(&mut s, "route.create", l_route());
+    let listed = run(&mut s, "route.list", json!({}));
+    let component = listed["routes"][0]["component"].clone();
+    run(&mut s, "component.rename", json!({"component": component, "name": "M"}));
+    // The component is the route's identity: the list and the details report it, not the stale
+    // name stored in the spec.
+    assert_eq!(run(&mut s, "route.list", json!({}))["routes"][0]["name"], "M");
+    assert_eq!(run(&mut s, "route.get", json!({"route": "M"}))["route"], "M");
+    run(&mut s, "route.edit", json!({"route": "M", "schedule": "80"}));
+    assert_eq!(run(&mut s, "route.list", json!({}))["routes"][0]["name"], "M", "an edit keeps the component's name");
+}
+
+#[test]
+fn a_schedule_en_cap_takes_the_pipe_tube_diameter() {
+    // EN 10253-4 2.5 in tube is 63.5 x 1.65 mm, not the B36.10 73.03 mm pipe; the cap must
+    // match the pipe it closes.
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "route.create",
+        json!({"name": "E", "nps": 2.5, "schedule": "EN", "points": [[0, 0, 0], [500, 0, 0]],
+                                       "fittings": [{"kind": "cap", "at": [500, 0, 0]}]}),
+    );
+    let m = run(&mut s, "inspect.measure", json!({}));
+    let cap = m["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "E_cap_1").unwrap();
+    let (lo, hi) = (&cap["bbox"]["min"], &cap["bbox"]["max"]);
+    assert!((f(&hi[1]) - f(&lo[1]) - 63.5).abs() < 1e-3, "the cap's diameter is the tube's: {cap}");
+    assert!((f(&hi[2]) - f(&lo[2]) - 63.5).abs() < 1e-3, "the cap's diameter is the tube's: {cap}");
 }
 
 #[test]
