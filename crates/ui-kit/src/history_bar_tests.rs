@@ -310,3 +310,30 @@ fn a_steps_state_reaches_its_chip_and_the_floating_card_dots_the_last_done_step(
     rig.frame(Vec::new());
     assert!(!dot(&rig), "only that step");
 }
+
+/// A strip narrower than its steps, scrolled to its end, shows the marker after the last step
+/// inside its clip: the marker is part of the scroll range, not cut off past it.
+#[test]
+fn scrolled_to_its_end_the_strip_shows_the_marker_after_the_last_step() {
+    let labels: Vec<&'static str> = (0..40).map(|i| &*Box::leak(format!("Step {i}").into_boxed_str())).collect();
+    let mut rig = Rig::new(&labels, labels.len());
+    rig.rect = Rect::from_min_size(pos2(0.0, 100.0), vec2(300.0, 40.0));
+    rig.frame(Vec::new());
+    let over = rig.rect.center();
+    for _ in 0..30 {
+        rig.time.set(rig.time.get() + 0.1);
+        let wheel = Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -2000.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        rig.frame(vec![Event::PointerMoved(over), wheel]);
+    }
+    rig.frame(Vec::new());
+    let marker = solidcraft_ui_registry::rect_of("test:marker").expect("the marker is drawn");
+    let last = rig.at("test:Step 39");
+    assert!(rig.rect.contains(last), "scrolled to the end: the last step {last:?} shows in {:?}", rig.rect);
+    assert!(marker.left() >= rig.rect.left() && marker.right() <= rig.rect.right(), "the marker {marker:?} lies inside the strip {:?}", rig.rect);
+}
