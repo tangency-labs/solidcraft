@@ -203,7 +203,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = setting::ground_shadow_follows_model(app, ui).backing_on_hover_text(app.tr("prefs.ground_shadow_follows_model_help"));
                 crate::scenario::publish_handle("prefs:ground_shadow_follows_model", response.rect.center());
             });
-            ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
+            let shadow_style = app.tr("ui.ground_shadow_style");
+            let label_width = (t.form_label_width + t.space_24).max(ui_kit::ContentWidth::label(ui, shadow_style) + t.space_4);
+            ui_kit::settings_form(ui, label_width, |ui| {
                 ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
                     let options = crate::navigation_slots::VISUAL_STYLES.map(|(_, label)| solidcraft_ui_text::tr_label(label));
                     let choices: Vec<_> =
@@ -224,6 +226,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let _ = app.run("view.visual_style", json!({"style":style}));
                     }
                 });
+                ui_kit::row(ui, shadow_style, |ui| super::ground_shadow_selector(app, ui));
                 ui.add_enabled_ui(app.ui.perspective || app.ui.auto_ortho_faces, |ui| field_of_view_row(app, ui));
             });
         });
