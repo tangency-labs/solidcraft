@@ -172,8 +172,6 @@
   "face_points_span_domain",
   "check_seam_crossing_unclosed",
   "surface_parallel_to_vector_checks",
-  "imprint_skips_collapsed_definition",
-  "boolean_coincident_strip_drops_crossing",
   "ascii_doubles_round_trip",
   "fillet_round_ends_at_tangent_continuation",
   "fillet_round_as_definition",

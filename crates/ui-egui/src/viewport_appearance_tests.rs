@@ -613,3 +613,34 @@ fn the_ambient_occlusion_radius_follows_what_is_drawn() {
     app.preferences.ambient_occlusion = false;
     assert_eq!(super::ao_radius(&app), 0.0, "off");
 }
+
+/// A body whose appearance has a PBR finish (brass) carries it in the model scene's palette on
+/// its body, instance and face slots; a plain body has none (the shader gives it a satin finish).
+/// The finish is shown by default, and the preference that turns it off reaches the shader.
+#[test]
+fn a_pbr_appearance_reaches_the_model_palette_and_the_finish_preference_the_shader() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 20, "width": 15, "height": 10, "body_name": "Part"})).unwrap();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Plain", "operation": "new"})).unwrap();
+    app.run("render.library.appearance.apply", json!({"id": "SURF-010", "variant": "uniform_opaque", "bodies": ["Part"]})).unwrap();
+    assert!(app.preferences.viewport_material_finish, "on by default");
+    let scene = build_scene(&app);
+    let slots = |name: &str| app.viewport.palette.lock().unwrap().slots(name).unwrap();
+    let at =
+        |scene: &crate::gpu::GpuScene, slot: crate::gpu::PaletteIndex| scene.palette.materials().get(slot.0 as usize).copied().unwrap_or_default();
+    let (part, plain) = (slots("Part"), slots("Plain"));
+    for slot in [part.body, part.instance, part.face(0), part.face(5)] {
+        let m = at(&scene, slot);
+        assert!(m.pbr && m.metallic == 1.0 && (m.roughness - 0.29).abs() < 1e-6, "brass on slot {slot:?}: {m:?}");
+    }
+    for slot in [plain.body, plain.instance, plain.face(0)] {
+        assert!(!at(&scene, slot).pbr, "a plain body has no finish");
+    }
+    let old: crate::prefs::Prefs = serde_json::from_value(json!({"msaa": 4})).unwrap();
+    assert!(old.viewport_material_finish, "older preferences get the finish too (a changed default)");
+    let up = solidcraft_viewport::UpAxis::Z;
+    let sky = |app: &SolveApp| super::sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, up);
+    assert_eq!(sky(&app), [0.0, 0.0, 1.0, 2.0]);
+    crate::prefs::set(&mut app, &json!({"viewport_material_finish": false})).unwrap();
+    assert_eq!(sky(&app), [0.0, 0.0, 1.0, 0.0], "off: shaded flat, as before");
+}

@@ -212,12 +212,12 @@ B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is
 **Near-coincident strips.** Two planar faces crossing at a small angle θ meet in a line fixed only
 to tol / sin θ. Where one face has an edge lying on the other, parallel to and covering the crossing,
 and the other face ends at a similar edge on the far side, the two planes stay within tolerance of
-each other across the whole strip between those edges. The port still makes the crossing an edge,
-whose ends are picked per body and never related, and `make_faceuse` then fails (`SM_ERR`). With
-`boolean_coincident_strip_drops_crossing` the crossing's edge definition is removed before
-`resolve_intersections`, so the strip is bounded by the existing edges
-(`topology_intersector/coincident_strip.rs`, `drop_crossings_in_coincident_strips`; test
-`solidcore/tests/wr_614_coincident_strip_crossing.rs`). The rule is for planes only, and it is opt-in.
+each other across the whole strip between those edges. Upstream still makes the crossing an edge,
+whose ends are picked per body and never related, and `make_faceuse` then fails (`SM_ERR`). The port
+removes the crossing's edge definition before `resolve_intersections`, so the strip is bounded by
+the existing edges (`topology_intersector/coincident_strip.rs`, `drop_crossings_in_coincident_strips`;
+test `solidcore/tests/wr_614_coincident_strip_crossing.rs`). The rule is for planes only; it is the
+default (its flag, `boolean_coincident_strip_drops_crossing`, was retired).
 
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
@@ -307,7 +307,7 @@ small error.
 | ray grazes a face or hits an edge | the parity of the crossing is ambiguous | lowest-dimension hit and its local sector; a hit at the start fails that ray, and the next axis is tried; no ray finds a region: `SM_ERR` | a certified classification (§4.3) |
 | faces within 10° at a common edge | the binormals do not separate the sector | stepped off the edge at growing distances; 0.5° is taken as coincident | an enclosure of the sector test |
 | coincident faces not recognised | the coincidence check is sampled off the plane | the pair goes to SSI with parallel normals | coincidence from the definitions (§5) |
-| near-coincident planar strip | a crossing fixed only to tol / sin θ, its ends unrelated | `make_faceuse` `SM_ERR`; fixed with `boolean_coincident_strip_drops_crossing` | curved strips |
+| near-coincident planar strip | a crossing fixed only to tol / sin θ, its ends unrelated | upstream's `make_faceuse` `SM_ERR`; the crossing is dropped (WR-614) | curved strips |
 | an imprint fails half way | both bodies are partly imprinted | the imprint's error is returned, not overwritten (`topology_intersector/p2.rs`) | |
 | union deletes a face between the outside and a solid | the solid merges into the infinite region | with `boolean_union_refuses_solid_leak`, refused with `SM_ERR` naming the face (`merge/p4.rs`) | on by default |
 | result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` | |
@@ -357,10 +357,10 @@ A reviewer can check each of these on a change to the boolean.
 - The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
-- Opt-in fixes for the cases in §5, §6 and §8: `boolean_coincident_strip_drops_crossing`,
-  `boolean_union_refuses_solid_leak`, `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`,
-  `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing`,
-  `boolean_splits_definition_across_split`, `boolean_skips_faces_apart` (`solidcore/src/kernel.rs`).
+- Opt-in fixes for the cases in §5, §6 and §8: `boolean_union_refuses_solid_leak`,
+  `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`, `keep_operand_uv_trims`,
+  `boolean_vertex_by_best_crossing`, `boolean_splits_definition_across_split`,
+  `boolean_skips_faces_apart` (`solidcore/src/kernel.rs`).
 
 **Open.**
 - Retiring those flags: each fix on by default with its old path deleted (AGENTS.md §4b).
