@@ -1445,21 +1445,11 @@ mod tests {
         ))
     }
 
-    /// `BooleanLists` copies its surface operands with the virtual `Copy` (WR-196): each
-    /// surface makes a face over its natural domain, a list of planes is recognised as
-    /// planar and takes the planar 2D path, whose outputs are copies of the derived
-    /// surfaces; a list with B-reps never reads its surfaces.
-    #[test]
-    fn surface_lists_copy_each_surface_whole() {
-        let mut k = Kernel::default();
-        let (brep, planar) =
-            list_operand(&mut k, &[], &[square_plane(0.0), square_plane(2.0)]).unwrap();
-        assert!(planar);
-        assert_eq!(bp::faces(&brep, None).unwrap().len(), 2);
-        // the last surface's kind decides (upstream: "we hope they are all the same")
-        let sphere = Surface::from(
+    /// The whole unit sphere about the origin.
+    fn unit_sphere(k: &Kernel) -> Surface {
+        Surface::from(
             crate::surface::sphere::Sphere::new(
-                &k,
+                k,
                 crate::math::Vec3::ZERO,
                 crate::math::Vec3::new(1.0, 0.0, 0.0),
                 crate::math::Vec3::new(0.0, 1.0, 0.0),
@@ -1472,13 +1462,35 @@ mod tests {
                 },
             )
             .unwrap(),
-        );
+        )
+    }
+
+    /// `BooleanLists` copies its surface operands with the virtual `Copy` (WR-196): each
+    /// surface makes a face over its natural domain, a list of planes is recognised as
+    /// planar and takes the planar 2D path, whose outputs are copies of the derived
+    /// surfaces; a list with B-reps never reads its surfaces.
+    #[test]
+    fn surface_lists_copy_each_surface_whole() {
+        let mut k = Kernel::default();
+        let (brep, planar) =
+            list_operand(&mut k, &[], &[square_plane(0.0), square_plane(2.0)]).unwrap();
+        assert!(planar);
+        assert_eq!(bp::faces(&brep, None).unwrap().len(), 2);
+        // the last surface's kind decides (upstream: "we hope they are all the same")
+        let sphere = unit_sphere(&k);
         let (brep, planar) = list_operand(&mut k, &[], &[square_plane(0.0), sphere]).unwrap();
         assert!(!planar);
         assert_eq!(bp::faces(&brep, None).unwrap().len(), 2);
-        // two unit squares overlapping in [0.5, 1] x [0, 1]: the union and the
-        // intersection are one region each, the exclusive or two, the differences one
-        for (operation, regions) in [(0, 1), (1, 1), (2, 2), (3, 1), (4, 1)] {
+        // two unit squares overlapping in [0.5, 1] x [0, 1]: each output plane spans one
+        // region of the result, [x0, x1] x [0, 1] at z = 0, from its natural domain
+        let regions: [(i32, &[(f64, f64)]); 5] = [
+            (0, &[(0.5, 1.0)]),
+            (1, &[(0.0, 1.5)]),
+            (2, &[(0.0, 0.5), (1.0, 1.5)]),
+            (3, &[(0.0, 0.5)]),
+            (4, &[(1.0, 1.5)]),
+        ];
+        for (operation, expected) in regions {
             let result = boolean_lists(
                 &mut k,
                 &[],
@@ -1490,14 +1502,37 @@ mod tests {
             )
             .unwrap();
             assert!(result.breps.is_empty(), "operation {operation}");
-            assert_eq!(result.surfaces.len(), regions, "operation {operation}");
+            let mut spans = Vec::new();
             for surface in &result.surfaces {
                 assert!(
                     surface.is_kind_of(PLANE_TYPE).unwrap(),
                     "operation {operation}"
                 );
+                let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+                let low = surface.evaluate_point(&k, domain.min()).unwrap();
+                let high = surface.evaluate_point(&k, domain.max()).unwrap();
+                assert_eq!([low.y, low.z, high.y, high.z], [0.0, 0.0, 1.0, 0.0]);
+                spans.push((low.x, high.x));
             }
+            spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert_eq!(spans, expected, "operation {operation}");
         }
+        // a list ending in a plane is planar whatever comes before it, so the planar path
+        // refuses a sphere in it
+        let sphere = unit_sphere(&k);
+        let result = boolean_lists(
+            &mut k,
+            &[],
+            &[sphere, square_plane_from(0.0)],
+            &[],
+            &[square_plane_from(0.5)],
+            1,
+            None,
+        );
+        assert!(
+            matches!(result, Err(SolidError::InvalidInput { .. })),
+            "{result:?}"
+        );
         // an operation BooleanLists does not know is refused once both lists are built
         let result = boolean_lists(
             &mut k,

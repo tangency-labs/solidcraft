@@ -502,7 +502,7 @@
         "tree": []
       },
       "expected_status": 1001,
-      "note": "The face of a sphere of radius 1e12 cannot be trimmed: SM_ERR."
+      "note": "The face of a sphere of radius 1e12 is not made (its rectangular trim, topology::brep::p8): SM_ERR."
     },
     {
       "name": "box_and_plane_in_one_list_vs_box",
