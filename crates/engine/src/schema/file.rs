@@ -1,15 +1,21 @@
 //! Contracts and result types for the commands in `cmd/file.rs`: so far `file.export` and the
 //! export command of each format (`file.export_step`, `file.export_stl`, `file.export_3mf`,
 //! `file.export_obj`, `file.export_urdf`), which take what `file.export` takes for that format,
-//! without `format`.
+//! without `format`, and `doc.open` and the recovery commands (`doc.recovery_list`,
+//! `doc.recover`, `doc.recovery_discard`), and local import-cache maintenance.
 
-use schemars::{JsonSchema, Schema};
+use std::borrow::Cow;
+use std::path::PathBuf;
+
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
+use solidcraft_doc::point_cloud::{MAX_POINTS, UNITS};
 use solidcraft_io::Format;
 
 use super::check::whole;
-use super::types::StringList;
+use super::types::{StringList, not_blank_pattern};
 
 /// How closely an exported mesh follows curved faces.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
@@ -46,9 +52,8 @@ pub struct ExportStepParams {
     pub bodies: Option<StringList>,
 }
 
-/// Export bodies as a mesh file: binary STL for `file.export_stl`, OBJ for `file.export_obj`
-/// (the colours of the bodies go in a material library, `.mtl`, written next to it). The file
-/// has that format whatever the path's extension.
+/// Export bodies as an OBJ mesh file (`file.export_obj`), the colours of the bodies in a material
+/// library, `.mtl`, written next to it. The file is OBJ whatever the path's extension.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportMeshParams {
@@ -60,6 +65,26 @@ pub struct ExportMeshParams {
     /// How closely the mesh follows curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+}
+
+/// Export bodies as a binary STL file (`file.export_stl`), whatever the path's extension.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExportStlParams {
+    /// The file to write.
+    pub path: String,
+    /// The bodies to export, by name. Default: every body.
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// How closely the mesh follows curved faces. Default: standard.
+    #[serde(default)]
+    pub quality: Option<MeshQualityParam>,
+    /// True writes each body with a print face (`body.print_face`) laid on it, as a slicer export
+    /// lays it: turned so the face points down at Z = 0, its centre of mass over the origin. Each
+    /// body is laid on its own, so several land on the origin together. Default: false, every body
+    /// as it lies in the design.
+    #[serde(default)]
+    pub lay_on_print_faces: Option<bool>,
 }
 
 /// Export bodies as a 3MF file, whatever the path's extension.
@@ -77,6 +102,11 @@ pub struct Export3mfParams {
     /// What each object in the file holds. Default: body.
     #[serde(default)]
     pub objects: Option<ObjectsParam>,
+    /// As `file.export_stl`'s: true writes each body with a print face laid on it. A body that is
+    /// one of the parts of an object (`objects: component`) stays as it lies, so the object keeps
+    /// its shape. Default: false.
+    #[serde(default)]
+    pub lay_on_print_faces: Option<bool>,
 }
 
 /// Export the whole assembly as a robot description (URDF), with an STL mesh for each link
@@ -109,7 +139,7 @@ pub struct ExportParams {
     /// The file to write.
     #[serde(default)]
     pub path: Option<String>,
-    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, urdf or json, or a file name whose
+    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf or json, or a file name whose
     /// extension names it. Default: from the path's extension.
     #[serde(default)]
     pub format: Option<String>,
@@ -117,7 +147,7 @@ pub struct ExportParams {
     /// complete design, so they refuse a list.
     #[serde(default)]
     pub bodies: Option<StringList>,
-    /// How closely the mesh follows curved faces (STL, OBJ and 3MF). Default: standard. Not read
+    /// How closely the mesh follows curved faces (STL, OBJ, 3MF and GLB). Default: standard. Not read
     /// for URDF.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
@@ -134,6 +164,10 @@ pub struct ExportParams {
     /// URDF only: each joint's velocity limit, a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// STL and 3MF only: true writes each body with a print face laid on it, as
+    /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
+    #[serde(default)]
+    pub lay_on_print_faces: Option<bool>,
 }
 
 fn export_required(schema: &mut Schema) {
@@ -173,8 +207,17 @@ fn names<E: serde::de::Error>(m: &Map<String, Value>) -> Result<Option<StringLis
 impl<'de> Deserialize<'de> for ExportParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let m = Map::<String, Value>::deserialize(d)?;
-        let mut out =
-            ExportParams { path: None, format: None, bodies: None, quality: None, objects: None, mesh_prefix: None, effort: None, velocity: None };
+        let mut out = ExportParams {
+            path: None,
+            format: None,
+            bodies: None,
+            quality: None,
+            objects: None,
+            mesh_prefix: None,
+            effort: None,
+            velocity: None,
+            lay_on_print_faces: None,
+        };
         // The handler reads `path` first and refuses anything but a name it can write to; the
         // other keys are read only once it has one, and the format is known.
         out.path = match m.get("path") {
@@ -224,23 +267,37 @@ impl<'de> Deserialize<'de> for ExportParams {
                 _ => return Err(refuse(format!("`objects` must be body or component, not {v}"))),
             },
         };
+        out.lay_on_print_faces = match m.get("lay_on_print_faces") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(false)) => Some(false),
+            Some(Value::Bool(true)) if matches!(format, Format::StlBinary | Format::StlAscii | Format::ThreeMf | Format::ThreeMfTagged) => Some(true),
+            Some(Value::Bool(true)) => return Err(refuse("`lay_on_print_faces` is for STL and 3MF: other formats are not printed")),
+            Some(_) => return Err(refuse("`lay_on_print_faces` must be true or false")),
+        };
         Ok(out)
     }
 }
 
 /// What `file.export_step`, `file.export_stl`, `file.export_3mf` and `file.export_obj` return.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct ExportResult {
     /// The file written.
     pub path: String,
     /// Its size in bytes.
     pub bytes: usize,
     /// The format written: Step, StlBinary, ThreeMf or Obj (and for `file.export` and
-    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design).
+    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design and Glb).
     pub format: String,
     /// OBJ only: every file written, the material library first and the mesh file last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+    /// With `lay_on_print_faces` only: the bodies that were written laid on their print face.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub print_faces: Vec<String>,
+    /// With `lay_on_print_faces` only: a warning for each body that has a print face but was
+    /// written as it lies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -266,14 +323,597 @@ pub struct UrdfExportResult {
     pub param_warnings: Vec<String>,
 }
 
+/// A file path as the open command reads it: text that is not blank and shorter than 4096 bytes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpenPath(pub String);
+
+impl<'de> Deserialize<'de> for OpenPath {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) if crate::cmd::usable_path(&s) => Ok(OpenPath(s)),
+            _ => Err(D::Error::custom(whole("`path` is required"))),
+        }
+    }
+}
+
+impl JsonSchema for OpenPath {
+    fn schema_name() -> Cow<'static, str> {
+        "OpenPath".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A file path: text with a character that is not white space, under 4096 bytes long (the schema's maxLength counts characters).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4095,
+            "pattern": not_blank_pattern()
+        })
+    }
+}
+
+/// Which way is up in a STEP, IGES, FreeCAD, Rhino or glTF file.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UpParam(pub bool);
+
+impl<'de> Deserialize<'de> for UpParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::up_form(&Value::deserialize(d)?).map(UpParam).ok_or_else(|| D::Error::custom(whole(crate::cmd::UP_MESSAGE)))
+    }
+}
+
+impl JsonSchema for UpParam {
+    fn schema_name() -> Cow<'static, str> {
+        "UpParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "z keeps the file's axes (the default); y says the file has Y up, so what it brings is turned a quarter turn about X, its Y becoming Z. Matching ignores case and surrounding spaces.",
+            "type": "string",
+            "enum": ["z", "y"]
+        })
+    }
+}
+
+/// What the bodies of a STEP, IGES, FreeCAD or Rhino file are named after.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NamesParam(pub solidcraft_io::StepNames);
+
+impl<'de> Deserialize<'de> for NamesParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::names_form(&Value::deserialize(d)?).map(NamesParam).ok_or_else(|| D::Error::custom(whole(crate::cmd::NAMES_MESSAGE)))
+    }
+}
+
+impl JsonSchema for NamesParam {
+    fn schema_name() -> Cow<'static, str> {
+        "NamesParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "auto (the default) keeps meaningful solid names and replaces placeholders with the nearest named product, else the instance's; solid is the solid's own name; product the part's name; instance the occurrence's name, else the product's. Matching ignores case and surrounding spaces.",
+            "type": "string",
+            "enum": ["auto", "solid", "product", "instance"]
+        })
+    }
+}
+
+/// The length unit of a point cloud file.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CloudUnits(pub String);
+
+impl<'de> Deserialize<'de> for CloudUnits {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let words = UNITS.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", ");
+        match Value::deserialize(d)? {
+            Value::String(u) if UNITS.iter().any(|(name, _)| name.eq_ignore_ascii_case(&u)) => Ok(CloudUnits(u)),
+            Value::String(u) => Err(D::Error::custom(format!("must be one of {words} (not `{u}`)"))),
+            _ => Err(D::Error::custom(format!("must be one of {words}"))),
+        }
+    }
+}
+
+impl JsonSchema for CloudUnits {
+    fn schema_name() -> Cow<'static, str> {
+        "CloudUnits".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let words: Vec<&str> = UNITS.iter().map(|(name, _)| *name).collect();
+        json_schema!({
+            "description": "The file's length unit. Matching ignores case.",
+            "type": "string",
+            "enum": words
+        })
+    }
+}
+
+/// The most points of a point cloud file kept: a whole number from 1 to the limit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MaxPoints(pub u64);
+
+impl<'de> Deserialize<'de> for MaxPoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_u64() {
+            Some(n) if (1..=MAX_POINTS as u64).contains(&n) => Ok(MaxPoints(n)),
+            _ => Err(D::Error::custom(format!("must be a whole number from 1 to {MAX_POINTS}"))),
+        }
+    }
+}
+
+impl JsonSchema for MaxPoints {
+    fn schema_name() -> Cow<'static, str> {
+        "MaxPoints".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Most points kept; a larger file is thinned evenly.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": MAX_POINTS
+        })
+    }
+}
+
+/// `history` of `doc.open`: rebuild a FreeCAD file's sketches and features, or bring in only
+/// its solids.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryParam {
+    /// The file's sketches and features, when every one rebuilds and they build what the file
+    /// holds; otherwise the solids come in with a warning.
+    Features,
+    /// Only the file's solids, as one Import feature.
+    Solids,
+}
+
+/// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
+/// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
+/// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
+/// FreeCAD, Rhino, 3MF, STL, OBJ or glTF file (a new design holding the file as a component
+/// named after it, as `file.insert_step` and `file.insert_mesh` make), or a `.ply`, `.xyz` or
+/// `.pts` point cloud (a new design holding it, as `pointcloud.insert` makes). The open design
+/// is replaced.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OpenParams {
+    /// The file to open; the kind of file is read from its extension.
+    pub path: OpenPath,
+    /// For a STEP, IGES, FreeCAD, Rhino or glTF file only (refused for any other): which way is up
+    /// in the file. Default: z for STEP, IGES, FreeCAD and Rhino, y for glTF.
+    #[serde(default)]
+    pub up: Option<UpParam>,
+    /// For a STEP, IGES, FreeCAD or Rhino file only (refused for any other): what the bodies are
+    /// named after. Default: auto.
+    #[serde(default)]
+    pub names: Option<NamesParam>,
+    /// For a STEP, IGES, FreeCAD or Rhino file (ignored for other files): true puts an import that
+    /// brings more than one item into the history (its Import feature and the rigid joints holding
+    /// its parts) into a new history folder named `Group #N`. Default: false.
+    #[serde(default)]
+    pub folder: Option<bool>,
+    /// For a FreeCAD file only (ignored for other files): its sketches and features rebuilt as
+    /// SolidCraft features, or only its solids as one Import feature. Default: features.
+    #[serde(default)]
+    pub history: Option<HistoryParam>,
+    /// For a 3MF, STL, OBJ or glTF file only (refused for any other): true moves the mesh so its
+    /// box is centred on X and Y with its base on Z = 0. Default: false.
+    #[serde(default)]
+    pub origin: Option<bool>,
+    /// For a design: saving to its own file is refused (`file.save_as` keeps the changes
+    /// elsewhere). Default: false.
+    #[serde(default)]
+    pub read_only: Option<bool>,
+    /// For a STEP or IGES file: false recomputes the import without reading or writing the local
+    /// saved-model cache. Default: true.
+    #[serde(default)]
+    pub reuse_import: Option<bool>,
+    /// For a design: verify its signature (if it has one) and report it. Default: false: the
+    /// design opens without spending the time a full verification takes.
+    #[serde(default)]
+    pub verify: Option<bool>,
+    /// For a point cloud, STL, OBJ or PLY file: the unit its coordinates are in, scaled to
+    /// millimetres as it is read (refused for a 3MF or glTF file, which states its own; ignored
+    /// for other files). Default: mm.
+    #[serde(default)]
+    pub units: Option<CloudUnits>,
+    /// For a point cloud file only (ignored for other files): the most points kept. Default:
+    /// 5000000.
+    #[serde(default)]
+    pub max_points: Option<MaxPoints>,
+}
+
+/// Another SolidCraft that has the design open, from its lock file.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OpenElsewhere {
+    /// The computer's name.
+    pub host: String,
+    /// The user's name.
+    pub user: String,
+    /// The SolidCraft version that holds the lock.
+    pub app: String,
+    /// When it opened the design (Unix seconds).
+    pub opened: u64,
+}
+
+/// What `doc.open` returns for a design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OpenedDesign {
+    /// The file opened.
+    pub path: String,
+    /// How many features the design has.
+    pub features: usize,
+    /// How many of them failed to evaluate.
+    pub errors: usize,
+    /// The design's name.
+    pub name: String,
+    /// Only with `read_only`: true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_only: Option<bool>,
+    /// Only when another SolidCraft has the design open (its lock file is fresh).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_elsewhere: Option<OpenElsewhere>,
+    /// Only when a newer SolidCraft saved the design: it opened all the same, and what this
+    /// version can't read is named here and kept by saving.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newer_file: Option<NewerFileReport>,
+    /// Only with `newer_file`: its notice, then a line for each part this version didn't read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<String>>,
+    /// With `verify: true`, when the file carries a signature: what verification found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<SignatureReport>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What a signature check found: the reply of `file.verify`, and part of `doc.open`'s when it
+/// verified the design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SignatureReport {
+    /// `unsigned`, `valid`, `not_covered`, `invalid` or `unsupported`.
+    pub status: String,
+    /// Why the signature is invalid or unsupported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Older records were dropped: the history is incomplete but the newest record names this
+    /// file's first record.
+    pub truncated: bool,
+    /// The records, oldest first; the last is the newest save.
+    pub records: Vec<SignatureRecord>,
+}
+
+/// One signed save, as a signature check reports it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SignatureRecord {
+    /// `ed25519` for a COSE record, `openpgp` for a GnuPG one.
+    pub method: String,
+    /// The OpenPGP signing key's fingerprint, or the COSE key's SHA-256, in hex.
+    pub key_id: String,
+    /// The OpenPGP key's primary user id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    /// The name the signer wrote, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// The signer's clock, in Unix seconds, if it wrote one; not authenticated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<u64>,
+    /// The design format that save wrote.
+    pub format: String,
+    /// This record covers the file's current content.
+    pub covered: bool,
+}
+
+/// `file.verify`'s parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct VerifyParams {
+    /// The design file to verify. Default: the design's current file.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// `file.verify`'s reply: the path checked and what verification found.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct VerifyResult {
+    pub path: String,
+    #[serde(flatten)]
+    pub signature: SignatureReport,
+}
+
+/// `file.gpg_keys` takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GpgKeysParams {}
+
+/// `file.gpg_keys`'s reply: the GnuPG keys a save can sign with.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GpgKeysResult {
+    /// Whether GnuPG was found on this computer.
+    pub available: bool,
+    pub keys: Vec<GpgKeyInfo>,
+}
+
+/// One GnuPG secret key, as `file.gpg_keys` lists it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GpgKeyInfo {
+    /// The primary key's fingerprint, uppercase hex.
+    pub fingerprint: String,
+    /// The primary key's long key id.
+    pub key_id: String,
+    /// The primary user id.
+    pub user_id: String,
+    /// The secret key lives on an OpenPGP smartcard.
+    pub on_card: bool,
+}
+
+/// What `doc.open` says about a design a newer SolidCraft saved.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NewerFileReport {
+    /// The design file format it was saved in.
+    pub format: u32,
+    /// The newest format this version reads.
+    pub reads_up_to: u32,
+    /// The format changes it names that this version doesn't know.
+    pub unknown_changes: Vec<String>,
+    /// What this version couldn't read, by name; saving keeps it.
+    pub not_understood: Vec<String>,
+    /// What to tell the user.
+    pub notice: String,
+}
+
+/// What `doc.open` returns for a `.dxf` or `.svg` drawing: what `sketch.insert_dxf` or
+/// `sketch.insert_svg` returned for it, and the new design's.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OpenedDrawing {
+    /// The sketch that holds the drawing.
+    pub sketch: u64,
+    /// The sketch made for it; null when one was already being edited.
+    pub created_sketch: Option<u64>,
+    /// How many curves were added.
+    pub curves: usize,
+    /// How many texts were added.
+    pub texts: usize,
+    /// The sketch's solve report, `{solved, dof}`, or null when it has none.
+    pub info: Value,
+    /// The file opened.
+    pub path: String,
+    /// The design's name.
+    pub name: String,
+    /// How many features the design has.
+    pub features: usize,
+    /// How many of them failed to evaluate.
+    pub errors: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `doc.open` returns for a point cloud file.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OpenedPointCloud {
+    /// The file opened.
+    pub path: String,
+    /// Always 0: a point cloud is not a feature.
+    pub features: usize,
+    /// Always 0.
+    pub errors: usize,
+    /// The cloud's id.
+    pub cloud: u64,
+    /// How many points were kept.
+    pub points: usize,
+    /// How many points the file has.
+    pub source_points: u64,
+    /// The box round the cloud in the design, `[[x, y, z], [x, y, z]]` in mm; null for no points.
+    pub bounds: Option<[[f64; 3]; 2]>,
+    /// What the reading could not carry over.
+    pub warnings: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `doc.open` returns for a STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF file.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OpenedFile {
+    /// The file opened.
+    pub path: String,
+    /// How many features the design has.
+    pub features: usize,
+    /// How many of them failed to evaluate.
+    pub errors: usize,
+    /// The bodies the file made, by name.
+    pub bodies: Vec<String>,
+    /// What the reading could not carry over.
+    pub warnings: Vec<String>,
+    /// The component made for the file (its id); it is the one being worked in.
+    pub component: u64,
+    /// The component's name.
+    pub component_name: String,
+    /// The component's occurrence in the design; null when it has none.
+    pub occurrence: Option<u64>,
+    /// How many components below it an assembly's parts and sub-assemblies made; only when there
+    /// are some.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subcomponents: Option<usize>,
+    /// How many rigid joints hold those together; only when there are subcomponents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rigid_joints: Option<usize>,
+    /// Only when `up` turned the file Y up to Z up: the occurrence that was turned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stand_up: Option<u64>,
+    /// STEP and IGES only: the system that wrote the file, as its header says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    /// STEP and IGES only, when the program that wrote the file is known to have a fixed up
+    /// direction: its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exporter: Option<String>,
+    /// With `exporter`: the direction that program's files have up, `z` or `y`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exporter_up: Option<String>,
+    /// A mesh file opened with `origin`: the shift [x, y, z] that moved it to the origin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_to_origin: Option<Vec<f64>>,
+    /// STEP and IGES only: the SHA-256 of the file's exact bytes, as lower-case hex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_sha256: Option<String>,
+    /// STEP and IGES only: true when an unchanged earlier import was reused from the local
+    /// saved-model cache, false when the file was imported afresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_reused: Option<bool>,
+    /// A FreeCAD file only: `"features"` when its sketches and features were rebuilt; absent
+    /// when its solids came in as one Import feature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `doc.open` returns: the shape depends on the kind of file opened.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum OpenResult {
+    /// A SolidCraft design.
+    Design(OpenedDesign),
+    /// A `.dxf` or `.svg` drawing.
+    Drawing(OpenedDrawing),
+    /// A point cloud.
+    PointCloud(OpenedPointCloud),
+    /// A STEP, IGES, FreeCAD, Rhino or mesh file.
+    File(OpenedFile),
+}
+
+/// List the designs that apps which crashed, or closed with unsaved changes, autosaved. Nothing is
+/// changed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RecoveryListParams {
+    /// The recovery folder. Default: the app's own; a blank value, or one of 4096 bytes or more, counts as no value.
+    #[serde(default)]
+    pub dir: Option<String>,
+}
+
+/// One autosaved design that can be recovered.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RecoveredDesign {
+    /// The entry's id, for `doc.recover` and `doc.recovery_discard`.
+    pub id: String,
+    /// The design's file, or null when it never had one.
+    pub path: Option<String>,
+    /// The design's name.
+    pub name: String,
+    /// When it was autosaved (Unix seconds).
+    pub saved_at: u64,
+    /// How many features the design had.
+    pub features: usize,
+}
+
+impl From<crate::recovery::Entry> for RecoveredDesign {
+    fn from(e: crate::recovery::Entry) -> Self {
+        RecoveredDesign { id: e.id, path: e.path, name: e.name, saved_at: e.saved_at, features: e.features }
+    }
+}
+
+/// What `doc.recovery_list` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RecoveryListResult {
+    /// The recovery folder that was read.
+    #[schemars(with = "String")]
+    pub dir: PathBuf,
+    /// The designs, the newest first (at most 1000).
+    pub designs: Vec<RecoveredDesign>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Open an autosaved design, replacing the open design, with its file path and as unsaved.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RecoverParams {
+    /// The entry to open: an `id` from `doc.recovery_list`.
+    #[serde(deserialize_with = "recovery_id")]
+    pub id: String,
+    /// The recovery folder. Default: the app's own; a blank value, or one of 4096 bytes or more, counts as no value.
+    #[serde(default)]
+    pub dir: Option<String>,
+    /// Delete the entry once the design is open. Default: false.
+    #[serde(default)]
+    pub discard: Option<bool>,
+}
+
+/// `id` of `doc.recover`: text, which the handler gives its own message for when it is not.
+fn recovery_id<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(s) => Ok(s),
+        _ => Err(D::Error::custom(whole("`id` is required (see doc.recovery_list)"))),
+    }
+}
+
+/// What `doc.recover` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RecoverResult {
+    /// The entry opened.
+    pub id: String,
+    /// The design's file, or null when it never had one.
+    pub path: Option<String>,
+    /// The name the entry was saved under.
+    pub name: String,
+    /// How many features the design has.
+    pub features: usize,
+    /// How many of them failed to evaluate.
+    pub errors: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Delete one autosaved design, or all of them.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RecoveryDiscardParams {
+    /// The entry to delete: an `id` from `doc.recovery_list`. Needed unless `all` is true, and
+    /// ignored then.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Delete every entry left by an app that is no longer running. Default: false.
+    #[serde(default)]
+    pub all: Option<bool>,
+    /// The recovery folder. Default: the app's own; a blank value, or one of 4096 bytes or more, counts as no value.
+    #[serde(default)]
+    pub dir: Option<String>,
+}
+
+/// What `doc.recovery_discard` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RecoveryDiscardResult {
+    /// The ids deleted.
+    pub discarded: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `file.export` returns: what the export command of the format returns.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum FileExportResult {
-    /// STL, OBJ, STEP, 3MF or design JSON.
+    /// STL, OBJ, STEP, 3MF, GLB or design JSON.
     File(ExportResult),
     /// URDF.
     Urdf(UrdfExportResult),
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportCacheClearParams {}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ImportCacheClearResult {
+    /// Number of cached imports removed. Open designs and stand-up answers are retained.
+    pub removed: usize,
 }
 
 #[cfg(test)]

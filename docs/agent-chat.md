@@ -44,18 +44,15 @@ when you send a message or press **Connect** (or at launch, when you turned that
 
 ## The panel
 
-With **Preferences → Layout → Use shared panel layout** enabled, side panels keep
-the conversation above the composer. A wide floating panel places the conversation
-beside the provider controls and composer when both columns have enough width.
-Smaller widths keep the stacked layout. The conversation, unsent draft and scroll
-state stay with the same Assistant when the layout changes. Hovering over its shared
-header reports the current agent state or pending approvals; requests that need
-attention use the shared attention indication. Classic and the Assistant's own
-native window keep their existing layout.
+Assistant uses the shared panel layout. Narrow panels keep the conversation above
+the composer. A wide floating panel places the conversation beside the provider
+controls and composer when both columns have enough width. The conversation,
+unsent draft and scroll state stay with the same Assistant when its placement
+changes. The shared header reports the agent state and pending approvals.
+The Assistant’s own native window keeps its existing layout.
 
-In the floating layout, Assistant fills the viewport height in the shared rounded panel, with
-space around its edges. The compass and navigation bar move into the remaining space beside it. It overlays the model without changing the viewport projection;
-clicks and scrolling over the panel stay in the chat. The docked layout retains its side panel.
+Assistant fills the available side height. The compass and navigation bar use the
+remaining viewport space. Clicks and scrolling over the panel stay in the chat.
 
 After clicking in Assistant, keyboard input stays in the chat, including when selecting text
 in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. Moving the
@@ -66,6 +63,11 @@ To select more of the conversation than fits in the panel, drag the selection to
 bottom edge and hold it there: the conversation scrolls, faster the further past the edge you
 go, and the selection grows with it. It stays when its start scrolls out of view, and Copy takes
 all of it.
+
+In Assistant, outside the message box, Ctrl+A (Cmd+A on macOS) selects the whole conversation:
+every prompt and answer, including those scrolled out of view, but not thoughts, tool cards, plans or
+notices. Ctrl+C then copies them in order as plain text, each under who wrote it. Esc or a
+click ends the selection; in the message box Ctrl+A selects only the draft.
 
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
@@ -438,17 +440,30 @@ The agent reaches the open design only through SolidCraft's own tools (the
   Faces and edges go with the names and numbers the agent's tools take and with their size and
   place (so they can be found again after an edit), features with their name and kind, bodies with
   their name. The agent gets them as text after your message; the conversation shows your message
-  as typed with the things as chips below it, grouped (Elements, Features, Bodies) with a count;
-  hover a chip for what the agent was told about it. At most 64 things go with one message; the
+  as typed (picks as pills) with the things that are not in a pill as chips below it, grouped (Elements, Features, Bodies) with a count;
+  hover a chip to light its target in the model and to see what the agent was told about it. A chip
+  whose target has since left the design (deleted, or changed so its face or edge is gone) is
+  struck through, with a note on hover. At most 64 things go with one message; the
   rest are counted ("+N more"), not dropped silently. The selection is read when you send, also for
   a message that waits in the queue.
 - **Pick context:** press it to choose what the message is about on purpose. A picker opens with
   three lists, **Elements** (faces, edges, vertices), **Features** (steps of the timeline) and
-  **Bodies**; click things in the model, the timeline or the browser to put them in the list that
-  is active (click a list to make it active; click a picked thing again to take it out). **OK**
-  puts them as chips above the message box, each with a **×**; they go with the next message like
-  an attached selection (and are shown the same way), and the box is empty again afterwards.
-  **Cancel** keeps what was picked before.
+  **Bodies**. A click in the model goes into the list that is active (click a list to make it
+  active). A step clicked in the History or the Browser goes into Features, and a body clicked in
+  the Browser into Bodies, whichever list is active. Click a picked thing again to take it out.
+  The arrow beside a list shows what it holds by name, as in every dialog; the × on a name takes
+  it out. **OK**
+  puts the pick into the message as a **pill**, `«1: Plate · 3 faces»`, at the text cursor (at the
+  end when the box was never used). Typing `@` where a word starts does the same: the `@` is
+  taken out and the picker opens, and the pill goes where it was. Pick as often as you like; each
+  pick is a pill of its own, so "make `«1: …»` match `«2: …»`" says which is which. A pill is part
+  of the text: it is edited, selected, cut and pasted like text, drawn as a pill, and Backspace
+  or Delete next to it takes it whole (taking the mark out drops the pick). Hold the pointer on a
+  pill to light its target in the model and to list what it holds; a pill whose target has left
+  the design is struck through. The agent gets your text with the marks numbered 1, 2, 3 in
+  reading order, and under it each numbered group with the faces, edges, features and bodies in
+  it; what **Attach selection** adds is listed apart, as not placed in the message.
+  **Cancel**, or **OK** with nothing picked, adds nothing.
 
 ## Custom instructions
 

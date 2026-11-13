@@ -147,7 +147,10 @@ impl Refusal {
 /// Write `refusal` to `note` and fail (`NoteError`, then `return SM_ERR`).
 fn refuse<T>(note: &mut Option<Refusal>, refusal: Refusal) -> Result<T> {
     *note = Some(refusal);
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::blend_failed(
+        OP,
+        "the overflow is refused, as the note says",
+    ))
 }
 
 const BRANCHES: Refusal = Refusal::no_room(
@@ -195,7 +198,8 @@ fn add_curve(
 
 /// `sm_EdgeCurve`: a copy of the edge's curve over the edge's interval.
 pub(crate) fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
-    let curve = edge::curve(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let curve =
+        edge::curve(b, e)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
     let mut copy = curve.copy(k)?;
     let mut ivl = edge::interval(b, e)?;
     if ivl != copy.natural_interval() {
@@ -242,7 +246,7 @@ pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<PlaneFrame>> {
     let normal = planar
         .normal
         .unitize()
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| SolidError::blend_failed(OP, "the plane's normal is zero"))?;
     // an axis in the plane: the normal crossed with the coordinate axis it leans on least
     let mut axis = Vec3::new(1.0, 0.0, 0.0);
     if normal.y.abs() < normal.x.abs() && normal.y.abs() <= normal.z.abs() {
@@ -253,7 +257,7 @@ pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<PlaneFrame>> {
     let x = normal
         .cross(axis)
         .unitize()
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| SolidError::blend_failed(OP, "the plane's axis is parallel to its normal"))?;
     let y = normal.cross(x);
     Ok(Some(PlaneFrame {
         origin: planar.point,
@@ -317,7 +321,8 @@ pub fn continued_surface(
     points: &[Point3],
     tol: f64,
 ) -> Result<ContinuedSurface> {
-    let base = face::p2::surface(b, f)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let base = face::p2::surface(b, f)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
     let domain = base.natural_uv_domain_with_nurb(k)?;
     let size = domain.size();
     let as_itself = OffsetSurface::continues_as_itself(base);
@@ -421,7 +426,8 @@ pub fn continued_surface(
 /// # Errors
 /// `SM_ERR_NULL_POINTER` for a face without surface; those of the drop.
 pub fn distance_to_surface(k: &Kernel, b: &Brep, f: FaceId, point: Point3) -> Result<f64> {
-    let surface = face::p2::surface(b, f)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface = face::p2::surface(b, f)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
     if let Some(frame) = plane_of(k, surface)? {
         return Ok((point - frame.origin).dot(frame.z).abs());
     }
@@ -455,7 +461,8 @@ pub fn covering_surface(
     points: &[Point3],
     tol: f64,
 ) -> Result<Option<Surface>> {
-    let surface = face::p2::surface(b, f)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface = face::p2::surface(b, f)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
     if let Some(frame) = plane_of(k, surface)? {
         // the plane through that origin along those axes, at unit scale: the same points
         let origin = frame.origin;
@@ -470,7 +477,7 @@ pub fn covering_surface(
             }
         }
         let Some(bbox) = bbox else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(OP, "no points lie on the plane"));
         };
         let margin = 0.01 * bbox.size().length() + 10.0 * tol;
         let domain = Extent2d::from_bounds(
@@ -511,8 +518,8 @@ pub fn lies_on_surface(
     f: FaceId,
     tol: f64,
 ) -> Result<bool> {
-    let surface =
-        face::p2::surface(region, sheet_face)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface = face::p2::surface(region, sheet_face)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the sheet face's surface"))?;
     let bbox = face::p2::uv_domain(region, sheet_face)?;
     let size = bbox.size();
     let mut on = true;
@@ -587,7 +594,7 @@ pub fn cut_fillet_at_open_end(
             continue;
         };
         let surface = face::p2::surface(region, f)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
             .clone_for_evaluation()?;
         let uv_domain = face::p2::uv_domain(region, f)?;
         let dropped = surface.drop_point::<NoObject>(
@@ -597,7 +604,10 @@ pub fn cut_fillet_at_open_end(
             &DropPointOptions::default(),
         )?;
         if !dropped.success {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the edge's middle does not drop onto the face",
+            ));
         }
         let keep = surface.evaluate_point(k, dropped.result_uv)?;
 
@@ -754,7 +764,7 @@ impl Blended {
             out.edges.insert(e);
             let (start, end) = edge::start_end_vertices(target, e)?;
             for v in [start, end] {
-                let v = v.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let v = v.ok_or_else(|| SolidError::blend_missing(OP, "the edge's vertex"))?;
                 out.vertices.insert(v);
                 for f in vertex::faces(target, v)? {
                     if host_set.insert(f) {
@@ -784,7 +794,7 @@ impl LaminaHosts {
         self.host_of
             .get(&e)
             .copied()
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's host face"))
     }
 
     fn at(&self, v: VertexId) -> &[EdgeId] {
@@ -817,7 +827,10 @@ pub fn lamina_hosts(
         // the sheet's face along the edge (a lamina edge has one)
         let sheet_faces = edge::faces(region, e, None)?;
         let [sheet_face] = sheet_faces.as_slice() else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the lamina edge does not have one sheet face",
+            ));
         };
         let mut host = None;
         for &f in hosts {
@@ -861,7 +874,7 @@ pub fn lamina_hosts(
         out.host_of.insert(e, host);
         let (start, end) = edge::start_end_vertices(region, e)?;
         for v in [start, end] {
-            let v = v.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let v = v.ok_or_else(|| SolidError::blend_missing(OP, "the edge's vertex"))?;
             out.at.entry(v).or_default().push(e);
         }
     }
@@ -920,8 +933,9 @@ pub fn lamina_chains(
             Ok(Ok(found))
         };
         let (start, end) = edge::start_end_vertices(region, first)?;
-        let start = start.ok_or_else(|| SolidError::null_pointer(OP))?;
-        let end = end.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let start =
+            start.ok_or_else(|| SolidError::blend_missing(OP, "the chain's start vertex"))?;
+        let end = end.ok_or_else(|| SolidError::blend_missing(OP, "the chain's end vertex"))?;
         let mut chain = Chain {
             host,
             edges: vec![first],
@@ -936,10 +950,16 @@ pub fn lamina_chains(
         while !closed {
             steps += 1;
             if steps > bound {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the chain walk passed its bound",
+                ));
             }
             let (Some(&at), Some(&from)) = (chain.vertices.last(), chain.edges.last()) else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the chain's last vertex and edge",
+                ));
             };
             let Ok(found) = next(at, from)? else {
                 return refuse(note, BRANCHES);
@@ -952,7 +972,7 @@ pub fn lamina_chains(
                 break;
             }
             let other = edge::other_vertex(region, found, Some(at))?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's other vertex"))?;
             chain.edges.push(found);
             chain.vertices.push(other);
             done.insert(found);
@@ -970,7 +990,10 @@ pub fn lamina_chains(
         loop {
             steps += 1;
             if steps > bound {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the chain walk passed its bound",
+                ));
             }
             let Ok(found) = next(at, from)? else {
                 return refuse(note, BRANCHES);
@@ -979,7 +1002,7 @@ pub fn lamina_chains(
                 break;
             };
             let other = edge::other_vertex(region, found, Some(at))?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's other vertex"))?;
             chain.edges.insert(0, found);
             chain.vertices.insert(0, other);
             done.insert(found);
@@ -1025,7 +1048,8 @@ fn side_end(
         }
         next_host = Some(hosts.host(e)?);
     }
-    let next_host = next_host.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let next_host = next_host
+        .ok_or_else(|| SolidError::blend_missing(OP, "the next host face at the chain's end"))?;
     let p = vertex::point(region, end_vertex)?;
     let mut inexact = false;
     let mut found: Option<SideEnd> = None;
@@ -1073,8 +1097,8 @@ fn side_end(
                 continue;
             }
             // on the side edge itself
-            let side_curve =
-                edge::curve(target, side)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let side_curve = edge::curve(target, side)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the side edge's curve"))?;
             let side_ivl = edge::interval(target, side)?;
             let on = side_curve.drop_point(
                 k,
@@ -1096,7 +1120,10 @@ fn side_end(
                     SolverOperation::Minimize,
                 )?;
                 if !on_v.success || on_v.distance > on_tol {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the vertex does not lie on the side edge",
+                    ));
                 }
                 let mut piece = side_curve.copy(k)?;
                 let mut part = crate::geom::extent1d::Extent1d::from_min_max(
@@ -1112,7 +1139,7 @@ fn side_end(
             }
             // on its line past its other end
             let w = edge::other_vertex(target, side, Some(v))?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the side edge's other vertex"))?;
             let along = vertex::point(target, w)? - pv;
             let out = p - pv;
             let len = along.length();
@@ -1177,7 +1204,7 @@ pub fn closing_face(
     // the chain, from its start to its end
     for (e, pair) in chain.edges.iter().zip(chain.vertices.windows(2)) {
         let [from, to] = pair else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(OP, "the chain's vertex pair"));
         };
         let curve = edge_curve(k, region, *e)?;
         add_curve(
@@ -1197,7 +1224,10 @@ pub fn closing_face(
         chain.edges.first(),
         chain.edges.last(),
     ) else {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(
+            OP,
+            "the chain's end vertices and edges",
+        ));
     };
     let start_side = side_end(
         k, region, target, blended, hosts, host, front_v, front_e, on_tol, note,
@@ -1223,7 +1253,10 @@ pub fn closing_face(
     let mut steps = 0;
     while at != start_side.vertex {
         if steps > host_edges.len() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the walk along the host's edges passed its bound",
+            ));
         }
         steps += 1;
         let mut found = None;
@@ -1256,7 +1289,7 @@ pub fn closing_face(
             );
         };
         let other = edge::other_vertex(target, found, Some(at))?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's other vertex"))?;
         let curve = edge_curve(k, target, found)?;
         add_curve(
             k,
@@ -1322,7 +1355,10 @@ fn face_of_loop(
             let dropped =
                 surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
             if !dropped.success {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the sample does not drop onto the surface",
+                ));
             }
             uvs.push(dropped.result_uv);
         }
@@ -1330,7 +1366,7 @@ fn face_of_loop(
     let mut area = 0.0;
     for (i, a) in uvs.iter().enumerate() {
         let Some(b) = uvs.get((i + 1) % uvs.len()) else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(OP, "the loop's next point"));
         };
         area += a.x * b.y - b.x * a.y;
     }
@@ -1369,7 +1405,8 @@ fn face_of_loop(
             env,
         )
     })?;
-    made.face.ok_or_else(|| SolidError::null_pointer(OP))
+    made.face
+        .ok_or_else(|| SolidError::blend_missing(OP, "the overflow face"))
 }
 
 /// The fork's `SmFilletExecutive::CloseRemovalRegion`: close `region`, the sheet of fillet
@@ -1404,7 +1441,7 @@ pub fn close_removal_region(
             // on a plane, round a loop of blended edges; on a full turn of a surface of
             // revolution, the band from its blended rim (tangency-labs/smlib@db4a655)
             let host_surface = face::p2::surface(target, chain.host)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the host face's surface"))?;
             if plane_of(k, host_surface)?.is_some() {
                 close_round_loop(k, region, target, blended, chain, on_tol, note)?;
             } else {
@@ -1436,7 +1473,7 @@ fn loop_area(k: &Kernel, lp: &[LoopCurve], frame: &PlaneFrame) -> Result<f64> {
     let mut area = 0.0;
     for (i, a) in uvs.iter().enumerate() {
         let Some(b) = uvs.get((i + 1) % uvs.len()) else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(OP, "the loop's next point"));
         };
         area += 0.5 * (a.x * b.y - b.x * a.y);
     }
@@ -1481,7 +1518,10 @@ pub fn close_round_loop(
 ) -> Result<FaceId> {
     let host = chain.host;
     if chain.vertices.len() != chain.edges.len() + 1 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the chain does not have one more vertex than edges",
+        ));
     }
 
     // the filleted edges whose fillet faces the chain bounds
@@ -1530,8 +1570,8 @@ pub fn close_round_loop(
             ),
         );
     };
-    let host_surface =
-        face::p2::surface(target, host)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let host_surface = face::p2::surface(target, host)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the host face's surface"))?;
     let Some(frame) = plane_of(k, host_surface)? else {
         return refuse(
             note,
@@ -1546,7 +1586,7 @@ pub fn close_round_loop(
     let mut loops: [Vec<LoopCurve>; 2] = [Vec::new(), Vec::new()];
     for (e, pair) in chain.edges.iter().zip(chain.vertices.windows(2)) {
         let [from, to] = pair else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(OP, "the chain's vertex pair"));
         };
         let curve = edge_curve(k, region, *e)?;
         add_curve(
@@ -1559,14 +1599,14 @@ pub fn close_round_loop(
     }
     let mut left: Vec<EdgeId> = Vec::new();
     for e in crate::topology::loopuse::loop_edges(target, round)? {
-        left.push(e.ok_or_else(|| SolidError::null_pointer(OP))?);
+        left.push(e.ok_or_else(|| SolidError::blend_missing(OP, "the round loop's edge"))?);
     }
     let Some(&first) = left.first() else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(OP, "the round loop has no edges"));
     };
     let mut at = edge::start_end_vertices(target, first)?
         .0
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the round loop's first vertex"))?;
     while !left.is_empty() {
         let mut found = None;
         for (i, &e) in left.iter().enumerate() {
@@ -1577,11 +1617,14 @@ pub fn close_round_loop(
             }
         }
         let Some(i) = found else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the round loop's edges are not connected",
+            ));
         };
         let e = left.remove(i);
-        let other =
-            edge::other_vertex(target, e, Some(at))?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let other = edge::other_vertex(target, e, Some(at))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's other vertex"))?;
         let curve = edge_curve(k, target, e)?;
         add_curve(
             k,
@@ -1601,7 +1644,7 @@ pub fn close_round_loop(
         }
     }
     let surface = covering_surface(k, target, host, &points, on_tol)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the covering surface"))?;
     let areas = [
         loop_area(k, &loops[0], &frame)?,
         loop_area(k, &loops[1], &frame)?,
@@ -1625,7 +1668,7 @@ pub fn close_round_loop(
     for index in [outer, inner] {
         let lp = loops
             .get(index)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the face's loop"))?;
         counts.push(lp.len());
         for c in lp {
             curves.push(Some(c.curve.clone()));
@@ -1657,7 +1700,8 @@ pub fn close_round_loop(
             env,
         )
     })?;
-    made.face.ok_or_else(|| SolidError::null_pointer(OP))
+    made.face
+        .ok_or_else(|| SolidError::blend_missing(OP, "the band face"))
 }
 
 /// The refusal of a closing band on a face that is not a full turn of a surface of
@@ -1693,7 +1737,8 @@ pub fn close_band(
     note: &mut Option<Refusal>,
 ) -> Result<FaceId> {
     let host = chain.host;
-    let base = face::p2::surface(target, host)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let base = face::p2::surface(target, host)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the host face's surface"))?;
     if !OffsetSurface::continues_as_itself(base) {
         return refuse(note, BAND_NOT_A_TURN);
     }
@@ -1775,7 +1820,10 @@ pub fn close_band(
             let dropped =
                 surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
             if !dropped.success {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the sample does not drop onto the surface",
+                ));
             }
             uvs.push(dropped.result_uv);
             *avg += gen_of(dropped.result_uv);
@@ -1929,7 +1977,7 @@ pub fn close_section_ended_round(
             return refuse(note, UNSUPPORTED);
         };
         let Some(entry) = list.get_mut(i) else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(OP, "the section's list entry"));
         };
         if entry.is_some() {
             return refuse(note, UNSUPPORTED);
@@ -1943,8 +1991,14 @@ pub fn close_section_ended_round(
     // a rail's end at each section: its vertex on that section's plane
     let rail_ends = |e: EdgeId| -> Result<Option<[Point3; 2]>> {
         let (a, b) = edge::start_end_vertices(region, e)?;
-        let a = vertex::point(region, a.ok_or_else(|| SolidError::null_pointer(OP))?)?;
-        let b = vertex::point(region, b.ok_or_else(|| SolidError::null_pointer(OP))?)?;
+        let a = vertex::point(
+            region,
+            a.ok_or_else(|| SolidError::blend_missing(OP, "the rail's start vertex"))?,
+        )?;
+        let b = vertex::point(
+            region,
+            b.ok_or_else(|| SolidError::blend_missing(OP, "the rail's end vertex"))?,
+        )?;
         let [e0, e1] = ends;
         if on_section_plane(a, e0.at, e0.normal, on_tol)
             && on_section_plane(b, e1.at, e1.normal, on_tol)
@@ -2026,8 +2080,14 @@ pub fn section_end_face(
 ) -> Result<()> {
     let line = |from: Point3, to: Point3| Curve::from(Line::from_points(from, to, 3));
     let (a, b) = edge::start_end_vertices(region, section)?;
-    let a = vertex::point(region, a.ok_or_else(|| SolidError::null_pointer(OP))?)?;
-    let b = vertex::point(region, b.ok_or_else(|| SolidError::null_pointer(OP))?)?;
+    let a = vertex::point(
+        region,
+        a.ok_or_else(|| SolidError::blend_missing(OP, "the section's start vertex"))?,
+    )?;
+    let b = vertex::point(
+        region,
+        b.ok_or_else(|| SolidError::blend_missing(OP, "the section's end vertex"))?,
+    )?;
     let mut lp: Vec<LoopCurve> = Vec::new();
     add_curve(k, &mut lp, edge_curve(k, region, section)?, a, b)?;
     for (from, to) in [(b, end.at), (end.at, a)] {
@@ -2050,7 +2110,10 @@ pub fn section_end_face(
         }
     }
     let Some(bbox) = bbox else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the section end's loop has no points",
+        ));
     };
     let margin = 0.01 * bbox.size().length() + on_tol;
     let domain = Extent2d::from_bounds(
@@ -2084,12 +2147,12 @@ pub fn section_end(
         interval.max()
     };
     let derivs = edge::curve(target, fil_edge)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's curve"))?
         .evaluate(k, t, 1, true, true)?;
     let tangent = derivs
         .get(1)
         .copied()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's tangent"))?;
     let length = tangent.length();
     if length <= EFF_ZERO {
         return Ok(None);
@@ -2140,4 +2203,21 @@ pub fn section_edge(
         }
     }
     Ok(found)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refusal_is_noted_and_a_typed_failure() {
+        let mut note = None;
+        let error = refuse::<()>(&mut note, BRANCHES).unwrap_err();
+        assert_eq!(note, Some(BRANCHES));
+        assert_eq!(
+            error,
+            SolidError::blend_failed(OP, "the overflow is refused, as the note says")
+        );
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+    }
 }

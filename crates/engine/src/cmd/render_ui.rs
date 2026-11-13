@@ -3,7 +3,7 @@ use super::CommandSpec;
 use crate::schema::render_lights::{MuteParams, SoloParams};
 use crate::schema::{
     TypedContract, output_schema_for,
-    render_ui::{BatchParams, BatchResult, CheckReport, CompareDivider, CompareParams, CompareSide, ResultIndex},
+    render_ui::{BatchParams, BatchResult, CheckReport, CompareDivider, CompareParams, CompareSide, OutputSize, ResultIndex},
 };
 use crate::{Result, Session, params::bad};
 use serde::Deserialize;
@@ -37,6 +37,7 @@ fn mute(_: &mut crate::Session, params: &serde_json::Value) -> crate::Result<ser
     serde_json::to_value(input).map_err(|e| crate::params::bad(command, e.to_string()))
 }
 const RESULT_INDEX: TypedContract<ResultIndex> = TypedContract::new();
+const OUTPUT_SIZE: TypedContract<OutputSize> = TypedContract::new();
 const COMPARE: TypedContract<CompareParams> = TypedContract::new();
 const DIVIDER: TypedContract<CompareDivider> = TypedContract::new();
 const BATCH: TypedContract<BatchParams> = TypedContract::new();
@@ -61,8 +62,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(results_ready)
         .contract(&RESULT_INDEX).output(output_schema_for::<ResultIndex>)
         .params("index: integer 0..7, oldest first; must be retained. Drops only that transient result, selecting the newest remaining result if necessary; echoes index."),
-    CommandSpec::new("render.output.size", "Set Render Output Size", output_size)
+    CommandSpec::new("render.output.size", "Set Render Output Size", crate::checked!("render.output.size", output_size))
         .icon("settings")
+        .contract(&OUTPUT_SIZE)
+        .output(output_schema_for::<OutputSize>)
         .noundo()
         .doc_only()
         .params("width, height: 1..16384; custom?: bool. Validated Render output draft request; headless echo only, no design edits or job. The UI separately limits new selections to 8192 per side, 33554432 output pixels and the selected rendering profile."),
@@ -249,24 +252,12 @@ fn render_lights_remaining_planned_commands_refuse_without_mutation() {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct OutputSize {
-    width: u32,
-    height: u32,
-    #[serde(default)]
-    custom: bool,
-}
 fn output_size(_: &mut Session, params: &Value) -> Result<Value> {
     let input: OutputSize = serde_json::from_value(params.clone()).map_err(|e| bad("render.output.size", e.to_string()))?;
     if !(1..=16384).contains(&input.width) || !(1..=16384).contains(&input.height) {
         return Err(bad("render.output.size", "dimensions must be in 1..16384"));
     }
-    let mut reply = json!({"width":input.width,"height":input.height});
-    if input.custom {
-        reply["custom"] = json!(true);
-    }
-    Ok(reply)
+    serde_json::to_value(input).map_err(|e| bad("render.output.size", e.to_string()))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -538,7 +529,7 @@ fn batch_fixture(count: usize) -> Session {
     let mut s = Session::default();
     s.set_render_job_host(Some(solidcraft_render::job::CpuHost::cooperative())).unwrap();
     for index in 0..count {
-        let camera = solidcraft_render::Camera { yaw: index as f64 * 0.2, roll: index as f64 * 0.01, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { yaw: index as f64 * 0.2, roll: index as f64 * 0.01, ..Default::default() };
         s.execute("render.settings.set", &json!({"name":format!("Shot {index:02}"),"set":{"camera":camera,"width":8+index,"height":8}})).unwrap();
     }
     s
@@ -660,7 +651,7 @@ fn render_results_batch_cameras_and_common_setup_are_captured_before_later_shot_
     let original = s.doc.render.setups.get("Shot 01").unwrap().camera;
     s.execute("render.batch", &json!({"request":{"setup":"Shot 00"}})).unwrap();
     let first = s.render_queue_state().job.unwrap();
-    let changed = solidcraft_render::Camera { yaw: 2.0, ..Default::default() };
+    let changed = solidcraft_viewport::Camera { yaw: 2.0, ..Default::default() };
     s.execute("render.settings.set", &json!({"name":"Shot 01","set":{"camera":changed}})).unwrap();
     s.execute("render.settings.set", &json!({"name":"Shot 00","set":{"width":64}})).unwrap();
     let document = s.doc.clone();

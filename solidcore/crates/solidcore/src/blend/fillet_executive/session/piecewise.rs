@@ -201,11 +201,12 @@ pub(super) fn naming_owner(
 
 /// `pRegion->IsVoid()` of the region of `brep`'s edge use (`NER` on each null).
 fn edgeuse_region_is_void(brep: &Brep, eu: Option<crate::topology::EdgeuseId>) -> Result<i32> {
-    let eu = eu.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let eu = eu.ok_or_else(|| SolidError::blend_missing(OP, "the edge use"))?;
     brep.edgeuse(eu)?
         .edge
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let shell = edgeuse::p1::shell(brep, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+    let shell =
+        edgeuse::p1::shell(brep, eu)?.ok_or_else(|| SolidError::blend_missing(OP, "the shell"))?;
     // pShell->GetRegion()->IsVoid() dereferences the region unchecked.
     let region = brep
         .shell(shell)?
@@ -310,7 +311,8 @@ impl FilletSession<'_> {
                     _ => None,
                 };
                 for rail in rails {
-                    let rail = rail.ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let rail = rail
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the fillet's rail edge"))?;
                     let original = self.objects.pseudo.fillet_edge(rail)?.original_face();
                     let original_surface = original
                         .map(|face| target_surface(self.objects.target, target_serial, face))
@@ -512,7 +514,7 @@ impl FilletSession<'_> {
             let target = bodies
                 .0
                 .take()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the target body"))?;
             let id = store.adopt_brep(context, target)?;
             if id != TARGET {
                 return Err(invalid("target store handle"));
@@ -520,7 +522,7 @@ impl FilletSession<'_> {
             let other = bodies
                 .1
                 .take()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the intermediate body"))?;
             let id = store.adopt_brep(context, other)?;
             if id != INTERMEDIATE {
                 return Err(invalid("intermediate store handle"));
@@ -575,7 +577,7 @@ impl FilletSession<'_> {
         let faces = p1::faces(target, None)?;
         for &f in &faces {
             let Some(surface_key) = target_surface(target, serial, f)?.map(|s| s.key) else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(OP, "the face's surface binding"));
             };
             if attributes
                 .find_attribute(surface_key, ids::FILLET_EDGEMAP)
@@ -589,11 +591,11 @@ impl FilletSession<'_> {
                 .face(f)?
                 .surface
                 .as_ref()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
             let normal: Vec3 = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
             let [_, _, _, _, _, dvv] = surface.evaluate_2nd_derivatives(k, uv, true, true)?;
-            let mut faceuse =
-                face::p2::upward_faceuse(target, f)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let mut faceuse = face::p2::upward_faceuse(target, f)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face's upward face use"))?;
             // See if the top Faceuse on the inside of the fillet
             if dvv.length() < EFF_ZERO {
                 continue;
@@ -602,20 +604,20 @@ impl FilletSession<'_> {
                 faceuse = target
                     .faceuse(faceuse)?
                     .mate
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the face use's mate"))?;
             }
             let region_of = |fu| -> Result<Option<RegionId>> {
                 let shell = target
                     .faceuse(fu)?
                     .shell
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the shell"))?;
                 Ok(target.shell(shell)?.region)
             };
             let region = region_of(faceuse)?;
             let mate = target
                 .faceuse(faceuse)?
                 .mate
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face use's mate"))?;
             if region_of(mate)? == region {
                 continue;
             }
@@ -644,7 +646,7 @@ impl FilletSession<'_> {
         // Now clean up attributes
         for &f in &faces {
             let Some(surface_key) = target_surface(target, serial, f)?.map(|s| s.key) else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(OP, "the face's surface binding"));
             };
             for id in [ids::FILLET_EDGEMAP, ids::FILLET_VERTMAP] {
                 if let Some(h) = attributes.find_attribute(surface_key, id) {

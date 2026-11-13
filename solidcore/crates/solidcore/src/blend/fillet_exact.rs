@@ -547,7 +547,10 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
 
     // what was read off the surface is the surface
     if q.distance(p) > tol || q.normal(p).dot(n) < 1.0 - EFF_ZERO_SQRT {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the surface read back is not the surface",
+        ));
     }
     Ok(q)
 }
@@ -1522,8 +1525,9 @@ pub fn classify_exact_blend(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let tol = b.tolerance();
 
     let mut radius = 0.0;
@@ -1545,7 +1549,7 @@ pub fn classify_exact_blend(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             BlendQuadric::from_surface(k, off.surface.base_surface(), uv, tol)?
         };
         if face.kind == QuadricKind::None && !any_faces {
@@ -1559,7 +1563,7 @@ pub fn classify_exact_blend(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = off.surface.base_surface();
             off.surface
                 .surface
@@ -1880,7 +1884,7 @@ pub struct CollapsedOffset {
     pub partial: bool,
 }
 
-/// Not the fork's (#2401; with `fixes.fillet_gn_section_generator`): for a constant ball of
+/// Not the fork's (#2401): for a constant ball of
 /// `radius` (`None`: the solver's own) whose offset of one of its faces collapses (the face
 /// a cylinder or sphere as wide as the ball, the ball inside it: its offset is the axis or
 /// the centre, [`QuadricKind::Line`] or [`QuadricKind::Point`]), the radius of that face
@@ -1930,13 +1934,14 @@ pub fn ball_zone_open_at_an_end(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     if edge::is_closed(b, e)? {
         return Ok(None);
     }
     let curve = edge::evaluation_curve(b, e)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's evaluation curve"))?
         .clone();
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
@@ -1954,7 +1959,7 @@ pub fn ball_zone_open_at_an_end(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = off.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
@@ -1976,7 +1981,7 @@ pub fn ball_zone_open_at_an_end(
             let surface = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = surface.surface.base_surface();
             match edge_match(k, base, &curve, ivl, off, tol)? {
                 // as wide as the ball along part of the edge only: refused, naming the face's
@@ -2047,7 +2052,7 @@ pub fn ball_zone_open_at_an_end(
             let surface = ops
                 .solver()
                 .surface(c)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = surface.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
@@ -2081,6 +2086,311 @@ pub fn ball_zone_open_at_an_end(
         }
     }
     Ok(None)
+}
+
+/// [`ball_past_an_end`]'s refusal: the edge's end the ball lies past, and the radius at which
+/// it first has a section of the round between the edge's ends (an open bound).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PastAnEnd {
+    /// The vertex point of the end whose End's plane every ball on the edge's faces lies past.
+    pub at: Point3,
+    /// The radius below which the ball touching the face on its far tangent edge lies on the
+    /// span's side of that plane again: the largest that has a section between the ends.
+    pub radius: f64,
+}
+
+/// One of a face's two tangent edges at the blended edge's ends: its vertex on the blended
+/// edge, its unit direction away from it and its length (a straight edge).
+#[derive(Debug, Clone, Copy)]
+struct TangentLine {
+    vertex: Point3,
+    dir: Vec3,
+    length: f64,
+}
+
+/// Not the fork's (#14846): for a constant ball of `radius` (`None`: the solver's own),
+/// whether every ball touching the edge's two faces lies past the plane through an end of the
+/// edge square to it, so that the round has no section between the edge's ends: its rail on
+/// one face leaves that face before either end and the ball rolls on the faces beyond.
+/// Returns that end and the largest radius whose round has a section between the ends;
+/// `None` where it has one, where the edge is closed, and where this is not judged.
+///
+/// Judged where one face F of the edge is a plane or a cylinder that ends at both of the
+/// edge's ends in a straight edge tangent to the face beyond (the R3 round of a block's rim
+/// between two of its planes, the edge the round's crease with a pocket), and the other face
+/// is a natural quadric other than a torus. A ball touching F along one of those edges T has
+/// its centre on the line T moved by the ball along F's normal (constant along T), and on the
+/// other face's offset: the two meet in closed form (a quadratic along the line), the point
+/// whose foot lies on T nearest the blended edge. Every ball touching F within F lies between
+/// those two in the order of the edge's sections (ARGUED: the balls on F are ordered by
+/// their foot across F); where both lie past one end's plane, by more than the solver's
+/// approximation tolerance, so do all of them. An end where the chain runs on into one of
+/// `joined` (the next round) is not an End and is not judged.
+///
+/// The radius named is computed from the same closed form, never by building: the root,
+/// bisected to rounding on `(0, radius)`, of the signed distance from that end's plane of the
+/// ball on F's far tangent edge (at radius 0 that ball is the far end's vertex, inside the
+/// span).
+///
+/// # Errors
+///
+/// Those of the drops, the evaluations, the topology lookups and the tangency test;
+/// [`SolidError::PortInvariant`] for a solver without its edge use, its edge's curve or its
+/// offset surfaces.
+pub fn ball_past_an_end(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    b: &mut Brep,
+    radius: Option<f64>,
+    joined: &[EdgeId],
+) -> Result<Option<PastAnEnd>> {
+    use crate::curve::curve::CurveKind;
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    use crate::topology::{edge, vertex};
+    let eu0 = ops
+        .solver()
+        .edgeuse(0)?
+        .ok_or_else(|| SolidError::port_invariant(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::port_invariant(OP, "the edge use's edge"))?;
+    if edge::is_closed(b, e)? {
+        return Ok(None);
+    }
+    let curve = edge::evaluation_curve(b, e)?
+        .ok_or_else(|| SolidError::port_invariant(OP, "the edge's evaluation curve"))?
+        .clone();
+    let ivl = edge::interval(b, e)?;
+    let tol = b.tolerance();
+    let approx = ops.solver().approx_tol_3d;
+    let tangency = ops.solver().tangency_tolerance;
+    let mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+
+    // each face's quadric and the ball's signed offset of it (the solver's, as
+    // `ball_zone_open_at_an_end` reads them)
+    let mut faces = [BlendQuadric::default(); 2];
+    let mut offs = [0.0; 2];
+    for i in 0..2 {
+        let (face, p, n, uv) = {
+            let off = ops
+                .solver()
+                .surface(i)?
+                .ok_or_else(|| SolidError::port_invariant(OP, "the solver's support surface"))?;
+            let base = off.surface.base_surface();
+            let domain = base.natural_uv_domain_with_nurb(k)?;
+            let dropped =
+                base.drop_point::<NoObject>(k, mid, &domain, &DropPointOptions::default())?;
+            if !dropped.success {
+                return Ok(None);
+            }
+            let uv = dropped.result_uv;
+            let face = BlendQuadric::from_surface(k, base, uv, tol)?;
+            let (p, n) = point_and_normal(k, base, uv)?;
+            (face, p, n, uv)
+        };
+        let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
+        let mut off = (q - p).dot(n);
+        if let Some(r) = radius {
+            off = if off < 0.0 { -r } else { r };
+        }
+        if let (Some(f), Some(o)) = (faces.get_mut(i), offs.get_mut(i)) {
+            *f = face;
+            *o = off;
+        }
+    }
+    let r = offs[0].abs();
+    if r.is_nan() || r <= 0.0 || (offs[1].abs() - r).abs() > tol {
+        return Ok(None);
+    }
+
+    // the edge's two ends: their points and the unit tangents into the span
+    let ends = {
+        let first = curve.evaluate(k, ivl.min(), 1, true, false)?;
+        let last = curve.evaluate(k, ivl.max(), 1, true, false)?;
+        let (Some(&p0), Some(&d0), Some(&p1), Some(&d1)) =
+            (first.first(), first.get(1), last.first(), last.get(1))
+        else {
+            return Ok(None);
+        };
+        let (Ok(d0), Ok(d1)) = (d0.unitize(), d1.unitize()) else {
+            return Ok(None);
+        };
+        [(p0, d0), (p1, -d1)]
+    };
+    let (start, end) = edge::start_end_vertices(b, e)?;
+    let vertices = [start, end];
+
+    for f in 0..2 {
+        let (Some(&face), Some(&other), Some(&off), Some(&off_other)) =
+            (faces.get(f), faces.get(1 - f), offs.get(f), offs.get(1 - f))
+        else {
+            return Ok(None);
+        };
+        if !matches!(face.kind, QuadricKind::Plane | QuadricKind::Cylinder)
+            || matches!(other.kind, QuadricKind::None | QuadricKind::Torus)
+        {
+            continue;
+        }
+        let Some(eu_f) = ops.solver().edgeuse(f)? else {
+            continue;
+        };
+        let Some(topo_face) = eu::face(b, eu_f)? else {
+            continue;
+        };
+        // F's straight edges at the blended edge's two ends, each tangent to the face beyond
+        let mut lines = Vec::new();
+        for &(at, _) in &ends {
+            let Some(v) = vertices
+                .iter()
+                .flatten()
+                .copied()
+                .find(|&v| vertex::point(b, v).is_ok_and(|p| p.distance(at) <= tol))
+            else {
+                return Ok(None);
+            };
+            let mut others = vertex::edges(b, v, Some(topo_face))?
+                .into_iter()
+                .filter(|&x| x != e);
+            let (Some(side), None) = (others.next(), others.next()) else {
+                break;
+            };
+            let is_line =
+                edge::curve(b, side)?.is_some_and(|c| matches!(c.kind(), CurveKind::Line(_)));
+            if !is_line
+                || !crate::blend::fillet_solver::p1::test_manifold_tangent_rollover(
+                    k, b, side, tangency,
+                )?
+                .0
+            {
+                break;
+            }
+            let Some(far) = edge::other_vertex(b, side, Some(v))? else {
+                break;
+            };
+            let near = vertex::point(b, v)?;
+            let along = vertex::point(b, far)? - near;
+            let length = along.length();
+            let Ok(dir) = along.unitize() else {
+                break;
+            };
+            lines.push(TangentLine {
+                vertex: near,
+                dir,
+                length,
+            });
+        }
+        let (Some(&ta), Some(&tb), 2) = (lines.first(), lines.get(1), lines.len()) else {
+            continue;
+        };
+        // F's normal along each line (constant along a plane's or a cylinder's straight edge),
+        // as the surface's at the line's vertex
+        let normal_at =
+            |k: &Kernel, ops: &dyn FilletSolverOps, p: Point3| -> Result<Option<Vec3>> {
+                let off = ops.solver().surface(f)?.ok_or_else(|| {
+                    SolidError::port_invariant(OP, "the solver's support surface")
+                })?;
+                let base = off.surface.base_surface();
+                let domain = base.natural_uv_domain_with_nurb(k)?;
+                let dropped =
+                    base.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
+                if !dropped.success || dropped.gap > tol {
+                    return Ok(None);
+                }
+                Ok(point_and_normal(k, base, dropped.result_uv)?
+                    .1
+                    .unitize()
+                    .ok())
+            };
+        let (Some(na), Some(nb)) = (normal_at(k, ops, ta.vertex)?, normal_at(k, ops, tb.vertex)?)
+        else {
+            continue;
+        };
+        let lines = [(ta, na), (tb, nb)];
+        let sign = |x: f64| if x < 0.0 { -1.0 } else { 1.0 };
+        // the signed distances from end `a`'s plane of the balls of radius `s` on the two
+        // lines (`None`: one has no ball, not judged)
+        let beyond = |s: f64, a: usize| -> Option<[f64; 2]> {
+            let (pa, da) = *ends.get(a)?;
+            let other = other.offset(sign(off_other) * s, tol);
+            let mut out = [0.0; 2];
+            for (slot, (line, n)) in out.iter_mut().zip(lines) {
+                let centre = ball_on_line(line, n * (sign(off) * s), &other, tol)?;
+                *slot = (centre - pa).dot(da);
+            }
+            Some(out)
+        };
+        for (a, &(at, _)) in ends.iter().enumerate() {
+            if end_runs_on(b, e, at, tol, joined)? {
+                continue;
+            }
+            let Some(sigma) = beyond(r, a) else {
+                continue;
+            };
+            if !sigma.iter().all(|&d| d < -approx) {
+                continue;
+            }
+            // the largest radius whose far ball is on the span's side: the far line's ball at
+            // radius 0 is the far end's vertex, inside the span
+            let far = |s: f64| beyond(s, a).map(|d| d[0].max(d[1]));
+            let (mut lo, mut hi) = (0.0, r);
+            for _ in 0..64 {
+                let m = 0.5 * (lo + hi);
+                if !(m > lo && m < hi) {
+                    break;
+                }
+                match far(m) {
+                    Some(d) if d >= 0.0 => lo = m,
+                    Some(_) => hi = m,
+                    None => return Ok(None),
+                }
+            }
+            return Ok(Some(PastAnEnd { at, radius: lo }));
+        }
+    }
+    Ok(None)
+}
+
+/// The centre of the ball touching a face along the straight `line` (its foot on the line,
+/// nearest the line's vertex, between its ends within `tol`), the face's normal there moved
+/// by the ball being `shift`, that lies on `other` (the other face's offset by the ball): the
+/// line moved by `shift` meets the quadric in a quadratic along it. `None` where it does not.
+fn ball_on_line(line: TangentLine, shift: Vec3, other: &BlendQuadric, tol: f64) -> Option<Point3> {
+    let (a, bv, c) = other.implicit();
+    let q0 = line.vertex + shift;
+    let d = line.dir;
+    let mul = |m: &[[f64; 3]; 3], v: Vec3| -> Vec3 {
+        let row = |i: usize| m.get(i).copied().unwrap_or([0.0; 3]);
+        let [r0, r1, r2] = [row(0), row(1), row(2)];
+        Vec3::new(
+            r0[0] * v.x + r0[1] * v.y + r0[2] * v.z,
+            r1[0] * v.x + r1[1] * v.y + r1[2] * v.z,
+            r2[0] * v.x + r2[1] * v.y + r2[2] * v.z,
+        )
+    };
+    let b = Vec3::new(bv[0], bv[1], bv[2]);
+    // Q(q0 + t d) = qa t^2 + 2 qb t + qc
+    let qa = d.dot(mul(&a, d));
+    let qb = q0.dot(mul(&a, d)) + b.dot(d);
+    let qc = q0.dot(mul(&a, q0)) + 2.0 * b.dot(q0) + c;
+    let mut roots = Vec::new();
+    if qa.abs() <= EFF_ZERO * (1.0 + qb.abs()) {
+        if qb.abs() > EFF_ZERO {
+            roots.push(-qc / (2.0 * qb));
+        }
+    } else {
+        let disc = qb * qb - qa * qc;
+        if disc < 0.0 {
+            return None;
+        }
+        let root = disc.sqrt();
+        roots.push((-qb - root) / qa);
+        roots.push((-qb + root) / qa);
+    }
+    roots
+        .into_iter()
+        .filter(|&t| t >= -tol && t <= line.length + tol)
+        .min_by(|x, y| x.abs().total_cmp(&y.abs()))
+        .map(|t| q0 + d * t)
 }
 
 /// A rail of a constant ball's round or chamfer whose ends lie within the part's
@@ -2192,13 +2502,14 @@ pub fn rail_below_resolution(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     if edge::is_closed(b, e)? {
         return Ok(None);
     }
     let curve = edge::evaluation_curve(b, e)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's evaluation curve"))?
         .clone();
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
@@ -2215,7 +2526,7 @@ pub fn rail_below_resolution(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = off.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
@@ -2380,7 +2691,7 @@ fn ball_on_face_along_arc(
     let surface = ops
         .solver()
         .surface(ring)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?
         .surface
         .base_surface();
     let mut feet = [Vec3::ZERO; 2];
@@ -2491,7 +2802,7 @@ fn keep_definition(
     }
     let support = |i: usize| -> Result<&Surface> {
         Ok(s.surface(i)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?
             .surface
             .base_surface())
     };
@@ -2519,8 +2830,13 @@ fn keep_definition(
         inputs,
     )?;
     let Some(surface) = pseudo.geom_mut(g)?.fillet_surface_mut(None)? else {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(
+            OP,
+            "the fillet geometry's surface",
+        ));
     };
+    // The round keeps its definition only where it is proved; a net the certificate refuses
+    // refuses the fillet (definitions-and-certificates.md §7.1, §7.4), never kept bare.
     round.recertify(k, surface)?;
     surface.set_exact_round(Some(round));
     Ok(())
@@ -2550,7 +2866,7 @@ fn exact_fillet_geom_of_class(
             .fsg
             .as_ref()
             .map(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::fillet_surface_generator_type)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface generator"))
     };
     match blend.spine {
         BlendSpine::Line => {

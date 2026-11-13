@@ -47,7 +47,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-6, &attrs).unwrap()
+    brep_volume(k, b, 1e-10, &attrs).unwrap()
 }
 
 /// The area of the section a round of radius `r` removes between faces `w` and `h` wide
@@ -289,33 +289,23 @@ fn variable_round(cliff: bool, r0: f64, r1: f64) -> Outcome {
     }
 }
 
-/// The box less the variable round's section along the edge, by the midpoint rule (the
-/// rolling ball's section across the edge is the circle of the radius there, to the
-/// accuracy of the round's cubic sections).
-fn variable_round_expected(r0: f64, r1: f64) -> f64 {
-    let n = 20_000;
-    let mut removed = 0.0;
-    for i in 0..n {
-        let t = (f64::from(i) + 0.5) / f64::from(n);
-        removed += removed_area(r0 + (r1 - r0) * t, 10.0, 30.0);
-    }
-    6000.0 - removed * 20.0 / f64::from(n)
-}
-
 #[test]
 fn a_variable_round_past_a_box_top_is_subtracted() {
-    // the fork's 2 -> 11, 20, 30, 50 (5789.69878, 5391.54581, 4819.37775, 3546.18768), from
-    // either end, to 1e-4 (the variable round's cubic sections' accuracy)
-    for (r1, fork) in [
-        (11.0, 5789.69878),
-        (20.0, 5391.54581),
-        (30.0, 4819.37775),
-        (50.0, 3546.18768),
+    // The round is the union of its balls (WR-685), here the balls' cone: the box less the corner
+    // between the planes and the cone, cut by the 10 wide top's far face and the box's bottom, by
+    // Gauss-Legendre quadrature of each plane across the edge (5 and 10 panels along it agree to
+    // 1e-9; 2 -> 11 is `wr685_variable_round_touch_circle`'s `CLIFF_2_11_VOLUME` within its 1e-5),
+    // from either end, to the subtraction's 1e-7. Upstream's approximated arcs (the fork's
+    // d01d7b0) kept up to 0.12 less (2 -> 50: 4693.48804); its great circles took off up to 1147
+    // more (3546.18768).
+    for (r1, closed) in [
+        (11.0, 5_802.443_145_423),
+        (20.0, 5_503.887_121_531),
+        (30.0, 5_184.057_273_581),
+        (50.0, 4_693.608_889_860),
     ] {
-        let expected = variable_round_expected(2.0, r1);
-        assert!((expected - fork).abs() < 1e-4, "{r1}: {expected}");
-        assert_builds(&variable_round(true, 2.0, r1), expected, 1e-4);
-        assert_builds(&variable_round(true, r1, 2.0), expected, 1e-4);
+        assert_builds(&variable_round(true, 2.0, r1), closed, 1e-7);
+        assert_builds(&variable_round(true, r1, 2.0), closed, 1e-7);
     }
     assert_no_room(&variable_round(false, 2.0, 11.0));
 }

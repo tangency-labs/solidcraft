@@ -48,8 +48,7 @@
 //!   upstream); a NaN step (from NaN tolerances) would loop forever upstream. Here
 //!   each step loop stops after [`MAX_STEP_TRIES`] tries and the trace after
 //!   [`MAX_TRACE_ITERATIONS`] steps (also counting the snapped points upstream does
-//!   not count) with [`SolidError::InvalidInput`]; and, with
-//!   `fixes.ssi_start_loop_trace_budget`, the traces of one start-point loop of
+//!   not count) with [`SolidError::InvalidInput`]; and the traces of one start-point loop of
 //!   `DoIntersection` together after [`MAX_START_LOOP_TRACE_STEPS`] steps (HANG-52),
 //!   the same way. `DoLawIntersection`'s span
 //!   subdivision stops at [`MAX_LAW_POINTS`] points the same way.
@@ -137,7 +136,7 @@ pub const MAX_STEP_TRIES: usize = 4096;
 pub const MAX_TRACE_ITERATIONS: usize = 100_000;
 
 /// The `ComputeNextPoint` calls of all the traces of one start-point loop of
-/// `DoIntersection` together, with `fixes.ssi_start_loop_trace_budget` (HANG-52).
+/// `DoIntersection` together (HANG-52).
 /// Upstream bounds one trace by 5000 points only, and a trace that creeps toward a
 /// surface boundary in ever smaller steps reaches that after about 15,000 calls, after
 /// which the loop goes on with the next start point: a filleted 30x20x10 box's face 14
@@ -463,10 +462,16 @@ impl SurfaceIntersector<'_> {
     fn check_in_domains(&self, next: TsectId, uv_tol: [f64; 2]) -> Result<()> {
         let p = self.point(next)?;
         if !self.uv_domains[0].contains_point(p.uv_pos(SrfIndex::First), uv_tol[0]) {
-            return Err(SolidError::sm_err(OP_TRACE));
+            return Err(SolidError::intersect_failed(
+                OP_TRACE,
+                "the traced point lies outside the first surface's domain",
+            ));
         }
         if !self.uv_domains[1].contains_point(p.uv_pos(SrfIndex::Second), uv_tol[1]) {
-            return Err(SolidError::sm_err(OP_TRACE));
+            return Err(SolidError::intersect_failed(
+                OP_TRACE,
+                "the traced point lies outside the second surface's domain",
+            ));
         }
         Ok(())
     }
@@ -648,7 +653,10 @@ impl SurfaceIntersector<'_> {
     pub fn find_interior_curves(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         // The basic intersector does not allow self intersection testing.
         if self.doing_self_intersection {
-            return Err(SolidError::sm_err(OP_FIC));
+            return Err(SolidError::intersect_failed(
+                OP_FIC,
+                "the basic intersector does not test self intersection",
+            ));
         }
 
         // Find node pairs in the tree (SER: checked; surface::surface::p7, its leaf
@@ -699,7 +707,10 @@ impl SurfaceIntersector<'_> {
         out: &mut TsectCurves,
     ) -> Result<()> {
         if self.doing_self_intersection {
-            return Err(SolidError::sm_err(OP_FIC));
+            return Err(SolidError::intersect_failed(
+                OP_FIC,
+                "the basic intersector does not test self intersection",
+            ));
         }
         let mut curve_caches: Vec<Option<CurveCache<()>>> = Vec::new();
         for pair in pairs {
@@ -720,12 +731,14 @@ impl SurfaceIntersector<'_> {
                     None => slot.insert(match make_curve_cache::<()>(k, curve, None) {
                         Ok(c) => c,
                         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                        Err(_) => return Err(SolidError::null_pointer(OP_FIC)),
+                        Err(_) => {
+                            return Err(SolidError::intersect_missing(OP_FIC, "the curve's cache"))
+                        }
                     }),
                 };
-                let tree = cache
-                    .tree()
-                    .ok_or_else(|| SolidError::null_pointer(OP_FIC))?;
+                let tree = cache.tree().ok_or_else(|| {
+                    SolidError::intersect_missing(OP_FIC, "the curve cache's tree")
+                })?;
                 if tree.intersects_box(&int_bbox)? {
                     is_near_curve = true;
                     break;
@@ -866,7 +879,10 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     law_curve: &mut FilletLaw,
 ) -> Result<IntersectionCurve> {
     let [first, last] = points else {
-        return Err(SolidError::sm_err(OP_DLI));
+        return Err(SolidError::intersect_failed(
+            OP_DLI,
+            "the law intersection needs exactly two points",
+        ));
     };
     let (first, last) = (*first, *last);
 
@@ -877,10 +893,16 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     // the offset surfaces
     if !is_offset_surface(v.intersector().surface(SrfIndex::First)) {
-        return Err(SolidError::null_pointer(OP_DLI));
+        return Err(SolidError::intersect_missing(
+            OP_DLI,
+            "the first surface's offset surface",
+        ));
     }
     if !is_offset_surface(v.intersector().surface(SrfIndex::Second)) {
-        return Err(SolidError::null_pointer(OP_DLI));
+        return Err(SolidError::intersect_missing(
+            OP_DLI,
+            "the second surface's offset surface",
+        ));
     }
 
     let normals = [
@@ -1402,7 +1424,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         point_count += 1;
         if point_count == 5000 {
             // the tolerance is too small or a surface is poorly defined
-            return Err(SolidError::sm_err(OP_TRACE));
+            return Err(SolidError::intersect_failed(OP_TRACE, "the trace reached 5000 points: the tolerance is too small or a surface is poorly defined"));
         }
     }
     Ok(())
@@ -1512,6 +1534,19 @@ fn keep_half_of_closed_extension<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         return Ok(());
     };
     let half = from + 0.5 * (v.intersector().point(last)?.curve_parameter - from);
+    pop_curve_points_past(v, half)
+}
+
+/// Pops the curve points past `half` from the back: the first point past it is the last
+/// kept one, and at least two points are kept.
+///
+/// # Errors
+///
+/// An unknown curve point.
+fn pop_curve_points_past<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    half: f64,
+) -> Result<()> {
     while v.intersector().curve_points.len() > 2 {
         let n = v.intersector().curve_points.len();
         let (Some(&before), Some(&tail)) = (
@@ -1530,6 +1565,85 @@ fn keep_half_of_closed_extension<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     Ok(())
 }
 
+/// Not upstream (#2500, completed): the extension back from the start came back onto the
+/// end of the extension past the end, which had stopped short of the start (at the edge of
+/// the trace's domain, which may reach round a closed turn further than half of it). The
+/// curve is closed and its gap is now known: each end keeps what it would have kept had
+/// the extension past the end come back to the start itself.
+///
+/// The curve points run from the end of the extension past the end (parameter 0) through
+/// the start (`start_param`) to the end of the extension back, where it closed: that last
+/// parameter is the closed curve's length. In those parameters:
+/// - the extension past the end keeps half of its run round the closed curve past the
+///   traced curve's end, `through` (the last through point; its parameter is still the
+///   trace's own, `at`, as it is not one of the curve points the reversal
+///   re-parametrised): the points before `start_param - forward_half` are dropped from the
+///   front, the point at it being the first kept one. As `forward_half = at + (length -
+///   at) / 2` is at least `at`, that is never past the traced curve's end, at
+///   `start_param - at` here;
+/// - the extension back keeps half of its run past `start_param` round to that end, as far
+///   as it traced.
+///
+/// An extension past the end that stopped within its half keeps all of it, and the one back
+/// keeps half of its own run, as [`keep_half_of_closed_extension`]; so does a trace that
+/// never reached its last through point (no extension past the end to share). Clears
+/// `extension_closed`.
+///
+/// # Errors
+///
+/// An unknown curve point.
+fn keep_halves_of_closed_extensions<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    start_param: f64,
+    through: Option<TsectId>,
+) -> Result<()> {
+    let Some(&last) = v.intersector().curve_points.last() else {
+        v.intersector_mut().extension_closed = false;
+        return Ok(());
+    };
+    let length = v.intersector().point(last)?.curve_parameter;
+    // the traced curve's end, the last through point's parameter in the trace's own (a
+    // negative one: not reached)
+    let at = match through {
+        Some(through) => v.intersector().point(through)?.curve_parameter,
+        None => -1.0,
+    };
+    if !(at >= 0.0 && at <= start_param) {
+        return keep_half_of_closed_extension(v, start_param);
+    }
+    // where the extension past the end would have kept to, in the trace's parameters (it
+    // ran from the start, at 0, to `start_param`)
+    let forward_half = at + 0.5 * (length - at);
+    if start_param <= forward_half {
+        return keep_half_of_closed_extension(v, start_param);
+    }
+    v.intersector_mut().extension_closed = false;
+    // the extension back keeps half of its run round to that end
+    let backward_half = start_param + 0.5 * (length - forward_half);
+    pop_curve_points_past(v, backward_half)?;
+    // the extension past the end is dropped from the front down to its half
+    let cut = start_param - forward_half;
+    let mut keep_from = 0;
+    while v.intersector().curve_points.len() - keep_from > 2 {
+        let Some(&next) = v.intersector().curve_points.get(keep_from + 1) else {
+            break;
+        };
+        if v.intersector().point(next)?.curve_parameter > cut {
+            break;
+        }
+        keep_from += 1;
+    }
+    let kept: Vec<TsectId> = v
+        .intersector()
+        .curve_points
+        .iter()
+        .skip(keep_from)
+        .copied()
+        .collect();
+    v.intersector_mut().curve_points = kept;
+    Ok(())
+}
+
 fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     v: &mut V,
     k: &Kernel,
@@ -1542,7 +1656,10 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     // no work - no through points specified
     if points.is_empty() {
-        return Err(SolidError::sm_err(OP_DPI));
+        return Err(SolidError::intersect_failed(
+            OP_DPI,
+            "no through points were given",
+        ));
     }
 
     // Use supplied tolerances when given
@@ -1599,7 +1716,12 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         match r {
             Ok(()) => {}
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_DPI)),
+            Err(_) => {
+                return Err(SolidError::intersect_failed(
+                    OP_DPI,
+                    "the through point's values could not be computed",
+                ))
+            }
         }
 
         // the first points must be on both surfaces
@@ -1609,7 +1731,10 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 tsp.srf_pos(SrfIndex::Second),
             )
         {
-            return Err(SolidError::sm_err(OP_DPI));
+            return Err(SolidError::intersect_failed(
+                OP_DPI,
+                "the first through point is not on both surfaces",
+            ));
         }
 
         if ii == 0 {
@@ -1652,7 +1777,7 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         .intersector_mut()
         .start_points
         .pop()
-        .ok_or_else(|| SolidError::null_pointer(OP_DPI))?;
+        .ok_or_else(|| SolidError::intersect_missing(OP_DPI, "a start point to trace from"))?;
     v.intersector_mut().curve_trace_direction = 1.0;
 
     // tracing beyond the end: clip the extension
@@ -1693,7 +1818,10 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => false,
     };
-    if traced && v.intersector().extension_closed {
+    // Not upstream: whether the extension past the end came back to the start (and kept half
+    // of the gap), for the extension back from the start below
+    let forward_closed = traced && v.intersector().extension_closed;
+    if forward_closed {
         // the extension past the end came back to the start: half of it
         let from = v.intersector().last_through_parameter;
         keep_half_of_closed_extension(v, from)?;
@@ -1735,7 +1863,12 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             v.intersector_mut().extension_closes_at = None;
             backward?;
             if v.intersector().extension_closed {
-                keep_half_of_closed_extension(v, start_param)?;
+                if forward_closed {
+                    keep_half_of_closed_extension(v, start_param)?;
+                } else {
+                    let through = points.last().copied();
+                    keep_halves_of_closed_extensions(v, start_param, through)?;
+                }
             }
             v.intersector_mut().reverse_curve_direction()?;
             v.intersector_mut().curve_trace_direction *= -1.0;
@@ -1889,6 +2022,89 @@ mod tests {
 
     fn unit() -> Extent2d {
         Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0)
+    }
+
+    /// A closed curve 7 long, traced along part of it and extended past its end by the
+    /// trace's domain, then back from its start until it closed onto that end: its curve
+    /// points every 0.125 from the extension past the end's end (0) through the start to 7.
+    /// The last through point is not a curve point: its parameter (the trace's own) is
+    /// `through_at`.
+    fn closed_extensions<'a>(
+        a: &'a Surface,
+        b: &'a Surface,
+        through_at: f64,
+    ) -> (SurfaceIntersector<'a>, TsectId) {
+        let k = &Kernel::default();
+        let mut si = SurfaceIntersector::new(k, a, &unit(), b, &unit(), false).unwrap();
+        let ids: Vec<TsectId> = (0..=56)
+            .map(|i| {
+                let mut p = TsectPnt::zeroed();
+                p.curve_parameter = f64::from(i) * 0.125;
+                si.alloc_point(p)
+            })
+            .collect();
+        si.curve_points = ids;
+        let mut t = TsectPnt::zeroed();
+        t.curve_parameter = through_at;
+        let through = si.alloc_point(t);
+        si.extension_closed = true;
+        (si, through)
+    }
+
+    fn two_planes() -> (Surface, Surface) {
+        (
+            plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+            plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        )
+    }
+
+    fn kept(si: &SurfaceIntersector<'_>) -> (f64, f64) {
+        let ps = si.curve_points();
+        let at = |id: &TsectId| si.point(*id).unwrap().curve_parameter;
+        (at(ps.first().unwrap()), at(ps.last().unwrap()))
+    }
+
+    /// The extension past the end ran 4.625 of the gap's 6.75 past the traced curve's end
+    /// (at 0.25) without closing: each end keeps what it keeps when that extension closes.
+    /// It keeps half of its run round the closed curve past the traced curve's end,
+    /// 0.25 + 6.75 / 2 = 3.625, its first point at 4.875 - 3.625 = 1.25; the extension back
+    /// keeps half of its run round to that end (half of 7 - 3.625), its last point the
+    /// first past 4.875 + 1.6875 = 6.5625, 6.625.
+    #[test]
+    fn closed_extensions_share_the_gap_as_when_the_first_closes() {
+        let (a, b) = two_planes();
+        let (mut si, through) = closed_extensions(&a, &b, 0.25);
+        keep_halves_of_closed_extensions(&mut si, 4.875, Some(through)).unwrap();
+        assert_eq!(kept(&si), (1.25, 6.625));
+        assert!(!si.extension_closed);
+    }
+
+    /// A traced curve longer than half the closed curve (its last through point at 3.75 in
+    /// the trace's parameters) leaves the extension past the end within its half
+    /// (3.75 + 3.25 / 2 = 5.375 past 4.875): it is never cut, and the one back keeps half
+    /// of its own run, its last point at 4.875 + 1.0625, the first past it 6.0.
+    #[test]
+    fn closed_extensions_never_cut_into_the_traced_curve() {
+        let (a, b) = two_planes();
+        let (mut si, through) = closed_extensions(&a, &b, 3.75);
+        keep_halves_of_closed_extensions(&mut si, 4.875, Some(through)).unwrap();
+        assert_eq!(kept(&si), (0.0, 6.0));
+    }
+
+    /// An extension past the end within its half (the start at 3 here, the traced curve's end
+    /// at 0.25, the closed curve 7 long: its half reaches 3.625) keeps all of it, and the one back keeps half of its own run, as
+    /// when the first closes: its last point at 3 + 2 = 5. So does a trace whose last through
+    /// point was not reached (a negative parameter): there is no extension past the end, and
+    /// the one back keeps half of 7 - 4.875, its last point the first past 5.9375, 6.
+    #[test]
+    fn closed_extensions_within_half_keep_the_first_and_halve_the_second() {
+        let (a, b) = two_planes();
+        let (mut si, through) = closed_extensions(&a, &b, 0.25);
+        keep_halves_of_closed_extensions(&mut si, 3.0, Some(through)).unwrap();
+        assert_eq!(kept(&si), (0.0, 5.0));
+        let (mut si, through) = closed_extensions(&a, &b, -1.0);
+        keep_halves_of_closed_extensions(&mut si, 4.875, Some(through)).unwrap();
+        assert_eq!(kept(&si), (0.0, 6.0));
     }
 
     #[test]
@@ -2084,7 +2300,13 @@ mod tests {
         *p.uv_pos_mut(SrfIndex::Second) = Point2::new(0.5, 0.5);
         let id = si.alloc_point(p);
         let r = si.do_point_intersection(&k, &[id], &opts);
-        assert!(matches!(r, Err(SolidError::Upstream { .. })));
+        assert!(
+            r.as_ref()
+                .err()
+                .and_then(SolidError::upstream_status)
+                .is_some(),
+            "{r:?}"
+        );
         assert_eq!(si.point(id).unwrap().curve_parameter, -1.0);
     }
 
@@ -2114,20 +2336,25 @@ mod tests {
         let p = si.alloc_point(TsectPnt::new());
         let q = si.alloc_point(TsectPnt::new());
         let mut law = FilletLaw::new(crate::blend::fillet_standard_solver::p1::FilletLawKind::Base);
-        assert!(matches!(
-            si.do_law_intersection(k, &[p], &opts, &mut law),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR,
-                ..
-            })
-        ));
-        assert!(matches!(
-            si.do_law_intersection(k, &[p, q], &opts, &mut law),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let one = si
+            .do_law_intersection(k, &[p], &opts, &mut law)
+            .unwrap_err();
+        assert_eq!(one.upstream_status(), Some(crate::error::SM_ERR), "{one}");
+        assert_eq!(
+            one.intersect_failure(),
+            Some(&crate::error::intersect::IntersectFailure::Failed(
+                "the law intersection needs exactly two points"
+            ))
+        );
+        let two = si
+            .do_law_intersection(k, &[p, q], &opts, &mut law)
+            .unwrap_err();
+        assert_eq!(
+            two.upstream_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER),
+            "{two}"
+        );
+        assert_eq!(two.operation(), OP_DLI);
         assert_eq!(si.this_approx_tol_3d, 0.25);
     }
 
@@ -2215,7 +2442,7 @@ mod tests {
         };
         assert_eq!(
             si.find_interior_curves_from_node_pairs(&k, &[pair, far_pair], &mut out),
-            Err(SolidError::null_pointer(OP_FIC))
+            Err(SolidError::intersect_missing(OP_FIC, "the curve's cache"))
         );
 
         // Pair validation still precedes even the first curve-cache build.
@@ -2235,7 +2462,7 @@ mod tests {
         // No cache from the earlier call may survive replacing its output curve.
         assert_eq!(
             si.find_interior_curves_from_node_pairs(&k, &[pair], &mut out),
-            Err(SolidError::null_pointer(OP_FIC))
+            Err(SolidError::intersect_missing(OP_FIC, "the curve's cache"))
         );
     }
 }

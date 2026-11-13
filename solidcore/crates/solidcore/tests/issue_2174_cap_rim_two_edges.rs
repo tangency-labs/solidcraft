@@ -8,9 +8,9 @@
 //! is the coincident range the other half's offset (the same circle) gives, and its far
 //! end is the first point's twin across the circle's seam: another parameter, the same
 //! point. One half got the whole circle, the other nothing (a zero-length interval), so
-//! the offset loop had a gap: with `offset_closes_loop_gaps` the shell fails with
-//! `SM_ERR_OFFSET_EDGE_VANISHES` (1043), and at the defaults it returns a non-manifold
-//! body (volume -627.4 out, 0 in).
+//! the offset loop had a gap: closing it fails with `SM_ERR_OFFSET_EDGE_VANISHES`
+//! (1043). Before gap closure became unconditional, disabling it instead returned
+//! a non-manifold body (volume -627.4 out, 0 in).
 //!
 //! `Kernel::fixes.offset_open_edge_second_trim_point` (WR-673; the fork's
 //! tangency-labs/smlib@7ee0876) refuses that twin by point. The second trim point is then

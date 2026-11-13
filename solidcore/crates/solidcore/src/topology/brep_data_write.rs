@@ -87,6 +87,31 @@ use crate::topology::{edge, face, loopuse, Brep, EdgeId, EdgeuseId, FaceId};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The B-rep's regions in the order [`BrepData::from_brep`] lists them: the region list with
+/// the infinite region moved to its head. Region `i` of the data is `data_regions(b)[i]`, and
+/// its shells are that region's, in its list order.
+///
+/// # Errors
+///
+/// Those of the region list walk.
+pub fn data_regions(b: &Brep) -> Result<Vec<crate::topology::RegionId>> {
+    let regions = bl::regions(b, None)?;
+    match b.infinite_region() {
+        Some(infinite)
+            if regions.len() > 1
+                && regions.first() != Some(&infinite)
+                && regions.contains(&infinite) =>
+        {
+            // the list's regions are distinct: the infinite region moves to the head, the
+            // others keep their order
+            Ok(std::iter::once(infinite)
+                .chain(regions.into_iter().filter(|&r| r != infinite))
+                .collect())
+        }
+        _ => Ok(regions),
+    }
+}
+
 /// `SM_CURRENT_DATABASE_VERSION`: the version [`BrepData::write_to_file`] writes.
 pub const DATABASE_VERSION: u64 = 42;
 
@@ -572,8 +597,17 @@ pub fn write_curve_to_db(
     } else {
         // database versions 32 and before - limited to BSplineCurves
         db.write_type(crate::curve::curve::p2::BSPLINE_CURVE_TYPE, None);
-        let b = bspline_curve_part(curve).ok_or_else(|| SolidError::null_pointer(OP_CURVE))?;
-        b.write_to_db(db, version)?;
+        // `pBSP->SmBSplineCurve::WriteToDB(..)` on the curve itself: its
+        // GetOrCreateGwNurbPointer runs a line's own MakeNurb (a two-point line has no NURB
+        // yet), so a line's part is written with its NURB
+        if let CurveKind::Line(l) = curve.kind() {
+            l.base_with_nurb()?.write_to_db(db, version)?;
+        } else {
+            let b = bspline_curve_part(curve).ok_or_else(|| {
+                SolidError::topology_missing(OP_CURVE, "the curve's B-spline part")
+            })?;
+            b.write_to_db(db, version)?;
+        }
     }
 
     // gather and output curve attributes
@@ -618,12 +652,15 @@ pub fn write_surface_to_db(
         let base = off
             .extended_base_surface()
             .unwrap_or_else(|| off.base_surface());
-        let b = bspline_surface_part(base)?.ok_or_else(|| SolidError::null_pointer(OP_SURFACE))?;
+        let b = bspline_surface_part(base)?.ok_or_else(|| {
+            SolidError::topology_missing(OP_SURFACE, "the offset surface's B-spline base")
+        })?;
         b.write_to_db(db, version)?;
     } else {
         db.write_type(B_SPLINE_SURFACE_TYPE, None);
-        let b =
-            bspline_surface_part(surface)?.ok_or_else(|| SolidError::null_pointer(OP_SURFACE))?;
+        let b = bspline_surface_part(surface)?.ok_or_else(|| {
+            SolidError::topology_missing(OP_SURFACE, "the surface's B-spline part")
+        })?;
         b.write_to_db(db, version)?;
     }
 
@@ -1120,7 +1157,7 @@ fn make_uv_curve_2d(c: &mut Curve) -> Result<()> {
     let cur = b
         .nurb
         .as_mut()
-        .ok_or_else(|| SolidError::null_pointer(OP_UV))?;
+        .ok_or_else(|| SolidError::topology_missing(OP_UV, "the UV curve's NURBS data"))?;
     let cpts = cur.cpts_mut();
     let first_z = cpts.first().map_or(NOZ, |p| p.z);
     if first_z != NOZ && cpts.iter().all(|p| p.z == 0.0) {
@@ -1174,7 +1211,7 @@ pub fn write_brep_to_file(
 
 /// `SM_ERR_NULL_POINTER` of [`BrepData::from_brep`].
 fn null() -> SolidError {
-    SolidError::null_pointer(OP_FROM)
+    SolidError::topology_missing(OP_FROM, "a link of the B-rep's topology")
 }
 
 /// `sm_GetMap`: the record index of `e`, `SM_NO_OBJECT` when it is not mapped (or
@@ -1282,14 +1319,7 @@ impl BrepData {
         bd.attributes = extract_attributes(&mut table, b.key());
 
         // Regions: place infinite region at head of list
-        let mut regions = bl::regions(b, None)?;
-        let infinite = b.infinite_region();
-        if regions.len() > 1 && regions.first().copied() != infinite {
-            if let Some(i) = regions.iter().skip(1).position(|&r| Some(r) == infinite) {
-                let r = regions.remove(i + 1);
-                regions.insert(0, r);
-            }
-        }
+        let regions = data_regions(b)?;
         bd.num_regions = regions.len() as u64;
         let mut all_shells = Vec::new();
         for (i, &r) in regions.iter().enumerate() {
@@ -1559,6 +1589,45 @@ mod tests {
     /// NURB their `MakeNurb` gives: the bytes equal those of the same surface with its
     /// NURB made first (upstream's `GetOrCreateGwNurbPointer`). A surface that has its
     /// NURB is written byte for byte as before.
+    /// A lazy line (`Line::from_points`, no NURB yet, as upstream's two-point `SmLine`) is
+    /// written to a version 32 database (the B-spline part only) with the NURB its
+    /// `MakeNurb` gives: the bytes equal those of the same line with its NURB made first
+    /// (upstream's `pBSP->SmBSplineCurve::WriteToDB` on the line itself).
+    #[test]
+    fn a_lazy_line_writes_the_nurb_it_makes_at_version_32() {
+        use crate::curve::line::Line;
+        let bytes = |c: Curve| -> Result<Vec<u8>> {
+            let store = AttributeStore::default();
+            let mut all = Vec::new();
+            let mut map = BTreeSet::new();
+            let mut attrs = AttributeTable {
+                store: &store,
+                all: &mut all,
+                map: &mut map,
+            };
+            let mut db = DatabaseWriter::open_for_write(FileType::Ascii);
+            db.begin_writing();
+            write_curve_to_db(
+                &Keyed {
+                    key: ObjectKey(0),
+                    object: c,
+                },
+                32,
+                &mut attrs,
+                &mut db,
+                false,
+            )?;
+            db.end_writing();
+            Ok(db.into_bytes())
+        };
+        let lazy = Line::from_points(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 6.0, 3.0), 3);
+        assert!(lazy.base().gw_nurb().is_none());
+        let mut made = lazy.clone();
+        made.make_nurb().unwrap();
+        let want = bytes(Curve::from(made)).unwrap();
+        assert_eq!(bytes(Curve::from(lazy)).unwrap(), want);
+    }
+
     #[test]
     fn lazy_surfaces_write_the_nurb_they_make() {
         use crate::geom::extent2d::Extent2d;

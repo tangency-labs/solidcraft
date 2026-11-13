@@ -211,8 +211,10 @@ fn group_and_name_required(schema: &mut Schema) {
     require(schema, &["group", "name"]);
 }
 
-fn body_and_name_required(schema: &mut Schema) {
-    require(schema, &["body", "name"]);
+/// `body.rename`: `name`, and one body or a list of them (#12341).
+fn body_or_bodies_and_name_required(schema: &mut Schema) {
+    require(schema, &["name"]);
+    schema.insert("anyOf".into(), json!([{"required": ["body"]}, {"required": ["bodies"]}]));
 }
 
 fn folder_and_items_required(schema: &mut Schema) {
@@ -375,6 +377,49 @@ impl JsonSchema for BodyName {
 
 fn some_body<'de, D: Deserializer<'de>>(d: D) -> Result<Option<BodyName>, D::Error> {
     BodyName::deserialize(d).map(Some)
+}
+
+/// The most bodies one `body.rename` call renames.
+pub const MAX_RENAMED_BODIES: usize = 1000;
+
+/// The bodies `body.rename` renames together, as it reads `bodies`: 1 to 1000 body names.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BodyNames(pub Vec<String>);
+
+impl<'de> Deserialize<'de> for BodyNames {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let bad = || D::Error::custom(whole(format!("`bodies` must be a list of 1 to {MAX_RENAMED_BODIES} body names")));
+        match Value::deserialize(d)? {
+            Value::Array(a) if !a.is_empty() && a.len() <= MAX_RENAMED_BODIES => a
+                .into_iter()
+                .map(|v| match v {
+                    Value::String(n) => Ok(n),
+                    _ => Err(bad()),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(BodyNames),
+            _ => Err(bad()),
+        }
+    }
+}
+
+impl JsonSchema for BodyNames {
+    fn schema_name() -> Cow<'static, str> {
+        "BodyNames".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Body names, as `body` takes one. The first body gets `name`, the next ones `name (2)`, `name (3)` and so on; a numbered name another body already has is skipped.",
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": MAX_RENAMED_BODIES
+        })
+    }
+}
+
+fn some_bodies<'de, D: Deserializer<'de>>(d: D) -> Result<Option<BodyNames>, D::Error> {
+    BodyNames::deserialize(d).map(Some)
 }
 
 /// What `entries` in `cmd/browser.rs` reads of a list of groups (numbers) and item keys
@@ -971,6 +1016,9 @@ pub struct VisibilityState {
     /// Whether the Origin folder is hidden. Present when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_hidden: Option<bool>,
+    /// Component Origin folders explicitly shown, by occurrence path. Present when there are any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shown_component_origins: Vec<Vec<u64>>,
     /// Sketches whose closed profiles are not shaded, by feature id. Present when there are any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_profiles: Vec<u64>,
@@ -995,6 +1043,7 @@ impl From<&solidcraft_doc::Visibility> for VisibilityState {
             shown_sketches: v.shown_sketches.clone(),
             hidden_joints: v.hidden_joints.clone(),
             origin_hidden: v.origin_hidden,
+            shown_component_origins: v.shown_component_origins.clone(),
             hidden_profiles: v.hidden_profiles.clone(),
             shown_dimensions: v.shown_dimensions.clone(),
             locked_bodies: v.locked_bodies.clone(),
@@ -1081,15 +1130,20 @@ pub struct BrowserFoldResult {
     pub param_warnings: Vec<String>,
 }
 
-/// Rename a body; the features that use it follow. A placed copy's name means the body it shows.
-/// One undo step.
+/// Rename a body, or several bodies with one name (numbered after the first); the features that
+/// use them follow. A placed copy's name means the body it shows. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = body_and_name_required)]
+#[schemars(deny_unknown_fields, transform = body_or_bodies_and_name_required)]
 pub struct BodyRenameParams {
-    // Required in the schema (`body_and_name_required`), optional in the type, as `group` above.
+    // `name` and one of `body` or `bodies` are required in the schema
+    // (`body_or_bodies_and_name_required`), optional in the type, as `group` above.
     #[serde(default, deserialize_with = "some_body", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "BodyName")]
     pub body: Option<BodyName>,
+    /// Several bodies renamed together, in place of `body` (#12341).
+    #[serde(default, deserialize_with = "some_bodies", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "BodyNames")]
+    pub bodies: Option<BodyNames>,
     /// The new name, 1 to 128 characters once surrounding spaces are cut; no other body may have it.
     #[serde(default, deserialize_with = "some_new_name", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "NewName")]
@@ -1099,10 +1153,13 @@ pub struct BodyRenameParams {
 /// What `body.rename` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct BodyRenamed {
-    /// The body's name before (the body a placed copy's name shows).
+    /// The body's name before (the body a placed copy's name shows); with `bodies`, the first one's.
     pub body: String,
     /// Its name now, without surrounding spaces.
     pub name: String,
+    /// With `bodies`: each body's name before and after, in the order given.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub renamed: Vec<RenamedBody>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1336,7 +1393,7 @@ pub struct ViewListResult {
 /// The camera `view.apply` turns to, as the handler reads it: `up` is refused, `roll` is finite,
 /// the pitch within ±π/2 and the rest finite with a positive distance.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ApplyCamera(pub solidcraft_render::Camera);
+pub struct ApplyCamera(pub solidcraft_viewport::Camera);
 
 impl<'de> Deserialize<'de> for ApplyCamera {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -1569,6 +1626,15 @@ pub struct RedefineSketchResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// One body `body.rename` renamed with `bodies`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RenamedBody {
+    /// Its name before.
+    pub body: String,
+    /// Its name now.
+    pub name: String,
 }
 
 #[cfg(test)]

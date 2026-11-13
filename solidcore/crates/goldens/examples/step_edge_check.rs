@@ -12,7 +12,7 @@ fn main() {
     for file in std::env::args().skip(1) {
         let Some(model) = std::fs::read(&file)
             .ok()
-            .and_then(|b| step_import::import(&b, &step_import::Limits::default()).ok())
+            .and_then(|b| step_export::import(&b, &step_export::Limits::default()).ok())
         else {
             println!("{file}: unreadable");
             continue;
@@ -22,8 +22,8 @@ fn main() {
             for (ei, e) in body.edges.iter().enumerate() {
                 n += 1;
                 let (Some(p0), Some(p1)) = (
-                    step_import::script::edge_point(e, 0.0),
-                    step_import::script::edge_point(e, 1.0),
+                    goldens::script::edge_point(e, 0.0),
+                    goldens::script::edge_point(e, 1.0),
                 ) else {
                     continue;
                 };

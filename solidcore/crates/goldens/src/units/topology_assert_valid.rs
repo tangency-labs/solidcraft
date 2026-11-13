@@ -516,8 +516,8 @@ fn update_rust(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> Result<Output, Harne
                 }
             }
         }
-        Err(solidcore::SolidError::Upstream { code, .. }) => {
-            out.push(f64::from(code));
+        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => {
+            out.push(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)));
             return update_output(&out);
         }
         Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),

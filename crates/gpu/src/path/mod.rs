@@ -65,7 +65,8 @@ const SHADER: &str = path_shader!(16);
 const SINGLE_MEDIUM_SHADER: &str = path_shader!(1);
 const MAX_TRIANGLES: u64 = MAX_GPU_PATH_TRIANGLES;
 const PATH_WORKGROUP_SIZE: u32 = 32;
-const SCENE_PIPELINE_CACHE_SLOTS: usize = 5;
+const SCENE_PIPELINE_CACHE_SLOTS: usize = 2;
+const CLAMPED_PIPELINE_CACHE_SLOTS: usize = SCENE_PIPELINE_CACHE_SLOTS + 1;
 const PARAMETER_BYTES: usize = 2096;
 // Five vec4s per source; exact device+upload growth is additional to v2's budget.
 const PUNCTUAL_PARAMETER_BYTES: u64 = 8 * 80;
@@ -128,16 +129,22 @@ pub fn host() -> Result<ImageHost> {
 /// Elsewhere a viewport on another backend is reopened on the same GPU through one of them.
 /// Without a usable adapter the executor is unavailable; CPU image methods remain usable.
 pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
-    let policy = crate::select::Policy::from_env().map_err(gpu)?;
+    let policy = crate::env::policy().map_err(gpu)?;
     let info = adapter.get_info();
-    if !viewport_path_backends(info.backend, cfg!(target_os = "windows")).intersects(crate::select::path_backends()) {
+    if !viewport_path_backends(info.backend, cfg!(target_os = "windows")).intersects(solidcraft_viewport_gpu::select::path_backends()) {
+        if cfg!(target_os = "windows") {
+            return Err(gpu(format!(
+                "GPU path tracing needs a Vulkan session on Windows; the window uses {:?}. Select Vulkan in Preferences > Graphics > Graphics API and restart SolidCraft, or select a CPU image method",
+                info.backend
+            )));
+        }
         return Err(gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)));
     }
-    if !policy.admits(crate::select::tier_of(info.device_type)) {
+    if !policy.admits(solidcraft_viewport_gpu::select::tier_of(info.device_type)) {
         return Err(gpu(format!("viewport adapter does not satisfy SOLIDCRAFT_GPU={}", policy.name())));
     }
     if !matches!(info.backend, wgpu::Backend::Vulkan | wgpu::Backend::Metal) {
-        let (picked, _) = crate::select::pick_path(policy, |i| i.vendor == info.vendor && i.device == info.device)
+        let (picked, _) = solidcraft_viewport_gpu::select::pick_path(policy, |i| i.vendor == info.vendor && i.device == info.device)
             .ok_or_else(|| gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)))?;
         let (device, queue) = open_device(&picked)?;
         log::info!("gpu-path viewport GPU: {} through Vulkan or Metal", info.name);
@@ -153,7 +160,7 @@ const VULKAN_ONLY: &str = "the GPU path tracer requires a Vulkan driver (Metal o
 
 /// Backends a viewport's path device may open, before any driver is loaded.
 fn viewport_path_backends(backend: wgpu::Backend, windows: bool) -> wgpu::Backends {
-    if windows { wgpu::Backends::from(backend) } else { crate::select::path_backends() }
+    if windows { wgpu::Backends::from(backend) } else { solidcraft_viewport_gpu::select::path_backends() }
 }
 
 // Path resources need six storage buffers (geometry, BVH, accumulation, HDRI,
@@ -180,15 +187,15 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
     let required_limits = device_limits(adapter.limits())?;
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("solidcraft progressive path"),
-        required_features: crate::depth_features(adapter),
+        required_features: solidcraft_viewport_gpu::depth_features(adapter),
         required_limits,
         ..Default::default()
     }))
     .map_err(gpu)
 }
 fn open_headless() -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let policy = crate::select::Policy::from_env().map_err(gpu)?;
-    let (adapter, _) = crate::select::pick_path(policy, |_| true)
+    let policy = crate::env::policy().map_err(gpu)?;
+    let (adapter, _) = solidcraft_viewport_gpu::select::pick_path(policy, |_| true)
         .ok_or_else(|| gpu(format!("{VULKAN_ONLY}; no Vulkan or Metal adapter satisfies SOLIDCRAFT_GPU={}", policy.name())))?;
     let (device, queue) = open_device(&adapter)?;
     Ok((adapter, device, queue))
@@ -199,9 +206,12 @@ struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
-    // Plain opaque and non-nested glass are ready before the host is published.
-    // The four map/nested variants are prepared lazily in the remaining slots.
+    // Plain opaque and unmapped glass are ready before the host is published.
+    // The mapped program is prepared lazily in the remaining slot.
     scene_pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; SCENE_PIPELINE_CACHE_SLOTS],
+    // The same three programs with the indirect clamp compiled in, each built and warmed by the
+    // first job that asks for it. Jobs without a clamp never compile or use them.
+    clamped_pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; CLAMPED_PIPELINE_CACHE_SLOTS],
     // Built and warmed by the first denoised job, then shared by later ones.
     denoise: std::sync::OnceLock<denoise::Pipelines>,
     // Only authored caustics compile/retain the seven-storage-buffer variant.
@@ -209,6 +219,9 @@ struct Context {
     // Optical hard-light connections are specialized away in the legacy program.
     glass: std::sync::OnceLock<GlassPipelines>,
     photon_glass: std::sync::OnceLock<GlassPipelines>,
+    // The same two with the indirect clamp compiled in, built by the first clamped job needing one.
+    clamped_glass: std::sync::OnceLock<GlassPipelines>,
+    clamped_photon_glass: std::sync::OnceLock<GlassPipelines>,
     layout: wgpu::BindGroupLayout,
 }
 impl Context {
@@ -225,15 +238,29 @@ impl Context {
     fn wait(&self, submission: wgpu::SubmissionIndex, timeout: Duration) -> Result<()> {
         wait_device(&self.device, &self.healthy, submission, timeout)
     }
-    #[cfg(test)]
-    fn prepared_scene_pipeline(&self, opaque: bool, maps: bool, nested: bool) -> Result<&wgpu::ComputePipeline> {
-        let Some(index) = scene_pipeline_variant(opaque, maps, nested) else { return Ok(&self.pipeline) };
-        self.scene_pipelines.get(index).and_then(std::sync::OnceLock::get).ok_or_else(|| gpu("captured scene has no prepared pipeline"))
+    // A job with an indirect clamp (JobOptions::clamp_indirect) uses its scene's program with
+    // the clamp compiled in; every other job keeps the programs without it.
+    fn scene_pipeline_slot(&self, opaque: bool, maps: bool, clamp: bool) -> Option<&std::sync::OnceLock<wgpu::ComputePipeline>> {
+        if clamp {
+            return self.clamped_pipelines.get(clamped_pipeline_variant(opaque, maps));
+        }
+        scene_pipeline_variant(opaque, maps).and_then(|index| self.scene_pipelines.get(index))
     }
-    fn prepare_scene_pipeline(&self, opaque: bool, maps: bool, nested: bool) -> Result<&wgpu::ComputePipeline> {
+    #[cfg(test)]
+    fn prepared_scene_pipeline(&self, opaque: bool, maps: bool, clamp: bool) -> Result<&wgpu::ComputePipeline> {
+        if !clamp && scene_pipeline_variant(opaque, maps).is_none() {
+            return Ok(&self.pipeline);
+        }
+        self.scene_pipeline_slot(opaque, maps, clamp).and_then(std::sync::OnceLock::get).ok_or_else(|| gpu("captured scene has no prepared pipeline"))
+    }
+    // A job cancelled while it waited for another compile returns before starting its own; a
+    // compile that ran is warmed up and kept for the next job.
+    fn prepare_scene_pipeline(&self, opaque: bool, maps: bool, clamp: bool, cancel: &CancelToken) -> Result<&wgpu::ComputePipeline> {
         self.ensure_available()?;
-        let Some(index) = scene_pipeline_variant(opaque, maps, nested) else { return Ok(&self.pipeline) };
-        let slot = self.scene_pipelines.get(index).ok_or_else(|| gpu("scene pipeline variant exceeds its finite cache"))?;
+        if !clamp && scene_pipeline_variant(opaque, maps).is_none() {
+            return Ok(&self.pipeline);
+        }
+        let slot = self.scene_pipeline_slot(opaque, maps, clamp).ok_or_else(|| gpu("scene pipeline variant exceeds its finite cache"))?;
         if let Some(pipeline) = slot.get() {
             return Ok(pipeline);
         }
@@ -241,11 +268,16 @@ impl Context {
         if let Some(pipeline) = slot.get() {
             return Ok(pipeline);
         }
+        cancel.check()?;
         let scopes = scopes(&self.device);
         // RADV's one-medium opaque specialization corrupts shading normals
         // after texture sampling (the mapped Lambertian plane loses its rim
         // light). Keep the qualified full producer for every textured scene.
         let specialize_opaque = opaque && !maps;
+        let mut constants = vec![("OPAQUE_SCENE", f64::from(u8::from(specialize_opaque))), ("HAS_TEXTURES", f64::from(u8::from(maps)))];
+        if clamp {
+            constants.extend_from_slice(CLAMP_INDIRECT);
+        }
         let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gpu-path captured scene"),
             source: wgpu::ShaderSource::Wgsl(scene_shader(specialize_opaque).into()),
@@ -260,10 +292,7 @@ impl Context {
             layout: Some(&layout),
             module: &shader,
             entry_point: Some("main"),
-            compilation_options: wgpu::PipelineCompilationOptions {
-                constants: &[("OPAQUE_SCENE", f64::from(u8::from(specialize_opaque))), ("HAS_TEXTURES", f64::from(u8::from(maps)))],
-                ..Default::default()
-            },
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
             cache: None,
         });
         checked(scopes)?;
@@ -353,14 +382,20 @@ impl Executor {
             photons: std::sync::OnceLock::new(),
             glass: std::sync::OnceLock::new(),
             photon_glass: std::sync::OnceLock::new(),
+            clamped_glass: std::sync::OnceLock::new(),
+            clamped_photon_glass: std::sync::OnceLock::new(),
             scene_pipelines: std::array::from_fn(|_| std::sync::OnceLock::new()),
+            clamped_pipelines: std::array::from_fn(|_| std::sync::OnceLock::new()),
         });
         // The original host prepared glass before advertising readiness. Keep the
-        // common no-map/non-nested program out of the first image job's work.
-        context.prepare_scene_pipeline(false, false, false)?;
+        // common unmapped program out of the first image job's work.
+        context.prepare_scene_pipeline(false, false, false, &CancelToken::default())?;
         Ok(Self { context })
     }
 }
+
+/// Pipeline constants that compile the indirect clamp into the integrator (path.wgsl).
+const CLAMP_INDIRECT: &[(&str, f64)] = &[("clamp_indirect", 1.0)];
 
 fn needs_glass_lighting(scene: &ProductScene) -> bool {
     let active = |transmission: Option<solidcraft_render::transmission::Transmission>| {
@@ -383,9 +418,14 @@ fn glass_tile_bytes(scene: &ProductScene, request: &ImageRequest) -> u64 {
     if needs_glass_lighting(scene) { (u64::from(request.width) * u64::from(request.height)).min(u64::from(dispatch::MAX_PATHS)) * 128 } else { 0 }
 }
 
-fn glass_pipeline(context: &Context, layout: &wgpu::BindGroupLayout, caustics: bool, cancel: &CancelToken) -> Result<GlassPipelines> {
+fn glass_pipeline(context: &Context, layout: &wgpu::BindGroupLayout, caustics: bool, clamp: bool, cancel: &CancelToken) -> Result<GlassPipelines> {
     cancel.check()?;
-    let slot = if caustics { &context.photon_glass } else { &context.glass };
+    let slot = match (caustics, clamp) {
+        (false, false) => &context.glass,
+        (true, false) => &context.photon_glass,
+        (false, true) => &context.clamped_glass,
+        (true, true) => &context.clamped_photon_glass,
+    };
     if let Some(pipeline) = slot.get() {
         return Ok(pipeline.clone());
     }
@@ -401,7 +441,10 @@ fn glass_pipeline(context: &Context, layout: &wgpu::BindGroupLayout, caustics: b
         bind_group_layouts: &[Some(layout)],
         immediate_size: 0,
     });
-    let constants = [("GLASS_DELTA_LIGHTS", 1.0), ("OPAQUE_SCENE", 0.0), ("HAS_TEXTURES", 1.0)];
+    let mut constants = vec![("GLASS_DELTA_LIGHTS", 1.0), ("OPAQUE_SCENE", 0.0), ("HAS_TEXTURES", 1.0)];
+    if clamp {
+        constants.extend_from_slice(CLAMP_INDIRECT);
+    }
     let pipeline = |entry| {
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("gpu-path optical hard lights"),
@@ -504,8 +547,17 @@ fn scene_shader(opaque: bool) -> &'static str {
     if opaque { SINGLE_MEDIUM_SHADER } else { SHADER }
 }
 
-fn scene_pipeline_variant(opaque: bool, maps: bool, nested: bool) -> Option<usize> {
-    if opaque { maps.then_some(0) } else { Some(1 + 2 * usize::from(maps) + usize::from(nested)) }
+/// A captured scene's program slot, or None for the eager opaque/no-map program. A slot is one
+/// compiled program: prepare_scene_pipeline builds scene_shader(opaque && !maps) with only
+/// OPAQUE_SCENE, HAS_TEXTURES and the clamp, so an opaque scene with maps shares the mapped glass
+/// program, and nested media, a uniform, share the program of disjoint media.
+fn scene_pipeline_variant(opaque: bool, maps: bool) -> Option<usize> {
+    if opaque && !maps { None } else { Some(usize::from(maps)) }
+}
+
+/// The clamped program's slot: all three scene programs, the eager opaque/no-map one included.
+fn clamped_pipeline_variant(opaque: bool, maps: bool) -> usize {
+    scene_pipeline_variant(opaque, maps).map_or(0, |index| index + 1)
 }
 
 fn use_opaque_pipeline(scene: &ProductScene, options: JobOptions) -> bool {
@@ -1029,10 +1081,21 @@ impl Task {
         let bvh_ms = start.elapsed().as_secs_f64() * 1000.0;
         let (environment_bytes, environment_power) = prepare_environment(&request, &cancel)?;
         let source_distribution = photons::source_distribution(options, &request, &upload.nodes, upload.photon_guide, environment_power)?;
+        // A job with an indirect clamp (JobOptions::clamp_indirect) uses the program for its scene
+        // with the clamp compiled in, built once per device; every other job keeps the ordinary ones.
+        let clamp = options.clamp_indirect.is_some();
         let photons = options
             .caustics
             .map(|options| {
-                photons::Resources::new(&context, options, &upload.nodes, upload.photon_guide, upload.photon_bounds, source_distribution.as_ref())
+                photons::Resources::new(
+                    &context,
+                    options,
+                    &upload.nodes,
+                    upload.photon_guide,
+                    upload.photon_bounds,
+                    source_distribution.as_ref(),
+                    clamp,
+                )
             })
             .transpose()?;
         cancel.check()?;
@@ -1042,7 +1105,13 @@ impl Task {
         #[cfg(test)]
         let page_layout = if let Some(rows) = _page_rows { page_layout.with_rows(rows, options.supersampling)? } else { page_layout };
         let optical_pipelines = if glass_lighting {
-            Some(glass_pipeline(&context, photons.as_ref().map_or(&context.layout, |resources| &resources.layout), photons.is_some(), &cancel)?)
+            Some(glass_pipeline(
+                &context,
+                photons.as_ref().map_or(&context.layout, |resources| &resources.layout),
+                photons.is_some(),
+                clamp,
+                &cancel,
+            )?)
         } else {
             None
         };
@@ -1051,7 +1120,7 @@ impl Task {
         } else if let Some(resources) = &photons {
             resources.render.clone()
         } else {
-            context.prepare_scene_pipeline(opaque_scene, has_textures, options.nested_media)?.clone()
+            context.prepare_scene_pipeline(opaque_scene, has_textures, clamp, &cancel)?.clone()
         };
         let optical_resolve = optical_pipelines.map(|pipelines| pipelines.resolve);
         cancel.check()?;
@@ -1120,6 +1189,7 @@ impl Task {
                     &accumulation,
                     options.adaptive.is_some(),
                     page_layout,
+                    &cancel,
                 )?)
             } else {
                 None
@@ -1316,7 +1386,10 @@ impl Task {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         let page = self.current_page()?;
-        for value in [page.start, page.pixels, 0, 0] {
+        // z carries the indirect clamp as f32 bits (zero is off). Validation keeps a set limit a
+        // normal f32, so it never rounds to zero here.
+        let clamp = self.options.clamp_indirect.map_or(0, |limit| (limit as f32).to_bits());
+        for value in [page.start, page.pixels, clamp, 0] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         Ok(bytes)
@@ -1798,7 +1871,7 @@ impl Task {
             height: self.output_request.height,
             exposure: 2.0f64.powf(self.options.exposure_ev),
             tone_map: self.options.tone_map,
-            background: self.request.background.map(solidcraft_render::surface::srgb8_to_linear),
+            background: self.request.background.map(solidcraft_viewport::surface::srgb8_to_linear),
             transparent: self.request.transparent_background,
         };
         // Pixels are independent: encode contiguous chunks on every core.

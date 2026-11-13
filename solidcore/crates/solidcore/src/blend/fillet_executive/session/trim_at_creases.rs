@@ -22,8 +22,7 @@
 //!   fork's in address order).
 //! - **Fit sizes.** The three refusals step 5 sizes (`NoteFitOnFace` after the tangent
 //!   edge and the extension, `NoteFitRadius` from `sm_CornerTakesPerRadius` after the
-//!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) note them with
-//!   `fixes.fillet_gn_section_generator` (WR-696, #2278).
+//!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) note them (WR-696, #2278).
 //! - **Section ends (not the fork's).** A round with WR-674's section ends is trimmed here
 //!   only with `fixes.fillet_section_end_trim_at_creases` (WR-706, #2223): each such end is
 //!   cut by its section's plane and closed by the section's flat face, and a side of that
@@ -278,7 +277,7 @@ impl FilletSession<'_> {
         let offset = |o: &super::SolverObject| -> Result<f64> {
             Ok(o.base()
                 .surface(0)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
                 .surface
                 .offset_distance())
         };
@@ -307,8 +306,8 @@ impl FilletSession<'_> {
                 *slot = super::fit_size::corner_takes_per_radius(k, target, v, e, &blended)?;
             }
         }
-        let curve =
-            edge::evaluation_curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = edge::evaluation_curve(target, e)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
         let length = curve.length(k, &edge::interval(target, e)?, crate::math::EFF_ZERO)?;
         if per[0] + per[1] > 0.0 {
             let margin = 1000.0 * edge::tolerance(target, e)?;
@@ -357,8 +356,8 @@ impl FilletSession<'_> {
         }
         // the signed drop of `p` on face `s`: its gap, and its side of the surface
         let drop_on_face = |s: FaceId, p: Point3| -> Result<Option<(f64, f64)>> {
-            let surface =
-                face::p2::surface(sheet, s)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let surface = face::p2::surface(sheet, s)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
             let domain = face::p2::uv_domain(sheet, s)?;
             let dropped =
                 surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
@@ -441,7 +440,7 @@ impl FilletSession<'_> {
                 let surface = object
                     .base()
                     .surface(0)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
                 size = smos_min(size, surface.surface.offset_distance().abs());
             }
         }
@@ -487,8 +486,10 @@ impl FilletSession<'_> {
     ) -> Result<Option<(Point3, Point3)>> {
         let on_tol = 10.0 * tol;
         let (sv, ev) = (
-            edge::start_vertex(sheet, e)?.ok_or_else(|| SolidError::null_pointer(OP))?,
-            edge::end_vertex(sheet, e)?.ok_or_else(|| SolidError::null_pointer(OP))?,
+            edge::start_vertex(sheet, e)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?,
+            edge::end_vertex(sheet, e)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?,
         );
         let (a, b) = (vertex::point(sheet, sv)?, vertex::point(sheet, ev)?);
         let curve = edge_curve(k, sheet, e)?;
@@ -509,8 +510,8 @@ impl FilletSession<'_> {
                 {
                     continue;
                 }
-                let t_curve =
-                    edge::curve(target, te)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let t_curve = edge::curve(target, te)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
                 if let Some((_, dist)) = drop_on(k, t_curve, &edge::interval(target, te)?, mid)? {
                     if dist <= on_tol {
                         return Ok(Some((a, b)));
@@ -552,7 +553,7 @@ impl FilletSession<'_> {
     pub(super) fn trim_at_creases(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::trim_at_creases");
         if self.objects.intermediate.is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(OP, "the intermediate body"));
         }
         let solvers = self.executive.solvers.clone();
         for &solver in &solvers {
@@ -562,7 +563,10 @@ impl FilletSession<'_> {
                     Some(NoRoomReason::CliffLawNotHeld),
                     "Fillet Error: a variable round traced on its faces' continuations does not hold its radius law",
                 ));
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "a variable round does not hold its radius law on its faces' continuations",
+                ));
             }
         }
 
@@ -581,9 +585,10 @@ impl FilletSession<'_> {
             tangency = smos_max(tangency, base.tangency_tolerance());
             let eu = base
                 .edgeuse(0)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
             blended_edges.push(
-                eu1::edge(self.objects.target, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?,
+                eu1::edge(self.objects.target, eu)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?,
             );
             faces_of.insert(solver, self.fillet_faces(solver)?);
         }
@@ -600,7 +605,7 @@ impl FilletSession<'_> {
             .objects
             .intermediate
             .take()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the intermediate body"))?;
 
         // the ends the corners left uncut, cut off by their end faces' surfaces continued
         // (an end's event: the end face cuts the blend whatever lies past it, a lip over a
@@ -625,28 +630,30 @@ impl FilletSession<'_> {
             let target = &*self.objects.target;
             let eu = base
                 .edgeuse(0)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
-            let fil_edge = eu1::edge(target, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+            let fil_edge = eu1::edge(target, eu)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
             let edge_mid = edge::curve(target, fil_edge)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
                 .evaluate_point(k, edge::interval(target, fil_edge)?.evaluate(0.5))?;
             let vertex_point = vertex::point(target, v)?;
             let end_surface = if end.section {
                 // WR-706: a section end (WR-674) is cut by the section through the vertex,
                 // normal to the filleted edge
-                let section =
-                    section_end(k, target, fil_edge, v)?.ok_or_else(|| SolidError::sm_err(OP))?;
+                let section = section_end(k, target, fil_edge, v)?.ok_or_else(|| {
+                    SolidError::blend_failed(OP, "no section through the end vertex")
+                })?;
                 section_ends.push(section);
                 section_solvers.push(end.solver);
                 Surface::from(Plane::from_normal(vertex_point, section.normal))
             } else {
                 face::p2::surface(target, end_face)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
                     .clone_for_evaluation()?
             };
             let entry = faces_of
                 .get_mut(&end.solver)
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's fillet faces"))?;
             let mut faces: Vec<Option<FaceId>> = entry.iter().map(|&(_, f)| f).collect();
             let cut = cut_fillet_at_open_end(
                 k,
@@ -661,10 +668,10 @@ impl FilletSession<'_> {
             for (slot, f) in entry.iter_mut().zip(faces) {
                 slot.1 = f;
             }
-            // not the fork's (#2401; with `fixes.fillet_gn_section_generator`, WR-696): an
-            // open end the end face does not cut is an overflow's, absent below the size at
-            // which the end's blend stays on its faces: that size (open)
-            if note.is_some() && cut.is_err() && k.fixes.fillet_gn_section_generator {
+            // not the fork's (#2401, WR-696): an open end the end face does not cut is an
+            // overflow's, absent below the size at which the end's blend stays on its
+            // faces: that size (open)
+            if note.is_some() && cut.is_err() {
                 self.executive
                     .note_fit_on_its_faces(k, &mut self.objects, end.solver)?;
             }
@@ -693,7 +700,7 @@ impl FilletSession<'_> {
                         Some(NoRoomReason::TangentContinuationEndUnsupported),
                         "Fillet Error: a round ending where its edge runs on tangentially has no single section there",
                     ));
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(OP, "a round that ends where its edge runs on tangentially has no single section there"));
                 };
                 section_end_face(k, &mut sheet, end, section, 10.0 * tol)?;
             }
@@ -739,7 +746,10 @@ impl FilletSession<'_> {
     ) -> Result<()> {
         let refuse = |note: &mut Option<Refusal>, r: Refusal| -> Result<()> {
             *note = Some(r);
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::blend_failed(
+                OP,
+                "the trim at the creases is refused",
+            ))
         };
         let mut tol = sheet.tolerance();
         for &a in approx {
@@ -750,9 +760,7 @@ impl FilletSession<'_> {
         // Not the fork's (#2404): the strip a blend leaves on an edge of the body, thinner than
         // the part resolves, has no topology to build
         if self.strip_below_resolution(k, &sheet, blended_edges, tol)? {
-            if k.fixes.fillet_gn_section_generator {
-                self.note_fit_of_the_strip(solvers, blended_edges)?;
-            }
+            self.note_fit_of_the_strip(solvers, blended_edges)?;
             return refuse(
                 note,
                 refusal(
@@ -905,16 +913,11 @@ impl FilletSession<'_> {
                                 && rolled_on.contains(&g)
                                 && is_tangent_edge(k, self.objects.target, e, tangency)?
                             {
-                                // the fork's NoteFitOnFace(g) (49f393d; with
-                                // `fixes.fillet_gn_section_generator`, WR-696)
-                                if k.fixes.fillet_gn_section_generator {
-                                    let face = FilletObject::Topology(
-                                        FilletBody::Target,
-                                        EntityRef::Face(g),
-                                    );
-                                    self.executive
-                                        .note_fit_on_face(k, &mut self.objects, face)?;
-                                }
+                                // the fork's NoteFitOnFace(g) (49f393d, WR-696)
+                                let face =
+                                    FilletObject::Topology(FilletBody::Target, EntityRef::Face(g));
+                                self.executive
+                                    .note_fit_on_face(k, &mut self.objects, face)?;
                                 return refuse(
                                     note,
                                     refusal(
@@ -929,7 +932,7 @@ impl FilletSession<'_> {
                     crossed += 1;
                     only = Some(
                         face::p2::surface(self.objects.target, f)?
-                            .ok_or_else(|| SolidError::null_pointer(OP))?
+                            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
                             .clone_for_evaluation()?,
                     );
                 }
@@ -995,12 +998,10 @@ impl FilletSession<'_> {
             if has && !kept_rounds.contains(&i) {
                 // the largest radius that keeps a length of the edge: its corners take
                 // r <u, e> at each end (sm_CornerTakesPerRadius), the edge's length L in all
-                // at r = L / (s0 + s1); open, so less the fit margin (the fork's a3d6d81;
-                // with `fixes.fillet_gn_section_generator`, WR-696)
-                if k.fixes.fillet_gn_section_generator {
-                    if let Some(&solver) = solvers.get(i) {
-                        self.note_fit_of_corners_taking_the_edge(k, solver, solvers)?;
-                    }
+                // at r = L / (s0 + s1); open, so less the fit margin (the fork's a3d6d81,
+                // WR-696)
+                if let Some(&solver) = solvers.get(i) {
+                    self.note_fit_of_corners_taking_the_edge(k, solver, solvers)?;
                 }
                 return refuse(
                     note,
@@ -1044,9 +1045,9 @@ impl FilletSession<'_> {
             for &e in &lamina_edges {
                 if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
                     let start = edge::start_vertex(&sheet, e)?
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
-                    let end =
-                        edge::end_vertex(&sheet, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?;
+                    let end = edge::end_vertex(&sheet, e)?
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?;
                     rails.push(Rail {
                         curve: edge_curve(k, &sheet, e)?,
                         start,
@@ -1062,13 +1063,10 @@ impl FilletSession<'_> {
             let outcome = extend(k, self.objects.target, f, &rails, blended_edges, tol)?;
             match outcome {
                 ExtendOutcome::Refused(why) => {
-                    // the fork's NoteFitOnFace(f) (49f393d; with
-                    // `fixes.fillet_gn_section_generator`, WR-696)
-                    if k.fixes.fillet_gn_section_generator {
-                        let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(f));
-                        self.executive
-                            .note_fit_on_face(k, &mut self.objects, face)?;
-                    }
+                    // the fork's NoteFitOnFace(f) (49f393d, WR-696)
+                    let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(f));
+                    self.executive
+                        .note_fit_on_face(k, &mut self.objects, face)?;
                     return refuse(
                         note,
                         refusal(
@@ -1098,6 +1096,23 @@ impl FilletSession<'_> {
                     on.push(edge_curve(k, &sheet, e)?);
                 }
             }
+            // an extension's runs from a chain's end to its foot lie on the walls beside it;
+            // with the sheet's section there they fence what the blend takes off that wall
+            // (else the section ends inside the wall and the material taken off reaches
+            // every face)
+            for ext in &extensions {
+                for run in &ext.foot_runs {
+                    if crate::blend::fillet_overflow::curve_on_surface(
+                        k,
+                        run,
+                        self.objects.target,
+                        f,
+                        on_tol,
+                    )? {
+                        on.push(run.copy(k)?);
+                    }
+                }
+            }
             // an open G1 setback corner's spring curves on this face: with the rails they
             // bound the corner's hole on it (the fork's ef57570)
             for (sf, curve) in &open_springs {
@@ -1119,8 +1134,10 @@ impl FilletSession<'_> {
             let mut found = false;
             for e in crate::topology::brep::p1::edges(target, None)? {
                 let (sv, ev) = (
-                    edge::start_vertex(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?,
-                    edge::end_vertex(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?,
+                    edge::start_vertex(target, e)?
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?,
+                    edge::end_vertex(target, e)?
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?,
                 );
                 let (s_pt, e_pt) = (vertex::point(target, sv)?, vertex::point(target, ev)?);
                 if (s_pt.distance(a) <= on_tol && e_pt.distance(b) <= on_tol)
@@ -1148,8 +1165,10 @@ impl FilletSession<'_> {
         let target_edges = crate::topology::brep::p1::edges(target, None)?;
         for &e in &target_edges {
             let (sv, ev) = (
-                edge::start_vertex(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?,
-                edge::end_vertex(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?,
+                edge::start_vertex(target, e)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?,
+                edge::end_vertex(target, e)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?,
             );
             let (s_pt, e_pt) = (vertex::point(target, sv)?, vertex::point(target, ev)?);
             // a piece of an edge an extension runs along, cut at its crossing by the imprint
@@ -1165,7 +1184,8 @@ impl FilletSession<'_> {
             if along.is_empty() && edge_creases.is_empty() {
                 continue;
             }
-            let curve = edge::curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curve = edge::curve(target, e)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
             let mid = curve.evaluate_point(k, edge::interval(target, e)?.evaluate(0.5))?;
             for c in &along {
                 if let Some((_, dist)) = drop_on(k, c, &c.natural_interval(), mid)? {
@@ -1193,7 +1213,8 @@ impl FilletSession<'_> {
         // the sheet edge to be on the face at
         let mut sew_tol = tol;
         for &e in &lamina_edges {
-            let curve = edge::curve(&sheet, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curve = edge::curve(&sheet, e)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
             let ivl = edge::interval(&sheet, e)?;
             let mut worst = 0.0_f64;
             let mut along_one = !crease_edges.is_empty();
@@ -1203,7 +1224,8 @@ impl FilletSession<'_> {
                 i += 1;
                 let mut best = f64::INFINITY;
                 for &ce in &crease_edges {
-                    let c = edge::curve(target, ce)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let c = edge::curve(target, ce)?
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
                     if let Some((_, dist)) = drop_on(k, c, &edge::interval(target, ce)?, p)? {
                         best = smos_min(best, dist);
                     }
@@ -1219,7 +1241,8 @@ impl FilletSession<'_> {
         let mut gone_order: Vec<FaceId> = Vec::new();
         let mut front: Vec<FaceId> = Vec::new();
         for &e in &target_edges {
-            let curve = edge::curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curve = edge::curve(target, e)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
             let mid = curve.evaluate_point(k, edge::interval(target, e)?.evaluate(0.5))?;
             let mut on_blended = false;
             for c in &blended_curves {
@@ -1316,10 +1339,12 @@ impl FilletSession<'_> {
                             break;
                         }
                         let (sv, ev) = (
-                            edge::start_vertex(&sheet, e)?
-                                .ok_or_else(|| SolidError::null_pointer(OP))?,
-                            edge::end_vertex(&sheet, e)?
-                                .ok_or_else(|| SolidError::null_pointer(OP))?,
+                            edge::start_vertex(&sheet, e)?.ok_or_else(|| {
+                                SolidError::blend_missing(OP, "the edge's start vertex")
+                            })?,
+                            edge::end_vertex(&sheet, e)?.ok_or_else(|| {
+                                SolidError::blend_missing(OP, "the edge's end vertex")
+                            })?,
                         );
                         if !edge::is_lamina(&sheet, e)?
                             || vertex::point(&sheet, sv)?.distance(p) <= 10.0 * tol
@@ -1327,8 +1352,8 @@ impl FilletSession<'_> {
                         {
                             continue;
                         }
-                        let curve =
-                            edge::curve(&sheet, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                        let curve = edge::curve(&sheet, e)?
+                            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
                         if let Some((t, dist)) = drop_on(k, curve, &edge::interval(&sheet, e)?, p)?
                         {
                             if dist <= 10.0 * tol {

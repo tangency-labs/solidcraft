@@ -3,13 +3,15 @@
 //! within 1e-5 of each other across the strip x in [1.9998, 2]: B's corner edge lies
 //! 1e-5 below A's face, A's corner edge 1e-5 off F1 (the default tolerances; at 5e-6 the
 //! union happens to succeed, hitting WR-619 instead). The crossing is fixed only to
-//! tol / sin, the whole strip, yet becomes an edge whose end vertices are picked per
-//! body and never related, and the merge fails (`SmMerge::MakeFaceuse`, `SM_ERR`).
+//! tol / sin, the whole strip, yet upstream makes it an edge whose end vertices are picked
+//! per body and never related, and the merge fails (`SmMerge::MakeFaceuse`, `SM_ERR`).
 //!
-//! `Kernel::fixes.boolean_coincident_strip_drops_crossing` drops that crossing before
-//! `ResolveIntersections`. Paired with `Kernel::fixes.imprint_skips_collapsed_definition`
-//! (WR-619, #2068), the strip union at d = 1e-5 succeeds as one valid manifold solid of
-//! both cubes' combined volume.
+//! solidcore drops that crossing before `ResolveIntersections` (WR-614). With the speck
+//! definition skipped at imprint (WR-619, #2068), the strip union at d = 1e-5 is one valid
+//! manifold solid of both cubes' combined volume. Both are the default (their opt-in flags,
+//! `boolean_coincident_strip_drops_crossing` and `imprint_skips_collapsed_definition`, were
+//! retired). The exact overlap of A and B is a wedge of volume 20.2 d^2 (2.02e-9 at
+//! d = 1e-5), below the accuracy asked of the volume integrator.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -18,7 +20,6 @@
 )] // test helpers
 
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
-use solidcore::error::SM_ERR;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
@@ -31,7 +32,7 @@ use solidcore::topology::proto_topology::p1::api_transform::{
     api_rotate, api_translate, TransformObject,
 };
 use solidcore::topology::{edge, vertex};
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 const SIDE: f64 = 4.0;
 const SLOPE: f64 = 0.1;
@@ -109,45 +110,21 @@ fn assert_valid(k: &mut Kernel, b: &mut Brep, what: &str) {
 }
 
 #[test]
-fn wr_614_coincident_strip_drops_crossing_is_off_by_default() {
-    let mut k = Kernel::default();
-    assert!(!k.fixes.boolean_coincident_strip_drops_crossing);
-    assert!(UpstreamFixes::NAMES.contains(&"boolean_coincident_strip_drops_crossing"));
-    *k.fixes
-        .flag_mut("boolean_coincident_strip_drops_crossing")
-        .unwrap() = true;
-    assert!(k.fixes.boolean_coincident_strip_drops_crossing);
-}
-
-#[test]
-fn wr_614_union_fails_upstream() {
-    let mut k = Kernel::default();
-    let (a, b) = strip_cubes(&mut k, D);
-    match boolean_union(&mut k, a, b) {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
-        other => panic!("upstream's union fails with SM_ERR, got {other:?}"),
-    }
-}
-
-#[test]
-fn wr_614_union_with_strip_fix_alone_matches_5e6_shape() {
+fn wr_614_union_1e5_matches_5e6_shape() {
     let mut k = Kernel::default();
     let (a, b) = strip_cubes(&mut k, 5e-6);
     let want = shape(&boolean_union(&mut k, a, b).unwrap());
-    assert_eq!(want.0, 12);
+    assert_eq!(want.0, 10);
 
     let mut k = Kernel::default();
-    k.fixes.boolean_coincident_strip_drops_crossing = true;
     let (a, b) = strip_cubes(&mut k, D);
     let u = boolean_union(&mut k, a, b).unwrap();
     assert_eq!(shape(&u), want);
 }
 
 #[test]
-fn wr_614_and_wr_619_union_1e5_is_one_valid_solid() {
+fn wr_614_union_1e5_is_one_valid_solid() {
     let mut k = Kernel::default();
-    k.fixes.boolean_coincident_strip_drops_crossing = true;
-    k.fixes.imprint_skips_collapsed_definition = true;
 
     let (mut a, mut b) = strip_cubes(&mut k, D);
     assert_valid(&mut k, &mut a, "A");
@@ -168,11 +145,9 @@ fn wr_614_and_wr_619_union_1e5_is_one_valid_solid() {
 }
 
 #[test]
-fn wr_614_and_wr_619_all_booleans_at_1e5_and_5e6() {
+fn wr_614_all_booleans_at_1e5_and_5e6() {
     for d in [D, 5e-6] {
         let mut k = Kernel::default();
-        k.fixes.boolean_coincident_strip_drops_crossing = true;
-        k.fixes.imprint_skips_collapsed_definition = true;
 
         let (a, b) = strip_cubes(&mut k, d);
         let mut u = boolean_union(&mut k, a, b).unwrap();
@@ -239,32 +214,8 @@ fn wr_614_imported_tolerances_union_and_intersection_at_5e6() {
         }
     };
 
-    // Without the fixes, imported tolerances lose the solid region at d = 5e-6 (WR-619)
-    // and fail MakeFaceuse with SM_ERR at d = 1e-5 (WR-614).
-    let mut k = Kernel::default();
-    let (mut a, mut b) = strip_cubes(&mut k, 5e-6);
-    set_imported_tols(&mut k, &mut a, &mut b);
-    let broken = boolean_union(&mut k, a, b).unwrap();
-    assert_eq!(
-        shape(&broken).3,
-        0,
-        "no solid region without fixes at d=5e-6"
-    );
-
-    let mut k = Kernel::default();
-    let (mut a, mut b) = strip_cubes(&mut k, 1e-5);
-    set_imported_tols(&mut k, &mut a, &mut b);
-    match boolean_union(&mut k, a, b) {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
-        other => {
-            panic!("expected SM_ERR without fix at imported tolerances d=1e-5, got {other:?}")
-        }
-    }
-
     for d in [4.95e-6, 5e-6, 1e-5] {
         let mut k = Kernel::default();
-        k.fixes.boolean_coincident_strip_drops_crossing = true;
-        k.fixes.imprint_skips_collapsed_definition = true;
 
         let (mut a, mut b) = strip_cubes(&mut k, d);
         set_imported_tols(&mut k, &mut a, &mut b);
@@ -290,67 +241,56 @@ fn wr_614_imported_tolerances_union_and_intersection_at_5e6() {
 /// edge, not a two-sided coincident strip, and must not be dropped.
 #[test]
 fn wr_614_wider_protruding_box_keeps_exit_crossing() {
-    let run = |strip_fix: bool| {
-        let mut k = Kernel::default();
-        k.fixes.boolean_coincident_strip_drops_crossing = strip_fix;
-        k.fixes.imprint_skips_collapsed_definition = true;
+    let mut k = Kernel::default();
+    let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
+    let (_, b) = strip_cubes(&mut k, D);
+    let mut u = boolean_union(&mut k, a, b).unwrap();
+    assert_eq!(shape(&u), (11, 27, 18, 1, true));
+    assert_valid(&mut k, &mut u, "wider box union");
+    // A (192) and B (64) overlap in the 20.2 d^2 wedge only.
+    let want = 12.0 * SIDE * SIDE + SIDE * SIDE * SIDE;
+    let vu = volume(&k, &mut u);
+    assert!(
+        (vu - want).abs() <= ACCURACY * want,
+        "volume {vu}, want {want}"
+    );
 
-        let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
-        let (_, b) = strip_cubes(&mut k, D);
-        let mut u = boolean_union(&mut k, a, b).unwrap();
-        assert_eq!(shape(&u).3, 1, "one solid region");
-        assert!(shape(&u).4, "manifold solid");
-        assert_valid(&mut k, &mut u, "wider box union");
-        let vu = volume(&k, &mut u);
-        assert!(
-            vu > 12.0 * SIDE * SIDE + 0.5,
-            "protruding wedge must add volume above box A (192), got {vu}"
-        );
-
-        let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
-        let (_, b) = strip_cubes(&mut k, D);
-        let inter = boolean_intersection(&mut k, a, b).unwrap();
-        assert_eq!(shape(&inter).3, 1, "one intersection solid");
-        assert!(shape(&inter).4, "manifold intersection");
-        (shape(&u), vu, shape(&inter))
-    };
-
-    let without = run(false);
-    let with = run(true);
-    assert_eq!(with.0, without.0);
-    assert!((with.1 - without.1).abs() <= ACCURACY * without.1);
-    assert_eq!(with.2, without.2);
+    let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
+    let (_, b) = strip_cubes(&mut k, D);
+    let inter = boolean_intersection(&mut k, a, b).unwrap();
+    assert_eq!(shape(&inter).3, 1, "one intersection solid");
+    assert!(shape(&inter).4, "manifold intersection");
 }
 
 /// Two boxes whose faces cross at 45 deg near x = 0 while both faces extend toward +x
 /// (away from the crossing on A's side, so A's inward binormal points away from the
-/// crossing) keep their crossing unchanged.
+/// crossing) keep their crossing: one manifold solid of the exact union's volume,
+/// 128 - 8 + 5.12e-10 (polygon clipping in exact rationals).
 #[test]
 fn wr_614_diverging_same_side_boxes_keep_crossing() {
-    let run = |fix: bool| {
-        let mut k = Kernel::default();
-        k.fixes.boolean_coincident_strip_drops_crossing = fix;
-        let a = create_box(&mut k, Point3::new(8e-6, -2.0, 0.0), SIDE, SIDE, SIDE).unwrap();
-        let mut b = create_box(&mut k, Point3::new(0.0, -2.0, 0.0), SIDE, SIDE, SIDE).unwrap();
-        api_rotate(
-            &mut k,
-            Some(TransformObject::Brep(&mut b)),
-            Point3::ZERO,
-            Vec3::Z,
-            45.0,
-        )
-        .unwrap();
-        api_translate(
-            &mut k,
-            Some(TransformObject::Brep(&mut b)),
-            Vec3::new(-8e-6, 2.0, 0.0),
-        )
-        .unwrap();
-        let mut u = boolean_union(&mut k, a, b).unwrap();
-        (shape(&u), volume(&k, &mut u))
-    };
-    let off = run(false);
-    let on = run(true);
-    assert_eq!(on.0, off.0);
-    assert!((on.1 - off.1).abs() <= ACCURACY * off.1);
+    let mut k = Kernel::default();
+    let a = create_box(&mut k, Point3::new(8e-6, -2.0, 0.0), SIDE, SIDE, SIDE).unwrap();
+    let mut b = create_box(&mut k, Point3::new(0.0, -2.0, 0.0), SIDE, SIDE, SIDE).unwrap();
+    api_rotate(
+        &mut k,
+        Some(TransformObject::Brep(&mut b)),
+        Point3::ZERO,
+        Vec3::Z,
+        45.0,
+    )
+    .unwrap();
+    api_translate(
+        &mut k,
+        Some(TransformObject::Brep(&mut b)),
+        Vec3::new(-8e-6, 2.0, 0.0),
+    )
+    .unwrap();
+    let mut u = boolean_union(&mut k, a, b).unwrap();
+    assert_eq!(shape(&u), (11, 25, 16, 1, true));
+    let want = 120.000_000_000_512;
+    let v = volume(&k, &mut u);
+    assert!(
+        (v - want).abs() <= ACCURACY * want,
+        "volume {v}, want {want}"
+    );
 }

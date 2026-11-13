@@ -459,23 +459,16 @@ pub(super) fn graph_gk(
         })
         .collect();
 
-    // The degrees: 9 first, then up from the least. Proven unmet at 9 (the QP's
-    // certificate), the sector conditions are unmet at every degree, and the search stops.
-    // Else the least degree whose fill is certified, or 9's.
+    // The degrees: 9 first, then up from the least, for the fill and for a probe that asks
+    // it (the scale search's attempts, as the fork's 3843ddb fills them). Proven unmet at 9
+    // (the QP's certificate), the sector conditions are unmet at every degree, and the
+    // search stops. Else the least degree whose fill is certified, or 9's.
     let mut top: Vec<Net> = Vec::new();
     let mut top_degree = 0;
     let probe_only = probe.as_ref().is_some_and(|p| !p.fill);
-    let probe_fill = probe.as_ref().is_some_and(|p| p.fill);
-    let mut degrees: Vec<usize> = Vec::new();
-    if probe.is_none() || probe_only {
-        degrees.push(9);
-    }
+    let mut degrees: Vec<usize> = vec![9];
     if !probe_only {
-        for d in nc..=9 {
-            if d < 9 || probe_fill {
-                degrees.push(d);
-            }
-        }
+        degrees.extend(nc..9);
     }
     'degrees: for &d in &degrees {
         let mono = monomials(d);
@@ -977,7 +970,7 @@ pub(super) fn graph_gk(
         if certified_convex(&nets, &plane_sides, e, GRAPH_DEPTH)?.is_err() {
             continue;
         }
-        if d == 9 && probe.is_none() {
+        if d == 9 {
             top = nets;
             top_degree = d;
             continue;

@@ -7,7 +7,6 @@ pub mod cpu_preparation;
 use super::{CancelToken, ErrorCode, JobError, Result};
 use crate::{
     ProductScene,
-    surface::{srgb8_to_linear, unit_direction},
     texture_input::{MapRole, TextureSource},
     texture_sampling::TextureView,
 };
@@ -15,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_viewport::surface::{srgb8_to_linear, unit_direction};
 
 pub const MAX_TEXTURE_BINDINGS: usize = 128;
 /// Capture is not residency: each producer still prepays its complete working set.
@@ -425,7 +425,13 @@ pub fn validate_cpu_options(options: &super::RaytraceOptions) -> Result<()> {
 /// Approximate a secondary ray's pixel cone by projecting two perpendicular
 /// spans onto the receiver plane. Exact primary ray differentials stay separate.
 #[cfg(feature = "raytrace-cpu")]
-pub(crate) fn secondary_footprint(camera: &crate::Camera, height: u32, distance: f64, direction: Vec3, normal: Vec3) -> Result<Option<[Vec3; 2]>> {
+pub(crate) fn secondary_footprint(
+    camera: &solidcraft_viewport::Camera,
+    height: u32,
+    distance: f64,
+    direction: Vec3,
+    normal: Vec3,
+) -> Result<Option<[Vec3; 2]>> {
     let pixel = 2.0 * camera.half_height() / f64::from(height);
     let diameter = if camera.fov > 0.0 { pixel * distance / camera.distance } else { pixel };
     if height == 0 || !diameter.is_finite() || diameter < 0.0 {
@@ -646,7 +652,7 @@ mod tests {
             assert!((rgb[0] - 0.5).abs() < 1e-10, "{rgb:?}");
             assert_eq!(rgb[1], 0.0, "minor-axis texel detail must survive");
         }
-        let camera = crate::Camera { fov: std::f64::consts::FRAC_PI_2, distance: 10.0, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { fov: std::f64::consts::FRAC_PI_2, distance: 10.0, ..Default::default() };
         let front = secondary_footprint(&camera, 100, 20.0, -Vec3::Z, Vec3::Z).unwrap().unwrap();
         assert!(front.iter().all(|v| (v.len() - 0.4).abs() < 1e-12));
         assert_eq!(front, secondary_footprint(&camera, 100, 20.0, -Vec3::Z, -Vec3::Z).unwrap().unwrap());
@@ -851,7 +857,8 @@ mod tests {
     #[test]
     #[cfg(feature = "raytrace-cpu")]
     fn cpu_quality_normal_mips_broaden_only_unresolved_detail() {
-        use crate::{clear_coat::ClearCoat, surface::OpaqueSurface, surface_patterns::ShadingSurface};
+        use crate::surface_patterns::ShadingSurface;
+        use solidcraft_viewport::{clear_coat::ClearCoat, surface::OpaqueSurface};
         let roughness = 0.2_f64;
         let strength = 0.65_f64;
         let original =
@@ -887,7 +894,8 @@ mod tests {
     #[test]
     #[cfg(feature = "raytrace-cpu")]
     fn cpu_map_material_roles_preserve_coat_ior_and_apply_normal_frame_and_flip_explicitly() {
-        use crate::{clear_coat::ClearCoat, surface::OpaqueSurface, surface_patterns::ShadingSurface};
+        use crate::surface_patterns::ShadingSurface;
+        use solidcraft_viewport::{clear_coat::ClearCoat, surface::OpaqueSurface};
         let source = OpaqueSurface::new(Vec3::new(0.8, 0.6, 0.4), 0.2, 0.5, 1.7).unwrap().with_clear_coat(ClearCoat::new(0.7, 0.2, 1.4).unwrap());
         let original = ShadingSurface { surface: source, shading_normal: Vec3::Z };
         for role in [MapRole::BaseColor, MapRole::Roughness, MapRole::Metallic, MapRole::NormalOpenGl] {
@@ -1006,7 +1014,7 @@ mod tests {
                 .unwrap()
                 .surface
                 .roughness(),
-            crate::surface::MIN_ROUGHNESS
+            solidcraft_viewport::surface::MIN_ROUGHNESS
         );
         binding.flip_v = true;
         assert_eq!(
@@ -1077,7 +1085,7 @@ mod tests {
         let mut binding = binding();
         binding.normal = Some(map);
         let original = crate::surface_patterns::ShadingSurface {
-            surface: crate::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap(),
+            surface: solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap(),
             shading_normal: Vec3::Z,
         };
         binding.normal_strength = f64::NAN;

@@ -3,7 +3,7 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::ribbon::{self, BUTTON_MIN_WIDTH, ButtonSize, GROUP_HEIGHT, ICON_GROUP_HEIGHT};
 use crate::{SolveApp, app_bar, icons};
@@ -16,7 +16,7 @@ fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
     if panel == "CONSTRAIN" {
         return t.glyph_text;
     }
-    solidcraft_theme::TabAccent::for_tab(t, tab).color
+    crate::workspace::tab_accent(t, tab).color
 }
 
 /// Panels shown on each tab (in order). Commands come from the registry by (tab, panel).
@@ -189,6 +189,7 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     home_rect: &["titlebar:home", "appbar:home"],
     file: &["appbar:file", "appbar:folder"],
     file_rect: &["appbar:file"],
+    plugins: "appbar:plugins",
     button: &["appbar:", "titlebar:"],
     separator: "titlebar:separator:",
     search: "titlebar:search",
@@ -208,7 +209,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
         let action = chrome.show(ui, r, |ui, content| {
             // While a file loads the design waits: no menus or commands from the bar.
-            let idle = !app.file_load.busy();
+            let idle = !app.file_load_holds();
             // Save, Undo and Redo use the same actions as the File menu and shortcuts.
             let shown = design_shown(app) && idle;
             let tip = |id: &str, key: &str| {
@@ -229,11 +230,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let palette_shortcut = crate::keymap::display_for(app, "ui.palette");
             // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
             let bar = app_bar::AppBar {
-                mark: &|painter, at| crate::icons::glyphs::brand_mark(painter, at),
+                mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
+                // The web build runs no plugins: no Plugins menu there. Its accessible name says
+                // "menu", so it is not taken for Preferences' Plugins page.
+                plugins: (!cfg!(target_arch = "wasm32")).then(|| (app.tr("ui.plugins"), app.plugin_menu.open, app.tr("ui.plugin_menu_name"))),
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
@@ -254,12 +258,21 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
+            app.plugin_menu.in_file_menu = out.plugins_in_file;
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
+                    app_bar::BarAction::Plugins { rect } => {
+                        app.ui.palette_open = false;
+                        crate::plugin_menu::toggle(app, &ui.ctx().clone(), *rect);
+                    }
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
+                        app.plugin_menu.open = false;
+                        if app.plugin_menu.in_file_menu {
+                            crate::plugin_menu::refresh(app);
+                        }
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -313,6 +326,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     file_menu(app, ui.ctx());
+    crate::plugin_menu::menu(app, &ui.ctx().clone());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::unique("sc_help_anchor")).unwrap_or(300.0));
     crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
 }
@@ -334,6 +348,8 @@ pub enum FileAction {
     Redo,
     /// Save a JSON design using the existing save-as flow.
     SaveJson,
+    /// Check the signatures of the active design's saved file.
+    VerifySignature,
     /// Export through the format-specific export command.
     Export(&'static str),
     /// Open the mesh export dialog with the selected format.
@@ -357,8 +373,9 @@ pub enum FileAction {
 impl FileAction {
     /// Whether this action is available in the current document, picker and report state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
-        let needs_design = matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_))
-            || matches!(self, Self::Export(extension) if *extension != "json");
+        let needs_design =
+            matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature)
+                || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
         // with unsaved changes under the report, and ask about it where it can't be answered.
@@ -367,16 +384,17 @@ impl FileAction {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
+            Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
-        !app.file_picker_busy() && !app.file_load.busy() && !behind_report && (!needs_design || design_shown(app)) && available
+        !app.file_picker_busy() && !app.file_load_holds() && !behind_report && (!needs_design || design_shown(app)) && available
     }
 
     /// Whether the native menu offers this action: while a widget has keyboard focus (a report's
     /// text field too), its Undo and Redo go to that widget instead of the design.
     pub fn menu_enabled(&self, app: &SolveApp, keyboard_focus: bool) -> bool {
-        self.enabled(app) || (matches!(self, Self::Undo | Self::Redo) && keyboard_focus && !app.file_picker_busy() && !app.file_load.busy())
+        self.enabled(app) || (matches!(self, Self::Undo | Self::Redo) && keyboard_focus && !app.file_picker_busy() && !app.file_load_holds())
     }
 
     /// Execute through the same document, save-job and preferences paths as the toolbar.
@@ -396,6 +414,9 @@ impl FileAction {
             Self::Undo => drop(app.run("edit.undo", json!({}))),
             Self::Redo => drop(app.run("edit.redo", json!({}))),
             Self::SaveJson => save_as_with_extension(app, "json"),
+            Self::VerifySignature => {
+                crate::verify_job::start(app);
+            }
             Self::Export(extension) => export(app, extension),
             Self::ExportMesh(format) => crate::dialogs_save_mesh::start_with_format(app, format),
             Self::Command(command) => app.start(command),
@@ -459,18 +480,19 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     recent.push(FileRow::Separator);
     recent.push(button("clear_recent", app.tr("ui.clear_recent"), "delete", None));
     rows.push(FileRow::Sub { label: app.tr("ui.open_recent").to_string(), rows: recent });
-    rows.push(row("file.insert_step", "Insert STEP…", "", "import", shown));
-    rows.push(row("file.insert_mesh", "Insert Mesh…", "", "import", shown));
+    rows.push(row("file.insert_step", &format!("{}…", app.tr_label("Insert STEP")), "", "import", shown));
+    rows.push(row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown));
     rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
     rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
     rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
-    rows.push(row("save_json", "Save As JSON…", "", "save", true));
+    rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
+    rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
     if app.services.download_design.is_some() {
-        rows.push(row("download", "Download design", "", "export", shown));
+        rows.push(row("download", app.tr_label("Download design"), "", "export", shown));
     }
     if app.services.browser_files.is_some() {
         rows.push(row("browser_files", "Files in this browser…", "", "open", true));
@@ -478,17 +500,23 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     // Each format's item runs its own command, so it shows that command's key.
     let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
-    rows.push(row("file.export_stl", "Export STL…", &key("file.export_stl"), "mesh_export", shown));
-    rows.push(row("file.export_3mf", "Export 3MF…", &key("file.export_3mf"), "mesh_export", shown));
-    rows.push(row("file.send_to_slicer", "Send to Slicer", "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)));
-    rows.push(row("file.export_step", "Export STEP…", &key("file.export_step"), "export", shown));
+    rows.push(row("file.export_stl", app.tr_label("Export STL…"), &key("file.export_stl"), "mesh_export", shown));
+    rows.push(row("file.export_3mf", app.tr_label("Export 3MF…"), &key("file.export_3mf"), "mesh_export", shown));
+    rows.push(row("file.send_to_slicer", app.tr("cmd.file_send_to_slicer"), "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)));
+    rows.push(row("file.export_step", app.tr_label("Export STEP…"), &key("file.export_step"), "export", shown));
     rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
-    rows.push(row("file.export_obj", "Export OBJ…", &key("file.export_obj"), "export", shown));
-    rows.push(row("file.export_urdf", "Export URDF…", &key("file.export_urdf"), "export", shown));
-    rows.push(row("export_json", "Export Design as JSON…", "", "export", true));
+    rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
+    rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
+    rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
+    rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
+    // A narrow app bar has no room for the Plugins button: its menu is here instead.
+    if app.plugin_menu.in_file_menu {
+        rows.push(crate::plugin_menu::file_submenu(app));
+        rows.push(FileRow::Separator);
+    }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
     if crate::install::offered(app).is_some() {
         rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
@@ -501,6 +529,10 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
 
 /// Runs the File menu's row `id` ([`file_rows`]).
 fn run_file_row(app: &mut SolveApp, id: &str) {
+    if let Some(id) = id.strip_prefix("plugins:") {
+        crate::plugin_menu::choose(app, id);
+        return;
+    }
     if let Some(i) = id.strip_prefix("recent:").and_then(|i| i.parse::<usize>().ok()) {
         if let Some(path) = app.home.recent.get(i).cloned() {
             FileAction::OpenRecent(path).run(app);
@@ -525,12 +557,14 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
         "save_json" => FileAction::SaveJson.run(app),
+        "file.verify" => FileAction::VerifySignature.run(app),
         "download" => download_design(app),
         "browser_files" => {
             if let Some(show) = &app.services.browser_files {
                 show();
             }
         }
+        "export_glb" => FileAction::Export("glb").run(app),
         "export_json" => FileAction::Export("json").run(app),
         "install" => {
             if let Some(offer) = crate::install::offered(app) {
@@ -550,6 +584,20 @@ pub fn design_shown(app: &SolveApp) -> bool {
     !app.home.open
 }
 
+/// The parameters a save takes from Preferences. Signing is off by default; a signing key left
+/// empty asks GnuPG for its default key.
+pub(crate) fn provenance_params(app: &SolveApp) -> Value {
+    let mut params = json!({});
+    if app.preferences.sign_saved_designs {
+        params["sign"] = json!(true);
+        let key = app.preferences.signing_key.trim();
+        if !key.is_empty() {
+            params["signing_key"] = json!(key);
+        }
+    }
+    params
+}
+
 pub fn save(app: &mut SolveApp) {
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
@@ -558,7 +606,7 @@ pub fn save(app: &mut SolveApp) {
     if app.session.path.is_some() {
         // Read-only, or changed on disk since it was opened: Save As, or a question, instead.
         if crate::open_elsewhere::check_save(app) {
-            crate::save_job::start(app, "file.save", json!({}));
+            crate::save_job::start(app, "file.save", provenance_params(app));
         }
     } else {
         save_as(app);
@@ -592,7 +640,18 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
     app.pick_save(&name, &[solidcraft_engine::io::DESIGN_EXT, "json"], |app, path| {
         // A save under way answers a closing tab when it ends.
         if let Some(path) = path
-            && crate::save_job::start(app, "file.save_as", json!({"path": path}))
+            && {
+                let mut params = provenance_params(app);
+                // A JSON design has no container to sign; asking would make this save fail.
+                if std::path::Path::new(&path).extension().is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+                    && let Some(params) = params.as_object_mut()
+                {
+                    params.remove("sign");
+                    params.remove("signing_key");
+                }
+                params["path"] = json!(path);
+                crate::save_job::start(app, "file.save_as", params)
+            }
         {
             return;
         }
@@ -648,7 +707,8 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
 
 /// Export to a file with extension `ext`, in `format` when the extension alone doesn't name it.
 fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
-    let name = format!("{}.{ext}", app.session.doc.name);
+    let body = crate::export_name::first_body(app);
+    let name = format!("{}.{ext}", crate::export_name::offered(app, body.as_deref(), &app.session.doc.name));
     let format = format.map(str::to_string);
     app.pick_save(&name, &[ext], move |app, path| {
         let Some(path) = path else { return };
@@ -743,7 +803,7 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
                 enabled: paint.enabled,
                 name,
                 checkable,
-                accent: solidcraft_theme::TabAccent::for_tab(&t, tab),
+                accent: crate::workspace::tab_accent(&t, tab),
             };
             tips.push((paint.deferred.response.clone(), paint.command, paint.disabled));
             (paint.deferred, look)
@@ -810,7 +870,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
                 .map(|(id, label)| ribbon::Tab {
                     id,
                     label,
-                    accent: solidcraft_theme::TabAccent::for_tab(&t, id),
+                    accent: crate::workspace::tab_accent(&t, id),
                     contextual: contextual_tab(app, id),
                     aliases: tab_aliases(id),
                 })
@@ -1383,7 +1443,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         let panels = RibbonPanels::new(app, ui, &tab, &lists, &painter, running.clone());
         let more_tip = solidcraft_ui_text::tr_label("More toolbar panels");
-        let accent = solidcraft_theme::TabAccent::for_tab(&t, &tab);
+        let accent = crate::workspace::tab_accent(&t, &tab);
         let row = panels.row(accent, labels, reveal.as_ref().map(|r| ribbon::Reveal { id: r.id, preview: r.preview, strength: pulse }), more_tip);
         let mut out = {
             let mut more_rows = |ui: &mut egui::Ui, group: usize| {
@@ -1540,7 +1600,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                 ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
                                 return;
                             }
-                            let grouped = crate::workspace::grouped_commands(&tab, panel, &cmds);
+                            let grouped = if *panel == "CONSTRUCT" && !app.preferences.construct_menu_groups {
+                                cmds.iter().map(|c| (None, *c)).collect()
+                            } else {
+                                crate::workspace::grouped_commands(&tab, panel, &cmds)
+                            };
                             if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
                                 let mut paints = Vec::new();
                                 let action = dropdown_grid(app, ui, &tab, &grouped, &crate::workspace::ungrouped(&tab, panel, &cmds), &mut paints);
@@ -1706,7 +1770,7 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
             _ => label.clone(),
         };
         let tip = if shown { tip } else { solidcraft_ui_text::format("ui.needs_design", &[("command", &label)]) };
-        if resp.on_hover_text(tip).clicked() && enabled {
+        if resp.backing_on_hover_text(tip).clicked() && enabled {
             start = Some((c.id, br));
         }
         buttons.push((c.id, br));
@@ -1750,7 +1814,7 @@ fn assistant_button(app: &mut SolveApp, ui: &mut egui::Ui, at: Rect) {
         AssistantMark::Quiet => crate::ui_kit::AssistantEntryState::Quiet,
         AssistantMark::Ready => crate::ui_kit::AssistantEntryState::Ready,
         AssistantMark::Busy => crate::ui_kit::AssistantEntryState::Busy,
-        AssistantMark::NeedsAuth => crate::ui_kit::AssistantEntryState::NeedsAuth,
+        AssistantMark::NeedsAuth | AssistantMark::NoDesign => crate::ui_kit::AssistantEntryState::NeedsAuth,
         AssistantMark::Stopped => crate::ui_kit::AssistantEntryState::Stopped,
         AssistantMark::Waiting(count) => crate::ui_kit::AssistantEntryState::Waiting(count),
     };
@@ -1765,7 +1829,7 @@ fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'static> {
     ribbon::MenuStyle {
         pin_tip: solidcraft_ui_text::tr_label("Pin to Toolbar"),
         unpin_tip: solidcraft_ui_text::tr_label("Remove from Toolbar"),
-        accent: solidcraft_theme::TabAccent::for_tab(&Tokens::get(), &app.ui.tab),
+        accent: crate::workspace::tab_accent(&Tokens::get(), &app.ui.tab),
         focus: egui::Id::unique("dropdown_row"),
         entry: &["toolbar:", "dropdown:"],
         pin: "dropdown_pin:",
@@ -1786,17 +1850,19 @@ struct RowData {
     hint: bool,
 }
 
+fn dropdown_checkable(app: &SolveApp, id: &str) -> bool {
+    id == "view.shots_strip" || (persistent_available(app, id) && app.preferences.persistent_ribbon_pressed)
+}
+
 impl RowData {
     fn new(app: &SolveApp, c: &'static solidcraft_engine::CommandSpec) -> Self {
         let info = crate::render_workspace::interactive_command_info(app, c);
         let label = app.tr_label(info.label).to_string();
-        let mut checked = None;
-        if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
-            checked = Some(persistent_pressed(app, c.id));
-        }
-        if c.id == "view.shots_strip" {
-            checked = Some(app.preferences.render_shots_strip);
-        }
+        let checked = if c.id == "view.shots_strip" {
+            Some(app.preferences.render_shots_strip)
+        } else {
+            dropdown_checkable(app, c.id).then(|| persistent_pressed(app, c.id))
+        };
         let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
         // A disabled row says why; a documented command also shows its help (#2758).
         let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason));
@@ -1856,11 +1922,19 @@ fn dropdown_keys(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engi
 
 /// How wide a panel drop-down's rows are: the widest label and shortcut, at least 200.
 fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engine::CommandSpec]) -> f32 {
-    let rows: Vec<(String, String)> = cmds
+    let rows: Vec<_> = cmds
         .iter()
-        .map(|c| (app.tr_label(c.info(&app.session).label).to_string(), crate::keymap::display_for(app, c.id).unwrap_or_default()))
+        .map(|c| {
+            let info = c.info(&app.session);
+            (
+                app.tr_label(info.label).to_string(),
+                crate::keymap::display_for(app, c.id).unwrap_or_default(),
+                info.icon,
+                dropdown_checkable(app, c.id),
+            )
+        })
         .collect();
-    ribbon::menu_width(ui, rows.iter().map(|(label, key)| (label.as_str(), key.as_str())))
+    ribbon::menu_width(ui, rows.iter().map(|(label, key, icon, checkable)| (label.as_str(), key.as_str(), *icon, *checkable)))
 }
 
 /// A panel drop-down drawn as a grid of large icons (the `ribbon_icon_grid` preference, #4739):
@@ -1875,7 +1949,7 @@ fn dropdown_grid(
     paints: &mut Vec<PersistentRibbonPaint>,
 ) -> Option<(&'static str, ribbon::MenuAction)> {
     let labels: Vec<String> = grouped.iter().map(|(_, c)| app.tr_label(c.label).to_string()).collect();
-    let headings: Vec<Option<String>> = grouped.iter().map(|(heading, _)| heading.map(|h| solidcraft_ui_text::tr_label(h).to_string())).collect();
+    let headings: Vec<Option<String>> = grouped.iter().map(|(heading, _)| heading.map(group_heading_text)).collect();
     let entries: Vec<(Option<&str>, ribbon::MenuEntry)> = grouped
         .iter()
         .zip(&labels)
@@ -2024,7 +2098,7 @@ fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraf
 
 /// A group heading's text: its name in the interface language, as written.
 fn group_heading_text(label: &str) -> String {
-    solidcraft_ui_text::tr_label(label).to_string()
+    if label.starts_with("ui.") { solidcraft_ui_text::tr(label) } else { solidcraft_ui_text::tr_label(label) }.to_string()
 }
 
 /// Take up what was done in a grid drop-down, as for a list row: start the command (and close
@@ -2220,7 +2294,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         app.viewport.key_hold = None;
     }
-    if app.file_load.busy() {
+    if app.file_load_holds() {
         return;
     }
     if crate::viewport_status::enabled(app)
@@ -2426,12 +2500,6 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
                 // second press finishes it (above).
-            }
-            // With a menu open, V runs that menu's Show/Hide on what the menu is for.
-            Key::V => {
-                if !crate::context_menu::press_shortcut(app, "V") {
-                    crate::context_menu::toggle_visibility(app);
-                }
             }
             Key::F2 => {
                 if !crate::context_menu::press_shortcut(app, "F2") {
@@ -2908,7 +2976,7 @@ mod header_report_tests {
             for vision in solidcraft_theme::ColorVision::ALL {
                 let t = Tokens::themed(dark, vision);
                 for tab in TABS.iter().copied().chain(["SKETCH", "FORM", "RENDER"]) {
-                    assert_eq!(panel_accent(&t, tab, "CREATE"), solidcraft_theme::TabAccent::for_tab(&t, tab).color);
+                    assert_eq!(panel_accent(&t, tab, "CREATE"), crate::workspace::tab_accent(&t, tab).color);
                     assert_eq!(panel_accent(&t, tab, "CONSTRAIN"), t.glyph_text);
                 }
             }
@@ -3483,6 +3551,82 @@ mod dropdown_tests {
         }
     }
 
+    /// Both layouts group Construct under Planes, Axes and Points by default, and keep the
+    /// original ungrouped order when `construct_menu_groups` is turned off.
+    #[test]
+    fn construct_dropdown_groups_are_visible_in_list_and_grid() {
+        for (grid, grouped) in [(false, true), (true, true), (false, false), (true, false)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.ribbon_icon_grid = grid;
+            if !grouped {
+                h.app.preferences.construct_menu_groups = false;
+            } else {
+                assert!(h.app.preferences.construct_menu_groups);
+            }
+            h.call("ui.resize", json!({"width":1600,"height":1200}));
+            h.app.ui.tab = "MODEL".into();
+            h.frames(4);
+            h.step(&json!({"click":{"handle":"panel:MODEL:CONSTRUCT"}})).unwrap();
+            h.frames(6);
+            let popup = h.ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open"))).unwrap();
+            h.ctx = egui::Context::default();
+            crate::fonts::setup_bundled_fonts(&h.ctx);
+            h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_panel_open"), popup));
+            let mut textures = std::collections::HashMap::new();
+            let mut output = None;
+            for frame in 0..12 {
+                let mut drawn = h.ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1600., 1200.))),
+                        time: Some(frame as f64 / 60.),
+                        ..Default::default()
+                    },
+                    |ui| h.app.ui(ui),
+                );
+                crate::ui_kit::test_textures_update(&mut textures, &drawn.textures_delta);
+                drawn.textures_delta.clear();
+                output = Some(drawn);
+            }
+            let output = output.unwrap();
+            if let Ok(dir) = std::env::var("SOLIDCRAFT_CONSTRUCT_EVIDENCE") {
+                let bounds = crate::scenario::rect_of("toolbar_dropdown").unwrap().expand(8.);
+                let image = crate::ui_kit::test_raster(&h.ctx, output.shapes.clone(), output.pixels_per_point, bounds, &textures);
+                std::fs::create_dir_all(&dir).unwrap();
+                image
+                    .save(std::path::Path::new(&dir).join(format!(
+                        "construct-{}-{}.png",
+                        if grid { "grid" } else { "list" },
+                        if grouped { "grouped" } else { "default" }
+                    )))
+                    .unwrap();
+            }
+            for heading in ["Planes", "Axes", "Points"] {
+                assert_eq!(
+                    output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == heading)),
+                    grouped,
+                    "{heading} in grid={grid}, grouped={grouped}"
+                );
+            }
+            let (cmds, _) = crate::workspace::layout("MODEL", "CONSTRUCT", &solidcraft_engine::command_specs()).unwrap();
+            let prefix = "dropdown:";
+            if !grouped {
+                let mut positions: Vec<_> = cmds.iter().map(|c| (c.id, crate::scenario::handle_at(&format!("{prefix}{}", c.id)).unwrap())).collect();
+                positions.sort_by(|a, b| a.1.y.total_cmp(&b.1.y).then(a.1.x.total_cmp(&b.1.x)));
+                assert_eq!(
+                    positions.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                    cmds.iter().map(|c| c.id).collect::<Vec<_>>(),
+                    "original order in grid={grid}"
+                );
+            }
+            for c in &cmds {
+                assert!(crate::scenario::handle_at(&format!("{prefix}{}", c.id)).is_some(), "{} remains reachable in grid={grid}", c.id);
+            }
+            h.step(&json!({"click":{"handle":format!("{prefix}construct.plane.offset")}})).unwrap();
+            assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::OffsetPlane { .. })));
+        }
+    }
+
     /// The grid's rows: a heading starts a new one, and the arrow keys move along and between
     /// them over the enabled icons only, wrapping at the ends (#4739).
     #[test]
@@ -3994,7 +4138,7 @@ mod dropdown_toggle_tests {
         h.step(&json!({"click": {"handle": "button:sketch.ellipse"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.ellipse"), "the click starts the tool");
         h.frames(3);
-        let soft = solidcraft_theme::TabAccent::for_tab(&solidcraft_theme::Tokens::get(), "SKETCH").soft;
+        let soft = crate::workspace::tab_accent(&solidcraft_theme::Tokens::get(), "SKETCH").soft;
         let pressed = |h: &Harness, id: &str| {
             let r = rect_of(&format!("button:{id}")).unwrap();
             let mut all = Vec::new();
@@ -4038,9 +4182,7 @@ mod dropdown_toggle_tests {
             let folded = rect_of("ribbon:folded").unwrap();
             assert!(folded.height() <= super::TAB_ROW_HEIGHT + 1.0, "{layout}: only the tab row is left: {folded:?}");
             assert!(rect_of("panel:MODEL:CREATE").is_none(), "{layout}: no panels while folded");
-            if layout == "compact" {
-                assert!(h.app.viewport.rect.unwrap().top() < whole_view.top() - 50.0, "{layout}: the view takes the panels' room");
-            }
+            assert_eq!(h.app.viewport.rect.unwrap(), whole_view, "{layout}: folding preserves the canvas domain");
 
             // A tab's click opens its panels over the view, as tall as the whole ribbon.
             let tab = rect_of("toolbar_tab:SURFACE").unwrap().center();
@@ -4051,10 +4193,7 @@ mod dropdown_toggle_tests {
             let open = rect_of("ribbon:open").unwrap();
             assert!((open.height() - whole.height()).abs() <= 2.0 * crate::ui_kit::SHELL_GAP + 1.0, "{layout}: {open:?} vs {whole:?}");
             assert!(rect_of("panel:SURFACE:CREATE").is_some(), "{layout}: the panels are drawn");
-            if layout == "compact" {
-                let top = h.app.viewport.rect.unwrap().top();
-                assert!((top - folded.bottom()).abs() <= 2.0, "{layout}: over the view, not pushing it down: {top} {folded:?}");
-            }
+            assert_eq!(h.app.viewport.rect.unwrap(), whole_view, "{layout}: the open ribbon overlays the canvas");
 
             // The pointer leaving the panels closes them.
             let away = h.app.viewport.rect.unwrap().center() + egui::vec2(0.0, 150.0);
@@ -4225,6 +4364,7 @@ mod ribbon_label_tests {
     }
 
     fn tab_test_themes() -> Vec<Tokens> {
+        crate::test_support::host_data();
         let mut themes = Vec::new();
         for dark in [false, true] {
             for vision in solidcraft_theme::ColorVision::ALL {
@@ -4239,16 +4379,16 @@ mod ribbon_label_tests {
     fn a_selected_contextual_tab_stands_out_and_an_unselected_one_is_outlined() {
         for t in tab_test_themes() {
             for tab in ["SKETCH", "SHEET METAL"] {
-                let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
+                let accent = crate::workspace::tab_accent(&t, tab);
                 for hovered in [false, true] {
-                    let active = ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), true, true, hovered);
-                    let inactive = ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), true, false, hovered);
+                    let active = ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), true, true, hovered);
+                    let inactive = ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), true, false, hovered);
                     assert_eq!(active, ribbon::TabStyle { fill: accent.color, ink: accent.on_fill(&t), outline: Color32::TRANSPARENT });
                     assert_eq!(
                         inactive,
                         ribbon::TabStyle {
                             outline: accent.color,
-                            ..ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), false, false, hovered)
+                            ..ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), false, false, hovered)
                         }
                     );
                     assert!(solidcraft_theme::contrast_ratio(active.ink, active.fill) >= 4.5, "{tab}: selected text must remain readable");
@@ -4267,16 +4407,16 @@ mod ribbon_label_tests {
     fn ordinary_tabs_keep_their_selected_hovered_and_idle_colors() {
         for t in tab_test_themes() {
             for tab in ["MODEL", "SURFACE", "SHEET METAL"] {
-                let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
+                let accent = crate::workspace::tab_accent(&t, tab);
                 for hovered in [false, true] {
                     let none = Color32::TRANSPARENT;
                     assert_eq!(
-                        ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), false, true, hovered),
+                        ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), false, true, hovered),
                         ribbon::TabStyle { fill: accent.soft, ink: accent.ink, outline: none }
                     );
                     let idle = if hovered { t.hover } else { none };
                     assert_eq!(
-                        ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), false, false, hovered),
+                        ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), false, false, hovered),
                         ribbon::TabStyle { fill: idle, ink: t.text, outline: none }
                     );
                 }
@@ -4931,7 +5071,7 @@ mod persistent_ribbon_tests {
             h.app.session.execute("inspect.zebra", &json!({})).unwrap();
             h.frame();
             assert_presentation(&h, "inspect.zebra", enabled, enabled);
-            let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
+            let accent = crate::workspace::tab_accent(&Tokens::get(), "INSPECT");
             assert!(button_shapes(&h, "inspect.zebra").iter().any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == zebra && rect.stroke.width == 2.0 && rect.stroke.color == accent.color.gamma_multiply(h.app.sbox.reveal.as_ref().unwrap().strength(h.ctx.input(|input| input.time), h.ctx.global_style().animation_time > 0.0)))), "the upstream pulse remains painted above the selected background");
             for (id, active) in [("inspect.draft", true), ("inspect.draft", false)] {
                 let at = scenario::handle_at(&format!("button:{id}")).unwrap();
@@ -5413,7 +5553,7 @@ mod persistent_ribbon_tests {
         assert_eq!(scenario::count_of("ribbon:pressed"), Some(0.0));
         assert_presentation(&h, "inspect.continuity", false, false);
         let r = scenario::rect_of("button:inspect.continuity").unwrap();
-        let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
+        let accent = crate::workspace::tab_accent(&Tokens::get(), "INSPECT");
         assert!(
             button_shapes(&h, "inspect.continuity")
                 .iter()
@@ -5444,7 +5584,7 @@ mod persistent_ribbon_tests {
     fn persistent_click_clear_and_replacement_remove_old_tool_paint_in_the_release_frame() {
         fn no_tool_paint(h: &Harness) {
             let r = scenario::rect_of("button:inspect.continuity").unwrap();
-            let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
+            let accent = crate::workspace::tab_accent(&Tokens::get(), "INSPECT");
             assert!(
                 !button_shapes(h, "inspect.continuity")
                     .iter()

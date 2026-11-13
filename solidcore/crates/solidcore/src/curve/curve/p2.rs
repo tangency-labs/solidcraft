@@ -172,8 +172,7 @@
 //!   `SurfaceMaxDistanceBetween`'s samples, `sm_FlushCrv`'s arc `EditParameterization`;
 //!   `SmCurvePropertyGS::BranchMayContainAnswers` rules nothing out (`TRUE`) when an angle
 //!   cannot be measured.
-//! - **Property solver branch bounds (WR-35, #2144).** With the opt-in
-//!   `Kernel::fixes.curve_property_gs_branch_bounds`, [`CurvePropertyGs`] fixes three
+//! - **Property solver branch bounds (WR-35, #2144).** [`CurvePropertyGs`] fixes three
 //!   upstream defects in `SmCurvePropertyGS`: [`CurvePropertyGs::may_contain_answers`]
 //!   evaluates `dZV = 1.0 * k` so all eight bounding-box corners are tested for the
 //!   `SM_CP_MINIMIZE_*ANGLE*` properties, converts `m_dMaxTurningAngleDeg` to radians
@@ -182,11 +181,9 @@
 //!   [`CurvePropertyGs::new`] populates [`GlobalSolver::opt_vectors`] (`base.opt_vectors`)
 //!   instead of leaving the base `SmGlobalSolver::m_cpOptVectors` shadowed and empty.
 //! - **Conic zero-tangent evaluation (`WR-27`, #2202).** [`Curve::evaluate`],
-//!   [`Curve::evaluate_into`], and `<Conic as CurveEvaluate>::evaluate` forward
-//!   [`Kernel::fixes`] ([`crate::kernel::UpstreamFixes::conic_evaluate_uses_computed_second_deriv`])
-//!   to [`Conic::evaluate_with_fixes`], using the computed second derivative in
-//!   `SmConic::Evaluate`'s `bNonZeroTangents` fallback when `num_derivs == 2`
-//!   (off by default for pinned C++ parity).
+//!   [`Curve::evaluate_into`], and `<Conic as CurveEvaluate>::evaluate` use the computed
+//!   second derivative in `SmConic::Evaluate`'s `bNonZeroTangents` fallback when
+//!   `num_derivs == 2`.
 
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::conic::Conic;
@@ -329,8 +326,8 @@ const OP_GS: &str = "curve::curve::p2::CurvePropertyGs";
 const OP_EVAL: &str = "curve::curve::p2::Curve::evaluate";
 
 /// `SM_ERR` of a base-class default.
-const fn base_err() -> SolidError {
-    SolidError::sm_err(OP_BASE)
+fn base_err() -> SolidError {
+    SolidError::curve_failed(OP_BASE, "the curve kind does not implement the method")
 }
 
 // ---- the evaluation interface ---------------------------------------------------------
@@ -437,13 +434,13 @@ impl CurveEvaluate for Conic {
 
     fn evaluate(
         &self,
-        k: &Kernel,
+        _k: &Kernel,
         t: f64,
         num_derivs: usize,
         _from_left: bool,
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
-        Self::evaluate_with_fixes(self, t, num_derivs, non_zero_tangents, &k.fixes)
+        Conic::evaluate(self, t, num_derivs, non_zero_tangents)
     }
 
     fn evaluate_point(&self, _k: &Kernel, t: f64) -> Result<Point3> {
@@ -897,6 +894,21 @@ impl Curve {
     #[must_use]
     pub const fn kind(&self) -> &CurveKind {
         &self.kind
+    }
+
+    /// Not upstream: points whose convex hull holds this curve over `interval`, each with
+    /// the error bound of its coordinates: a line's two ends
+    /// ([`Line::segment_over`](crate::curve::line::Line::segment_over)), a B-spline's
+    /// control points of the knot spans that meet `interval`
+    /// ([`BSplineCurve::hull_points_over`]). `None` for the other kinds, whose evaluation
+    /// is not their control polygon's, and when no hull is certain.
+    #[must_use]
+    pub(crate) fn hull_points_over(&self, interval: &Extent1d) -> Option<Vec<(Point3, f64)>> {
+        match &self.kind {
+            CurveKind::Line(l) => l.segment_over(interval).map(Vec::from),
+            CurveKind::BSpline(b) => b.hull_points_over(interval),
+            _ => None,
+        }
     }
 
     /// The B-spline (base) of the kinds derived from `SmBSplineCurve` (`SM_CAST_PTR`):
@@ -1397,9 +1409,7 @@ impl Curve {
             CurveKind::Ellipse(c) => c
                 .base()
                 .evaluate(t, num_derivs, from_left, non_zero_tangents),
-            CurveKind::Conic(c) => {
-                c.evaluate_with_fixes(t, num_derivs, non_zero_tangents, &k.fixes)
-            }
+            CurveKind::Conic(c) => c.evaluate(t, num_derivs, non_zero_tangents),
             CurveKind::Parabola(c) => {
                 c.base()
                     .evaluate(t, num_derivs, from_left, non_zero_tangents)
@@ -1454,10 +1464,9 @@ impl Curve {
         if let Some(b) = base {
             return b.evaluate_into(t, from_left, non_zero_tangents, out);
         }
-        let num_derivs = out
-            .len()
-            .checked_sub(1)
-            .ok_or_else(|| SolidError::sm_err(OP_EVAL))?;
+        let num_derivs = out.len().checked_sub(1).ok_or_else(|| {
+            SolidError::curve_failed(OP_EVAL, "there is no slot to evaluate into")
+        })?;
         let pv = self.evaluate(k, t, num_derivs, from_left, non_zero_tangents)?;
         for (i, slot) in out.iter_mut().enumerate() {
             *slot = at(&pv, i);
@@ -1840,6 +1849,43 @@ impl Curve {
         }
     }
 
+    /// (not upstream) [`Self::edit_parameterization`] whose natural interval is then
+    /// `new_param` exactly: where the natural interval's ends were already the same as
+    /// `new_param`'s within the scaled zero, the edit leaves them as they are, and the
+    /// knots of a B-spline's, a line's or a conic's NURB are then mapped onto `new_param`,
+    /// so an edge that keeps `new_param` as its interval lies inside its curve. Every
+    /// point is kept. The other kinds are left as [`Self::edit_parameterization`] leaves
+    /// them.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::edit_parameterization`] and of [`BSplineCurve::reparam_to`].
+    pub(crate) fn edit_parameterization_exactly(
+        &mut self,
+        k: &Kernel,
+        new_param: &Extent1d,
+    ) -> Result<()> {
+        self.edit_parameterization(k, new_param)?;
+        if self.natural_interval() == *new_param {
+            return Ok(());
+        }
+        self.memo = CurveMemo::new();
+        match &mut self.kind {
+            CurveKind::BSpline(c) => c.reparam_to(new_param),
+            CurveKind::Hyperbola(c) => c.base_mut().reparam_to(new_param),
+            CurveKind::Parabola(c) => c.base_mut().reparam_to(new_param),
+            CurveKind::Ellipse(c) => {
+                c.base_mut().reparam_to(new_param)?;
+                c.notify(k, NotifyOperation::PostEdit)
+            }
+            CurveKind::Line(c) => {
+                c.ensure_nurb(self.owner)?;
+                c.base_mut().reparam_to(new_param)
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// `ReverseParameterization` (base: `SM_ERR`): the new interval of `old_interval`.
     ///
     /// # Errors
@@ -2132,7 +2178,10 @@ impl Curve {
         // make sure splitParam is within the parameter range
         let mut ivl = self.natural_interval();
         if !ivl.contains_value(split_param, 0.0) {
-            return Err(SolidError::sm_err(OP_SPLIT));
+            return Err(SolidError::curve_failed(
+                OP_SPLIT,
+                "the split parameter is outside the curve's interval",
+            ));
         }
 
         // limit a valid splitParam so that it can't be on the end or very close to the end
@@ -2141,10 +2190,16 @@ impl Curve {
         let tol_min = EFF_ZERO * 100.0 * (1.0 + min.abs());
         let tol_max = EFF_ZERO * 100.0 * (1.0 + max.abs());
         if split_param < min + tol_min {
-            return Err(SolidError::sm_err(OP_SPLIT));
+            return Err(SolidError::curve_failed(
+                OP_SPLIT,
+                "the split parameter is at the curve's start",
+            ));
         }
         if split_param > max - tol_max {
-            return Err(SolidError::sm_err(OP_SPLIT));
+            return Err(SolidError::curve_failed(
+                OP_SPLIT,
+                "the split parameter is at the curve's end",
+            ));
         }
 
         let mut copy = self.copy(k)?;
@@ -2317,7 +2372,10 @@ impl Curve {
             ISO_CURVE_TYPE => IsoCurve::read_from_db(k, db, version).map(Self::from),
             OFFSET_CURVE_TYPE => OffsetCurve::read_from_db(k, db, version).map(Self::from),
             PROJECTED_CURVE_TYPE => ProjectedCurve::read_from_db(k, db, version).map(Self::from),
-            _ => Err(SolidError::sm_err(OP_READ)),
+            _ => Err(SolidError::curve_failed(
+                OP_READ,
+                "the curve type read is not known",
+            )),
         };
         db.leave_nested();
         result
@@ -2816,7 +2874,10 @@ pub fn pop_stack(stack: &mut Vec<f64>) -> Result<(f64, [Vec3; 2])> {
 /// `SM_ERR` when the stack holds fewer than 7 values.
 pub fn stack_look(stack: &[f64]) -> Result<(f64, [Vec3; 2])> {
     let Some(&[t, x0, y0, z0, x1, y1, z1]) = stack.last_chunk() else {
-        return Err(SolidError::sm_err(OP_STACK));
+        return Err(SolidError::curve_failed(
+            OP_STACK,
+            "the stack holds fewer than 7 values",
+        ));
     };
     Ok((t, [Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1)]))
 }
@@ -2857,7 +2918,10 @@ pub fn add_to_curve(
             || p1.distance(last_pt) > pnt_scale * EFF_ZERO
         {
             // signal an error for now
-            return Err(SolidError::sm_err(OP_ADD));
+            return Err(SolidError::curve_failed(
+                OP_ADD,
+                "the added piece does not start where the curve ends",
+            ));
         }
     } else if !knots.is_empty() {
         // knots without control points: upstream reads past the polygon
@@ -3892,8 +3956,8 @@ pub struct CurvePropertyGs<'t, O> {
     pub property: CurvePropertyType,
     /// `m_cpdPropertyValue` (`None` = null).
     pub property_value: Option<f64>,
-    /// `m_cpOptVectors` (this class's own member, shadowing `base.opt_vectors` unless
-    /// `Kernel::fixes.curve_property_gs_branch_bounds` forwards it).
+    /// `m_cpOptVectors` (this class's own member; [`CurvePropertyGs::new`] also forwards
+    /// it to `base.opt_vectors`, which upstream leaves shadowed and empty).
     pub opt_vectors: Vec<Vec3>,
     /// The curve the tree decomposes (upstream reads it back as the tree node's
     /// owner object, `pCurveNode->GetOwnerObject()`); `None` until set with
@@ -3937,9 +4001,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         opt_vectors: Vec<Vec3>,
     ) -> Self {
         let mut base = GlobalSolver::with_tree_and_kernel(k, curve_tree, 1);
-        if k.fixes.curve_property_gs_branch_bounds {
-            base.opt_vectors.clone_from(&opt_vectors);
-        }
+        base.opt_vectors.clone_from(&opt_vectors);
         Self {
             kernel: k,
             base,
@@ -3959,15 +4021,13 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         self
     }
 
-    /// Optional vector `i` (`m_cpOptVectors[i]`; reads `base.opt_vectors` when
-    /// `curve_property_gs_branch_bounds` populated it).
+    /// Optional vector `i` (`m_cpOptVectors[i]`; reads `base.opt_vectors` when it is
+    /// populated).
     pub(crate) fn opt(&self, i: usize) -> Result<Vec3> {
-        let vecs = if self.kernel.fixes.curve_property_gs_branch_bounds
-            && !self.base.opt_vectors.is_empty()
-        {
-            &self.base.opt_vectors
-        } else {
+        let vecs = if self.base.opt_vectors.is_empty() {
             &self.opt_vectors
+        } else {
+            &self.base.opt_vectors
         };
         let err = SolidError::InvalidInput {
             operation: OP_GS,
@@ -4011,7 +4071,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         let mut swap = false;
         let curve_node = self.base.branch_node(branch, 0)?;
         let tree = self.base.tree(0)?;
-        let null = || SolidError::null_pointer(OP_GS);
+        let null = || SolidError::curve_missing(OP_GS, "a curve node's child");
         let node1 = tree.node(curve_node.child1.ok_or_else(null)?)?;
         let node2 = tree.node(curve_node.child2.ok_or_else(null)?)?;
         let sph1 = node1.bbox.sphere_bound();
@@ -4131,14 +4191,13 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
             // false when no bbox corner angle is less than the current best answer
             P::MinimizeAngleToPlane | P::MinimizeDirectedAngle | P::MinimizeCcwAngle => {
                 let (o0, o1, o2) = (self.opt(0)?, self.opt(1)?, self.opt(2)?);
-                let fix_bounds = self.kernel.fixes.curve_property_gs_branch_bounds;
                 for i in 0..2u32 {
                     let xv = f64::from(i);
                     for j in 0..2u32 {
                         let yv = f64::from(j);
                         for k in 0..2u32 {
                             // WR-35: upstream writes `dZV = 1.0 * j` instead of `k`.
-                            let zv = f64::from(if fix_bounds { k } else { j });
+                            let zv = f64::from(k);
                             let test_pnt = bbox.evaluate(xv, yv, zv);
                             let mut vec = o1.cross(test_pnt - o0).cross(o1);
                             if vec.length_squared() < EFF_ZERO {
@@ -4274,12 +4333,8 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
             }
             let angle = line_vec.angle_between(reference)?;
             // WR-35: `turn` is in degrees (`m_dMaxTurningAngleDeg`) while `angle` is
-            // in radians; convert `turn` (`SM_DEG2RAD`) when opted in.
-            let turn_bound = if self.kernel.fixes.curve_property_gs_branch_bounds {
-                turn * (PI / 180.0)
-            } else {
-                turn
-            };
+            // in radians; convert `turn` (`SM_DEG2RAD`).
+            let turn_bound = turn * (PI / 180.0);
 
             // If the angle is not near 90 degrees then we can return a FALSE
             if angle + turn_bound < PI / 2.0 || angle - turn_bound > PI / 2.0 {
@@ -5146,36 +5201,17 @@ mod tests {
     }
 
     #[test]
-    fn wr35_flag_lookup_and_base_opt_vectors() {
+    fn wr35_base_opt_vectors() {
         use crate::curve::curve::p5::make_curve_cache;
         use crate::geom::global_solver::SolveRequest;
         use crate::geom::solution_array::{OperandObject, SolutionArray};
 
-        let k_off = Kernel::default();
-        assert!(!k_off.fixes.curve_property_gs_branch_bounds);
-        let mut k_on = Kernel::default();
-        let flag = k_on.fixes.flag_mut("curve_property_gs_branch_bounds");
-        *flag.unwrap() = true;
-        assert!(k_on.fixes.curve_property_gs_branch_bounds);
-        let entry = ("curve_property_gs_branch_bounds", true);
-        assert!(k_on.fixes.flags().any(|f| f == entry));
+        let k_on = Kernel::default();
 
         let crv = cubic();
         let ivl = crv.natural_interval();
-        let cache = make_curve_cache::<OperandObject>(&k_off, &crv, None).unwrap();
+        let cache = make_curve_cache::<OperandObject>(&k_on, &crv, None).unwrap();
         let tree = cache.tree().unwrap();
-
-        let gs_off = CurvePropertyGs::new(
-            &k_off,
-            tree,
-            ivl,
-            CurvePropertyType::PerpendicularToVector,
-            None,
-            vec![Vec3::X],
-        );
-        assert!(!gs_off.base.fixes.curve_property_gs_branch_bounds);
-        assert!(gs_off.base.opt_vectors.is_empty());
-        assert!(gs_off.base.opt_vector(0).is_err());
 
         let mut gs_on = CurvePropertyGs::new(
             &k_on,
@@ -5186,7 +5222,6 @@ mod tests {
             vec![Vec3::X],
         )
         .with_curve(&crv);
-        assert!(gs_on.base.fixes.curve_property_gs_branch_bounds);
         assert_eq!(gs_on.base.opt_vectors, vec![Vec3::X]);
         assert_eq!(gs_on.base.opt_vector(0).unwrap(), Vec3::X);
 
@@ -5203,13 +5238,11 @@ mod tests {
     }
 
     #[test]
-    fn wr35_angle_minimize_eight_corners_keeps_valid_branch_default_prunes() {
+    fn wr35_angle_minimize_eight_corners_keeps_valid_branch() {
         use crate::curve::curve::p7::PropertyAnalysisOptions;
         use crate::geom::solution_array::OperandObject;
 
-        let k_off = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.curve_property_gs_branch_bounds = true;
+        let k_on = Kernel::default();
         let ivl = Extent1d::from_min_max(0.0, 1.0);
 
         // Plane y + z = 0: j == k corners (y=1, z=-3) and (y=2, z=-1) have angle^2 > 0.10,
@@ -5221,17 +5254,6 @@ mod tests {
             wr35_curve_node_tree(bbox_plane, [Vec3::ZERO, Vec3::X], 0.0);
         let plane_normal = Vec3::new(0.0, 1.0, 1.0).unitize().unwrap();
         let plane_vecs = vec![Vec3::ZERO, Vec3::X, plane_normal];
-
-        let mut gs_off = CurvePropertyGs::new(
-            &k_off,
-            &tree_plane,
-            ivl,
-            CurvePropertyType::MinimizeAngleToPlane,
-            None,
-            plane_vecs.clone(),
-        );
-        gs_off.base.best_answer_so_far_sq = 0.01;
-        assert!(!gs_off.may_contain_answers(&branch_plane).unwrap());
 
         let mut gs_on = CurvePropertyGs::new(
             &k_on,
@@ -5256,10 +5278,6 @@ mod tests {
             CurvePropertyType::MinimizeDirectedAngle,
             CurvePropertyType::MinimizeCcwAngle,
         ] {
-            let mut off = CurvePropertyGs::new(&k_off, &td, ivl, prop, None, dv.clone());
-            off.base.best_answer_so_far_sq = 0.40;
-            assert!(!off.may_contain_answers(&branch_dir).unwrap());
-
             let mut on = CurvePropertyGs::new(&k_on, &td, ivl, prop, None, dv.clone());
             on.base.best_answer_so_far_sq = 0.40;
             assert!(on.may_contain_answers(&branch_dir).unwrap());
@@ -5291,18 +5309,6 @@ mod tests {
             opt_vectors: &plane_vecs,
             ..PropertyAnalysisOptions::default()
         };
-        let res_off = poly
-            .global_property_analysis(
-                &k_off,
-                &ivl,
-                CurvePropertyType::MinimizeAngleToPlane,
-                1e-6,
-                &opts,
-            )
-            .unwrap();
-        let best_off = res_off.solutions.get_at(0).unwrap();
-        assert!(best_off.start.param(0).unwrap() < 0.01);
-        assert!(best_off.start.solution_value > 0.10);
 
         let res_on = poly
             .global_property_analysis(
@@ -5320,9 +5326,7 @@ mod tests {
 
     #[test]
     fn wr35_perpendicular_and_maxima_to_plane_convert_turning_angle_to_radians() {
-        let k_off = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.curve_property_gs_branch_bounds = true;
+        let k_on = Kernel::default();
         let ivl = Extent1d::from_min_max(0.0, 1.0);
         let chord_end = Vec3::new(0.5, 3.0_f64.sqrt() / 2.0, 0.0);
         let bbox = Extent3d::from_points(Vec3::ZERO, chord_end);
@@ -5331,14 +5335,6 @@ mod tests {
         // 90 deg; pinned code adds 10.0 directly to radians and fails to prune.
         let (tree_10, branch_10) = wr35_curve_node_tree(bbox, [Vec3::ZERO, chord_end], 10.0);
         for dir in [Vec3::X, -Vec3::X] {
-            let perp_off = CurvePropertyGs::new(
-                &k_off,
-                &tree_10,
-                ivl,
-                CurvePropertyType::PerpendicularToVector,
-                None,
-                vec![dir],
-            );
             let perp_on = CurvePropertyGs::new(
                 &k_on,
                 &tree_10,
@@ -5347,17 +5343,8 @@ mod tests {
                 None,
                 vec![dir],
             );
-            assert!(perp_off.may_contain_answers(&branch_10).unwrap());
             assert!(!perp_on.may_contain_answers(&branch_10).unwrap());
 
-            let max_off = CurvePropertyGs::new(
-                &k_off,
-                &tree_10,
-                ivl,
-                CurvePropertyType::MaximaToPlane,
-                None,
-                vec![Vec3::ZERO, dir],
-            );
             let max_on = CurvePropertyGs::new(
                 &k_on,
                 &tree_10,
@@ -5366,7 +5353,6 @@ mod tests {
                 None,
                 vec![Vec3::ZERO, dir],
             );
-            assert!(max_off.may_contain_answers(&branch_10).unwrap());
             assert!(!max_on.may_contain_answers(&branch_10).unwrap());
         }
 
@@ -5432,10 +5418,8 @@ mod tests {
             .unwrap(),
         );
         let ivl = parabola.natural_interval();
-        let k_off = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.curve_property_gs_branch_bounds = true;
-        let cache = make_curve_cache::<OperandObject>(&k_off, &parabola, None).unwrap();
+        let k_on = Kernel::default();
+        let cache = make_curve_cache::<OperandObject>(&k_on, &parabola, None).unwrap();
         let tree = cache.tree().unwrap();
 
         let cases = [
@@ -5447,43 +5431,27 @@ mod tests {
                 opt_vectors: &vecs,
                 ..PropertyAnalysisOptions::default()
             };
-            let res_off = parabola
-                .global_property_analysis(&k_off, &ivl, prop, 1e-6, &opts)
-                .unwrap();
             let res_on = parabola
                 .global_property_analysis(&k_on, &ivl, prop, 1e-6, &opts)
                 .unwrap();
-            assert_eq!(res_off.solutions.len(), 1);
             assert_eq!(res_on.solutions.len(), 1);
-            let sol_off = res_off.solutions.get_at(0).unwrap();
             let sol_on = res_on.solutions.get_at(0).unwrap();
-            let t_off = sol_off.start.param(0).unwrap();
             let t_on = sol_on.start.param(0).unwrap();
-            assert!((t_off - 0.5).abs() < 1e-9);
             assert!((t_on - 0.5).abs() < 1e-9);
             let deriv = parabola.evaluate(&k_on, t_on, 1, true, true).unwrap();
             assert!(deriv[1].dot(Vec3::Y).abs() < 1e-9);
 
-            let gs_off = CurvePropertyGs::new(&k_off, tree, ivl, prop, None, vecs.clone());
-            let mut gs_off = gs_off.with_curve(&parabola);
             let gs_on = CurvePropertyGs::new(&k_on, tree, ivl, prop, None, vecs.clone());
             let mut gs_on = gs_on.with_curve(&parabola);
-            let mut sols_off = SolutionArray::new();
             let mut sols_on = SolutionArray::new();
-            let req_off = SolveRequest {
+            let req_on = SolveRequest {
                 operation: SolverOperation::Find,
                 solution_requested: SolutionRequested::All,
                 tolerance_3d: 1e-6,
                 best_answer_so_far_sq: BIG_DOUBLE,
-                opt_vectors: &[],
-            };
-            let req_on = SolveRequest {
                 opt_vectors: &vecs,
-                ..req_off
             };
-            gs_off.solve_it(&req_off, &mut sols_off).unwrap();
             gs_on.solve_it(&req_on, &mut sols_on).unwrap();
-            assert!(gs_on.base.branches_visited < gs_off.base.branches_visited);
         }
     }
 }

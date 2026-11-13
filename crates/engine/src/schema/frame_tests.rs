@@ -47,6 +47,7 @@ fn schemas_and_the_key_check_agree() {
             "body_name",
             "exact_regions",
             "lines",
+            "locate",
             "mirror",
             "name",
             "names",
@@ -57,7 +58,7 @@ fn schemas_and_the_key_check_agree() {
             "sketch",
         ],
     );
-    assert_keys(input_schema_for::<ProfileListParams>(), &[]);
+    assert_keys(input_schema_for::<ProfileListParams>(), &["family"]);
     assert_keys(input_schema_for::<ProfilePropertiesParams>(), &["density", "profile"]);
     assert_keys(input_schema_for::<ProfileInsertParams>(), &["anchor", "angle", "at", "fixed", "profile", "sketch"]);
 }
@@ -110,6 +111,11 @@ fn strict_keeps_todays_errors() {
         member(json!({"profile": {"kind": "bar", "width": " ", "height": 5}})),
         member(json!({"profile": {"kind": "rect_tube", "width": 10, "height": 10, "wall": 5}})),
         member(json!({"profile": {"kind": "bar", "width": "nonsense(", "height": 5}})),
+        member(json!({"profile": {"size": "RSC 999x99"}})),
+        member(json!({"profile": {"size": 5}})),
+        member(json!({"profile": {"size": "RSC 203x89", "height": 200}})),
+        member(json!({"profile": {"size": "RSC 203x89", "kind": "angle"}})),
+        member(json!({"profile": {"kind": "channel", "height": 100, "width": 50, "web": 6, "flange": 8, "flange_slope": 45}})),
         member(json!({"lines": []})),
         member(json!({"lines": "l1"})),
         member(json!({"lines": [1]})),
@@ -136,6 +142,10 @@ fn strict_keeps_todays_errors() {
         member(json!({"participants": 5})),
         member(json!({"participants": [5]})),
         member(json!({"participants": ["Nobody"]})),
+        // frame.profile.list
+        ("frame.profile.list", json!({"family": "XYZ"})),
+        ("frame.profile.list", json!({"family": 5})),
+        ("frame.profile.list", json!({"family": "rsc"})),
         // frame.profile.properties
         ("frame.profile.properties", json!({})),
         ("frame.profile.properties", json!({"profile": null})),
@@ -343,9 +353,20 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"sketch": "Frame", "profile": tube(), "anchor": "middle"}), false),
             (json!({"sketch": "Frame", "profile": tube(), "angle": true}), false),
             (json!({"sketch": "Frame", "profile": tube(), "body_names": ["a"]}), false),
+            (json!({"sketch": "Frame", "profile": {"size": "RSC 203x89"}}), true),
+            (json!({"sketch": "Frame", "profile": {"size": "RSC 203x89", "kind": "channel"}}), true),
+            (json!({"sketch": "Frame", "profile": {"size": "RSC 203x89", "height": 200}}), false),
+            (json!({"sketch": "Frame", "profile": {"size": ""}}), false),
+            (
+                json!({"sketch": "Frame", "profile": {"kind": "channel", "height": 100, "width": 50, "web": 6, "flange": 8, "flange_slope": "5 deg"}}),
+                true,
+            ),
         ],
     );
-    takes(input_schema_for::<ProfileListParams>(), &[(json!({}), true), (json!({"kind": "bar"}), false)]);
+    takes(
+        input_schema_for::<ProfileListParams>(),
+        &[(json!({}), true), (json!({"family": "RSC"}), true), (json!({"family": "rsc"}), false), (json!({"kind": "bar"}), false)],
+    );
     takes(
         input_schema_for::<ProfilePropertiesParams>(),
         &[
@@ -385,7 +406,8 @@ fn the_name_patterns_are_the_blank_pattern() {
     let properties = input_schema_for::<ProfilePropertiesParams>();
     let properties = properties.as_value();
     let kinds = properties["$defs"]["ProfileParam"]["anyOf"].as_array().cloned().unwrap_or_default();
-    assert_eq!(kinds.len(), frame::profile_kinds().len());
+    // One schema per kind, and one for a standard size by name.
+    assert_eq!(kinds.len(), frame::profile_kinds().len() + 1);
     assert_eq!(kinds[0]["properties"]["width"]["anyOf"][1]["pattern"], json!(blank));
 }
 
@@ -442,7 +464,15 @@ fn profile_library_replies_match_the_output_schema() {
     let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
     let listed = run("frame.profile.list", json!({}));
     matches(output_schema_for::<ProfileListResult>(), "frame.profile.list", &listed);
-    assert_eq!(listed, json!({"kinds": frame::profile_kinds()}));
+    assert_eq!(listed["kinds"], json!(frame::profile_kinds()));
+    let families: Vec<&str> = listed["sizes"].as_array().into_iter().flatten().filter_map(|f| f["family"].as_str()).collect();
+    assert_eq!(families, ["RSC", "PFC", "RSA", "SHS", "RHS", "CHS"]);
+    let only = run("frame.profile.list", json!({"family": "CHS"}));
+    matches(output_schema_for::<ProfileListResult>(), "frame.profile.list", &only);
+    assert_eq!(only["sizes"].as_array().map(Vec::len), Some(1), "{only}");
+    let sized = run("frame.profile.properties", json!({"profile": {"size": "RSC 203x89"}}));
+    matches(output_schema_for::<ProfilePropertiesResult>(), "frame.profile.properties", &sized);
+    assert_eq!(sized["size"], json!("RSC 203x89"));
     let kinds = listed["kinds"].as_array().cloned().unwrap_or_default();
     assert_eq!(kinds.len(), 7);
     for kind in &kinds {

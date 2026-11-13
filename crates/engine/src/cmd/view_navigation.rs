@@ -1,7 +1,7 @@
 //! Stateless camera commands shared by the navigation cube and programmatic callers.
 use serde_json::{Value, json};
 use solidcraft_geom::prelude::*;
-use solidcraft_render::{Camera, StandardView};
+use solidcraft_viewport::{Camera, StandardView};
 
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
@@ -28,6 +28,7 @@ const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContrac
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
 const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
 const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
+const ORIGIN_AXES_ACROSS_VIEW_CONTRACT: TypedContract<crate::schema::view_navigation::OriginAxesAcrossViewParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -130,6 +131,8 @@ CommandSpec::new("view.graphics_preset", "Graphics Preset", crate::checked!("vie
     .icon("settings").noundo().doc_only().contract(&GRAPHICS_PRESET_CONTRACT).output(output_schema_for::<GraphicsPresetResult>).params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
 CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!("view.ambient_occlusion", ambient_occlusion))
     .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
+CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole View", crate::checked!("view.origin_axes_across_view", origin_axes_across_view))
+    .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
 CommandSpec::new("view.perspective", "Perspective view", perspective)
     .icon("perspective").noundo().doc_only().params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
@@ -243,7 +246,19 @@ fn normal_target(s: &Session) -> Option<(solidcore_record::Vec3, solidcore_recor
             let plane = state.body(body)?.body.planar_face(*index)?;
             Some((*point, plane.normal()))
         }
-        Sel::Plane { name } => solidcore_record::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
+        Sel::Plane { name } => {
+            // The design's world planes keep the precedence they always had: `XY` looks at the
+            // design's XY plane before a construction plane of the same name answers (an older
+            // design can hold one named `XY`) (#7313 review). A component origin key follows
+            // its placement, with a construction plane of the same name still winning over it.
+            let feature = || crate::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, plane)| plane);
+            let plane = if crate::origins::datum(name).is_some() {
+                feature().or_else(|| s.origin_plane(name))
+            } else {
+                solidcore_record::Plane::named(name).or_else(feature)
+            };
+            plane.map(|plane| (plane.origin, plane.normal()))
+        }
         _ => None,
     })
 }
@@ -653,7 +668,7 @@ pub(crate) fn square_heading(yaw: f64) -> f64 {
 mod tests {
     use super::*;
     use solidcore_record::Vec3;
-    use solidcraft_render::UpAxis;
+    use solidcraft_viewport::UpAxis;
 
     #[test]
     fn view_bar_commands_validate_json_without_editing_design_or_history() {
@@ -1094,6 +1109,13 @@ fn angle_readout(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// Origin-axis display is an application preference, not a design edit.
+fn origin_axes_across_view(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.origin_axes_across_view";
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
+    typed_reply(cmd, crate::schema::view_navigation::OriginAxesAcrossViewResult { enabled, param_warnings: Vec::new() })
+}
+
 fn next_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
     tab_step(1)
 }
@@ -1110,6 +1132,22 @@ fn tab_step(step: i8) -> Result<Value> {
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
+
+    #[test]
+    fn origin_axes_across_view_validates_without_editing_design_history_or_camera() {
+        for param_check in crate::schema::ParamCheck::ALL {
+            let mut s = Session { param_check, ..Session::default() };
+            let design = s.doc.to_json();
+            for enabled in [true, false] {
+                assert_eq!(s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+            }
+            for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+                assert!(s.execute("view.origin_axes_across_view", &params).is_err(), "{param_check:?}: {params}");
+            }
+            assert_eq!(s.doc.to_json(), design);
+            assert!(s.undo.is_empty() && s.camera.is_none());
+        }
+    }
 
     #[test]
     fn angle_readout_validates_display_setting_without_editing_design_or_history() {

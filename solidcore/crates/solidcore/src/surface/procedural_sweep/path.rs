@@ -1036,10 +1036,15 @@ pub(crate) fn rounding_floor(size: f64, reach: f64) -> f64 {
     gamma(96) * (size + reach) * 4.0
 }
 
-/// `v` turned right-handed about the unit `axis` by `angle`.
-fn rodrigues(v: Vec3, axis: Vec3, angle: f64) -> Vec3 {
+/// `v` turned right-handed about the unit `axis` by `angle` (Rodrigues): the one rotation the
+/// sweeps' frames use (this module's arcs, `sweep::stations`' pieces and corners).
+pub(crate) fn rodrigues(v: Vec3, axis: Vec3, angle: f64) -> Vec3 {
     v * angle.cos() + axis.cross(v) * angle.sin() + axis * (axis.dot(v) * (1.0 - angle.cos()))
 }
+
+/// Two unit tangents meet G1 where they are at most this far apart (docs/procedural-sweep.md
+/// section 3.1): the one rule for a path's joints, here and in `sweep::stations`.
+pub(crate) const G1_TANGENTS: f64 = 1e-8;
 
 /// The unit tangent of `path` at `t`, from the left or the right.
 fn unit_tangent(path: &BSplineCurve, t: f64, from_left: bool) -> Result<Vec3> {
@@ -1123,7 +1128,7 @@ fn spans_of(
             None => start_normal,
             Some(prev) => {
                 let x_end = unit_tangent(path, prev.to, true)?;
-                if (x_end - x0).length() > 1e-8 {
+                if (x_end - x0).length() > G1_TANGENTS {
                     return Err(bad("a joint of the path is not G1"));
                 }
                 match prev.kind {

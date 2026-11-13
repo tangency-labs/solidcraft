@@ -84,6 +84,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::offset::offset_executive::p2::local_operation_simple;
 use crate::offset::offset_geometry_creation::{FaceOffsetBrep, OffsetGeometryCreation};
+use crate::surface::implicit::AnalyticSupport;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -801,6 +802,13 @@ impl FaceOffsetBrep<MoveHandle> for MoveBrep<'_> {
 /// Whether face `f` lies on one of `targets` (the fork marks the target surfaces and
 /// asks whether a face's surface carries the mark; see the module deviations): nine
 /// points of the face's surface over its UV domain within `tol` of a target.
+///
+/// (not upstream) An analytic target (a plane, cylinder, cone, sphere or torus) is
+/// measured by its implicit equation ([`AnalyticSupport::implicit`]), the whole surface:
+/// its NURBS form is bounded to where it was made, the extent of the face it was offset
+/// from, and a face the move grew (a cap growing along a cone, two adjacent walls each
+/// extended to meet the other) reaches past that extent, where a drop onto the bounded
+/// form stops at its edge and finds the face off a surface it lies on.
 fn on_target(k: &Kernel, b: &Brep, f: FaceId, targets: &[Surface], tol: f64) -> Result<bool> {
     let Some(s) = crate::topology::face::p2::surface(b, f)? else {
         return Ok(false);
@@ -814,6 +822,13 @@ fn on_target(k: &Kernel, b: &Brep, f: FaceId, targets: &[Surface], tol: f64) -> 
         }
     }
     for t in targets {
+        if let Some(support) = AnalyticSupport::of(t) {
+            let implicit = support.implicit();
+            if points.iter().all(|&p| implicit.distance(p) <= tol) {
+                return Ok(true);
+            }
+            continue;
+        }
         let t_domain = t.natural_uv_domain_with_nurb(k)?;
         let mut all = true;
         for &p in &points {
@@ -1241,9 +1256,9 @@ impl OffsetFacesExecutive {
                 else {
                     continue;
                 };
-                // (DoDefeature always succeeds and hands back the base B-rep itself; with
-                // `fixes.defeature_refuses_open_base`, not upstream, it refuses a base it
-                // could not patch, put back, which is the refusal below)
+                // (upstream's DoDefeature always succeeds and hands back the base B-rep
+                // itself; here, not upstream (WR-656), it refuses a base it could not patch,
+                // put back, which is the refusal below)
                 match defeature.do_defeature(k) {
                     Err(e) if is_open_base_refusal(&e) => false,
                     r => {
@@ -1772,5 +1787,39 @@ mod tests {
         ex.move_faces(&mut k, &mut b, -2.0, tol).unwrap();
         let got = volume(&k, &mut b);
         assert!((got - 800.0).abs() <= 1e-9 * 800.0, "volume {got}");
+    }
+
+    /// Two adjacent walls of a 10 mm box moved out 1 each grow into each other: each lies
+    /// on its new plane past the extent of the wall it was offset from. They give the
+    /// 11 x 11 x 10 box (tangency-labs/solidcraft#14412).
+    #[test]
+    fn adjacent_walls_moved_out_grow_onto_their_planes() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let x = face_where(&b, |p| (p.x - 10.0).abs() < 1e-6);
+        let y = face_where(&b, |p| (p.y - 10.0).abs() < 1e-6);
+        let mut ex = OffsetFacesExecutive::new();
+        ex.offset_faces(&mut k, &mut b, &[x, y], 1.0).unwrap();
+        let got = volume(&k, &mut b);
+        assert!((got - 1210.0).abs() <= 1e-9 * 1210.0, "volume {got}");
+    }
+
+    /// A face lies on a plane however far it reaches past the extent the plane was made
+    /// over: a cap grown along its cone, here the top of a 10 mm box against the plane of
+    /// a 1 mm box's top at the same height.
+    #[test]
+    fn a_face_past_its_target_planes_extent_lies_on_it() {
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let small = create_box(&mut k, Point3::new(0.0, 0.0, 9.0), 1.0, 1.0, 1.0).unwrap();
+        let top = face_where(&b, |p| (p.z - 10.0).abs() < 1e-6);
+        let small_top = face_where(&small, |p| (p.z - 10.0).abs() < 1e-6);
+        let plane = crate::topology::face::p2::surface(&small, small_top)
+            .unwrap()
+            .unwrap()
+            .clone();
+        assert!(on_target(&k, &b, top, std::slice::from_ref(&plane), 1e-6).unwrap());
+        let bottom = face_where(&b, |p| p.z.abs() < 1e-6);
+        assert!(!on_target(&k, &b, bottom, &[plane], 1e-6).unwrap());
     }
 }

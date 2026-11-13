@@ -1144,7 +1144,7 @@ pub struct UnlockResult {
 // ---------------------------------------------------------------------------------------------
 
 /// The message of a handler's refusal, to give whole.
-fn refusal(e: crate::EngineError) -> String {
+pub(crate) fn refusal(e: crate::EngineError) -> String {
     match e {
         crate::EngineError::BadParams { msg, .. } => msg,
         e => e.to_string(),
@@ -1185,11 +1185,13 @@ fn without(mut value: Value, keys: &[&str]) -> Value {
 /// in size, with its message `key must contain three finite numbers` for anything else, `null`
 /// included.
 fn move_point_key<'de, D: Deserializer<'de>>(d: D, key: &str, coordinate: bool) -> Result<Option<Point3>, D::Error> {
+    move_point_value::<D::Error>(Value::deserialize(d)?, key, coordinate)
+}
+
+fn move_point_value<E: serde::de::Error>(value: Value, key: &str, coordinate: bool) -> Result<Option<Point3>, E> {
     let mut one = serde_json::Map::new();
-    one.insert(key.to_string(), Value::deserialize(d)?);
-    crate::cmd::move_vector(&Value::Object(one), key, Vec3::ZERO, coordinate, "")
-        .map(|v| Some(Point3(v)))
-        .map_err(|e| D::Error::custom(whole(refusal(e))))
+    one.insert(key.to_string(), value);
+    crate::cmd::move_vector(&Value::Object(one), key, Vec3::ZERO, coordinate, "").map(|v| Some(Point3(v))).map_err(|e| E::custom(whole(refusal(e))))
 }
 
 macro_rules! move_point {
@@ -1201,6 +1203,24 @@ macro_rules! move_point {
 }
 
 move_point!(translate_key, "translate", true);
+
+/// `occurrence.move`'s `translate`: three numbers, or three entries of which some are length
+/// expressions (#8192). Whether the expressions work out is the handler's to say.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MoveTranslate {
+    Point(Point3),
+    Exprs(PointExpr3),
+}
+
+fn move_translate_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MoveTranslate>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if matches!(&v, Value::Array(a) if a.len() == 3 && a.iter().any(Value::is_string)) {
+        return PointExpr3::deserialize(&v)
+            .map(|p| Some(MoveTranslate::Exprs(p)))
+            .map_err(|_| D::Error::custom(whole("translate entries must be numbers or length expressions")));
+    }
+    move_point_value::<D::Error>(v, "translate", true).map(|p| p.map(MoveTranslate::Point))
+}
 move_point!(axis_key, "axis", false);
 move_point!(origin_key, "origin", true);
 move_point!(at_key, "at", true);
@@ -1415,26 +1435,56 @@ fn drag_schema(schema: &mut Schema) {
 
 fn move_schema(schema: &mut Schema) {
     require(schema, "occurrence");
-    schema.insert("allOf".into(), json!(["translate", "axis", "angle", "origin"].map(|key| json!({"not": {"required": ["matrix", key]}}))));
+    let mut pairs: Vec<Value> = ["translate", "axis", "angle", "origin"].map(|key| json!({"not": {"required": ["matrix", key]}})).into();
+    for target in ["to", "to_matrix"] {
+        for key in ["translate", "axis", "angle", "origin", "matrix", "base_transform"] {
+            pairs.push(json!({"not": {"required": [target, key]}}));
+        }
+    }
+    pairs.push(json!({"not": {"required": ["to", "to_matrix"]}}));
+    schema.insert("allOf".into(), Value::Array(pairs));
 }
 
-/// `sketches` as `string_list` reads it (one name or a list, with its messages), where `null`,
-/// `[]` and a missing key all get the handler's `` `sketches` must list sketches ``.
-fn sketch_names<'de, D: Deserializer<'de>>(d: D) -> Result<Option<super::config::NameList>, D::Error> {
-    let v = Value::deserialize(d)?;
-    let names = if v.is_null() { Default::default() } else { super::config::NameList::deserialize(v).map_err(D::Error::custom)? };
-    if names.0.is_empty() { Err(D::Error::custom(whole("`sketches` must list sketches"))) } else { Ok(Some(names)) }
+/// `sketches` as `name_or_id_values` reads it (one name, or a list of names and ids, with its
+/// messages), where `null`, `[]` and a missing key all get the handler's
+/// `` `sketches` must list sketches ``.
+fn sketch_names<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SketchKeys>, D::Error> {
+    // Each message starts with "must", so the check names the key in front, as the reader does.
+    let keys = match Value::deserialize(d)? {
+        Value::Null => Vec::new(),
+        v @ Value::String(_) => vec![v],
+        Value::Array(list) if list.len() > params::MAX_STRING_LIST => {
+            return Err(D::Error::custom(format!("must list at most {} keys", params::MAX_STRING_LIST)));
+        }
+        Value::Array(list) => {
+            if let Some((i, v)) = list.iter().enumerate().find(|(_, v)| !v.is_string() && !v.is_u64()) {
+                return Err(D::Error::custom(format!("must list names or ids; the entry {} is {}", i + 1, params::json_brief(v))));
+            }
+            list
+        }
+        v => return Err(D::Error::custom(format!("must be a list of names or ids; it is {}", params::json_brief(&v)))),
+    };
+    if keys.is_empty() { Err(D::Error::custom(whole("`sketches` must list sketches"))) } else { Ok(Some(SketchKeys(keys))) }
 }
+
+/// The sketches' keys, each a name or an id as given (not serialized, so the schema keeps no
+/// `null` default).
+#[derive(Debug)]
+pub struct SketchKeys(pub Vec<Value>);
 
 fn sketch_names_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "The sketches, by id or name as text: one, or a list of 1 to 10000.",
-        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": params::MAX_STRING_LIST}]
+        "description": "The sketches: one name, or a list of 1 to 10000 names and ids. A number is an id; a string is an exact name, then an id.",
+        "anyOf": [
+            {"type": "string"},
+            {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]}, "minItems": 1, "maxItems": params::MAX_STRING_LIST}
+        ]
     })
 }
 
-/// Make every pending occurrence move the occurrence's placement. The exploded view is shown,
-/// never captured: it stays shown, and the design keeps its placements.
+/// Make every pending occurrence move the occurrence's placement, and save every moving joint's
+/// current values for Revert Position. The exploded view is shown, never captured: it stays
+/// shown, and the design keeps its placements.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CapturePositionParams {}
@@ -1444,13 +1494,16 @@ pub struct CapturePositionParams {}
 pub struct CapturePositionResult {
     /// How many pending moves became the occurrences' placements.
     pub captured: usize,
+    /// How many joints had their current values saved, for Revert Position to put back.
+    pub joints: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
 
-/// Drop pending occurrence moves, putting the occurrences back where they were captured. Not an
-/// undo step.
+/// Drop pending occurrence moves, putting the occurrences back where they were captured. Without
+/// `occurrences`, the joints also go back to the values Capture Position saved, clamped to their
+/// limits. One undo step, not a history step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct RevertPositionParams {
@@ -1465,6 +1518,9 @@ pub struct RevertPositionParams {
 pub struct RevertPositionResult {
     /// How many pending moves were dropped.
     pub reverted: usize,
+    /// How many joints went back to the values Capture Position saved (clamped to their
+    /// limits). Only when every occurrence is reverted (no `occurrences`).
+    pub joints: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1688,9 +1744,9 @@ pub struct MoveKeys {
     #[schemars(with = "MoveSpace")]
     pub space: Option<MoveSpace>,
     /// Move by this much, in mm. Default: no move. Not with `matrix`.
-    #[serde(default, deserialize_with = "translate_key", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Point3")]
-    pub translate: Option<Point3>,
+    #[serde(default, deserialize_with = "move_translate_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointExpr3")]
+    pub translate: Option<MoveTranslate>,
     /// The axis to turn about, not zero when `angle` is. Default: Z. Not with `matrix`.
     #[serde(default, deserialize_with = "axis_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point3")]
@@ -1709,8 +1765,18 @@ pub struct MoveKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "MatrixParam")]
     pub matrix: Option<MatrixParam>,
-    /// With `matrix`: the largest accepted |RᵀR − I| per entry. Default: 1e-9. Read only with
-    /// `matrix`.
+    /// Absolute placement (#12150): where the occurrence goes in `space`, not a move. Not with
+    /// `translate`, `axis`, `angle`, `origin`, `matrix`, `to_matrix` or `base_transform`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub to: Option<MoveTo>,
+    /// Absolute placement as a rigid matrix, in the form `matrix` takes: where the occurrence goes
+    /// in `space`, not a move. Not with `translate`, `axis`, `angle`, `origin`, `matrix`, `to` or
+    /// `base_transform`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "MatrixParam")]
+    pub to_matrix: Option<MatrixParam>,
+    /// With `matrix` or `to_matrix`: the largest accepted |RᵀR − I| per entry. Default: 1e-9.
+    /// Read only with those.
     #[serde(default)]
     pub tolerance: Option<MatrixTolerance>,
     /// `true` makes the move the occurrence's placement now; `false` keeps it pending until
@@ -1727,6 +1793,20 @@ pub struct MoveKeys {
     pub base_transform: Option<BaseTransform>,
 }
 
+/// `occurrence.move`'s `to`: a placement as a position and a turn about an axis through it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveTo {
+    /// Where the occurrence's origin goes, in mm.
+    pub position: Point3,
+    /// The axis of its turn from the frame's axes. Default: Z.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub axis: Option<Point3>,
+    /// The turn about `axis`: radians, or an angle expression. Default: 0.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub angle: Option<MoveAngle>,
+}
+
 /// `occurrence.move`'s parameters: [`MoveKeys`], read as the handler reads them: with `matrix`,
 /// `translate`, `axis`, `angle` and `origin` are refused and `tolerance` is read; without it,
 /// `tolerance` is not.
@@ -1736,6 +1816,23 @@ pub struct MoveParams(pub MoveKeys);
 impl<'de> Deserialize<'de> for MoveParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let mut value = Value::deserialize(d)?;
+        let absolute = ["to", "to_matrix"].into_iter().filter(|k| value.get(*k).is_some()).collect::<Vec<_>>();
+        if let Some(key) = absolute.first() {
+            if absolute.len() > 1 {
+                return Err(D::Error::custom(whole("give either to or to_matrix, not both")));
+            }
+            if let Some(k) = ["translate", "axis", "angle", "origin", "matrix", "base_transform"].into_iter().find(|k| value.get(*k).is_some()) {
+                return Err(D::Error::custom(whole(format!("give either {key} or {k}, not both"))));
+            }
+            if *key == "to_matrix" {
+                let tolerance = crate::cmd::matrix_tolerance(&value, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
+                crate::cmd::rigid_matrix(value.get("to_matrix").unwrap_or(&Value::Null), tolerance, "")
+                    .map_err(|e| D::Error::custom(whole(refusal(e))))?;
+                return staged(&value, &[&["occurrence"], &["space"], &["path"]]).map(MoveParams);
+            }
+            value = without(value, &["tolerance"]);
+            return staged(&value, &[&["occurrence"], &["to"], &["space"], &["path"]]).map(MoveParams);
+        }
         if value.get("matrix").is_some() {
             read_stages::<MoveKeys, D::Error>(&value, &[&["occurrence"]])?;
             if let Some(key) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| value.get(*k).is_some()) {
@@ -1939,7 +2036,7 @@ pub struct MoveSketchesParams {
     // out, `null` or empty, the handler refuses the call with its own message.
     #[serde(default, deserialize_with = "sketch_names")]
     #[schemars(schema_with = "sketch_names_schema")]
-    pub sketches: Option<super::config::NameList>,
+    pub sketches: Option<SketchKeys>,
     /// The component they go to, by id or name.
     #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentRef")]

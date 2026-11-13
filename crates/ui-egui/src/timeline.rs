@@ -1,7 +1,7 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
-use crate::ui_kit::{Container, Edge, Status, Surface};
-use egui::{Rect, UiBuilder, pos2};
+use crate::ui_kit::Status;
+use egui::{Rect, pos2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{
     FeatureKind, FeatureResult, PlaneRef, SketchId,
@@ -40,7 +40,9 @@ pub(crate) fn affected_bodies_menu(app: &mut SolveApp, ui: &mut egui::Ui, id: u6
                 ui.strong(solidcraft_ui_text::tr(label));
                 for body in bodies {
                     let label = match body.component_name {
-                        Some(component) => solidcraft_ui_text::format("timeline.effects.body_component", &[("body", &body.name), ("component", &component)]),
+                        Some(component) => {
+                            solidcraft_ui_text::format("timeline.effects.body_component", &[("body", &body.name), ("component", &component)])
+                        }
                         None => body.name.clone(),
                     };
                     let available = !body.selectable_bodies.is_empty();
@@ -99,20 +101,86 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
     if app.close_editor_for_history().is_err() {
         return;
     }
+    if control == crate::ui_kit::HistoryTransport::Play {
+        app.start("timeline.play");
+        return;
+    }
     let n = app.session.doc.features.len();
-    let marker = app.session.doc.marker.unwrap_or(n);
-    let position = match control {
-        crate::ui_kit::HistoryTransport::First => 0,
-        crate::ui_kit::HistoryTransport::Back => marker.saturating_sub(1),
-        crate::ui_kit::HistoryTransport::Play => {
-            app.start("timeline.play");
-            return;
-        }
-        crate::ui_kit::HistoryTransport::Forward => marker.saturating_add(1).min(n),
-        crate::ui_kit::HistoryTransport::Last => n,
+    let Some(position) = step_position(app, app.session.doc.marker.unwrap_or(n), control) else {
+        // The marker stays, but the click still takes over from playback, as a step does.
+        stop_playback(app);
+        return;
     };
     let params = if position < n { json!({"position":position}) } else { json!({}) };
     let _ = app.run_heavy("timeline.roll_to", params);
+}
+
+/// Where a step control (not Play) takes the marker from `marker`, or `None` when it keeps it.
+/// The steps are the features the History shows: in the bottom bar, only those of the component
+/// it shows (`timeline_scope`, #11430). A step lands where dropping the marker in that slot would.
+fn step_position(app: &SolveApp, marker: usize, control: crate::ui_kit::HistoryTransport) -> Option<usize> {
+    use crate::ui_kit::HistoryTransport;
+    let n = app.session.doc.features.len();
+    let view = transport_view(app);
+    let len = view.len();
+    if len == 0 && n > 0 {
+        return None;
+    }
+    let slot = view.slot(marker);
+    let slot = match control {
+        HistoryTransport::First => 0,
+        HistoryTransport::Back => slot.saturating_sub(1),
+        HistoryTransport::Play => return None,
+        HistoryTransport::Forward => slot.saturating_add(1).min(len),
+        HistoryTransport::Last => len,
+    };
+    let position = view.index(slot);
+    // From a marker outside the shown features, the nearest shown slot can lie the other way:
+    // First and Back never add features, and Forward and Last never roll any back.
+    let backwards = matches!(control, HistoryTransport::First | HistoryTransport::Back);
+    if (backwards && position > marker) || (!backwards && position < marker) { None } else { Some(position) }
+}
+
+/// Whether a History control would do anything now: a step that moves the marker, or Play (Stop
+/// while History plays) when it can run. Only Play says why not: a dimmed step already says the
+/// marker is at that end.
+pub(crate) fn transport_effect(app: &SolveApp, control: crate::ui_kit::HistoryTransport) -> Result<(), Option<String>> {
+    transport_availability(app, control).map_err(Some)?;
+    if control == crate::ui_kit::HistoryTransport::Play {
+        return Ok(());
+    }
+    // An open feature editor has rolled the marker to its feature; a step starts from the
+    // design's own marker, which it gets back when the step closes the editor (#10688).
+    let doc = app.editing_state.as_ref().map_or(&app.session.doc, |editing| &editing.original.doc);
+    let marker = doc.marker.unwrap_or(doc.features.len());
+    match step_position(app, marker, control) {
+        Some(position) if position != marker => Ok(()),
+        _ => Err(None),
+    }
+}
+
+/// The History folder's menu, with History in the browser: the History controls (first,
+/// previous, Play History when shown, next, last), each greyed out while it would do nothing,
+/// then the controls' own menu.
+pub(crate) fn history_folder_items(app: &SolveApp) -> Vec<Item> {
+    let playing = app.timeline_playback.is_some();
+    let mut items: Vec<Item> = crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button)
+        .iter()
+        .map(|&control| {
+            let icon = match control {
+                crate::ui_kit::HistoryTransport::Play if playing => "timeline_stop".to_owned(),
+                _ => format!("timeline_{}", control.id()),
+            };
+            let effect = transport_effect(app, control);
+            Item::action("ui.historyTransport", control.label(playing, play_labels()), &icon)
+                .with(json!({ "control": control.id() }))
+                .on(effect.is_ok())
+                .off_because(effect.err().flatten())
+        })
+        .collect();
+    items.push(Item::sep());
+    items.extend(transport_items(app));
+    items
 }
 
 /// Shared-header actions use the same command availability as History playback.
@@ -128,33 +196,26 @@ pub(crate) fn transport_availability(app: &SolveApp, control: crate::ui_kit::His
     if info.enabled { Ok(()) } else { Err(info.disabled_reason.unwrap_or_else(|| info.label.to_owned())) }
 }
 
-/// A click runs a History control; a right-click offers to show or hide the Play button.
-pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport, response: &egui::Response) {
-    for action in history_bar::transport_actions(control, response) {
-        run_control_action(app, action);
-    }
-}
+/// The features the History controls step through: those the bottom bar shows (one component's
+/// and those inside it while the bar shows one, without the components kept out of the bar), or
+/// every feature for the History on the left or in the browser, or when Preferences > Layout
+/// turns "History steps by component" off.
+fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
+    let doc = &app.session.doc;
+    use solidcraft_engine::panels::{SectionLocation, Zone};
 
-/// Runs what a History control asked for (the bar's other actions are its strip's).
-fn run_control_action(app: &mut SolveApp, action: history_bar::Action) {
-    use crate::ui_kit::HistoryTransport;
-    let control = match action {
-        history_bar::Action::Seek(history_bar::Seek::First) => HistoryTransport::First,
-        history_bar::Action::Seek(history_bar::Seek::Back) => HistoryTransport::Back,
-        history_bar::Action::Play => HistoryTransport::Play,
-        history_bar::Action::Seek(history_bar::Seek::Forward) => HistoryTransport::Forward,
-        history_bar::Action::Seek(history_bar::Seek::Last) => HistoryTransport::Last,
-        history_bar::Action::ControlsMenu { at } => {
-            crate::context_menu::open_for(app, at, crate::context_menu::Target::HistoryControls);
-            return;
-        }
-        history_bar::Action::Seek(history_bar::Seek::Slot { .. })
-        | history_bar::Action::Select { .. }
-        | history_bar::Action::Edit(_)
-        | history_bar::Action::Menu { .. }
-        | history_bar::Action::Reorder { .. } => return,
-    };
-    run_transport(app, control);
+    let side_history = app.panel_runtime().is_some_and(|runtime| {
+        let layout = runtime.layout().layout();
+        layout.sections.iter().any(|section| {
+            matches!(section.location, SectionLocation::Dock { zone: Zone::Left | Zone::Right })
+                && section.tabs.iter().any(|instance| instance.0 == "history")
+        })
+    });
+    if side_history || app.preferences.history_in_browser || !app.preferences.history_steps_component {
+        return crate::timeline_fold::View::of(doc, None, true);
+    }
+    let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
+    crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden)
 }
 
 /// The History controls' menu: shows or hides the Play button, and — when the design marks any
@@ -303,12 +364,14 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Remove { .. } => "delete",
         FeatureKind::BoundingSolid { .. } => "bounding_solid",
         FeatureKind::Pipe { .. } => "pipe",
+        FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameMember { .. } => "frame_member",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
         FeatureKind::Coil { .. } => "coil",
         FeatureKind::SheetPerforate { .. } => "perforate",
+        FeatureKind::CellGrid { .. } => "perforate",
         FeatureKind::BoundaryFill { .. } => "boundary_fill",
         FeatureKind::Patch { .. } => "surface_patch",
         FeatureKind::Stitch { .. } => "surface_stitch",
@@ -453,7 +516,7 @@ fn delete_label(count: usize) -> String {
 /// one is among them, labelled with how many, else that feature alone (#5005).
 pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
     let targets = menu_targets(app, id);
-    if crate::context_menu::button(ui, &delete_label(targets.len()), "delete").clicked() {
+    if crate::ui_kit::menu::button(ui, &delete_label(targets.len()), "delete").clicked() {
         delete_features(app, targets);
         ui.close();
     }
@@ -488,7 +551,7 @@ fn after_marker(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Opt
 /// The [`after_marker`] entry as a button.
 pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
     let Some((label, ids)) = after_marker(app, id, index, marker, shown) else { return };
-    if crate::context_menu::button(ui, &label, "delete").clicked() {
+    if crate::ui_kit::menu::button(ui, &label, "delete").clicked() {
         delete_features(app, ids);
         ui.close();
     }
@@ -552,12 +615,12 @@ pub(crate) fn anchor_key(id: u64) -> String {
 
 /// Copy and Paste in a feature's timeline menu. Paste puts the copies at the history marker.
 pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
-    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label("Copy"), "copy").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Copy"), "copy").clicked() {
         let features = menu_targets(app, id);
         let _ = app.run("timeline.copy", json!({ "features": features }));
         ui.close();
     }
-    if crate::context_menu::button_enabled(ui, solidcraft_ui_text::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
+    if crate::ui_kit::menu::button_enabled(ui, solidcraft_ui_text::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
         let _ = app.run("timeline.paste", json!({}));
         ui.close();
     }
@@ -606,7 +669,7 @@ pub(crate) fn feature_status(app: &SolveApp, id: u64) -> Option<Status> {
 }
 
 /// The mark of the feature at `index` in the history, given how to find its result.
-fn status_at<'a>(app: &SolveApp, index: usize, result: impl FnOnce() -> Option<&'a solidcraft_engine::doc::FeatureResult>) -> Option<Status> {
+pub(crate) fn status_at<'a>(app: &SolveApp, index: usize, result: impl FnOnce() -> Option<&'a FeatureResult>) -> Option<Status> {
     let feature = app.session.doc.features.get(index)?;
     if feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker) {
         return None;
@@ -737,7 +800,7 @@ pub(crate) fn message_button(app: &SolveApp, ui: &mut egui::Ui, id: u64) {
     let Some(text) = feature_message(app, id) else { return };
     let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
     let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
-    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label(label), "copy").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label(label), "copy").clicked() {
         ui.ctx().copy_text(text);
         ui.close();
     }
@@ -753,7 +816,7 @@ pub(crate) fn sketch_plane_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64
     else {
         return;
     };
-    let response = crate::context_menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
+    let response = crate::ui_kit::menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
     if response.clicked() {
         crate::context_menu::run_item(app, &item, response.rect.center());
         ui.close();
@@ -775,18 +838,24 @@ fn select_range(app: &mut SolveApp, order: &[u64], id: u64, add: bool) {
     let _ = app.run("select.set", json!({ "items": items, "add": add }));
 }
 
-/// Give a History feature click to a compatible active dialog input in any layout.
+/// Give a History or Browser feature click to a compatible active dialog input in any layout.
 /// Plain clicks keep an existing pick; Ctrl/Command clicks toggle it off.
 pub(crate) fn pick_feature_into_dialog(app: &mut SolveApp, id: u64, modifiers: egui::Modifiers) -> bool {
     // A pattern or Mirror says why it does not take a sketch (#10057).
     if app.dialog.as_mut().is_some_and(|d| d.refuse_sketch(&app.session, id)) {
         return true;
     }
+    // The chat's picker takes the step into Features whichever list is active (#11318).
+    if let Some(d) = app.dialog.as_mut() {
+        d.activate_input_taking(crate::selection::FEATURES);
+    }
     let Some(d) = app.dialog.as_mut().filter(|d| d.active_input().is_some_and(|i| i.accept & crate::selection::FEATURES != 0)) else {
         return false;
     };
     let feature = solidcraft_engine::Sel::Feature { id };
-    if modifiers.command || modifiers.ctrl || !d.active_input().is_some_and(|i| i.items.contains(&feature)) {
+    // The chat's picker takes a picked step out on a plain click too, as the model view does.
+    let toggle = modifiers.command || modifiers.ctrl || matches!(d.kind, crate::dialogs::Kind::ChatContext);
+    if toggle || !d.active_input().is_some_and(|i| i.items.contains(&feature)) {
         d.pick(&app.session, feature);
     }
     true
@@ -851,7 +920,7 @@ fn playback_blocked(app: &SolveApp) -> bool {
         || app.session.active_sketch.is_some()
         || app.dialog.is_some()
         || app.tool.is_some()
-        || app.file_load.busy()
+        || app.file_load_holds()
         || app.file_picker.is_some()
         || app.saving.is_some()
         || app.applying.is_some()
@@ -932,50 +1001,12 @@ pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
     app.timeline_playback = Some(playback);
 }
 
-pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
-    crate::browser::sync_reveals(app);
-    let t = Tokens::get();
-    app.shell.history_dock_space = Some(ui.available_rect_before_wrap());
-    if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
-        let rect = floating_rect(ui.available_rect_before_wrap());
-        // A window too short for the card (the ribbon already fills it) leaves the history out
-        // rather than drawing into a negative-size rectangle.
-        if !rect.is_finite() || rect.width() < 1.0 || rect.height() < 30.0 {
-            app.shell.history = None;
-            return;
-        }
-        app.shell.history = Some(rect);
-        crate::scenario::publish_rect("history:card", rect);
-        let mut child = ui.new_child(UiBuilder::new().id_salt("sc_timeline").max_rect(rect));
-        Container::paint_panel_frame(
-            ui.painter(),
-            Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left),
-            rect,
-        );
-        child.set_clip_rect(rect);
-        timeline_contents(app, &mut child, true);
-    } else {
-        let host = Container::new(ui.ctx(), Surface::Panel);
-        let response = host.show_edge(ui, host.edge("sc_timeline", Edge::Bottom).exact_size(40.0), host.edge_frame(t.timeline), |ui| {
-            timeline_contents(app, ui, false);
-        });
-        let frame = host.edge_frame(t.timeline);
-        Container::paint_inset(ui.painter(), response.response.rect - frame.outer_margin, frame);
-        app.shell.history = Some(response.response.rect);
-        crate::scenario::publish_rect("history:strip", response.response.rect);
-    }
-}
-
-pub(crate) fn floating_rect(available: Rect) -> Rect {
-    Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
-}
-
 /// A folder's Edit Holes item, when it holds holes only: one Hole dialog for all of them.
 pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64) {
     if crate::hole_folder::holes(app, folder).is_none() {
         return;
     }
-    if crate::context_menu::button(ui, "Edit Holes", "hole").clicked() {
+    if crate::ui_kit::menu::button(ui, "Edit Holes", "hole").clicked() {
         if let Err(why) = crate::hole_folder::open(app, folder) {
             app.set_status(why, true);
         }
@@ -983,37 +1014,30 @@ pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64
     }
 }
 
-/// Where the bottom History bar publishes its grip, marker and feature chips.
-const BAR_HANDLES: history_bar::Handles<'static> =
-    history_bar::Handles { grip: "history:grip", marker: "history:marker", step: "timeline:", controls: "history:" };
+/// Where the bottom History strip publishes its marker and feature chips.
+const BAR_HANDLES: history_bar::Handles<'static> = history_bar::Handles { marker: "history:marker", step: "timeline:" };
 
 /// A feature as the bar draws it: id, name, icon, suppressed, type name, kind.
 type BarFeature = (u64, String, &'static str, bool, &'static str, TimelineKind);
+
+/// The History Play control's names: SolidCraft's commands that play and stop History.
+pub(crate) fn play_labels() -> crate::ui_kit::PlayLabels<'static> {
+    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr("cmd.timeline_play"), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
+}
 
 /// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
 fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
     let t = Tokens::get();
     history_bar::Bar {
-        title: solidcraft_ui_text::tr("ui.history_title"),
         marker_tip: solidcraft_ui_text::tr("ui.history_marker_tip"),
-        play: app.preferences.history_play_button,
-        playing: app.timeline_playback.is_some(),
-        accent: solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab),
-        drag_accent: solidcraft_theme::TabAccent::for_tab(&t, "SKETCH"),
+        accent: crate::workspace::tab_accent(&t, &app.ui.tab),
+        drag_accent: crate::workspace::tab_accent(&t, "SKETCH"),
         marker: 0,
         steps: 0,
         floating,
+        reorder: true,
         handles: BAR_HANDLES,
     }
-}
-
-fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
-    let head = history_bar::header(ui, &bar(app, floating), ui.max_rect());
-    crate::timeline_left::dock_drag(app, ui, &head.grip);
-    for action in head.actions {
-        run_control_action(app, action);
-    }
-    timeline_strip(app, ui, floating, head.x);
 }
 
 /// The shared host already supplies the title and declared playback controls.
@@ -1022,9 +1046,11 @@ pub(crate) fn panel_inline(app: &mut SolveApp, ui: &mut egui::Ui) {
     timeline_strip(app, ui, true, ui.max_rect().left());
 }
 
+/// Render the horizontal history strip and its interactive feature tiles, handling selection,
+/// edits, drags, and hover updates.
 fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32) {
     let t = Tokens::get();
-    let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
     let r = ui.max_rect();
     let p = ui.painter().clone();
     let n = app.session.doc.features.len();
@@ -1064,7 +1090,7 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
         let mut steps = BarSteps { app: &mut *app, history: &history, strip: &strip, feats: &feats, reveal, marker, marker_view };
         history_bar::strip(ui, &bar, r, strip_rect, ("history_strip", history.within), &mut steps)
     };
-    app.viewport.hover_feature = out.hovered;
+    crate::semantic_content::set_timeline_feature_hover(app, out.hovered);
     // The design's position of a slot; at the marker's, on the side of the marker the pointer is
     // on (features not shown may sit between it and the next one shown).
     let position = |slot: usize, before: bool| {
@@ -1081,7 +1107,7 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
             history_bar::Action::Edit(id) => app.edit_feature(id),
             // The same menu as the browser's, so the control channel reports it (#10745).
             history_bar::Action::Menu { step, at } => crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: step }),
-            history_bar::Action::Seek(history_bar::Seek::Slot { slot, before }) => {
+            history_bar::Action::Seek { slot, before } => {
                 let slot = position(slot, before);
                 let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
             }
@@ -1089,7 +1115,6 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
             history_bar::Action::Reorder { step, slot, before } => {
                 crate::timeline_folders::drop_feature(app, &history.folders, step, position(slot, before), before, marker.min(n));
             }
-            control => run_control_action(app, control),
         }
     }
 }
@@ -1216,7 +1241,7 @@ impl history_bar::Contents for BarSteps<'_> {
                 slot: i,
                 label: name,
                 icon,
-                icon_accent: crate::ui_kit::feature_icon_accent(ty, icon),
+                icon_accent: crate::workspace::feature_icon_accent(ty, icon),
                 state: history_bar::StepState {
                     selected: picked.contains(id),
                     highlighted: strip.from_view.contains(&Some(*id)),
@@ -1300,7 +1325,7 @@ mod tests {
         assert_eq!(super::folder_kind_icon(&h.app, both), None);
         // Both Histories draw it without trouble.
         for left in [false, true] {
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.frames(3);
         }
     }
@@ -1311,7 +1336,7 @@ mod tests {
         for left in [false, true] {
             let mut h = Harness::new();
             h.app.home.open = false;
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.app.preferences.history_group_joints = true;
             h.app.preferences.history_bar_groups = true;
             h.app.run("component.create", json!({"name":"Part"})).unwrap();
@@ -1493,7 +1518,7 @@ mod tests {
         for left in [false, true] {
             let mut h = Harness::new();
             h.app.preferences.language = "ja".into();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
             h.app.run("sketch.finish", json!({})).unwrap();
             h.frames(4);
@@ -1633,7 +1658,7 @@ mod tests {
 
     fn two_boxes(left: bool) -> Harness {
         let mut h = Harness::new();
-        h.app.preferences.timeline_left = left;
+        h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "First", "body_name": "One"})).unwrap();
         h.app
             .run(
@@ -1644,6 +1669,50 @@ mod tests {
         h.app.run("select.clear", json!({})).unwrap();
         h.frames(4);
         h
+    }
+
+    /// With History in the browser its bar is hidden, so a right-click on the History folder
+    /// offers the bar's controls, each greyed out while it would leave the marker where it is
+    /// (#14521).
+    #[test]
+    fn the_browser_history_folder_menu_steps_and_greys_out_what_would_not_move() {
+        let mut h = two_boxes(false);
+        let folder = crate::context_menu::Target::HistoryFolder;
+        assert!(crate::context_menu::check_target(&h.app, &folder).is_err(), "only the browser lists History as a folder");
+        h.app.run("view.history_layout", json!({"dock": "browser"})).unwrap();
+        h.frames(4);
+        assert!(crate::context_menu::check_target(&h.app, &folder).is_ok());
+        let enabled = |h: &Harness| -> Vec<(String, bool)> {
+            crate::context_menu::items(&h.app, &crate::context_menu::Target::HistoryFolder)
+                .into_iter()
+                .filter(|i| i.id == "ui.historyTransport")
+                .map(|i| (i.params.as_ref().and_then(|p| p["control"].as_str()).unwrap_or_default().to_owned(), i.enabled))
+                .collect()
+        };
+        let state = |pairs: [(&str, bool); 5]| pairs.map(|(c, on)| (c.to_owned(), on)).to_vec();
+        // At the end: only the steps back are on, and Play has nothing left to play.
+        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", false), ("forward", false), ("last", false)]));
+        let play = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.label == "Play History");
+        assert_eq!(play.and_then(|i| i.tip).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_roll_back")), "Play says why it is off");
+        // The bar's controls menu follows a separator.
+        let items = crate::context_menu::items(&h.app, &folder);
+        assert!(items.iter().any(|i| i.is_sep()) && items.iter().any(|i| i.id == "ui.historyPlayButton"));
+        // A right-click on the folder opens the menu; Go to beginning rolls to the start.
+        h.step(&json!({"click": {"browser": solidcraft_ui_text::tr("ui.history_title")}, "button": "right"})).unwrap();
+        assert_eq!(h.app.menu.target, folder);
+        h.call("ui.menuPick", json!({"item": solidcraft_ui_text::tr("ui.history_first")}));
+        h.frames(4);
+        assert_eq!(h.app.session.doc.marker, Some(0));
+        assert_eq!(enabled(&h), state([("first", false), ("back", false), ("play", true), ("forward", true), ("last", true)]));
+        // One step forward leaves every control something to do.
+        let forward = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.label == solidcraft_ui_text::tr("ui.history_forward"));
+        crate::context_menu::run_item(&mut h.app, &forward.unwrap(), egui::Pos2::ZERO);
+        h.frames(4);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert!(enabled(&h).iter().all(|(_, on)| *on), "{:?}", enabled(&h));
+        // With the Play button hidden, the menu leaves Play out, as the bar does.
+        h.app.preferences.history_play_button = false;
+        assert!(enabled(&h).iter().all(|(c, _)| c != "play"));
     }
 
     #[test]
@@ -1806,7 +1875,7 @@ mod tests {
     fn playback_refuses_to_start_while_other_history_work_waits() {
         let mut h = two_boxes(false);
         h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
-        h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 1})));
+        h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 1}), 0));
         assert!(h.app.run("timeline.play", json!({"action": "play"})).is_err(), "refused up front, not stopped a frame later");
         assert!(h.app.timeline_playback.is_none());
         h.app.deferred_queue.clear();
@@ -1835,12 +1904,7 @@ mod tests {
 
             let at = |name: &str| crate::scenario::handle_at(name).unwrap();
             let (back, play, forward) = (at("history:back"), at("history:play"), at("history:forward"));
-            let across = dock == "bottom" || width > 56.0;
-            if across {
-                assert!(back.x < play.x && play.x < forward.x, "Play sits between Previous and Next; {dock} {width}");
-            } else {
-                assert!(back.y < play.y && play.y < forward.y, "Play sits between Previous and Next; {dock} {width}");
-            }
+            assert!(back.x < play.x && play.x < forward.x, "Play sits between Previous and Next; {dock} {width}");
 
             h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
             h.frames(2);
@@ -2048,6 +2112,7 @@ mod tests {
     fn a_deep_run_shows_only_its_component_and_the_path_steps_back_out() {
         use crate::scenario::{handle_at, rect_of};
         let (mut h, _) = rig_with_arm_and_leg(30);
+        h.call("ui.resize", json!({"width":2200,"height":1000}));
         let rig_chip = handle_at("timeline-group:Rig").expect("the rig folds");
         assert!(handle_at("timeline-group:Arm").is_none() && handle_at("timeline-path:Rig").is_none());
         assert!(handle_at("timeline-path:All components").is_some(), "the path starts at the whole design");
@@ -2262,13 +2327,181 @@ mod tests {
         assert_eq!(h.app.tree.timeline_followed, None, "it follows the new design's own component");
     }
 
+    /// While a component is active, the History controls step through the features the timeline
+    /// shows (that component's), not the whole design's (#11430).
+    #[test]
+    fn the_history_controls_step_through_the_active_components_features() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new_body", "name": "RightBox"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "Left"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 10], "operation": "new_body", "name": "LeftTop"}))
+            .unwrap();
+        let names: Vec<String> = h.app.session.doc.features.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(names, ["LeftBox", "RightBox", "LeftTop"]);
+        let features = h.app.session.doc.features.clone();
+        h.settle();
+        // Positions are the design's: 0 before LeftBox, 2 before LeftTop, None the end.
+        for (control, position) in [
+            ("back", Some(2)),
+            ("back", Some(0)),
+            ("back", Some(0)),
+            ("forward", Some(2)),
+            ("forward", None),
+            ("forward", None),
+            ("first", Some(0)),
+            ("last", None),
+        ] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "{control}");
+            assert_eq!(h.app.session.doc.features, features, "transport only moves the marker");
+        }
+        // Show All steps through every feature again.
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        h.settle();
+        for (control, position) in [("back", Some(2)), ("back", Some(1)), ("back", Some(0)), ("forward", Some(1))] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "show all: {control}");
+        }
+        // Back to Left's features with the marker between them (after LeftBox, before RightBox):
+        // Forward adds LeftTop, the next feature the bar shows, not only the hidden RightBox.
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        h.settle();
+        h.step(&json!({"click": {"handle": "history:forward"}})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.marker, None, "forward from between the shown features");
+    }
+
+    /// A component with no features of its own lists nothing, so the controls leave the marker
+    /// where it is rather than stepping through other components' features (#11430).
+    #[test]
+    fn the_history_controls_of_a_component_with_no_features_do_nothing() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"})).unwrap();
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "name": "Side"})).unwrap();
+        h.app.run("component.create", json!({"name": "Empty"})).unwrap();
+        h.settle();
+        h.app.run("timeline.roll_to", json!({"position": 1})).unwrap();
+        h.settle();
+        for control in ["first", "back", "forward", "last"] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, Some(1), "{control}");
+        }
+        // A control that leaves the marker still takes over from playback, as any other step does.
+        for control in ["first", "back", "forward", "last"] {
+            h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+            h.settle();
+            h.app.start("timeline.play");
+            h.frames(2);
+            assert!(h.app.timeline_playback.is_some(), "playing before {control}");
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.frames(2);
+            assert!(h.app.timeline_playback.is_none(), "{control} stops playback");
+        }
+    }
+
+    /// With the marker outside the shown features (after them, or before them), a control never
+    /// moves it the other way: Forward and Last don't roll back over hidden features, and First
+    /// and Back don't add them (#11430).
+    #[test]
+    fn the_history_controls_never_step_against_their_direction() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new_body", "name": "RightBox"}))
+            .unwrap();
+        // Left shows only LeftBox, and the marker is at the end, after RightBox.
+        h.app.run("component.activate", json!({"component": "Left"})).unwrap();
+        h.settle();
+        for control in ["forward", "last"] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, None, "{control} past the shown features");
+        }
+        // Right shows only RightBox, and the marker is at the start, before LeftBox.
+        h.app.run("component.activate", json!({"component": "Right"})).unwrap();
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        h.settle();
+        for control in ["back", "first"] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, Some(0), "{control} before the shown features");
+        }
+    }
+
+    /// With "History steps by component" off, the controls step through
+    /// the whole design as before, even while a component is active (#11430).
+    #[test]
+    fn the_history_controls_step_through_the_whole_design_when_the_preference_is_off() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.history_steps_component = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new_body", "name": "RightBox"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "Left"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 10], "operation": "new_body", "name": "LeftTop"}))
+            .unwrap();
+        h.settle();
+        for (control, position) in [("back", Some(2)), ("back", Some(1)), ("back", Some(0)), ("forward", Some(1)), ("last", None), ("first", Some(0))]
+        {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "{control}");
+        }
+    }
+
+    /// Preferences > Layout shows "History steps by component" as a
+    /// checkbox with its note, and clicking it turns the preference off and on (#11430).
+    #[test]
+    fn the_layout_page_has_a_checkbox_for_the_history_controls_preference() {
+        let mut h = Harness::new();
+        h.call("ui.prefs", json!({"language": "en", "open": "Layout"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["history_steps_component"], true, "on by default");
+        crate::prefs::reveal_preference(&mut h, "prefs:history_steps_component");
+        h.step(&json!({"click": {"handle": "prefs:history_steps_component"}})).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["history_steps_component"], false, "a click turns it off");
+        h.step(&json!({"click": {"handle": "prefs:history_steps_component"}})).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["history_steps_component"], true, "a second click turns it on again");
+        for locale in ["ar", "de", "he", "ja", "ko", "vi", "zh"] {
+            for id in ["prefs.history_steps_component", "prefs.history_steps_component_note"] {
+                let text = solidcraft_ui_text::Locale::for_language(locale).text(id);
+                assert_ne!(text, solidcraft_ui_text::Locale::for_language("en").text(id), "{locale} translates {id}");
+            }
+        }
+    }
+
     /// Find in Timeline on the last body of a history longer than the timeline scrolls its
     /// feature into view, in the bottom strip and in the history on the left (#5850).
     #[test]
     fn find_in_timeline_scrolls_both_timelines_to_the_found_feature() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             for i in 0..80 {
                 h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
                 h.app.run("sketch.finish", json!({})).unwrap();
@@ -2300,7 +2533,7 @@ mod tests {
     fn a_face_picked_in_the_view_scrolls_both_timelines_to_the_feature_that_made_it() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             let block =
                 h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "name": "Block", "body_name": "Plate"})).unwrap()["feature"]
                     .as_u64()
@@ -2344,7 +2577,7 @@ mod tests {
     fn the_feature_menu_edits_its_profile_sketch_in_both_timelines() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
             h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
             h.app.run("sketch.finish", json!({})).unwrap();
@@ -2749,10 +2982,9 @@ mod tests {
                 assert_eq!(rect_of("history:card").unwrap().bottom(), viewport.bottom() - crate::ui_kit::SHELL_GAP);
             } else {
                 let strip = rect_of("history:strip").unwrap();
-                assert_eq!(strip.top(), viewport.bottom());
-                assert_eq!(strip.bottom(), h.ctx.content_rect().bottom());
-                assert_eq!(strip.left(), 0.0);
-                assert_eq!(strip.height(), 40.0);
+                assert!(viewport.contains_rect(strip), "the strip overlays the viewport");
+                assert_eq!(strip.bottom(), viewport.bottom());
+                assert_eq!(strip.left(), viewport.left());
             }
             h.step(&json!({"click":{"handle":"timeline:First"}})).unwrap();
             h.step(&json!({"click":{"handle":"timeline:Second"},"ctrl":true})).unwrap();
@@ -2803,11 +3035,11 @@ mod tests {
     }
 
     #[test]
-    fn floating_strip_has_only_history_text_and_accents_the_last_done_chip_and_marker() {
+    fn history_strip_body_accents_the_last_done_chip_and_marker() {
         let mut h = two_boxes(false);
         h.app.ui.tab = "SURFACE".into();
         let t = solidcraft_theme::Tokens::get();
-        let accent = solidcraft_theme::TabAccent::for_tab(&t, "SURFACE");
+        let accent = crate::workspace::tab_accent(&t, "SURFACE");
         for marker_position in [None, Some(1), Some(0)] {
             h.app.session.doc_mut().marker = marker_position;
             let marker_index = marker_position.unwrap_or(2);
@@ -2815,7 +3047,7 @@ mod tests {
                 h.app.session.selection =
                     selected.map(|i| solidcraft_engine::Sel::Feature { id: h.app.session.doc.features[i].id }).into_iter().collect();
                 let ctx = crate::fonts::test_context();
-                let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::timeline(&mut h.app, ui));
+                let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::panel_inline(&mut h.app, ui));
                 out.textures_delta.clear();
                 let texts: Vec<_> = out
                     .shapes
@@ -2825,7 +3057,7 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                assert_eq!(texts, ["History"]);
+                assert!(texts.is_empty(), "the shared host owns the title");
                 let chips: Vec<_> = out
                     .shapes
                     .iter()
@@ -2951,19 +3183,19 @@ mod tests {
         assert!(handle_at("timeline:A").is_some() && handle_at("timeline:B").is_some(), "a click shows each feature");
 
         // Folded in the History beside the browser, it is folded here too, and the other way.
-        h.app.preferences.timeline_left = true;
+        h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
         h.frames(4);
         assert!(handle_at("timeline:A").is_some(), "open there too");
         h.step(&json!({"click": {"handle": "timeline-folder-fold:Pair"}})).unwrap();
         assert!(handle_at("timeline:A").is_none());
-        h.app.preferences.timeline_left = false;
+        h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
         h.frames(4);
         assert!(handle_at("timeline:A").is_none() && handle_at("timeline-folder-chip:Pair").is_some(), "folded here too");
         h.step(&json!({"click": {"handle": "timeline-folder-chip:Pair"}})).unwrap();
-        h.app.preferences.timeline_left = true;
+        h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
         h.frames(4);
         assert!(handle_at("timeline:A").is_some(), "opened here, open there");
-        h.app.preferences.timeline_left = false;
+        h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
         h.frames(4);
 
         let menu = |h: &mut Harness, name: &str, item: &str| {
