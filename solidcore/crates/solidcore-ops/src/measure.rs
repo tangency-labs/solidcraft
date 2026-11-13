@@ -629,15 +629,39 @@ impl Body {
         })
     }
 
+    /// The rim of record faces `faces`: the record edges with a face of the set on one side only,
+    /// in record order. A seam (its face on both sides) and an edge between two faces of the set
+    /// are not on it, whether the faces meet smoothly there or not. Empty when the faces close up
+    /// on their own, as a whole sphere's do. [`Body::outline_cuts`] cuts with this rim.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or a face with no side that faces out;
+    /// [`Error::Unsupported`] for a face with material on both sides; any other kernel error.
+    pub fn rim_edges(&self, order: &Order, faces: &[usize]) -> Result<Vec<usize>> {
+        let set = faces
+            .iter()
+            .map(|&i| order::face(order, i))
+            .collect::<Result<Vec<_>>>()?;
+        with_body("rim_edges", self, |_, b| {
+            let rims = match rim_edges(b, &set)? {
+                Ok(rims) => rims,
+                Err(e) => return Ok(Err(e)),
+            };
+            let indices = (0..order.edges.len())
+                .filter(|&i| order.edges.get(i).is_some_and(|e| rims.contains(e)));
+            Ok(Ok(indices.collect()))
+        })?
+    }
+
     /// Where the rim of record faces `faces` cuts `outline`, a curve over `interval` (the record's
     /// parameter) that lies in the plane through `point` with normal `normal`: the outline's
-    /// parameters, in order. The rim is [`rim_edges`]: the edges with a face of the set on one
-    /// side only, so not a seam or an edge between two faces of the set, smooth or not. A crossing
-    /// of a rim edge with the plane (`edge_plane_crossings`; a stretch gives its two ends) is a cut
-    /// when the kernel's closest point of the outline to it is within the edge's tolerance and
-    /// inside `interval`; a crossing at a vertex already cut is not cut again. So an outline that
-    /// is one line of the plane keeps only the crossings on that line, and two edges meeting at a
-    /// vertex on it cut it once.
+    /// parameters, in order. The rim is [`Body::rim_edges`]: the edges with a face of the set on
+    /// one side only, so not a seam or an edge between two faces of the set, smooth or not. A
+    /// crossing of a rim edge with the plane (`edge_plane_crossings`; a stretch gives its two ends)
+    /// is a cut when the kernel's closest point of the outline to it is within the edge's tolerance
+    /// and inside `interval`; a crossing at a vertex already cut is not cut again. So an outline
+    /// that is one line of the plane keeps only the crossings on that line, and two edges meeting
+    /// at a vertex on it cut it once.
     ///
     /// # Errors
     /// [`Error::Argument`] for an index past the faces, a face with no side that faces out, a
@@ -1798,5 +1822,27 @@ pub(crate) mod tests {
         assert!(b
             .outline_cuts(&o, &[0], &line, [0.0, 1.0], [0.0; 3], [0.0; 3])
             .is_err());
+    }
+
+    #[test]
+    fn rim_edges_are_the_edges_with_the_set_on_one_side() {
+        // a box's top face: its four edges, in record order; all six faces, and a whole sphere's
+        // faces (whose seam has the sphere on both sides), close up and have none
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let o = kernel_order(&b);
+        let top = faces_at(&b, &o, |c| (c[2] - 1.0).abs() <= 1e-9);
+        let on_top: Vec<usize> = (0..o.edges.len())
+            .filter(|&i| (b.edge_middle(&o, i).unwrap()[2] - 1.0).abs() <= 1e-9)
+            .collect();
+        assert_eq!(on_top.len(), 4, "{on_top:?}");
+        assert_eq!(b.rim_edges(&o, &top), Ok(on_top));
+        let all: Vec<usize> = (0..o.faces.len()).collect();
+        assert_eq!(b.rim_edges(&o, &all), Ok(Vec::new()));
+        assert_eq!(b.rim_edges(&o, &[o.faces.len()]), Err(Error::Argument));
+        let ball = crate::make_sphere([0.0, 0.0, 0.0], 5.0).unwrap();
+        let ball_order = kernel_order(&ball);
+        let whole = faces_on(&ball, &ball_order, |s| matches!(s, SurfaceKind::Sphere(_)));
+        assert_eq!(ball.rim_edges(&ball_order, &whole), Ok(Vec::new()));
     }
 }
