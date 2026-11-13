@@ -1,0 +1,34 @@
+name: SolidCraft Test 144 - Upstream Drawing Integration
+on:
+  push:
+    branches:
+      - integration/issue-15776-upstream-20261113
+    paths:
+      - '.github/workflows/solidcraft-t144-upstream-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  viewport-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tested revision
+        run: git rev-parse HEAD
+      - name: Compile viewport selection and repair integration
+        run: cargo check -p solidcraft-ui-egui
+      - name: Viewport selection repair UI
+        run: cargo test -p solidcraft-ui-egui --lib drawing_repair_ui -- --nocapture
+      - name: Repair confirmation gate
+        run: cargo test -p solidcraft-ui-egui --lib drawing_dimension_repair -- --nocapture
+      - name: Drawing browser integration
+        run: cargo test -p solidcraft-ui-egui --lib drawing_workspace -- --nocapture
+      - name: Status lifecycle
+        run: cargo test -p solidcraft-ui-egui --lib drawing_status_controller -- --nocapture
+      - name: Real engine repair and undo
+        run: cargo test -p solidcraft-engine --lib a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it -- --nocapture
+      - name: Invalid repair does not change drawing
+        run: cargo test -p solidcraft-engine --lib a_bad_repair_pick_changes_nothing -- --nocapture
