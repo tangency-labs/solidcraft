@@ -245,11 +245,12 @@ fn hit(
 /// # Errors
 ///
 /// - `InvalidInput`: a distance not finite and positive; `e` not an edge of `f`'s outer loop;
-/// - `Unsupported`: a face not on a plane, a vertex loop, an outer loop
-///   of two edges, an edge curve that cannot be offset, a neighbour that never meets the moved
-///   edge (it leaves the corner along the edge's own line, or at a reflex corner into the face),
-///   neighbours that cross before the distance, a moved edge that crosses the face's other edges
-///   or that the kernel's check refuses;
+/// - `Unsupported`: a surface that does not reach past its trims
+///   ([`Surface::reaches_past_trims`]), a vertex loop, an outer loop of two edges, an edge curve
+///   that cannot be offset, a neighbour that never meets the moved edge (it leaves the corner
+///   along the edge's own line, or at a reflex corner into the face), neighbours that cross
+///   before the distance, a moved edge that crosses the face's other edges or that the kernel's
+///   check refuses;
 /// - `NotConverged`: a spline edge whose offset is not within a tenth of the tolerance;
 /// - those of the curve, intersection and face constructors.
 pub fn extend_trim(
@@ -270,8 +271,13 @@ pub fn extend_trim(
         .surface
         .as_ref()
         .ok_or_else(|| SolidError::invalid_input(OP, "a face without a surface"))?;
+    if !surface.reaches_past_trims() {
+        return Err(unsupported("a surface that does not reach past its trims"));
+    }
     let SurfaceKind::Plane(plane) = surface.kind() else {
-        return Err(unsupported("a face not on a plane"));
+        return Err(unsupported(
+            "a surface that reaches past its trims but is not a plane",
+        ));
     };
     let (origin, x, y) = plane.position().canonical();
     let normal = x.cross(y);
