@@ -1,8 +1,8 @@
-//! The browser's search (#1413): a magnifier in the Browser's header row that opens a field over that
-//! row (no height added), with Ctrl+F giving it the keyboard and Esc closing it. It keeps only the rows
-//! whose names match, each with its parents (dimmed, opened for the search); a list in the row narrows it
-//! to one kind, and a line under the header (only once there is a search) counts the matches and offers
-//! Select all / Hide others. The matching is the engine's ([`browser_find`]), the same as the
+//! The browser's search (#1413): a magnifier in the Browser panel's header (a header action of the
+//! shared panel host) that opens a field as the panel's first row, with Ctrl+F giving it the keyboard
+//! and Esc closing it. It keeps only the rows whose names match, each with its parents (dimmed, opened
+//! for the search); a list in the field's row narrows it to one kind, and a line under it (only once
+//! there is a search) counts the matches and offers Select all / Hide others. The matching is the engine's ([`browser_find`]), the same as the
 //! `browser.find` command's.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -249,17 +249,16 @@ fn kind_label(kind: Option<Kind>) -> &'static str {
     }
 }
 
-/// The field covers the header row once asked for, and while a search is on, which only the
-/// field can end. Never in Render, which has its own search.
+/// The field's row is there once asked for, and while a search is on, which only the field can
+/// end. Never in Render, which has its own search.
 pub(crate) fn bar_shown(app: &SolveApp) -> bool {
     let search = &app.tree.search;
     !crate::render_workspace::active(app) && (search.shown || search.on())
 }
 
-/// The search field, the kind it is narrowed to and the ×, laid over the header row `rect`
-/// (the Browser's title row), so the search adds no height. The × (or Esc) ends the search and
-/// gives the row back to the title.
-pub(crate) fn header_field(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect) {
+/// The search field, the kind it is narrowed to and the ×, in the row `rect` at the top of the
+/// Browser panel. The × (or Esc) ends the search and takes the row away.
+pub(crate) fn field_row(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect) {
     let t = Tokens::get();
     refresh(app);
     crate::scenario::publish_rect("browser:search:bar", rect);
@@ -314,7 +313,7 @@ pub(crate) fn header_field(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Re
     }
 }
 
-/// Under the header, only once there is a search: how many it found, with Select all and Hide
+/// Under the field's row, only once there is a search: how many it found, with Select all and Hide
 /// others, or that it found none. The matches themselves are the tree below.
 pub(crate) fn results(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
