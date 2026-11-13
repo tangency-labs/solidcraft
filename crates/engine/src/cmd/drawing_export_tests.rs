@@ -2,7 +2,6 @@ use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::canvas::base64_decode;
 use solidcraft_geom::paper::NoPictures;
-use solidcraft_geom::prelude::*;
 use solidcraft_io::paper::{PngColour, paper_png};
 
 use super::*;
@@ -376,8 +375,9 @@ fn a_shaded_views_picture_follows_the_parts_colour() {
 
 /// The drawing milestone's plate (acceptance case 84, #4894) by commands alone: modelled from its
 /// parameters, a top view at 1:2 and the views projected below and right of it, its length, width
-/// and first bore dimensioned, with each dimension's id, value and text.
-fn milestone_plate() -> (Session, Vec<(Value, Value, Value)>) {
+/// and first bore dimensioned. With the ids of the top, below and right views, and each dimension's
+/// id, value and text.
+fn milestone_plate() -> (Session, [u64; 3], Vec<(Value, Value, Value)>) {
     let mut s = Session::default();
     let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
     let made = s.run_script(&script).unwrap();
@@ -394,6 +394,7 @@ fn milestone_plate() -> (Session, Vec<(Value, Value, Value)>) {
         let [w, h] = size(view);
         assert!((w - expected[0]).abs() < 1e-6 && (h - expected[1]).abs() < 1e-6, "{view}");
     }
+    let views = [top, &below, &right].map(|view| ids::decode(view["view"].as_str().unwrap()).unwrap());
     // The first bore's rim, by a point on it.
     let mut dimensions = Vec::new();
     for (kind, value) in [
@@ -405,14 +406,14 @@ fn milestone_plate() -> (Session, Vec<(Value, Value, Value)>) {
         assert!((added["value"].as_f64().unwrap() - value).abs() < 1e-9, "{added}");
         dimensions.push((added["dimension"].clone(), added["value"].clone(), added["text"].clone()));
     }
-    (s, dimensions)
+    (s, views, dimensions)
 }
 
 /// Saved with the design and opened again, the plate's sheet exports the same SVG, byte for byte,
 /// and each dimension reads the same.
 #[test]
 fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
-    let (mut s, dimensions) = milestone_plate();
+    let (mut s, _, dimensions) = milestone_plate();
     let svg = run(&mut s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
     let drawing = ids::encode(s.drawing("test").unwrap().id);
     let folder = Folder::new("drawing-m2-plate");
@@ -427,33 +428,24 @@ fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
     }
 }
 
-/// What each view on the open drawing's first sheet fills, in sheet mm, sorted.
-fn view_sizes(s: &Session) -> Vec<[f64; 2]> {
-    let d = s.drawing("test").unwrap().clone();
-    let scene = crate::drawing_scene::build(s, &d, d.sheets[0].id).unwrap().scene;
-    let views = scene.groups.iter().filter(|group| group.kind == solidcraft_geom::paper::ObjectKind::View);
-    let mut sizes: Vec<[f64; 2]> = views
-        .map(|view| {
-            let paths =
-                view.items.iter().filter_map(|item| if let solidcraft_geom::paper::Item::Stroke { path, .. } = item { Some(path) } else { None });
-            let points: Vec<solidcore_record::Vec2> = paths.flatten().flat_map(|seg| (0..=16).map(|i| seg.point_at(f64::from(i) / 16.0))).collect();
-            let extent = |along: fn(&solidcore_record::Vec2) -> f64| {
-                points.iter().map(along).fold(f64::NEG_INFINITY, f64::max) - points.iter().map(along).fold(f64::INFINITY, f64::min)
-            };
-            [extent(|p| p.x), extent(|p| p.y)]
-        })
-        .collect();
-    sizes.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    sizes
+/// What each of `views` draws on the open drawing's first sheet: the box round its lines, in sheet mm.
+fn view_sizes(s: &Session, views: [u64; 3]) -> [[f64; 2]; 3] {
+    let d = s.drawing("test").unwrap();
+    let shown = crate::drawing_scene::build(s, d, d.sheets[0].id).unwrap();
+    views.map(|view| {
+        let size = shown.objects.iter().find(|o| o.object == view).unwrap().bounds_mm.size();
+        [size.x, size.y]
+    })
 }
 
-/// The plate's model edited with its drawing closed (acceptance cases 85 to 87, #4894): the views
-/// and the model follow with the hand values, and each edit saved and opened again exports the same
-/// SVG. Undo brings back the sheet before it byte for byte, and redo the one after it. What the
-/// dimensions read across these edits is E2E-01 to E2E-04, on #8288.
+/// The plate's model edited with its drawing closed (acceptance cases 85 to 87, #4894): each view's
+/// lines follow with the hand sizes, and each edit saved and opened again exports the same SVG. Undo
+/// brings back the sheet before it byte for byte, and redo the one after it. The edited model's own
+/// geometry is oracle cases 85 to 87's (tests/oracle), and what the dimensions read across these
+/// edits is in drawing_dimension_tests.rs (#8288).
 #[test]
 fn the_milestone_plate_follows_its_model_and_undo_brings_its_sheet_back() {
-    let (mut s, _) = milestone_plate();
+    let (mut s, views, _) = milestone_plate();
     let drawing = ids::encode(s.drawing("test").unwrap().id);
     let on_the_model = |s: &mut Session, id: &str, p: Value| {
         run(s, "drawing.close", json!({}));
@@ -463,23 +455,18 @@ fn the_milestone_plate_follows_its_model_and_undo_brings_its_sheet_back() {
     let sheet = |s: &mut Session| run(s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
     let folder = Folder::new("drawing-m2-edits");
     let before = sheet(&mut s);
-    let wide = [[10.0, 50.0], [50.0, 10.0], [50.0, 50.0]];
-    let plate = [[10.0, 40.0], [50.0, 10.0], [50.0, 40.0]];
-    let bores = |one: f64, two: f64| 100.0 * 80.0 * 20.0 - std::f64::consts::PI * (one * one + two * two) / 4.0 * 20.0;
-    for (case, id, edit, sizes, volume) in [
-        (85, "parameters.change", json!({"name": "width", "expression": "100 mm"}), wide, 196_858.41),
-        (86, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}), plate, bores(12.0, 10.0)),
-        (87, "timeline.delete", json!({"feature": "Bore1"}), plate, bores(0.0, 10.0)),
+    // At 1:2, top, below and right: length by width, length by thickness, thickness by width.
+    let wide = [[50.0, 50.0], [50.0, 10.0], [10.0, 50.0]];
+    let plate = [[50.0, 40.0], [50.0, 10.0], [10.0, 40.0]];
+    for (case, id, edit, sizes) in [
+        (85, "parameters.change", json!({"name": "width", "expression": "100 mm"}), wide),
+        (86, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}), plate),
+        (87, "timeline.delete", json!({"feature": "Bore1"}), plate),
     ] {
         on_the_model(&mut s, id, edit);
-        for (size, expected) in view_sizes(&s).iter().zip(sizes) {
+        for (size, expected) in view_sizes(&s, views).iter().zip(sizes) {
             assert!((size[0] - expected[0]).abs() < 1e-6 && (size[1] - expected[1]).abs() < 1e-6, "case {case}: {size:?}");
         }
-        run(&mut s, "drawing.close", json!({}));
-        let measured = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
-        run(&mut s, "drawing.open", json!({"drawing": drawing}));
-        // Measured over facets, so a bore comes a little short of the hand's circle.
-        assert!((measured - volume).abs() < 1.0, "case {case}: {measured}");
         // The sheet the edit gives, and the same from the file.
         let after = sheet(&mut s);
         assert_ne!(after, before, "case {case}");
