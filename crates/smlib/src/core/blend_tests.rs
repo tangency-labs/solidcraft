@@ -509,7 +509,15 @@ fn a_knife_edge_chamfer_too_large_names_its_distance() {
     let s = (R * d).sqrt();
     let kept = 0.5 * (R * TIP / s - R) * (TIP - s) * H;
     let v = volume(&cut, 1e-8).unwrap();
-    assert!((v - kept).abs() < 1e-9 * v, "{v} vs {kept}");
+    // the sliver's bound is the contact solve's, as in solidcore's
+    // `the_distance_named_builds_the_sliver_the_chord_keeps`: its legs lie on exact faces, so
+    // the error is in the chord; each station's Newton stops at `1e-9 * max(1, |m|)`
+    // (`fillet_section/section.rs`, `solve_tol`), m the ball's centre (TIP - 2s, -d, z), so the
+    // volume moves by at most `solve_tol * hypotenuse * H` (3.5e-9 absolute, 7e-4 of the sliver)
+    let hypotenuse = ((TIP - s).powi(2) + (R * TIP / s - R).powi(2)).sqrt();
+    let centre = ((TIP - 2.0 * s).powi(2) + d * d + H * H).sqrt();
+    let solve_tol = 1.0e-9 * centre.max(1.0);
+    assert!((v - kept).abs() <= solve_tol * hypotenuse * H, "{v} vs {kept}");
     // the sliver's volume goes as the square of what the named distance falls short of
     // TIP² / R, so its check is ill-conditioned; d = 100 keeps 611.83, well conditioned
     let third = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
