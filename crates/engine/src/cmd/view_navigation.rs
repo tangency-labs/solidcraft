@@ -572,7 +572,7 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
                 .map(|d| if d == 90.0 { (1.0, 0.0) } else { d.to_radians().sin_cos() })
                 .ok_or_else(|| bad(cmd, "degrees must be a number above 0 and at most 180"))?,
         };
-        // The cube's arrows (no `degrees`) turn about the screen's own axis and keep the roll, so
+        // The navigator's arrows (no `degrees`) turn about the screen's own axis and keep the roll, so
         // four clicks one way go all the way round, over the top too (#15633). The arrow keys'
         // steps stand the view upright about the world's up axis.
         let quarter = p.get("degrees").is_none();
@@ -1100,10 +1100,10 @@ mod tests {
         }
     }
 
-    /// #15633: each cube arrow turns a quarter turn about the screen's own axis and keeps the
+    /// #15633: each navigator arrow turns a quarter turn about the screen's own axis and keeps the
     /// roll, from upright, rolled, pole and Y-up starts, and four clicks one way come back round.
     #[test]
-    fn cube_arrows_turn_about_the_screen_axis_over_the_poles_and_keep_the_roll() {
+    fn navigator_arrows_turn_about_the_screen_axis_over_the_poles_and_keep_the_roll() {
         let mut s = Session::default();
         let mut step = |cam: Camera, action: &str| -> Camera {
             let reply = navigate(&mut s, &json!({"camera": cam, "action": action})).unwrap();
