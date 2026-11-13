@@ -132,8 +132,8 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         id: 100,
         name: "Pivot".into(),
         kind: JointKind::Revolute,
-        a: JointOrigin { occurrence: 0, snap: Snap::Frame { origin: pick, z: Vec3::Z, x: Some(Vec3::X) } },
-        b: JointOrigin { occurrence, snap: Snap::FaceCenter { pick, face: None, x: Some(XRef::Dir(Vec3::X)) } },
+        a: JointOrigin::new(0, Snap::Frame { origin: pick, z: Vec3::Z, x: Some(Vec3::X) }),
+        b: JointOrigin::new(occurrence, Snap::FaceCenter { pick, face: None, x: Some(XRef::Dir(Vec3::X)) }),
         values: vec![0.0],
         limits: Vec::new(),
         flip: true,
@@ -141,6 +141,8 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        captured: None,
+        constraint: None,
     });
     // One body supplies both old nearest-face snaps and persistent named-face snaps.
     // A scratch model shares its measurements, even though each sample changes the pose.
@@ -181,7 +183,7 @@ fn joint_face_measurements_never_follow_a_replaced_body_or_stale_offset() {
     let mut doc = Document::new("replaced joint geometry");
     let mut state = ModelState::default();
     state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 10.0).unwrap(), 0));
-    let origin = JointOrigin { occurrence: 0, snap: Snap::FaceCenter { pick: Vec3::new(0.0, 0.0, 10.0), face: None, x: None } };
+    let origin = JointOrigin::new(0, Snap::FaceCenter { pick: Vec3::new(0.0, 0.0, 10.0), face: None, x: None });
     let work = counted(|| {
         joints::resolve_origin(&doc, &state, &origin).unwrap();
     });
@@ -210,7 +212,7 @@ fn an_edge_origin_measures_its_faces_once() {
     let mut state = ModelState::default();
     state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap(), 0));
     let pick = Vec3::new(5.0, 0.0, 10.0);
-    let origin = JointOrigin { occurrence: 0, snap: Snap::Edge { pick, edge: None, face: None, corner: None, axis: None } };
+    let origin = JointOrigin::new(0, Snap::Edge { pick, edge: None, face: None, corner: None, axis: None });
     let work = counted(|| {
         for _ in 0..8 {
             let frame = joints::resolve_origin(&doc, &state.clone(), &origin).unwrap();
@@ -572,6 +574,7 @@ fn plate_with_holes(doc: &mut Document, comp: u64, tools: u64, holes: usize) -> 
         width: "10".into(),
         height: "4".into(),
         operation: Operation::NewBody,
+        centred: false,
     };
     let plate = doc.add_feature(kind, None).unwrap();
     doc.feature_mut(plate).unwrap().component = comp;
@@ -580,7 +583,7 @@ fn plate_with_holes(doc: &mut Document, comp: u64, tools: u64, holes: usize) -> 
     let body = model.state().bodies.iter().find(|b| b.feature == plate).unwrap().name.clone();
     for k in 0..holes {
         let corner = point_expr(Vec3::new(10.0 * k as f64 + 4.0, 4.0, -1.0));
-        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut, centred: false };
         let id = doc.add_feature(kind, None).unwrap();
         let f = doc.feature_mut(id).unwrap();
         f.component = tools;
@@ -656,6 +659,126 @@ fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, &body));
 }
 
+/// A root design with two 10 x 10 x 4 mm plates, "Plate" at the origin and "Other" 30 mm along Y,
+/// and a sketch on origin plane `plane` of the rectangle `profile` spans (opposite corners, in mm):
+/// (the plate part, the other part, the sketch).
+fn two_plates_and_a_sketch(doc: &mut Document, plane: &str, profile: [Vec2; 2]) -> (u64, u64, u64) {
+    let plate = doc.add_component(Some("Plate"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    place(doc, other, rigid(Vec3::new(0.0, 30.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    plate_with_holes(doc, other, other, 0);
+    plate_with_holes(doc, plate, plate, 0);
+    let mut sk = Sketch::new();
+    let [a, c] = profile;
+    let p = [a, Vec2::new(c.x, a.y), c, Vec2::new(a.x, c.y)].map(|q| sk.add_point(q, None).unwrap());
+    for k in 0..4 {
+        sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: plane.into() }, sketch: sk }, None).unwrap();
+    (plate, other, sketch)
+}
+
+/// `kind` added to the root with its face points named after the faces under them, as the
+/// command that makes it names them.
+fn add_named(doc: &mut Document, kind: FeatureKind) -> u64 {
+    let mut model = Model::new();
+    model.evaluate(doc);
+    let names = face_point_names(doc, &model.state(), &kind, 0).unwrap();
+    assert!(names.iter().all(|n| !n.is_empty()), "{names:?}");
+    let id = doc.add_feature(kind, None).unwrap();
+    doc.feature_mut(id).unwrap().face_names = names;
+    id
+}
+
+/// An extrude in the root from the top of the plate (z 4) 6 mm up, over 2 to 8 mm on X and Y.
+fn extrude_from_the_plate(doc: &mut Document) -> (u64, u64, u64) {
+    let (plate, other, sketch) = two_plates_and_a_sketch(doc, "XY", [Vec2::new(2.0, 2.0), Vec2::new(8.0, 8.0)]);
+    let kind = FeatureKind::Extrude {
+        thin: None,
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: serde_json::from_value(serde_json::json!({"distance": "6", "from": [5.0, 5.0, 4.0]})).unwrap(),
+        operation: Operation::NewBody,
+        targets: vec![],
+    };
+    (plate, other, add_named(doc, kind))
+}
+
+/// Where the body feature `id` made has its centre.
+fn centroid_of(model: &Model, id: u64) -> Vec3 {
+    let st = model.state();
+    kernel::measure(&st.bodies.iter().find(|b| b.feature == id).unwrap().body).unwrap().centroid
+}
+
+/// An extrude from a face of the plate reads where the plate is, and nothing else (#6325): a
+/// joint moving another part leaves its result, and every result after it, as it was.
+#[test]
+fn an_extrude_from_its_own_part_keeps_its_result_when_another_part_moves() {
+    let mut doc = Document::new("from object");
+    let (plate, other, extrude) = extrude_from_the_plate(&mut doc);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!((centroid_of(&model, extrude).z - 7.0).abs() < 1e-6, "{:?}", centroid_of(&model, extrude));
+    place(&mut doc, other, rigid(Vec3::new(0.0, 40.0, 3.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    // The plate lifted 5 mm: the extrude starts on its top where it is now (#928).
+    place(&mut doc, plate, rigid(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1);
+    assert!((centroid_of(&model, extrude).z - 12.0).abs() < 1e-6, "{:?}", centroid_of(&model, extrude));
+}
+
+/// A revolve To a face of the plate, as the extrude from it: it turns again only when the plate
+/// moves.
+#[test]
+fn a_revolve_to_its_own_part_keeps_its_result_when_another_part_moves() {
+    let mut doc = Document::new("revolve to object");
+    let (plate, other, sketch) = two_plates_and_a_sketch(&mut doc, "XZ", [Vec2::new(12.0, 0.0), Vec2::new(15.0, 2.0)]);
+    let kind = FeatureKind::Revolve {
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        axis: AxisRef::SketchAxis { axis: "y".into() },
+        angle: "90 deg".into(),
+        operation: Operation::NewBody,
+        targets: vec![],
+        angle2: None,
+        symmetric: false,
+        convention: Default::default(),
+        to: Some(serde_json::from_value(serde_json::json!([5.0, 5.0, 4.0])).unwrap()),
+    };
+    let revolve = add_named(&mut doc, kind);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let turned = volume(&model, &model.state().bodies.iter().find(|b| b.feature == revolve).unwrap().name.clone());
+    place(&mut doc, other, rigid(Vec3::new(0.0, 40.0, 3.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    // The plate turned a quarter about Z: the revolve turns to its top where it is now.
+    place(&mut doc, plate, rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1);
+    let now = volume(&model, &model.state().bodies.iter().find(|b| b.feature == revolve).unwrap().name.clone());
+    assert!((now - turned).abs() > 1.0, "{turned} then {now}");
+}
+
+/// A From face without a name is found by its point, on whatever body lies there: moving any
+/// part extrudes again.
+#[test]
+fn an_extrude_from_a_face_without_a_name_extrudes_again_when_any_part_moves() {
+    let mut doc = Document::new("from a point");
+    let (_, other, extrude) = extrude_from_the_plate(&mut doc);
+    doc.feature_mut(extrude).unwrap().face_names.clear();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!((centroid_of(&model, extrude).z - 7.0).abs() < 1e-6, "{:?}", centroid_of(&model, extrude));
+    place(&mut doc, other, rigid(Vec3::new(0.0, 40.0, 3.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1);
+}
+
 #[test]
 fn a_body_is_measured_once_while_it_stays_the_same() {
     let mut doc = Document::new("measured once");
@@ -720,6 +843,7 @@ fn shared_evaluation_requires_its_actual_model_and_unmodified_geometry_inputs() 
                 width: "3".into(),
                 height: "4".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -791,6 +915,7 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
                     positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0.]),
                     triangles: Arc::from([0, 1, 2]),
                     color: None,
+                    corner_normals: Default::default(),
                 }],
             },
             None,
@@ -804,7 +929,7 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
     Arc::make_mut(&mut doc).occurrences[0].transform = rigid(Vec3::new(10., 0., 0.), Vec3::ZERO, Vec3::Z, 0.3);
     assert!(!model.evaluate_shared(&doc));
     assert!(Arc::ptr_eq(&original, &model.state()));
-    for edit in 0..5 {
+    for edit in 0..6 {
         let FeatureKind::MeshImport { meshes, .. } = &mut Arc::make_mut(&mut doc).feature_mut(feature).unwrap().kind else { panic!("mesh") };
         let mesh = &mut meshes[0];
         match edit {
@@ -812,6 +937,7 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
             1 => Arc::make_mut(&mut mesh.triangles).swap(1, 2),
             2 => mesh.color = Some([0.2, 0.4, 0.6]),
             3 => mesh.name = "Renamed".into(),
+            4 => mesh.corner_normals = Arc::from([0., 1., 1., 0., 1., 1., 0., 1., 1.]),
             _ => mesh.positions = Arc::from(mesh.positions.to_vec()),
         }
         assert!(model.evaluate_shared(&doc), "mesh edit {edit} must invalidate");
@@ -863,7 +989,8 @@ fn saved_states_read_back_their_sketch_keys() {
         doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(f64::from(i) + 1.0, 1.0)), None).unwrap();
         for j in 0..3 {
             let corner = point_expr(Vec3::new(f64::from(i) * 20.0, f64::from(j) * 20.0, 0.0));
-            let kind = FeatureKind::Box { corner, length: "5".into(), width: "5".into(), height: "5".into(), operation: Operation::NewBody };
+            let kind =
+                FeatureKind::Box { corner, length: "5".into(), width: "5".into(), height: "5".into(), operation: Operation::NewBody, centred: false };
             doc.add_feature(kind, None).unwrap();
         }
     }
@@ -924,6 +1051,7 @@ fn comparing_a_copied_mesh_does_not_read_its_shared_arrays() {
         positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., f64::NAN]),
         triangles: Arc::from([0, 1, 2]),
         color: None,
+        corner_normals: Default::default(),
     };
     let copy = mesh.clone();
     assert!(copy == mesh, "a copy shares the arrays and is the same mesh without reading them");
@@ -948,13 +1076,14 @@ fn blocks_with_cuts(doc: &mut Document, comp: u64, blocks: usize, cuts: usize) {
     let y = 100.0 * comp as f64;
     for k in 0..blocks {
         let corner = point_expr(Vec3::new(20.0 * k as f64, y, 0.0));
-        let kind = FeatureKind::Box { corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody };
+        let kind =
+            FeatureKind::Box { corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody, centred: false };
         let id = doc.add_feature(kind, None).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
     for k in 0..cuts {
         let corner = point_expr(Vec3::new(20.0 * k as f64 + 4.0, y + 4.0, -1.0));
-        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut, centred: false };
         let id = doc.add_feature(kind, None).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
@@ -1156,6 +1285,7 @@ fn block(doc: &mut Document, name: &str, corner: Vec3, size: [f64; 3]) {
                 width: size[1].to_string().into(),
                 height: size[2].to_string().into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -1219,6 +1349,7 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
         width: "40".into(),
         height: "10".into(),
         operation: Operation::Cut,
+        centred: false,
     };
     assert_eq!(cut_work(&mut doc, along).cut, 1);
     // A dome: a sphere's cap rising 10 mm above the circle it stands on. A thin tool drilled into
@@ -1232,6 +1363,7 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
         width: "60".into(),
         height: "40".into(),
         operation: Operation::Cut,
+        centred: false,
     };
     doc.add_feature(below, None).unwrap();
     let mut model = Model::new();
@@ -1289,6 +1421,7 @@ fn marking(p: Vec3) -> FeatureKind {
         chamfer_angle: None,
         chamfer_depth: None,
         steep_flank: Default::default(),
+        continuous_flanks: false,
         old_auto_size: false,
     }
 }
@@ -1330,6 +1463,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
         ease_out: None,
         to: None,
         references: Vec::new(),
+        old_surface_start: false,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.cylinder_search, 1, "only the plate is searched");
@@ -1447,6 +1581,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
         ease_out: None,
         to: None,
         references: Vec::new(),
+        old_surface_start: false,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.tapped_wall, 3, "Plate, Below and Grazing are read");
@@ -1584,6 +1719,35 @@ fn copies_of_a_hole_that_come_close_are_cut_one_by_one() {
     assert!((v - (disc - 16.0 * hole)).abs() < 1e-3 * hole, "{v}");
 }
 
+#[test]
+fn many_copies_cut_in_groups_leave_what_one_cut_leaves() {
+    // 48 holes on a 40 mm circle, 5.2 mm apart: the 47 copies are more than one joined tool
+    // takes, so they are cut as two (#8765). The disc comes out as cutting all of them in one go
+    // leaves it: the same volume, the same faces, named the same.
+    let disc = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("perforated");
+        disc_with_hole_pattern(&mut doc, 40.0, 48);
+        let mut model = Model::new();
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        assert_eq!(st.bodies.len(), 1);
+        let mut names = crate::naming::face_names(&st.bodies[0]).to_vec();
+        names.sort();
+        (disc_volume(&model), st.bodies[0].body.face_count(), names, work.cut_tools)
+    };
+    let (volume, faces, names, tools) = disc(super::MAX_JOINED_TOOLS);
+    let (one_volume, one_faces, one_names, one_tools) = disc(usize::MAX);
+    assert_eq!((tools, one_tools), (2, 1));
+    let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
+    assert!((volume - one_volume).abs() < 1e-6 * hole, "{volume} vs {one_volume}");
+    assert!((one_volume - (std::f64::consts::PI * 2500.0 * 1.5 - 48.0 * hole)).abs() < 1e-3 * hole, "{one_volume}");
+    assert_eq!(faces, one_faces);
+    assert_eq!(names, one_names);
+}
+
 /// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
 /// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
 /// kernel grows them, meet, their exact shapes are 1.9 mm apart. The ring's faces counted as its
@@ -1651,6 +1815,7 @@ fn imported_meshes() -> Document {
             positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0].into(),
             triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
             color: Some([0.2, 0.4, 0.6]),
+            corner_normals: Default::default(),
         })
         .collect();
     let id = doc.add_feature(FeatureKind::MeshImport { file: "tetrahedra.stl".into(), meshes }, Some("Meshes")).unwrap();
@@ -1682,6 +1847,16 @@ fn same_as_fresh(doc: &Document, model: &Model) {
 #[test]
 fn unchanged_mesh_payloads_are_not_read_again_for_rigid_motion() {
     let mut doc = imported_meshes();
+    for mesh in meshes_mut(&mut doc) {
+        mesh.generate_crease_normals(10.0).unwrap();
+        assert!(!mesh.corner_normals.is_empty());
+    }
+    let compact: serde_json::Value = serde_json::from_str(&super::feature_json(&doc.features[0], &super::ImportDigests::default())).unwrap();
+    for mesh in compact[0]["meshes"].as_array().unwrap() {
+        assert_eq!(mesh["positions"], serde_json::json!([]));
+        assert_eq!(mesh["triangles"], serde_json::json!([]));
+        assert!(mesh.get("corner_normals").is_none(), "the fingerprint must hash the retained digest without serializing shading payloads");
+    }
     let mut model = Model::new();
     assert_eq!(counted(|| model.evaluate(&doc)).mesh_digested, 2);
     for k in 1..5 {
@@ -1835,4 +2010,74 @@ fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
     // A point on a side wall drills into that wall.
     let side = super::hole_direction_at(&st, Vec3::new(252.0, 0.0, 5.0), &[]).unwrap();
     assert!((side - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-6, "into the side wall: {side:?}");
+}
+
+/// A cut whose target name is taken by another component's sheet, while a body of the cut's own
+/// component was asked for that name, is refused before the sheet is machined (#12141).
+#[test]
+fn an_ambiguous_target_is_refused_before_a_sheet_is_machined() {
+    let mut doc = Document::new("names");
+    let linked = doc.add_component(Some("Encoder"), 0).unwrap();
+    let local = doc.add_component(Some("Assembly"), 0).unwrap();
+    flat_sheet(&mut doc, Vec2::new(0.0, 0.0), 40.0, 40.0);
+    for f in doc.features.iter_mut() {
+        f.component = linked;
+    }
+    let base = doc.features.last().unwrap().id;
+    doc.feature_mut(base).unwrap().body_names = vec!["Plate".into()];
+    let own = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(100.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(own).unwrap().component = local;
+    doc.feature_mut(own).unwrap().body_names = vec!["Plate".into()];
+    let cut = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(10.0, 10.0, -5.0)),
+                length: "5".into(),
+                width: "5".into(),
+                height: "20".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(cut).unwrap().component = local;
+    doc.feature_mut(cut).unwrap().participants = vec!["Plate".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let err = model.result(cut).and_then(|r| r.error.clone()).expect("the cut is refused");
+    assert!(err.contains("ambiguous") && err.contains("`Encoder`"), "{err}");
+    let st = model.state();
+    let sheet = st.sheets.iter().find(|s| s.body == "Plate").expect("the linked sheet");
+    assert!(sheet.holes.is_empty(), "the linked sheet is not machined");
+}
+
+/// A hole's look at the material over its entry face (#10695) is best effort: when the kernel
+/// cannot build the run-on's column (here a column of no width), the hole keeps its full run-on
+/// and cuts nothing out of its tools, as before the check, instead of failing.
+#[test]
+fn a_hole_whose_run_on_column_cannot_be_built_keeps_its_run_on() {
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("Over".into(), kernel::box_solid(Vec3::new(-5.0, -5.0, 0.5), Vec3::new(5.0, 5.0, 2.0)).unwrap(), 0));
+    for reach in [0.0, f64::NAN] {
+        let (top, near) = super::hole_run_on(&state, &Plane::XY, reach, 1.0);
+        assert_eq!(top, 1.0, "reach {reach}");
+        assert!(near.is_empty(), "reach {reach}");
+    }
+    // With a column, the body 0.5 over the face halves the run-on to its gap.
+    let (top, near) = super::hole_run_on(&state, &Plane::XY, 3.0, 1.0);
+    assert!((top - 0.25).abs() < 1e-6, "top {top}");
+    assert!(near.is_empty());
 }

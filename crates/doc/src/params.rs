@@ -483,9 +483,10 @@ impl Document {
     }
 
     /// User parameters as CSV (`name,unit,expression,value,comment`). The `value` column is the
-    /// number in the `unit` column, rounded for reading (#10747); import reads `expression`.
+    /// number in the `unit` column, rounded for reading (#10747); import reads `expression`. A text
+    /// field a spreadsheet would run as a formula is written as text ([`crate::csv`]).
     pub fn params_csv(&self) -> String {
-        let q = |s: &str| if s.contains([',', '"', '\r', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
+        let q = crate::csv::field;
         let mut out = String::from("name,unit,expression,value,comment,favorite\n");
         for r in self.param_rows().into_iter().filter(|r| r.source == "user") {
             out += &format!(
@@ -652,6 +653,8 @@ pub enum ParamUser {
     Rule { kind: String, name: String, field: String },
     /// The plane a canvas lies on (`input` is its label, e.g. `Offset`).
     Canvas { canvas: u64, name: String, input: String },
+    /// An occurrence moved by an expression (`input` names the axis, e.g. `translate y`).
+    Occurrence { occurrence: u64, name: String, input: String },
 }
 
 impl ParamUser {
@@ -667,6 +670,7 @@ impl ParamUser {
             ParamUser::Joint { name, input, .. } => format!("joint {name} ({input})"),
             ParamUser::Rule { kind, name, field } => format!("{kind} rule {name} ({field})"),
             ParamUser::Canvas { name, input, .. } => format!("canvas {name} ({input})"),
+            ParamUser::Occurrence { name, input, .. } => format!("occurrence {name} ({input})"),
         }
     }
 }
@@ -807,6 +811,12 @@ impl Document {
         }
         let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
         let rule_uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| r == name);
+        for o in &self.occurrences {
+            let axes: BTreeSet<&str> = o.expressed_moves.iter().flat_map(|m| m.exprs()).filter(|(_, e)| uses(e)).map(|(axis, _)| axis).collect();
+            for axis in axes {
+                out.push(ParamUser::Occurrence { occurrence: o.id, name: o.name.clone(), input: format!("translate {axis}") });
+            }
+        }
         for r in &self.sheet.rules {
             for (field, _, _) in r.fields().into_iter().filter(|(f, e, _)| rule_uses(f, e)) {
                 out.push(ParamUser::Rule { kind: "sheet metal".into(), name: r.name.clone(), field: field.into() });
@@ -980,6 +990,13 @@ impl Document {
                 }
             }
         }
+        for e in self.occurrences.iter_mut().flat_map(|o| &mut o.expressed_moves).flat_map(|m| m.translate.iter_mut().flatten()) {
+            let r = expr::rename_reference(e, old, new);
+            if r != *e {
+                *e = r;
+                n += 1;
+            }
+        }
         for e in self.assembly.exprs_mut() {
             let r = expr::rename_reference(e, old, new);
             if r != *e {
@@ -1137,17 +1154,88 @@ fn split_csv(text: &str, separator: char) -> impl Iterator<Item = &str> {
 fn csv_fields(record: &str) -> Result<Vec<String>> {
     split_csv(record, ',')
         .map(|raw| {
+            // `unguard` takes off the `'` an export put before a value a spreadsheet would run.
             let field = raw.trim();
             if !field.contains('"') {
-                return Ok(field.to_string());
+                return Ok(crate::csv::unguard(field).to_string());
             }
             let inner = field.strip_prefix('"').and_then(|s| s.strip_suffix('"'));
             match inner {
-                Some(s) if s.split("\"\"").all(|part| !part.contains('"')) => Ok(s.replace("\"\"", "\"")),
+                Some(s) if s.split("\"\"").all(|part| !part.contains('"')) => Ok(crate::csv::unguard(&s.replace("\"\"", "\"")).to_string()),
                 _ => Err(DocError::Invalid("invalid quoting in parameter CSV".into())),
             }
         })
         .collect()
+}
+
+/// Whether `query` spells the starts of some words of `name`, in order, ignoring case: for
+/// `tooth_outward_flange_diameter`, `toodia`, `toofla`, `outdia` and `toofladia` all match
+/// (#11978). Words may be skipped but not reordered. Underscores, hyphens, spaces and other
+/// separators split `name` into words, and so do camelCase and letter-digit boundaries.
+/// Underscores, hyphens and spaces in `query` are ignored. A query with any other symbol (an
+/// expression such as `width *`) or with no letters or digits never matches here. This only adds
+/// to a plain substring search: callers keep that one too.
+pub fn name_words_match(name: &str, query: &str) -> bool {
+    if query.chars().any(|c| !(c.is_alphanumeric() || matches!(c, '_' | '-' | ' '))) {
+        return false;
+    }
+    let query: Vec<char> = query.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
+    let words = name_words(name);
+    // Every query character must come from some word, so a longer query can never match;
+    // this also bounds the work below by the name's length.
+    if query.is_empty() || query.len() > words.iter().map(Vec::len).sum::<usize>() {
+        return false;
+    }
+    // `reached[i]`: the first `i` query characters are spelled by word starts seen so far.
+    let mut reached = vec![false; query.len() + 1];
+    if let Some(first) = reached.first_mut() {
+        *first = true;
+    }
+    for word in &words {
+        // From the highest start down, so each word extends a match at most once.
+        for start in (0..query.len()).rev() {
+            if !reached.get(start).copied().unwrap_or(false) {
+                continue;
+            }
+            let rest = query.get(start..).unwrap_or_default();
+            for (k, _) in word.iter().zip(rest).take_while(|(a, b)| a == b).enumerate() {
+                if let Some(r) = reached.get_mut(start + k + 1) {
+                    *r = true;
+                }
+            }
+        }
+        if reached.last().copied().unwrap_or(false) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The words of a parameter name, in lower case: see [`name_words_match`].
+fn name_words(name: &str) -> Vec<Vec<char>> {
+    let mut words = Vec::new();
+    let mut word: Vec<char> = Vec::new();
+    let mut previous: Option<char> = None;
+    for c in name.chars() {
+        let split = match previous {
+            _ if !c.is_alphanumeric() => true,
+            Some(p) => (p.is_lowercase() && c.is_uppercase()) || p.is_numeric() != c.is_numeric(),
+            None => false,
+        };
+        if split && !word.is_empty() {
+            words.push(std::mem::take(&mut word));
+        }
+        if c.is_alphanumeric() {
+            word.extend(c.to_lowercase());
+            previous = Some(c);
+        } else {
+            previous = None;
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
 }
 
 /// Parameters whose definitions depend on each other in a loop.
@@ -1223,6 +1311,25 @@ mod design_length_tests {
         assert!((inches - 127.0).abs() < 1e-9, "{inches}");
     }
 
+    /// A bare number written with a decimal comma (`2,5`) or as a mixed number (`2 1/8`) means the
+    /// design's units like `2.5` does, not millimetres.
+    #[test]
+    fn a_decimal_comma_or_mixed_number_gets_the_design_unit() {
+        let mut doc = Document::new("Units");
+        doc.units = "in".into();
+        let length = crate::expr::Kind::Length;
+        assert_eq!(doc.with_design_unit("2,5", length), "2,5 in");
+        assert_eq!(doc.with_design_unit("-,5", length), "-,5 in");
+        assert_eq!(doc.with_design_unit("=2 1/8", length), "=2 1/8 in");
+        assert_eq!(doc.with_design_unit("w = 2,5", length), "w = 2,5 in");
+        let inches = doc.eval(&doc.with_design_unit("2 1/8", length), length).unwrap();
+        assert!((inches - 2.125 * 25.4).abs() < 1e-9, "{inches}");
+        // Anything that is not one bare number is left as typed.
+        for e in ["2,5 mm", "2 1/8\"", "(2,5)", "2,5 + 1", "1/2", "d3"] {
+            assert_eq!(doc.with_design_unit(e, length), e, "{e}");
+        }
+    }
+
     #[test]
     fn the_written_value_reads_back_within_a_micrometre() {
         for units in ["mm", "cm", "m", "in", "ft"] {
@@ -1233,6 +1340,50 @@ mod design_length_tests {
                 let back = doc.eval(&e, crate::expr::Kind::Length).unwrap();
                 assert!((back - mm).abs() <= 1e-6, "{units} {mm}: {e} reads {back}");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod name_words_tests {
+    use super::name_words_match;
+
+    #[test]
+    fn the_starts_of_words_in_order_find_a_long_name() {
+        let name = "tooth_outward_flange_diameter";
+        for query in ["too", "dia", "toodia", "toofla", "outdia", "toofladia", "TooDia", "too_dia", "tooth outward", "toothoutwardflangediameter"] {
+            assert!(name_words_match(name, query), "{query}");
+        }
+        // Out of order, from inside a word, more than the words hold, or not a name at all.
+        for query in ["diatoo", "ooth", "toodiax", "toox", "", "_", "-  ", "tooth *", "too.dia"] {
+            assert!(!name_words_match(name, query), "{query}");
+        }
+    }
+
+    #[test]
+    fn camel_case_hyphens_and_digits_split_words() {
+        assert!(name_words_match("boltHoleDepth", "bhd"));
+        assert!(name_words_match("boltHoleDepth", "holedep"));
+        assert!(name_words_match("rib-count-max", "rcm"));
+        assert!(name_words_match("hole2_depth", "h2d"));
+        assert!(name_words_match("Länge_Außen", "läau"));
+        assert!(!name_words_match("boltholedepth", "bhd"));
+    }
+
+    #[test]
+    fn a_later_word_can_take_over_part_of_a_match() {
+        // `ab` must not be taken whole from `abc` when the match needs `a` and then `bd...`.
+        assert!(name_words_match("abc_bd", "abd"));
+        assert!(name_words_match("aa_ab", "aab"));
+    }
+
+    #[test]
+    fn hostile_names_and_queries_never_panic() {
+        let long = "a_".repeat(5_000);
+        assert!(name_words_match(&long, &"a".repeat(5_000)));
+        assert!(!name_words_match(&long, &"a".repeat(5_001)));
+        for (name, query) in [("", "a"), ("\u{0}", "\u{0}"), ("İ", "i"), ("ß", "ss"), ("🙂_x", "x"), ("x", "🙂")] {
+            let _ = name_words_match(name, query);
         }
     }
 }

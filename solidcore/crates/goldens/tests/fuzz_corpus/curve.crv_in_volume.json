@@ -1,0 +1,6 @@
+{
+  "unit": "curve.crv_in_volume",
+  "cases": [
+    {"name": "fuzz00294_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/curve.crv_in_volume/fuzz00294.json (panic: rust: capacity overflow)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"civ": {"curve": {"hermite": {"d1": [-30.9, -26.8, 15.9], "d2": [1.43, -22.7, -21.7], "dim": 3, "p1": [1.42, -30.0, -8.77], "p2": [-4.26, 17.1, 37.3]}}}, "left": false, "n": 9223372036854775807, "nonzero": false, "op": "eval", "t": 0.0831}}
+  ]
+}

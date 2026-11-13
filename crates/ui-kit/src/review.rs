@@ -1,0 +1,74 @@
+//! Shared review composition for operations that replace saved rendering state.
+use super::{Action, Confirm, Sphere, Text, checkbox, list_frame, sphere_thumbnail, text};
+use solidcraft_ui_text::tr;
+
+/// Content varies; the card, impact rows, acknowledgement and modal actions do not.
+pub struct ReviewAndApply<'a> {
+    pub title: &'a str,
+    pub name: &'a str,
+    pub subtitle: &'a str,
+    /// The impact rows' labels and values: what applying replaces and what it keeps.
+    pub replaces_label: &'a str,
+    pub replaces: &'a str,
+    pub kept_label: &'a str,
+    pub kept: &'a str,
+    pub acknowledgement: &'a str,
+    /// The handle the acknowledgement checkbox publishes.
+    pub acknowledge_handle: &'a str,
+    pub apply: &'a str,
+    /// The label of a secondary action beside Apply, if the review offers one.
+    pub secondary: Option<&'a str>,
+    pub notice: Option<&'a str>,
+}
+
+impl ReviewAndApply<'_> {
+    pub fn show(&self, ctx: &egui::Context, valid: bool, acknowledged: &mut bool, content: impl FnOnce(&mut egui::Ui)) -> (bool, Action) {
+        Confirm::new(egui::Id::unique("render_review_apply"), "inspect", self.title)
+            .actions(self.apply, tr("ui.cancel"), self.secondary)
+            .secondary_left()
+            .show(ctx, valid && *acknowledged, |ui| self.content(ui, acknowledged, content))
+    }
+
+    pub fn content(&self, ui: &mut egui::Ui, acknowledged: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
+        list_frame(ui, "review:card", |ui| {
+            ui.horizontal(|ui| {
+                sphere_thumbnail(
+                    ui,
+                    "review:sphere",
+                    Sphere { color: solidcraft_theme::Tokens::get().body, kind: super::FinishKind::Satin, opacity: None },
+                    40.0,
+                );
+                ui.vertical(|ui| {
+                    text(ui, self.name, Text::Heading("review:name"));
+                    text(ui, self.subtitle, Text::Note("review:subtitle"));
+                });
+            });
+        });
+        if let Some(notice) = self.notice {
+            let t = solidcraft_theme::Tokens::get();
+            crate::Container::show_backing(
+                ui,
+                egui::Frame::NONE.fill(t.accent_soft).corner_radius(t.control_radius).inner_margin(egui::Margin::same(t.space_8 as i8)),
+                |ui| {
+                    text(ui, notice, Text::Note("review:physical"));
+                },
+            );
+        }
+        content(ui);
+        for (label, value, key) in [(self.replaces_label, self.replaces, "review:replaces"), (self.kept_label, self.kept, "review:kept")] {
+            // Impact text wraps independently of ordinary one-line form rows.
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(solidcraft_theme::Tokens::get().space_16 * 4.0);
+                    text(ui, label, Text::Inline);
+                });
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width());
+                    text(ui, value, Text::Note(key));
+                });
+            });
+        }
+        let ack = checkbox(ui, self.acknowledgement, acknowledged);
+        solidcraft_ui_registry::publish_target(self.acknowledge_handle, ack.rect);
+    }
+}

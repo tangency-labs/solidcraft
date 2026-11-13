@@ -5,6 +5,8 @@
 //! texture, arrows and Home, and its body (when one is chosen; a profile without one leaves the
 //! current body alone). Page moves preserve that stored key set; device-specific 3D mouse keys,
 //! graphics, recent files and Assistant settings stay out.
+//! An enabled panel runtime contributes the selected layout workspace and every
+//! workspace's current arrangement, without its named library or native window geometry.
 //!
 //! A profile is kept, exported and imported as one `solidcraft-profile/1` document. Every
 //! document is checked by [`sanitize`] first: unknown keys are dropped, sizes are capped, and a
@@ -43,17 +45,12 @@ const MAX_ID: usize = 200;
 /// and title tags never remove stored keys such as the bridge, origin names and direct interaction.
 const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
-    "browser_collapsed",
     "browser_eye_left",
-    "browser_float",
-    "browser_share",
-    "browser_show",
-    "browser_width",
     "center_arc_follows_cursor",
     "color_vision",
     "dialog_buttons",
-    "dialog_place",
     "direct_interaction",
+    "escape_twice_finishes_sketch",
     "free_orbit",
     "free_orbit_upright",
     "hidden_toolbar_tabs",
@@ -63,15 +60,18 @@ const PROFILE_KEYS: &[&str] = &[
     "history_sketches",
     "home_fit_size",
     "invert_navigator_arrows",
+    "keep_hover_while_navigating",
     "keep_work_on_tab_switch",
     "language",
     "layout",
     "line_drag_draws_one",
     "line_hover_tangent_arc",
+    "live_panel_drag_preview",
     "logo_accent",
     "look_at_anim",
     "look_at_speed",
     "manipulator_free_alt",
+    "maya_horizontal_zoom",
     "middle_double_click",
     "mouse_gestures",
     "nav",
@@ -110,6 +110,7 @@ const PROFILE_KEYS: &[&str] = &[
     "sketch_face_activates_part",
     "sketch_open_look_at",
     "sketch_recent_snap",
+    "sketch_snap_to_visible_grid",
     "sketch_state_icons",
     "sketch_tab_always",
     "sketch_tracking_guides",
@@ -122,14 +123,10 @@ const PROFILE_KEYS: &[&str] = &[
     "theme_follow",
     "theme_night",
     "theme_options",
-    "timeline_collapsed",
-    "timeline_left",
-    "timeline_left_browser_collapsed",
-    "timeline_left_width",
     "timeline_origin_bodies",
-    "timeline_under_browser",
     "toast_place",
     "trackpad_pan",
+    "trackpad_twist_turns",
     "trackpad_zoom_modifier",
     "ui_font",
     "ui_scale",
@@ -259,6 +256,9 @@ pub fn capture(app: &SolveApp, name: &str) -> Value {
     // profile key set above, which never changes.
     if let Some(o) = doc.as_object_mut() {
         o.insert("view_navigator".into(), crate::view_gizmo::profile_settings(app));
+        if let Some(layout) = crate::panel_runtime::profile_value(app) {
+            o.insert("panel_layout".into(), layout);
+        }
     }
     let gizmo = app.view_gizmo.stored();
     if let Some(o) = doc.as_object_mut().filter(|_| gizmo.is_object()) {
@@ -318,7 +318,7 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
         .into_iter()
         .flatten()
         .filter(|(id, _)| id.chars().count() <= MAX_ID)
-        .filter_map(|(id, keys)| Some((id.clone(), shortcut_keys(keys)?)))
+        .filter_map(|(id, keys)| Some((id.clone(), shortcut_keys(id, keys)?)))
         .take(MAX_SHORTCUTS)
         .collect();
     let favourites: Vec<String> = o.get("favourites").and_then(Value::as_array).into_iter().flatten().filter_map(text).take(MAX_FAVOURITES).collect();
@@ -362,6 +362,12 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
             None => log::warn!("settings profile `{name}`: the view navigator's body can't be read; left out"),
         }
     }
+    if let Some(layout) = o.get("panel_layout") {
+        crate::panel_runtime::validate_profile_value(layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        if let Some(d) = doc.as_object_mut() {
+            d.insert("panel_layout".into(), layout.clone());
+        }
+    }
     if doc.to_string().len() > MAX_PROFILE_BYTES {
         return Err(format!("a settings profile is at most {} KiB", MAX_PROFILE_BYTES / 1024));
     }
@@ -370,8 +376,8 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
 
 /// A command's keys in a profile, as the keymap saves them (`""`, one key or a list of them), or
 /// `None` when they can't be read or a key name is too long.
-fn shortcut_keys(v: &Value) -> Option<Value> {
-    let keys = crate::keymap::saved_keys(v)?;
+fn shortcut_keys(id: &str, v: &Value) -> Option<Value> {
+    let keys = crate::keymap::saved_keys(id, v)?;
     keys.iter().all(|k| k.chars().count() <= MAX_ID).then(|| crate::keymap::keys_value(&keys))
 }
 
@@ -452,6 +458,12 @@ fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
     }
     if let Some(v) = doc.get("view_gizmo") {
         app.view_gizmo.load(Some(v));
+    }
+    if let Some(layout) = doc.get("panel_layout")
+        && let Err(reason) = crate::panel_runtime::apply_profile_value(app, layout)
+    {
+        log::warn!("settings profile: panel layout keeps its current value: {}", solidcraft_engine::panels::commands::error_text(reason));
+        skipped.push("panel_layout".into());
     }
     skipped
 }
@@ -565,8 +577,8 @@ fn act(app: &mut SolveApp, id: &str, params: Value, done: &'static str) {
 
 /// General's saved profiles and row actions. All mutations still use settings.profile.*.
 pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = crate::theme::Tokens::get();
-    let count = crate::i18n::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
+    let t = solidcraft_theme::Tokens::get();
+    let count = solidcraft_ui_text::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
     ui_kit::settings_section_count(ui, "profiles", app.tr("ui.profiles"), Some(&count), |ui| {
         let names = app.settings_profiles.names();
         ui.scope(|ui| {
@@ -646,7 +658,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Searching for "profiles" must keep this entry on the results page; without a hit here the
         // whole section was dropped and the name field could not be reached with a query active.
         let entry = [app.tr("prefs.general.profile_name"), app.tr("prefs.general.save_new"), app.tr("prefs.general.import")];
-        if crate::prefs_search::visible(ui, &entry) {
+        if crate::ui_kit::settings_search::visible(ui, &entry) {
             ui.horizontal_wrapped(|ui| {
                 let mut draft = std::mem::take(&mut app.settings_profiles.draft);
                 let enter = ui_kit::named_control(ui, app.tr("prefs.general.profile_name"), |ui| {
@@ -716,7 +728,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::scenario::publish_rect(&format!("prefs:profiles:{key}:row"), row.response.rect);
             }
         });
-        let locale = crate::i18n::Locale::for_language(&app.preferences.language);
+        let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
         match &app.settings_profiles.message {
             Some(Outcome::Done(id)) => {
                 ui_kit::text(ui, locale.text(id), ui_kit::Text::Note("profile_message"));
@@ -736,12 +748,12 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Run before the Preferences window so Escape belongs to this editor, including in a scrolled
 /// page. A separate popup container keeps the shared rename menu accessible and unclipped.
 pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
-    if !app.prefs_window.open || app.prefs_window.section != prefs::PAGE_GENERAL || !app.prefs_window.filter.is_empty() {
+    if !app.prefs_window.shell.open || app.prefs_window.shell.section != prefs::PAGE_GENERAL || !app.prefs_window.shell.filter.is_empty() {
         app.settings_profiles.rename = None;
         return;
     }
     let Some(mut rename) = app.settings_profiles.rename.take() else { return };
-    crate::prefs_search::note_key_sink(ctx);
+    crate::ui_kit::settings_search::note_key_sink(ctx);
     let mut done = None;
     let popup = ui_kit::Container::new(ctx, ui_kit::Surface::Popup)
         .area(egui::Id::unique("sc_profile_rename"))
@@ -825,9 +837,9 @@ pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
 pub(crate) fn tag(ui: &mut egui::Ui) {
     let response = ui_kit::settings_chip(
         ui,
-        crate::i18n::tr("prefs.structure.in_profile"),
+        solidcraft_ui_text::tr("prefs.structure.in_profile"),
         ui_kit::SettingsChip { icon: Some("settings_profile"), compact: true, ..Default::default() },
     )
-    .backing_on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
+    .backing_on_hover_text(solidcraft_ui_text::tr("prefs.structure.profile_hover"));
     crate::scenario::publish_target("prefs:in_profile", response.rect);
 }

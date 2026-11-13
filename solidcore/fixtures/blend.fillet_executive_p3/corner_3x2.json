@@ -1,0 +1,520 @@
+{
+  "cases": [
+    {
+      "name": "corner3x2-union-overhang-front-edges15-22-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            15,
+            22
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-overhang-front-edges15-24-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            15,
+            24
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-overhang-corner-edges6-12-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                -2,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            6,
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-overhang-corner-edges6-13-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                -2,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            6,
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-inset-side-step-edges1-18-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1,
+            18
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-inset-side-step-edges12-17-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12,
+            17
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-inset-side-step-edges15-19-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            15,
+            19
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-inset-side-step-edges15-27-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            15,
+            27
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-inset-side-step-edges1-14-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1,
+            14
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-inset-side-step-edges12-13-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12,
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-inset-side-step-edges13-19-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            13,
+            19
+          ]
+        }
+      }
+    },
+    {
+      "name": "corner3x2-union-inset-side-step-edges14-27-r1",
+      "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:3003",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14,
+            27
+          ]
+        }
+      }
+    }
+  ]
+}

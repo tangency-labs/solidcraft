@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="300" viewBox="0 0 760 300">
+  <title>Untitled-2</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="760" height="300" fill="#ffffff"/>
+    <rect x="30" y="80" width="200" height="64" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="280" y="80" width="200" height="64" fill="#f0f0f0" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect x="530" y="80" width="200" height="64" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="30" y="210" width="200" height="64" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="280" y="210" width="200" height="64" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="530" y="210" width="200" height="64" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 30 34)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">The order of the steps in a join of a rational and a non-rational surface</tspan></text>
+    <text transform="matrix(1 0 0 1 30 70)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Before (upstream N_SrfJoin)</tspan></text>
+    <text transform="matrix(1 0 0 1 30 200)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">After (join in solidcore)</tspan></text>
+    <text transform="matrix(1 0 0 1 290 88)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">2 Remove the joint knot on the</tspan><tspan x="0" y="26.4">mixed net: NOW counts as a weight</tspan></text>
+    <text transform="matrix(1 0 0 1 540 88)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">3 Set every NOW weight to 1.0</tspan></text>
+    <text transform="matrix(1 0 0 1 40 218)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">1 Give the non-rational piece</tspan><tspan x="0" y="26.4">weights 1.0</tspan></text>
+    <text transform="matrix(1 0 0 1 290 218)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">2 Load both nets: every point has a</tspan><tspan x="0" y="26.4">real weight</tspan></text>
+    <text transform="matrix(1 0 0 1 540 218)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">3 Remove the joint knot as far as tol</tspan><tspan x="0" y="26.4">allows</tspan></text>
+    <path id="arrows" d="M232 112 L270 112 M262 106 L272 112 L262 118 M482 112 L520 112 M512 106 L522 112 L512 118 M232 242 L270 242 M262 236 L272 242 L262 248 M482 242 L520 242 M512 236 L522 242 L512 248" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 40 88)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">1 Load both nets: the non-rational</tspan><tspan x="0" y="26.4">piece keeps NOW (-f64::MAX)</tspan></text>
+  </g>
+</svg>

@@ -1,0 +1,864 @@
+//! The prism family: planar region booleans and extrusion, prism sections and equivalence.
+//! Moved from SolidCraft's `crates/kernel/src/prism.rs` and `prism_measure.rs` tests (see
+//! notes-f-prism/TESTS.md for each move). The oracles are closed forms; the tests compute them
+//! with the maths the library itself may not use.
+#![allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::disallowed_methods,
+    clippy::float_cmp
+)]
+
+use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, TAU};
+
+use solidcore_ops::prism::{
+    extrude_planar_regions, loop_holds, planar_regions_boolean, prism_equivalent, prism_section,
+    region_area, PrismSection,
+};
+use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, Error};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+
+fn all_fixes() {
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+}
+
+fn v(x: f64, y: f64) -> Vec2 {
+    Vec2::new(x, y)
+}
+
+fn rectangle(a: Vec2, b: Vec2) -> Region2 {
+    Region2 {
+        outer: Loop2::polygon(&[a, v(b.x, a.y), b, v(a.x, b.y)]),
+        holes: vec![],
+    }
+}
+
+fn area(r: &Region2) -> f64 {
+    region_area(r).unwrap().value
+}
+
+fn loop_area(l: &Loop2) -> f64 {
+    area(&Region2 {
+        outer: l.clone(),
+        holes: vec![],
+    })
+}
+
+fn start(s: &Seg2) -> Vec2 {
+    match *s {
+        Seg2::Line { a, .. } | Seg2::Conic { a, .. } => a,
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            ..
+        } => v(
+            center.x + radius * start.cos(),
+            center.y + radius * start.sin(),
+        ),
+        Seg2::Cubic { p0, .. } => p0,
+        Seg2::Bezier { p, .. } => p[0],
+    }
+}
+
+fn end(s: &Seg2) -> Vec2 {
+    match *s {
+        Seg2::Line { b, .. } | Seg2::Conic { b, .. } => b,
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => v(
+            center.x + radius * (start + sweep).cos(),
+            center.y + radius * (start + sweep).sin(),
+        ),
+        Seg2::Cubic { p3, .. } => p3,
+        Seg2::Bezier { n, p } => p[usize::from(n)],
+    }
+}
+
+fn dist(a: Vec2, b: Vec2) -> f64 {
+    (a.x - b.x).hypot(a.y - b.y)
+}
+
+/// A line's or arc's length.
+fn length(s: &Seg2) -> f64 {
+    match *s {
+        Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
+        _ => dist(start(s), end(s)),
+    }
+}
+
+fn reversed(s: &Seg2) -> Seg2 {
+    match *s {
+        Seg2::Line { a, b } => Seg2::Line { a: b, b: a },
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => Seg2::Arc {
+            center,
+            radius,
+            start: start + sweep,
+            sweep: -sweep,
+        },
+        Seg2::Conic { a, apex, b, w } => Seg2::Conic {
+            a: b,
+            apex,
+            b: a,
+            w,
+        },
+        other => panic!("{other:?}"),
+    }
+}
+
+fn closed(l: &Loop2, tol: f64) -> bool {
+    l.segs
+        .iter()
+        .zip(l.segs.iter().cycle().skip(1))
+        .all(|(a, b)| dist(end(a), start(b)) <= tol)
+}
+
+fn is_line_or_arc(s: &Seg2) -> bool {
+    matches!(s, Seg2::Line { .. } | Seg2::Arc { .. })
+}
+
+fn same_seg(a: &Seg2, b: &Seg2) -> bool {
+    match (a, b) {
+        (
+            Seg2::Conic { a, apex, b, w },
+            Seg2::Conic {
+                a: c,
+                apex: x,
+                b: d,
+                w: u,
+            },
+        ) => {
+            dist(*a, *c) < 1e-9
+                && dist(*apex, *x) < 1e-9
+                && dist(*b, *d) < 1e-9
+                && (w - u).abs() < 1e-12
+        }
+        _ => a == b,
+    }
+}
+
+#[test]
+fn shared_arc_line_endpoint_roundoff_does_not_open_a_union() {
+    all_fixes();
+    let a = Region2 {
+        outer: Loop2::polygon(&[v(-2., 0.), v(2., 0.), v(2., 2.), v(-2., 2.)]),
+        holes: vec![],
+    };
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line {
+        a: v(a.0, a.1),
+        b: v(b.0, b.1),
+    };
+    for epsilon in [-4e-14, 4e-14] {
+        let b = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    line((1.15, epsilon), (-1.15, -epsilon)),
+                    Seg2::Arc {
+                        center: v(-1.35, epsilon),
+                        radius: 0.2,
+                        start: 0.,
+                        sweep: -FRAC_PI_2,
+                    },
+                    line((-1.35, -0.2), (-2.4, -0.2)),
+                    line((-2.4, -0.2), (-2.4, -1.)),
+                    line((-2.4, -1.), (2.4, -1.)),
+                    line((2.4, -1.), (2.4, -0.2)),
+                    line((2.4, -0.2), (1.35, -0.2)),
+                    Seg2::Arc {
+                        center: v(1.35, -epsilon),
+                        radius: 0.2,
+                        start: -FRAC_PI_2,
+                        sweep: -FRAC_PI_2,
+                    },
+                ],
+            },
+            holes: vec![],
+        };
+        let result = planar_regions_boolean(
+            std::slice::from_ref(&a),
+            std::slice::from_ref(&b),
+            BooleanOp::Union,
+            1e-5,
+        )
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(closed(&result[0].outer, 1e-4));
+        assert!((area(&result[0]) - area(&a) - area(&b)).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn a_ledge_shorter_than_the_tolerance_reads_back_as_one_region() {
+    all_fixes();
+    let ledged = Region2 {
+        outer: Loop2::polygon(
+            &[
+                (100.0, 3.0),
+                (100.0, 3.0001),
+                (97.0, 3.0001),
+                (97.0, 60.0),
+                (0.0, 60.0),
+                (0.0, 3.0),
+            ]
+            .map(|(x, y)| v(x, y)),
+        ),
+        holes: vec![],
+    };
+    let below = rectangle(v(0.0, -12.0), v(100.0, 0.0));
+    let out = planar_regions_boolean(
+        std::slice::from_ref(&ledged),
+        std::slice::from_ref(&below),
+        BooleanOp::Union,
+        1e-7,
+    )
+    .unwrap();
+    assert_eq!(out.len(), 2, "{out:?}");
+    let top = out
+        .iter()
+        .find(|r| loop_holds(&r.outer, v(50.0, 30.0)) == Some(true))
+        .unwrap();
+    assert!(
+        top.outer.segs.len() == 6 && closed(&top.outer, 1e-9),
+        "{top:?}"
+    );
+    assert!((area(top) - area(&ledged)).abs() < 1e-9, "{}", area(top));
+}
+
+fn volume(b: &Body) -> f64 {
+    b.volume(1e-8).unwrap()
+}
+
+#[test]
+fn compound_planar_extrusion_normalizes_overlap_and_retains_islands() {
+    all_fixes();
+    let plane = Plane::XY;
+    let a = rectangle(Vec2::ZERO, v(10.0, 10.0));
+    let b = rectangle(v(5.0, 0.0), v(15.0, 10.0));
+    let body = extrude_planar_regions(&plane, &[a.clone(), b], 0.0, 2.0).unwrap();
+    assert!((volume(&body) - 300.0).abs() < 1e-6);
+    let inner = Region2 {
+        outer: Loop2::circle(v(5.0, 5.0), 2.0),
+        holes: vec![],
+    };
+    let body = extrude_planar_regions(&plane, &[a.clone(), inner.clone()], 0.0, 2.0).unwrap();
+    assert!((volume(&body) - 200.0).abs() < 1e-6);
+    let mut hole = Loop2::circle(v(5.0, 5.0), 3.0);
+    hole.segs = hole.segs.iter().map(reversed).collect();
+    let annulus = Region2 {
+        outer: a.outer,
+        holes: vec![hole],
+    };
+    let body = extrude_planar_regions(&plane, &[annulus, inner], 0.0, 2.0).unwrap();
+    let expected = (100.0 - PI * 5.0) * 2.0;
+    assert!((volume(&body) - expected).abs() < 0.1);
+    assert_eq!(body.solid_count().unwrap(), 2);
+    let a = rectangle(Vec2::ZERO, v(10.0, 10.0));
+    let b = rectangle(v(10.0, 10.0), v(20.0, 20.0));
+    assert!(matches!(
+        extrude_planar_regions(&plane, &[a, b], 0.0, 2.0),
+        Err(Error::Unsupported(_))
+    ));
+    let circles = [Vec2::ZERO, v(10.0, 0.0)].map(|center| Region2 {
+        outer: Loop2::circle(center, 5.0),
+        holes: vec![],
+    });
+    assert!(extrude_planar_regions(&plane, &circles, 0.0, 2.0).is_err());
+}
+
+/// An ellipse about `c` with semi-axes `a` (along x) and `b`, as four exact conics.
+fn ellipse(c: Vec2, a: f64, b: f64) -> Loop2 {
+    let corners = [c + v(a, 0.0), c + v(0.0, b), c - v(a, 0.0), c - v(0.0, b)];
+    Loop2 {
+        segs: (0..4)
+            .map(|i| Seg2::Conic {
+                a: corners[i],
+                apex: corners[i] + corners[(i + 1) % 4] - c,
+                b: corners[(i + 1) % 4],
+                w: FRAC_1_SQRT_2,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn free_form_cut_outs_stay_exact_whole_or_cut() {
+    all_fixes();
+    let plate = rectangle(Vec2::ZERO, v(100.0, 60.0));
+    let hole = Region2 {
+        outer: ellipse(v(40.0, 30.0), 15.0, 8.0),
+        holes: vec![],
+    };
+    let out = planar_regions_boolean(
+        std::slice::from_ref(&plate),
+        std::slice::from_ref(&hole),
+        BooleanOp::Subtract,
+        1e-7,
+    )
+    .unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].holes.len(), 1);
+    // the whole ellipse comes back as its four exact conics, running as a hole (clockwise)
+    let h = &out[0].holes[0];
+    assert_eq!(h.segs.len(), 4);
+    assert!(
+        h.segs
+            .iter()
+            .all(|s| hole.outer.segs.iter().any(|t| same_seg(&reversed(s), t))),
+        "{h:?}"
+    );
+    assert!(loop_area(h) < 0.0);
+    let exact = 6000.0 - PI * 15.0 * 8.0;
+    assert!(
+        (area(&out[0]) - exact).abs() < 1e-9,
+        "{} vs {exact}",
+        area(&out[0])
+    );
+    // what the cut takes is the ellipse, whole and exact, counter-clockwise
+    let taken = planar_regions_boolean(
+        std::slice::from_ref(&plate),
+        std::slice::from_ref(&hole),
+        BooleanOp::Intersect,
+        1e-7,
+    )
+    .unwrap();
+    assert!(
+        taken.len() == 1
+            && taken[0]
+                .outer
+                .segs
+                .iter()
+                .all(|s| hole.outer.segs.iter().any(|t| same_seg(s, t))),
+        "{taken:?}"
+    );
+    // an ellipse centred on the plate's edge makes a notch of exactly half the ellipse
+    let over = Region2 {
+        outer: ellipse(v(100.0, 30.0), 15.0, 8.0),
+        holes: vec![],
+    };
+    let out = planar_regions_boolean(
+        std::slice::from_ref(&plate),
+        std::slice::from_ref(&over),
+        BooleanOp::Subtract,
+        1e-7,
+    )
+    .unwrap();
+    assert_eq!(out.len(), 1);
+    assert!(out[0].holes.is_empty() && !out[0].outer.segs.iter().all(is_line_or_arc));
+    let notched = 6000.0 - PI * 15.0 * 8.0 / 2.0;
+    assert!(
+        (area(&out[0]) - notched).abs() < 1e-6,
+        "{} vs {notched}",
+        area(&out[0])
+    );
+    // two ellipses that overlap join into one outline of their conics; apart, both stay whole
+    let beside = |dx: f64| Region2 {
+        outer: ellipse(v(40.0 + dx, 30.0), 15.0, 8.0),
+        holes: vec![],
+    };
+    let joined = planar_regions_boolean(
+        std::slice::from_ref(&hole),
+        &[beside(20.0)],
+        BooleanOp::Union,
+        1e-7,
+    )
+    .unwrap();
+    assert!(
+        joined.len() == 1 && joined[0].outer.segs.iter().all(|s| !is_line_or_arc(s)),
+        "{joined:?}"
+    );
+    let apart = planar_regions_boolean(
+        std::slice::from_ref(&hole),
+        &[beside(40.0)],
+        BooleanOp::Union,
+        1e-7,
+    )
+    .unwrap();
+    assert!(
+        apart.len() == 2 && apart.iter().all(|r| r.outer.segs.len() == 4),
+        "{apart:?}"
+    );
+    // the flat material extrudes with the exact elliptic wall: four conic faces, two caps
+    let cut = planar_regions_boolean(&[plate], &[hole], BooleanOp::Subtract, 1e-7).unwrap();
+    let body = extrude_planar_regions(&Plane::XY, &cut, 0.0, 2.0).unwrap();
+    assert_eq!(body.counts().unwrap()[0], 4 + 4 + 2);
+    let vol = volume(&body);
+    assert!((vol - exact * 2.0).abs() < 1e-3 * exact, "{vol}");
+}
+
+#[test]
+fn free_form_loops_that_are_not_finite_are_refused() {
+    all_fixes();
+    let plate = rectangle(Vec2::ZERO, v(100.0, 60.0));
+    let mut bad = ellipse(v(40.0, 30.0), 15.0, 8.0);
+    let (a, b) = (start(&bad.segs[1]), end(&bad.segs[1]));
+    bad.segs[1] = Seg2::Conic {
+        a,
+        apex: v(f64::NAN, 0.0),
+        b,
+        w: 1.0,
+    };
+    let e = planar_regions_boolean(
+        std::slice::from_ref(&plate),
+        &[Region2 {
+            outer: bad,
+            holes: vec![],
+        }],
+        BooleanOp::Subtract,
+        1e-7,
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("free-form"), "{e}");
+}
+
+#[test]
+fn many_small_cut_outs_far_apart_cut_as_before() {
+    all_fixes();
+    let plate = rectangle(Vec2::ZERO, v(2000.0, 20.0));
+    let holes: Vec<Region2> = (0..400)
+        .map(|i| Region2 {
+            outer: Loop2::circle(v(2.5 + 5.0 * f64::from(i), 10.0), 1.8),
+            holes: vec![],
+        })
+        .collect();
+    let out = planar_regions_boolean(&[plate], &holes, BooleanOp::Subtract, 1e-7).unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].holes.len(), 400);
+    let exact = 40_000.0 - 400.0 * PI * 1.8 * 1.8;
+    assert!((area(&out[0]) - exact).abs() < 1e-6, "{}", area(&out[0]));
+}
+
+/// Loops close only within the chaining tolerance: a neighbour with an edge level with a gap of
+/// one joins the square instead of being dropped as if it lay inside it.
+#[test]
+fn ray_parity_closes_the_gaps_chaining_leaves() {
+    all_fixes();
+    let gap = 1e-13;
+    let square = Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(0.0, 0.0),
+                b: v(10.0, 0.0),
+            },
+            Seg2::Line {
+                a: v(10.0, 0.0),
+                b: v(10.0, 10.0),
+            },
+            Seg2::Line {
+                a: v(10.0, 10.0),
+                b: v(0.0, 10.0),
+            },
+            Seg2::Line {
+                a: v(0.0, 10.0),
+                b: v(0.0, 5.0 + gap),
+            },
+            Seg2::Line {
+                a: v(0.0, 5.0),
+                b: v(0.0, 0.0),
+            },
+        ],
+    };
+    let a = Region2 {
+        outer: square,
+        holes: vec![],
+    };
+    let b = rectangle(v(-4.0, 2.0), v(0.0, 5.0));
+    let union = planar_regions_boolean(&[a], &[b], BooleanOp::Union, 1e-7).unwrap();
+    assert_eq!(union.len(), 1);
+    assert!(
+        (area(&union[0]).abs() - 112.0).abs() < 1e-9,
+        "{}",
+        area(&union[0])
+    );
+}
+
+/// Edges on one line within the tolerance, a hair from parallel, are one edge of the result:
+/// where they meet is no corner.
+#[test]
+fn overlapping_lines_a_hair_from_parallel_do_not_cross() {
+    all_fixes();
+    let square = rectangle(Vec2::ZERO, v(10.0, 10.0));
+    let quad = |meet: f64, far: f64| {
+        let on = |x: f64| v(x, (meet - x) * 1e-9);
+        let mut corners = [on(4.0), on(14.0), v(14.0, far), v(4.0, far)];
+        if far < 0.0 {
+            corners.reverse();
+        }
+        Region2 {
+            outer: Loop2::polygon(&corners),
+            holes: vec![],
+        }
+    };
+    let lengths = |r: &Region2| {
+        let mut all: Vec<f64> = r.outer.segs.iter().map(length).collect();
+        all.sort_by(f64::total_cmp);
+        all
+    };
+    let same = |got: &[f64], want: &[f64]| {
+        got.len() == want.len() && got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-6)
+    };
+    for meet in [10.0 - 5e-8, 7.0] {
+        let below = quad(meet, -5.0);
+        let cut = planar_regions_boolean(
+            std::slice::from_ref(&square),
+            std::slice::from_ref(&below),
+            BooleanOp::Subtract,
+            1e-7,
+        )
+        .unwrap();
+        assert_eq!(cut.len(), 1, "{meet}");
+        assert!(
+            same(&lengths(&cut[0]), &[10.0, 10.0, 10.0, 10.0]),
+            "{meet}: cut edges {:?}",
+            lengths(&cut[0])
+        );
+        assert!(
+            (area(&cut[0]) - 100.0).abs() < 1e-6,
+            "{meet}: {}",
+            area(&cut[0])
+        );
+        let flush = quad(meet, 5.0);
+        let union = planar_regions_boolean(
+            std::slice::from_ref(&square),
+            std::slice::from_ref(&flush),
+            BooleanOp::Union,
+            1e-7,
+        )
+        .unwrap_or_else(|e| panic!("{meet}: union {e}"));
+        assert_eq!(union.len(), 1, "{meet}");
+        assert!(
+            same(&lengths(&union[0]), &[4.0, 5.0, 5.0, 10.0, 10.0, 14.0]),
+            "{meet}: union edges {:?}",
+            lengths(&union[0])
+        );
+        assert!(
+            (area(&union[0]) - 120.0).abs() < 1e-6,
+            "{meet}: {}",
+            area(&union[0])
+        );
+    }
+}
+
+/// A tool smaller than a display chord's sagitta between the circle and the chord is cut, not
+/// lost: the booleans never read the circle as a polyline.
+#[test]
+fn tiny_tool_between_circle_and_display_chord_is_not_lost() {
+    all_fixes();
+    let circle = Region2 {
+        outer: Loop2::circle(Vec2::ZERO, 10.0),
+        holes: vec![],
+    };
+    // a chord of 1e-3 sagitta spans 2 sqrt(2 r s) of arc: the square sits outside that chord
+    let half_angle = (2.0 * 10.0 * 1e-3_f64).sqrt() / 10.0;
+    let at = v(half_angle.cos(), half_angle.sin()) * 9.9998;
+    let half = v(0.000025, 0.000025);
+    let square = rectangle(at - half, at + half);
+    assert!(9.9998 + 0.000025 * 2.0_f64.sqrt() < 10.0);
+    assert!(
+        9.9998 - 0.000025 * 2.0_f64.sqrt() > 10.0 * half_angle.cos(),
+        "outside the chord"
+    );
+    let cut = planar_regions_boolean(
+        std::slice::from_ref(&circle),
+        std::slice::from_ref(&square),
+        BooleanOp::Subtract,
+        1e-7,
+    )
+    .unwrap();
+    assert_eq!(cut.len(), 1);
+    assert_eq!(cut[0].holes.len(), 1);
+    assert!((loop_area(&cut[0].holes[0]).abs() - 2.5e-9).abs() < 1e-13);
+    let intersect =
+        planar_regions_boolean(&[circle], &[square], BooleanOp::Intersect, 1e-7).unwrap();
+    assert_eq!(intersect.len(), 1);
+    assert!((area(&intersect[0]) - 2.5e-9).abs() < 1e-13);
+}
+
+/// A 200 x 37 plate turned by `theta` about the origin, and the fillet region of one of its
+/// corners: an arc of radius `r` tangent to both edges, closed by two lines meeting `reach` out.
+fn plate_and_corner_fillet(theta: f64, r: f64, reach: f64) -> (Region2, Region2) {
+    let (sn, cs) = theta.sin_cos();
+    let rot = |x: f64, y: f64| v(x * cs - y * sn, x * sn + y * cs);
+    let (w, lo, hi) = (200.0, -40.25, -3.25);
+    let plate = Region2 {
+        outer: Loop2::polygon(&[rot(0.0, hi), rot(0.0, lo), rot(w, lo), rot(w, hi)]),
+        holes: vec![],
+    };
+    let arc = Seg2::Arc {
+        center: rot(w - r, lo + r),
+        radius: r,
+        start: theta,
+        sweep: -FRAC_PI_2,
+    };
+    let out = rot(w + reach, lo - reach);
+    let cut = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                arc,
+                Seg2::Line {
+                    a: end(&arc),
+                    b: out,
+                },
+                Seg2::Line {
+                    a: out,
+                    b: start(&arc),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    (plate, cut)
+}
+
+/// A line and an arc that touch meet at one point: the cut leaves no hairline edge along the
+/// plate's edge past the arc's end, at every turn of the plate.
+#[test]
+fn an_arc_tangent_to_the_edges_it_ends_on_leaves_no_hairline_edges() {
+    all_fixes();
+    for k in 0..=360 {
+        let theta = (f64::from(k) * 0.25).to_radians();
+        for r in [2.0, 0.5, 25.0] {
+            let (plate, cut) = plate_and_corner_fillet(theta, r, 0.4);
+            let out = planar_regions_boolean(
+                std::slice::from_ref(&plate),
+                std::slice::from_ref(&cut),
+                BooleanOp::Subtract,
+                1e-7,
+            )
+            .unwrap_or_else(|e| panic!("{k} r {r}: {e}"));
+            assert_eq!(out.len(), 1, "{k} r {r}");
+            let lp = &out[0].outer;
+            let shortest = lp.segs.iter().map(length).fold(f64::MAX, f64::min);
+            let arcs = lp
+                .segs
+                .iter()
+                .filter(|s| matches!(s, Seg2::Arc { .. }))
+                .count();
+            assert!(
+                out[0].holes.is_empty() && lp.segs.len() == 5 && arcs == 1 && shortest > 0.5,
+                "{k} r {r}: {} edges, shortest {shortest:e}",
+                lp.segs.len()
+            );
+            let want = 200.0 * 37.0 - r * r * (1.0 - FRAC_PI_4);
+            assert!(
+                (area(&out[0]) - want).abs() < 1e-9,
+                "{k} r {r}: {} vs {want}",
+                area(&out[0])
+            );
+            let taken = planar_regions_boolean(
+                std::slice::from_ref(&plate),
+                std::slice::from_ref(&cut),
+                BooleanOp::Intersect,
+                1e-7,
+            )
+            .unwrap();
+            assert!(
+                taken.len() == 1 && taken[0].outer.segs.len() == 3,
+                "{k} r {r}: {taken:?}"
+            );
+            assert!(
+                (area(&taken[0]) - r * r * (1.0 - FRAC_PI_4)).abs() < 1e-9,
+                "{k} r {r}"
+            );
+        }
+    }
+}
+
+/// A plate whose bottom edge bends up by `slope` over its last 5 mm, and a strip below its
+/// straight 50 mm, its corners on that edge rounded to the nanometre and moved by `off`; both
+/// turned by `theta`.
+fn plate_and_strip_by_a_bent_edge(theta: f64, slope: f64, off: Vec2) -> (Region2, Region2) {
+    let (sn, cs) = theta.sin_cos();
+    let rot = |x: f64, y: f64| v(x * cs - y * sn, x * sn + y * cs);
+    let nm = |p: Vec2| v((p.x * 1e9).round() / 1e9, (p.y * 1e9).round() / 1e9) + off;
+    let plate = [
+        rot(95.0, 50.0 + 5.0 * slope),
+        rot(100.0, 50.0),
+        rot(150.0, 50.0),
+        rot(150.0, 80.0),
+        rot(95.0, 80.0),
+    ];
+    let strip = [
+        nm(rot(100.0, 50.0)),
+        rot(100.0, 47.0),
+        rot(150.0, 47.0),
+        nm(rot(150.0, 50.0)),
+    ];
+    (
+        Region2 {
+            outer: Loop2::polygon(&plate),
+            holes: vec![],
+        },
+        Region2 {
+            outer: Loop2::polygon(&strip),
+            holes: vec![],
+        },
+    )
+}
+
+/// The bent piece of the plate's edge crosses the strip's edge short of their shared corner: the
+/// union is the plate and the strip whole, six edges, no sliver.
+#[test]
+fn a_bent_edge_crossing_its_neighbour_by_their_corner_leaves_no_sliver() {
+    all_fixes();
+    let union_is_whole = |(plate, strip): (Region2, Region2), what: &str| {
+        let want = area(&plate) + area(&strip);
+        for (a, b) in [(&plate, &strip), (&strip, &plate)] {
+            let out = planar_regions_boolean(
+                std::slice::from_ref(a),
+                std::slice::from_ref(b),
+                BooleanOp::Union,
+                1e-7,
+            )
+            .unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert_eq!(out.len(), 1, "{what}: {out:?}");
+            let lp = &out[0].outer;
+            let shortest = lp.segs.iter().map(length).fold(f64::MAX, f64::min);
+            assert!(
+                out[0].holes.is_empty() && lp.segs.len() == 6 && shortest > 2.9,
+                "{what}: {} edges, shortest {shortest:e}",
+                lp.segs.len()
+            );
+            assert!(
+                (area(&out[0]) - want).abs() < 1e-6,
+                "{what}: {} vs {want}",
+                area(&out[0])
+            );
+        }
+    };
+    for k in 0..360 {
+        for slope in [0.01, 0.001] {
+            union_is_whole(
+                plate_and_strip_by_a_bent_edge(
+                    (f64::from(k) * 0.25).to_radians(),
+                    slope,
+                    Vec2::ZERO,
+                ),
+                &format!("{k} slope {slope}"),
+            );
+        }
+    }
+    for k in 0..16 {
+        for d in [1e-9, 4e-9] {
+            let a = f64::from(k) * TAU / 16.0;
+            let off = v(a.cos() * d, a.sin() * d);
+            union_is_whole(
+                plate_and_strip_by_a_bent_edge(0.0, 0.01, off),
+                &format!("off {off:?}"),
+            );
+        }
+    }
+}
+
+#[test]
+fn planar_region_api_rejects_hostile_values_and_budgets() {
+    all_fixes();
+    let plate = rectangle(Vec2::ZERO, v(10.0, 10.0));
+    for tolerance in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+        assert_eq!(
+            planar_regions_boolean(
+                std::slice::from_ref(&plate),
+                &[],
+                BooleanOp::Union,
+                tolerance
+            ),
+            Err(Error::Argument)
+        );
+    }
+    let mut bad = plate.clone();
+    bad.outer.segs[0] = Seg2::Line {
+        a: v(f64::NAN, 0.0),
+        b: Vec2::X,
+    };
+    assert!(matches!(
+        planar_regions_boolean(&[bad], &[], BooleanOp::Union, 1e-7),
+        Err(Error::Profile(_))
+    ));
+    let many = vec![plate; solidcore::prism::profile::MAX_SEGMENTS / 4 + 1];
+    assert!(matches!(
+        planar_regions_boolean(&many, &[], BooleanOp::Union, 1e-7),
+        Err(Error::Profile(_))
+    ));
+}
+
+/// A box cut by a cylinder through it, moved: a prism along its moved axis, and the same prism
+/// as itself moved the same way; the drilled box against a box drilled wider is not.
+#[test]
+fn a_drilled_box_moved_is_the_prism_it_was() {
+    all_fixes();
+    let drilled = |r: f64| {
+        let stock = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+        let cutter = make_cylinder([10.0, 10.0, -1.0], r, 12.0).unwrap();
+        solidcore_ops::boolean::boolean(stock, cutter, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    let source = drilled(6.0);
+    let s: PrismSection = prism_section(&source, &Plane::XY)
+        .unwrap()
+        .expect("a drilled box is a prism");
+    let exact = 4000.0 - 360.0 * PI;
+    assert!(
+        s.volume.lo <= exact && s.volume.hi >= exact,
+        "{:?}",
+        s.volume
+    );
+    assert!(s.lo.abs() <= s.tolerance && (s.hi - 10.0).abs() <= s.tolerance);
+    let twin = drilled(6.0);
+    assert_eq!(prism_equivalent(&source, &twin).unwrap(), Some(true));
+    assert_eq!(prism_equivalent(&source, &source).unwrap(), Some(true));
+    assert_eq!(
+        prism_equivalent(&source, &drilled(6.0001)).unwrap(),
+        Some(false)
+    );
+    // turned 0.7 rad about (1, 2, 3) through the origin, and moved: still the same prism
+    let (c, sn) = (0.7_f64.cos(), 0.7_f64.sin());
+    let n = {
+        let l = 14.0_f64.sqrt();
+        [1.0 / l, 2.0 / l, 3.0 / l]
+    };
+    let mut m = [[0.0; 4]; 4];
+    for (i, row) in m.iter_mut().enumerate().take(3) {
+        for (j, x) in row.iter_mut().enumerate().take(3) {
+            let id = if i == j { 1.0 } else { 0.0 };
+            let cross = match (i, j) {
+                (0, 1) => n[2],
+                (0, 2) => -n[1],
+                (1, 0) => -n[2],
+                (1, 2) => n[0],
+                (2, 0) => n[1],
+                (2, 1) => -n[0],
+                _ => 0.0,
+            };
+            // column-major: m[column][row]
+            *x = c * id + (1.0 - c) * n[i] * n[j] + sn * cross;
+        }
+    }
+    m[3] = [30.0, 20.0, 10.0, 1.0];
+    let moved = source.copy().unwrap();
+    moved.transform(&m).unwrap();
+    let twin_moved = twin.copy().unwrap();
+    twin_moved.transform(&m).unwrap();
+    assert_eq!(prism_equivalent(&moved, &twin_moved).unwrap(), Some(true));
+    assert!(
+        prism_section(&moved, &Plane::XY).unwrap().is_none(),
+        "not along z once turned"
+    );
+}
+
+#[test]
+fn loop_holds_a_point_on_an_edge_line_off_the_loop() {
+    let sq = Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]);
+    assert_eq!(loop_holds(&sq, v(-1.0, 0.0)), Some(false));
+    assert_eq!(loop_holds(&sq, v(11.0, 10.0)), Some(false));
+    assert_eq!(loop_holds(&sq, v(5.0, 5.0)), Some(true));
+    assert_eq!(loop_holds(&sq, v(5.0, 0.0)), None);
+}

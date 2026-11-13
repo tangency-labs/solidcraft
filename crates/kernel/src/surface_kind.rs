@@ -1,8 +1,9 @@
 //! What surface a face lies on (plane, cylinder, cone, sphere, torus), for construction
 //! geometry: axes through round faces, centres of spheres and tori.
 
+use solidcore_ops::face_surface::{Exact, FaceSurface as ExactSurface};
 use solidcore_record::Vec3;
-use solidcore_record::brep::{Brep, Curve};
+use solidcore_record::brep::{Brep, Curve, Surface};
 use solidcraft_geom::UnitVec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::prelude::*;
@@ -125,8 +126,17 @@ fn find_torus(eval: &SurfaceEval, u0: f64, u1: f64, v0: f64, v1: f64, tol: f64, 
     Some(FaceSurface::Torus { center, axis, major, minor })
 }
 
-/// The analytic surface of face `face` of the record `b`, as the record holds it.
+/// The analytic surface of face `face` of the record `b`, as the record holds it; a round kept
+/// as its definition is the torus that definition gives, when it is one.
 pub(crate) fn surface_of(b: &Brep, face: usize) -> Option<FaceSurface> {
+    if matches!(b.faces.get(face)?.surface, Surface::Blend { .. }) {
+        return match *ExactSurface::of(b, face).ok()?.exact() {
+            Exact::Torus { centre, axis, major, minor } => {
+                Some(FaceSurface::Torus { center: Vec3::from(centre), axis: Vec3::from(axis).unit()?, major, minor })
+            }
+            _ => None,
+        };
+    }
     Some(match surf_of(b, face)? {
         Surf::Plane { n, d } => FaceSurface::Plane { normal: n.unit()?, point: n * d },
         Surf::Cylinder { o, a, r, .. } => FaceSurface::Cylinder { origin: o, axis: a.unit()?, radius: r },
@@ -150,6 +160,11 @@ pub struct EdgeCircle {
     pub angle: f64,
 }
 
+/// The record edges that bound face `face` of `b` (none for a face out of range).
+pub fn face_edge_indices(b: &Body, face: usize) -> Vec<usize> {
+    crate::offset::face_edges(b.record(), face).into_iter().map(|e| e as usize).collect()
+}
+
 /// The circle edge `edge` (in the order of [`Body::edges`] and the tessellated mesh's edges)
 /// lies on, if its curve is a circle or an arc of one: exactly from a circle record, and for any
 /// other curve when its points all lie on one circle (a circle held as a rational spline). `None`
@@ -168,7 +183,7 @@ pub fn edge_circle(b: &Body, edge: usize) -> Option<EdgeCircle> {
         // angles of its interval on the circle itself (a NURBS form is parameterised otherwise).
         let axis = Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)).unit()?;
         let closed = e.vertices[0] == e.vertices[1];
-        let [a0, a1] = solidcraft_geom::brep::label::edge_curve_interval(e)?;
+        let [a0, a1] = solidcore_ops::label::edge_curve_interval(e)?;
         let angle = if closed { std::f64::consts::TAU } else { (a1 - a0).min(std::f64::consts::TAU) };
         return Some(EdgeCircle { center: Vec3::from(frame.origin), axis, radius: *radius, start, end, angle });
     }

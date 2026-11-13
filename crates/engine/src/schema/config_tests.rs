@@ -43,6 +43,8 @@ fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
         ("config.activate", json!({})),
         ("config.activate", json!({"row": 5})),
+        ("config.activate", json!({"row": -1})),
+        ("config.activate", json!({"row": 1.5})),
         ("config.activate", json!({"row": "Nope"})),
         ("config.configure", json!({"params": 5})),
         ("config.configure", json!({"params": ["W", 1]})),
@@ -78,6 +80,9 @@ fn strict_keeps_todays_errors() {
         ("config.row", json!({"name": "R", "values": {"param:W": "1".repeat(4097)}})),
         ("config.row", json!({"name": "R", "values": {"param:W": "1"}})),
         ("config.row", json!({"name": "R", "from": "Nope"})),
+        ("config.row", json!({"name": "R", "from": 99_999})),
+        ("config.row", json!({"name": "R", "from": true})),
+        ("config.row", json!({"name": 99_999, "delete": true})),
         ("config.row", json!({"name": "R", "rename": null})),
         ("config.row", json!({"name": "R", "rename": "S"})),
         ("config.row", json!({"name": "R", "delete": true})),

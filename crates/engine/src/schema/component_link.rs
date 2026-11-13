@@ -20,6 +20,7 @@ use solidcraft_geom::Vec3Geom as _;
 
 use super::check::{located, whole};
 use super::types::{not_blank_pattern, present};
+use crate::cmd::LinkState;
 use crate::params;
 
 /// The most components `component.update_links` and `component.replace_with_link` read from a
@@ -52,7 +53,7 @@ impl JsonSchema for ComponentRef {
 
 /// `key`, a component's id or name, with the handler's message for anything else, `null`
 /// included.
-fn component_key<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<ComponentRef>, D::Error> {
+pub(super) fn component_key<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<ComponentRef>, D::Error> {
     match Value::deserialize(d)? {
         Value::Number(n) => Ok(Some(ComponentRef(n.to_string()))),
         Value::String(s) => Ok(Some(ComponentRef(s))),
@@ -62,6 +63,11 @@ fn component_key<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<Co
 
 fn component<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ComponentRef>, D::Error> {
     component_key(d, "component")
+}
+
+/// `occurrence`, a placement by its id, with the handler's message for anything else.
+fn placement<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    Value::deserialize(d)?.as_u64().map(Some).ok_or_else(|| D::Error::custom(whole("`occurrence` must be a placement id")))
 }
 
 fn parent<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ComponentRef>, D::Error> {
@@ -95,7 +101,7 @@ fn path_schema(_: &mut SchemaGenerator) -> Schema {
 
 /// Adds `key` to the schema's `required` list: for a key the type has optional so that the
 /// handler, not the check, refuses it when it's left out.
-fn require(schema: &mut Schema, key: &str) {
+pub(super) fn require(schema: &mut Schema, key: &str) {
     match schema.get_mut("required") {
         Some(Value::Array(required)) => {
             if !required.iter().any(|k| k == key) {
@@ -329,8 +335,8 @@ pub struct LinkFailure {
 }
 
 /// Replace the source of a linked component with another saved design, for all its occurrences,
-/// keeping their identities and placements. The design is read and checked before anything
-/// changes; one undo step.
+/// keeping their identities and placements, or with `occurrence` for that one only. The design is
+/// read and checked before anything changes; one undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = component_and_path_required)]
 pub struct RelinkParams {
@@ -343,13 +349,25 @@ pub struct RelinkParams {
     #[serde(default, deserialize_with = "path_required", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]
     pub path: Option<String>,
+    /// One of its placements, by id. When the component has other placements, only this one
+    /// comes to show the design, as a placement of the component already linked to it or of a
+    /// new one under the same parent, keeping its position, grounding and joints.
+    #[serde(default, deserialize_with = "placement", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u64")]
+    pub occurrence: Option<u64>,
 }
 
 /// What `component.relink` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RelinkResult {
-    /// The component, by id.
+    /// The component, by id: with `occurrence`, the one that placement shows now.
     pub component: u64,
+    /// With `occurrence`: the component the placement showed before, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_component: Option<u64>,
+    /// With `occurrence`: the placement, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence: Option<u64>,
     /// The Import feature that holds the linked bodies, by id.
     pub feature: u64,
     /// The new file, as the link stores it.
@@ -415,8 +433,9 @@ pub struct LinksResult {
     pub param_warnings: Vec<String>,
 }
 
-/// One linked component. A file that is looked for has `found` and `changed`; a refused one is
-/// not looked for and has `found` null and a `reason`.
+/// One linked component. A file that is looked for has `found` and `changed`, and a `state` and
+/// a `reason` when it can't be reached; a refused one is not looked for and has `found` null, a
+/// `state` and a `reason`.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum LinkInfo {
@@ -434,6 +453,13 @@ pub enum LinkInfo {
         /// Whether the file is no longer what this design last read (`component.update_links`
         /// reads it again); null when it is not found or the link is older than this record.
         changed: Option<bool>,
+        /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
+        /// when it can be read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state: Option<LinkState>,
+        /// What to show about it. Left out with `state`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     /// The file is on a network location that is not allowed.
     Network {
@@ -445,6 +471,8 @@ pub enum LinkInfo {
         found: Option<bool>,
         /// The network location.
         host: String,
+        /// Always `not_allowed`.
+        state: LinkState,
         reason: String,
     },
     /// The path names a device.
@@ -455,6 +483,8 @@ pub enum LinkInfo {
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,
+        /// Always `unreadable`.
+        state: LinkState,
         reason: String,
     },
 }

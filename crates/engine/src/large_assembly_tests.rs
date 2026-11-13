@@ -29,7 +29,14 @@ fn generated_assembly(parts: usize) -> Document {
     let mut made = Vec::new();
     for i in 0..parts {
         let o = Vec3::new(30.0 * (i % 20) as f64, 30.0 * (i / 20) as f64, 0.0);
-        let block = FeatureKind::Box { corner: point_expr(o), length: mm(20.0), width: mm(12.0), height: mm(6.0), operation: Operation::NewBody };
+        let block = FeatureKind::Box {
+            corner: point_expr(o),
+            length: mm(20.0),
+            width: mm(12.0),
+            height: mm(6.0),
+            operation: Operation::NewBody,
+            centred: false,
+        };
         made.push((i, doc.add_feature(block, Some(&format!("Plate {i}"))).unwrap()));
         for (k, x) in [2.0, 9.0, 16.0].into_iter().enumerate() {
             let pin = FeatureKind::Cylinder {

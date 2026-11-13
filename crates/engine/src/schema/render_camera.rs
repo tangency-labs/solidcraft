@@ -35,7 +35,7 @@ const MAX_ASPECT: f64 = 1e6;
 /// refuse an explicit `up`, while a render camera keeps both `roll` and `up`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(transparent)]
-pub struct RenderCamera(pub solidcraft_render::Camera);
+pub struct RenderCamera(pub solidcraft_viewport::Camera);
 
 impl JsonSchema for RenderCamera {
     fn schema_name() -> Cow<'static, str> {
@@ -191,7 +191,7 @@ pub struct ApplyParams {
 
 /// A setup's name as `render.settings.apply` reads it: `null` is left out, other text than a
 /// string gets serde's message, and a string must be a valid setup name.
-fn setup_name<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+pub(super) fn setup_name<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     let Some(name) = Option::<String>::deserialize(Value::deserialize(d)?).map_err(|e| D::Error::custom(whole(e)))? else {
         return Ok(None);
     };
@@ -202,7 +202,7 @@ fn setup_name<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Erro
 /// The pattern says "not blank"; trimmed, at most 128 bytes and free of control characters,
 /// which JSON Schema can't count or class portably, are in the field's description and
 /// checked by [`setup_name`].
-fn setup_name_schema(_: &mut SchemaGenerator) -> Schema {
+pub(super) fn setup_name_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
         "type": "string",
         "minLength": 1,

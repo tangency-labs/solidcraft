@@ -16,6 +16,7 @@ use solidcraft_engine::{
 };
 
 use super::{ImageMethod, ribbon};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 
 const LONGEST_EDGE: u32 = 512;
@@ -126,7 +127,7 @@ impl State {
         let answer = match pending.receiver.try_recv() {
             Ok(answer) => answer,
             Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => Err(crate::i18n::tr("render.live.worker_stopped").into()),
+            Err(mpsc::TryRecvError::Disconnected) => Err(solidcraft_ui_text::tr("render.live.worker_stopped").into()),
         };
         let generation = pending.generation;
         let cancelled = pending.cancelled.load(Ordering::Acquire);
@@ -152,7 +153,7 @@ impl State {
         let result = (|| -> Result<Option<Picture>, String> {
             let status = job.handle.status().map_err(|e| e.to_string())?;
             if status.job != job.handle.id() || status.scene_generation != job.revision {
-                return Err(crate::i18n::tr("render.error_provisional_identity").into());
+                return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
             }
             if let Some(error) = &status.error {
                 return Err(error.to_string());
@@ -169,7 +170,7 @@ impl State {
                     || info.executor != status.resolved.executor
                     || (info.width, info.height) != (status.request.width, status.request.height)
                 {
-                    return Err(crate::i18n::tr("render.error_provisional_identity").to_string());
+                    return Err(solidcraft_ui_text::tr("render.error_provisional_identity").to_string());
                 }
                 let image = super::decode_render_image(png, info.width, info.height, limits, ctx.input(|i| i.max_texture_side))?;
                 Ok(Picture {
@@ -202,7 +203,7 @@ impl State {
                     || preview.info.samples_per_pixel >= job.target
                     || preview.info.adaptive != adaptive
                 {
-                    return Err(crate::i18n::tr("render.error_provisional_identity").into());
+                    return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
                 }
                 return load(&preview.info.frame, preview.png(), preview.info.frame_sequence, preview.info.samples_per_pixel, false, adaptive)
                     .map(Some);
@@ -211,7 +212,7 @@ impl State {
                 return Err(reason.into());
             }
             if matches!(status.progress.phase, Phase::Cancelled | Phase::Failed) {
-                return Err(crate::i18n::tr("render.live.stopped").into());
+                return Err(solidcraft_ui_text::tr("render.live.stopped").into());
             }
             Ok(None)
         })();
@@ -356,7 +357,7 @@ fn capture(app: &SolveApp, identity: &Identity, generation: u64) -> Result<Pendi
         .spawn(move || {
             let result = solidcraft_engine::io::vfs::scoped(scope, || {
                 if stop.load(Ordering::Acquire) {
-                    return Err(crate::i18n::tr("render.live.stopped").to_string());
+                    return Err(solidcraft_ui_text::tr("render.live.stopped").to_string());
                 }
                 let reply = owner.execute("render.start", &request).map_err(|e| e.to_string())?;
                 let id = serde_json::from_value(reply["job"].clone()).map_err(|e| format!("{e}"))?;
@@ -592,7 +593,7 @@ pub(super) fn source_text(app: &SolveApp, executor: &str, current: bool) -> Stri
         "gpu-path" => app.tr("render.method_gpu"),
         _ => executor,
     };
-    crate::i18n::format(if current { "render.live.source_current" } else { "render.live.source_outdated" }, &[("method", method)])
+    solidcraft_ui_text::format(if current { "render.live.source_current" } else { "render.live.source_outdated" }, &[("method", method)])
 }
 
 pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -608,11 +609,11 @@ pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         })
         .to_string()
     } else if let Some(error) = &state.error {
-        crate::i18n::format("render.live.refused", &[("reason", error)])
+        solidcraft_ui_text::format("render.live.refused", &[("reason", error)])
     } else if let Some(picture) = &state.picture {
         if picture.generation == state.generation && !state.suspended {
             if let Some(adaptive) = picture.adaptive {
-                crate::i18n::format(
+                solidcraft_ui_text::format(
                     "render.live.adaptive",
                     &[
                         ("width", &picture.size[0].to_string()),
@@ -622,7 +623,7 @@ pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 )
             } else {
                 let target = state.running.as_ref().map_or(picture.samples, |job| job.target);
-                crate::i18n::format(
+                solidcraft_ui_text::format(
                     "render.live.samples",
                     &[
                         ("current", &picture.samples.to_string()),
@@ -645,13 +646,13 @@ pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     if response.clicked() {
         let _ = app.run("view.render_live", json!({"paused":!paused}));
     }
-    let max_width = ui.available_width().min(crate::theme::Tokens::get().control_height * 10.0);
+    let max_width = ui.available_width().min(solidcraft_theme::Tokens::get().control_height * 10.0);
     let mut help = format!("{status}\n\n{}", app.tr("render.live.quality_help"));
     if app.render_workspace.live.picture.as_ref().is_some_and(|picture| picture.adaptive.is_some()) {
         help.push_str("\n\n");
         help.push_str(app.tr("render.adaptive.preview_help"));
     }
-    let note = ui_kit::StageBar::note_bounded(ui, &status, max_width).on_hover_text(help);
+    let note = ui_kit::StageBar::note_bounded(ui, &status, max_width).backing_on_hover_text(help);
     crate::scenario::publish_target("render:live:status", note.rect);
     ui_kit::StageBar::separator(ui);
 }

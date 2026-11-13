@@ -1,0 +1,235 @@
+{
+ "cases": [
+  {
+   "name": "fuzz06650_seed_degen_faces_twice_swap",
+   "inputs": {
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true
+    },
+    "case": "heal",
+    "init_gaps": true,
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ],
+    "targets": {
+     "e": "all",
+     "f": "all",
+     "v": "all"
+    }
+   }
+  },
+  {
+   "name": "fuzz14730_seed_degen_faces_twice",
+   "inputs": {
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false
+    },
+    "case": "heal",
+    "init_gaps": false,
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ],
+    "targets": {
+     "e": "all",
+     "f": "all",
+     "v": "all"
+    }
+   }
+  },
+  {
+   "name": "fuzz07609_readd_live_edge_before_fix_degen_edges",
+   "inputs": {
+    "brep": {
+     "curve": {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1e-06,
+        2e-06,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3e-06,
+        1e-06,
+        1e-06,
+        -1.7976931348623157e+308
+       ],
+       [
+        4e-06,
+        0.0,
+        2e-06,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "dim": 3,
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "kind": "wire",
+     "t0": 0.2,
+     "t1": 0.7
+    },
+    "case": "heal",
+    "init_gaps": true,
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "op": 16,
+      "step": "set_done_heal_op"
+     },
+     {
+      "add": [
+       [
+        3,
+        0
+       ],
+       [
+        7,
+        0
+       ]
+      ],
+      "op": 16,
+      "remove": [],
+      "step": "update_targets"
+     }
+    ],
+    "targets": {
+     "e": "all",
+     "f": "all",
+     "v": "all"
+    }
+   }
+  },
+  {
+   "name": "fuzz07609_remove_then_readd_edge_is_valid",
+   "inputs": {
+    "brep": {
+     "curve": {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1e-06,
+        2e-06,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3e-06,
+        1e-06,
+        1e-06,
+        -1.7976931348623157e+308
+       ],
+       [
+        4e-06,
+        0.0,
+        2e-06,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "dim": 3,
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "kind": "wire",
+     "t0": 0.2,
+     "t1": 0.7
+    },
+    "case": "heal",
+    "init_gaps": true,
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "op": 16,
+      "step": "set_done_heal_op"
+     },
+     {
+      "add": [
+       [
+        7,
+        0
+       ]
+      ],
+      "op": 16,
+      "remove": [
+       [
+        7,
+        0
+       ]
+      ],
+      "step": "update_targets"
+     }
+    ],
+    "targets": {
+     "e": "all",
+     "f": "all",
+     "v": "all"
+    }
+   }
+  }
+ ]
+}

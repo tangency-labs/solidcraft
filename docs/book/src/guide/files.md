@@ -2,7 +2,8 @@
 
 Everything here starts from the **File** menu at the top left.
 
-![The File menu, numbered 1 to 5](../media/files/menu.png)
+<img class="dark-ui" src="../media/files/menu.png" alt="The File menu, numbered 1 to 5">
+<img class="light-ui" src="../media/files/menu.light.png" alt="The File menu, numbered 1 to 5">
 
 **1** Open a design (or a STEP, IGES or mesh file as a new one) · **2** Insert a file into the open
 design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSON ·
@@ -14,17 +15,40 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
-| FreeCAD `.FCStd`, Rhino `.3dm` | solids, through cadmpeg | |
+| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg | |
+| Rhino `.3dm` | solids, through cadmpeg | |
 | 3MF, STL, OBJ | mesh bodies | yes |
-| glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | |
+| glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
 | URDF | | the assembly as a robot: links with meshes, mass and inertia, joints from the assembly's joints |
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
 | PNG, JPEG | canvases and decals | |
 
+**File → Export GLB…** (`file.export` with a `.glb` path) writes one binary glTF file for web viewers,
+renderers such as Blender, and game engines. Each body is a node named after it, where the design places
+it. Its colour, metallic and roughness become a glTF material, and a face with a look of its own gets that
+look. A body with no colour gets the Render workspace's grey. The file is in metres with Y up, as glTF
+requires, through one root node. A transparent body or face, and a body that a render setup gives an
+image texture or optics, are refused with a message that names the body, since the file would show it
+wrongly; leave such a body out with `bodies`. A refused export leaves a file already at the path as it was.
+
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
-inserting one adds them to the current design. Later features build on them. Mesh bodies render,
+inserting one adds them to the current design. Later features build on them. A FreeCAD file's
+sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
+when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
+General › FreeCAD files turns the rebuild off). Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
+
+The stand-up offer for STEP and IGES files remembers your answer for unchanged files; Preferences › Design lets you turn this memory off or forget all remembered answers.
+
+Reopening an unchanged STEP or IGES file reuses its untouched import from a local cache,
+keyed by the file's SHA-256, import options and application build. It uses the same lossless,
+validated model cache as saved designs; a missing, damaged or incompatible entry imports
+again. Later edits and stand-up rotations are never stored in it, and your remembered
+stand-up answer still applies when you reopen. The cache keeps at most 512 MiB and 500 entries,
+removing the oldest first, in SolidCraft's data folder across updates. Preferences › Design ›
+**Reuse imports I've opened before** is on by default; turn it off to import every time,
+or use **Clear** beside it to remove cached imports without forgetting stand-up answers.
 
 Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new component named after the
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and
@@ -84,8 +108,11 @@ copy of the body so the print face points down at Z = 0, with its centre of mass
 origin; the design itself does not move. The face is tinted and outlined in the viewport, and a
 copy made with Move/Copy or Mirror keeps it. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
+Scripts and agents can write the same laid-down copies to an STL or 3MF file without a slicer:
+`file.export_stl`, `file.export_3mf`, `file.export` and `file.save_mesh` take
+`lay_on_print_faces: true`, and the reply names the bodies that were laid on their print face.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
-marked, as no sketch can be attached to one either; this needs kernel work, which is paused.
+marked, as no sketch can be attached to one either; this needs kernel work in solidcore.
 
 The list also has a plain **EasyPrint (Printables, in the browser)** row, and it is the one entry
 that works in the browser build too. EasyPrint is Printables' slicer, so choosing it uploads the
@@ -117,8 +144,9 @@ is started on its own first, SolidCraft waits up to ten seconds for it to be rea
 file. If the version can't be read, the command decides: the `slic3r-app-launcher` launcher is
 treated as PrusaSlicer 3, and any other entry is left as it is.
 
-Closed mechanical meshes with a constant cross-section can be rebuilt as solids with the
-`mesh.convert` command (command palette, scripts and the control channel).
+Closed meshes can be rebuilt as solids with the `mesh.convert` command (command palette,
+scripts and the control channel): a mesh with a constant cross-section as analytic planar and
+cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
 
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate
@@ -216,6 +244,29 @@ Before you raise them:
 
 The control channel sets the same preference with `ui.prefs {"max_step_file_mb": 2048,
 "max_design_file_mb": 1024}`.
+
+## Export file names
+
+**Preferences → Design → Export file name** sets the name that **File → Export**, **Save As Mesh**
+and a body's right-click **Export…** offer in the save dialog. The setting is a template. Each
+placeholder in it is replaced:
+
+| Placeholder | Replaced with |
+|---|---|
+| `{design}` | The design's name |
+| `{body}` | The exported body's name. When an export holds several bodies, the first one |
+| `{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}` | That [design property](#design-properties) |
+
+The help icon next to the setting lists the same placeholders. A design property that is not set
+is left out. Other text in braces stays as typed.
+
+With `{part_number}_rev{revision}`, a design with part number RV-102 and revision C is offered as
+`RV-102_revC.step`. With `{design}-{body}`, the body Base of the design Bracket is offered as
+`Bracket-Base.stl`. Characters that file names cannot hold (`/ \ : * ? " < > |`) become `_`. A
+name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in front. A long name is
+cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
+offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
+channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
 
 ## Design properties
 

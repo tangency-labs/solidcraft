@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use egui::{Painter, Rect, Sense, pos2, vec2};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// A step's name is cut at this width (its tooltip has it whole).
 const STEP_MAX: f32 = 120.0;
@@ -240,7 +240,7 @@ fn components_toggle(app: &mut SolveApp, ui: &mut egui::Ui, p: &Painter, x: f32,
 
 fn step_name(app: &SolveApp, step: Step) -> String {
     match step {
-        Step::All => crate::i18n::tr_label("All components").to_string(),
+        Step::All => solidcraft_ui_text::tr_label("All components").to_string(),
         Step::More(_) => "\u{2026}".to_string(),
         Step::Component(c) => crate::timeline_fold::name(app, c),
     }
@@ -256,7 +256,7 @@ fn step_button(app: &mut SolveApp, ui: &mut egui::Ui, p: &Painter, x: f32, r: Re
         Step::More(_) => false,
     };
     let name = step_name(app, step);
-    let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
     let galley = p.layout_no_wrap(name.clone(), egui::FontId::proportional(t.font_small), t.text_dim);
     let size = vec2(galley.size().x.min(STEP_MAX) + 2.0 * t.space_4, t.space_24);
     let rect = Rect::from_min_size(pos2(x, r.center().y - t.space_24 / 2.0), size);
@@ -310,11 +310,11 @@ fn step_key(step: Step) -> (u8, u64) {
 
 fn step_tip(app: &SolveApp, step: Step, current: bool) -> String {
     match step {
-        Step::All if current && focus(app).is_none() => crate::i18n::tr("ui.history_scope_pick").to_string(),
-        Step::All if current => crate::i18n::tr("ui.history_scope_all_shown").to_string(),
-        Step::All => crate::i18n::tr("ui.history_scope_all").to_string(),
+        Step::All if current && focus(app).is_none() => solidcraft_ui_text::tr("ui.history_scope_pick").to_string(),
+        Step::All if current => solidcraft_ui_text::tr("ui.history_scope_all_shown").to_string(),
+        Step::All => solidcraft_ui_text::tr("ui.history_scope_all").to_string(),
         Step::More(c) => path_to(app, c).iter().map(|c| crate::timeline_fold::name(app, *c)).collect::<Vec<_>>().join(" \u{203a} "),
-        Step::Component(c) if current => crate::i18n::format("ui.history_scope_shown", &[("name", &crate::timeline_fold::name(app, c))]),
-        Step::Component(c) => crate::i18n::format("ui.history_scope_show", &[("name", &crate::timeline_fold::name(app, c))]),
+        Step::Component(c) if current => solidcraft_ui_text::format("ui.history_scope_shown", &[("name", &crate::timeline_fold::name(app, c))]),
+        Step::Component(c) => solidcraft_ui_text::format("ui.history_scope_show", &[("name", &crate::timeline_fold::name(app, c))]),
     }
 }
