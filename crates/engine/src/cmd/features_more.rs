@@ -15,7 +15,7 @@ use super::features::{
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::schema::align::AlignParams;
 use crate::schema::features::FeatureResult;
-use crate::schema::features_more::{BoundaryFillParams, RemoveParams, RibParams};
+use crate::schema::features_more::{BoundaryFillParams, CoilParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -24,6 +24,9 @@ const RIB_CONTRACT: TypedContract<RibParams> = TypedContract::new();
 const ALIGN_CONTRACT: TypedContract<AlignParams> = TypedContract::new();
 const REMOVE_CONTRACT: TypedContract<RemoveParams> = TypedContract::new();
 const BOUNDARY_FILL_CONTRACT: TypedContract<BoundaryFillParams> = TypedContract::new();
+const COIL_CONTRACT: TypedContract<CoilParams> = TypedContract::new();
+const EMBOSS_CONTRACT: TypedContract<EmbossParams> = TypedContract::new();
+const REPLACE_FACE_CONTRACT: TypedContract<ReplaceFaceParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.boundary_fill", "Boundary Fill", crate::checked!("solid.boundary_fill", boundary_fill))
@@ -34,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
         ),
-    CommandSpec::new("solid.coil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
+    CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
          base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
@@ -52,11 +55,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RIB_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal"),
-    CommandSpec::new("solid.emboss", "Emboss", emboss)
+    CommandSpec::new("solid.emboss", "Emboss", crate::checked!("solid.emboss", emboss))
         .at("SOLID", "CREATE")
         .icon("emboss")
+        .contract(&EMBOSS_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete exterior cylindrical wall (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
-    CommandSpec::new("solid.replace_face", "Replace Face", replace_face)
+    CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face))
+        .contract(&REPLACE_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .at("SOLID", "MODIFY")
         .icon("replace_face")
         .params("faces: [[x,y,z] points on planar faces, or face names from model.faces]; target: plane (XY|XZ|YZ|construction plane|{origin, normal}) | target_face: [x,y,z] on a parallel planar face; body?"),
@@ -408,8 +415,11 @@ fn face_points(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<Vec<Vec3>> 
 fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.replace_face";
     let faces = face_points(s, p, "faces", cmd)?;
+    let refs = p.get("faces").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    // The body first: a face flush with another body's is looked up on that body alone.
+    let picked = super::face::faces_body(s, p, refs, &faces);
     for f in &faces {
-        if super::face::face_normal(s, *f).is_none() {
+        if super::face::face_normal_in(s, *f, picked.lookup()).is_none() {
             return Err(bad(cmd, "not supported yet: replacing a face that is not planar"));
         }
     }
@@ -421,8 +431,8 @@ fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => plane_param(s, p.get("target"), cmd)?,
     };
-    let body = str_(p, "body").map(str::to_string);
-    add_feature(s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body: body.map(BodyName) })
+    let body = picked.body.clone().map(BodyName);
+    super::features::add_face_feature(&picked, s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body })
 }
 
 /// What `solid.align` says when `axes` is not three booleans, or when none is true.
@@ -644,7 +654,10 @@ fn align_frame(s: &Session, p: &Value, key: &str, bodies: &[String]) -> Result<O
             (frame, s.doc.feature(sketch).map_or(0, |f| f.component))
         }
         None => {
-            let origin = super::joints::origin_param(s, Some(v), cmd)?;
+            // On its part, in the part's own coordinates: the same in every copy of a
+            // sub-assembly the part is in, wherever it was picked.
+            let picked = super::joints::origin_param(s, Some(v), cmd)?;
+            let origin = solidcraft_doc::joints::JointOrigin::new(picked.part(), picked.snap);
             let on = super::joints::component_of(s, origin.occurrence);
             (AlignFrame::Origin { origin: Box::new(origin) }, on)
         }

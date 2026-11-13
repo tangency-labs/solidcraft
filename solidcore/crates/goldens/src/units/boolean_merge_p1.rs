@@ -1194,7 +1194,9 @@ impl UnitDiff for Runner {
                 Output::err(format!(
                     "status_{}",
                     match e {
-                        SolidError::Upstream { code, .. } => code,
+                        SolidError::Upstream { .. } | SolidError::Failed(_) => {
+                            e.sm_status().unwrap_or(-1)
+                        }
                         _ => -1,
                     }
                 ))

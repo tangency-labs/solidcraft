@@ -9,8 +9,9 @@ use std::sync::{Arc, Mutex};
 use egui_wgpu::wgpu;
 pub use solidcraft_viewport_gpu::view::{
     AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
-    InstancedMesh, LINE_SIZE, LOD_PX, MAX_PALETTE, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer, SHARED_SIZE, SceneBlock,
-    SceneSlot, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width, placement_scale, runs_within, supersampled_size,
+    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer,
+    SHARED_SIZE, SceneBlock, SceneSlot, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width, lit_line_style,
+    placement_scale, runs_within, supersampled_size,
 };
 
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
@@ -95,6 +96,31 @@ pub(crate) fn report_gpu_error(e: &wgpu::Error) {
     solidcraft_engine::note!("SolidCraft graphics: {e}");
     #[cfg(target_arch = "wasm32")]
     let _ = e;
+}
+
+/// The viewport scene's sample count, for the desktop and the web app alike. Only the offscreen
+/// scene is multisampled; the window's own pass is 1x.
+/// - `chosen` is the Anti-aliasing preference.
+/// - `supported` lists the counts the device draws the scene's colour and depth formats with;
+///   empty means unknown, and `chosen` is taken.
+///
+/// The backend's policy comes first: OpenGL and WebGL draw 1x (`effective_msaa_samples`). A
+/// count the device can't draw falls back to the largest supported count up to the default (4x),
+/// not to 1x, so an 8x chosen on another device still antialiases here.
+pub fn scene_samples(backend: wgpu::Backend, chosen: u32, supported: &[u32]) -> u32 {
+    let requested = egui_wgpu::effective_msaa_samples(backend, chosen.max(1));
+    if requested <= 1 || supported.is_empty() || supported.contains(&requested) {
+        requested
+    } else {
+        supported.iter().copied().filter(|&n| n <= crate::prefs::Prefs::default().msaa).max().unwrap_or(1)
+    }
+}
+
+/// The anti-aliasing choices Graphics offers: the counts in `supported` (as for [`scene_samples`])
+/// that the backend draws as such. A choice the backend would draw at 1x (OpenGL and WebGL) then
+/// shows as unavailable, instead of being offered and doing nothing.
+pub fn scene_sample_choices(backend: wgpu::Backend, supported: Vec<u32>) -> Vec<u32> {
+    supported.into_iter().filter(|&n| egui_wgpu::effective_msaa_samples(backend, n) == n).collect()
 }
 
 /// Draw this process's headless pictures (`ui.render`, the agent's view image, thumbnails of
@@ -656,6 +682,7 @@ fn offscreen(
         pv_hide: false,
         preview_bounds: None,
         view_proj,
+        turned_depth: None,
         back,
         size_px: [size as f32; 2],
         clip: [0.0; 4],
@@ -864,6 +891,22 @@ impl OffscreenFrames {
 
 #[cfg(test)]
 mod tests {
+    /// The web app drew its scene at 1x whatever Graphics said (#11622). It now takes its sample
+    /// count by the desktop's rule: the saved choice where the browser's device draws it, else
+    /// the default it supports, and 1x on WebGL, where Graphics offers 1x alone.
+    #[test]
+    fn the_scene_takes_the_chosen_antialiasing_where_the_backend_draws_it() {
+        use egui_wgpu::wgpu::Backend;
+        // WebGPU guarantees 1x and 4x for the scene's formats.
+        assert_eq!(super::scene_samples(Backend::BrowserWebGpu, 4, &[1, 4]), 4, "the default");
+        assert_eq!(super::scene_samples(Backend::BrowserWebGpu, 1, &[1, 4]), 1, "Off");
+        assert_eq!(super::scene_samples(Backend::BrowserWebGpu, 8, &[1, 4]), 4, "a desktop choice the browser lacks");
+        assert_eq!(super::scene_samples(Backend::Gl, 4, &[1, 4]), 1, "WebGL");
+        assert_eq!(super::scene_sample_choices(Backend::BrowserWebGpu, vec![1, 4]), [1, 4]);
+        assert_eq!(super::scene_sample_choices(Backend::Gl, vec![1, 4]), [1]);
+        assert_eq!(super::scene_sample_choices(Backend::Vulkan, vec![1, 2, 4, 8]), [1, 2, 4, 8]);
+    }
+
     #[test]
     fn blur_radius_schedule_and_hostile_values() {
         use crate::blur::{schedule, validate_radius};

@@ -483,10 +483,9 @@ fn write_surf_of_revolution(
     }
 
     // the generator curve (upstream dereferences a null one)
-    let gen = r
-        .gen_curve
-        .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP_WRITE))?;
+    let gen = r.gen_curve.as_ref().ok_or_else(|| {
+        SolidError::topology_missing(OP_WRITE, "the surface of revolution's generator curve")
+    })?;
     if ascii {
         db.out_str(" SmSurfOfRevolution->GenCurve \n");
     }
@@ -547,10 +546,9 @@ fn write_surf_of_extrusion(
     }
 
     // the generator curve (upstream dereferences a null one)
-    let gen = e
-        .gen_curve
-        .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP_WRITE))?;
+    let gen = e.gen_curve.as_ref().ok_or_else(|| {
+        SolidError::topology_missing(OP_WRITE, "the surface of extrusion's generator curve")
+    })?;
     if ascii {
         db.out_str(" SmSurfOfExtrusion->GenCurve \n");
     }

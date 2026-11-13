@@ -212,6 +212,15 @@ impl Extended {
 }
 
 impl Surface {
+    /// Whether a face on this surface is extended by growing its trim within it
+    /// ([`crate::topology::brep::trim_extend::extend_trim`]) rather than by continuing the
+    /// surface past its box ([`Surface::extended_by_distance`]): the surface goes on past every
+    /// trim as itself, its own continuation of every order. A plane.
+    #[must_use]
+    pub fn reaches_past_trims(&self) -> bool {
+        matches!(self.kind(), SurfaceKind::Plane(_))
+    }
+
     /// Whether `dom` is exactly the box of the surface's NURBS form, as
     /// [`Surface::extended_by_distance`] needs a spline's face box to be: every bound equal.
     ///
@@ -272,7 +281,7 @@ impl Surface {
     /// `at`'s side (the same side coordinate as `dom`'s) rather than `dom`'s: where earlier
     /// sides grew the box, `at` is the face's own extent along the side, so the distance is
     /// met at the face, not where the surface has grown ([`Surface::extended_sides`]).
-    pub(super) fn extended_by_distance_at(
+    pub fn extended_by_distance_at(
         &self,
         k: &Kernel,
         dom: &Extent2d,
@@ -300,7 +309,9 @@ impl Surface {
                 reason: "the surface has no exact B-spline form",
             },
         )?;
-        let net = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+        let net = form
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
         let degree = if side.is_u() { net.p() } else { net.q() };
         let local = Local::of(net, side);
         let fixed = side.at(dom);
@@ -409,7 +420,9 @@ impl Surface {
                 "the extension is not a B-spline",
             ));
         };
-        let out = b.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+        let out = b
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
         let regraded = if side.is_u() {
             out.q() != net.q()
         } else {

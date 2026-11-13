@@ -13,7 +13,7 @@
 
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 /// The fuzz case's origin and size (the record's hex floats).
 fn tiny_box(fix: bool) -> solidcore::Result<Brep> {
@@ -36,7 +36,7 @@ fn tiny_box(fix: bool) -> solidcore::Result<Brep> {
 fn wr_596_tiny_box_is_sm_err_with_the_fix() {
     let r = tiny_box(true);
     assert!(
-        matches!(r, Err(SolidError::Upstream { code: 1001, .. })),
+        matches!(&r, Err(e) if solidcore::error::upstream_status(e) == Some(1001)),
         "{:?}",
         r.map(|b| b.face_list().len())
     );

@@ -18,15 +18,13 @@
 //!   quadrilateral (40, 0), (0, 20), (0, 30), (40, 30) from z = -15 to 30, joined; the edge
 //!   lies between the wedge's front face y = 0 and its top face z = 15.
 //! - A box edge whose radius runs linearly from 4 to 0 (and 0 to 4): the round closes to the
-//!   box corner as before. What it removes depends on its construction:
-//!   - without `fillet_gn_section_generator` its sections are the balls' great circles, and
-//!     it removes `(1 - pi/4) L r0^2 / 3 = 22.8909` (the integral of the corner's
-//!     `(1 - pi/4) r^2` along the edge, exact for a round of great circles);
-//!   - with it, its sections are the circles each ball touches the round along, shifted
-//!     `-r r' / |c'|` from the great circle, and it removes the balls' union. Its volume
-//!     22.594877 is not a closed form but SolidCraft's numerical integration of that union
-//!     (`removed_by_balls` in its `variable_radius_down_to_zero_at_one_end`, which checks it
-//!     to 1e-5).
+//!   box corner as before. Its sections are the circles each ball touches the round along,
+//!   shifted `-r r' / |c'|` from the great circle, on every kernel (the G^n section's flag,
+//!   `fillet_gn_section_generator`, is retired: WR-685 addendum 2026-11-06), and it removes
+//!   the balls' union. Its volume 22.594877 is not a closed form but SolidCraft's numerical
+//!   integration of that union (`removed_by_balls` in its
+//!   `variable_radius_down_to_zero_at_one_end`, which checks it to 1e-5). The great circles
+//!   removed `(1 - pi/4) L r0^2 / 3 = 22.8909`.
 //!
 //!   Each is checked to 1e-4 relative, as SolidCraft checks it.
 //!
@@ -367,17 +365,14 @@ fn taper_closing_to_a_point_rounds_the_wedge() {
 }
 
 /// A box edge's radius running linearly from 4 to 0 (and 0 to 4) closes the round to the box
-/// corner: 7 faces, the corner kept. What it removes depends on the round's construction
-/// (module docs): its sections the balls' great circles without `fillet_gn_section_generator`,
-/// `(1 - pi/4) L r0^2 / 3` (exact for a round of great circles); the balls' touch circles with
-/// it, their union's volume (SolidCraft's numerical reference). Checked to 1e-4 relative.
+/// corner: 7 faces, the corner kept, removing the balls' union (module docs; SolidCraft's
+/// numerical reference), with no fixes and with every fix. Checked to 1e-4 relative.
 #[test]
 fn linear_radius_to_zero_closes_a_box_round_to_the_corner() {
-    let great_circles = (1.0 - std::f64::consts::FRAC_PI_4) * 20.0 * 16.0 / 3.0;
     // the union of the balls, integrated numerically (module docs)
     let balls = 22.594_877;
     let mut wrong = Vec::new();
-    for (fixes, want) in [(Fixes::None, great_circles), (Fixes::All, balls)] {
+    for (fixes, want) in [(Fixes::None, balls), (Fixes::All, balls)] {
         for (r0, r1) in [(4.0, 0.0), (0.0, 4.0)] {
             let mut k = kernel(fixes);
             let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 30.0).unwrap();

@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{BoundaryFillParams, RemoveParams, RibParams};
+use super::{BoundaryFillParams, CoilParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
 use crate::Session;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -40,6 +40,39 @@ fn boxes(level: ParamCheck) -> Session {
     )
 }
 
+/// `Section`, a 1 mm square 10 mm from the Z axis on a plane through it, to coil.
+fn coil_section(level: ParamCheck) -> Session {
+    session(
+        level,
+        &[
+            ("sketch.create", json!({"plane": "YZ", "name": "Section"})),
+            ("sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]})),
+            ("sketch.finish", json!({})),
+        ],
+    )
+}
+
+fn coil() -> Value {
+    json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section_size": 4})
+}
+
+/// `Sleeve`, a cylinder, and `Badge`, a rectangle on the plane touching it at Y = 10.
+fn badge(level: ParamCheck) -> Session {
+    session(
+        level,
+        &[
+            ("solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Sleeve"})),
+            ("sketch.create", json!({"name": "Badge", "plane": {"origin": [0, 10, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}})),
+            ("sketch.rectangle.two_point", json!({"p0": [-2, 5], "p1": [2, 10]})),
+            ("sketch.finish", json!({})),
+        ],
+    )
+}
+
+fn emboss() -> Value {
+    json!({"sketch": "Badge", "face": [0, 10, 7.5], "depth": 1})
+}
+
 fn rib() -> Value {
     json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4})
 }
@@ -59,8 +92,37 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(input_schema_for::<RemoveParams>(), &["bodies", "body_name", "body_names", "name", "participants"]);
     assert_keys(
+        input_schema_for::<EmbossParams>(),
+        &["body_name", "body_names", "depth", "face", "mode", "name", "participants", "profiles", "sketch", "targets"],
+    );
+    assert_keys(
         input_schema_for::<BoundaryFillParams>(),
         &["body_name", "body_names", "cells", "name", "operation", "participants", "remove_tools", "tools", "touching"],
+    );
+    assert_keys(
+        input_schema_for::<CoilParams>(),
+        &[
+            "axis",
+            "base",
+            "body_name",
+            "body_names",
+            "clockwise",
+            "diameter",
+            "height",
+            "name",
+            "operation",
+            "participants",
+            "pitch",
+            "profiles",
+            "revolutions",
+            "section",
+            "section_position",
+            "section_size",
+            "sketch",
+            "start_angle",
+            "targets",
+            "turns",
+        ],
     );
 }
 
@@ -115,6 +177,16 @@ fn strict_keeps_todays_errors() {
         ("solid.rib", json!({"sketch": true, "curves": ["l1"], "thickness": 1})),
         ("solid.rib", json!({"sketch": "Nope", "curves": ["l1"], "thickness": 1})),
         ("solid.web", json!({"curves": [], "thickness": 1})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "section": "Hexagon"})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "section_position": "Middle"})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "base": null})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "base": [1, 2]})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "axis": null})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "axis": [0, 0, 0]})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "profiles": [0]})),
+        ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "operation": "glue"})),
+        ("solid.coil", json!({"sketch": "Nope", "revolutions": 2, "pitch": 8})),
         ("solid.remove", json!({})),
         ("solid.remove", json!({"bodies": null})),
         ("solid.remove", json!({"bodies": []})),
@@ -173,6 +245,30 @@ fn the_contracts_refuse_what_the_handlers_ignore() {
     }
 }
 
+/// Calls Emboss refuses today get the same message in strict; a `mode` that isn't text, which
+/// the handler ignores, is refused by the contract, and so is a misspelt key.
+#[test]
+fn emboss_contract_keeps_the_handlers_errors() {
+    assert_strict_keeps_errors_on(
+        badge,
+        &[
+            ("solid.emboss", with(&emboss(), "depth", json!(null))),
+            ("solid.emboss", with(&emboss(), "depth", json!("nope"))),
+            ("solid.emboss", with(&emboss(), "depth", json!("2 deg"))),
+            ("solid.emboss", with(&emboss(), "mode", json!("sideways"))),
+            ("solid.emboss", with(&emboss(), "face", json!(null))),
+            ("solid.emboss", with(&emboss(), "face", json!([0, 10]))),
+            ("solid.emboss", with(&emboss(), "face", json!([500, 500, 500]))),
+            ("solid.emboss", with(&emboss(), "sketch", json!(true))),
+            ("solid.emboss", with(&emboss(), "sketch", json!("Nope"))),
+            ("solid.emboss", with(&emboss(), "targets", json!(5))),
+            ("solid.emboss", with(&emboss(), "profiles", json!(true))),
+        ],
+    );
+    assert!(!crate::schema::issues("solid.emboss", &with(&emboss(), "mode", json!(5))).is_empty());
+    assert!(badge(ParamCheck::Strict).execute("solid.emboss", &with(&emboss(), "depht", json!(1))).is_err());
+}
+
 /// #12655: the schemas take what the handlers take. Each call is checked against both the schema
 /// and the handler, with the check off, so the two can't drift apart.
 #[test]
@@ -219,6 +315,28 @@ fn the_schemas_take_what_the_handlers_take() {
         input_schema_for::<RemoveParams>(),
         &[json!({"bodies": "B"}), json!({"bodies": ["A", "B"], "name": "Gone"}), json!({"bodies": []}), json!({"bodies": [5]}), json!({})],
     );
+    agree(
+        badge,
+        "solid.emboss",
+        input_schema_for::<EmbossParams>(),
+        &[
+            emboss(),
+            with(&emboss(), "depth", json!("1 mm")),
+            with(&emboss(), "mode", json!("emboss")),
+            with(&emboss(), "profiles", json!("all")),
+            with(&emboss(), "targets", json!(["Sleeve"])),
+            with(&emboss(), "face", json!({"x": 0, "y": 10, "z": 7.5})),
+            with(&emboss(), "depth", json!("")),
+            with(&emboss(), "mode", json!("glue")),
+            with(&emboss(), "face", json!([0, 10])),
+        ],
+    );
+    agree(
+        coil_section,
+        "solid.coil",
+        input_schema_for::<CoilParams>(),
+        &[coil(), with(&coil(), "section", json!("hexagon")), with(&coil(), "section_position", json!("middle"))],
+    );
 }
 
 /// #12655: each command replies as a feature command does, in Warn without warnings: a rib and a
@@ -237,15 +355,85 @@ fn the_features_reply_with_their_schemas() {
     let r = check(&mut bracket(ParamCheck::Warn), "solid.rib", with(&rib(), "name", json!("Brace")));
     assert_eq!((&r["name"], &r["changed_bodies"]), (&json!("Brace"), &json!(["L"])), "{r}");
     check(&mut bracket(ParamCheck::Warn), "solid.web", rib());
+    let r = check(&mut badge(ParamCheck::Warn), "solid.emboss", with(&emboss(), "name", json!("Mark")));
+    assert_eq!((&r["name"], &r["changed_bodies"]), (&json!("Mark"), &json!(["Sleeve"])), "{r}");
     let mut s = boxes(ParamCheck::Warn);
     let r = check(&mut s, "solid.boundary_fill", json!({"tools": ["A", "B"], "cells": [[15, 10, 10]], "body_name": "Lens"}));
     assert_eq!(r["created_bodies"], json!(["Lens"]), "{r}");
     let r = check(&mut s, "solid.remove", json!({"bodies": "Lens"}));
     assert_eq!(r["removed_bodies"], json!(["Lens"]), "{r}");
+    // Every form Coil takes: the three ways to give its length, each option, and a sketch section.
+    for p in [
+        coil(),
+        json!({"diameter": 40, "turns": 2, "height": 16, "section_size": 4, "body_name": "Spring"}),
+        json!({"diameter": "40 mm", "height": 16, "pitch": "8 mm", "section_size": 4, "section": "Square", "section_position": "outside"}),
+        json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section_size": 4, "section": "circle", "section_position": "on_center", "base": [50, "2 mm", 0], "axis": "Y", "start_angle": "30 deg", "clockwise": true}),
+        json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section_size": 4, "axis": [0, 0, 1], "section_position": "inside", "operation": "new", "name": "Helix"}),
+    ] {
+        check(&mut Session { param_check: ParamCheck::Warn, ..Session::default() }, "solid.coil", p);
+    }
+    for p in [
+        json!({"sketch": "Section", "revolutions": 3, "pitch": 8}),
+        json!({"sketch": "Section", "profiles": [0], "revolutions": 3, "pitch": 8, "clockwise": true}),
+    ] {
+        check(&mut coil_section(ParamCheck::Warn), "solid.coil", p);
+    }
+    let mut s = boxes(ParamCheck::Warn);
+    let r = check(
+        &mut s,
+        "solid.coil",
+        json!({"diameter": 12, "revolutions": 2, "pitch": 6, "section_size": 3, "base": [10, 10, 4], "operation": "join", "targets": ["A"]}),
+    );
+    assert_eq!(r["changed_bodies"], json!(["A"]), "{r}");
     // A misspelt key.
     let p = with(&rib(), "flp", json!(true));
     let r = bracket(ParamCheck::Warn).execute("solid.rib", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
     assert!(r["param_warnings"].to_string().contains("flp"), "{r}");
     let error = bracket(ParamCheck::Strict).execute("solid.rib", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`flp`"), "{error}");
+}
+
+/// A low block, 20 mm wide and 10 high, and a high one 20 high beside it at x = 30.
+fn low_and_high(level: ParamCheck) -> Session {
+    session(
+        level,
+        &[
+            ("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Low"})),
+            ("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [30, 0, 0], "body_name": "High"})),
+        ],
+    )
+}
+
+/// Replace Face describes its keys, keeps today's errors, and takes both kinds of target; its
+/// reply fits the feature result.
+#[test]
+fn replace_face_contract_and_reply() {
+    assert_keys(
+        input_schema_for::<ReplaceFaceParams>(),
+        &["body", "body_name", "body_names", "faces", "name", "participants", "target", "target_face"],
+    );
+    assert_strict_keeps_todays_errors(&[
+        ("solid.replace_face", json!({"target": "XY"})),
+        ("solid.replace_face", json!({"faces": 3, "target": "XY"})),
+        ("solid.replace_face", json!({"faces": [], "target": "XY"})),
+        ("solid.replace_face", json!({"faces": [true], "target": "XY"})),
+    ]);
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let calls = [
+        json!({"faces": [[10, 10, 10]], "target": {"origin": [0, 0, 15], "normal": [0, 0, 1]}}),
+        json!({"faces": [[10, 10, 10]], "target_face": [40, 10, 20], "name": "Flush", "body": "Low"}),
+    ];
+    for p in calls {
+        let r = low_and_high(ParamCheck::Strict).execute("solid.replace_face", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    }
+}
+
+/// With its contract, Replace Face refuses an unknown key in strict.
+#[test]
+fn replace_face_checks_its_keys() {
+    let p = json!({"faces": [[10, 10, 10]], "target": "XY", "flp": true});
+    let error = low_and_high(ParamCheck::Strict).execute("solid.replace_face", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`flp`"), "{error}");
 }

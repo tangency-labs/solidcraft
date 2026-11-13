@@ -534,7 +534,7 @@ fn put(o: &mut Vec<f64>, v: Vec3) {
 /// The upstream status a Rust error stands for.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         _ => 1007.0,
     }
 }

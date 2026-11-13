@@ -28,6 +28,13 @@
 //! | `EvalFunction for` [`FindCurveDistanceExtrema`]   | `SmFindCurveDistanceExtremaEFO::Evaluate` (co-ported in [`crate::curve::curve_cache`]) |
 //!
 //! Deviations:
+//! - **Projected maximum derivative.** Negating the projected stationary
+//!   equation also negates its derivative, so Newton steps use the derivative
+//!   of the function they are solving. Upstream negates only `F` (WR-768). The
+//!   search then reaches the nearest stationary point, so
+//!   [`crate::curve::curve::p5::local_property_analysis`] accepts it only where
+//!   the projected distance has a maximum, and otherwise searches the interval
+//!   for one.
 //! - **Base bodies.** The virtual `IsClosed`, `IsDegenerate` and `ApproximatePolarBox`
 //!   are generic over [`CurveEvaluate`] (`*_base`), so curve kinds whose overrides
 //!   fall back to the base class (the B-spline `IsDegenerate`) can call them on
@@ -859,7 +866,7 @@ pub fn approximate_polar_box<C: CurveEvaluate + ?Sized>(
     polar_box.reset();
     // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
     eval_into_or_pass_on(k, curve, ivl.evaluate(0.5), 1, true, &mut pv)?;
-    polar_box.add_vector_with_kernel(k, at(&pv, 1), None);
+    polar_box.add_vector(at(&pv, 1), None);
 
     // iteration locals
     let mut param = ivl.min();
@@ -871,7 +878,7 @@ pub fn approximate_polar_box<C: CurveEvaluate + ?Sized>(
         eval_into_or_pass_on(k, curve, param, 1, true, &mut pv)?;
 
         // add the tangent to the PolarBox
-        polar_box.add_vector_with_kernel(k, at(&pv, 1), None);
+        polar_box.add_vector(at(&pv, 1), None);
         param += step;
     }
 
@@ -1366,7 +1373,10 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
     /// The option vectors after upstream's `NULL` check (`SER(SM_ERR)`).
     fn checked_vec(&self, i: usize) -> Result<Vec3> {
         if self.opt_vectors.is_none() {
-            return Err(SolidError::sm_err(OP_EFO));
+            return Err(SolidError::curve_failed(
+                OP_EFO,
+                "the property function has no option vectors",
+            ));
         }
         self.vec(i)
     }
@@ -1381,8 +1391,9 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
 
     /// The property value after upstream's `NULL` check (`SER(SM_ERR)`).
     fn checked_value(&self) -> Result<f64> {
-        self.property_value
-            .ok_or_else(|| SolidError::sm_err(OP_EFO))
+        self.property_value.ok_or_else(|| {
+            SolidError::curve_failed(OP_EFO, "the property function has no property value")
+        })
     }
 
     /// `m_crCurve.Evaluate(dT, n, TRUE, sC, non_zero)` into four entries.
@@ -1394,7 +1405,8 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
 impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
     // `signal_errors` only chooses whether upstream prints the error.
     fn evaluate(&mut self, t: f64, out: &mut FunctionValue, _signal_errors: bool) -> Result<()> {
-        let err = || SolidError::sm_err(OP_EFO);
+        let err =
+            || SolidError::curve_failed(OP_EFO, "the property function cannot be evaluated there");
 
         // init output
         out.f = 0.0;
@@ -1785,6 +1797,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
 
                 if self.property == CurvePropertyType::ProjectedPointMaximize {
                     out.f = -out.f; // [B543]
+                    out.f_prime = -out.f_prime;
                 }
 
                 out.found_answer = (v_dot_v < (EFF_ZERO_SQ * 100.0))
@@ -1955,11 +1968,18 @@ impl<'a, C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> CcTangentIntEnf
 
         // if we have a zero length tangent then we must fail
         if tan_len_sq2 < EFF_ZERO || tan_len_sq1 < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_TAN));
+            return Err(SolidError::curve_failed(
+                OP_TAN,
+                "a curve has a zero-length tangent",
+            ));
         }
 
-        let ufp = pvv1[1].unitize().map_err(|_| SolidError::sm_err(OP_TAN))?;
-        let ugp = pvv2[1].unitize().map_err(|_| SolidError::sm_err(OP_TAN))?;
+        let ufp = pvv1[1]
+            .unitize()
+            .map_err(|_| SolidError::curve_failed(OP_TAN, "a curve's tangent does not unitize"))?;
+        let ugp = pvv2[1]
+            .unitize()
+            .map_err(|_| SolidError::curve_failed(OP_TAN, "a curve's tangent does not unitize"))?;
         let ufpp = pvv1[1].unitized_derivative(pvv1[2]);
         let ugpp = pvv2[1].unitized_derivative(pvv2[2]);
         let gap_vec = pvv1[0] - pvv2[0];
@@ -2217,7 +2237,10 @@ impl<C: CurveEvaluate + ?Sized> EvalNFunctions for CpDistAtEnfo<'_, C> {
 
         // if we have a zero length tangent then we must fail
         if tan_len_sq1 < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_DIST_AT));
+            return Err(SolidError::curve_failed(
+                OP_DIST_AT,
+                "the curve has a zero-length tangent",
+            ));
         }
 
         // gap = C(s) - TestPoint
@@ -2268,6 +2291,42 @@ mod tests {
     fn seg(a: [f64; 3], b: [f64; 3]) -> Curve {
         let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         hermite(a, d, b, d)
+    }
+
+    #[test]
+    fn projected_maximum_equation_has_its_actual_derivative() {
+        use crate::geom::local_solve1d::{EvalFunction, FunctionValue};
+        use crate::math::Vec3;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+
+        let k = Kernel::default();
+        let curve = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
+        // C(t) = (t, 0, 0), P = 0, N = (0, 0, s): the maximum's signed stationary
+        // equation is F(t) = -s^2 t, so F'(t) = -s^2 exactly.
+        for scale in [0.5, 1.0, 2.0] {
+            let vectors = [Vec3::ZERO, Vec3::Z * scale];
+            let mut evaluator = CurvePropertyEfo::new(
+                &k,
+                &curve,
+                CurvePropertyType::ProjectedPointMaximize,
+                None,
+                Some(&vectors),
+                1e-20,
+            );
+            for t in [0.2, 0.25, 0.3] {
+                let mut value = FunctionValue::default();
+                evaluator.evaluate(t, &mut value, false).unwrap();
+                let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs().max(1.0);
+                assert!(
+                    close(value.f, -scale * scale * t),
+                    "F at t={t}, scale={scale}"
+                );
+                assert!(
+                    close(value.f_prime, -scale * scale),
+                    "F' at t={t}, scale={scale}"
+                );
+            }
+        }
     }
 
     #[test]

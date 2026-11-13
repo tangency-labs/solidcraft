@@ -1,21 +1,19 @@
 //! Public-operation regression for tangency-labs/solidcore#521 / WR-268 and WR-266:
-//! what `Kernel::fixes.heal_stage3_failures_propagate` changes in a healed body.
+//! what reporting `SetProps_Stage3`'s classification status changes in a healed body.
 //!
 //! `SetProps_Stage3` evaluates the new faces the heal's seam splits make. On the flat
 //! cylinder below (radius 1, height `1e-9`) that evaluation fails for the new side
 //! face: `SmFace::ClassifyLoops` returns `SM_ERR` (1001) because the face it is handed
 //! has no loops to classify. SMLib (and so the default kernel) drops that status and
 //! reads the empty classification as `SM_ERR_NOTYET_HEAL_FACE` (1040) from the missing
-//! loop tree root, and `Cache_FaceProps_Stage3` quarantines the face. With the opt-in
-//! flag the classification status itself is reported (WR-268), so the quarantine does
-//! not happen: the face stays a target and `Fix_SplitFaceAtSeams` runs on it, which
+//! loop tree root, and `Cache_FaceProps_Stage3` quarantines the face. solidcore reports
+//! the classification status itself (WR-268), so the quarantine does not happen: the face stays a target and `Fix_SplitFaceAtSeams` runs on it, which
 //! drops every UV trim curve of the body.
 //!
 //! The measurement is through public APIs only: the public primitive `create_cylinder`,
-//! the public entry point `api_heal_brep` with every other `Kernel::fixes` field at its
-//! default, and the public query `uv_trim_curve_pointer`. Status, entity counts, face,
-//! edge and vertex tolerances, the faces that keep a surface and the region void flags
-//! are identical in both modes; only the UV trim curves differ.
+//! the public entry point `api_heal_brep`, and the public query `uv_trim_curve_pointer`.
+//! Status, entity counts, face, edge and vertex tolerances, the faces that keep a surface
+//! and the region void flags are SMLib's; only the UV trim curves differ.
 
 #![allow(
     clippy::unwrap_used,
@@ -30,8 +28,7 @@ use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::topology::edgeuse::p1::uv_trim_curve_pointer;
 use solidcore::Kernel;
 
-/// The measured body, with every public value that the two modes share, plus the UV
-/// trim curves they differ in.
+/// The measured body: its public values and its UV trim curves.
 #[derive(PartialEq, Debug)]
 struct Healed {
     shells: usize,
@@ -52,10 +49,8 @@ struct Healed {
     uv_trim_curves: Vec<bool>,
 }
 
-fn heal_flat_cylinder(propagate: bool) -> Healed {
+fn heal_flat_cylinder() -> Healed {
     let mut k = Kernel::default();
-    // All other fixes stay at their `Default` values.
-    k.fixes.heal_stage3_failures_propagate = propagate;
     let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1e-9).unwrap();
 
     // Public heal operation, whole sequence, no UV trim pass.
@@ -113,14 +108,12 @@ fn heal_flat_cylinder(propagate: bool) -> Healed {
 }
 
 #[test]
-fn wr266_public_heal_stage3_failure_quarantines_the_face_and_keeps_its_uv_trims() {
-    let default = heal_flat_cylinder(false);
-    let fixed = heal_flat_cylinder(true);
-
-    // The default (SMLib) body: the flat cylinder collapses to 3 faces, 3 loops,
-    // 2 edges, 1 vertex and 3 regions, all at the healed tolerance, with four of the
-    // eight edge uses carrying a UV trim curve.
-    let expected_default = Healed {
+fn wr266_public_heal_stage3_failure_does_not_quarantine_the_face() {
+    // The flat cylinder collapses to 3 faces, 3 loops, 2 edges, 1 vertex and 3 regions,
+    // all at the healed tolerance (as SMLib's), and no UV trim curves at all: the
+    // un-quarantined face is passed to `Fix_SplitFaceAtSeams`, which clears them (WR-268;
+    // SMLib quarantines it and four of the eight edge uses keep a UV trim curve).
+    let expected = Healed {
         shells: 3,
         faces: 3,
         loops: 3,
@@ -135,16 +128,7 @@ fn wr266_public_heal_stage3_failure_quarantines_the_face_and_keeps_its_uv_trims(
         edge_tolerance_bits: vec![f64::to_bits(1e-5); 2],
         vertex_tolerance_bits: vec![f64::to_bits(1e-5)],
         region_is_void: vec![1, 0, 0],
-        uv_trim_curves: vec![true, false, false, true, true, false, true, false],
-    };
-    assert_eq!(default, expected_default, "default heal body changed");
-
-    // WR-268 with the flag on: the same status and the same topology, tolerances and
-    // regions, and no UV trim curves at all (the un-quarantined face is passed to
-    // `Fix_SplitFaceAtSeams`, which clears them).
-    let expected_fixed = Healed {
         uv_trim_curves: vec![false; 8],
-        ..expected_default
     };
-    assert_eq!(fixed, expected_fixed, "flag-on heal body changed");
+    assert_eq!(heal_flat_cylinder(), expected, "heal body changed");
 }

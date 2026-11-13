@@ -277,6 +277,50 @@ fn hidden<'de, D: Deserializer<'de>>(d: D) -> Result<Option<HiddenLines>, D::Err
     read_as(d, "hidden must be omit or dashed")
 }
 
+/// How the drawing's curved edges are written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DxfCurves {
+    /// As short straight lines, as the view is tessellated.
+    Lines,
+    /// Round holes and arcs as `CIRCLE` and `ARC` entities.
+    Arcs,
+}
+
+fn curves_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "How curved edges are written: `lines` writes the short straight lines the view is built from; `arcs` writes the visible circles and arcs as CIRCLE and ARC entities, which a milling or CAD program can pick as circles. Default: lines.",
+        "enum": ["lines", "arcs"],
+        "default": "lines"
+    })
+}
+
+fn curves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<DxfCurves>, D::Error> {
+    read_as(d, "curves must be lines or arcs")
+}
+
+/// Where the drawing's zero point is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DxfZero {
+    /// The point the camera looks at.
+    Target,
+    /// The model's origin, seen from the camera.
+    Origin,
+}
+
+fn zero_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Where the drawing's zero point is: `target` is the point the camera looks at, `origin` is the model's origin as seen from the camera (for machining from a part corner). Default: target.",
+        "enum": ["target", "origin"],
+        "default": "target"
+    })
+}
+
+fn zero<'de, D: Deserializer<'de>>(d: D) -> Result<Option<DxfZero>, D::Error> {
+    read_as(d, "zero must be target or origin")
+}
+
 fn tolerance<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     read_with(d, "tolerance must be 0.0001..1 mm", |v| v.as_f64().filter(|t| (0.0001..=1.0).contains(t)))
 }
@@ -329,6 +373,15 @@ pub struct ExportViewDxfParams {
     #[serde(default, deserialize_with = "tolerance", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "tolerance_schema")]
     pub tolerance: Option<f64>,
+    /// Where the drawing's zero point is: the camera target or the model's origin. Default: target.
+    #[serde(default, deserialize_with = "zero", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "zero_schema")]
+    pub zero: Option<DxfZero>,
+    /// How curved edges are written: as short lines or, for visible circles and arcs, as CIRCLE
+    /// and ARC. Default: lines.
+    #[serde(default, deserialize_with = "curves", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "curves_schema")]
+    pub curves: Option<DxfCurves>,
     /// The `.dxf` file to write. Default: the reply carries the DXF text instead.
     #[serde(default, deserialize_with = "export_path", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]

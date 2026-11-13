@@ -457,11 +457,10 @@ fn sketch_square(s: &mut Session) {
     run(s, "sketch.finish", json!({}));
 }
 
-/// `component.move_sketches.to_parts` (#10218): sketches drawn on a part's face while the design
-/// was active go to that part and stay where they are on the face; the others stay and say why;
-/// it is one undo step.
-#[test]
-fn sketches_move_to_the_part_whose_face_they_are_on() {
+/// A part (unplaced at the origin, moved to x = 30) with a box, the design active again, a
+/// sketch "OnFace" on the box's top face and a sketch "OnXY" on XY. Returns the session, the
+/// part, its placement and the two sketches.
+fn sketch_on_a_part_face() -> (Session, u64, u64, u64, u64) {
     let mut s = Session::default();
     let run = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
     let part = run(&mut s, "component.create", json!({"name":"Part","parent":0,"grounded":false}));
@@ -477,6 +476,16 @@ fn sketches_move_to_the_part_whose_face_they_are_on() {
     sketch_square(&mut s);
     let on_xy = run(&mut s, "sketch.create", json!({"name":"OnXY","plane":"XY"}))["sketch"].as_u64().unwrap();
     sketch_square(&mut s);
+    (s, component, occurrence, on_face, on_xy)
+}
+
+/// `component.move_sketches.to_parts` (#10218): sketches drawn on a part's face while the design
+/// was active go to that part and stay where they are on the face; the others stay and say why;
+/// it is one undo step.
+#[test]
+fn sketches_move_to_the_part_whose_face_they_are_on() {
+    let run = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
+    let (mut s, component, occurrence, on_face, on_xy) = sketch_on_a_part_face();
     let world_plane = |s: &Session| s.world_state().unwrap().sketch(on_face).unwrap().plane;
     let before = world_plane(&s);
     assert_eq!(s.doc.feature(on_face).unwrap().component, 0);
@@ -499,6 +508,19 @@ fn sketches_move_to_the_part_whose_face_they_are_on() {
     run(&mut s, "component.move_sketches.to_parts", json!({}));
     let again = run(&mut s, "component.move_sketches.to_parts", json!({"sketches":["OnFace"]}));
     assert_eq!((again["moved"].as_u64(), again["kept"][0]["reason"].as_str()), (Some(0), Some("already in its part")));
+}
+
+/// The sketch on the face goes to the part when another sketch is named like its id: the move
+/// passes the id on as a number, which a name never shadows (#9748).
+#[test]
+fn sketches_to_parts_moves_the_sketch_given_when_another_is_named_like_its_id() {
+    let run = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
+    let (mut s, component, _, on_face, on_xy) = sketch_on_a_part_face();
+    run(&mut s, "timeline.rename", json!({"feature": on_xy, "name": on_face.to_string()}));
+    let out = run(&mut s, "component.move_sketches.to_parts", json!({"sketches": [on_face]}));
+    assert_eq!(out["moved"].as_u64(), Some(1), "{out}");
+    assert_eq!(s.doc.feature(on_face).unwrap().component, component);
+    assert_eq!(s.doc.feature(on_xy).unwrap().component, 0);
 }
 
 /// A sketch moved to its part while an exploded view moves the part saves the same picked point
@@ -812,7 +834,8 @@ fn the_schemas_take_what_the_occurrence_handlers_read() {
             (json!({"sketches": ["S"]}), false),
             (json!({"component": "B"}), false),
             (json!({"component": "B", "sketches": []}), false),
-            (json!({"component": "B", "sketches": [1]}), false),
+            (json!({"component": "B", "sketches": [1]}), true),
+            (json!({"component": "B", "sketches": [true]}), false),
         ],
     );
 }
@@ -867,6 +890,13 @@ fn the_check_reads_the_occurrence_keys_as_the_handlers_do() {
         ["matrix must be 12 numbers (3x4, row by row) or 16 (4x4), flat or as rows"]
     );
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "translate": [1, 2]})), ["translate must contain three finite numbers"]);
+    // Length expressions in `translate` (#8192): read as the handler reads them.
+    assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "translate": ["0 mm", "dy", 0]})), none);
+    assert_eq!(
+        issues("occurrence.move", json!({"occurrence": 1, "translate": [true, "dy", 0]})),
+        ["translate entries must be numbers or length expressions"]
+    );
+    assert_eq!(issues("occurrence.copy", json!({"occurrence": 1, "translate": ["dy", 0, 0]})), ["translate must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "axis": null})), ["axis must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "origin": "x"})), ["origin must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "angle": null})), ["angle must be a number or angle expression"]);
@@ -902,8 +932,11 @@ fn the_check_reads_the_occurrence_keys_as_the_handlers_do() {
         issues("component.move_bodies", json!({"component": 1, "bodies": ["A"], "from_path": null})),
         ["`from_path` must list 0..64 occurrence ids"]
     );
-    assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": 5})), ["`sketches` must be a list of names; it is 5"]);
-    assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": ["S", 3]})), ["`sketches` must list names; the entry 2 is 3"]);
+    assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": 5})), ["`sketches` must be a list of names or ids; it is 5"]);
+    assert_eq!(
+        issues("component.move_sketches", json!({"component": 1, "sketches": ["S", true]})),
+        ["`sketches` must list names or ids; the entry 2 is true"]
+    );
     assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": null})), ["`sketches` must list sketches"]);
     assert_eq!(issues("component.move_sketches", json!({"component": 1, "sketches": "S"})), none);
 }

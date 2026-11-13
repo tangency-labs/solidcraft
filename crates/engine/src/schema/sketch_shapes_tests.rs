@@ -68,6 +68,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.point", json!({"point": "mid:nope"})),
         ("sketch.point", json!({"point": {"vertex": "x"}})),
         ("sketch.point", json!({"point": "on:l1:x"})),
+        ("sketch.point", json!({"point": "x:l1:1,1"})),
+        ("sketch.point", json!({"point": "x:l1+l1:5,0"})),
         ("sketch.point", json!({"point": "vertex:1,2"})),
         ("sketch.point", json!({"point": [1, 2], "id": "a|b"})),
         ("sketch.circle.center", json!({"center": [0, 0]})),
@@ -179,6 +181,7 @@ fn replies_match_the_output_schema_and_forms_are_accepted() {
         json!({"point": ["10 mm", 40], "connect": false}),
         json!({"point": "mid:l1"}),
         json!({"point": "on:l1:5,0"}),
+        json!({"point": "x:l1+l4:0,0"}),
     ];
     let mut s = session(ParamCheck::Warn);
     for (id, p) in &calls {
@@ -317,7 +320,7 @@ fn rectangles_and_polygons_reply_with_their_types() {
     assert_eq!(keys(&r), ["constraints", "corners", "created", "curves", "sides", "sketch"]);
     assert!(r["sides"]["bottom"].is_string() && r["corners"]["top_left"].is_string(), "{r}");
     let r = run(&mut off, "sketch.rectangle.rounded", json!({"p0": [170, 0], "p1": [190, 10], "radius": 2}));
-    assert_eq!(keys(&r), ["arcs", "constraints", "created", "curves", "param", "sides", "sketch"]);
+    assert_eq!(keys(&r), ["arcs", "centre", "constraints", "created", "curves", "diagonal", "param", "sides", "sketch"]);
     assert_eq!((r["curves"].as_array().map(Vec::len), r["arcs"].as_array().map(Vec::len)), (Some(8), Some(4)), "{r}");
     assert!(r["param"].as_str().is_some_and(|name| !name.is_empty()), "{r}");
     let r = run(&mut off, "sketch.polygon.inscribed", json!({"center": [210, 5], "radius": 4}));
@@ -356,12 +359,9 @@ fn rectangles_and_polygons_report_wrong_typed_keys() {
     assert_eq!(message("sketch.polygon.edge", json!({"p0": [0, 0], "p1": [5, 0], "sides": 4})), None);
 }
 
-/// The slot replies keep the shape the handlers returned before the schemas: exactly the keys
-/// `curves`, `constraints` and `sketch` of the old `result()` helper, plus the `created` summary
-/// that `Session::execute` adds to every sketch command, and no `param_warnings`. Pinned by hand
-/// from the code on `origin/main`, so it does not depend on the checked path under test.
+/// Slot replies expose the construction centre line and its constrained middle point.
 #[test]
-fn slot_replies_keep_their_old_shape() {
+fn slot_replies_include_their_construction_middle() {
     let mut s = session(ParamCheck::Off);
     for (id, p) in [
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 4})),
@@ -371,7 +371,7 @@ fn slot_replies_keep_their_old_shape() {
         let o = r.as_object().unwrap_or_else(|| panic!("{id}: {r}"));
         let mut keys: Vec<&str> = o.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["constraints", "created", "curves", "sketch"], "{id}: {r}");
+        assert_eq!(keys, ["centre_line", "constraints", "created", "curves", "middle", "sketch"], "{id}: {r}");
         for k in ["curves", "constraints"] {
             let list = o[k].as_array().unwrap_or_else(|| panic!("{id} {k}: {r}"));
             assert!(!list.is_empty() && list.iter().all(Value::is_string), "{id} {k}: {r}");
@@ -379,7 +379,10 @@ fn slot_replies_keep_their_old_shape() {
         assert_eq!(o["curves"].as_array().map(Vec::len), Some(4), "{id}: {r}");
         assert_eq!(sorted_keys(&o["sketch"]), Some(vec!["dof", "solved"]), "{id}: {r}");
         assert_eq!(sorted_keys(&o["created"]), Some(vec!["constraints", "curves", "dimensions", "points"]), "{id}: {r}");
-        assert_eq!(o["created"]["curves"], o["curves"], "{id}: {r}");
+        assert!(o["centre_line"].is_string() && o["middle"].is_string(), "{id}: {r}");
+        let mut expected = o["curves"].as_array().cloned().unwrap_or_default();
+        expected.push(o["centre_line"].clone());
+        assert_eq!(o["created"]["curves"], json!(expected), "{id}: {r}");
     }
 }
 

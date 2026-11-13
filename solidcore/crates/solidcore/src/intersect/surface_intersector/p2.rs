@@ -532,7 +532,10 @@ impl SurfaceIntersector<'_> {
 
                 // error case - surface point has no normal
                 if norm.length_squared() < EFF_ZERO_SQ {
-                    return Err(SolidError::sm_err(OP_CPV));
+                    return Err(SolidError::intersect_failed(
+                        OP_CPV,
+                        "the surface point has no normal",
+                    ));
                 }
             }
 
@@ -638,7 +641,12 @@ impl SurfaceIntersector<'_> {
                         ) {
                             Ok(()) => {}
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                            Err(_) => return Err(SolidError::sm_err(OP_SING)),
+                            Err(_) => {
+                                return Err(SolidError::intersect_failed(
+                                    OP_SING,
+                                    "the advanced intersector could not place the singular point",
+                                ))
+                            }
                         }
                     } else {
                         compute_singularity_point_base(uv_values, point, previous)?;
@@ -851,7 +859,11 @@ impl SurfaceIntersector<'_> {
 
         // for every point to flush
         let n = pnts.len();
-        let at = |i: usize| pnts.get(i).ok_or_else(|| SolidError::sm_err(OP_FLUSH));
+        let at = |i: usize| {
+            pnts.get(i).ok_or_else(|| {
+                SolidError::intersect_failed(OP_FLUSH, "the curve has no point at that index")
+            })
+        };
         let mut i = 1;
         while i < n {
             let prev = at(i - 1)?;
@@ -1171,7 +1183,10 @@ impl SurfaceIntersector<'_> {
         let mut ii = 1usize;
         loop {
             if ii > MAX_GAP_SAMPLES {
-                return Err(SolidError::sm_err(OP_CLASSIFY));
+                return Err(SolidError::intersect_failed(
+                    OP_CLASSIFY,
+                    "the boundary start point is not classified within the sample limit",
+                ));
             }
             // the sample array index: 1, then 2 (the last sample moves to 1)
             let tgt = if ii > 1 { 2 } else { 1 };
@@ -1418,7 +1433,10 @@ fn compute_singularity_point_base(
     _point: &mut TsectPnt,
     _previous: Option<&TsectPnt>,
 ) -> Result<()> {
-    Err(SolidError::sm_err(OP_SING))
+    Err(SolidError::intersect_failed(
+        OP_SING,
+        "the basic intersector does not handle singular or tangent points",
+    ))
 }
 
 /// True when `point` is farther than `tol_3d` from every start point's curve point
@@ -1649,7 +1667,10 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             // `SER( Inversion(dParameter, ..) )`: SM_ERR outside the interval or for a
             // zero-length one
             if pass && !inv.is_success() {
-                return Err(SolidError::sm_err(OP_LAW));
+                return Err(SolidError::intersect_failed(
+                    OP_LAW,
+                    "the law curve's normal could not be inverted",
+                ));
             }
             let t = inv.parameter.unwrap_or(UNDEF_DOUBLE);
             pv[1] = n0 * (1.0 - t) + n1 * t;
@@ -1657,7 +1678,10 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             // the step may end just past the interval, where the unclamped parameter
             // is set and extrapolates as wanted: only an undefined one is passed on
             if pass && inv.parameter.is_none() {
-                return Err(SolidError::sm_err(OP_LAW));
+                return Err(SolidError::intersect_failed(
+                    OP_LAW,
+                    "the law curve's normal inversion gave no parameter",
+                ));
             }
             let t = inv.parameter.unwrap_or(UNDEF_DOUBLE);
             pv_delta[1] = n0 * (1.0 - t) + n1 * t;
@@ -1722,7 +1746,10 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         // next iteration with a bigger delta step
         delta_step *= 10.0;
     }
-    Err(SolidError::sm_err(OP_LAW))
+    Err(SolidError::intersect_failed(
+        OP_LAW,
+        "no delta step gives the law point's values",
+    ))
 }
 
 #[cfg(test)]

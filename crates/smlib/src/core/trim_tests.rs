@@ -126,7 +126,7 @@ fn solidcore_case(name: &str) -> Got {
     let (c, _) = case(name);
     let got = untrim_face(&c.input.core(), c.point, TOL, c.holes, c.outer, c.in_place).map(|b| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Measured { area: area(&b, 1e-8).unwrap(), counts: counts(&b).unwrap() }
     });
     judge(name, "solidcore", got)
@@ -266,7 +266,7 @@ fn extend_solidcore(name: &str) -> Got {
     let (sheet, point, distance, how, _) = extend_case(name);
     let got = extend_sheet(&sheet.core(), point, TOL, distance, how).map(|b| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Measured { area: area(&b, 1e-8).unwrap(), counts: counts(&b).unwrap() }
     });
     extend_judge(name, "solidcore", got)
@@ -294,6 +294,16 @@ extend_cases!(
     extend_a_cylinder_curvature_run_off,
     extend_picks_near_no_edge,
 );
+
+#[test]
+fn a_sub_resolution_extension_is_not_reported_as_a_changed_sheet() {
+    let sheet = Sheet::Square.core();
+    let was = native(&to_arrays(&sheet).unwrap()).unwrap().0;
+    for how in [Continuation::Natural, Continuation::Tangent, Continuation::Curvature] {
+        assert_eq!(extend_sheet(&sheet, [10.0, 5.0, 0.0], TOL, 1e-14, how).err(), Some(Error::NotExact));
+        assert_eq!(native(&to_arrays(&sheet).unwrap()).unwrap().0, was);
+    }
+}
 
 /// The capi's argument checks for an extend, before any kernel call, and a body of more than
 /// one face.

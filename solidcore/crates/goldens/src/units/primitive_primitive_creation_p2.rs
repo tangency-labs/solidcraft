@@ -36,7 +36,9 @@ struct Inputs {
 /// The status code of an operation error (its upstream `SmStatus`).
 fn error(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.,
         _ => 1001.,
     }
@@ -82,6 +84,7 @@ fn options(f: &[f64]) -> SweepOptions {
         orient_profile_perpendicular_to_path: f[3] != 0.,
         move_to_profile: f[4] != 0.,
         profile_at_path_start: false,
+        up: None,
     }
 }
 
