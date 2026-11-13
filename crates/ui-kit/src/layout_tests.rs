@@ -365,26 +365,26 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
         for width in [140.0, 280.0, 646.0] {
             let ctx = crate::test_support::context();
             let options = [
-                PictureChoice { key: "bottom", label: "Bottom", figure: paint_history_bottom },
-                PictureChoice { key: "left", label: "Left", figure: paint_history_left },
-                PictureChoice { key: "under_browser", label: "Under browser", figure: paint_history_under_browser },
-                PictureChoice { key: "browser", label: "In browser", figure: paint_history_in_browser },
+                PictureChoice { key: "origin", label: "Origin", figure: |p, r| crate::preferences_figures::paint_orbit(p, r, 0) },
+                PictureChoice { key: "centre", label: "Centre", figure: |p, r| crate::preferences_figures::paint_orbit(p, r, 1) },
+                PictureChoice { key: "cursor", label: "Cursor", figure: |p, r| crate::preferences_figures::paint_orbit(p, r, 2) },
+                PictureChoice { key: "z_up", label: "Z up", figure: |p, r| crate::preferences_figures::paint_orientation(p, r, false) },
             ];
             frame(&ctx, vec![], |ui| {
                 ui.set_width(width);
-                settings_picture_choices(ui, "geometry_history", "History", &options, 2, true);
+                settings_picture_choices(ui, "geometry_cards", "Example", &options, 2, true);
             });
-            let row = registry::rect_of("dialog:row:History").unwrap();
+            let row = registry::rect_of("dialog:row:Example").unwrap();
             for option in &options {
-                let rect = registry::rect_of(&format!("prefs:geometry_history:{}", option.key)).unwrap();
+                let rect = registry::rect_of(&format!("prefs:geometry_cards:{}", option.key)).unwrap();
                 assert!(row.expand(0.5).contains_rect(rect), "{width}: {rect:?} outside {row:?}");
-                assert!(rect.contains(registry::handle_at(&format!("dialog:History:{}", option.label)).unwrap()));
+                assert!(rect.contains(registry::handle_at(&format!("dialog:Example:{}", option.label)).unwrap()));
             }
-            let at = registry::handle_at("prefs:geometry_history:left").unwrap();
+            let at = registry::handle_at("prefs:geometry_cards:centre").unwrap();
             for down in [true, false] {
                 frame(&ctx, pointer(at, down), |ui| {
                     ui.set_width(width);
-                    let picked = settings_picture_choices(ui, "geometry_history", "History", &options, 2, true);
+                    let picked = settings_picture_choices(ui, "geometry_cards", "Example", &options, 2, true);
                     if !down {
                         assert_eq!(picked, Some(1), "the real card selects its option");
                     }

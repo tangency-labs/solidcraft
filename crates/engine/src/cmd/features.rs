@@ -16,8 +16,8 @@ use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, s
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
-    FeatureNotice, FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams,
-    PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
+    FeatureNotice, FeatureResult, FilletParams, FilletResult, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams,
+    PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::schema::features::{PatternCircularParams, PatternCircularResult};
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
@@ -44,6 +44,7 @@ const SPLIT_FACE_CONTRACT: TypedContract<SplitFaceParams> = TypedContract::new()
 const SPLIT_BODY_CONTRACT: TypedContract<SplitBodyParams> = TypedContract::new();
 const PATTERN_CIRCULAR_CONTRACT: TypedContract<PatternCircularParams> = TypedContract::new();
 const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
+const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -206,7 +207,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("presspull")
         .key("Q")
         .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet)"),
-    CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place); occurrences?: [occurrence paths, root first] (only with copy: each component is copied as an independent component, as Paste New copies it, and the copy moves by the same translate, axis and angle in the world; the reply lists the copies in occurrences)"),
+    CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
+        .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
+        .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
+        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -353,7 +357,12 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     // A profile's points are in the active component's frame; a body placed differently (in a
     // moved or turned component) is probed where it is shown. Face picks are in `st`'s frame.
     let frames: Vec<Option<solidcraft_doc::Mat>> = bodies.iter().map(|b| if grouped.is_some() { None } else { into_body_frame(s, b) }).collect();
-    let inside = |q: Vec3| bodies.iter().zip(&frames).any(|(b, m)| b.mesh().contains(m.as_ref().map_or(q, |m| solidcraft_doc::apply_point(m, q))));
+    let inside = |q: Vec3| {
+        bodies.iter().zip(&frames).any(|(b, m)| {
+            let pt = m.as_ref().map_or(q, |m| solidcraft_doc::apply_point(m, q));
+            matches!(b.body.classify_point(pt), Ok(solidcraft_kernel::PointClass::Inside))
+        })
+    };
     // A step into whatever is right in front of the profile, short of the far end.
     let near = |d: f64| d.signum() * (d.abs() * 0.5).min(START_PROBE_MM);
     let into = |d: f64| inside(base + n * near(d)) || inside(base + n * (d * 0.5));
@@ -378,8 +387,14 @@ fn through_all_reach(st: &solidcraft_doc::ModelState, p: &Value, base: Vec3) -> 
     if !through_all {
         return None;
     }
-    let reach =
-        st.bodies.iter().map(|b| b.mesh().bounds()).map(|bb| bb.center().dist(base) + bb.diagonal()).filter(|r| r.is_finite()).fold(1.0, f64::max);
+    let reach = st
+        .bodies
+        .iter()
+        .filter_map(|b| b.body.exact_bounds().ok())
+        .filter(|bb| !bb.is_empty())
+        .map(|bb| bb.center().dist(base) + bb.diagonal())
+        .filter(|r| r.is_finite())
+        .fold(1.0, f64::max);
     let dir = str_(p, "direction").map(str::to_ascii_lowercase);
     Some(if matches!(dir.as_deref(), Some("negative" | "reverse" | "flip")) { -reach } else { reach })
 }
@@ -1054,7 +1069,7 @@ fn profiles_or_default(s: &Session, p: &Value, sketch: u64, cmd: &str) -> Result
 /// Without nesting this is `All`, as before. When the pick cannot be stored so that it finds the
 /// same profiles again (the sketch is not solved, or two profiles share their curves), it stays
 /// `All` too.
-fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
+pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
     let st = s.model.state();
     let Some(ss) = st.sketch(sketch) else { return ProfileSel::All };
     let drawn = solidcraft_sketch::find_drawn_profiles(&ss.sketch);
@@ -2294,7 +2309,53 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// Convert a rigid matrix to the Move feature's existing translation/axis/angle form before
+/// frame mapping. The original matrix is validated before any information is discarded. A matrix
+/// turns about the world origin, so the origin is given explicitly: an omitted one would mean the
+/// moved body's own frame's origin on a placed component.
+pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
+    let Some(matrix) = p.get("matrix") else { return Ok(None) };
+    let cmd = "solid.move";
+    if ["translate", "axis", "angle", "origin"].iter().any(|k| p.get(k).is_some()) {
+        return Err(bad(cmd, "matrix cannot be combined with translate, axis, angle or origin"));
+    }
+    let m = super::component::matrix::rigid(matrix, super::component::matrix::tolerance(p, cmd)?, cmd)?;
+    let (axis, angle) = super::component::matrix::axis_angle(&m);
+    let mut out = p.clone();
+    if let Some(obj) = out.as_object_mut() {
+        obj.remove("matrix");
+        obj.remove("tolerance");
+        obj.insert("translate".into(), json!([format!("{} mm", m[3][0]), format!("{} mm", m[3][1]), format!("{} mm", m[3][2])]));
+        obj.insert("origin".into(), json!(["0 mm", "0 mm", "0 mm"]));
+        obj.insert("axis".into(), json!([axis.x, axis.y, axis.z]));
+        obj.insert("angle".into(), json!(format!("{angle} rad")));
+    }
+    Ok(Some(out))
+}
+
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
+    let normalized = move_matrix_params(p)?;
+    let p = normalized.as_ref().unwrap_or(p);
+    let cmd = "solid.move";
+    if p.get("tolerance").is_some() {
+        return Err(bad(cmd, "tolerance requires matrix"));
+    }
+    // Validate before choosing the body-feature or multi-placement route.
+    point_param(s, p, "translate", cmd)?;
+    point_param(s, p, "origin", cmd)?;
+    if let Some(v) = p.get("axis") {
+        let a = vec3(v).ok_or_else(|| bad(cmd, "axis must be a finite non-zero [x, y, z]"))?;
+        if a.normalized().is_none() {
+            return Err(bad(cmd, "axis must be non-zero"));
+        }
+    }
+    if p.get("angle").is_some() {
+        let a = req_expr(cmd, p, "angle")?;
+        check_expr(s, &a, Kind::Angle, cmd, "angle")?;
+    }
+    if p.get("copy").is_some_and(|v| !v.is_boolean()) {
+        return Err(bad(cmd, "copy must be a boolean"));
+    }
     if let Some(paths) = copied_components(p)? {
         return copy_components(s, p, paths);
     }
@@ -2360,26 +2421,23 @@ fn copied_components(p: &Value) -> Result<Option<Vec<Vec<u64>>>> {
     Ok(Some(paths))
 }
 
-/// The translation (mm) and turn (radians, if any) of a move in the world.
-fn world_move(s: &Session, p: &Value) -> Result<(Vec<f64>, Option<f64>)> {
+/// The origin and translation (mm), axis and turn (radians) of a move in the world.
+fn world_move(s: &Session, p: &Value) -> Result<Value> {
     let cmd = "solid.move";
-    let length = |v: &Value| -> Result<f64> {
-        match v {
-            Value::Number(n) => n.as_f64().ok_or_else(|| bad(cmd, "translate entries must be numbers or expressions")),
-            Value::String(e) => s.doc.eval(e, Kind::Length).map_err(|e| bad(cmd, format!("translate: {e}"))),
-            _ => Err(bad(cmd, "translate entries must be numbers or expressions")),
+    let mut transform = json!({});
+    for key in ["translate", "origin"] {
+        if let Some(coords) = point_param(s, p, key, cmd)? {
+            let values = coords.iter().map(|e| s.doc.eval(e, Kind::Length).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
+            transform[key] = json!(values);
         }
-    };
-    let translate = match p.get("translate") {
-        Some(Value::Array(a)) if a.len() == 3 => a.iter().map(length).collect::<Result<Vec<f64>>>()?,
-        None => vec![0.0; 3],
-        _ => return Err(bad(cmd, "`translate` must be [x, y, z]")),
-    };
-    let angle = match expr(p, "angle") {
-        Some(a) => Some(s.doc.eval(&a, Kind::Angle).map_err(|e| bad(cmd, format!("angle: {e}")))?),
-        None => None,
-    };
-    Ok((translate, angle))
+    }
+    if let Some(axis) = p.get("axis") {
+        transform["axis"] = axis.clone();
+    }
+    if let Some(angle) = expr(p, "angle") {
+        transform["angle"] = json!(s.doc.eval(&angle, Kind::Angle).map_err(|e| bad(cmd, e.to_string()))?);
+    }
+    Ok(transform)
 }
 
 /// A copying move of components (`occurrences`, with `copy`): each picked placement's component is
@@ -2389,7 +2447,7 @@ fn world_move(s: &Session, p: &Value) -> Result<(Vec<f64>, Option<f64>)> {
 /// `move_body_feature`) in the same command, so the whole move is one undo step.
 fn copy_components(s: &mut Session, p: &Value, paths: Vec<Vec<u64>>) -> Result<Value> {
     let cmd = "solid.move";
-    let (translate, angle) = world_move(s, p)?;
+    let transform = world_move(s, p)?;
     let paste = super::find_command("component.paste_new").ok_or_else(|| EngineError::UnknownCommand("component.paste_new".into()))?;
     let mover = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
     // A component inside another one copied here comes with its parent's copy.
@@ -2425,13 +2483,10 @@ fn copy_components(s: &mut Session, p: &Value, paths: Vec<Vec<u64>>) -> Result<V
         // The copy is placed by the same parent placement as its source.
         let mut at = path[..path.len() - 1].to_vec();
         at.push(copy);
-        let mut q = json!({"occurrence": copy, "path": at, "space": "world", "translate": translate});
-        if let Some(axis) = p.get("axis") {
-            q["axis"] = axis.clone();
-        }
-        if let Some(angle) = angle {
-            q["angle"] = json!(angle);
-        }
+        let mut q = transform.clone();
+        q["occurrence"] = json!(copy);
+        q["path"] = json!(at);
+        q["space"] = json!("world");
         mover.run_nested(s, &q)?;
         copies.push(copy);
     }
@@ -2447,22 +2502,17 @@ fn copy_components(s: &mut Session, p: &Value, paths: Vec<Vec<u64>>) -> Result<V
     Ok(out)
 }
 
-/// A move of several placements of one part (`frames::placements_moved`, #4768): each placement
-/// moved in the world by the move's translation and turn (about the world origin, as the Move
-/// feature turns bodies), and the root component's bodies listed moved as bodies, in one step.
+/// Move repeated placements in world coordinates, and any root bodies in the same step.
 fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMove) -> Result<Value> {
-    let (translate, angle) = world_move(s, p)?;
+    let transform = world_move(s, p)?;
     let spec = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
     let mut moved = Vec::new();
     for path in &plan.paths {
         let Some(&occurrence) = path.last() else { continue };
-        let mut q = json!({"occurrence": occurrence, "path": path, "space": "world", "translate": translate});
-        if let Some(axis) = p.get("axis") {
-            q["axis"] = axis.clone();
-        }
-        if let Some(angle) = angle {
-            q["angle"] = json!(angle);
-        }
+        let mut q = transform.clone();
+        q["occurrence"] = json!(occurrence);
+        q["path"] = json!(path);
+        q["space"] = json!("world");
         spec.run_nested(s, &q)?;
         moved.push(occurrence);
     }
@@ -2481,34 +2531,18 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list bodies"));
     }
-    let t = match p.get("translate") {
-        Some(Value::Array(a)) if a.len() == 3 => {
-            let mut out: [Expr; 3] = Default::default();
-            for (i, v) in a.iter().enumerate() {
-                let e = expr(&json!({"v": v}), "v").ok_or_else(|| bad(cmd, "translate entries must be numbers or expressions"))?;
-                check_expr(s, &e, Kind::Length, cmd, "translate")?;
-                if let Some(slot) = out.get_mut(i) {
-                    *slot = e;
-                }
-            }
-            out
-        }
-        None => ["0".into(), "0".into(), "0".into()],
-        _ => return Err(bad(cmd, "`translate` must be [x, y, z]")),
-    };
-    let angle = expr(p, "angle");
-    if let Some(a) = &angle {
-        check_expr(s, a, Kind::Angle, cmd, "angle")?;
-    }
+    let translate = point_param(s, p, "translate", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
+    let origin = point_param(s, p, "origin", cmd)?;
     let copy = bool_(p, "copy").unwrap_or(false);
     let reply = add_feature(
         s,
         p,
         FeatureKind::Move {
             bodies: bodies.iter().cloned().map(BodyName).collect(),
-            translate: t,
+            translate,
+            origin,
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
-            angle,
+            angle: expr(p, "angle"),
             copy,
         },
     )?;
@@ -3073,8 +3107,8 @@ pub(super) fn brief(text: &str) -> String {
     }
 }
 
-/// ISO 273 clearance hole diameters (close, normal, loose fit) for metric bolts.
-fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
+/// ISO 273's clearance holes for metric bolts: (size, close, normal, loose fit), M1.6 to M64.
+fn clearance_table() -> &'static [(f64, f64, f64, f64)] {
     const TABLE: [(f64, f64, f64, f64); 21] = [
         (1.6, 1.7, 1.8, 2.0),
         (2.0, 2.2, 2.4, 2.6),
@@ -3098,15 +3132,40 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
         (60.0, 62.0, 66.0, 70.0),
         (64.0, 66.0, 70.0, 74.0),
     ];
+    &TABLE
+}
+
+/// The bolt sizes [`clearance_diameter`] knows, as `clearance` takes them (`M1.6` to `M64`), for a
+/// size list in a dialog.
+pub fn clearance_sizes() -> Vec<String> {
+    clearance_table().iter().map(|r| format!("M{}", r.0)).collect()
+}
+
+/// ISO 273 clearance hole diameter (mm) for a metric bolt size (`M4`, or `M4x0.7` with the pitch)
+/// and a fit: `close`, `normal` or `loose` (`fine`, `medium`, `coarse` are older names). `None` for
+/// a size or fit outside the table.
+pub fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
     let t = size.trim().trim_start_matches(['M', 'm']);
     let d: f64 = t.split(['x', 'X']).next()?.trim().parse().ok()?;
-    let row = TABLE.iter().find(|r| (r.0 - d).abs() < 1e-9)?;
+    let row = clearance_table().iter().find(|r| (r.0 - d).abs() < 1e-9)?;
     match fit {
         "close" | "fine" => Some(row.1),
         "normal" | "medium" => Some(row.2),
         "loose" | "coarse" => Some(row.3),
         _ => None,
     }
+}
+
+/// `head_gap`'s default: the room left each side of a cap screw's head and below it, in mm.
+const HEAD_GAP_MM: f64 = 0.5;
+
+/// The counterbore `head` makes for a cap screw of `size` (`M4`) with the default `head_gap`:
+/// its diameter and depth in mm, as the Hole dialog shows them before the command runs. `None`
+/// for a standard or a size the head tables do not have.
+pub fn head_counterbore(standard: &str, size: &str) -> Option<(f64, f64)> {
+    let (dk, k) = super::parts::cap_screw_head(standard, size).ok()?;
+    let round = |x: f64| (x * 1e6).round() / 1e6;
+    Some((round(dk + 2.0 * HEAD_GAP_MM), round(k + HEAD_GAP_MM)))
 }
 
 /// The counterbore a cap screw's head sits in (`head` with `clearance`): its diameter and depth.
@@ -3123,7 +3182,7 @@ fn head_recess(s: &Session, cmd: &str, p: &Value) -> Result<Option<(Expr, Expr)>
     let (dk, k) = super::parts::cap_screw_head(head, size).map_err(|e| bad(cmd, e))?;
     let gap = match (expr(p, "head_gap"), p.get("head_gap")) {
         (Some(g), _) => g,
-        (None, None | Some(Value::Null)) => Expr::new("0.5 mm"),
+        (None, None | Some(Value::Null)) => Expr::new(format!("{HEAD_GAP_MM} mm")),
         (None, v) => return Err(bad(cmd, format!("`head_gap` {}", expr_problem(v)))),
     };
     let g = s.doc.eval(gap.as_str(), Kind::Length).map_err(|e| bad(cmd, format!("head_gap: {e}")))?;

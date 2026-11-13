@@ -1,8 +1,10 @@
 # Export the current view as DXF
 
 Choose **File → Export Current View as DXF…**, choose whether to omit hidden edges or
-export them as dashed lines, set **Curve tolerance**, then choose **Export DXF…** and a
-destination. Both settings are remembered. The Japanese menu is
+export them as dashed lines, choose the drawing's **Zero point** — **Camera target** (the
+point the camera looks at) or **Model origin** (the model's origin as seen from the camera,
+for machining from a part corner) — set **Curve tolerance**, then choose **Export DXF…** and
+a destination. All three settings are remembered. The Japanese menu is
 **ファイル → 現在の表示をDXFでエクスポート…**.
 
 On desktop, the export runs on a background worker while the window continues repainting

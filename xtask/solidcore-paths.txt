@@ -7,4 +7,4 @@
 # solidcore-ops or solidcore-tess (solidcore docs/layers.md). `cargo xtask layers --paths [crate]`
 # lists the paths counted.
 crates/geom 20
-crates/smlib 727
+crates/smlib 722

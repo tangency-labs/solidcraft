@@ -41,15 +41,18 @@
 //! [`Surface::global_point_solve_point_test_off`] (its face check keeps every
 //! solution without fetching a cache); the cache check-out has nothing to act on. `EdgeCurveOnClassify` lifts a 2D curve to a
 //! curve on the face's surface only when an upward edge use of the face is found (upstream lifts it
-//! first and ignores `SetAll`'s status). No recursion.
+//! first and ignores `SetAll`'s status). No recursion: the enclosure of an edge's gap to a
+//! plane (`edge_parts`, not upstream) halves Bézier pieces on an explicit stack, at most 40
+//! times each and 1024 times per edge, then leaves the gap unproved.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::ignored;
+use crate::geom::certified::{above, gamma};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::tol::xsect_tol_3d_from_zones;
+use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::point_class::{ClassGeometry, PointClassType, PointClassification};
@@ -57,6 +60,7 @@ use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::{NOW, NOZ};
 use crate::query::brep::LazyBrep;
 use crate::query::face::p2::{face_surface_cache, FaceSurfaceCache};
 use crate::surface::surface::p4::NoObject;
@@ -115,6 +119,443 @@ fn tight_face_box(k: &Kernel, lb: &mut LazyBrep<'_>, f: FaceId) -> Result<Extent
     let mut face_bbox = Extent3d::new();
     crate::query::face::p3::calculate_tight_bounding_box_into(k, lb, f, &mut face_bbox)?;
     Ok(face_bbox)
+}
+
+/// Not upstream (WR-755): the tolerance and the box within which the surfaces of two faces
+/// are compared by their definitions: the larger face tolerance, and the two faces
+/// together (where the surfaces must agree).
+///
+/// # Errors
+///
+/// Those of the face tolerances and bounding boxes.
+pub fn surface_comparison_extent(
+    k: &Kernel,
+    brep: &Brep,
+    face: FaceId,
+    other: &Brep,
+    other_face: FaceId,
+) -> Result<(f64, Extent3d)> {
+    let tol = fp2::tolerance(brep, face)?.max(fp2::tolerance(other, other_face)?);
+    let region = calculate_bounding_box(k, brep, face, false)?
+        .union(&calculate_bounding_box(k, other, other_face, false)?);
+    Ok((tol, region))
+}
+
+/// Not upstream: whether the definitions show the surfaces of two faces to be different
+/// surfaces: two different analytic kinds ([`Surface::is_other_analytic_kind`]), two planes
+/// whose faces part by more than their tolerance band ([`planes_part`]), or two quadrics of
+/// one kind that [`Surface::same_analytic_surface`] tells apart within
+/// [`surface_comparison_extent`]. Faces on such surfaces meet in curves and points, however
+/// parallel they leave a common edge. `false` where the definitions cannot tell (a B-spline,
+/// an offset, an extrusion, a revolution): the faces may be on one surface.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face without surface; those of
+/// [`surface_comparison_extent`].
+pub fn faces_on_other_surfaces(
+    k: &Kernel,
+    brep: &Brep,
+    face: FaceId,
+    other: &Brep,
+    other_face: FaceId,
+) -> Result<bool> {
+    fn surface(b: &Brep, f: FaceId) -> Result<&Surface> {
+        fp2::surface(b, f)?
+            .ok_or_else(|| SolidError::invalid_input(OP_FACE_BOX, "face without surface"))
+    }
+    let (a, b) = (surface(brep, face)?, surface(other, other_face)?);
+    if a.is_other_analytic_kind(b) {
+        return Ok(true);
+    }
+    if let (SurfaceKind::Plane(pa), SurfaceKind::Plane(pb)) = (a.kind(), b.kind()) {
+        return planes_part(k, brep, face, pb, other, other_face, pa);
+    }
+    // of one kind, only quadrics have definitions that tell two surfaces apart
+    let quadric = |s: &Surface| {
+        matches!(
+            s.kind(),
+            SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_)
+        )
+    };
+    if !(quadric(a) && quadric(b)) {
+        return Ok(false);
+    }
+    let (tol, region) = surface_comparison_extent(k, brep, face, other, other_face)?;
+    Ok(a.same_analytic_surface(b, tol, &region) == Some(false))
+}
+
+/// The most halvings of Bézier pieces while one edge's gap to a plane is enclosed
+/// ([`edge_parts`]).
+const PLANE_GAP_HALVINGS: usize = 1024;
+/// The most halvings of one Bézier piece of an edge ([`edge_parts`]).
+const PLANE_GAP_DEPTH: usize = 40;
+
+/// Not upstream: whether the planar faces `face` (on `face_plane`) and `other_face` (on
+/// `other_plane`) part by more than the band of their two zone tolerances: a point of either
+/// face is proved to lie farther than the band from the other's plane. The gap to a plane is
+/// affine, so over a planar face it is largest on the face's boundary, the exact edges. An
+/// exact edge lies on the face's plane, within the edge's tolerance `τ_e` of its curve (the
+/// tube, validity invariant 6), not on the curve: the curve may stand `τ_e + τ_f` off the
+/// plane (an edge 3e-5 off a plane two faces share, under a 3e-5 tolerance, parts nothing).
+/// So each edge curve is dropped onto the face's own plane along its normal, and the gap read
+/// there, on the trace the other plane leaves in it ([`PlaneLevel`]); the exact edge is
+/// within `τ_e` of that point in the plane, where the gap changes by at most `τ_e sin φ` (φ
+/// between the normals), which the edge's band adds. Each edge's gap is enclosed
+/// ([`edge_parts`]). A gap proved past the band shows the planes part there (two walls through
+/// a common edge at 3.3e-7 rad are 2.8e-5 apart 85 mm from it); faces not proved apart (a
+/// coincident strip, two planes crossing at an angle within the tolerance of each other across
+/// the strip, an edge whose gap is not enclosed) are left to the sector.
+fn planes_part(
+    k: &Kernel,
+    brep: &Brep,
+    face: FaceId,
+    other_plane: &crate::surface::plane::Plane,
+    other: &Brep,
+    other_face: FaceId,
+    face_plane: &crate::surface::plane::Plane,
+) -> Result<bool> {
+    let band = zone_tol3d(k, fp2::tolerance(brep, face)?)
+        + zone_tol3d(k, fp2::tolerance(other, other_face)?);
+    Ok(plane_gap(k, brep, face, face_plane, other_plane, band)?
+        || plane_gap(k, other, other_face, other_plane, face_plane, band)?)
+}
+
+/// Whether an edge of `face` (on `own`) is proved to leave the band about `plane`, read on
+/// `own` (see [`planes_part`]): `faces_band` and `τ_e sin φ` for the edge's tolerance.
+fn plane_gap(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    own: &crate::surface::plane::Plane,
+    plane: &crate::surface::plane::Plane,
+    faces_band: f64,
+) -> Result<bool> {
+    let Some(level) = PlaneLevel::new(own, plane) else {
+        return Ok(false);
+    };
+    for e in topology_traverser::face_edges(b, face)? {
+        let rec = b.edge(e)?;
+        let Some(curve) = rec.curve.as_ref() else {
+            continue;
+        };
+        let band = faces_band + zone_tol3d(k, edge::tolerance(b, e)?) * level.sin_phi;
+        if edge_parts(curve, &rec.interval, &level, band)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The gap to a plane `B` of the point `x` dropped onto a plane `A` along `A`'s normal, as the
+/// affine function `a . x - c`: with unit normals `n_A`, `n_B` and origins `o_A`, `o_B`,
+/// `a = n_B - (n_A . n_B) n_A` and `c = n_B . o_B - (n_A . n_B) (n_A . o_A)`. `|a|` is the
+/// sine of the angle between the planes; parallel planes give `a = 0` and the constant gap
+/// between them. The coefficients carry bounds on their rounding (Higham's `gamma_k`, as in
+/// [`crate::geom::certified`]): each normal unitised within `gamma_6` per component, their
+/// products and sums each rounding once more, bounded together by `gamma_40` of the sizes.
+#[derive(Debug, Clone, Copy)]
+struct PlaneLevel {
+    /// `a`, as computed.
+    a: [f64; 3],
+    /// A bound on the rounding of each component of `a`.
+    a_err: f64,
+    /// `c`, as computed.
+    c: f64,
+    /// A bound on the rounding of `c`.
+    c_err: f64,
+    /// An upper bound of `|a|`: the sine of the angle between the planes.
+    sin_phi: f64,
+}
+
+impl PlaneLevel {
+    /// `None` for a plane whose normal or origin is not finite, or whose normal is not proved
+    /// non-zero.
+    fn new(
+        own: &crate::surface::plane::Plane,
+        other: &crate::surface::plane::Plane,
+    ) -> Option<Self> {
+        let unit = |p: &crate::surface::plane::Plane| {
+            let pos = p.position();
+            let (o, z) = (pos.origin(), pos.z_axis());
+            let len = (z.x * z.x + z.y * z.y + z.z * z.z).sqrt();
+            let ok = above(len, 0.0) && len.is_finite();
+            ok.then_some(([z.x / len, z.y / len, z.z / len], [o.x, o.y, o.z]))
+        };
+        let ((na, oa), (nb, ob)) = (unit(own)?, unit(other)?);
+        let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        let s = dot(na, nb);
+        let a = [nb[0] - s * na[0], nb[1] - s * na[1], nb[2] - s * na[2]];
+        let c = dot(nb, ob) - s * dot(na, oa);
+        let norm1 = |v: [f64; 3]| v[0].abs() + v[1].abs() + v[2].abs();
+        let a_err = gamma(40);
+        let c_err = gamma(40) * 2.0 * (norm1(oa) + norm1(ob));
+        let sin_phi = dot(a, a).sqrt() * (1.0 + gamma(4)) + 2.0 * a_err;
+        let finite = a.iter().all(|v| v.is_finite()) && c.is_finite() && c_err.is_finite();
+        finite.then_some(Self {
+            a,
+            a_err,
+            c,
+            c_err,
+            sin_phi,
+        })
+    }
+
+    /// `a . x - c w` for the homogeneous point `(x, w)` (`x` the weighted coordinates), and a
+    /// bound on its rounding with the coordinates and the weight within `err` each.
+    fn homogeneous(&self, x: [f64; 3], w: f64, err: f64) -> (f64, f64) {
+        let [a0, a1, a2] = self.a;
+        let terms = [a0 * x[0], a1 * x[1], a2 * x[2], -(self.c * w)];
+        let value = terms[0] + terms[1] + terms[2] + terms[3];
+        // four products and three sums; the coefficients' and the coordinates' errors
+        let size = terms[0].abs() + terms[1].abs() + terms[2].abs() + terms[3].abs();
+        let a1n = a0.abs() + a1.abs() + a2.abs() + 3.0 * self.a_err;
+        let bound = gamma(4) * size
+            + self.a_err * (x[0].abs() + x[1].abs() + x[2].abs())
+            + self.c_err * w.abs()
+            + (a1n + self.c.abs() + self.c_err) * err;
+        (value, bound)
+    }
+
+    /// A lower bound of the gap of the point whose homogeneous gap is `num` (within `num_err`)
+    /// and weight `den` (within `den_err`); 0 where nothing positive is proved.
+    fn lower(num: f64, num_err: f64, den: f64, den_err: f64) -> f64 {
+        let top = num.abs() - num_err;
+        let bottom = den + den_err;
+        if !(above(top, 0.0) && above(den - den_err, 0.0) && bottom.is_finite()) {
+            return 0.0;
+        }
+        // the difference, the sum and the quotient each round once
+        top * (1.0 - gamma(3)) / bottom
+    }
+
+    /// An upper bound of the same gap (see [`Self::lower`]); infinite where the weight is not
+    /// proved positive.
+    fn upper(num: f64, num_err: f64, den: f64, den_err: f64) -> f64 {
+        if !above(den - den_err, 0.0) {
+            return f64::INFINITY;
+        }
+        (num.abs() + num_err) * (1.0 + gamma(3)) / (den - den_err)
+    }
+}
+
+/// Whether the edge on `curve` over `ivl` is proved to leave the band `band` of the gap
+/// `level`: a point of the curve within the interval whose certified gap exceeds the band
+/// (rounded up for the sum that made it). A decision on enclosures, never on
+/// samples. A line's gap is affine in its parameter, so its ends decide. A curve held as a
+/// B-spline (a B-spline, an ellipse or circle, a hyperbola, a parabola: their points are the
+/// B-spline's) is cut to the interval and into its Bézier pieces, on which the gap is the
+/// rational Bernstein function `Σ D_i B_i / Σ W_i B_i` (`D_i` the gap of the homogeneous
+/// control point, `W_i` its weight). A piece's ends are points of the edge, and with positive
+/// weights every value lies in the hull of the `D_i / W_i` (Piegl and Tiller, *The NURBS
+/// Book*, 2nd ed., §4.4); a piece whose hull stays within the band holds no proof and is
+/// dropped, the others are halved by de Casteljau (Farouki and Rajan 1987) until an end
+/// proves the gap: at most [`PLANE_GAP_DEPTH`] times each and [`PLANE_GAP_HALVINGS`] times in
+/// all, then not proved. `false` (not proved) for other curves, an interval outside the
+/// curve's, or weights not all positive.
+///
+/// # Errors
+///
+/// Unported or cancelled calls of the B-spline's cutting.
+fn edge_parts(curve: &Curve, ivl: &Extent1d, level: &PlaneLevel, band: f64) -> Result<bool> {
+    // the band as summed may round below the exact sum of its terms
+    let band = band * (1.0 + gamma(2));
+    if !band.is_finite() {
+        return Ok(false);
+    }
+    let base = match curve.kind() {
+        CurveKind::Line(line) => return Ok(line_parts(line, ivl, level, band)),
+        CurveKind::BSpline(c) => c,
+        CurveKind::Ellipse(c) => c.base(),
+        CurveKind::Hyperbola(c) => c.base(),
+        CurveKind::Parabola(c) => c.base(),
+        _ => return Ok(false),
+    };
+    let Some(nurb) = base.nurb.as_ref() else {
+        return Ok(false);
+    };
+    let (u0, um) = nurb.param_bounds();
+    let (t0, t1) = (ivl.min(), ivl.max());
+    if !(u0 <= t0 && t0 < t1 && t1 <= um) {
+        return Ok(false);
+    }
+    let mut most = 0.0_f64;
+    let mut w_min = f64::INFINITY;
+    for cp in nurb.cpts() {
+        if cp.z == NOZ {
+            return Ok(false);
+        }
+        let w = if cp.w == NOW { 1.0 } else { cp.w };
+        most = most
+            .max(cp.x.abs())
+            .max(cp.y.abs())
+            .max(cp.z.abs())
+            .max(w.abs());
+        w_min = w_min.min(w);
+    }
+    if !(most.is_finite() && above(w_min, 0.0)) {
+        return Ok(false);
+    }
+    let cut;
+    let held = if t0 == u0 && t1 == um {
+        nurb
+    } else {
+        let Some(c) = ignored(nurb.extract_seg(t0, t1))? else {
+            return Ok(false);
+        };
+        cut = c;
+        &cut
+    };
+    let Some(beziers) = ignored(held.decompose_bez())? else {
+        return Ok(false);
+    };
+    // the knot insertions that cut the interval out and the pieces apart: each is a convex
+    // combination (three roundings in its ratio, two in its sum), at most 3 (p + 1) deep,
+    // of homogeneous coordinates no larger than the curve's
+    let err = gamma(5 * (3 * held.degree() + 5)) * most;
+    let mut stack = Vec::new();
+    for bez in beziers.iter().rev() {
+        let (mut d, mut w, mut d_err) = (Vec::new(), Vec::new(), 0.0_f64);
+        for cp in bez.cpts() {
+            let wi = if cp.w == NOW { 1.0 } else { cp.w };
+            let (v, e) = level.homogeneous([cp.x, cp.y, cp.z], wi, err);
+            d.push(v);
+            w.push(wi);
+            d_err = d_err.max(e);
+        }
+        stack.push(GapPiece {
+            d,
+            w,
+            d_err,
+            w_err: err,
+            depth: 0,
+        });
+    }
+    let mut halvings = 0;
+    while let Some(piece) = stack.pop() {
+        if piece.end_beyond(band) {
+            return Ok(true);
+        }
+        if piece.hull_within(band) || piece.depth >= PLANE_GAP_DEPTH {
+            continue;
+        }
+        if halvings >= PLANE_GAP_HALVINGS {
+            break;
+        }
+        halvings += 1;
+        let (left, right) = piece.halves();
+        stack.push(right);
+        stack.push(left);
+    }
+    Ok(false)
+}
+
+/// Whether an end of the line edge over `ivl` lies past `band` from the plane `level`: the gap
+/// is affine along the line, so its ends hold its largest value. The ends are evaluated as the
+/// line evaluates (`P + s scale V`, `s` the STEP parameter of the NURB parameter), so their
+/// rounding is bounded by `gamma_16` of the point's and the vector's sizes over the
+/// parameters met (the conversion's five roundings, the evaluation's three).
+fn line_parts(
+    line: &crate::curve::line::Line,
+    ivl: &Extent1d,
+    level: &PlaneLevel,
+    band: f64,
+) -> bool {
+    let (t0, t1) = (ivl.min(), ivl.max());
+    let canon = line.canonical();
+    let domain = if line.is_bounded() {
+        let nat = line.natural_interval();
+        if !(nat.min() <= t0 && t1 <= nat.max()) {
+            return false;
+        }
+        canon.domain.min().abs() + canon.domain.max().abs()
+    } else {
+        0.0
+    };
+    let reach = domain + t0.abs() + t1.abs();
+    let (p, v) = (canon.point, canon.vector);
+    let size = p.x.abs().max(p.y.abs()).max(p.z.abs());
+    let step = v.x.abs().max(v.y.abs()).max(v.z.abs());
+    let p_err = gamma(16) * (size + 2.0 * reach * step);
+    if !p_err.is_finite() {
+        return false;
+    }
+    [t0, t1].into_iter().any(|t| {
+        let x = line.evaluate_point(t);
+        let (num, num_err) = level.homogeneous([x.x, x.y, x.z], 1.0, p_err);
+        above(PlaneLevel::lower(num, num_err, 1.0, 0.0), band)
+    })
+}
+
+/// A Bézier piece of an edge's gap to a plane ([`edge_parts`]): the gaps `d` of its
+/// homogeneous control points and their weights `w`, each within its bound, and how often it
+/// was halved.
+#[derive(Debug, Clone)]
+struct GapPiece {
+    d: Vec<f64>,
+    w: Vec<f64>,
+    d_err: f64,
+    w_err: f64,
+    depth: usize,
+}
+
+impl GapPiece {
+    /// Whether an end of the piece, a point of the edge, is proved past `band`.
+    fn end_beyond(&self, band: f64) -> bool {
+        [
+            (self.d.first(), self.w.first()),
+            (self.d.last(), self.w.last()),
+        ]
+        .into_iter()
+        .any(|end| match end {
+            (Some(&d), Some(&w)) => above(PlaneLevel::lower(d, self.d_err, w, self.w_err), band),
+            _ => false,
+        })
+    }
+
+    /// Whether every point of the piece is proved within `band` (the hull of its gaps).
+    fn hull_within(&self, band: f64) -> bool {
+        self.d
+            .iter()
+            .zip(&self.w)
+            .all(|(&d, &w)| PlaneLevel::upper(d, self.d_err, w, self.w_err) <= band)
+    }
+
+    /// Its two halves at the middle of its parameter (de Casteljau): each of the degree's
+    /// levels averages once, which adds `gamma` of the degree plus one of the largest value.
+    fn halves(&self) -> (Self, Self) {
+        let largest = |v: &[f64], e: f64| v.iter().fold(0.0_f64, |m, x| m.max(x.abs())) + e;
+        let grow = gamma(self.d.len() + 1);
+        let d_err = self.d_err + grow * largest(&self.d, self.d_err);
+        let w_err = self.w_err + grow * largest(&self.w, self.w_err);
+        let (dl, dr) = de_casteljau_halves(&self.d);
+        let (wl, wr) = de_casteljau_halves(&self.w);
+        let half = |d, w| Self {
+            d,
+            w,
+            d_err,
+            w_err,
+            depth: self.depth + 1,
+        };
+        (half(dl, wl), half(dr, wr))
+    }
+}
+
+/// The Bernstein coefficients of the two halves of the polynomial with coefficients `c`.
+fn de_casteljau_halves(c: &[f64]) -> (Vec<f64>, Vec<f64>) {
+    let mut work = c.to_vec();
+    let (mut left, mut right) = (Vec::new(), Vec::new());
+    while let (Some(&first), Some(&last)) = (work.first(), work.last()) {
+        left.push(first);
+        right.push(last);
+        work = work
+            .iter()
+            .zip(work.iter().skip(1))
+            .map(|(a, b)| 0.5 * (a + b))
+            .collect();
+    }
+    right.reverse();
+    (left, right)
 }
 
 const NORMAL_BOX: BoundingBoxRequest = BoundingBoxRequest {
@@ -902,5 +1343,132 @@ mod tests {
         );
         let e = edge_curve_on_classify(&k, &mut b, FaceId::from_index(0), None, &c, &opts);
         assert!(e.is_err());
+    }
+
+    /// The plane through the line along `chord` through `origin`, turned out of z = 0 by
+    /// `theta` about it towards `side` (a unit vector in z = 0 across the chord): its normal is
+    /// `chord x (side cos theta + Z sin theta)`, so a point `s` across the chord in z = 0 lies
+    /// `s sin theta` from it.
+    fn tilted_plane(origin: Point3, chord: Vec3, side: Vec3, theta: f64) -> Plane {
+        let domain = Extent2d::from_bounds(-100.0, -100.0, 100.0, 100.0);
+        Plane::new(
+            origin,
+            chord,
+            side * theta.cos() + Vec3::Z * theta.sin(),
+            Vec2::new(1.0, 1.0),
+            &domain,
+        )
+    }
+
+    /// The plane z = 0, which the test curves lie in.
+    fn flat() -> Plane {
+        tilted_plane(Point3::new(0.0, 0.0, 0.0), Vec3::X, Vec3::Y, 0.0)
+    }
+
+    /// The largest distance from `plane` read at the ten points of the sampled check this
+    /// replaced (the interval's ends and eight points between, evenly in the parameter).
+    fn sampled_gap(k: &Kernel, c: &Curve, ivl: &Extent1d, plane: &Plane) -> f64 {
+        let pos = plane.position();
+        (0..=9)
+            .map(|i| {
+                let p = c
+                    .evaluate_point(k, ivl.evaluate(f64::from(i) / 9.0))
+                    .unwrap();
+                (p - pos.origin()).dot(pos.z_axis()).abs()
+            })
+            .fold(0.0, f64::max)
+    }
+
+    /// A curved boundary whose gap to the other plane is past the band only near its middle,
+    /// between the points a sampled check reads (the reviewer's case): the quadratic
+    /// `y = 4 h t (1 - t)` over the chord from (0, 0) to (2, 0), against the plane turned
+    /// about the chord by `theta`, `h sin theta = 1.005 band`. Its largest gap, at `t = 1/2`,
+    /// is past the band; the ten samples read at most 80/81 of it, within the band. The
+    /// enclosure proves the gap at the first halving, whose end is the middle. At
+    /// `h sin theta = 0.99 band` the halves' hulls stay within the band: not proved.
+    #[test]
+    fn a_curved_edge_parts_from_a_plane_between_samples() {
+        let k = Kernel::default();
+        let band = 2e-5;
+        let h = 10.0;
+        let bump = |h: f64| {
+            let raw = NurbCurve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, 2.0 * h, 0.0, NOW),
+                    CPoint::new(2.0, 0.0, 0.0, NOW),
+                ],
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap();
+            Curve::from(BSplineCurve::from_nurb(raw, 3, false))
+        };
+        let c = bump(h);
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        for (ratio, parts) in [(1.005, true), (0.99, false)] {
+            let theta = (ratio * band / h).asin();
+            let plane = tilted_plane(Point3::new(0.0, 0.0, 0.0), Vec3::X, Vec3::Y, theta);
+            let mid = c.evaluate_point(&k, 0.5).unwrap();
+            let mid_gap = (mid - plane.position().origin())
+                .dot(plane.position().z_axis())
+                .abs();
+            assert!((mid_gap / band - ratio).abs() < 1e-9, "{ratio}: {mid_gap}");
+            // the sampled check saw no gap past the band
+            assert!(sampled_gap(&k, &c, &ivl, &plane) < band, "{ratio}");
+            let level = PlaneLevel::new(&flat(), &plane).unwrap();
+            assert_eq!(
+                edge_parts(&c, &ivl, &level, band).unwrap(),
+                parts,
+                "{ratio}"
+            );
+        }
+    }
+
+    /// The same on a rational curve: the quarter circle of radius `r` from (r, 0) to (0, r)
+    /// (weights 1, sqrt 2 / 2, 1) against the plane turned by `theta` about its chord; the
+    /// arc's middle is `r (1 - 1 / sqrt 2)` across the chord. And an edge on part of a curve:
+    /// cut to its first quarter, which ends 0.78 as far across the chord as the middle, the
+    /// edge stays within the band however far the rest of the curve leaves it.
+    #[test]
+    fn a_circular_edge_parts_from_a_plane_by_its_enclosure() {
+        let k = Kernel::default();
+        let band = 2e-5;
+        let r = 50.0;
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let raw = NurbCurve::new(
+            vec![
+                CPoint::new(r, 0.0, 0.0, 1.0),
+                CPoint::new(r * w, r * w, 0.0, w),
+                CPoint::new(0.0, r, 0.0, 1.0),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let c = Curve::from(BSplineCurve::from_nurb(raw, 3, false));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let across = r * (1.0 - w);
+        let side = Vec3::new(-w, -w, 0.0);
+        let chord = Vec3::new(-w, w, 0.0);
+        for (ratio, parts) in [(1.005, true), (0.99, false)] {
+            let theta = (ratio * band / across).asin();
+            let plane = tilted_plane(Point3::new(r, 0.0, 0.0), chord, side, theta);
+            let level = PlaneLevel::new(&flat(), &plane).unwrap();
+            assert_eq!(
+                edge_parts(&c, &ivl, &level, band).unwrap(),
+                parts,
+                "{ratio}"
+            );
+        }
+        // the first quarter of the parameter: its far end is the farthest across the chord
+        let quarter = Extent1d::from_min_max(0.0, 0.25);
+        let end = c.evaluate_point(&k, 0.25).unwrap();
+        let end_across = (end - Point3::new(r, 0.0, 0.0)).dot(side).abs();
+        let theta = (1.005 * band / across).asin();
+        let plane = tilted_plane(Point3::new(r, 0.0, 0.0), chord, side, theta);
+        let level = PlaneLevel::new(&flat(), &plane).unwrap();
+        assert!(end_across * theta.sin() < band);
+        assert!(!edge_parts(&c, &quarter, &level, band).unwrap());
     }
 }

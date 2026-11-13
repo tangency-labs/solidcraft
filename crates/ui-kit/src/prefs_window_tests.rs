@@ -19,6 +19,7 @@ struct Fake {
     failing_restores: usize,
     /// Applies that fail before one succeeds.
     failing_applies: usize,
+    failing_confirmations: usize,
 }
 
 impl Host for Fake {
@@ -41,6 +42,13 @@ impl Host for Fake {
             return Err("not now".into());
         }
         self.values = snapshot.clone();
+        Ok(())
+    }
+    fn confirm(&mut self) -> Result<(), String> {
+        if self.failing_confirmations > 0 {
+            self.failing_confirmations -= 1;
+            return Err("invalid field".into());
+        }
         Ok(())
     }
     fn apply(&mut self) -> Result<(), String> {
@@ -273,4 +281,24 @@ fn every_name_the_window_publishes_starts_with_the_hosts_prefix() {
     assert_eq!(fake.window.section, 0, "Enter opened the match");
     assert!(registry::handle_at("x:revealed").is_some(), "the opened row is published under the prefix");
     no_prefs_names("revealing");
+}
+
+#[test]
+fn invalid_draft_fields_keep_ok_and_apply_editable_until_corrected() {
+    for button in [Button::Ok, Button::Apply] {
+        let (ctx, mut fake) = opened();
+        fake.values.grid = true;
+        fake.failing_confirmations = 2;
+        let target = if button == Button::Ok { "test:ok" } else { "test:apply" };
+        for _ in 0..2 {
+            frame(&ctx, &mut fake, Vec::new());
+            assert_eq!(click(&ctx, &mut fake, target), Some(button));
+            assert!(fake.window.open);
+            assert_eq!(fake.window.snapshot(), Some(&Values::default()));
+            assert!(fake.window.restore_error().is_none());
+        }
+        press(&mut fake, PAGES, button).unwrap();
+        assert!(fake.values.grid);
+        assert_eq!(fake.window.open, button == Button::Apply);
+    }
 }

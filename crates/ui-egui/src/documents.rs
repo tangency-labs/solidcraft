@@ -81,8 +81,7 @@ struct DocWork {
 /// computing after OK can't wait (its result belongs to the window thread): that dialog is
 /// cancelled, as without the preference.
 fn take_work(app: &mut SolveApp) -> DocWork {
-    let keep_bom = crate::panel_runtime::production_active(app);
-    let bom = app.bom.take().filter(|_| keep_bom);
+    let bom = app.bom.take();
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
         app.tool = None;
@@ -102,10 +101,8 @@ fn take_work(app: &mut SolveApp) -> DocWork {
 /// design's history rolled back for an edit, and only the dialog's Cancel or OK puts it back.
 /// `before`: the session's revision before the switch moved it on to refresh the views.
 fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
-    if crate::panel_runtime::production_active(app) {
-        app.bom = work.bom;
-        crate::bom_panel::set_focus_pending(app, true);
-    }
+    app.bom = work.bom;
+    crate::bom_panel::set_focus_pending(app, true);
     // That refresh is not a change to the design: the edit's Cancel must still see the design
     // it left (`Session::restore_editor` compares revisions), as `PendingFeatureEdit` does.
     if let Some(state) = &mut work.editing_state {

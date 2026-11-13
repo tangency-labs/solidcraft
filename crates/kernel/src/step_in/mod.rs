@@ -7,7 +7,7 @@
 //! untrusted: every count and nesting depth is capped, and what cannot be read becomes a
 //! warning rather than a failure wherever the rest of the file is still usable.
 
-pub(crate) mod p21;
+pub mod p21;
 mod parallel;
 
 use std::collections::{BTreeMap, HashMap, HashSet};

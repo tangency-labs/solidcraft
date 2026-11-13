@@ -79,7 +79,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&RESTORE_CHECKPOINT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
-        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring or forgetting uses it and every later checkpoint up: take a new one to go back again"),
+        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring uses it and every later checkpoint up: take a new one to go back again. Forgetting drops only it"),
     CommandSpec::new("timeline.compute_all", "Compute All", crate::checked!("timeline.compute_all", compute_all))
         .at("SOLID", "MODIFY")
         .icon("compute")
@@ -192,7 +192,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("timeline.inspect", "Inspect Feature", crate::checked!("timeline.inspect", inspect_feature))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&INSPECT_CONTRACT)
         .output(crate::schema::output_schema_for::<TimelineInspectResult>)
         .params(
@@ -2065,6 +2065,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let constructor = super::features::COMMANDS
         .iter()
         .chain(super::features_more::COMMANDS)
+        .chain(super::cell_grid::COMMANDS)
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
         .chain(super::surface_boundary::COMMANDS)

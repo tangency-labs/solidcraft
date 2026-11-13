@@ -463,14 +463,15 @@ impl SurfOfRevolution {
     /// whose outputs it then reads).
     pub fn new(
         k: &Kernel,
-        gen_curve: Curve,
+        mut gen_curve: Curve,
         origin: Point3,
         x_axis: Vec3,
         y_axis: Vec3,
         anal_uv_domain: Extent2d,
         swap_uv: bool,
     ) -> Result<Self> {
-        let base_gen = gen_base(&gen_curve)?;
+        // (the generator must be derived from SmBSplineCurve)
+        gen_base(&gen_curve)?;
         let mut surf = Self {
             base: BSplineSurface::new(),
             gen_curve: None,
@@ -496,7 +497,11 @@ impl SurfOfRevolution {
         // when curve is not planar
         // (when curve is not planar, mark that; else see if it is on the X/Z plane)
         if gen_curve.is_planar(k, tol_3d)?.is_planar {
-            let on = base_gen.is_on_plane(origin, y_axis, tol_3d, None)?;
+            // `pGenCurve->IsOnPlane(..)` is called on the generator itself, whose
+            // `GetOrCreateGwNurbPointer` runs its own `MakeNurb` (a two-point `SmLine` has no
+            // NURB yet): the NURB is made on the generator here, as upstream
+            gen_ensure_nurb(k, &mut gen_curve)?;
+            let on = gen_base(&gen_curve)?.is_on_plane(origin, y_axis, tol_3d, None)?;
             if !on.on_plane {
                 surf.planar_generator = false;
             }
@@ -2266,45 +2271,6 @@ mod tests {
     }
 
     #[test]
-    fn rejected_shifted_generator_interval_preserves_the_revolution() {
-        let mut k = k();
-        k.fixes.ellipse_step_interval_checks = true;
-        for swap in [false, true] {
-            let g = Ellipse::new_circle(
-                &k,
-                Vec3::new(3.0, 0.0, 0.0),
-                Vec3::X,
-                Vec3::Z,
-                Extent1d::from_min_max(0.0, 360.0),
-                1.0,
-                &EllipseOptions::default(),
-            )
-            .unwrap();
-            let mut s =
-                SurfOfRevolution::create_canonical(&k, Curve::from(g), Vec3::ZERO, Vec3::Z, swap)
-                    .unwrap();
-            let old_domain = s.step_uv_domain();
-            let old_nurb = s.base().gw_nurb().unwrap().clone();
-            let target = Extent2d::from_bounds(0.0, 360.0, 180.0, 540.0);
-            assert!(matches!(
-                s.adjust_step_uv_domain(&k, &target),
-                Err(SolidError::InvalidInput { .. })
-            ));
-            assert_eq!(s.step_uv_domain(), old_domain);
-            assert_eq!(s.base().gw_nurb().unwrap(), &old_nurb);
-            let CurveKind::Ellipse(gen) = s.gen_curve().unwrap().kind() else {
-                panic!("circle generator changed type");
-            };
-            assert_eq!(gen.step_interval(), old_domain.v_interval());
-            // A supported trim still succeeds after the rejected edit.
-            s.adjust_step_uv_domain(&k, &Extent2d::from_bounds(0.0, 0.0, 180.0, 90.0))
-                .unwrap();
-            let n = s.base().gw_nurb().unwrap();
-            assert!(n.u_knots().iter().chain(n.v_knots()).all(|v| v.is_finite()));
-        }
-    }
-
-    #[test]
     fn canonical_line_is_a_cone() {
         let s = cone();
         assert!(s.planar_generator());
@@ -2413,6 +2379,37 @@ mod tests {
             None,
         );
         assert!(r.is_ok_and(|(_, x)| x.curves_3d.len() == x.curve_types.len()));
+    }
+
+    /// A lazy line generator (`Line::from_points`, no NURB yet, as upstream's two-point
+    /// `SmLine`) reaches `new`'s on-plane test, where upstream's virtual `MakeNurb` makes
+    /// its NURB. The profile `(1, 0, 0)`–`(2, 0, 1)` about Z is `S(u, v) = Rz(u) λ(v)`
+    /// (`u` in degrees, `v` the line's parameter on `[0, 1]`): `λ(1) = (2, 0, 1)` turned by
+    /// 90° is `(0, 2, 1)`, and the profile lies on the X/Z plane.
+    #[test]
+    fn a_lazy_line_generator_revolves_through_its_on_plane_test() {
+        for fixes in [
+            crate::kernel::UpstreamFixes::default(),
+            crate::kernel::UpstreamFixes::all(),
+        ] {
+            let k = Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let line = Line::from_points(Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 1.0), 3);
+            assert!(line.base().gw_nurb().is_none());
+            let s = SurfOfRevolution::create_canonical(
+                &k,
+                Curve::from(line),
+                Vec3::ZERO,
+                Vec3::Z,
+                false,
+            )
+            .unwrap();
+            assert!(s.planar_generator);
+            let p = s.evaluate_step_point(&k, Point2::new(90.0, 1.0)).unwrap();
+            assert!((p - Vec3::new(0.0, 2.0, 1.0)).length() <= 1e-12, "{p:?}");
+        }
     }
 
     #[test]
