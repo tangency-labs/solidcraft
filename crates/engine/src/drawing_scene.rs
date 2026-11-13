@@ -98,7 +98,7 @@ use crate::{EngineError, Result, Session};
 
 #[path = "drawing_scene_kept.rs"]
 mod kept;
-use kept::{Kept, KeptDimension, KeptLines, KeptView};
+use kept::{Kept, KeptLines};
 
 /// The command the sheet scene answers for, in its errors.
 pub const CMD: &str = "drawing.scene";
@@ -1145,7 +1145,8 @@ impl SourceKey {
 }
 
 /// A view's last drawing, and what it was drawn from: the world state (held, so its address can't
-/// be reused while it is compared), what that showed, and the view as it drew.
+/// be reused while it is compared), what that showed, and the view as it drew. Kept whole when its
+/// drawing closes, all but its world state ([`Kept::closing`]), so what is added here is kept too.
 #[derive(Clone)]
 struct Entry {
     state: Arc<ModelState>,
@@ -1258,7 +1259,7 @@ impl Entry {
 
 /// A dimension's last drawing, or a note's, and what it was drawn from: its record, the world state,
 /// its view's drawing (by serial, which holds its frame), the drawing's lettering and, for a note,
-/// the document's revision ([`Annotation::reads_fields`]).
+/// the document's revision ([`Annotation::reads_fields`]). Kept as a view's entry is ([`Entry`]).
 #[derive(Clone)]
 struct DimensionEntry {
     state: Arc<ModelState>,
@@ -1335,26 +1336,22 @@ impl Cache {
         }
     }
 
-    /// Drawing `drawing`'s lines kept when it closed, as its views' and dimensions' entries: from a
-    /// world state that has gone, so each view is out of date until [`keep_what_shows_the_same`] finds
-    /// it shows the same, and each dimension is read again once its view is up to date. A held
-    /// drawing draws neither, so it shows them as they were.
+    /// Drawing `drawing`'s entries kept when it closed, back as its views' and dimensions', numbered
+    /// again from the cache's serial, which started over at the close. Drawn from a world state that
+    /// has gone ([`Kept::closing`]), so each view is out of date until [`keep_what_shows_the_same`]
+    /// finds it shows the same, and each dimension is read again once its view is up to date (its
+    /// `view_serial`, from before the close, never matches its view's new one either). A held drawing
+    /// draws neither, so it shows them as they were.
     fn take_kept(&mut self, drawing: u64) {
-        let gone: Arc<ModelState> = Arc::default();
-        let kept = self.kept.take(drawing);
-        for (id, kept) in kept.views {
+        let Kept { views, dimensions } = self.kept.take(drawing);
+        for (id, mut entry) in views {
             self.serial += 1;
-            let entry =
-                Entry { state: gone.clone(), shows: kept.shows, view: kept.view, drawn: kept.drawn, serial: self.serial, pixels: kept.pixels };
+            entry.serial = self.serial;
             self.views.insert(id, entry);
         }
-        // From the same gone state, so read again: its `view_serial`, from before the close, never
-        // matches its view's new one either.
-        for (id, kept) in kept.dimensions {
+        for (id, mut entry) in dimensions {
             self.serial += 1;
-            let KeptDimension { record, view_serial, lettering, drawn } = kept;
-            // Its world state is gone, so it is read again whatever its revision.
-            let entry = DimensionEntry { state: gone.clone(), record, view_serial, lettering, revision: 0, drawn, serial: self.serial };
+            entry.serial = self.serial;
             self.dimensions.insert(id, entry);
         }
     }
@@ -2289,15 +2286,9 @@ fn sheet_pictures(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)]
 pub(crate) fn forget_closed(s: &mut Session) {
     let cache = &mut s.drawing_scenes;
     if let Some(drawing) = cache.drawing.filter(|d| s.open_drawing != Some(*d)) {
-        let mut kept = std::mem::take(&mut cache.kept);
-        let views = std::mem::take(&mut cache.views)
-            .into_iter()
-            .map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows, pixels: e.pixels }));
-        let dimensions = std::mem::take(&mut cache.dimensions)
-            .into_iter()
-            .map(|(id, e)| (id, KeptDimension { record: e.record, view_serial: e.view_serial, lettering: e.lettering, drawn: e.drawn }));
-        kept.keep(drawing, Kept { views: views.collect(), dimensions: dimensions.collect() });
-        *cache = Cache { kept, ..Cache::default() };
+        let Cache { views, dimensions, mut kept, .. } = std::mem::take(cache);
+        kept.keep(drawing, Kept::closing(views, dimensions));
+        cache.kept = kept;
     }
     cache.kept.retain(|drawing| s.doc.drawings.iter().any(|d| d.id == drawing));
 }

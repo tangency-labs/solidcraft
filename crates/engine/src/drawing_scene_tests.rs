@@ -729,24 +729,34 @@ fn a_title_blocks_text_follows_the_model_state_alone() {
     assert_ne!(shown(&s), with_tower, "the mass read from the model's state as it is");
 }
 
-/// Closing the drawing drops its scenes and the world states they hold, and keeps each view's lines.
-/// Opened again with nothing changed, its views show those lines, up to date, and none is drawn:
-/// only its dimensions are read again.
+/// Closing the drawing drops its scenes and the world states they hold, and keeps each view's lines,
+/// and each dimension's, with no world state. Opened again with nothing changed, its views show those
+/// lines, up to date, and none is drawn: only its dimensions are read again. What came back is
+/// numbered within the cache's serial, so no later drawing repeats a number.
 #[test]
 fn closing_the_drawing_keeps_its_lines_for_when_it_opens_again() {
     let (mut s, sheet, [front, _]) = front_and_top();
     top_edge(&mut s, front);
-    let drawing = ids::encode(s.open_drawing.unwrap());
+    let id = s.open_drawing.unwrap();
+    let drawing = ids::encode(id);
     let before = settled(&mut s, sheet);
+    let state = s.world_state().unwrap();
     run(&mut s, "drawing.close", json!({}));
     let cache = &s.drawing_scenes;
     assert!(cache.views.is_empty() && cache.dimensions.is_empty() && cache.last.is_none() && cache.shown.is_none() && cache.drawing.is_none());
+    let kept = cache.kept.of(id).expect("kept at the close");
+    assert_eq!((kept.views.len(), kept.dimensions.len()), (2, 1));
+    let mut states = kept.views.values().map(|e| &e.state).chain(kept.dimensions.values().map(|e| &e.state));
+    assert!(states.all(|held| !Arc::ptr_eq(held, &state) && held.bodies.is_empty()), "a closed drawing holds no model");
     assert!(!step(&mut s));
     run(&mut s, "drawing.open", json!({"drawing": drawing}));
     let reopened = extract(&mut s, sheet).unwrap();
     // A new scene, so a new number: the page can't take it for the one it showed before.
     assert!(reopened.stale.is_empty() && reopened.generation > before.generation, "{:?}", reopened.stale);
     assert_eq!(reopened.stale_dimensions.len(), 1);
+    let cache = &s.drawing_scenes;
+    let serials: BTreeSet<u64> = cache.views.values().map(|e| e.serial).chain(cache.dimensions.values().map(|e| e.serial)).collect();
+    assert!(serials.len() == 3 && serials.iter().all(|n| *n <= cache.serial), "{serials:?} within {}", cache.serial);
     let after = settled(&mut s, sheet);
     assert_eq!((bytes(&after.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
 }
@@ -3852,6 +3862,26 @@ fn a_fine_sheet_draws_the_page_picture_coarser() {
         assert_eq!(window_grid(&rect(100.0, 20.0), dpi).unwrap().pitch, 25.4 / (dpi / k), "{dpi}");
     }
     assert!(window_grid(&rect(5000.0, 5000.0), 2400.0).unwrap().pixels() <= WINDOW_PICTURE_PIXELS, "the largest paper at the finest dpi fits");
+}
+
+/// A shaded view closed and opened again with nothing changed comes back whole: its lines up to date,
+/// none drawn, and its picture's last pixels shown at once, the same rows, until it settles on the
+/// same pixels.
+#[test]
+fn a_reopened_drawing_shows_its_kept_lines_and_pixels_at_once() {
+    let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let before = settled(&mut s, sheet);
+    let last = only_picture(&before).rows.clone().unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "drawing.open", drawing);
+    let reopened = extract(&mut s, sheet).unwrap();
+    assert!(reopened.stale.is_empty(), "{:?}", reopened.stale);
+    assert!(only_picture(&reopened).rows.as_ref().is_some_and(|rows| Arc::ptr_eq(rows, &last)), "the kept pixels show at once");
+    let after = settled(&mut s, sheet);
+    assert_eq!((bytes(&after.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
+    let picture = only_picture(&after);
+    assert!(!picture.stale && **picture.rows.as_ref().unwrap() == *last, "{picture:?}");
 }
 
 /// Only the drawing closed last keeps its pictures' pixels: once another closes, the first keeps its
