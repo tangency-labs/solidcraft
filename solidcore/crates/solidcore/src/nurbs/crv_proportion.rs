@@ -85,10 +85,15 @@ impl Polygon {
             return last + self.out * (t - end);
         }
         for (k, w) in self.chord.windows(2).enumerate() {
-            if let ([s0, s1], Some(&a), Some(&b)) = (w, self.points.get(k), self.points.get(k + 1)) {
+            if let ([s0, s1], Some(&a), Some(&b)) = (w, self.points.get(k), self.points.get(k + 1))
+            {
                 if t <= *s1 {
                     let span = s1 - s0;
-                    return if span > 0.0 { a + (b - a) * ((t - s0) / span) } else { a };
+                    return if span > 0.0 {
+                        a + (b - a) * ((t - s0) / span)
+                    } else {
+                        a
+                    };
                 }
             }
         }
@@ -145,7 +150,9 @@ impl Curve {
         let mut best = make(d1);
         let mut l1 = length(&best)?;
         for _ in 0..MAX_STEPS {
-            if (l1 - target).abs() <= LENGTH_TOL * target.max(1.0) || (l1 - l0).abs() <= f64::EPSILON * target.max(1.0) {
+            if (l1 - target).abs() <= LENGTH_TOL * target.max(1.0)
+                || (l1 - l0).abs() <= f64::EPSILON * target.max(1.0)
+            {
                 break;
             }
             let d2 = d1 + (target - l1) * (d1 - d0) / (l1 - l0);
@@ -166,7 +173,10 @@ mod tests {
     use super::*;
 
     fn curve(points: &[[f64; 3]], degree: usize) -> Curve {
-        let pw: Vec<CPoint> = points.iter().map(|p| CPoint::from_point(Vec3::new(p[0], p[1], p[2]))).collect();
+        let pw: Vec<CPoint> = points
+            .iter()
+            .map(|p| CPoint::from_point(Vec3::new(p[0], p[1], p[2])))
+            .collect();
         let n = pw.len();
         let mut knots = vec![0.0; degree + 1];
         for i in 1..n - degree {
@@ -187,14 +197,26 @@ mod tests {
         let (out, reached) = line.extend_keeping_proportion(5.0, CurveEnd::End).unwrap();
         assert!((reached - 15.0).abs() < 1e-6, "{reached}");
         let p = cvs(&out);
-        assert!((p[0] - Vec3::ZERO).length() < 1e-12 && (p[1] - Vec3::new(15.0, 0.0, 0.0)).length() < 1e-6, "{p:?}");
+        assert!(
+            (p[0] - Vec3::ZERO).length() < 1e-12
+                && (p[1] - Vec3::new(15.0, 0.0, 0.0)).length() < 1e-6,
+            "{p:?}"
+        );
     }
 
     /// A straight cubic with CVs at x = 0, 1, 3 and 6 made 3 longer at its end: the CVs at
     /// 0, 1.5, 4.5 and 9, each at its share of the polygon as before, the knots kept.
     #[test]
     fn a_straight_cubic_keeps_each_cvs_share_of_its_polygon() {
-        let c = curve(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [3.0, 0.0, 0.0], [6.0, 0.0, 0.0]], 3);
+        let c = curve(
+            &[
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [6.0, 0.0, 0.0],
+            ],
+            3,
+        );
         let (out, reached) = c.extend_keeping_proportion(3.0, CurveEnd::End).unwrap();
         assert!((reached - 9.0).abs() < 1e-6, "{reached}");
         assert_eq!(out.knots(), c.knots());
@@ -208,8 +230,18 @@ mod tests {
     /// length 3 more.
     #[test]
     fn a_curved_cubic_grows_by_the_length_asked() {
-        let c = curve(&[[0.0, 0.0, 0.0], [2.0, 3.0, 0.0], [6.0, 3.0, 0.0], [9.0, 0.0, 0.0]], 3);
-        let before = c.arc_length(0.0, 1.0, 1e-9, ToleranceKind::Relative).unwrap();
+        let c = curve(
+            &[
+                [0.0, 0.0, 0.0],
+                [2.0, 3.0, 0.0],
+                [6.0, 3.0, 0.0],
+                [9.0, 0.0, 0.0],
+            ],
+            3,
+        );
+        let before = c
+            .arc_length(0.0, 1.0, 1e-9, ToleranceKind::Relative)
+            .unwrap();
         let (out, reached) = c.extend_keeping_proportion(3.0, CurveEnd::End).unwrap();
         assert!((reached - before - 3.0).abs() < 1e-6, "{before} {reached}");
         assert_eq!(out.knots(), c.knots());
@@ -221,7 +253,15 @@ mod tests {
     /// Grown at its start, the end stays.
     #[test]
     fn grown_at_its_start_the_end_stays() {
-        let c = curve(&[[0.0, 0.0, 0.0], [2.0, 3.0, 0.0], [6.0, 3.0, 0.0], [9.0, 0.0, 0.0]], 3);
+        let c = curve(
+            &[
+                [0.0, 0.0, 0.0],
+                [2.0, 3.0, 0.0],
+                [6.0, 3.0, 0.0],
+                [9.0, 0.0, 0.0],
+            ],
+            3,
+        );
         let (out, _) = c.extend_keeping_proportion(2.0, CurveEnd::Start).unwrap();
         let (old, new) = (cvs(&c), cvs(&out));
         assert!((old[3] - new[3]).length() < 1e-12, "the end stays");
@@ -232,7 +272,9 @@ mod tests {
     fn bad_lengths_and_polygons_are_refused() {
         let c = curve(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]], 1);
         assert!(c.extend_keeping_proportion(0.0, CurveEnd::End).is_err());
-        assert!(c.extend_keeping_proportion(f64::NAN, CurveEnd::End).is_err());
+        assert!(c
+            .extend_keeping_proportion(f64::NAN, CurveEnd::End)
+            .is_err());
         let point = curve(&[[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], 1);
         assert!(point.extend_keeping_proportion(1.0, CurveEnd::End).is_err());
     }

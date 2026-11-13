@@ -358,12 +358,22 @@ pub fn circle(centre: [f64; 3], normal: [f64; 3], x_dir: [f64; 3], radius: f64) 
 /// [`Error::Argument`] for a number not finite or past the coordinate bound, a `normal` of no
 /// length, or a start or end on the axis; [`Error::Record`] for an arc the record cannot hold;
 /// the kernel's status otherwise.
-pub fn arc_about(centre: [f64; 3], normal: [f64; 3], start: [f64; 3], end: [f64; 3]) -> Result<Curve> {
+pub fn arc_about(
+    centre: [f64; 3],
+    normal: [f64; 3],
+    start: [f64; 3],
+    end: [f64; 3],
+) -> Result<Curve> {
     if ![centre, normal, start, end].iter().all(|p| coord_ok(p)) {
         return Err(Error::Argument);
     }
     let made = run("curve::arc_about", |k| {
-        let definition = match ArcDefinition::from_points(point(centre), point(normal), point(start), point(end)) {
+        let definition = match ArcDefinition::from_points(
+            point(centre),
+            point(normal),
+            point(start),
+            point(end),
+        ) {
             Ok(d) => d,
             Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
             Err(e) => return Err(e),

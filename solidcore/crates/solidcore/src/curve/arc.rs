@@ -162,7 +162,12 @@ impl ArcDefinition {
     ///
     /// `InvalidInput` for a number not finite, an axis of no length, or a start or an end within
     /// [`MIN_ARC`] of the axis.
-    pub fn from_points(centre: Point3, axis: Vec3, start: Point3, end: Point3) -> Result<ArcDefinition> {
+    pub fn from_points(
+        centre: Point3,
+        axis: Vec3,
+        start: Point3,
+        end: Point3,
+    ) -> Result<ArcDefinition> {
         const OP: &str = "curve::arc::ArcDefinition::from_points";
         let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
         if ![centre, axis, start, end].into_iter().all(finite) {
@@ -184,7 +189,14 @@ impl ArcDefinition {
         if !(towards.length() > MIN_ARC) {
             return Err(SolidError::invalid_input(OP, "the end is on the axis"));
         }
-        let mut arc = ArcDefinition { centre, axis: n, reference, radius, start: 0.0, end: TAU };
+        let mut arc = ArcDefinition {
+            centre,
+            axis: n,
+            reference,
+            radius,
+            start: 0.0,
+            end: TAU,
+        };
         let angle = arc.angle_of(centre + towards)?;
         if angle > MIN_ARC {
             arc.end = angle;
@@ -510,19 +522,53 @@ mod tests {
         let c = Point3::new(1.0, 2.0, 3.0);
         let up = Vec3::new(0.0, 0.0, 5.0);
         // From +X (radius 4) to the +Y direction (at any distance and height): a quarter turn.
-        let quarter = ArcDefinition::from_points(c, up, c + Vec3::new(4.0, 0.0, 1.0), c + Vec3::new(0.0, 9.0, -2.0)).unwrap();
-        assert!((quarter.radius - 4.0).abs() < 1e-12 && (quarter.sweep() - 0.5 * PI).abs() < 1e-12, "{quarter:?}");
+        let quarter = ArcDefinition::from_points(
+            c,
+            up,
+            c + Vec3::new(4.0, 0.0, 1.0),
+            c + Vec3::new(0.0, 9.0, -2.0),
+        )
+        .unwrap();
+        assert!(
+            (quarter.radius - 4.0).abs() < 1e-12 && (quarter.sweep() - 0.5 * PI).abs() < 1e-12,
+            "{quarter:?}"
+        );
         let ends = Ellipse::arc(&k, &quarter).unwrap().base().ends().unwrap();
-        assert!(near(ends.start, c + Vec3::new(4.0, 0.0, 0.0)) && near(ends.end, c + Vec3::new(0.0, 4.0, 0.0)), "{ends:?}");
+        assert!(
+            near(ends.start, c + Vec3::new(4.0, 0.0, 0.0))
+                && near(ends.end, c + Vec3::new(0.0, 4.0, 0.0)),
+            "{ends:?}"
+        );
         // About -Z the same points are three quarters round.
-        let three = ArcDefinition::from_points(c, up * -1.0, c + Vec3::new(4.0, 0.0, 0.0), c + Vec3::new(0.0, 1.0, 0.0)).unwrap();
+        let three = ArcDefinition::from_points(
+            c,
+            up * -1.0,
+            c + Vec3::new(4.0, 0.0, 0.0),
+            c + Vec3::new(0.0, 1.0, 0.0),
+        )
+        .unwrap();
         assert!((three.sweep() - 1.5 * PI).abs() < 1e-12, "{three:?}");
         // The end in the start's direction: a full turn.
-        let full = ArcDefinition::from_points(c, up, c + Vec3::new(4.0, 0.0, 0.0), c + Vec3::new(2.0, 0.0, 0.0)).unwrap();
+        let full = ArcDefinition::from_points(
+            c,
+            up,
+            c + Vec3::new(4.0, 0.0, 0.0),
+            c + Vec3::new(2.0, 0.0, 0.0),
+        )
+        .unwrap();
         assert!((full.sweep() - TAU).abs() < 1e-12, "{full:?}");
-        assert!(ArcDefinition::from_points(c, up, c + Vec3::new(0.0, 0.0, 3.0), c + Vec3::new(1.0, 0.0, 0.0)).is_err());
+        assert!(ArcDefinition::from_points(
+            c,
+            up,
+            c + Vec3::new(0.0, 0.0, 3.0),
+            c + Vec3::new(1.0, 0.0, 0.0)
+        )
+        .is_err());
         assert!(ArcDefinition::from_points(c, up, c + Vec3::new(1.0, 0.0, 0.0), c).is_err());
-        assert!(ArcDefinition::from_points(c, Vec3::new(0.0, 0.0, 0.0), c + Vec3::X, c + Vec3::Y).is_err());
+        assert!(
+            ArcDefinition::from_points(c, Vec3::new(0.0, 0.0, 0.0), c + Vec3::X, c + Vec3::Y)
+                .is_err()
+        );
     }
 
     #[test]
