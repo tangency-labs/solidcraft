@@ -32,6 +32,7 @@ on:
       - "crates/smlib/**"
       - "crates/io/src/**"
       - "crates/doc/src/**"
+      - "crates/develop/src/**"
       - "crates/engine/src/**"
       - "tests/kernel-cases/**"
       # The vendored kernel: a change here runs every area (tests/kernel-cases/PATHS-ALL).
@@ -52,6 +53,7 @@ on:
       - "crates/smlib/**"
       - "crates/io/src/**"
       - "crates/doc/src/**"
+      - "crates/develop/src/**"
       - "crates/engine/src/**"
       - "tests/kernel-cases/**"
       # The vendored kernel: a change here runs every area (tests/kernel-cases/PATHS-ALL).

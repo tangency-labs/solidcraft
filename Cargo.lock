@@ -4891,6 +4891,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-develop"
+version = "0.40.1"
+dependencies = [
+ "serde",
+ "solidcore-ops",
+ "solidcore-record",
+ "solidcraft-geom",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft-doc"
 version = "0.41.0"
 dependencies = [
@@ -4902,6 +4913,7 @@ dependencies = [
  "solidcore-tess",
  "solidcraft-color",
  "solidcraft-derive",
+ "solidcraft-develop",
  "solidcraft-format",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4940,6 +4952,7 @@ dependencies = [
  "solidcore-record",
  "solidcraft-color",
  "solidcraft-control",
+ "solidcraft-develop",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",

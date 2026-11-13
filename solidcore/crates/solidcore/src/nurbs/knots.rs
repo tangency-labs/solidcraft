@@ -26,6 +26,7 @@
 //! | [`clamped_uniform`]                    | none (not upstream)               |
 //! | [`periodic_uniform`]                   | none (not upstream)               |
 //! | [`is_periodic`]                        | none (not upstream)               |
+//! | [`joints`]                             | none (not upstream)               |
 //!
 //! Deviations:
 //! - Out-params become return values ([`Basis`], tuples, `Vec`s sized by the callee).
@@ -926,6 +927,25 @@ pub fn is_periodic(knots: &[f64], degree: usize) -> bool {
     })
 }
 
+/// The joints of a B-spline of `degree` on `knots` strictly inside `(t0, t1)`: each distinct
+/// knot there that `knots` holds at least `degree` times, in order. A B-spline is `degree − m`
+/// times continuously differentiable at a knot of multiplicity `m` (Piegl and Tiller, *The NURBS
+/// Book*, 2nd ed., §2.2, P2.5), so at a joint it is at most continuous: where the pieces of a
+/// chain meet, and where it can turn a corner. Equal knots count together where they are next
+/// to each other, as a knot vector, which never decreases, holds them.
+///
+/// Not upstream.
+#[must_use]
+pub fn joints(knots: &[f64], degree: usize, [t0, t1]: [f64; 2]) -> Vec<f64> {
+    knots
+        .chunk_by(|a, b| a == b)
+        .filter_map(|run| match *run {
+            [k, ..] if k > t0 && k < t1 && run.len() >= degree => Some(k),
+            _ => None,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -993,6 +1013,41 @@ mod tests {
                 .validate(degree)
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn joints_are_the_inner_knots_held_as_many_times_as_the_degree() {
+        // Degree 2 on [0, 0, 0, 1, 1, 2, 2, 2]: 1 is held twice, the degree, so the curve is
+        // 2 − 2 = 0 times differentiable there, a joint; the ends 0 and 2 are not inside.
+        let twice = [0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0];
+        assert_eq!(joints(&twice, 2, [0.0, 2.0]), vec![1.0]);
+        // A cubic with 1 held twice and 2 three times: 2 is a joint, and 1 is not (the curve is
+        // 3 − 2 = 1 times differentiable there).
+        let cubic = [
+            0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0,
+        ];
+        assert_eq!(joints(&cubic, 3, [0.0, 3.0]), vec![2.0]);
+        // A knot held past the degree (3 times at degree 2: a break) is a joint too.
+        let broken = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0];
+        assert_eq!(joints(&broken, 2, [0.0, 2.0]), vec![1.0]);
+        // A chain of three degree-7 pieces, its inner knots 1 and 2 held 7 times each: both are
+        // joints, and only those strictly inside the interval count (on [1, 3] the one at 1 is
+        // its start; on [0.5, 1.5] only 1 is inside).
+        let mut chain = vec![0.0; 8];
+        chain.extend([1.0; 7]);
+        chain.extend([2.0; 7]);
+        chain.extend([3.0; 8]);
+        assert_eq!(joints(&chain, 7, [0.0, 3.0]), vec![1.0, 2.0]);
+        assert_eq!(joints(&chain, 7, [1.0, 3.0]), vec![2.0]);
+        assert_eq!(joints(&chain, 7, [0.5, 1.5]), vec![1.0]);
+        // Degree 1, a polyline: every inner knot is a joint.
+        let polyline = [0.0, 0.0, 1.0, 2.0, 3.0, 3.0];
+        assert_eq!(joints(&polyline, 1, [0.0, 3.0]), vec![1.0, 2.0]);
+        // No inner knot, or inner knots that are not numbers: none.
+        let ends = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        assert!(joints(&ends, 2, [0.0, 1.0]).is_empty());
+        let nan = [0.0, 0.0, f64::NAN, f64::NAN, 1.0, 1.0];
+        assert!(joints(&nan, 1, [0.0, 1.0]).is_empty());
     }
     use super::*;
     use crate::kernel::UpstreamFixes;

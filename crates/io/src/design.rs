@@ -1604,7 +1604,7 @@ mod tests {
             .map(|i| {
                 let bodies = if i == 0 { json!([[0, 16]]) } else { json!([[0, 8], [8 * (i + 1), 8]]) };
                 json!({
-                    "bodies": bodies, "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
+                    "bodies": bodies, "sketches": [], "body_counter": 7, "construct": [], "threads": [],
                     "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
                 })
             })
@@ -1617,7 +1617,7 @@ mod tests {
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
-                "sheets": [], "threads": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "threads": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
             }),
             bodies,
         }
@@ -1668,7 +1668,7 @@ mod tests {
             assert_eq!(
                 one.records["states"],
                 json!([{
-                    "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
+                    "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "construct": [], "threads": [],
                     "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
                 }])
             );
@@ -1829,14 +1829,17 @@ mod tests {
             assert!(read_design_preview(&bytes).is_none());
             assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         }
-        // A cache of the format before sketch-key sets (/4) or before the tap markings were
-        // written once (/8) is a miss, and so are records of those shapes (each state's keys or
-        // markings inline) under the current format: never misread.
+        // A cache of the format before sketch-key sets (/4), before the tap markings were written
+        // once (/8) or before the sheets made from surfaces were (/9) is a miss, and so are records
+        // of those shapes (each state's keys or markings inline) under the current format: never
+        // misread.
         let manifest: Value = serde_json::from_slice(&original["cache/model.json"]).unwrap();
         let mut older = manifest.clone();
         older["format"] = json!("solidcraft-model-cache/4");
         let mut before_markings = manifest.clone();
         before_markings["format"] = json!("solidcraft-model-cache/8");
+        let mut before_surface_sheets = manifest.clone();
+        before_surface_sheets["format"] = json!("solidcraft-model-cache/9");
         let mut markings_inline = manifest.clone();
         markings_inline["model"].as_object_mut().unwrap().remove("threads");
         let mut inline = manifest.clone();
@@ -1845,7 +1848,7 @@ mod tests {
         let state = model["states"][0].as_object_mut().unwrap();
         state.remove("sketch_key_set");
         state.insert("sketch_keys".into(), json!([]));
-        for manifest in [older, before_markings, markings_inline, inline] {
+        for manifest in [older, before_markings, before_surface_sheets, markings_inline, inline] {
             let mut entries = original.clone();
             entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
             let bytes = package(&entries);

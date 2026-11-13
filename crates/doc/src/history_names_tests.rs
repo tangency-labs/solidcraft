@@ -79,6 +79,28 @@ fn pieces_nothing_tells_apart_are_numbered_and_unverified() {
     assert!(!names.verified(0) && !names.verified(1));
 }
 
+/// #7990, change 4: pieces nothing around them tells apart, whose feature says where each
+/// starts along its definition (a hole's wall's halves along its sketch circle), are numbered in
+/// that order, whatever order the faces come in, and the names are exact. Where two would share a
+/// place the order says nothing, and they are numbered as before.
+#[test]
+fn pieces_are_numbered_along_their_definition_where_the_feature_says() {
+    let ranked = |order: [usize; 2]| {
+        let mut faces = named(&["F3:side:c1", "F3:side:c1", "F1:top"]);
+        for (face, place) in faces.iter_mut().zip(order) {
+            face.ordinal = Some(place);
+        }
+        qualify(faces, &[(0, 2), (1, 2)])
+    };
+    let names = ranked([2, 1]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#2", "F3:side:c1#1"));
+    assert!(names.verified(0) && names.verified(1));
+    let names = ranked([1, 2]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#1", "F3:side:c1#2"));
+    let names = ranked([1, 1]);
+    assert!(!names.verified(0) && !names.verified(1));
+}
+
 /// #5860: a piece of a split face that is split again must not stack another qualifier on
 /// its name: the name grew with every split (728 characters after eleven splits).
 #[test]

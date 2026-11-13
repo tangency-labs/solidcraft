@@ -5,12 +5,33 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 (thickness, bend radius, K-factor), set in **Sheet Metal Rules** (`sheet.manage_rules`).
 
 - [**Flange**](../reference/commands.md#command-sheet.flange): a base flange from a sketch profile, a contour flange from an open
-  sketch, or an edge flange from a part edge.
+  sketch of lines and circular arcs, or an edge flange from a part edge. A contour flange along an ellipse, a conic or a
+  spline is not supported yet ([#15743](https://github.com/tangency-labs/solidcraft/issues/15743)): the free-form panel it
+  would make has no closed-form flat, so the flange is refused, naming the curve.
 - [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
 - **Fold** (`sheet.fold`) bends the sheet along a sketch line.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
-- **Convert** (`sheet.convert`) turns a plate of constant thickness into sheet metal, or, with
-  bend edges, a solid or a shelled body.
+- **Convert** (`sheet.convert`) turns surfaces into sheet metal: the faces of a solid or of a
+  surface body. Every face becomes a panel, however thin the body (a thin plate's six faces are
+  six panels, parted by rips), with no face fixed; sharp edges are cut open but the ones picked
+  as bends. The sheet is the rule's, as your tooling makes it: the rule's thickness, its bends at
+  the rule's radius and its corners with the rule's reliefs, whatever a vendor's file has. A
+  cylinder modeled between two flat faces is a bend, at the rule's radius, while its inside
+  radius is short of 10^0.7 (about 5) of the rule's thicknesses, and a roll from there; other
+  cylinders and cones are rolls. A roll keeps its own radius. The line between the two is where
+  DIN 6935's correction of the neutral fiber, 0.65 + 0.5·lg(R/T), reaches 1; bends and rolls
+  alike are developed with the rule's K-factor. A roll's flat pattern has its lines where it
+  starts and ends and halfway between, and the DXF draws them on a `ROLL` layer. The sheet is
+  every face of the body but the ones skipped (`skip`), or the faces picked (`face`, `faces`) and
+  every face a bend joins to them. A surface body has no thickness of its own: its faces are the
+  sheet's surface, with the rule's thickness on the side `direction` says. Panels whose material
+  would overlap (a thin block's two sides, each the rule's thickness in) are refused, naming them.
+  A free-form (B-spline) face is not supported yet
+  ([#15743](https://github.com/tangency-labs/solidcraft/issues/15743)): its flat has no closed
+  form, so it is refused, naming where it is. Skip it to leave it out.
+- **Recognize Sheet Metal** (`sheet.recognize`) takes a body that is sheet metal already (a
+  shelled part, a plate, a part from another system, of one even thickness) as one sheet, read
+  from one of its sides (see **Recognize Sheet Metal** below).
 - **Create Flat Pattern** (`sheet.flat_pattern`) shows the flat part with its bend lines and a
   bend table, and exports it as DXF or a bend-table CSV through the save picker.
 
@@ -315,53 +336,75 @@ open with a warning. Side-edge setbacks on curved panels or on only part of an e
 a cut-out are not supported yet. The edge connecting a panel to its existing bend is not a
 free edge. See `examples/regressions/sheet-side-flange-corner.json` for a small reproduction.
 
-**Convert** also takes a solid or a shelled body: pick the face that stays fixed and the sharp
-edges that become bends (`bends`; Bend Edges in the dialog). The flat faces reached from the
-fixed face across those edges become the sheet. A shelled body keeps its walls and their
-thickness; any other solid's faces become the outside of the sheet, with the rule's thickness
-taken into the body. Each sharp edge stays where the faces of its bend would meet, so the part
-keeps its envelope and the flat pattern is the outside lengths less a bend deduction per bend,
-2·(R + T)·tan(θ/2) − θ·(R + K·T). A bend can be picked on either skin of a shell; bends turn
-either way, follow one another and take any angle (the walls of a tapered tray at 72°). An
-edge between two faces of the sheet that is no bend is cut open, each side half the rule's
-**gap** from the plane halfway between the two, like the corners of a tray. A bend drawn as a
-chamfer (a flat strip between two faces, the chord of the bend's arc, as models without bend
-radii draw one) is picked in the middle of the strip: the two faces then meet at their virtual
-sharp in one bend of the rule's radius, and the strip is no face of the sheet. A bend modelled
-with its radius (a cylinder between two flat faces tangent to it, as sheet metal parts from
-other systems come, or a filleted edge) is picked anywhere on its cylinder, on either skin, and
-converts the same way: the sheet is bent there with the rule's radius and K-factor, not the
-modelled radius, so the flat pattern is the one the rule makes. The result is an
+**Picked faces** (Convert's `face` and `faces`; Faces in the dialog): pick a face of the sheet
+and the sharp edges that become bends (`bends`; Bend Edges in the dialog). The faces reached
+from the picked faces across those edges become the sheet. They are surfaces, whatever the body
+is: a solid's faces become the outside of the sheet, with the rule's thickness taken into the
+body, and a shelled body's walls are no different (Convert reads no other side of a face;
+Recognize, below, does). Each sharp edge stays where the faces of its bend would meet, so the
+part keeps its envelope and the flat pattern is the outside lengths less a bend deduction per
+bend, 2·(R + T)·tan(θ/2) − θ·(R + K·T). Bends turn either way, follow one another and take any
+angle (the walls of a tapered tray at 72°). An edge between two faces of the sheet that is no
+bend is cut open, each side half the rule's **gap** from the plane halfway between the two, like
+the corners of a tray. A bend drawn as a chamfer (a flat strip between two faces, the chord of
+the bend's arc, as models without bend radii draw one) is a face of the sheet like any other:
+its two edges are the bends to pick, and a pick in the middle of the strip is refused. A bend
+modeled with its radius (a cylinder between two flat faces tangent to it, as sheet metal parts
+from other systems come, or a filleted edge) is picked anywhere on its cylinder, and converts the
+same way while its inside radius is short of about five thicknesses (see Convert above): the
+sheet is bent there with the rule's radius and K-factor, not the modeled radius, so the flat
+pattern is the one your tooling makes; from five thicknesses on it is a roll. The result is an
 ordinary sheet body: edge flanges, cuts, Unfold, the flat pattern and its exports work on it,
-and it follows the solid when a parameter changes (the edges and the fixed face are found by
-their names). Without bend edges Convert expects a plate, as before. Either way round walls
-(holes, slot ends, rounded corners, notches) stay circles and arcs in the flat pattern and the
-DXF, also where a STEP file writes one in pieces, and the holes and slots of every face of the
-sheet are its cut-outs, where the bends put them. An engraving in a face of the sheet (a recess
-with a flat floor, at most half the thickness deep) becomes a pocket of it, as a plate's does
-(below), on either skin of a shell. Not converted yet: curved faces other than bends (rolled
-sheet), with bend edges a hole or an engraving that reaches into a bend or a pocket deeper than
-half the thickness (cut them after converting), and bends that close a ring.
+and it follows the solid when a parameter changes (the edges and the picked faces are found by
+their names). Without bend edges the sheet is the faces picked alone: one face is a plate.
+Either way round walls (holes, slot ends, rounded corners, notches) stay circles and arcs in the
+flat pattern and the DXF, and the holes and slots of every face of the sheet are its cut-outs,
+where the bends put them. Not converted yet: a hole that reaches into the band a bend takes from
+its panel (cut it after converting), and bends that close a ring.
 
-A plate may carry recesses in one of its faces, such as an engraved label or a counterbore: a
-recess with a flat floor and walls square to the plate, at most half the plate's thickness
-deep. Each becomes a pocket of the sheet (see the pockets below), so the converted part keeps
-it: the sheet is as thick as the plate, the flat pattern is the whole plate with the recess
-listed under `pockets` (its outline, side and depth), and the DXF draws its outline on the
-pocket layer of its depth, apart from the cut contours, for a laser to mark rather than cut.
-The face the recesses are in can be the one picked or the other. A recess deeper than half the
-thickness, recesses in both faces, and a plate whose recesses are larger than the face around
-them (a thinner plate with raised parts) are refused with the reason. A recess lies in an
-opening of the face it is cut into, so the faces of a bent part's legs are none: a bent part is
-refused as no plate, and converts with its bend edges. A bend across a pocket is refused as for
-any pocket, so fold or flange clear of an engraving.
+```json
+{"command":"solid.box","params":{"length":100,"width":60,"height":30,"body_name":"Block"}}
+{"command":"sheet.convert","params":{"body":"Block","face":[50,30,0],
+ "bends":[[50,0,0],[100,30,0],[50,60,0],[0,30,0]]}}
+```
+
+(A tray: the block's bottom and its four walls, the rule's thickness in from their outside; the
+block's top is no face of the sheet.)
+
+**Recognize Sheet Metal** (`sheet.recognize`) reads a body that is sheet metal already (a shelled
+part, a plate, a part from another system) as one sheet. The side of the face picked (`face`;
+Surface Face in the dialog), else of the body's largest face, is the sheet's surface, and every
+face of that side has its other side one thickness behind it; a body whose walls are of more than
+one thickness is refused, naming them. A bend can be picked on either side, on its edge or on its
+modeled cylinder, and the sharp edges that are not picked are cut open. A modeled cylinder is a
+bend or a roll as in Convert, its inside radius measured in the body's own thickness. Round walls
+that a STEP file writes in pieces (a hole as two half-cylinders) are one circle each. The sheet
+is still the rule's: the rule's thickness, taken into the material from the surface side, and
+the rule's bend radius, whatever the body's, and the feature's warning says where they differ.
+To keep the body's own sizes, `new_rule` (New Rule in the dialog) first makes a rule of the
+body's thickness and of the inside radius most of its modeled bends have, its K-factor, reliefs
+and gaps the active rule's, and the sheet takes it; `sheet.measure_body` reads those values
+without changing the design.
 
 ```json
 {"command":"solid.box","params":{"length":100,"width":60,"height":30,"body_name":"Tray"}}
 {"command":"solid.shell","params":{"faces":[[50,30,30]],"thickness":2}}
-{"command":"sheet.convert","params":{"body":"Tray","face":[50,30,0],
- "bends":[[50,0,0],[100,30,0],[50,60,0],[0,30,0]]}}
+{"command":"sheet.recognize","params":{"body":"Tray","face":[50,30,0],
+ "bends":[[50,0,0],[100,30,0],[50,60,0],[0,30,0]],"new_rule":"Tray 2 mm"}}
 ```
+
+Recesses with a flat floor and walls square to the face, such as an engraved label or a
+counterbore, are kept as pockets of the sheet: the flat pattern lists each under `pockets` (its
+outline, side and depth), and the DXF draws its outline on the pocket layer of its depth, apart
+from the cut contours, for a laser to mark rather than cut. Recognize keeps a shell's or a
+plate's own, at any depth short of the thickness and from either face; a plate raised in places
+(a boss) is no plate of even thickness and is refused. Convert keeps a recess only where its
+walls and floor are picked to engrave (`engrave`; Engrave Faces in the dialog): it is then a
+pocket of the panel round it, as deep as its floor lies behind that panel's face, and one deeper
+than the sheet is thick is refused. A recess not picked may be a pocket the design means: its
+faces are panels, or, where only the face it is cut into is picked, its opening is a hole of
+that panel. A bend across a pocket is refused as for any pocket, so fold or flange clear of an
+engraving.
 
 The `face` can also be the name `model.faces` lists for it (`"face":"F1:+z"`), which saves
 computing a point on a face with holes or a curved outline: `model.faces` gives every face a
@@ -464,10 +507,10 @@ exactly (`cutout_shapes`): a round hole as `{"circle": {"center", "radius"}}`, a
 
 Cuts can leave separate material pieces, including the centre of a ring cut. These pieces
 remain one logical sheet group through Unfold / Refold and export as separate flat outlines.
-A cut that parts a piece from the base (a flange cut off along its bend, the part of a ring's
-inside on a flange's edge) keeps it too, folded or flat, and its warning says how many pieces
-are no longer joined to the base, their area and where they lie in the flat pattern. Islands
-inside other material (a ring's centre, a letter's counter) are not counted.
+A piece a cut parts from its panel that holds none of the panel's joints (a flange cut off along
+its bend, the part of a ring's inside on a flange's edge, a letter's counter) stays where it was,
+folded or flat, and in the DXF. A cut that leaves the sheet in several pieces gives no warning:
+every piece is as much the sheet as any other.
 Large profiles that exceed the geometry processing budget report an error instead of
 exporting a partial outline.
 
@@ -475,10 +518,10 @@ A Box cut, or a Cylinder cut whose axis is the sheet's normal, machines the shee
 extrude of its footprint: through the sheet it is a cut-out (a cylinder a round one), and
 part way it is a pocket. A primitive cut at any other angle, or across a folded bend, is refused.
 
-Hole machines the sheet the same way from a flat face of any panel, the base or a flange, on
-either side, folded or unfolded: square to that panel, a through hole (plain or tapped) is a
-round cut-out of the flat pattern and a `CIRCLE` in the DXF, and a counterbore or a blind
-flat-bottomed hole is a round pocket. A hole slanted to its panel or drilled into the edge of
+Hole machines the sheet the same way from a flat face of any panel, on either side, folded or
+unfolded: square to that panel, a through hole (plain or tapped) is a round cut-out of the flat
+pattern and a `CIRCLE` in the DXF, and a counterbore or a blind flat-bottomed hole is a round
+pocket. A hole slanted to its panel or drilled into the edge of
 the sheet, a countersink and a drill point are refused.
 
 Parallel, untapered extrude cuts also preserve shallow pockets through Unfold / Refold.
@@ -513,23 +556,42 @@ a part that does not match the body. A later sheet metal feature rebuilds the bo
 features and says that the change is not kept. Moving the body, splitting its faces and cosmetic
 threads leave the flat pattern as it is.
 
-A sketch can be drawn on a flat face of the sheet: the base or a flange, on either side. Pick
-the face (or give `sketch.create` the point `plane: {face: [x, y, z]}`) and the sketch attaches
-to that panel instead of to a certified source face. It keeps the face's name,
-`sheet:<body>:<panel>:<top|bottom>` (the panel is `base` or the flange's feature tag), and finds
-the face again whenever the sheet is rebuilt: after a parameter change such as the thickness or
-a flange angle, through Unfold / Refold, after the file is reopened and when the body is
-renamed. Sketch coordinates are the flat pattern's, so a point drawn on a flange lies where the
-flat pattern and its DXF have it, and on the bottom face y runs the other way, as seen from
-below. When the face is gone (its flange is suppressed or deleted) the sketch reports a lost
-attachment instead of moving to another face; **Redefine Sketch Plane** attaches it to another
-face. `fixed: true` still freezes the picked plane in space.
+A sketch can be drawn on a flat face of the sheet: a face of any panel, on either side. Pick the
+face (or give `sketch.create` the point `plane: {face: [x, y, z]}`) and the sketch attaches to it
+by the face's name, as on any other body (`"attachment": "exact_face"`), and finds the face again
+whenever the sheet is rebuilt: after a parameter change such as the thickness or a flange angle,
+through Unfold / Refold, after the file is reopened and when the body is renamed. Sketch
+coordinates are the flat pattern's, so a point drawn on a flange lies where the flat pattern and
+its DXF have it, and on the bottom face y runs the other way, as seen from below. When the face
+is gone (its flange is suppressed or deleted) the sketch reports a lost attachment instead of
+moving to another face; **Redefine Sketch Plane** attaches it to another face. `fixed: true`
+still freezes the picked plane in space.
 
-Every face of a folded sheet has a name of that kind, which `model.faces` lists as `sheet_face`:
-`<panel>:top` and `<panel>:bottom`, `<panel>:rim.<edge>` for a rim (a base sketch line's id, or a
-flange's `far`, `side0`, `side1`; `rim.bend0`/`rim.bend1` for a bend's flat ends and
-`rim.ext0`/`rim.ext1` where a flange runs on past its bend toward a neighbour), and
-`<flange>:bend.inner` / `<flange>:bend.outer` for a bend's curved faces. A command that takes a
-face name takes it too (`sheet:Body1:F3.1:top`), and finds the face from the sheet itself, so the
-name stays with that face while the sheet's sizes change and other flanges come and go. Faces the
-sheet does not describe (a hole's wall) have none.
+A sheet has no face names of its own: it reports what each face of its body was made for, and
+the model names the face from that, as it names every feature's faces. `model.faces` lists the
+name, and a command that takes a face name takes it. A face is `F<feature>:<role>`, the feature
+whose build made it, and where it was made on a face of the sheet as it was, that face's name
+after it:
+
+- a panel's faces are `top` (on the sheet's surface) and `bottom`: a base flange's are `F3:top`
+  and `F3:bottom`, an edge flange's are named after the rim it stands on, `F5:top:F3:side:l2`
+  (feature 5's flange on the base flange's rim along its sketch line `l2`), and a contour
+  flange's after the sketch line its panel was drawn along (`F4:top:l1`);
+- a rim is `side:<line>` on a panel a sketch made (`F3:side:l2`), and on a panel a bend made
+  `far` (its far edge), `end0` and `end1` (across the bend's ends) or `past0` and `past1` (an
+  edge's stretch past the bend's end, where a corner runs the panel on): `F5:far:F3:side:l2`;
+- a bend's faces are named after the panel it makes: `F5:bend.inner:F3:side:l2` and
+  `bend.outer`, its ends `bend.end0` and `bend.end1`, and a tab's faces `tab.top` and
+  `tab.bottom`; a fold's bend after the face its line lies on (`F7:bend.inner:F3:top`);
+- a hole's wall is the cut's, after its sketch curve (`F9:side:c1`), and where the wall is in
+  pieces they are numbered `#1`, `#2` in the order they start along the curve.
+
+A face a later feature adds to a panel is that feature's, named after the face it was made from:
+where feature 6's flange meets feature 5's at a corner, the stretch of feature 5's flange edge
+past its bend's end, which feature 6's build made, is `F6:past0:F5:bend.end0:F3:side:l1`. Pieces
+of a face that a cut parts are told apart by the faces around them (`F3:top#[…]`). The names
+never count panels or picks: reordering a feature's picked edges renames nothing, and a name
+stays with its face while the sheet's sizes change and other flanges come and go. A face nothing
+reports a part for is named from its geometry, as a body without history is. A
+`sheet:<body>:<panel>:<side>` name that designs saved before used finds no face: a sketch
+attached by one reports a lost attachment, and Redefine Sketch Plane attaches it again.

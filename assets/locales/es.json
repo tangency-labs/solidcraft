@@ -1892,7 +1892,7 @@
   "help.plastic.rest": "Añade un apoyo en una cara: un taco redondo o rectangular, macizo o hueco, con desmoldeo. Úsalo como soporte o separador en una carcasa moldeada.",
   "help.plastic.snap_fit": "Añade un gancho de encaje a presión en una cara, con su longitud, espesor y retención. Úsalo para unir piezas sin tornillos.",
   "help.pointcloud.insert": "Inserta un escaneo PLY, XYZ o PTS como nube de puntos junto al modelo. Úsala como",
-  "help.sheet.convert": "Convierte una placa o un cuerpo vaciado de espesor uniforme en un cuerpo de chapa metálica, con pliegues en las aristas que elijas. Úsalo para hacer desplegable una pieza existente.",
+  "help.sheet.convert": "Convierte superficies en chapa según la regla: las caras de un sólido o de un cuerpo de superficie, con pliegues en las aristas que elija. Úselo para hacer una pieza de chapa a partir de una forma modelada.",
   "help.sheet.export_bend_table": "Guarda la tabla de plegado de un cuerpo de chapa metálica como CSV o JSON: ángulos, radios y posiciones de los pliegues en el desarrollo. Úsalo para la plegadora o el taller.",
   "help.sheet.export_dxf": "Guarda el desarrollo plano como DXF, con contornos, líneas de plegado y notas de plegado opcionales. Úsalo para corte por láser, plasma o chorro de agua.",
   "help.sheet.flange": "Añade una pestaña: una placa base a partir de un boceto, una pared a lo largo de un contorno abierto de boceto, o una pared plegada en aristas de chapa. Úsalo para construir piezas de chapa metálica.",

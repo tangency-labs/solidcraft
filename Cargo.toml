@@ -20,6 +20,7 @@ craft-plugin = { path = "crates/craft-plugin" }
 craft-plugin-wasm = { path = "crates/craft-plugin-wasm" }
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-profile = { path = "crates/profile" }
+solidcraft-develop = { path = "crates/develop" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
 solidcraft-smlib = { path = "crates/smlib" }

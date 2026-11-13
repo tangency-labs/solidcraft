@@ -105,8 +105,16 @@ fn point(e: &Entity, code: i32) -> Vec2 {
 
 /// All loops of the flat pattern (outlines, cut-outs, islands).
 fn loops(s: &Session) -> Vec<solidcore_record::Loop2> {
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     regions.iter().flat_map(|r| std::iter::once(r.outer.clone()).chain(r.holes.clone())).collect()
+}
+
+/// The cuts a sheet's flat makes along split edges' junctions (`SurfaceSheet::slits`), as the flat
+/// shows them: each as a loop out along the cut and back, as the flat model spliced them into its
+/// outline.
+fn junction_cuts(s: &Session) -> Vec<solidcore_record::Region2> {
+    let slits = s.model.state().surface_sheets.first().map(|sk| sk.shown().slits).unwrap_or_default();
+    slits.iter().map(|&[a, b]| solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&[a, b]), holes: Vec::new() }).collect()
 }
 
 /// The profiles of the DXF read into a new sketch: their areas, largest first.
@@ -162,7 +170,7 @@ fn a_spline_cut_out_is_the_splines_it_was() {
     }
     // The same plate comes back.
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default()[0].area();
+    let plate = s.model.state().surface_sheets[0].shown().regions[0].area();
     assert!((areas[0] - plate).abs() < 1e-6, "{areas:?} {plate}");
 }
 
@@ -196,7 +204,7 @@ fn a_g4_blend_cut_out_is_one_spline_of_degree_nine_and_closes() {
 
     // The cut-out closes, so the same plate and the same cut-out come back.
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default()[0].area();
+    let plate = s.model.state().surface_sheets[0].shown().regions[0].area();
     assert!(areas.len() == 2 && (areas[0] - plate).abs() < 1e-6 && (areas[1] - (6000.0 - plate)).abs() < 1e-6, "{areas:?} {plate}");
 }
 
@@ -221,7 +229,7 @@ fn text_is_splines_and_lines_not_chords() {
     // The plate with the letters cut out comes back from the file with its area (the largest region; the islands inside the
     // letters come in no fixed order).
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).fold(0.0, f64::max);
+    let plate = s.model.state().surface_sheets[0].shown().regions.iter().map(|r| r.area()).fold(0.0, f64::max);
     assert!((areas[0] - plate).abs() < 1e-3, "{areas:?} {plate}");
 }
 
@@ -344,7 +352,7 @@ fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
     let es = entities(dxf);
     let on = |layer: &str| es.iter().filter(|e| layer_of(e) == layer).collect::<Vec<_>>();
     // OUTLINE: the tray's outer contour alone, one entity for each of its segments (lines and arcs).
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     let plate =
         regions.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| r.outer.clone()).unwrap_or(solidcore_record::Loop2 { segs: Vec::new() });
     assert_eq!(on("OUTLINE").len(), solidcraft_io::loop_shapes(&plate).len());
@@ -704,7 +712,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
         assert!(errors.is_empty(), "unfold: {errors:?}");
     };
     // The flat pattern: the outline runs out along the junction and back.
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)),
         "the blank is cut at the junction: {:?}",
@@ -722,7 +730,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
     let mut differ = plate_in(sheet_of_2mm(), &[]);
     run(&mut differ, "sheet.flange", flange([false, true], ["20 mm", "15 mm"]));
     let step = Vec2::new(50.0, 3.0 - (PI + 12.0));
-    let regions = differ.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&differ);
     assert!(
         regions.iter().any(|r| cut(&r.outer, from, step) && cut(&r.outer, step, from)),
         "the blank is not cut at the differing-height junction: {:?}",
@@ -735,7 +743,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
     // Same-side stretches of different heights: two bends, one piece, no cut at the junction.
     let mut same = plate_in(sheet_of_2mm(), &[]);
     run(&mut same, "sheet.flange", flange([false, false], ["20 mm", "15 mm"]));
-    let regions = same.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&same);
     assert!(!regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)), "a same-side junction stays joined");
 }
 
@@ -768,7 +776,7 @@ fn a_notch_through_a_junctions_far_edge_still_parts_the_blank() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, bend, left) && cut(&r.outer, left, bend)),
         "the blank is not cut from the bend line to the notch's edge: {:?}",
@@ -821,7 +829,7 @@ fn a_round_notch_over_a_junctions_far_edge_ends_the_cut_on_the_arc() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, bend, on_arc) && cut(&r.outer, on_arc, bend)),
         "the blank is not cut from the bend line to the arc: {:?}",
@@ -894,7 +902,7 @@ fn every_surviving_bridge_of_a_junction_is_cut() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     for (a, b) in bridges {
         assert!(
             regions.iter().any(|r| cut(&r.outer, a, b) && cut(&r.outer, b, a)),
@@ -955,7 +963,7 @@ fn a_junction_cut_stops_at_its_own_tip_on_a_c_shaped_blank() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, bend, left) && cut(&r.outer, left, bend)),
         "the blank is not cut from the bend line to the notch's edge: {:?}",
@@ -1031,7 +1039,7 @@ fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, inner, nearer_far) && cut(&r.outer, nearer_far, inner)),
         "the flat loop has no cut from the inner bend line {inner:?} to the nearer far edge {nearer_far:?}          ({offset} mm apart from the farther-out bend line {farther_out:?}): {:?}",

@@ -88,7 +88,19 @@ pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
 pub mod sheet;
+mod sheet_surface;
+mod sheet_surface_convert;
+mod sheet_surface_cuts;
+mod sheet_surface_features;
+mod sheet_surface_fold;
+mod sheet_surface_perforation;
+mod sheet_surface_shadow;
 pub mod sketch_equation;
+pub use sheet_surface_convert::{
+    ConvertRule, RollEdge, RollInfo, RollLine, SheetFaces, SheetMeasure, SurfaceBendLine, SurfaceConversion, SurfaceSheet, convert_surfaces,
+    measure_sheet_body,
+};
+pub use sheet_surface_cuts::{Loose, Recess};
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
@@ -111,6 +123,7 @@ pub use expr::Expr;
 pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
 pub use params::{ParamRow, ParamUser, cycles, name_words_match};
 pub use points::{Dir, FacePick, Position, plain};
+pub use solidcraft_develop as develop;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;
 

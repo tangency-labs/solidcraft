@@ -1233,16 +1233,16 @@ impl Surface {
     pub fn procedural_blend(&self) -> Option<BlendRef<'_>> {
         match self.definition.as_deref() {
             Some(KeptDefinition::Round(round)) => {
-                return Some(BlendRef::Exact { round, net: self })
+                return Some(BlendRef::Exact { round, net: self });
             }
             Some(KeptDefinition::Corner(corner)) => {
-                return Some(BlendRef::Corner { corner, net: self })
+                return Some(BlendRef::Corner { corner, net: self });
             }
             Some(KeptDefinition::Draft(draft)) => {
-                return Some(BlendRef::Draft { draft, net: self })
+                return Some(BlendRef::Draft { draft, net: self });
             }
             Some(KeptDefinition::SectionBlend(blend)) => {
-                return Some(BlendRef::SectionBlend { blend, net: self })
+                return Some(BlendRef::SectionBlend { blend, net: self });
             }
             Some(KeptDefinition::Sweep(_)) | None => {}
         }
@@ -1535,7 +1535,7 @@ impl Surface {
                 return Err(SolidError::invalid_input(
                     "surface::copy_cache_slot_of",
                     "the trimmed surface cache is in use",
-                ))
+                ));
             }
             TrimCacheSlot::Stored(cache) => {
                 let copied = cache.map_handles(&map).and_then(|mut copy| {
@@ -4287,8 +4287,45 @@ impl Surface {
                 )?;
                 Ok(())
             }
-            SurfaceKind::BSpline(_)
-            | SurfaceKind::ProceduralBlend(_)
+            // Not upstream (#6748): a B-spline surface that is a profile swept along a
+            // vector meets a plane parallel to the profile's plane in the profile itself,
+            // moved onto the plane, as the surface of extrusion it is does (the arm above;
+            // `crate::surface::plane::p2::extrusion_parallel_to`); otherwise the general
+            // intersection.
+            SurfaceKind::BSpline(nurbs) => {
+                if let SurfaceKind::Plane(plane) = other.kind_with_nurb(k)? {
+                    if let Some(ext) =
+                        crate::surface::plane::p2::extrusion_parallel_to(k, nurbs, plane)?
+                    {
+                        let x = ext.intersect_with_plane_on(
+                            k,
+                            self,
+                            uv_domain,
+                            plane,
+                            crate::surface::plane::p2::PlaneOwner::of(other)?,
+                            other_uv_domain,
+                            approx_tol_3d,
+                        )?;
+                        if !x.needs_more_intersections {
+                            *out = SurfaceIntersection::from(x);
+                            return Ok(());
+                        }
+                    }
+                }
+                base_global_surface_intersect_into(
+                    k,
+                    self,
+                    uv_domain,
+                    other,
+                    other_uv_domain,
+                    use_surface_edges,
+                    approx_tol_3d,
+                    ang_tol_rad,
+                    context,
+                    out,
+                )
+            }
+            SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::BallPatch(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)

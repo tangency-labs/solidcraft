@@ -4,9 +4,28 @@
   "tangency-labs/solidcraft#3325",
   "tangency-labs/solidcraft#3418"
  ],
- "what": "a fillet on a sheet metal corner changes the body but not its sheet model, so the flat pattern would be a sharp rectangle: it must refuse",
- "source": "invariants",
- "method": "after Fillet R10 on a corner of a 100 x 60 sheet the body has a round, and a flat pattern written from the sheet model would be the sharp 100 x 60 rectangle, a different part from the design; the right behaviour is a clean refusal naming the feature",
- "outcome": "refused",
- "refusal": "the flat pattern of `Body1` can't include Fillet1, which changed the body after its sheet metal features"
+ "what": "a fillet R10 through the thickness of a 100 x 60 x 2 sheet's corner is an arc of the sheet's outline: the flat pattern and its DXF have the round the body has",
+ "source": "analytic",
+ "method": "T = 2. The round takes the corner's 10 x 10 square less its quarter circle, 100 - 25 pi: area 6000 - 100 + 25 pi = 5978.539816 mm2, V = 2 x that = 11957.079633 mm3. Flat 100 x 60. OUTLINE: 4 lines and 1 arc, length 2 (100 + 60) - 2 x 10 + 10 pi / 2 = 315.707963",
+ "body_count": 1,
+ "volume_mm3": 11957.07963267949,
+ "flat_pattern": {
+  "size_mm": [
+   100,
+   60
+  ],
+  "area_mm2": 5978.539816339745
+ },
+ "files": [
+  {
+   "path": "flat.dxf",
+   "dxf": {
+    "OUTLINE": {
+     "LINE": 4,
+     "ARC": 1,
+     "length_mm": 315.70796326794897
+    }
+   }
+  }
+ ]
 }

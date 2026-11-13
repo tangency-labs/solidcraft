@@ -3,8 +3,9 @@ use serde_json::{Value, json};
 
 use super::{
     BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam,
-    FlatPatternParams, FlatPatternResult, FoldParams, FoldPoints, FoldPosition, HeightFromParam, HemParams, PathFlangeParams, PerforateParams,
-    PerforationPattern, ReliefShapeParam, SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
+    FlatPatternParams, FlatPatternResult, FoldParams, FoldPoints, FoldPosition, FoldStays, HeightFromParam, HemParams, MaterialSide,
+    MeasureBodyParams, PathFlangeParams, PerforateParams, PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints,
+    ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -68,9 +69,14 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(input_schema_for::<PerforateParams>(), &keys(&["body", "diameter", "margin", "pattern", "pitch", "profiles", "sketch"]));
     assert_keys(input_schema_for::<HemParams>(), &keys(&["body", "edges", "flip", "gap", "length"]));
-    assert_keys(input_schema_for::<FoldParams>(), &keys(&["angle", "body", "curve", "fixed", "flip", "points", "position", "radius", "sketch"]));
+    assert_keys(
+        input_schema_for::<FoldParams>(),
+        &keys(&["angle", "body", "curve", "fixed", "flip", "points", "position", "radius", "sketch", "stays"]),
+    );
     assert_keys(input_schema_for::<UnfoldParams>(), &keys(&["body"]));
-    assert_keys(input_schema_for::<ConvertParams>(), &keys(&["bends", "body", "face", "rule"]));
+    assert_keys(input_schema_for::<ConvertParams>(), &keys(&["bends", "body", "direction", "engrave", "face", "faces", "rule", "skip"]));
+    assert_keys(input_schema_for::<RecognizeParams>(), &keys(&["bends", "body", "face", "new_rule", "rule", "skip"]));
+    assert_keys(input_schema_for::<MeasureBodyParams>(), &["body", "face"]);
     assert_keys(input_schema_for::<PathFlangeParams>(), &keys(&["body", "curves", "edge", "radius", "sketch"]));
     assert_keys(input_schema_for::<FlatPatternParams>(), &["body"]);
     assert_keys(input_schema_for::<BendTableParams>(), &["body", "format", "path"]);
@@ -190,7 +196,9 @@ fn the_value_types_match_the_readers() {
     );
     words(&["outer", " Inner ", "TANGENT"], &[json!("sharp"), json!(""), json!(5)], &|v| parse::<HeightFromParam>(v).is_some());
     words(&["centerline", "Start", "END", "mould", "Mold"], &[json!("center"), json!("side"), json!(null)], &|v| parse::<FoldPosition>(v).is_some());
+    words(&["left", "Right", "LEFT"], &[json!("up"), json!(" left"), json!(""), json!(5), json!(null)], &|v| parse::<FoldStays>(v).is_some());
     words(&["notch", " Round ", "rectangular", "TEAR"], &[json!("oval"), json!(""), json!(5)], &|v| parse::<ReliefShapeParam>(v).is_some());
+    words(&["inside", "Outside", "INSIDE"], &[json!("both"), json!(""), json!(5)], &|v| parse::<MaterialSide>(v).is_some());
     // A bend table's format: what the handler reads, in any case but without blanks.
     let formats = ["csv", "CSV", "Json", "jSoN"];
     words(&formats, &[json!(" csv"), json!("xml"), json!(""), json!(5), json!(null)], &|v| parse::<BendTableFormatParam>(v).is_some());
@@ -253,6 +261,9 @@ fn strict_keeps_todays_errors() {
         ("sheet.convert", json!({"body": "Plate", "face": [50, 130, 2.5], "bends": [[1, 2]]})),
         ("sheet.convert", json!({"body": "Plate", "face": ""})),
         ("sheet.convert", json!({"body": "Plate", "face": true})),
+        ("sheet.convert", json!({"body": "Plate", "direction": "both"})),
+        ("sheet.convert", json!({"body": "Plate", "skip": [[50, 130, 2.5], ""]})),
+        ("sheet.convert", json!({"body": "Plate", "engrave": [[50, 130, 2.5], ""]})),
         ("sheet.path_flange", json!({"edge": [50, 0, 2.5], "sketch": "Base", "curves": []})),
         ("sheet.path_flange", json!({"edge": [50, 0, 2.5], "sketch": "Base", "curves": vec!["l1"; 65]})),
         ("sheet.path_flange", json!({"edge": [50, 0, 2.5], "sketch": "Base", "curves": ["l1"], "radius": "2 deg"})),
@@ -363,7 +374,7 @@ fn replies_match_the_output_schema() {
     ] {
         ok(&mut s, id, p);
     }
-    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let body = s.model.state().surface_sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
     check(ok(&mut s, "sheet.fold", json!({"sketch": "FoldLine", "curve": "fl", "position": "start", "flip": true, "body": body})));
     let mut s = warn();
     for (id, p) in [
@@ -565,7 +576,7 @@ fn path_flange_replies_match_the_output_schema() {
         (json!({"edge": [1, 0, 20], "sketch": "Path", "curves": ["p2", "p1"], "radius": null, "body": null}), 3),
     ] {
         let mut s = path_bracket();
-        let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+        let body = s.model.state().surface_sheets.first().map(|sk| sk.body.clone()).unwrap_or_default();
         let mut p = p;
         if p["body"] == "?" {
             p["body"] = json!(body);
@@ -611,7 +622,7 @@ fn flat_pattern_replies_match_the_output_schema() {
     let schema = output_schema_for::<FlatPatternResult>();
     let schema = schema.as_value();
     let mut s = worked_sheet();
-    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let body = s.model.state().surface_sheets.first().map(|sk| sk.body.clone()).unwrap_or_default();
     let f = quiet(&mut s, "sheet.flat_pattern", json!({}));
     assert!(conforms(schema, schema, &f), "{f} doesn't match {schema}");
     // Every part of the reply is there, from the features above.
@@ -658,7 +669,7 @@ fn bend_table_replies_match_the_output_schema() {
     let schema = output_schema_for::<BendTableResult>();
     let schema = schema.as_value();
     let mut s = worked_sheet();
-    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let body = s.model.state().surface_sheets.first().map(|sk| sk.body.clone()).unwrap_or_default();
     let flat = quiet(&mut s, "sheet.flat_pattern", json!({}));
     let rows = flat["bends"].as_array().map_or(0, Vec::len);
     let table = |s: &mut Session, p: Value| {

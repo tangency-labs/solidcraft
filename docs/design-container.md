@@ -198,7 +198,9 @@ repeat for longest), each while what it adds still fits: the bodies no state kep
 so far holds (a body is stored once however many states hold it) and the records
 of the state, those bodies, their names and sketches. Sheet bodies, like sketches, are
 written once and named by place in the states (most features leave the sheets as they were); a
-thinned cache keeps all of them. So are the tap markings (cosmetic threads): a state lists the
+thinned cache keeps all of them. Sheets made from surfaces are written the same way, in a
+list of their own (`surface_sheets`; format 9 wrote them out again in every state). So are the
+tap markings (cosmetic threads): a state lists the
 markings of every feature before it, so writing them with each state grew with the square of the
 features (400 marked cylinders: 34 of a 37 MB manifest); each marking is written once and a state
 names its markings as runs of places, and a thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each

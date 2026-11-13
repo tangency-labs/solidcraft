@@ -421,7 +421,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "SHEET METAL",
         panel: "CREATE",
         promoted: 4,
-        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.perforate", "sheet.convert"],
+        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.perforate", "sheet.convert", "sheet.recognize"],
     },
     Section { tab: "SHEET METAL", panel: "FLAT", promoted: 3, ids: &["sheet.unfold", "sheet.refold", "sheet.flat_pattern"] },
     Section { tab: "SHEET METAL", panel: "OUTPUT", promoted: 2, ids: &["sheet.export_dxf", "sheet.export_bend_table"] },
@@ -681,7 +681,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetPath { .. } => "path_flange",
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
-        FeatureKind::SheetConvert { .. } => "convert_sheet",
+        FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } | FeatureKind::SheetRecognize { .. } => "convert_sheet",
         FeatureKind::Boss { .. } => "boss",
         FeatureKind::Lip { .. } => "lip",
         FeatureKind::SnapFit { .. } => "snap_fit",
@@ -713,7 +713,7 @@ fn active_body<'a>(app: &'a crate::SolveApp, state: &'a solidcraft_engine::doc::
 pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
     let state = app.session.model.state();
     let body = active_body(app, &state)?;
-    state.sheets.iter().find(|s| s.body == body).map(|s| s.body.clone())
+    state.surface_sheets.iter().any(|s| s.body == body).then(|| body.to_string())
 }
 
 /// The active body when a Frame Member feature made it.

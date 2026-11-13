@@ -1,0 +1,16 @@
+[package]
+name = "solidcraft-develop"
+description = "SolidCraft sheet development: a sheet of panels and joints laid out into its flat pattern"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+solidcore-ops = { workspace = true }
+solidcore-record = { workspace = true }
+solidcraft-geom = { workspace = true }
+thiserror = { workspace = true }

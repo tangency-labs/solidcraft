@@ -164,6 +164,21 @@ pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
     k::eval(&solidcore_convert::curve2(c), t)
 }
 
+/// The point of pcurve `c` at `t` and its first derivative there (`None` outside its interval or
+/// for a malformed record) ([`solidcore::eval::pcurve::eval_d1`]).
+#[must_use]
+pub fn eval_d1(c: &Curve2, t: f64) -> Option<([f64; 2], [f64; 2])> {
+    k::eval_d1(&solidcore_convert::curve2(c), t)
+}
+
+/// The pieces of pcurve `c`'s interval that the flux of a field through its face is integrated
+/// over, a Gauss rule on each: one or two to each knot span, at most 64 (`None` for a malformed
+/// record) ([`solidcore::eval::pcurve::flux_pieces`]).
+#[must_use]
+pub fn flux_pieces(c: &Curve2) -> Option<Vec<[f64; 2]>> {
+    k::flux_pieces(&solidcore_convert::curve2(c))
+}
+
 /// One use's records as the kernel's values.
 struct Use {
     edge: u32,

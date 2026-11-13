@@ -20,8 +20,9 @@ use crate::*;
 /// measured, bodies searched for by name, features searched for by id, bodies a cut (or
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
-/// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
-/// go), and face surfaces classified for a hole's direction.
+/// that cut nothing, the tools a cut of many tools is made with (one when they are cut in one
+/// go), face surfaces classified for a hole's direction, and the flats of sheets made from
+/// surfaces laid out (their pieces cut).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -37,6 +38,7 @@ pub(super) struct Counts {
     pub miss_intersects: usize,
     pub cut_tools: usize,
     pub surfaces: usize,
+    pub flats: usize,
 }
 
 thread_local! {
@@ -55,6 +57,7 @@ thread_local! {
             miss_intersects: 0,
             cut_tools: 0,
             surfaces: 0,
+            flats: 0,
         })
     };
 }
@@ -86,6 +89,11 @@ fn written(f: impl FnOnce()) -> usize {
 /// A search on this thread through all of a design's features for one.
 pub(crate) fn count_feature_search() {
     count(|c| c.feature_searches += 1);
+}
+
+/// The flat of a sheet made from surfaces laid out on this thread: its pieces cut.
+pub(crate) fn count_flat() {
+    count(|c| c.flats += 1);
 }
 
 /// The searches `f` makes on this thread through all features or all bodies.
@@ -1538,7 +1546,7 @@ fn hole(position: Vec3, direction: Vec3, diameter: f64) -> FeatureKind {
 
 /// The sheet metal bodies of a model.
 fn sheet_bodies(model: &Model) -> Vec<String> {
-    model.state().sheets.iter().map(|s| s.body.clone()).collect()
+    model.state().surface_sheets.iter().map(|s| s.body.clone()).collect()
 }
 
 /// A cut leaves the sheets it cannot reach as they were, without checking that it would leave
@@ -1607,7 +1615,10 @@ fn a_hole_leaves_sheets_it_cannot_reach_as_they_were() {
     assert!(volume(&work.model, "Plate") < 43_200.0 - 300.0, "and the plate is drilled");
 }
 
-/// A hole drilled into a sheet's rim still bores that sheet, beside sheets it cannot reach.
+/// A hole drilled into a sheet's rim still bores that sheet, beside sheets it cannot reach. The
+/// sheet takes the drill as a bore of the panel it runs along and builds its body again (see
+/// `surface_hole_cut`), so no body goes through a boolean: on main the flat sheet was cut and read
+/// back, one boolean. The far sheets are left as they were.
 #[test]
 fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     let mut doc = Document::new("rim");
@@ -1616,18 +1627,64 @@ fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     }
     let mut model = Model::new();
     model.evaluate(&doc);
-    let near = sheet_bodies(&model)[0].clone();
+    // The sheet the drill runs along: the one at the origin, which holds the middle of its run, 30
+    // along it and halfway through the 2.5 mm.
+    let mid = Vec3::new(30.0, 20.0, 1.25);
+    let holds = |m: &Model, name: &str| m.state().body(name).is_some_and(|b| matches!(b.body.classify_point(mid), Ok(kernel::PointClass::Inside)));
+    let near = sheet_bodies(&model).into_iter().find(|b| holds(&model, b.as_str())).expect("the sheet at the origin");
     let whole = volume(&model, &near);
+    // Into its rim at x = 60, along it (-x) through all, 1.5 across, halfway through its thickness.
     let d = 1.5;
     let work = cut_work(&mut doc, hole(Vec3::new(60.0, 20.0, 1.25), Vec3::new(-1.0, 0.0, 0.0), d));
-    assert_eq!(work.cut, 1, "only the sheet the drill meets is bored");
-    assert_eq!(work.kept, sheet_bodies(&work.model)[1..]);
+    assert_eq!(work.cut, 0, "the sheet bores itself: no body goes through a boolean");
+    let mut far: Vec<String> = sheet_bodies(&work.model).into_iter().filter(|b| *b != near).collect();
+    let mut kept = work.kept.clone();
+    far.sort();
+    kept.sort();
+    assert!(far.len() == 3 && kept == far, "the far sheets are left as they were: {kept:?} of {far:?}");
     let state = work.model.state();
-    let sheet = state.sheets.iter().find(|s| s.body == near).unwrap();
-    assert_eq!(sheet.bores.len(), 1, "kept as a bore of the sheet");
+    let sheet = state.surface_sheets.iter().find(|s| s.body == near).expect("the drilled sheet");
+    assert!(sheet.bores.len() == 1 && (sheet.bores[0].radius - d / 2.0).abs() < 1e-12, "kept as a bore of the sheet: {:?}", sheet.bores);
+    // It takes the bore's cylinder through the plate's 60: π (d/2)² 60 = 106.03 mm³ (to 2 %, as on
+    // main).
     let removed = whole - volume(&work.model, &near);
     let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
     assert!((removed - bore).abs() < 0.02 * bore, "removed {removed} of {bore}");
+}
+
+/// A flange on a sheet made from surfaces lays the sheet's flat out once, however many flanges
+/// the sheet already has: naming its pick (the model's name for the edge), finding the sheet and
+/// the edge again by that name, and keying the panels it makes lay nothing out. Each of them laid
+/// the whole sheet out again, five flats for every flange built (#6748).
+#[test]
+fn a_flange_lays_its_sheet_out_once() {
+    let mut doc = Document::new("flanges");
+    flat_sheet(&mut doc, Vec2::new(0.0, 0.0), 150.0, 100.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let flange = |p: Vec3| FeatureKind::SheetFlange {
+        edges: vec![FlangeEdge::at(p)],
+        height: "20 mm".into(),
+        angle: "90 deg".into(),
+        radius: None,
+        position: "inside".into(),
+        flip: false,
+        body: None,
+        corner_relief_shape: None,
+        corner_relief: None,
+        height_from: None,
+    };
+    for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
+        // The pick is named as the engine names it, on the model as it is.
+        let mut names = Vec::new();
+        let naming = counted(|| names = crate::sheet::sheet_edge_names(&model.state(), &[p])).flats;
+        assert!(names.first().is_some_and(|n| n.contains('|')), "the model's name for the edge: {names:?}");
+        let id = doc.add_feature(flange(p), None).unwrap();
+        doc.feature_mut(id).unwrap().edge_names = names;
+        let built = counted(|| model.evaluate(&doc)).flats;
+        assert_eq!(model.result(id).unwrap().error, None, "the flange at {p:?} builds");
+        assert_eq!((naming, built), (0, 1), "the flange at {p:?}: flats laid out naming its pick, and building it");
+    }
 }
 
 /// A 1.5 mm disc of 50 mm radius with a 3.5 mm through hole at `radius` on X, patterned `count`
@@ -2060,8 +2117,8 @@ fn an_ambiguous_target_is_refused_before_a_sheet_is_machined() {
     let err = model.result(cut).and_then(|r| r.error.clone()).expect("the cut is refused");
     assert!(err.contains("ambiguous") && err.contains("`Encoder`"), "{err}");
     let st = model.state();
-    let sheet = st.sheets.iter().find(|s| s.body == "Plate").expect("the linked sheet");
-    assert!(sheet.holes.is_empty(), "the linked sheet is not machined");
+    let sheet = st.surface_sheets.iter().find(|s| s.body == "Plate").expect("the linked sheet");
+    assert!(sheet.sheet.panels.iter().all(|p| p.region.holes.is_empty()), "the linked sheet is not machined");
 }
 
 /// A hole's look at the material over its entry face (#10695) is best effort: when the kernel

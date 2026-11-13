@@ -19,6 +19,7 @@ use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Curve2};
 use solidcraft_geom::Ring;
 use solidcraft_geom::brep::eval::{SurfaceEval, face_flux};
+use solidcraft_geom::bspline::Side;
 
 use crate::body::Body;
 use crate::{KernelError, Result, guard};
@@ -369,11 +370,18 @@ const FOLD_PIECES: usize = 1024;
 const FOLD_TOL: f64 = 1e-7;
 
 /// The point and first three derivatives at `t` of a B-spline or NURBS curve (homogeneous
-/// `[x·w, y·w, z·w, w]` points; weight 1 for a B-spline): the homogeneous derivatives `A⁽ᵏ⁾`,
-/// `w⁽ᵏ⁾`, then `C⁽ᵏ⁾ = (A⁽ᵏ⁾ − Σⱼ₌₁ᵏ C(k, j) w⁽ʲ⁾ C⁽ᵏ⁻ʲ⁾) / w`.
-fn curve_derivs(knots: &[f64], points: &[[f64; 4]], t: f64) -> Option<[Vec3; 4]> {
+/// `[x·w, y·w, z·w, w]` points; weight 1 for a B-spline), from `side` of `t` (at a joint the two
+/// differ; elsewhere they agree): the homogeneous derivatives `A⁽ᵏ⁾`, `w⁽ᵏ⁾`, then
+/// `C⁽ᵏ⁾ = (A⁽ᵏ⁾ − Σⱼ₌₁ᵏ C(k, j) w⁽ʲ⁾ C⁽ᵏ⁻ʲ⁾) / w`.
+fn curve_derivs(knots: &[f64], points: &[[f64; 4]], t: f64, side: Side) -> Option<[Vec3; 4]> {
     let degree = knots.len().checked_sub(points.len() + 1)?;
-    let (first, ders) = solidcraft_geom::bspline::basis_derivatives(knots, degree, points.len(), t, 3)?;
+    // From the left, the curve cut at `t` (the control points before it and their knots), whose
+    // domain ends there: a B-spline's basis at the end of its domain is its limit from the left.
+    let count = match side {
+        Side::Left => knots.partition_point(|k| *k < t).min(points.len()),
+        Side::Right => points.len(),
+    };
+    let (first, ders) = solidcraft_geom::bspline::basis_derivatives(knots.get(..count + degree + 1)?, degree, count, t, 3)?;
     let (mut a, mut w) = ([Vec3::ZERO; 4], [0.0f64; 4]);
     for (i, d) in ders.iter().enumerate() {
         let h = points.get(first + i)?;
@@ -435,8 +443,8 @@ fn hermite7(p: [[f64; 2]; 4], r: [[f64; 2]; 4], h: f64) -> [[f64; 2]; 8] {
 /// on the edge's own parameter, matching the point and first three derivatives of its angle about
 /// the axis (through the form's quarter parameter when `form` is given) and of its height along
 /// the axis at each piece's ends. The pieces break where the angle crosses a quarter (the form's
-/// parameter is only once differentiable there) and are halved until they lift onto the edge
-/// within [`FOLD_TOL`]. An approximation by construction from exact derivatives, like the edge
+/// parameter is only once differentiable there) and at the edge's own corners (a chain's
+/// joints), and are halved until they lift onto the edge within [`FOLD_TOL`]. An approximation by construction from exact derivatives, like the edge
 /// itself; nothing is fitted. `None` for another face or curve, or past the piece budget.
 fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve, [t0, t1]: [f64; 2]) -> Option<Curve2> {
     use solidcraft_geom::bspline::{HPoint, bezier_point};
@@ -453,7 +461,7 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
     let on = SurfaceEval::new(form.unwrap_or(label)).ok()?;
     let edge = solidcraft_geom::brep::eval::CurveEval::new(curve).ok()?;
     let raw_angle = |t: f64| -> Option<f64> {
-        let d = curve_derivs(knots, points, t)?[0] - o;
+        let d = edge.point(t)? - o;
         Some(d.dot(y).atan2(d.dot(x)))
     };
     let angle_near = |t: f64, near: f64| raw_angle(t).map(|a| a + ((near - a) / TAU).round() * TAU);
@@ -464,8 +472,10 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
         let inside = |a: f64| (lo - 1e-9..=hi + 1e-9).contains(&solidcraft_geom::brep::form::param(a));
         start = (-2..=2).map(|k| start + f64::from(k) * TAU).find(|a| inside(*a))?;
     }
-    // The angle along the edge, unwrapped from its start, on a grid fine against the edge's spans.
-    let grid = 64 * knots.len().max(1);
+    // The angle along the edge, unwrapped from its start, on a grid of 32 points to each of the
+    // edge's spans (a span of a fold turns through far less than a half turn).
+    let spans = knots.windows(2).filter(|w| w[1] > w[0] && w[1] > t0 && w[0] < t1).count();
+    let grid = 32 * spans.max(1);
     let ts: Vec<f64> = (0..=grid).map(|i| t0 + (t1 - t0) * i as f64 / grid as f64).collect();
     let mut angles = Vec::with_capacity(ts.len());
     let mut prev = start;
@@ -495,6 +505,13 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
             breaks.push((0.5 * (lo + hi), target));
         }
     }
+    // And at the edge's own corners, its joints (knots as many as its degree, where a chain's
+    // pieces meet): no piece matches the edge's derivatives across one.
+    for k in solidcore_ops::curve_knots::joints(curve, [t0, t1]).ok()? {
+        let i = ts.partition_point(|t| *t <= k).saturating_sub(1);
+        breaks.push((k, angle_near(k, *angles.get(i)?)?));
+    }
+    breaks.sort_by(|a, b| a.0.total_cmp(&b.0));
     breaks.push((t1, *angles.last()?));
     let size = points.iter().fold(1.0f64, |m, h| [h[0], h[1], h[2]].iter().fold(m, |m, c| m.max((c / h[3]).abs())));
     // A crossing within rounding of another break (or of an end), or nearer to it on the edge
@@ -517,10 +534,11 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
         }
     }
     let breaks = kept;
-    // u and v with their first three derivatives at `t`, angle `a`, in quarter `q` of the form.
+    // u and v with their first three derivatives at `t` from `side`, angle `a`, in quarter `q` of
+    // the form.
     let tq = FRAC_PI_8.tan();
-    let uv = |t: f64, a: f64, q: f64| -> Option<[[f64; 2]; 4]> {
-        let c = curve_derivs(knots, points, t)?;
+    let uv = |t: f64, side: Side, a: f64, q: f64| -> Option<[[f64; 2]; 4]> {
+        let c = curve_derivs(knots, points, t, side)?;
         let w = |d: Vec3| (d.dot(x), d.dot(y));
         let (w0, r1, r2, r3) = (w(c[0] - o), w(c[1]), w(c[2]), w(c[3]));
         let (r1, r2, r3) = (cdiv(r1, w0), cdiv(r2, w0), cdiv(r3, w0));
@@ -557,7 +575,9 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
                 let (s0, s1) = (a + (e - a) * k as f64 / pieces as f64, a + (e - a) * (k + 1) as f64 / pieces as f64);
                 let (b0, b1) = (last, if k + 1 == pieces { ea } else { angle_near(s1, last)? });
                 last = b1;
-                let piece = hermite7(uv(s0, b0, q)?, uv(s1, b1, q)?, s1 - s0);
+                // Its start read from the right and its end from the left: the edge on the piece's
+                // own side of a joint there, where the edge turns.
+                let piece = hermite7(uv(s0, Side::Right, b0, q)?, uv(s1, Side::Left, b1, q)?, s1 - s0);
                 ctrl.extend_from_slice(if ctrl.is_empty() { &piece[..] } else { &piece[1..] });
                 knots2.extend(std::iter::repeat_n(s1, 7));
                 let h = piece.map(|c| HPoint { x: c[0], y: c[1], z: 0.0, w: 1.0 });
@@ -748,6 +768,14 @@ pub fn sew(faces: &[FaceSpec]) -> Result<Body> {
 pub fn sew_touching(faces: &[FaceSpec]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "sew_touching");
     sew_impl(faces, true, None).map(|(body, _)| body)
+}
+
+/// [`sew_touching`], with the face of `faces` each face of the body was sewn from (by its place in
+/// `faces`; `None` when that could not be followed): what lets the caller name the body's faces
+/// by what it made each from.
+pub fn sew_touching_traced(faces: &[FaceSpec]) -> Result<(Body, Option<Vec<usize>>)> {
+    let _span = solidcraft_profile::span("kernel", "sew_touching");
+    sew_impl(faces, true, None)
 }
 
 /// Separate boundary sheets at a shared geometric edge without moving it.
@@ -1484,7 +1512,16 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     let mut volume = vec![0.0; groups.len()];
     for (k, g) in groups.iter().enumerate() {
         if closed.get(k).copied().unwrap_or(false) {
-            let v = flux_of(g, &|p| p * (1.0 / 3.0))?;
+            // About a point of the shell: each face's share is then as large as the shell, where
+            // about a far origin the shares are large and cancel down to the volume.
+            let c = g
+                .first()
+                .and_then(|f| faces.get(*f))
+                .and_then(|f| f.loops.first()?.first())
+                .and_then(|u| edges.get(u.edge as usize))
+                .and_then(|e| vertices.get(e.vertices[0] as usize))
+                .map_or(Vec3::ZERO, |p| v3(*p));
+            let v = flux_of(g, &|p| (p - c) * (1.0 / 3.0))?;
             if !(v.abs() > 0.0) || !v.is_finite() {
                 return Err(fail("a closed shell encloses no volume".into()));
             }
@@ -2013,5 +2050,71 @@ mod tests {
         let p = Vec3::new(0.0, 0.0, 10.0);
         flat[1] = quad(p, p + Vec3::X * 3.0, p + Vec3::X * 7.0, p + Vec3::X * 10.0);
         assert!(sew(&flat).unwrap_err().to_string().contains("not on one plane"));
+    }
+
+    /// A chain turning a corner on the cylinder of radius 2 about z, degree 2 with its joint at
+    /// the knot 1 (held twice): the quarter circle z = 0 from (2, 0, 0) to (0, 2, 0) (weights 1,
+    /// w = √2/2, 1), then the ruling from there up to (0, 2, 3) at a constant speed.
+    fn corner_on_a_cylinder() -> (Vec<f64>, Vec<[f64; 4]>) {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0];
+        (knots, vec![[2.0, 0.0, 0.0, 1.0], [2.0 * w, 2.0 * w, 0.0, w], [0.0, 2.0, 0.0, 1.0], [0.0, 2.0, 1.5, 1.0], [0.0, 2.0, 3.0, 1.0]])
+    }
+
+    /// At a joint the edge turns: from the left it is the piece before, from the right the piece
+    /// after, each exactly (to rounding), nothing read a little way off the joint.
+    #[test]
+    fn a_chain_is_read_from_each_side_of_its_joint() {
+        let (knots, points) = corner_on_a_cylinder();
+        let s2 = std::f64::consts::SQRT_2;
+        // The quarter circle at its end t = 1, from the left. Its weight W = 1 there, W' = 2 − 2w
+        // = 2 − √2, W'' = 4 − 4w = 2W'. C' = 2w (P₂ − P₁) = (−2√2, 0, 0): speed √2 r = 2√2 round
+        // z. C'' = ((2√2 − 2) r, −2r, 0) = (4√2 − 4, −4, 0): |C'|²/r = 4 towards the axis, and the
+        // speed falling. C''' = −3W'(C'' + 2C') = 12(2 − √2)(1, 1, 0) = (7.0294, 7.0294, 0). Read
+        // 1e-12 short of the joint instead, C' is off by 1e-12 C'' (4e-12 in y): past 1e-13.
+        let third = Vec3::new(1.0, 1.0, 0.0) * (12.0 * (2.0 - s2));
+        let want = [Vec3::new(0.0, 2.0, 0.0), Vec3::new(-2.0 * s2, 0.0, 0.0), Vec3::new(4.0 * s2 - 4.0, -4.0, 0.0), third];
+        let left = curve_derivs(&knots, &points, 1.0, Side::Left).unwrap();
+        for (k, (got, want)) in left.into_iter().zip(want).enumerate() {
+            assert!((got - want).len() < 1e-13, "from the left, derivative {k}: {got:?} vs {want:?}");
+        }
+        // The ruling at its start, from the right: z = 3(t − 1), so C' = (0, 0, 3), C'' = C''' = 0.
+        let want = [Vec3::new(0.0, 2.0, 0.0), Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO, Vec3::ZERO];
+        let right = curve_derivs(&knots, &points, 1.0, Side::Right).unwrap();
+        for (k, (got, want)) in right.into_iter().zip(want).enumerate() {
+            assert!((got - want).len() < 1e-13, "from the right, derivative {k}: {got:?} vs {want:?}");
+        }
+    }
+
+    /// The pcurve of that chain folded onto its cylinder (no form: u the angle, v the height)
+    /// turns at the joint as the edge does, from each side.
+    #[test]
+    fn a_folded_pcurve_turns_with_its_edge_at_a_joint() {
+        let (knots, homogeneous) = corner_on_a_cylinder();
+        let frame = b::Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
+        let cylinder = b::Surface::Cylinder { frame, radius: 2.0 };
+        let edge = b::Curve::RationalSpline { knots, homogeneous };
+        let Some(Curve2::Spline { knots, points }) = folded_pcurve(&cylinder, None, &edge, [0.0, 2.0]) else { panic!("no folded pcurve") };
+        // The pcurve from each side of t = 1, where its Hermite pieces meet (a knot it holds 7
+        // times), its points as (u, v, 0) with weight 1.
+        let h: Vec<[f64; 4]> = points.iter().map(|p| [p[0], p[1], 0.0, 1.0]).collect();
+        let (left, right) = (curve_derivs(&knots, &h, 1.0, Side::Left).unwrap(), curve_derivs(&knots, &h, 1.0, Side::Right).unwrap());
+        // The angle θ = arg(C − o) in the xy plane: θ' = Im(C'/w₀), θ'' = Im(C''/w₀) − Im((C'/w₀)²),
+        // w₀ = 2i at the joint. The quarter circle's end: C'/w₀ = −2√2/2i = √2 i, so θ' = √2;
+        // C''/w₀ = (4√2 − 4 − 4i)/2i = −2 − (2√2 − 2) i and (√2 i)² = −2, so θ'' = 2 − 2√2; v' =
+        // v'' = 0 (z = 0). The ruling's start: θ' = θ'' = 0, v' = 3, v'' = 0. Both at (π/2, 0).
+        let s2 = std::f64::consts::SQRT_2;
+        let corner = Vec3::new(std::f64::consts::FRAC_PI_2, 0.0, 0.0);
+        // Each derivative comes back from control points holding it times the piece's length h
+        // (the quarter circle lifts within FOLD_TOL on 4 pieces, h = 1/4), so a rounding of a
+        // point (2e-16 of π/2) comes back times 7/h in the first and 42/h² in the second: within
+        // 1e-12 and 1e-10.
+        let quarter = [corner, Vec3::new(s2, 0.0, 0.0), Vec3::new(2.0 - 2.0 * s2, 0.0, 0.0)];
+        let ruling = [corner, Vec3::new(0.0, 3.0, 0.0), Vec3::ZERO];
+        for (side, got, want) in [("left", left, quarter), ("right", right, ruling)] {
+            for (k, (tol, want)) in [1e-12, 1e-12, 1e-10].into_iter().zip(want).enumerate() {
+                assert!((got[k] - want).len() < tol, "from the {side}, derivative {k}: {:?} vs {want:?}", got[k]);
+            }
+        }
     }
 }
