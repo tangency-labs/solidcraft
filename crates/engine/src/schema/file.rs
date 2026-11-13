@@ -2,7 +2,7 @@
 //! export command of each format (`file.export_step`, `file.export_stl`, `file.export_3mf`,
 //! `file.export_obj`, `file.export_urdf`), which take what `file.export` takes for that format,
 //! without `format`, and `doc.open` and the recovery commands (`doc.recovery_list`,
-//! `doc.recover`, `doc.recovery_discard`).
+//! `doc.recover`, `doc.recovery_discard`), and local import-cache maintenance.
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -486,6 +486,10 @@ pub struct OpenParams {
     /// elsewhere). Default: false.
     #[serde(default)]
     pub read_only: Option<bool>,
+    /// For a STEP or IGES file: false recomputes the import without reading or writing the local
+    /// saved-model cache. Default: true.
+    #[serde(default)]
+    pub reuse_import: Option<bool>,
     /// For a point cloud, STL, OBJ or PLY file: the unit its coordinates are in, scaled to
     /// millimetres as it is read (refused for a 3MF or glTF file, which states its own; ignored
     /// for other files). Default: mm.
@@ -647,6 +651,13 @@ pub struct OpenedFile {
     /// A mesh file opened with `origin`: the shift [x, y, z] that moved it to the origin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moved_to_origin: Option<Vec<f64>>,
+    /// STEP and IGES only: the SHA-256 of the file's exact bytes, as lower-case hex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_sha256: Option<String>,
+    /// STEP and IGES only: true when an unchanged earlier import was reused from the local
+    /// saved-model cache, false when the file was imported afresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_reused: Option<bool>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -785,6 +796,16 @@ pub enum FileExportResult {
     File(ExportResult),
     /// URDF.
     Urdf(UrdfExportResult),
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportCacheClearParams {}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ImportCacheClearResult {
+    /// Number of cached imports removed. Open designs and stand-up answers are retained.
+    pub removed: usize,
 }
 
 #[cfg(test)]

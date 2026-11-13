@@ -73,7 +73,6 @@ impl Body {
 /// solidcore pin to a rev with a new flag fails until it is added here.
 pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
-    f.fillet_retry_radius_as_first = true;
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
@@ -118,7 +117,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_edge_self_loop_on_vertex_degenerate = true;
     f.slice_coincident_faces_sheet_side = true;
     f.boolean_outer_shell_first = true;
-    f.heal_stage3_failures_propagate = true;
     f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
     f.boolean_cleanup_removes_slits = true;
@@ -131,7 +129,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
-    f.precise_properties_body_length_scale = true;
     f.offset_extension_from_base = true;
     f.corner_blend_stays_inside_neighbours = true;
     f.fillet_cleanup_keeps_target_faces = true;
@@ -140,7 +137,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
-    f.boolean_lists_virtual_surface_copies = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.ssi_singular_start_inside_direction = true;
@@ -156,10 +152,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_corner_ball_center_from_axes = true;
     f.boolean2d_plane_covers_far_faces = true;
     f.boolean_splits_definition_across_split = true;
-    f.curve_tight_box_interval_knots = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
-    f.torus_check_reads_v_interval = true;
     f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
@@ -169,12 +163,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_chamfer_cone_stored_as_cone = true;
     f.offset_point_vertex_caps = true;
     f.proto_edge_splits_at_captured_vertices = true;
-    f.stitch_solid_nests_cavities = true;
     f.local_operation_closes_walls_to_nothing = true;
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
-    f.cylinder_plane_tangent_within_tolerance = true;
     f.fillet_nx1_tangent_corner_edge = true;
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
@@ -183,7 +175,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
-    f.ellipse_adjust_step_interval_keeps_turns = true;
     f.fillet_rail_end_on_continued_surface = true;
     f.glue_vertices_joins_every_region = true;
     f.fillet_removal_takes_ring_fillets = true;
@@ -207,7 +198,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.planar_path_sweep_statuses = true;
     f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;
-    f.perspective_sphere_offsets = true;
     f.plane_recognition_origin_after_axes = true;
     f.brep_edit_statuses_pass_on = true;
     f.fillet_run_on_bspline_trims = true;
@@ -219,7 +209,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.offset_keep_cavity_regions = true;
-    f.gap_samples_non_bspline_v_stride = true;
     f.imprint_skips_collapsed_definition = true;
     f.temporary_radius_setup_errors = true;
     f.ellipse_step_interval_checks = true;
@@ -234,37 +223,23 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.sphere_from_arcs_common_centre = true;
     f.dupin_bottom_hyperbola_axis = true;
     f.extent3d_contains_both_segment_endpoints = true;
-    f.gap_samples_use_trimmed_spans = true;
     f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
-    f.circumscribe_axis_map_by_basis = true;
     f.validation_does_not_make_uv_trims = true;
-    f.iso_curve_uv_line_both_params = true;
     f.analytic_corner_failure_is_false = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_exact_round_classes = true;
-    f.cpoly_remove_poly_face_check_member = true;
     f.check_seam_crossing_unclosed = true;
     f.ascii_doubles_round_trip = true;
-    f.transform_aligned_bbox_image = true;
     f.offset_edges_keep_source_tolerance = true;
-    f.circle_silhouette_perspective_center = true;
-    f.ellipse_convert_to_2d_uses_both_axes = true;
-    f.circle_offset_antiparallel_normal = true;
-    f.global_solver_identical_prefers_larger_when_maximizing = true;
     f.surface_continuity_checks_last_v_knot = true;
-    f.surface_point_solver_propagates_bbox_failure = true;
     f.volume_lift_third_derivative_terms = true;
     f.stop_tracking_checks_own_callback = true;
     f.plane_reparameterize_moves_origin = true;
-    f.crv_in_volume_mults_by_break_index = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
-    f.composite_curve_bbox_segment_intervals = true;
     f.knot_vector_valid_requires_span = true;
-    f.projected_curve_transform_when_owned = true;
-    f.curve_property_gs_branch_bounds = true;
     f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
     f.close_loop_relates_only_coincident_edges = true;
@@ -291,7 +266,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
-    f.ellipse_open_arc_keeps_end_angle = true;
     f.fillet_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
     f.plane_first_torus_section_exact = true;

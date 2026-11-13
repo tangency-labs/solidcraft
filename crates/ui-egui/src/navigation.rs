@@ -201,8 +201,9 @@ impl TrackpadCoast {
 /// `gesture` tracks an ongoing bracketed trackpad scroll (`Start` … `End`):
 /// moves inside one pan, bare `Move` input is a mouse (vertical zooms,
 /// horizontal pans). Only point input brackets; line/page input always zooms.
-/// With `shift_orbits` (Shift + two fingers orbits), `coast` ends the inertia
-/// when the modifiers change.
+/// With `scroll` telling the two gestures apart (Shift + two fingers orbits in
+/// Fusion, bare two fingers orbit in Blender), `coast` ends the inertia when
+/// the modifiers change.
 pub(crate) fn immediate_wheel(
     input: &egui::InputState,
     options: egui::InputOptions,
@@ -210,7 +211,7 @@ pub(crate) fn immediate_wheel(
     gesture: &mut bool,
     bracketed: &mut bool,
     coast: &mut TrackpadCoast,
-    shift_orbits: bool,
+    scroll: crate::prefs::TrackpadScroll,
     zoom_modifier: Option<egui::Modifiers>,
 ) -> RawWheel {
     let mut out = RawWheel {
@@ -272,7 +273,9 @@ pub(crate) fn immediate_wheel(
             continue;
         }
         let shift = modifiers.shift && !modifiers.ctrl && !modifiers.command && !modifiers.alt;
-        if point && *gesture && !coast.moves(shift) && shift_orbits {
+        // The gesture the preset gives this scroll: orbiting or panning.
+        let orbit = scroll.orbits(shift);
+        if point && *gesture && !coast.moves(orbit) && scroll.modes_differ() {
             continue;
         }
         if point && *gesture {
@@ -311,6 +314,50 @@ fn wheel_points(unit: egui::MouseWheelUnit, delta: egui::Vec2, options: egui::In
 /// event: that key held alone. egui aliases Ctrl/Command on Windows/Linux; macOS can hold both.
 pub(crate) fn claims_scroll(modifiers: egui::Modifiers, zoom_modifier: Option<egui::Modifiers>) -> bool {
     zoom_modifier.is_some_and(|chosen| modifiers.matches_exact(chosen) && !(modifiers.mac_cmd && modifiers.ctrl))
+}
+
+/// How long a twist may pause, in seconds, before it has ended and its cursor pivot is let go.
+const TWIST_PAUSE: f64 = 0.25;
+
+/// The trackpad's two-finger rotation this frame in radians, counter-clockwise positive (egui's
+/// `Event::Rotate` counts clockwise). Events that carry a non-finite angle are ignored.
+pub(crate) fn twist_radians(input: &egui::InputState) -> f64 {
+    input
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            egui::Event::Rotate(r) if r.is_finite() => Some(-f64::from(*r)),
+            _ => None,
+        })
+        .sum()
+}
+
+/// Turn the view about the world's up axis (Z, or Y in a Y-up design) by `radians`, through the
+/// centre that Orbit around names: the view's centre, the world origin, or the model point under
+/// the cursor, chosen when the twist begins. A counter-clockwise twist turns the model
+/// counter-clockwise as seen from above, so the model follows the fingers. Pitch and roll stay
+/// as they are.
+pub(crate) fn twist_turn(app: &mut SolveApp, rect: Rect, radians: f64, hover: Option<Pos2>) {
+    if !radians.is_finite() {
+        return;
+    }
+    let pivot = match app.preferences.orbit_around {
+        OrbitAround::ViewCentre => None,
+        OrbitAround::Origin => Some(Vec3::ZERO),
+        OrbitAround::Cursor => Some(match app.viewport.twist_pivot {
+            Some(p) => p,
+            None => {
+                let p = pivot_under(app, &projection(app, rect), hover.unwrap_or(rect.center()));
+                app.viewport.twist_pivot = Some(p);
+                p
+            }
+        }),
+    };
+    let keep = pivot.map(|p| (p, app.cam.frame_coords(p)));
+    app.cam.yaw = (app.cam.yaw + radians) % std::f64::consts::TAU;
+    if let Some((p, coords)) = keep {
+        app.cam.place(p, coords);
+    }
 }
 
 /// Combined pinch-to-zoom factor for one frame (1 = no pinch input).
@@ -690,7 +737,11 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     let options = ui.ctx().options(|o| o.input_options);
     let page_height = ui.ctx().viewport_rect().height();
-    let trackpad_orbit = trackpad_pan && app.preferences.nav == "fusion";
+    // The preset's two-finger gesture: Fusion orbits with Shift held, Blender
+    // orbits without it, and the other presets pan either way (#15079). With
+    // panning off the scroll zooms, so there is one gesture and no coast to end.
+    let scroll_mode = if trackpad_pan { app.preferences.trackpad_scroll() } else { crate::prefs::TrackpadScroll::Pans };
+    let trackpad_orbit = scroll_mode.modes_differ();
     let zoom_modifier = app.preferences.trackpad_zoom_modifier.modifiers();
     let viewport = &mut app.viewport;
     let raw = ui.input(|i| {
@@ -701,7 +752,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             &mut viewport.trackpad_gesture,
             &mut viewport.trackpad_gesture_bracketed,
             &mut viewport.trackpad_coast,
-            trackpad_orbit,
+            scroll_mode,
             zoom_modifier,
         )
     });
@@ -723,8 +774,14 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             app.viewport.trackpad_gesture = false;
         }
     }
-    let mut pan =
-        if trackpad_pan { raw.pan + if trackpad_orbit { egui::Vec2::ZERO } else { raw.shift_pan } } else { egui::Vec2::ZERO } + raw.mouse_pan;
+    // The gesture each scroll belongs to: the preset orbits with Shift (Fusion) or
+    // without it (Blender), and pans with the other modifier.
+    let (pan_points, orbit_points) = match scroll_mode {
+        crate::prefs::TrackpadScroll::Pans => (raw.pan + raw.shift_pan, egui::Vec2::ZERO),
+        crate::prefs::TrackpadScroll::ShiftOrbits => (raw.pan, raw.shift_pan),
+        crate::prefs::TrackpadScroll::BareOrbits => (raw.shift_pan, raw.pan),
+    };
+    let mut pan = if trackpad_pan { pan_points } else { egui::Vec2::ZERO } + raw.mouse_pan;
     pan.x *= crate::prefs::pan_sign_x(app);
     pan.y *= crate::prefs::pan_sign_y(app);
     let scroll = if app.viewport.wheel_zoom_raw_until_idle || (trackpad_pan && app.viewport.trackpad_until_idle) {
@@ -776,11 +833,28 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             app.cam.pan(f64::from(pan.x), f64::from(pan.y), h);
         }
     }
-    if wheel_inside && caps.orbit && trackpad_orbit && raw.shift_pan != egui::Vec2::ZERO {
+    if wheel_inside && caps.orbit && trackpad_orbit && orbit_points != egui::Vec2::ZERO {
         app.cancel_view_animation();
         app.viewport.orbit_free = None;
         let sign = crate::prefs::orbit_sign(app);
-        orbit(app, rect, sign * f64::from(raw.shift_pan.x), sign * f64::from(raw.shift_pan.y), hover);
+        orbit(app, rect, sign * f64::from(orbit_points.x), sign * f64::from(orbit_points.y), hover);
+    }
+    // A two-finger twist on the trackpad turns the view about the world's up axis (#6286).
+    // The OS does not send a rotation on every frame of a slow twist, so the twist's cursor pivot
+    // is kept through short gaps and let go only once the twist has paused or a button is pressed.
+    // That is checked before this frame's rotation: an idle window draws no frames in between, so
+    // the first rotation of a new twist must not turn about the last twist's point.
+    let (twist, now, pressed) = ui.input(|i| (twist_radians(i), i.time, i.pointer.any_pressed()));
+    if pressed || app.viewport.twist_last.is_none_or(|last| now - last > TWIST_PAUSE) {
+        app.viewport.twist_pivot = None;
+        app.viewport.twist_last = None;
+    }
+    if wheel_inside && caps.orbit && app.preferences.trackpad_twist_turns && twist != 0.0 {
+        app.cancel_view_animation();
+        app.viewport.orbit_free = None;
+        app.viewport.spin = false;
+        twist_turn(app, rect, twist, hover);
+        app.viewport.twist_last = Some(now);
     }
     let zoom_held = (inside || app.viewport.zoom_shortcut_drag)
         && ui.input(|input| crate::keymap::drag_zoom_held(app, input))
@@ -829,10 +903,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // left button would otherwise do - selecting, dragging geometry, the preset's binding or the
     // navigation bar's fixed mode - and lasts only while the key is held. Space still types in a
     // text field, and while a dimension's text is being edited, so those keep the keyboard.
-    let space_pan = (inside || primary_down)
-        && !ui.ctx().egui_wants_keyboard_input()
-        && !crate::dim_view::editing()
-        && ui.input(|i| i.key_down(egui::Key::Space));
+    let space_pan =
+        (inside || primary_down) && !ui.ctx().text_edit_focused() && !crate::dim_view::editing() && ui.input(|i| i.key_down(egui::Key::Space));
     if zoom_held {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
     } else if space_pan {
@@ -864,10 +936,13 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     } else {
         None
     };
-    // An orbit started on the viewport owns its button until release, including over a
-    // floating shell card that disables the underlying egui response.
-    let captured_orbit = app.viewport.orbit_from.is_some() && button.is_some();
-    let dragging = resp.dragged() || (inside && button.is_some()) || captured_orbit;
+    // The full canvas response can report a drag whose press belonged to a panel above it.
+    // A camera drag that started in free space keeps its capture when it crosses a panel.
+    let press_in_view = ui.input(|input| input.pointer.press_origin()).is_some_and(|at| {
+        input_rect.contains(at) && !axes.contains(at) && !readout.is_some_and(|rect| rect.contains(at)) && !crate::shell::covered(app, at)
+    });
+    let captured = button.is_some_and(|button| app.viewport.orbit_from.is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == button));
+    let dragging = captured || (press_in_view && (resp.dragged() || (inside && (button.is_some() || (space_pan && primary_down)))));
     // A middle or right drag keeps the mode it started with until its button is released, as a
     // left one does (`primary_nav`): letting go of Shift partway through a Shift+middle orbit
     // doesn't turn the rest into a pan (#9557). Off in Preferences, the keys held decide on every
@@ -1606,7 +1681,7 @@ mod tests {
                 gesture,
                 &mut false,
                 &mut Default::default(),
-                false,
+                crate::prefs::TrackpadScroll::Pans,
                 Some(egui::Modifiers::COMMAND),
             ),
             events,
@@ -1631,19 +1706,19 @@ mod tests {
 
         let mut input = egui::InputState::default();
         input.events = vec![event(egui::TouchPhase::Start, egui::MouseWheelSource::Trackpad)];
-        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, true, None);
+        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
         assert!(gesture && bracketed, "the gesture starts inside its bracket");
 
         // A move in the middle of the gesture keeps the bracket open.
         let mut input = egui::InputState::default();
         input.events = vec![event(egui::TouchPhase::Move, egui::MouseWheelSource::Trackpad)];
-        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, true, None);
+        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
         assert!(bracketed, "the bracket stays open between the moves");
 
         // Its End closes the gesture and the bracket.
         let mut input = egui::InputState::default();
         input.events = vec![event(egui::TouchPhase::End, egui::MouseWheelSource::Trackpad)];
-        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, true, None);
+        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
         assert!(!gesture && !bracketed, "the End closes the gesture and its bracket");
     }
 
@@ -1675,7 +1750,16 @@ mod tests {
                         };
                         let mut input = egui::InputState::default();
                         input.events = if bracket { vec![event(P::Start), event(P::Move), event(P::End)] } else { vec![event(P::Move)] };
-                        let raw = super::immediate_wheel(&input, options, 600.0, &mut false, &mut false, &mut Default::default(), true, chosen);
+                        let raw = super::immediate_wheel(
+                            &input,
+                            options,
+                            600.0,
+                            &mut false,
+                            &mut false,
+                            &mut Default::default(),
+                            crate::prefs::TrackpadScroll::ShiftOrbits,
+                            chosen,
+                        );
                         let expected = match chosen {
                             Some(m) if m == M::COMMAND => [M::COMMAND, M::CTRL | M::COMMAND, M::MAC_CMD | M::COMMAND].contains(&held),
                             Some(m) if m == M::CTRL => [M::CTRL, M::CTRL | M::COMMAND].contains(&held),

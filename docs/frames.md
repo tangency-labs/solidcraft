@@ -56,6 +56,12 @@ the selected body (or the last body of the active component).
 - `anchor`: the profile point on the line: `origin` (the default: a built-in profile's centre, a
   profile sketch's origin), `center` (of its bounding box), `centroid`, or a corner or edge middle
   of its bounding box (`bottom_left`, `top`…).
+- `locate`: `[x, y]`, the profile point on the line in mm from the built-in profile's own origin (a
+  bar's or an angle's bottom-left corner, the middle of a channel's web back, the centre of the
+  others; a profile sketch's origin). It takes precedence over `anchor`. A bounding-box anchor moves
+  with the section when its size changes; a located point does not, so a member stays attached at
+  the same point of its section (`[0, 0]` keeps an angle's heel on the line whatever its leg
+  lengths). Edit Feature keeps it.
 - **Orientation**: the profile's y points up (world +Z) as far as the line allows and its x is
   square to the line and to y (x × y runs along the line, so on a line along +X the profile's x is
   world +Y); a vertical member's x is world +X. `angle` (an angle expression) turns the profile

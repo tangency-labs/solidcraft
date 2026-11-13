@@ -48,6 +48,9 @@ pub struct Resolved {
     /// The edge an `Edge` reference resolved to (its index in the body's mesh), whose
     /// persistent name the link keeps ([`resolved_edge_name`]). Computed metadata only.
     pub edge_index: Option<usize>,
+    /// The vertex a `Vertex` reference resolved to (its index in the body's B-rep record),
+    /// whose persistent name the link keeps ([`resolved_vertex_name`]). Computed metadata only.
+    pub vertex_index: Option<usize>,
 }
 
 /// Resolutions of body-based references, keyed by the reference, the sketch plane and the
@@ -133,6 +136,7 @@ fn resolve_uncached(
     let mut moved = false;
     let mut face_index = None;
     let mut edge_index = None;
+    let mut vertex_index = None;
     let mut source = src.clone();
     let mut wires: Vec<Vec<Vec3>> = Vec::new();
     let mut exact: Vec<Vec<WireCurve>> = Vec::new();
@@ -201,7 +205,9 @@ fn resolve_uncached(
                 return Err(lost("the vertex"));
             }
             moved = d > (size * 2e-3).max(1e-3);
-            let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
+            let body_ref = st.bodies.get(bi);
+            vertex_index = body_ref.and_then(|b| crate::naming::vertex_index_at(b, v));
+            let name = body_ref.map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             source = LinkSource::Vertex { body: name, at: v };
             vec![LinkGeom::Point(plane.to_local(v))]
         }
@@ -356,7 +362,7 @@ fn resolve_uncached(
     if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid(format!("the {} projects to nothing on this sketch plane", src.describe())));
     }
-    Ok(Resolved { geom: merge_split_circles(geom), wires, exact, source, moved, face_index, edge_index })
+    Ok(Resolved { geom: merge_split_circles(geom), wires, exact, source, moved, face_index, edge_index, vertex_index })
 }
 
 /// Whether a curve (world points) leaves the sketch plane: included, it then stays 3D.
@@ -946,6 +952,14 @@ pub fn resolved_edge_name(st: &ModelState, r: &Resolved) -> Option<String> {
     crate::naming::edge_names(body).get(index).filter(|name| !name.is_empty()).cloned()
 }
 
+/// The persistent name of the vertex a `Vertex` reference resolved to, for its link to keep and
+/// be found by from then on. None on a mesh body, whose vertices have no names.
+pub fn resolved_vertex_name(st: &ModelState, r: &Resolved) -> Option<String> {
+    let (LinkSource::Vertex { body, .. }, Some(index)) = (&r.source, r.vertex_index) else { return None };
+    let body = st.body(body).filter(|body| !body.body.is_mesh())?;
+    crate::naming::vertex_names(body).get(index).filter(|name| !name.is_empty()).cloned()
+}
+
 fn lost(reference: &str) -> DocError {
     DocError::Unknown(format!("{reference} no longer exists"))
 }
@@ -957,6 +971,27 @@ fn locate_named_edge(st: &ModelState, kind: LinkKind, body: &str, name: &str, at
     let locate = |b: &crate::ModelBody| match kind {
         LinkKind::Project => crate::name_lookup::locate_projected_edge(b, name, at),
         _ => crate::naming::locate_edge(b, name, at),
+    };
+    let hit = |b: &crate::ModelBody| locate(b).ok().map(|hit| (b.name.clone(), hit));
+    match st.body(body) {
+        Some(b) => hit(b),
+        None => {
+            let mut found = st.bodies.iter().filter(|b| !b.body.is_mesh()).filter_map(hit);
+            match (found.next(), found.next()) {
+                (Some(one), None) => Some(one),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// The vertex a link's stored name finds, and the body it is on: the link's body, or, when no
+/// body has that name any more (it was joined into another), the one body on which the name
+/// finds a vertex.
+fn locate_named_vertex(st: &ModelState, kind: LinkKind, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::VertexHit)> {
+    let locate = |b: &crate::ModelBody| match kind {
+        LinkKind::Project => crate::name_lookup::locate_projected_vertex(b, name, at),
+        _ => crate::naming::locate_vertex(b, name, at),
     };
     let hit = |b: &crate::ModelBody| locate(b).ok().map(|hit| (b.name.clone(), hit));
     match st.body(body) {
@@ -988,7 +1023,33 @@ fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         return Err(DocError::Invalid("named edge projects to nothing on this sketch plane".into()));
     }
     let source = LinkSource::Edge { body: body.into(), at };
-    Ok(Resolved { geom: merge_split_circles(geom), wires, exact, source, moved: false, face_index: None, edge_index: Some(index) })
+    Ok(Resolved {
+        geom: merge_split_circles(geom),
+        wires,
+        exact,
+        source,
+        moved: false,
+        face_index: None,
+        edge_index: Some(index),
+        vertex_index: None,
+    })
+}
+
+/// A vertex found by its persistent name: vertex `index` of `body` at its evaluated point `at`.
+fn resolve_named_vertex(plane: &Plane, body: &str, index: usize, at: Vec3) -> Result<Resolved> {
+    if !at.is_finite() {
+        return Err(lost("named projection vertex"));
+    }
+    Ok(Resolved {
+        geom: vec![LinkGeom::Point(plane.to_local(at))],
+        wires: Vec::new(),
+        exact: Vec::new(),
+        source: LinkSource::Vertex { body: body.into(), at },
+        moved: false,
+        face_index: None,
+        edge_index: None,
+        vertex_index: Some(index),
+    })
 }
 
 fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str, index: usize, at: Vec3) -> Result<Resolved> {
@@ -1017,6 +1078,7 @@ fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         moved: false,
         face_index,
         edge_index: None,
+        vertex_index: None,
     })
 }
 
@@ -1103,6 +1165,7 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
         moved: false,
         face_index: if indices.len() == 1 { indices.first().copied() } else { None },
         edge_index: None,
+        vertex_index: None,
     })
 }
 
@@ -1304,13 +1367,33 @@ fn refresh_links_in(
             warn.extend(hit.note(name).map(|note| format!("projected {note}")));
             named_edge = Some((body, hit.edge, *at));
         }
+        // A vertex the link keeps by name is that vertex of its body, wherever it went. When no
+        // vertex has the name any more no other vertex is taken for it: the sketch fails.
+        let mut named_vertex = None;
+        if let (Some(name), LinkSource::Vertex { body, at }) = (&l.vertex_name, &source) {
+            let Some((body, hit)) = locate_named_vertex(st, l.kind, body, name, *at) else {
+                lose_named(sk, &l.id, name, lost_names, &mut warn)?;
+                continue;
+            };
+            warn.extend(hit.note(name).map(|note| format!("projected {note}")));
+            named_vertex = Some((body, hit.vertex, hit.point));
+        }
         let resolved = if matches!(source, LinkSource::Text { .. }) {
             // A text needs nothing outside its sketch; one on a path follows a curve of it.
             sk.text_source_geometry(&source).map_err(DocError::from).and_then(|geom| {
                 if geom.is_empty() {
                     return Err(DocError::Invalid(format!("the {} makes no outline", source.describe())));
                 }
-                Ok(Resolved { geom, wires: Vec::new(), exact: Vec::new(), source: source.clone(), moved: false, face_index: None, edge_index: None })
+                Ok(Resolved {
+                    geom,
+                    wires: Vec::new(),
+                    exact: Vec::new(),
+                    source: source.clone(),
+                    moved: false,
+                    face_index: None,
+                    edge_index: None,
+                    vertex_index: None,
+                })
             })
         } else if l.auto_face {
             anchor
@@ -1323,18 +1406,26 @@ fn refresh_links_in(
             resolve_named_face(st, plane, l.kind, &body, index, at)
         } else if let Some((body, index, at)) = named_edge {
             resolve_named_edge(st, plane, l.kind, &body, index, at)
+        } else if let Some((body, index, at)) = named_vertex {
+            resolve_named_vertex(plane, &body, index, at)
         } else {
             resolve_at(doc, vals, st, plane, l.kind, &source, frame)
         };
         match resolved {
             Ok(r) => {
-                // An edge link saved without a name takes the name of the edge it was found
-                // on. A sketch that is edited stores it; evaluation leaves the design as it is.
+                // An edge or vertex link saved without a name takes the name of the geometry it was
+                // found on. A sketch that is edited stores it; evaluation leaves the design as it is.
                 if l.edge_name.is_none()
                     && let Some(name) = resolved_edge_name(st, &r)
                     && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
                 {
                     link.edge_name = Some(name);
+                }
+                if l.vertex_name.is_none()
+                    && let Some(name) = resolved_vertex_name(st, &r)
+                    && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
+                {
+                    link.vertex_name = Some(name);
                 }
                 sk.set_link_source(&l.id, r.source);
                 if let Err(e) = sk.set_link_wires(&l.id, &r.wires).and_then(|()| sk.set_link_wire_curves(&l.id, &r.exact)) {

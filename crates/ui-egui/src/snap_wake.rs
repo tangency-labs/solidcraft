@@ -11,6 +11,7 @@
 use egui::{Painter, Pos2, Stroke};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::snap::{SnapKind, SnapPoint, snap_points};
 
 use crate::SolveApp;
@@ -29,6 +30,9 @@ pub struct Woken {
     /// A face of the rim's own body crossed on the way to its centre: its points are woken too.
     pub face: Option<Sel>,
     pub points: Vec<SnapPoint>,
+    /// The last item hovered that offered nothing the woken points lack: it is not asked again
+    /// while it stays under the pointer.
+    pub kept_over: Option<Sel>,
     /// The design's revision the points were found in: an edit, undo or redo sleeps them.
     pub revision: u64,
 }
@@ -42,8 +46,12 @@ impl Woken {
 
 /// Whether snap points are on and the active dialog input or sketch tool takes them.
 pub fn wanted(app: &SolveApp) -> bool {
-    app.preferences.snap_points
-        && (app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::SNAP_POINTS != 0) || sketch_drawing(app))
+    app.preferences.snap_points && (input_takes(app) || sketch_drawing(app))
+}
+
+/// Whether the active dialog input takes snap points (Move, Align, Measure, joints).
+fn input_takes(app: &SolveApp) -> bool {
+    app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::SNAP_POINTS != 0)
 }
 
 /// Whether a sketch tool that places points is active (2D or 3D).
@@ -84,12 +92,19 @@ fn same_item(a: &Sel, b: &Sel) -> bool {
 /// After the hover was found this frame: a newly hovered edge or curve wakes its points (and the
 /// earlier ones sleep); a face does too unless an edge's or curve's points are awake, so the
 /// pointer can cross the faces between a rim and its centre. Anything else keeps them. All sleep
-/// when the input doesn't take them.
+/// when the input doesn't take them. So that the pointer can travel to a point it was shown:
+/// - nothing changes them while `keep` is held in a dialog's point input (the Keep Snap Points
+///   binding, Shift by default; in a sketch, Shift targets a midpoint instead), or while the
+///   pointer is within reach of one of them (`near`: within [`REACH`] of a point, or
+///   inside a woken rim's circle on its way to the centre);
+/// - an item that offers nothing the woken points lack keeps them (a hole's rim after its wall).
+///
+/// A vertex of another body puts them to sleep.
 ///
 /// A sketch curve under the pointer wakes its points even where the input doesn't take the
 /// curve itself (Move's points), so it is looked for among all the hits (`hits`), not only the
 /// hover.
-pub fn update(app: &mut SolveApp, hits: &[Hit]) {
+pub fn update(app: &mut SolveApp, hits: &[Hit], keep: bool, near: Option<(&Proj, Pos2)>) {
     if app.dialog.is_none() {
         app.viewport.snapped.clear();
     }
@@ -101,9 +116,23 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
     if app.viewport.woken.revision != app.session.revision {
         app.viewport.woken = Woken { revision: app.session.revision, ..Woken::default() };
     }
+    if keep && input_takes(app) && app.viewport.woken.item.is_some() {
+        return;
+    }
+    if let Some(Hit::Vertex { body, .. }) = app.viewport.hover.as_ref()
+        && app.viewport.woken.points.first().is_some_and(|p| !p.body.is_empty() && p.body != *body)
+    {
+        app.viewport.woken = Woken { revision: app.session.revision, ..Woken::default() };
+        return;
+    }
     let curve = hits.iter().find_map(|h| item_of(app, h)).filter(|i| matches!(i, Sel::ExternalSketchCurve { .. }));
     let Some(item) = curve.or_else(|| app.viewport.hover.as_ref().and_then(|h| item_of(app, h))) else { return };
-    if app.viewport.woken.has(&item) {
+    if app.viewport.woken.has(&item) || app.viewport.woken.kept_over.as_ref().is_some_and(|k| same_item(k, &item)) {
+        return;
+    }
+    // On the way to a woken point (within reach of one), nothing else takes over: not a rim seen
+    // through a hole at its centre, nor the next face at a corner they share.
+    if near.is_some_and(|(proj, pos)| in_reach(app, proj, pos)) {
         return;
     }
     // Crossing a face of the rim's own body on the way to its centre keeps the rim's points and
@@ -130,8 +159,34 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
         remember(app, &item, &added);
         return;
     }
+    // An item that offers nothing the woken points lack keeps them; it is remembered, so it is
+    // not asked again while it stays under the pointer.
+    let within = |a: &[SnapPoint], b: &[SnapPoint]| a.iter().all(|x| b.iter().any(|y| y.at.dist(x.at) <= 1e-6 * (1.0 + x.at.len())));
+    if !app.viewport.woken.points.is_empty() && within(&points, &app.viewport.woken.points) {
+        app.viewport.woken.kept_over = Some(item);
+        return;
+    }
     remember(app, &item, &points);
-    app.viewport.woken = Woken { item: Some(item), face: None, points, revision: app.session.revision };
+    app.viewport.woken = Woken { item: Some(item), face: None, points, kept_over: None, revision: app.session.revision };
+}
+
+/// Whether the pointer is still where the woken points lead it: within reach of one of them, or
+/// inside the circle a woken rim spans about its centre on screen (a hole's opening), the points
+/// where they show (see [`shown`]).
+fn in_reach(app: &SolveApp, proj: &Proj, pos: Pos2) -> bool {
+    let shown = shown(app);
+    if shown.iter().filter_map(|(at, _)| proj.to_screen(*at)).any(|p| p.distance(pos) <= REACH) {
+        return true;
+    }
+    let centre = shown.iter().find(|(_, p)| p.kind == SnapKind::Centre).and_then(|(at, _)| proj.to_screen(*at));
+    let on_edge = match &app.viewport.woken.item {
+        Some(Sel::Edge { point, .. }) => proj.to_screen(*point),
+        _ => None,
+    };
+    match (centre, on_edge) {
+        (Some(c), Some(e)) => pos.distance(c) <= c.distance(e) + ON,
+        _ => false,
+    }
 }
 
 /// A hovered item taken back to where the design keeps it: on a body a Move dialog moves, the

@@ -1527,7 +1527,8 @@ pub trait CurveOnClassifyBrep<O: ClassObject>:
     }
 }
 
-/// The lazy B-rep query state shared by classifications of the same face. Only gap
+/// The lazy B-rep query state shared by classifications of the same face, or of faces of
+/// one B-rep that does not change between them (keep features' walls). Only gap
 /// caches are copied back: replacing the B-rep would also replace geometry ownership
 /// and unrelated topology. Keep this state alive on error, since `CalcVertexFaceGap`
 /// invalidates same-face siblings before attempting the projection.
@@ -2132,6 +2133,9 @@ pub(crate) fn curve_on_classify_cached<O: ClassObject>(
     uv_space_okay: bool,
     cache: &mut CurveOnClassifyCache,
 ) -> Result<bool> {
+    if cache.snapshot.is_none() {
+        k.work_counters.add_classification_snapshot();
+    }
     curve_on_classify_mut(
         k,
         f,
