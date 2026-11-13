@@ -1194,7 +1194,7 @@ fn apply_dogbone_editor(mut h: Harness, id: u64) {
 #[test]
 fn dogbone_editor_reads_bare_lengths_in_the_design_unit() {
     let (mut h, id) = resized_pocket_dogbone_editor(json!({"faces":[[20,10,10]],"diameter":3}));
-    h.app.dialog = None;
+    crate::dialogs::cancel(&mut h.app);
     h.app.run("document.units", json!({"units":"in"})).unwrap();
     h.app.edit_feature(id);
     let Some(crate::dialogs::Kind::Dogbone(k)) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no Dogbone editor") };
@@ -1202,7 +1202,10 @@ fn dogbone_editor_reads_bare_lengths_in_the_design_unit() {
     // Minimal, the style with a gap.
     k.style = 1;
     k.gap = "0.01".into();
-    let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().into_iter().next().unwrap();
+    // An edit is applied as a redefine of the feature, with the command's parameters inside.
+    let (command, redefine) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().into_iter().next().unwrap();
+    assert_eq!(command, "timeline.redefine", "{redefine}");
+    let params = &redefine["params"];
     for (key, mm) in [("diameter", 3.175), ("gap", 0.254)] {
         let text = params[key].as_str().unwrap_or_default();
         let got = h.app.session.doc.eval(text, solidcraft_engine::doc::expr::Kind::Length).unwrap();
