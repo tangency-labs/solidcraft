@@ -60,23 +60,20 @@ impl Piece {
 /// The planar face of `body` at `at`: its index and outward normal.
 fn face_at(body: &Body, rec: &Brep, at: Vec3) -> Result<(usize, Vec3)> {
     let size = body.size();
-    let mesh = body.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
-    let near = mesh
-        .triangles
-        .iter()
-        .zip(&mesh.tri_face)
-        .filter_map(|(t, f)| {
-            let [a, b, c] = mesh.tri(t)?;
-            let n = (b - a).cross(c - a).normalized()?;
-            let q = at - n * (at - a).dot(n);
-            let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-9);
-            inside.then_some(((at - a).dot(n).abs(), *f as usize))
-        })
-        .min_by(|x, y| x.0.total_cmp(&y.0));
-    let (d, f) = near.ok_or_else(|| fail("no face there"))?;
-    if d > size * 1e-3 {
-        return Err(fail("no face there"));
+    let tol = (size * 1e-3).max(1e-3);
+    let (ops, order) = body.ops_body().ok_or_else(|| fail("the body has no exact B-rep"))?;
+    let pt = [at.x, at.y, at.z];
+    let distances = ops.face_distances_within(order, &[pt], tol).map_err(|_| fail("face distance query failed"))?;
+
+    let mut nearest_all: Option<(f64, usize)> = None;
+    for (f, face_ds) in distances.iter().enumerate() {
+        let Some(Some(d)) = face_ds.first() else { continue };
+        if *d <= tol && nearest_all.is_none_or(|(min_d, _)| *d < min_d) {
+            nearest_all = Some((*d, f));
+        }
     }
+
+    let (_, f) = nearest_all.ok_or_else(|| fail("no face there"))?;
     match surf_of(rec, f) {
         Some(Surf::Plane { n, .. }) => Ok((f, n)),
         _ => Err(fail("the face must be planar")),
