@@ -2110,7 +2110,7 @@ impl Batches {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         uniform: &wgpu::Buffer,
-        bgl: &wgpu::BindGroupLayout,
+        bgl: &Group0,
         key: u64,
         sc: &GpuScene,
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
