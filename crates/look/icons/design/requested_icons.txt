@@ -96,6 +96,7 @@ delete	false
 delete_face	false
 dimension	false
 display	false
+dogbone	false
 dots	false
 draft	false
 draft_analysis	false

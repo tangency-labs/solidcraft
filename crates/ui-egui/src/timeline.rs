@@ -243,6 +243,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Revolve { .. } => "revolve",
         FeatureKind::Fillet { .. } => "fillet",
         FeatureKind::Chamfer { .. } => "chamfer",
+        FeatureKind::Dogbone { .. } => "dogbone",
         FeatureKind::Box { .. } => "box",
         FeatureKind::Cylinder { .. } => "cylinder",
         FeatureKind::Sphere { .. } => "sphere",

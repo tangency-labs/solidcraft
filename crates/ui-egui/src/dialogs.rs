@@ -425,6 +425,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Frame(crate::dialogs_frame::Member),
             /// End caps on frame members (`dialogs_end_cap`).
             EndCap(crate::dialogs_end_cap::EndCap),
+            /// Dogbone reliefs in inside corners (`dialogs_dogbone`).
+            Dogbone(crate::dialogs_dogbone::Dogbone),
             /// Appearance (`dialogs_appearance`).
             Appearance(crate::dialogs_appearance::Ap),
             /// Contact sets, motion studies, exploded views, configurations (`dialogs_motion`).
@@ -1180,6 +1182,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_plastic::start(app, id))
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
+                    .or_else(|| crate::dialogs_dogbone::start(app, id))
                     .or_else(|| crate::dialogs_appearance::start(app, id))
                     .or_else(|| crate::dialogs_motion::start(app, id))
                     .or_else(|| crate::dialogs_parts::start(app, id))
@@ -1433,7 +1436,7 @@ impl Dialog {
             Kind::Surface(_) => return true,
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
-            Kind::Frame(_) | Kind::EndCap(_) => return true,
+            Kind::Frame(_) | Kind::EndCap(_) | Kind::Dogbone(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
@@ -1496,6 +1499,7 @@ impl Dialog {
             }
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
+            Kind::Dogbone(c) => ("Diameter", ValueKind::Length, &mut c.diameter),
             Kind::Hole { diameter, opts, .. } => {
                 // A thread or a bolt size sets the diameter: nothing to type on the canvas.
                 if opts.tapped || opts.clearance {
@@ -2858,6 +2862,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
+        Kind::Dogbone(_) => "ui.dogbone_title",
         Kind::Appearance(_) => "APPEARANCE",
         Kind::Motion(k) => k.title(),
         Kind::Part(_) => "INSERT PART",
@@ -4568,6 +4573,7 @@ fn rememberable(kind: &Kind) -> bool {
             )
             | Kind::Frame(_)
             | Kind::EndCap(_)
+            | Kind::Dogbone(_)
     )
 }
 
@@ -6525,6 +6531,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
+        Kind::Dogbone(k) => return crate::dialogs_dogbone::commands(app, k, &d.inputs, &d.extra),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
         Kind::Part(k) => return crate::dialogs_parts::commands(app, k, &d.inputs),
@@ -7005,7 +7012,7 @@ pub(crate) fn face_sel_on(s: &Session, only: Option<&str>, p0: Vec3) -> Option<S
 
 /// Resolve a stored name on the current input body before placing its pick in the viewport.
 /// Keep the resolved index: a face point can lie on a boundary shared with another face.
-fn named_refill(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: bool) -> Option<Sel> {
+pub(crate) fn named_refill(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: bool) -> Option<Sel> {
     use solidcraft_engine::doc::naming;
 
     if name.is_empty() {
@@ -8316,6 +8323,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 .or_else(|| crate::dialogs_plastic::for_feature(app, other))
                 .or_else(|| crate::dialogs_frame::for_feature(app, other))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
+                .or_else(|| crate::dialogs_dogbone::for_feature(app, &f))
                 .or_else(|| crate::dialogs_surface::for_feature(app, other, &feature_frame(s, f.component)))?;
             let mut d = Dialog::new(kind, inputs);
             d.extra = extra;

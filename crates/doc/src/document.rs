@@ -865,6 +865,39 @@ pub enum FeatureKind {
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         tangent_chain: bool,
     },
+    /// Dogbone reliefs (CNC routing): a round bite of the bit's diameter cut into each picked
+    /// inside corner edge, or into the inside corners at picked planar faces (a pocket's floor, a
+    /// plate's face a slot runs through), so that a square part seats where a round bit would
+    /// leave a round. See `crate::dogbone`.
+    Dogbone {
+        /// Reference points on the inside corner edges (each re-finds the nearest edge).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        edges: Vec<Position>,
+        /// Points on planar faces whose inside corners, along the face's normal, are relieved.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<FacePick>,
+        #[walk(length = "Bit Diameter")]
+        diameter: Expr,
+        #[serde(default, skip_serializing_if = "crate::dogbone::DogboneStyle::is_normal")]
+        style: crate::dogbone::DogboneStyle,
+        /// Minimal style: how far short of the sharp corner the relief stops (default 5% of the
+        /// bit diameter).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
+        /// T-bone style: the wall the relief bites.
+        #[serde(default, skip_serializing_if = "crate::dogbone::DogboneSide::is_longer")]
+        side: crate::dogbone::DogboneSide,
+        /// The largest corner angle relieved (default 90°).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Largest Angle")]
+        max_angle: Option<Expr>,
+        /// The bit's axis: picked edges not along it are skipped (default: any direction).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        along: Option<Dir>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+    },
     Box {
         /// The box's lowest corner, or its centre when `centred` is set.
         #[serde(with = "point_expr")]
@@ -2808,6 +2841,7 @@ impl FeatureKind {
             FeatureKind::Revolve { .. } => "RevolveFeature",
             FeatureKind::Fillet { .. } => "FilletFeature",
             FeatureKind::Chamfer { .. } => "ChamferFeature",
+            FeatureKind::Dogbone { .. } => "DogboneFeature",
             FeatureKind::Box { .. } => "BoxFeature",
             FeatureKind::Cylinder { .. } => "CylinderFeature",
             FeatureKind::Sphere { .. } => "SphereFeature",
@@ -2895,6 +2929,7 @@ impl FeatureKind {
             FeatureKind::Revolve { .. } => "revolve",
             FeatureKind::Fillet { .. } => "fillet",
             FeatureKind::Chamfer { .. } => "chamfer",
+            FeatureKind::Dogbone { .. } => "dogbone",
             FeatureKind::Box { .. } => "box",
             FeatureKind::Cylinder { .. } => "cylinder",
             FeatureKind::Sphere { .. } => "sphere",
@@ -2978,6 +3013,7 @@ impl FeatureKind {
             "RevolveFeature" => "revolve",
             "FilletFeature" => "fillet",
             "ChamferFeature" => "chamfer",
+            "DogboneFeature" => "dogbone",
             "BoxFeature" => "box",
             "CylinderFeature" => "cylinder",
             "SphereFeature" => "sphere",
@@ -3060,6 +3096,7 @@ impl FeatureKind {
             FeatureKind::Revolve { .. } => "Revolve",
             FeatureKind::Fillet { .. } => "Fillet",
             FeatureKind::Chamfer { .. } => "Chamfer",
+            FeatureKind::Dogbone { .. } => "Dogbone",
             FeatureKind::Box { .. } => "Box",
             FeatureKind::Cylinder { .. } => "Cylinder",
             FeatureKind::Sphere { .. } => "Sphere",

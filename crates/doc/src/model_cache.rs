@@ -571,6 +571,7 @@ impl SavedModel {
             let sketch_keys = key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).cloned().ok_or_else(|| bad("saved model: state"))?;
             Ok(ModelState {
                 frame_bodies: Default::default(),
+                dogbones: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
                 body_counter: index(s.get("body_counter"), usize::MAX)?,

@@ -453,6 +453,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
         "Inset By" => Role::ComboBox,
+        "Style" if command == "solid.dogbone" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -471,6 +472,7 @@ macro_rules! form_case {
 form_case!(revolve, "solid.revolve", ["Angle", "Direction", "Type"]);
 form_case!(shell, "solid.shell", ["Thickness", "Direction"]);
 form_case!(draft, "solid.draft", ["Angle"]);
+form_case!(dogbone, "solid.dogbone", ["Bit diameter", "Style", "Largest angle"]);
 form_case!(mirror, "solid.mirror", ["Operation"]);
 form_case!(end_cap, "frame.end_cap", ["Thickness", "Direction", "Offset", "Corner Chamfer"]);
 
@@ -1149,6 +1151,124 @@ fn face_editor_refills_named_faces_after_sketch_resize() {
         }
         assert_eq!(h.app.session.doc.features.last().unwrap().id, id);
         assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
+    }
+}
+
+/// A 40 x 20 x 20 block with a pocket 10 deep from x 10 to 30 and y 5 to `d2 - 5`, relieved by
+/// `params`; then `d2` goes from 20 to 30, so the pocket's far wall moves from y 15 to y 25, and
+/// the Dogbone feature is opened for editing.
+fn resized_pocket_dogbone_editor(params: Value) -> (Harness, u64) {
+    let mut h = Harness::new();
+    for (id, params) in [
+        ("sketch.create", json!({"plane":"XY"})),
+        ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]})),
+        ("sketch.dimension", json!({"entities":["l1"],"value":40})),
+        ("sketch.dimension", json!({"entities":["l2"],"value":20})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance":20})),
+        ("solid.box", json!({"corner":[10,5,10],"length":20,"width":"d2 - 10","height":10,"operation":"cut"})),
+        ("solid.dogbone", params),
+        ("parameters.change", json!({"name":"d2","expression":"30"})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    let id = h.app.session.doc.features.last().unwrap().id;
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
+    h.app.edit_feature(id);
+    (h, id)
+}
+
+fn apply_dogbone_editor(mut h: Harness, id: u64) {
+    let d = h.app.dialog.as_ref().unwrap();
+    let commands = apply_commands(&h.app, d).unwrap();
+    crate::dialogs::roll_marker(&mut h.app, None).unwrap();
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+    assert_eq!(h.app.session.doc.features.last().unwrap().id, id);
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
+}
+
+/// A bit diameter and gap typed as bare numbers in an inch design are inches: OK hands the
+/// command 3.175 mm and 0.254 mm, not 0.125 mm and 0.01 mm.
+#[test]
+fn dogbone_editor_reads_bare_lengths_in_the_design_unit() {
+    let (mut h, id) = resized_pocket_dogbone_editor(json!({"faces":[[20,10,10]],"diameter":3}));
+    crate::dialogs::cancel(&mut h.app);
+    h.app.run("document.units", json!({"units":"in"})).unwrap();
+    h.app.edit_feature(id);
+    let Some(crate::dialogs::Kind::Dogbone(k)) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no Dogbone editor") };
+    k.diameter = "0.125".into();
+    // Minimal, the style with a gap.
+    k.style = 1;
+    k.gap = "0.01".into();
+    // An edit is applied as a redefine of the feature, with the command's parameters inside.
+    let (command, redefine) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().into_iter().next().unwrap();
+    assert_eq!(command, "timeline.redefine", "{redefine}");
+    let params = &redefine["params"];
+    for (key, mm) in [("diameter", 3.175), ("gap", 0.254)] {
+        let text = params[key].as_str().unwrap_or_default();
+        let got = h.app.session.doc.eval(text, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+        assert!(text.ends_with(" in") && (got - mm).abs() < 1e-9, "{key}: {text} is {got} mm");
+    }
+}
+
+#[test]
+fn dogbone_editor_refills_named_edges_after_sketch_resize() {
+    let (h, id) = resized_pocket_dogbone_editor(json!({"edges":[[10,5,15],[30,5,15],[30,15,15],[10,15,15]],"diameter":3}));
+    let d = h.app.dialog.as_ref().unwrap();
+    let picks = &d.inputs[0].items;
+    assert_eq!(picks.len(), 4);
+    let s = &h.app.session;
+    let body = s.model.state().bodies.first().unwrap().clone();
+    let names = &s.doc.feature(id).unwrap().edge_names;
+    assert_eq!(names.len(), 4);
+    for (pick, name) in picks.iter().zip(names) {
+        let Sel::Edge { point, index, .. } = pick else { panic!("{pick:?}") };
+        let hit = solidcraft_engine::doc::naming::locate_edge(&body, name, *point).unwrap();
+        assert_eq!(*index, hit.edge);
+        assert!(hit.on_point, "{point:?} must lie on the moved corner edge");
+    }
+    let far: Vec<f64> = picks[2..].iter().map(|p| if let Sel::Edge { point, .. } = p { point.y } else { f64::NAN }).collect();
+    assert!(far.iter().all(|y| (y - 25.0).abs() < 1e-6), "{far:?}");
+    apply_dogbone_editor(h, id);
+}
+
+#[test]
+fn dogbone_editor_refills_named_faces_after_sketch_resize() {
+    let (h, id) = resized_pocket_dogbone_editor(json!({"faces":[[20,10,10]],"diameter":3}));
+    let d = h.app.dialog.as_ref().unwrap();
+    let picks = &d.inputs[0].items;
+    assert_eq!(picks.len(), 1, "the pocket's floor must refill");
+    let Sel::Face { point, .. } = picks.first().unwrap() else { panic!("{picks:?}") };
+    assert!((point.z - 10.0).abs() < 1e-6, "{point:?}");
+    apply_dogbone_editor(h, id);
+}
+
+/// A face pick Edit Feature cannot bring back (no stored name, and its point 2 mm above the
+/// pocket's floor, on no face) is not dropped: OK hands it to the command as stored, beside the
+/// edge pick that did come back, and it counts as a pick, so there is no "no corners" refusal.
+#[test]
+fn dogbone_editor_keeps_a_pick_it_cannot_bring_back() {
+    use solidcraft_engine::doc::FeatureKind;
+
+    let (h, id) = resized_pocket_dogbone_editor(json!({"edges":[[10,5,15]],"faces":[[20,10,10]],"diameter":3}));
+    let mut f = h.app.session.doc.feature(id).unwrap().clone();
+    let FeatureKind::Dogbone { faces, .. } = &mut f.kind else { panic!("{:?}", f.kind) };
+    faces[0].0 = Vec3::new(20.0, 10.0, 12.0);
+    f.face_names.clear();
+    let (crate::dialogs::Kind::Dogbone(k), inputs, extra) = crate::dialogs_dogbone::for_feature(&h.app, &f).unwrap() else {
+        panic!("no Dogbone editor")
+    };
+    assert!(inputs[0].items.iter().all(|p| matches!(p, Sel::Edge { .. })), "{:?}", inputs[0].items);
+    assert_eq!(inputs[0].items.len(), 1, "the edge comes back, the face does not");
+    let commands = crate::dialogs_dogbone::commands(&h.app, &k, &inputs, &extra).unwrap();
+    let [(command, params)] = commands.as_slice() else { panic!("{commands:?}") };
+    assert_eq!(command, "solid.dogbone");
+    assert_eq!(params["faces"], json!([[20.0, 10.0, 12.0]]), "{params}");
+    assert_eq!(params["edges"].as_array().map(Vec::len), Some(1), "{params}");
+    for key in ["kept_edges", "kept_faces", "kept_body"] {
+        assert!(params.get(key).is_none(), "{key} must not reach the command: {params}");
     }
 }
 

@@ -1,6 +1,9 @@
 newer_file_feature
 frame_end_cap
   moves: ends[0].plane.axis_dir[0], ends[0].plane.axis_dir[1], ends[0].plane.axis_origin[0], ends[0].plane.axis_origin[1], ends[0].plane.axis_origin[2]
+dogbone
+  moves: along[0], along[2], edges[0][0], edges[0][1], edges[0][2], faces[0][0], faces[0][1], faces[0][2]
+  face points: [0, 0, 0]
 body_transfer
 sketch
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
