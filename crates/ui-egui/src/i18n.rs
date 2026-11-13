@@ -2067,7 +2067,7 @@ mod tests {
         "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
         "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
-        "checkbox_grid, options, checkbox_row, toggle_icon, removable_header, bin_button, ",
+        "checkbox_grid, options, checkbox_row, action_row, toggle_icon, removable_header, bin_button, ",
         "Column, Menu, MenuItem, CommandSearch};"
     );
 
