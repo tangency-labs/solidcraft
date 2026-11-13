@@ -63,7 +63,7 @@ pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None })]);
         id
     };
     let front_settings =
@@ -2182,6 +2182,36 @@ fn a_centre_line_on_a_follower_blocks_an_exploded_parent() {
     edit_view(&mut s, above, json!({"exploded": "assembled"}));
     edit_view(&mut s, parent, json!({"exploded": apart}));
     assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line": line}))["status"], "ok");
+}
+
+/// A projected view's automatic centre-mark rule blocks its parent from exploding, and a view that
+/// draws an exploded view through its parent can't turn the rule on, until the follower explicitly
+/// chooses the assembled design for itself; turning the rule off is never refused.
+#[test]
+fn an_automatic_centre_mark_rule_on_a_follower_blocks_an_exploded_parent() {
+    let (mut s, parent, _, apart) = exploded_pair();
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(parent), "side": "above", "place": {"at": [150, 250]}}));
+    let set = |s: &mut Session, view: u64, enabled: bool| {
+        s.execute("drawing.auto_center_mark.set", &json!({"view": ids::encode(view), "enabled": enabled}))
+    };
+    set(&mut s, above, true).unwrap();
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let error = edit_refused(&mut s, parent, json!({"exploded": apart}));
+    assert!(error.contains("automatic centre marks enabled"), "{error}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, parent, json!({"exploded": apart}));
+    assert!((width(&mut s, parent) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 40.0).abs() < 1e-6);
+
+    // Following the exploded parent again would draw the rule's view exploded: refused.
+    let error = edit_refused(&mut s, above, json!({"exploded": null}));
+    assert!(error.contains("automatic centre marks enabled"), "{error}");
+    // The parent now draws exploded: a rule can't be enabled on it, but a follower's can be disabled.
+    let error = set(&mut s, parent, true).unwrap_err().to_string();
+    assert!(error.contains("automatic centre marks on an exploded view"), "{error}");
+    assert_eq!(set(&mut s, above, false).unwrap()["enabled"], false);
+    edit_view(&mut s, above, json!({"exploded": null}));
+    assert!((width(&mut s, above) - 70.0).abs() < 1e-6);
 }
 
 /// A shaded view's pictures are rendered from the design as it places its parts, so an exploded view

@@ -59,7 +59,15 @@ fn boxed() -> Fixture {
     let base = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let side = ViewKind::Projected { parent: front, side: ProjectedSide::Right };
     d.add_views([
-        Arc::new(View { id: front, sheet, kind: base, place: ViewPlace::At([150.0, 150.0]), settings: half, reference_shown_percent: 0.0 }),
+        Arc::new(View {
+            id: front,
+            sheet,
+            kind: base,
+            place: ViewPlace::At([150.0, 150.0]),
+            settings: half,
+            reference_shown_percent: 0.0,
+            centre_marks: None,
+        }),
         Arc::new(View {
             id: right,
             sheet,
@@ -67,6 +75,7 @@ fn boxed() -> Fixture {
             place: ViewPlace::Aligned(300.0),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
         }),
     ]);
     d.validate().unwrap();
@@ -691,7 +700,7 @@ fn a_spheres_size_reads_on_its_contour_where_its_faces_are() {
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
     let place = ViewPlace::At([300.0, 230.0]);
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    f.d.add_views([Arc::new(View { id: top, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+    f.d.add_views([Arc::new(View { id: top, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None })]);
     let from_above = f.add(top, sphere(&cap), None);
     let r = f.resolve(from_above);
     assert!(matches!(&r.status, Status::Unmeasurable(why) if why.contains("contour in this view isn't on it")), "{r:?}");
@@ -870,6 +879,185 @@ fn base_view(f: &mut Fixture, direction: ViewDirection, at: [f64; 2]) -> u64 {
     let (sheet, source) = (f.d.sheets[0].id, f.d.sources[0].id);
     let kind = ViewKind::Base { source, view: direction };
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    f.d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0 })]);
+    f.d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0, centre_marks: None })]);
     id
+}
+
+#[test]
+fn auto_mark_exclusions_follow_the_existing_reference_statuses() {
+    use solidcraft_doc::drawing::auto_marks::resolve_exclusions;
+    let mut f = boxed();
+    let edge = f.edge([0.0, 0.0, 0.0], [80.0, 0.0, 0.0]);
+    let mut missing = edge.clone();
+    missing.body = "Missing".into();
+    let read = |f: &Fixture| resolve_exclusions(&f.s.doc, &f.s.model, &[edge.clone(), missing.clone()]).unwrap();
+    let first = read(&f);
+    assert_eq!(first[0].status, Status::Ok);
+    assert!(first[0].edge_index.is_some());
+    assert!(matches!(first[1].status, Status::Lost(..)));
+    assert!(first[1].edge_index.is_none());
+    let name = f.s.doc.features.last().unwrap().name.clone();
+    run(&mut f.s, "timeline.suppress", json!({"feature": name, "suppressed": true}));
+    assert_eq!(read(&f)[0].status, Status::Suppressed);
+    run(&mut f.s, "timeline.suppress", json!({"feature": name, "suppressed": false}));
+    assert_eq!(read(&f)[0].status, Status::Ok);
+    let bad = ModelEdge { body: String::new(), ..edge.clone() };
+    assert!(resolve_exclusions(&f.s.doc, &f.s.model, &[bad]).is_err());
+}
+
+#[test]
+fn auto_mark_candidates_include_both_hole_rims_without_view_line_visibility() {
+    use solidcore_record::Plane;
+    use solidcraft_doc::drawing::auto_marks::{circular_edges, group_candidates};
+    let mut f = boxed();
+    run(
+        &mut f.s,
+        "solid.cylinder",
+        json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"], "name": "Hole"}),
+    );
+    let body = f.body();
+    let arcs = circular_edges(&body, &[], &Plane::XZ).unwrap();
+    let hole: Vec<_> = arcs.iter().filter(|a| (a.radius - 6.0).abs() < 1e-6 && (a.center.x - 40.0).abs() < 1e-6).collect();
+    assert!(hole.iter().any(|a| a.depth.abs() < 1e-6));
+    assert!(hole.iter().any(|a| (a.depth - 40.0).abs() < 1e-6));
+    assert!(hole.iter().all(|a| a.edge.body == "Box" && a.edge.path.is_empty()));
+    let marks = group_candidates(&arcs).unwrap();
+    let hole_marks: Vec<_> = marks.iter().filter(|m| (m.radius - 6.0).abs() < 1e-6 && (m.center.x - 40.0).abs() < 1e-6).collect();
+    assert_eq!(hole_marks.len(), 1);
+    assert!(hole_marks[0].sources.len() >= 2);
+    let end_on = circular_edges(&body, &[], &Plane::YZ).unwrap();
+    assert!(!end_on.iter().any(|a| (a.radius - 6.0).abs() < 1e-6));
+}
+
+#[test]
+fn auto_mark_exclusion_split_is_reported_and_recovers_after_undo() {
+    use solidcraft_doc::drawing::auto_marks::resolve_exclusions;
+    let mut f = boxed();
+    let edge = f.edge([0.0, 0.0, 30.0], [80.0, 0.0, 30.0]);
+    run(&mut f.s, "solid.box", json!({"length": 10, "width": 5, "height": 5, "corner": [35, -1, 26], "operation": "cut", "targets": ["Box"]}));
+    let read = |f: &Fixture| resolve_exclusions(&f.s.doc, &f.s.model, std::slice::from_ref(&edge)).unwrap().remove(0);
+    let split = read(&f);
+    assert!(matches!(&split.status, Status::Ambiguous(candidates) if candidates.len() == 2));
+    assert!(split.edge_index.is_none());
+    run(&mut f.s, "edit.undo", json!({}));
+    assert_eq!(read(&f).status, Status::Ok);
+}
+
+#[test]
+fn auto_mark_candidate_scan_rejects_invalid_paths_and_view_basis() {
+    use solidcore_record::Plane;
+    use solidcraft_doc::drawing::auto_marks::circular_edges;
+    let f = boxed();
+    let body = f.body();
+    assert!(circular_edges(&body, &[0], &Plane::XZ).is_err());
+    let invalid = Plane { x: Vec3::ZERO, ..Plane::XZ };
+    assert!(circular_edges(&body, &[], &invalid).is_err());
+}
+
+#[test]
+fn auto_mark_rule_commands_preserve_exclusions_and_undo() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius":6,"height":52,"base":[40,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":"Hole"}));
+    let drawing = run(&mut s, "drawing.create", json!({}));
+    let sheet = drawing["sheets"][0]["id"].clone();
+    let view = run(&mut s, "drawing.view.base", json!({"sheet":sheet,"view":"front","scale":"1:1"}))["view"].clone();
+    let set = "drawing.auto_center_mark.set";
+    let inspect = "drawing.auto_center_mark.inspect";
+    let exclude = "drawing.auto_center_mark.exclude";
+    let include = "drawing.auto_center_mark.include";
+    assert_eq!(run(&mut s, set, json!({"view":view,"enabled":true}))["changed"], true);
+    assert_eq!(run(&mut s, set, json!({"view":view,"enabled":true}))["changed"], false);
+    let unchanged = s.drawing("test").unwrap().to_json().unwrap();
+    assert!(s.execute(exclude, &json!({"view":view,"edge":[5,0,0]})).is_err());
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), unchanged);
+    let result = run(&mut s, exclude, json!({"view":view,"edge":[46,0,10]}));
+    assert_eq!(result["exclusions"][0]["status"], "ok");
+    let reference = result["exclusions"][0]["reference"].clone();
+    assert_eq!(run(&mut s, exclude, json!({"view":view,"edge":[46,0,10]}))["changed"], false);
+    let saved = s.drawing("test").unwrap().to_json().unwrap();
+    let reopened = Drawing::from_json(&saved).unwrap();
+    assert_eq!(reopened.views.iter().filter_map(|v| v.centre_marks.as_ref()).next().unwrap().exclude.len(), 1);
+    assert_eq!(run(&mut s, include, json!({"view":view,"reference":reference}))["changed"], true);
+    assert!(run(&mut s, inspect, json!({"view":view}))["exclusions"].as_array().unwrap().is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, inspect, json!({"view":view}))["exclusions"].as_array().unwrap().len(), 1);
+    run(&mut s, set, json!({"view":view,"enabled":false}));
+    assert_eq!(run(&mut s, inspect, json!({"view":view}))["enabled"], false);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, inspect, json!({"view":view}))["exclusions"].as_array().unwrap().len(), 1);
+    let drawing_id = solidcraft_doc::ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature":"Hole"}));
+    run(&mut s, "drawing.open", json!({"drawing":drawing_id}));
+    assert_eq!(run(&mut s, inspect, json!({"view":view}))["exclusions"][0]["status"], "lost");
+    assert_eq!(run(&mut s, include, json!({"view":view,"reference":reference}))["changed"], true);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, inspect, json!({"view":view}))["exclusions"][0]["status"], "lost");
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing":drawing_id}));
+    assert_eq!(run(&mut s, inspect, json!({"view":view}))["exclusions"][0]["status"], "ok");
+}
+
+#[test]
+fn auto_mark_candidates_group_a_real_counterbore_by_connected_faces() {
+    use solidcore_record::Plane;
+    use solidcraft_doc::drawing::auto_marks::{circular_edges, group_candidates};
+    let mut f = boxed();
+    run(&mut f.s, "solid.cylinder", json!({"radius":6,"height":42,"base":[40,-1,15],"axis":"Y","operation":"cut","targets":["Box"],"name":"Hole"}));
+    run(
+        &mut f.s,
+        "solid.cylinder",
+        json!({"radius":10,"height":7,"base":[40,-1,15],"axis":"Y","operation":"cut","targets":["Box"],"name":"Counterbore"}),
+    );
+    let arcs = circular_edges(&f.body(), &[], &Plane::XZ).unwrap();
+    let marks = group_candidates(&arcs).unwrap();
+    let centre = Plane::XZ.to_local(Vec3::new(40.0, 0.0, 15.0));
+    let at_hole: Vec<_> = marks.iter().filter(|mark| mark.center.dist(centre) < 1e-6).collect();
+    assert_eq!(at_hole.len(), 1, "{marks:?}");
+    assert!((at_hole[0].radius - 10.0).abs() < 1e-6);
+    assert!(at_hole[0].sources.len() >= 3);
+}
+
+#[test]
+fn auto_mark_inspect_reports_excessive_limits_and_clears_when_disabled() {
+    let mut s = Session::default();
+    let pin_reply = run(&mut s, "component.create", json!({"name": "Pin"}));
+    let comp = pin_reply["component"].as_u64().unwrap();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [0, 0, 0], "axis": "Y", "operation": "new"}));
+
+    let mut doc = (*s.doc).clone();
+    for i in 1..1025 {
+        doc.add_occurrence(
+            comp,
+            0,
+            solidcraft_doc::rigid(
+                solidcore_record::Vec3::new(i as f64 * 20.0, 0.0, 0.0),
+                solidcore_record::Vec3::ZERO,
+                solidcore_record::Vec3::Z,
+                0.0,
+            ),
+        )
+        .unwrap();
+    }
+    let mut s = Session::new(doc);
+    let drawing = run(&mut s, "drawing.create", json!({}));
+    let sheet = drawing["sheets"][0]["id"].clone();
+    let view = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "view": "front", "scale": "1:1"}))["view"].clone();
+
+    // Enabling automatic marks reports the limit in reason
+    let set_result = run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    assert_eq!(set_result["enabled"], true);
+    assert!(set_result["reason"].as_str().unwrap().contains("more than 2048 automatic-mark edges to group"));
+
+    // Inspect exposes the reason
+    let inspect_result = run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": view}));
+    assert_eq!(inspect_result["enabled"], true);
+    assert!(inspect_result["reason"].as_str().unwrap().contains("more than 2048 automatic-mark edges to group"));
+
+    // Disabling clears the reason
+    let unset_result = run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": false}));
+    assert_eq!(unset_result["enabled"], false);
+    assert!(unset_result.get("reason").is_none());
 }

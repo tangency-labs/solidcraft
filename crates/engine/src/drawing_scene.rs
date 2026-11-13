@@ -35,6 +35,9 @@
 //! A deferred drawing ([`Updates::Deferred`]) draws nothing once the model has moved on from its last
 //! `drawing.update`, which isn't saved: its last lines show, its views listed in `stale`, and every command
 //! that reads a sheet ([`as_shown`]) reads those and lists the views and their dimensions out of date.
+//! A view's centre annotations, and the failures that omit them, are held with its lines the same
+//! way, in view-local paper coordinates, until its next accepted frame; an inspect command reads
+//! the model as it is now instead (`drawing.auto_center_mark.inspect`'s `reason`).
 //!
 //! [`hit`] says which of a scene's objects is under a point of the sheet, the one rule for picking
 //! there: the sheet page's hover and `drawing.scene.hit`.
@@ -88,6 +91,11 @@ use kept::{Kept, KeptDimension, KeptLines, KeptView};
 use marks::Mark;
 #[path = "drawing_scene_marks.rs"]
 mod marks;
+
+/// Eligible automatic-mark sources on one view, before exclusions.
+pub(crate) fn automatic_mark_candidates(s: &Session, view: u64) -> Result<Vec<solidcraft_doc::drawing::auto_marks::MarkCandidate>> {
+    marks::candidates(s, view)
+}
 
 /// The command the sheet scene answers for, in its errors.
 pub const CMD: &str = "drawing.scene";
@@ -406,10 +414,10 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // Construct annotations in view-local paper coordinates, just as the provider does,
     // then translate them once. This keeps one-shot and accepted cached scenes identical.
     let mark_frames = assembly.placed.iter().map(|(id, (frame, _))| (*id, (*frame, Vec2::ZERO))).collect();
-    let mut marks = marks::groups(s, drawing, &mark_frames);
+    let mut marks = marks::groups(s, drawing, &mark_frames, shown.get(&Choice::default()));
     for state in &assembly.states {
         if !assembly.placed.contains_key(&state.view) {
-            marks.extend(marks::unframed(drawing, state.view));
+            marks.extend(marks::unframed(drawing, state.view, &state.status));
         }
     }
     marks.sort_by_key(|mark| (matches!(mark.kind, ObjectKind::CentreLine), mark.object));
@@ -920,7 +928,9 @@ impl Assembly {
         if let Some(group) = mark.group {
             match self.add(&group, &[], Vec2::ZERO, DrawnFor::View) {
                 Ok(bounds_mm) => {
-                    self.objects.extend(SheetObject::on_paper(mark.object, mark.kind, bounds_mm, None).map(banded(DrawnFor::View)));
+                    if mark.object != mark.view {
+                        self.objects.extend(SheetObject::on_paper(mark.object, mark.kind, bounds_mm, None).map(banded(DrawnFor::View)));
+                    }
                 }
                 Err(LeftOut::TooManyRecords) => why = Some(format!("with its lines the sheet exceeds the {MAX_RECORDS} record budget")),
                 Err(LeftOut::Invalid(reason)) => why = Some(reason),
@@ -1027,7 +1037,7 @@ fn assemble<D: Borrow<Drawn>>(
 
 /// The box round what `group` draws: along its lines' paths and its text's outlines, in `fonts`,
 /// and round its pictures.
-fn group_bounds(group: &Group, fonts: &[Font]) -> Aabb2 {
+pub(crate) fn group_bounds(group: &Group, fonts: &[Font]) -> Aabb2 {
     let mut bounds = Aabb2::EMPTY;
     for item in &group.items {
         let mut add = |path: &[Seg2]| path.iter().for_each(|seg| bounds = bounds.union(&seg.bounds()));
@@ -1202,6 +1212,7 @@ struct Inputs {
     dimensions: Vec<(u64, u64)>,
     marks: Vec<Arc<solidcraft_doc::drawing::centre_mark::CentreMark>>,
     lines: Vec<Arc<solidcraft_doc::drawing::centre_line::CentreLine>>,
+    automatic: Vec<(u64, solidcraft_doc::drawing::view::AutoMarks)>,
 }
 
 /// The last answer of [`extract`], for the sheet, drawing, design, world state, lettering and serial
@@ -1296,12 +1307,14 @@ impl Cache {
         let ids: BTreeSet<_> = on.iter().map(|(id, _, _)| *id).collect();
         let marks = d.centre_marks.iter().filter(|mark| ids.contains(&mark.view)).cloned().collect();
         let lines = d.centre_lines.iter().filter(|line| ids.contains(&line.view)).cloned().collect();
+        let automatic =
+            d.views.iter().filter(|view| ids.contains(&view.id)).filter_map(|view| view.centre_marks.clone().map(|rule| (view.id, rule))).collect();
         let images = crate::drawing_pictures::groups(d, record.id);
         let logos = crate::drawing_pictures::logo_items(d, record.id);
         let views = on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect();
         let read = dimensions_on(d, on.iter().map(|(id, ..)| *id));
         let dimensions = read.iter().filter_map(|record| self.dimensions.get(&record.id()).map(|e| (record.id(), e.serial))).collect();
-        Inputs { sheet: record.clone(), projection: d.projection, images, logos, views, dimensions, marks, lines }
+        Inputs { sheet: record.clone(), projection: d.projection, images, logos, views, dimensions, marks, lines, automatic }
     }
 
     /// The views of the last scene assembled, while it is still its sheet's scene: the sheet as `d`
@@ -1451,7 +1464,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let on = views_on(&d, sheet)?;
     set_waiting_dimensions(s, &d, &on, &state, &lettering);
     let revision = s.revision;
-    let has_marks = !d.centre_marks.is_empty() || !d.centre_lines.is_empty();
+    let has_marks = !d.centre_marks.is_empty() || !d.centre_lines.is_empty() || d.views.iter().any(|v| v.centre_marks.is_some());
     let reference_statuses: Vec<_> =
         if has_marks { s.model.results.iter().map(|r| (r.id, r.skipped, r.error.clone())).collect() } else { Vec::new() };
     let last = s.drawing_scenes.last.as_ref().filter(|last| !last.pending && last.reads(sheet, &d, &s.doc, &state, &lettering));
@@ -1493,7 +1506,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             && last.text.faces() == text.faces()
             && last.notes == notes
             && last.reference_statuses == reference_statuses
-            && ((inputs.marks.is_empty() && inputs.lines.is_empty()) || Arc::ptr_eq(&last.state, &state))
+            && ((inputs.marks.is_empty() && inputs.lines.is_empty() && inputs.automatic.is_empty()) || Arc::ptr_eq(&last.state, &state))
     });
     let (scene, views, objects, dimensions, notes_drawn, annotation_failures, generation) = if let Some(last) = reused {
         (
@@ -1581,9 +1594,19 @@ fn provider_marks(
     states: &[ViewState],
 ) -> (Vec<Mark>, BTreeMap<u64, Vec<Mark>>) {
     let fresh: BTreeSet<_> = on.iter().filter(|(id, view, _)| s.drawing_scenes.fresh(*id, state, view)).map(|(id, ..)| *id).collect();
-    let frames = placed.iter().filter(|(id, _)| fresh.contains(id)).map(|(id, (frame, _))| (*id, (*frame, Vec2::ZERO))).collect();
-    let resolved = marks::groups(s, d, &frames);
-    let owner = |object| d.centre_mark(object).map(|m| m.view).or_else(|| d.centre_line(object).map(|l| l.view));
+    let frames: BTreeMap<_, _> = placed.iter().filter(|(id, _)| fresh.contains(id)).map(|(id, (frame, _))| (*id, (*frame, Vec2::ZERO))).collect();
+    // A view drawing its parts apart is never scanned; its rule reports why.
+    let automatic = frames.keys().any(|id| d.view(*id).is_some_and(|view| view.centre_marks.is_some()) && draws_apart(d, *id).is_none());
+    let shown = if automatic {
+        let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
+        crate::drawing_view::shown(copy.as_ref().unwrap_or(s))
+    } else {
+        Err(Unmeasured::NoBodies)
+    };
+    let resolved = marks::groups(s, d, &frames, automatic.then_some(&shown));
+    let owner = |object| {
+        d.centre_mark(object).map(|m| m.view).or_else(|| d.centre_line(object).map(|l| l.view)).or_else(|| d.view(object).map(|view| view.id))
+    };
     let mut by_view: BTreeMap<u64, Vec<Mark>> = BTreeMap::new();
     for group in resolved {
         if let Some(view) = owner(group.object) {
@@ -1605,15 +1628,17 @@ fn provider_marks(
             mark
         }));
     }
-    for view in states.iter().map(|state| state.view).filter(|view| !placed.contains_key(view)) {
-        let local = if fresh.contains(&view) {
-            let local = marks::unframed(d, view);
-            updates.insert(view, local.clone());
+    for state in states.iter().filter(|state| !placed.contains_key(&state.view)) {
+        let local = if fresh.contains(&state.view) {
+            let mut local = by_view.remove(&state.view).unwrap_or_default();
+            local.extend(marks::unframed(d, state.view, &state.status));
+            updates.insert(state.view, local.clone());
             local
         } else {
-            s.drawing_scenes.views.get(&view).map_or_else(Vec::new, |entry| entry.marks.clone())
+            s.drawing_scenes.views.get(&state.view).map_or_else(Vec::new, |entry| entry.marks.clone())
         };
-        groups.extend(local.into_iter().filter(|mark| mark.group.is_none() && owner(mark.object) == Some(view)));
+        // Without a frame only the accepted failures can be presented.
+        groups.extend(local.into_iter().filter(|mark| mark.group.is_none() && owner(mark.object) == Some(state.view)));
     }
     groups.sort_by_key(|group| (matches!(group.kind, ObjectKind::CentreLine), group.object));
     (groups, updates)
@@ -1706,7 +1731,11 @@ impl Job {
         let dimensions = dimensions_on(&drawing, std::iter::once(ticket.view));
         let lines = draw_dimensions(&copy, &drawing, &dimensions, |_| frame, false);
         let frames = drawn.frame.map(|frame| BTreeMap::from([(ticket.view, (frame, Vec2::ZERO))])).unwrap_or_default();
-        let marks = if drawn.frame.is_some() { marks::groups(&copy, &drawing, &frames) } else { marks::unframed(&drawing, ticket.view) };
+        let marks = if drawn.frame.is_some() {
+            marks::groups(&copy, &drawing, &frames, Some(&shown))
+        } else {
+            marks::unframed(&drawing, ticket.view, &drawn.status)
+        };
         let shown = Choice::of(&ticket.resolved).is_placed().then_some((state, shown));
         Done { ticket, drawn, shows, dimensions, lines, marks, shown }
     }

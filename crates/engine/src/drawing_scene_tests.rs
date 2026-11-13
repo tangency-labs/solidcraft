@@ -38,7 +38,7 @@ fn front_and_top_of(mut s: Session) -> (Session, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
@@ -793,7 +793,7 @@ fn two_assembled_one_apart() -> (Session, u64, [u64; 3], u64) {
         let id = d.allocate_id(&mut id_source).unwrap();
         let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), exploded, ..ViewOverrides::default() };
         let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
-        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0, centre_marks: None })]);
         id
     };
     let views = [
@@ -1195,7 +1195,7 @@ fn a_held_deferred_drawing_exports_the_same_from_a_scratch_copy() {
     let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(10431)).unwrap();
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    let view = View { id, sheet: other, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0 };
+    let view = View { id, sheet: other, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0, centre_marks: None };
     d.add_views([Arc::new(view)]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
@@ -3647,6 +3647,7 @@ fn an_off_paper_centre_line_does_not_prevent_view_publication() {
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube", "operation": "new"}));
     let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [300000, 0, 0]}))["occurrence"].as_u64().unwrap();
     let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": ids::encode(front), "enabled": true}));
     let dimension = run(
         &mut s,
         "drawing.dimension.add",
@@ -3777,6 +3778,248 @@ fn centre_annotations_respect_the_cumulative_paper_budget() {
 }
 
 #[test]
+fn automatic_marks_share_manual_strokes_and_refresh_the_cached_scene() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block"}));
+    for x in [20, 40, 60, 80] {
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"radius":6,"height":52,"base":[x,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":format!("Hole{x}")}),
+        );
+    }
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let view = ids::encode(front);
+    let set = "drawing.auto_center_mark.set";
+    run(&mut s, set, json!({"view":view,"enabled":true}));
+    let automatic =
+        |scene: &Scene| scene.groups.iter().filter(|g| g.kind == ObjectKind::CentreMark && g.object == front).cloned().collect::<Vec<_>>();
+    let once = built(&s, sheet).scene;
+    let initial = automatic(&once);
+    assert_eq!(initial.len(), 4);
+    assert_eq!(automatic(&settled(&mut s, sheet).scene), initial);
+    let (lo, hi, _) = reach(&initial[0]);
+    let point = (lo + hi) * 0.5;
+    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet":ids::encode(sheet),"point_mm":[point.x,point.y],"band_mm":0.0}));
+    assert_eq!(hit["hit"]["kind"], "view", "automatic marks must not create selectable objects");
+    assert_eq!(hit["hit"]["object"], view);
+    for group in &initial {
+        assert_eq!(group.items.len(), 2);
+        for item in &group.items {
+            let Item::Stroke { path, pattern, .. } = item else { panic!("expected stroke") };
+            assert!((path[0].length() - 10.0).abs() < 1e-6);
+            assert!(pattern.is_some());
+        }
+    }
+    assert_eq!(run(&mut s, set, json!({"view":view,"enabled":true}))["changed"], false);
+    assert_eq!(automatic(&extract(&mut s, sheet).unwrap().scene).len(), 4);
+    let manual = run(&mut s, "drawing.center_mark.add", json!({"view":view,"edge":[26,0,10],"overshoot_mm":2.0}));
+    let manual_id = ids::decode(manual["mark"].as_str().unwrap()).unwrap();
+    let both = built(&s, sheet).scene;
+    assert_eq!(bytes(&both), bytes(&settled(&mut s, sheet).scene));
+    let manually_drawn = both.groups.iter().find(|g| g.object == manual_id && g.kind == ObjectKind::CentreMark).unwrap();
+    assert!(automatic(&both).iter().any(|g| g.items == manually_drawn.items));
+    let reply = run(&mut s, CMD, json!({"sheet":ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let selectable_marks: Vec<_> = reply["objects"].as_array().unwrap().iter().filter(|object| object["kind"] == "centre_mark").collect();
+    assert_eq!(selectable_marks.len(), 1);
+    assert_eq!(selectable_marks[0]["object"], ids::encode(manual_id));
+    run(&mut s, "drawing.auto_center_mark.exclude", json!({"view":view,"edge":[26,0,10]}));
+    let excluded = extract(&mut s, sheet).unwrap().scene;
+    assert_eq!(automatic(&excluded).len(), 3);
+    assert_eq!(automatic(&built(&s, sheet).scene), automatic(&excluded));
+    assert!(excluded.groups.iter().any(|g| g.object == manual_id && g.kind == ObjectKind::CentreMark));
+    // Exercise the saved rule through the actual design-file lifecycle, not just record JSON.
+    let folder = crate::tests::Folder::new("auto-centre-marks");
+    let path = folder.path("marks.solidcraft");
+    let drawing_id = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "file.save", json!({"path":path}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path":path}));
+    run(&mut reopened, "drawing.open", json!({"drawing":drawing_id}));
+    assert_eq!(automatic(&settled(&mut reopened, sheet).scene), automatic(&excluded));
+    assert_eq!(run(&mut reopened, "drawing.auto_center_mark.inspect", json!({"view":view}))["exclusions"][0]["status"], "ok");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(automatic(&extract(&mut s, sheet).unwrap().scene).len(), 4);
+    run(&mut s, "drawing.view.edit", json!({"view":view,"set":{"place":{"at":[200.0,150.0]},"scale":"1:1"}}));
+    let scaled = settled(&mut s, sheet).scene;
+    assert_eq!(automatic(&built(&s, sheet).scene), automatic(&scaled));
+    for group in automatic(&scaled) {
+        for item in &group.items {
+            let Item::Stroke { path, .. } = item else { panic!("expected stroke") };
+            assert!((path[0].length() - 16.0).abs() < 1e-6);
+        }
+    }
+    run(&mut s, "edit.undo", json!({}));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius":3,"height":52,"base":[5,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":"Hole5"}));
+    run(&mut s, "drawing.open", json!({"drawing":drawing}));
+    assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 5);
+    assert_eq!(automatic(&built(&s, sheet).scene), automatic(&settled(&mut s, sheet).scene));
+    let exported = run(&mut s, "drawing.export", json!({"sheet":ids::encode(sheet)}));
+    assert!(exported["svg"].as_str().unwrap().contains("stroke-dasharray="));
+}
+
+#[test]
+fn automatic_marks_distinguish_placed_occurrences_and_exclusions() {
+    let mut s = Session::default();
+    let first = run(&mut s, "component.create", json!({"name":"Part"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block","operation":"new"}));
+    run(&mut s, "solid.cylinder", json!({"radius":6,"height":52,"base":[40,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":"Hole"}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence":first,"translate":[120,0,0]}))["occurrence"].as_u64().unwrap();
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let view = ids::encode(front);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view":view,"enabled":true}));
+    let automatic =
+        |scene: &Scene| scene.groups.iter().filter(|g| g.kind == ObjectKind::CentreMark && g.object == front).cloned().collect::<Vec<_>>();
+    let all = automatic(&settled(&mut s, sheet).scene);
+    assert_eq!(all.len(), 2);
+    let first_center = (reach(&all[0]).0 + reach(&all[0]).1) * 0.5;
+    let second_center = (reach(&all[1]).0 + reach(&all[1]).1) * 0.5;
+    assert!((first_center.dist(second_center) - 60.0).abs() < 1e-6);
+    let manual =
+        run(&mut s, "drawing.center_mark.add", json!({"view": view, "edge": {"point": [166, 0, 10], "path": [second]}, "overshoot_mm": 2.0}))["mark"]
+            .clone();
+    let line = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({"view": view, "a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [120, 0, 0], "path": [second]}, "overshoot_mm": 2.0}),
+    )["line"]
+        .clone();
+    let manual_id = ids::decode(manual.as_str().unwrap()).unwrap();
+    let line_id = ids::decode(line.as_str().unwrap()).unwrap();
+    settled(&mut s, sheet);
+    // Filtering uses the resolved saved view, not the visible-line result. The old marks
+    // remain with the old view until its filtered frame is accepted.
+    run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"hide": [[second]]}}));
+    assert_eq!(automatic(&extract(&mut s, sheet).unwrap().scene).len(), 2);
+    let hidden = settled(&mut s, sheet).scene;
+    assert_eq!(automatic(&hidden).len(), 1);
+    assert!(hidden.groups.iter().any(|group| group.object == manual_id && group.kind == ObjectKind::CentreMark));
+    assert!(hidden.groups.iter().any(|group| group.object == line_id && group.kind == ObjectKind::CentreLine));
+    let warning = json!([format!("view {view} doesn't draw this part now: its hide leaves out occurrence path [{second}]")]);
+    for (command, params) in [("drawing.center_mark.inspect", json!({"mark": manual})), ("drawing.center_line.inspect", json!({"line": line}))] {
+        let inspected = run(&mut s, command, params);
+        assert_eq!(inspected["status"], "ok");
+        assert_eq!(inspected["warnings"], warning);
+    }
+    let projected =
+        s.drawing("test").unwrap().views.iter().find(|v| matches!(v.kind, ViewKind::Projected { parent, .. } if parent == front)).unwrap().id;
+    let resolved = s.drawing("test").unwrap().resolve_view(projected).unwrap();
+    let shown = crate::drawing_view::shown(&s).unwrap();
+    assert_eq!(shown.of_view(&resolved).bodies.iter().map(|body| body.path.clone()).collect::<Vec<_>>(), vec![vec![first]]);
+    assert!(s.execute("drawing.auto_center_mark.exclude", &json!({"view": view, "edge": {"point": [166,0,10], "path": [second]}})).is_err());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 2);
+    assert!(run(&mut s, "drawing.center_mark.inspect", json!({"mark": manual}))["warnings"].is_null());
+    assert!(run(&mut s, "drawing.center_line.inspect", json!({"line": line}))["warnings"].is_null());
+    run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"source": {"occurrences": [[first]]}}}));
+    assert_eq!(automatic(&extract(&mut s, sheet).unwrap().scene).len(), 2);
+    assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 1);
+    let warning = json!([format!("view {view} doesn't draw this part now: its source draws only the occurrences it chose")]);
+    assert_eq!(run(&mut s, "drawing.center_mark.inspect", json!({"mark": manual}))["warnings"], warning);
+    assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line": line}))["warnings"], warning);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 2);
+    let exclusion = run(&mut s, "drawing.auto_center_mark.exclude", json!({"view":view,"edge":{"point":[46,0,10],"path":[first]}}));
+    assert_eq!(exclusion["exclusions"][0]["reference"]["path"], json!([first]));
+    assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 1);
+    assert_eq!(automatic(&built(&s, sheet).scene), automatic(&settled(&mut s, sheet).scene));
+    run(&mut s, "drawing.auto_center_mark.exclude", json!({"view":view,"edge":{"point":[166,0,10],"path":[second]}}));
+    assert!(automatic(&settled(&mut s, sheet).scene).is_empty());
+}
+
+#[test]
+fn automatic_mark_considers_a_hole_occluded_by_another_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius":6,"height":52,"base":[40,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":"Hole"}));
+    run(&mut s, "solid.box", json!({"corner":[0,-10,0],"length":100,"width":5,"height":20,"body_name":"Cover","operation":"new"}));
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view":ids::encode(front),"enabled":true}));
+    let scene = settled(&mut s, sheet).scene;
+    let marks: Vec<_> = scene.groups.iter().filter(|g| g.kind == ObjectKind::CentreMark && g.object == front).collect();
+    assert_eq!(marks.len(), 1);
+    let (lo, hi, _) = reach(marks[0]);
+    let centre = (lo + hi) * 0.5;
+    let view = scene.groups.iter().find(|g| g.kind == ObjectKind::View && g.object == front).unwrap();
+    let visible_rim = view
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Stroke { path, .. } => Some(path),
+            _ => None,
+        })
+        .flatten()
+        .flat_map(|segment| [segment.start(), segment.end()])
+        .any(|point| (point.dist(centre) - 3.0).abs() < 1e-4);
+    assert!(!visible_rim, "the cover should occlude the hole's visible lines");
+    assert_eq!(automatic_scene_groups(&built(&s, sheet).scene, front), automatic_scene_groups(&scene, front));
+}
+
+fn automatic_scene_groups(scene: &Scene, view: u64) -> Vec<Group> {
+    scene.groups.iter().filter(|group| group.kind == ObjectKind::CentreMark && group.object == view).cloned().collect()
+}
+
+#[test]
+fn automatic_marks_follow_only_the_accepted_view_job() {
+    let (mut s, sheet, front, _, _) = holed();
+    let view = ids::encode(front);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    let before = settled(&mut s, sheet);
+    assert_eq!(automatic_scene_groups(&before.scene, front).len(), 1);
+    run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"scale": "1:1"}}));
+    assert_eq!(automatic_scene_groups(&extract(&mut s, sheet).unwrap().scene, front), automatic_scene_groups(&before.scene, front));
+    let stale = begin(&mut s).unwrap().run();
+    run(&mut s, "drawing.auto_center_mark.exclude", json!({"view": view, "edge": [56, 0, 10]}));
+    assert!(!finish(&mut s, stale), "a changed exclusion invalidates the running job");
+    let earlier = begin(&mut s).unwrap().run();
+    let latest = begin(&mut s).unwrap().run();
+    assert!(!finish(&mut s, earlier));
+    assert!(finish(&mut s, latest));
+    let end = settled(&mut s, sheet);
+    assert!(automatic_scene_groups(&end.scene, front).is_empty());
+    assert_eq!(bytes(&end.scene), bytes(&built(&s, sheet).scene));
+    run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"scale": "1:4"}}));
+    extract(&mut s, sheet).unwrap();
+    let cancelled = begin(&mut s).unwrap().run();
+    cancel(&mut s);
+    assert!(!finish(&mut s, cancelled));
+    assert!(automatic_scene_groups(&extract(&mut s, sheet).unwrap().scene, front).is_empty());
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
+}
+
+/// The background copy takes a reopened held drawing's automatic marks with its kept view lines.
+#[test]
+fn a_reopened_held_drawing_exports_its_automatic_marks_from_the_background_copy() {
+    let (mut s, sheet, front, _, drawing) = holed();
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": ids::encode(front), "enabled": true}));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    extract(&mut s, sheet).unwrap();
+    run(&mut s, "drawing.update", json!({}));
+    let before = settled(&mut s, sheet);
+    let marks = automatic_scene_groups(&before.scene, front);
+    assert_eq!(marks.len(), 1);
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let request = json!({"sheet": ids::encode(sheet), "format": "svg"});
+    let scratch = s.scratch_as_shown().execute("drawing.export", &request).unwrap();
+    let session = run(&mut s, "drawing.export", request);
+    assert_eq!((&scratch["svg"], &scratch["out_of_date"]), (&session["svg"], &session["out_of_date"]));
+    let held = settled(&mut s, sheet);
+    assert!(held.stale.contains(&front));
+    assert_eq!(automatic_scene_groups(&held.scene, front), marks);
+    run(&mut s, "drawing.update", json!({}));
+    let updated = settled(&mut s, sheet);
+    assert!(!updated.stale.contains(&front));
+    assert_eq!(bytes(&updated.scene), bytes(&built(&s, sheet).scene));
+}
+
+#[test]
 fn manual_centre_annotations_use_the_shared_sheet_hit_test() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
@@ -3831,6 +4074,34 @@ fn manual_centre_annotations_use_the_shared_sheet_hit_test() {
 }
 
 #[test]
+fn automatic_marks_ignore_an_uncaptured_occurrence_move_like_their_view() {
+    let mut s = Session::default();
+    let occurrence = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}))["occurrence"].clone();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block", "operation": "new"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 6, "height": 52, "base": [40, -1, 10], "axis": "Y", "operation": "cut", "targets": ["Block"], "name": "Hole"}),
+    );
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-20, 0, 0], "body_name": "Anchor", "operation": "new"}));
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": ids::encode(front), "enabled": true}));
+    let before = settled(&mut s, sheet);
+    let initial = automatic_scene_groups(&before.scene, front);
+    assert_eq!(initial.len(), 1);
+    in_the_model(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [30, 0, 0], "capture": false}));
+    assert!(!s.pending_moves.is_empty());
+    let pending = settled(&mut s, sheet);
+    assert_eq!(automatic_scene_groups(&pending.scene, front), initial);
+    assert_eq!(bytes(&pending.scene), bytes(&built(&s, sheet).scene));
+    in_the_model(&mut s, "component.capture_position", json!({}));
+    let captured = settled(&mut s, sheet);
+    assert_ne!(automatic_scene_groups(&captured.scene, front), initial);
+    assert_eq!(bytes(&captured.scene), bytes(&built(&s, sheet).scene));
+}
+
+#[test]
 fn closing_and_deleting_a_drawing_cleans_up_its_retained_centre_annotations() {
     let (mut s, sheet, [front, _]) = front_and_top();
     let drawing = s.open_drawing.unwrap();
@@ -3871,4 +4142,664 @@ fn centre_annotations_refuse_a_motion_study_view() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("centre annotations") && err.contains("position of its own"), "{err}");
+}
+
+#[test]
+fn automatic_mark_inspection_explains_a_view_past_the_walk_limit() {
+    let (mut s, sheet, front, _, _) = holed();
+    let view = ids::encode(front);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    settled(&mut s, sheet);
+    for level in 0..=MAX_PLACEMENT_DEPTH as u64 + 1 {
+        nest(&mut s, level);
+    }
+
+    let shown = settled(&mut s, sheet);
+    assert_eq!(shown.views.iter().find(|v| v.view == front).unwrap().status, Status::Placeholder(Unmeasured::PastWalkLimit));
+    assert!(!shown.scene.groups.iter().any(|group| group.object == front && group.kind == ObjectKind::CentreMark));
+    let failure = shown.annotation_failures.iter().find(|failure| failure.view == front).unwrap();
+    assert!(failure.reason.contains("without a drawable view frame"), "{}", failure.reason);
+    assert_eq!(shown.annotation_failures, built(&s, sheet).annotation_failures);
+    let inspected = run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": view}));
+    assert_eq!(inspected["enabled"], true);
+    assert!(inspected["reason"].as_str().unwrap().contains("past_walk_limit"), "{inspected}");
+}
+
+#[test]
+fn automatic_mark_scan_failure_is_reported_without_hiding_manual_annotations() {
+    let (mut s, sheet, front, _, _) = holed();
+    let view = ids::encode(front);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    let manual = run(&mut s, "drawing.center_mark.add", json!({"view": view, "edge": [56, 0, 10], "overshoot_mm": 2.0}));
+    let manual = ids::decode(manual["mark"].as_str().unwrap()).unwrap();
+    settled(&mut s, sheet);
+    let frame = s.drawing_scenes.views.get(&front).unwrap().drawn.frame.unwrap();
+    let d = s.drawing("test").unwrap().clone();
+    let frames = BTreeMap::from([(front, (frame, Vec2::ZERO))]);
+    let marks = marks::groups(&s, &d, &frames, Some(&Err(Unmeasured::NotPlaced)));
+    let record = sheet_of(&d, sheet).unwrap();
+    let mut assembly = assemble(record, d.projection, &labels(record), &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap();
+    for mark in marks {
+        assembly.add_mark(mark);
+    }
+    assert!(assembly.objects.iter().any(|(_, object)| object.object == manual));
+    assert!(!assembly.objects.iter().any(|(_, object)| object.object == front));
+    assert_eq!(assembly.annotation_failures.len(), 1);
+    let failure = &assembly.annotation_failures[0];
+    assert_eq!((failure.object, failure.view, failure.kind), (front, front, ObjectKind::CentreMark));
+    assert!(failure.reason.contains("cannot scan shown bodies"));
+}
+
+#[test]
+fn automatic_marks_skip_mesh_bodies_and_export_sheet_successfully() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 6, "height": 52, "base": [50, -1, 10], "axis": "Y", "operation": "cut", "targets": ["Block"], "name": "Hole"}),
+    );
+    let mesh_solid =
+        solidcraft_kernel::box_solid(solidcore_record::Vec3::new(120.0, 0.0, 0.0), solidcore_record::Vec3::new(140.0, 20.0, 20.0)).unwrap();
+    let mesh = mesh_solid.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = (*s.doc).clone();
+    doc.add_feature(
+        solidcraft_doc::FeatureKind::MeshImport {
+            file: "mesh.stl".into(),
+            meshes: vec![solidcraft_doc::MeshData {
+                name: "MeshBody".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                corner_normals: Default::default(),
+                color: None,
+            }],
+        },
+        Some("ImportMesh"),
+    )
+    .unwrap();
+    let (mut s, sheet, [front, _]) = front_and_top_of(Session::new(doc));
+    let view = ids::encode(front);
+
+    // Automatic centre marks enabled on the front view containing the solid hole and the mesh
+    let set = run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    assert_eq!(set["enabled"], true);
+    assert_eq!(set["changed"], true);
+    assert!(set.get("reason").is_none());
+
+    // Inspect confirms rule is enabled with no limit or mesh failure
+    let inspected = run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": view}));
+    assert_eq!(inspected["enabled"], true);
+    assert!(inspected.get("reason").is_none());
+
+    // Sheet scene succeeds without failing the sheet; mesh body is skipped, solid hole is marked
+    let params = json!({"sheet": ids::encode(sheet)});
+    let scene = run(&mut s, "drawing.scene", params.clone());
+    assert!(scene.get("annotation_failures").is_none());
+    let has_mark = scene["scene"]["groups"].as_array().unwrap().iter().any(|g| g["object"] == front && g["kind"] == "centre_mark");
+    assert!(has_mark, "hole on solid body must receive automatic centre mark");
+
+    // Sheet export succeeds without failing, outputting the centre mark in SVG
+    let export = run(&mut s, "drawing.export", params);
+    assert!(export.get("annotation_failures").is_none());
+    let svg = export["svg"].as_str().unwrap();
+    assert!(svg.contains("stroke-dasharray"), "SVG export must contain centre mark dashes for the hole");
+}
+
+#[test]
+fn automatic_marks_omit_affected_view_on_excessive_edge_limits_while_drawing_unaffected_views() {
+    let mut s = Session::default();
+    let pin_reply = run(&mut s, "component.create", json!({"name": "Pin"}));
+    let comp = pin_reply["component"].as_u64().unwrap();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [0, 0, 0], "axis": "Y", "operation": "new"}));
+
+    let single_reply = run(&mut s, "component.create", json!({"name": "Single", "parent": 0}));
+    let single_occ = single_reply["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.cylinder", json!({"radius": 8, "height": 30, "base": [0, 100, 0], "axis": "Y", "operation": "new"}));
+
+    // Add 1024 occurrences of Pin (total 1025 occurrences of Pin = 2050 circular edges in front view > MAX_GROUP_EDGES 2048)
+    let mut doc = (*s.doc).clone();
+    for i in 1..1025 {
+        doc.add_occurrence(
+            comp,
+            0,
+            solidcraft_doc::rigid(
+                solidcore_record::Vec3::new(i as f64 * 20.0, 0.0, 0.0),
+                solidcore_record::Vec3::ZERO,
+                solidcore_record::Vec3::Z,
+                0.0,
+            ),
+        )
+        .unwrap();
+    }
+    let mut s = Session::new(doc);
+
+    let drawing = run(&mut s, "drawing.create", json!({}));
+    let sheet = drawing["sheets"][0]["id"].clone();
+
+    // View 1 (affected): shows all bodies, exceeding the 2048 limit
+    let view1 = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "view": "front", "scale": "1:1"}))["view"].clone();
+    // View 2 (unaffected): isolated to only single_occ, well within limit
+    let view2 = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "view": "front", "scale": "1:1"}))["view"].clone();
+    run(&mut s, "drawing.view.edit", json!({"view": view2, "set": {"source": {"occurrences": [[single_occ]]}}}));
+
+    // Enable automatic marks on both views
+    let set1 = run(&mut s, "drawing.auto_center_mark.set", json!({"view": view1, "enabled": true}));
+    assert_eq!(set1["enabled"], true);
+    assert!(set1["reason"].as_str().unwrap().contains("more than 2048 automatic-mark edges to group"));
+
+    let set2 = run(&mut s, "drawing.auto_center_mark.set", json!({"view": view2, "enabled": true}));
+    assert_eq!(set2["enabled"], true);
+    assert!(set2.get("reason").is_none());
+
+    // Inspect confirms the excessive limit reason on view1 and ok status on view2
+    let inspect1 = run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": view1}));
+    assert_eq!(inspect1["enabled"], true);
+    assert!(inspect1["reason"].as_str().unwrap().contains("more than 2048 automatic-mark edges to group"));
+
+    let inspect2 = run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": view2}));
+    assert_eq!(inspect2["enabled"], true);
+    assert!(inspect2.get("reason").is_none());
+
+    // The entire sheet does not fail: drawing.scene succeeds
+    let params = json!({"sheet": sheet});
+    let scene = run(&mut s, "drawing.scene", params.clone());
+    assert_eq!(scene["annotation_failures"].as_array().unwrap().len(), 1);
+    let failure = &scene["annotation_failures"][0];
+    assert_eq!(failure["view"], view1);
+    assert_eq!(failure["kind"], "centre_mark");
+    assert!(failure["reason"].as_str().unwrap().contains("more than 2048 automatic-mark edges to group"));
+
+    // View 2's automatic mark is present in the scene, while View 1's mark is omitted
+    let view1_id = ids::decode(view1.as_str().unwrap()).unwrap();
+    let view2_id = ids::decode(view2.as_str().unwrap()).unwrap();
+    let has_view1_mark = scene["scene"]["groups"].as_array().unwrap().iter().any(|g| g["object"] == view1_id && g["kind"] == "centre_mark");
+    let has_view2_mark = scene["scene"]["groups"].as_array().unwrap().iter().any(|g| g["object"] == view2_id && g["kind"] == "centre_mark");
+    assert!(!has_view1_mark, "affected view must have its automatic centre marks omitted");
+    assert!(has_view2_mark, "unaffected view must have its automatic centre mark drawn in scene");
+
+    // drawing.export succeeds rather than failing the sheet/export
+    let export = run(&mut s, "drawing.export", params);
+    assert_eq!(export["annotation_failures"].as_array().unwrap().len(), 1);
+    let export_failure = &export["annotation_failures"][0];
+    assert_eq!(export_failure["view"], view1);
+    assert!(export_failure["reason"].as_str().unwrap().contains("more than 2048 automatic-mark edges to group"));
+    let svg = export["svg"].as_str().unwrap();
+    assert!(svg.contains("stroke-dasharray"), "export must contain automatic centre mark strokes for unaffected view");
+}
+
+/// A held deferred drawing keeps its view's accepted automatic marks, and the accepted failures,
+/// until `drawing.update`, as `drawing.scene` lists it in `out_of_date`; `drawing.auto_center_mark.inspect`
+/// reads the model as it is now. Once updated, both say the same, in both directions.
+#[test]
+fn automatic_mark_inspect_reads_the_model_now_while_a_held_sheet_keeps_its_accepted_marks() {
+    const LIMIT: &str = "more than 2048 automatic-mark edges to group";
+    let mut s = Session::default();
+    let comp = run(&mut s, "component.create", json!({"name": "Pin"}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [0, 0, 0], "axis": "Y", "operation": "new"}));
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let view = ids::encode(front);
+    let params = json!({"sheet": ids::encode(sheet)});
+    let inspect = |s: &mut Session| run(s, "drawing.auto_center_mark.inspect", json!({"view": view}));
+    let reopened_with = |s: &mut Session, occurrences: &dyn Fn(&mut Session)| {
+        let drawing = ids::encode(s.open_drawing.unwrap());
+        run(s, "drawing.close", json!({}));
+        occurrences(s);
+        run(s, "drawing.open", json!({"drawing": drawing}));
+    };
+
+    // Fresh, one pin: the marks are drawn, and neither the scene nor inspect reports a reason.
+    assert!(run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true})).get("reason").is_none());
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    extract(&mut s, sheet).unwrap();
+    run(&mut s, "drawing.update", json!({}));
+    let accepted = settled(&mut s, sheet);
+    let marks = automatic_scene_groups(&accepted.scene, front);
+    assert!(!marks.is_empty() && accepted.annotation_failures.is_empty() && !accepted.stale.contains(&front));
+    assert!(inspect(&mut s).get("reason").is_none());
+
+    // The model moves on to more edges than a view groups: held, the sheet still shows the accepted
+    // marks with no failure, though inspect already says why the model now has none.
+    reopened_with(&mut s, &|s| {
+        for i in 1..1025 {
+            let at = solidcore_record::Vec3::new(f64::from(i) * 20.0, 0.0, 0.0);
+            s.doc_mut().add_occurrence(comp, 0, solidcraft_doc::rigid(at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0)).unwrap();
+        }
+    });
+    let held = settled(&mut s, sheet);
+    assert!(held.stale.contains(&front));
+    assert_eq!(automatic_scene_groups(&held.scene, front), marks);
+    assert!(held.annotation_failures.is_empty());
+    let shown = run(&mut s, "drawing.scene", params.clone());
+    assert!(shown.get("annotation_failures").is_none(), "{shown}");
+    assert!(shown["out_of_date"].as_array().unwrap().contains(&json!(view)), "{shown}");
+    let held_check = run(&mut s, "drawing.check", params.clone());
+    assert!(
+        !held_check["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "failed" && f["object"]["id"] == view && f["why"].as_str().unwrap().contains(LIMIT)),
+        "{held_check}"
+    );
+    let now = inspect(&mut s);
+    assert!(now["reason"].as_str().unwrap().contains(LIMIT), "{now}");
+
+    // Updated: the sheet reports the failure inspect reported, with the view as its object, and
+    // draws no automatic mark.
+    run(&mut s, "drawing.update", json!({}));
+    let fresh = run(&mut s, "drawing.scene", params.clone());
+    assert!(fresh.get("out_of_date").is_none(), "{fresh}");
+    let failures = fresh["annotation_failures"].as_array().unwrap();
+    assert_eq!(failures.len(), 1, "{fresh}");
+    assert_eq!((&failures[0]["object"], &failures[0]["view"], &failures[0]["kind"]), (&json!(view), &json!(view), &json!("centre_mark")));
+    assert_eq!(failures[0]["reason"], inspect(&mut s)["reason"]);
+    let fresh_check = run(&mut s, "drawing.check", params.clone());
+    assert!(
+        fresh_check["findings"].as_array().unwrap().iter().any(|f| f["kind"] == "failed"
+            && f["object"]["kind"] == "view"
+            && f["object"]["id"] == view
+            && f["why"].as_str().unwrap().contains(LIMIT)),
+        "{fresh_check}"
+    );
+    let drawn = settled(&mut s, sheet);
+    assert!(automatic_scene_groups(&drawn.scene, front).is_empty() && !drawn.stale.contains(&front));
+    assert_eq!(drawn.annotation_failures.len(), 1);
+
+    // The model recovers: held, the sheet keeps the accepted failure and no marks, and inspect
+    // already has no reason; updated, the marks are back as they were and the failure is gone.
+    reopened_with(&mut s, &|s| s.doc_mut().occurrences.truncate(1));
+    let held = settled(&mut s, sheet);
+    assert!(held.stale.contains(&front));
+    assert!(automatic_scene_groups(&held.scene, front).is_empty());
+    assert_eq!(held.annotation_failures, drawn.annotation_failures);
+    let held_check = run(&mut s, "drawing.check", params.clone());
+    assert!(
+        held_check["findings"].as_array().unwrap().iter().any(|f| f["kind"] == "failed"
+            && f["object"]["kind"] == "view"
+            && f["object"]["id"] == view
+            && f["why"].as_str().unwrap().contains(LIMIT)),
+        "{held_check}"
+    );
+    assert!(inspect(&mut s).get("reason").is_none());
+    run(&mut s, "drawing.update", json!({}));
+    let recovered = settled(&mut s, sheet);
+    assert!(!recovered.stale.contains(&front) && recovered.annotation_failures.is_empty());
+    assert_eq!(automatic_scene_groups(&recovered.scene, front), marks);
+}
+
+/// A block with a cross hole as two occurrences of one component and an exploded view, Apart, that moves
+/// the second: the session, the component, the first occurrence and Apart's id.
+fn holed_pair() -> (Session, u64, u64, u64) {
+    let mut s = Session::default();
+    let made = run(&mut s, "component.create", json!({"name": "Part"}));
+    let (comp, first) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block", "operation": "new"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 52, "base": [50, -1, 10], "axis": "Y", "operation": "cut", "targets": ["Block"]}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [150, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let apart =
+        run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": second, "translate": [30, 0, 0]}]}))["view"].as_u64().unwrap();
+    (s, comp, first, apart)
+}
+
+/// Changing sheet notes and an automatic rule independently keeps the accepted scene and the
+/// one-shot export in agreement, including the notes introduced by drawings' note-field support.
+#[test]
+fn automatic_marks_and_notes_refresh_without_losing_each_other() {
+    let (s, _, _, _) = holed_pair();
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let note = sheet_note(&mut s, sheet, [60.0, 40.0], json!("General note"));
+    let field = view_note(&mut s, front, None, [0.0, -30.0], sheet_of_count());
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    let view = ids::encode(front);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    let initial = settled(&mut s, sheet);
+    let marks = automatic_scene_groups(&initial.scene, front);
+    assert!(!marks.is_empty());
+    assert_eq!(bytes(&initial.scene), bytes(&built(&s, sheet).scene));
+    assert_eq!(text_and_tips(group_of(&initial.scene, field)).0, vec!["Sheet 1 of 1".to_string()]);
+    let folder = crate::tests::Folder::new("auto-marks-and-logo");
+    let path = folder.path("logo.png");
+    let png =
+        solidcraft_doc::canvas::base64_decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8AAQv8BD/kD/YURmXYAAAAASUVORK5CYII=")
+            .unwrap();
+    std::fs::write(&path, png).unwrap();
+    run(&mut s, "drawing.title_block.logo", json!({"cell": "legal_owner", "file": path}));
+    let with_logo = settled(&mut s, sheet);
+    assert_eq!(automatic_scene_groups(&with_logo.scene, front), marks);
+    assert!(
+        with_logo
+            .scene
+            .groups
+            .iter()
+            .any(|group| group.kind == ObjectKind::TitleBlock && group.items.iter().any(|item| matches!(item, Item::Picture(_))))
+    );
+    assert_eq!(bytes(&with_logo.scene), bytes(&built(&s, sheet).scene));
+    run(&mut s, "drawing.note.edit", json!({"note": ids::encode(note), "set": {"content": "Revised note"}}));
+    let edited = settled(&mut s, sheet);
+    assert_eq!(automatic_scene_groups(&edited.scene, front), marks);
+    assert_eq!(text_and_tips(group_of(&edited.scene, note)).0, vec!["Revised note".to_string()]);
+    assert_eq!(bytes(&edited.scene), bytes(&built(&s, sheet).scene));
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": false}));
+    let disabled = settled(&mut s, sheet);
+    assert!(automatic_scene_groups(&disabled.scene, front).is_empty());
+    assert_eq!(text_and_tips(group_of(&disabled.scene, note)).0, vec!["Revised note".to_string()]);
+    assert_eq!(bytes(&disabled.scene), bytes(&built(&s, sheet).scene));
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    assert_eq!(automatic_scene_groups(&settled(&mut s, sheet).scene, front), marks);
+}
+
+/// Automatic centre marks read the assembled placements, so an exploded view can't have them yet: the
+/// rule can't be enabled and no edge excluded there, and a view edit can't make a view exploded while
+/// its rule is on, each changing nothing. What a saved file holds is cleaned up, though: disabling
+/// and including an exclusion are allowed, and until then the view draws no mark, says why in the
+/// scene, the export's failures and inspect, and leaves the other views as they were.
+#[test]
+fn automatic_marks_on_an_exploded_view_are_refused_held_and_inspected() {
+    let (s, _, first, apart) = holed_pair();
+    let (mut s, sheet, [front, top]) = front_and_top_of(s);
+    let (front_id, top_id) = (ids::encode(front), ids::encode(top));
+    let edge = json!({"point": [56, 0, 10], "path": [first]});
+    let unchanged = |s: &mut Session, cmd: &str, params: Value, says: &str| {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let error = s.execute(cmd, &params).unwrap_err().to_string();
+        assert!(error.contains(says), "{error}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    };
+
+    // A rule on: exploding its view, or a follower's, is refused; the view keeps its marks.
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": front_id, "enabled": true}));
+    unchanged(&mut s, "drawing.view.edit", json!({"view": front_id, "set": {"exploded": apart}}), "automatic centre marks enabled");
+    let marks = automatic_scene_groups(&settled(&mut s, sheet).scene, front);
+    assert!(!marks.is_empty());
+
+    // An exploded view can't enable a rule, whatever it is asked, and keeps the choice it had.
+    run(&mut s, "drawing.view.edit", json!({"view": top_id, "set": {"exploded": apart}}));
+    unchanged(&mut s, "drawing.auto_center_mark.set", json!({"view": top_id, "enabled": true}), "automatic centre marks on an exploded view");
+    assert_eq!(run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": top_id}))["enabled"], false);
+    // Disabling what isn't on is no change, and no refusal.
+    assert_eq!(run(&mut s, "drawing.auto_center_mark.set", json!({"view": top_id, "enabled": false}))["changed"], false);
+
+    // As a saved file holds it: a rule, and an exclusion, on a view that draws an exploded view.
+    let kept = run(&mut s, "drawing.auto_center_mark.exclude", json!({"view": front_id, "edge": edge}));
+    let reference = kept["exclusions"][0]["reference"].clone();
+    run(&mut s, "edit.undo", json!({}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|view| view.id == top).unwrap();
+    let rule = solidcraft_doc::drawing::view::AutoMarks { exclude: vec![serde_json::from_value(reference.clone()).unwrap()] };
+    Arc::make_mut(record).centre_marks = Some(rule);
+    s.doc_mut().put_drawing(Arc::new(d));
+
+    let shown = settled(&mut s, sheet);
+    let once = built(&s, sheet);
+    assert_eq!(bytes(&shown.scene), bytes(&once.scene));
+    assert_eq!(shown.annotation_failures, once.annotation_failures);
+    assert!(automatic_scene_groups(&shown.scene, top).is_empty());
+    assert_eq!(automatic_scene_groups(&shown.scene, front), marks, "the other view is as it was");
+    assert_eq!(shown.annotation_failures.len(), 1, "{:?}", shown.annotation_failures);
+    let failure = &shown.annotation_failures[0];
+    assert_eq!((failure.object, failure.view, failure.kind), (top, top, ObjectKind::CentreMark));
+    assert!(failure.reason.contains("exploded view"), "{}", failure.reason);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(scene["annotation_failures"][0]["view"], json!(top_id), "{scene}");
+    let inspected = run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": top_id}));
+    assert_eq!(inspected["enabled"], true);
+    assert_eq!(inspected["reason"], json!(failure.reason), "{inspected}");
+
+    // Excluding is refused there, and the saved exclusion can still be included again, then the rule
+    // turned off: each one undo step, after which the view draws with no failure.
+    unchanged(
+        &mut s,
+        "drawing.auto_center_mark.exclude",
+        json!({"view": top_id, "edge": edge}),
+        "an automatic centre mark exclusion on an exploded view",
+    );
+    let included = run(&mut s, "drawing.auto_center_mark.include", json!({"view": top_id, "reference": reference}));
+    assert_eq!((included["changed"].clone(), included["exclusions"].as_array().unwrap().len()), (json!(true), 0));
+    let off = run(&mut s, "drawing.auto_center_mark.set", json!({"view": top_id, "enabled": false}));
+    assert_eq!((off["changed"].clone(), off["enabled"].clone(), off.get("reason")), (json!(true), json!(false), None));
+    let clean = settled(&mut s, sheet);
+    assert!(clean.annotation_failures.is_empty());
+    assert_eq!(automatic_scene_groups(&clean.scene, front), marks);
+}
+
+/// A deferred drawing holds what it last accepted: a saved rule that now sits on an exploded view
+/// keeps its view's accepted marks, and no failure, with the view out of date, while inspect already
+/// says why the view has none; `drawing.update` then reports the failure and draws no mark, and
+/// turning the rule off clears it.
+#[test]
+fn a_held_view_keeps_its_accepted_marks_when_a_saved_rule_lands_on_an_exploded_view() {
+    let (s, comp, _, apart) = holed_pair();
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let view = ids::encode(front);
+    let params = json!({"sheet": ids::encode(sheet)});
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    extract(&mut s, sheet).unwrap();
+    run(&mut s, "drawing.update", json!({}));
+    let accepted = settled(&mut s, sheet);
+    let marks = automatic_scene_groups(&accepted.scene, front);
+    assert!(!marks.is_empty() && accepted.annotation_failures.is_empty() && !accepted.stale.contains(&front));
+
+    // The model moves on while the drawing is closed, and the file's view now draws Apart.
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    let at = solidcore_record::Vec3::new(500.0, 0.0, 0.0);
+    s.doc_mut().add_occurrence(comp, 0, solidcraft_doc::rigid(at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0)).unwrap();
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|v| v.id == front).unwrap();
+    Arc::make_mut(record).settings.exploded = Some(Exploded::View(apart));
+    s.doc_mut().put_drawing(Arc::new(d));
+
+    let held = settled(&mut s, sheet);
+    assert!(held.stale.contains(&front));
+    assert_eq!(automatic_scene_groups(&held.scene, front), marks, "the accepted marks stay with the view they were drawn for");
+    assert!(held.annotation_failures.is_empty());
+    let shown = run(&mut s, "drawing.scene", params.clone());
+    assert!(shown.get("annotation_failures").is_none(), "{shown}");
+    assert!(shown["out_of_date"].as_array().unwrap().contains(&json!(view)), "{shown}");
+    let now = run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": view}));
+    assert!(now["reason"].as_str().unwrap().contains("exploded view"), "{now}");
+
+    run(&mut s, "drawing.update", json!({}));
+    let fresh = run(&mut s, "drawing.scene", params);
+    let failures = fresh["annotation_failures"].as_array().unwrap();
+    assert_eq!(failures.len(), 1, "{fresh}");
+    assert_eq!((&failures[0]["object"], &failures[0]["view"]), (&json!(view), &json!(view)));
+    assert_eq!(failures[0]["reason"], run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": view}))["reason"]);
+    let drawn = settled(&mut s, sheet);
+    assert!(automatic_scene_groups(&drawn.scene, front).is_empty() && !drawn.stale.contains(&front));
+
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": false}));
+    run(&mut s, "drawing.update", json!({}));
+    assert!(settled(&mut s, sheet).annotation_failures.is_empty());
+}
+
+/// A saved rule on an exploded placeholder is reported in the accepted frame, including export.
+/// Until update, a deferred sheet retains the marks from its previous assembled frame.
+#[test]
+fn automatic_rule_on_exploded_placeholder_reports_its_accepted_failure() {
+    let (s, _, first, apart) = holed_pair();
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let view = ids::encode(front);
+    let params = json!({"sheet": ids::encode(sheet)});
+    let line = run(&mut s, "drawing.center_line.add", json!({"view": view, "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(line["line"].as_str().unwrap()).unwrap();
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    extract(&mut s, sheet).unwrap();
+    run(&mut s, "drawing.update", json!({}));
+    let accepted = settled(&mut s, sheet);
+    let marks = automatic_scene_groups(&accepted.scene, front);
+    assert!(!marks.is_empty());
+    assert!(accepted.annotation_failures.is_empty());
+
+    // Simulate a saved rule on an exploded view with no selected occurrence to draw.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|v| v.id == front).unwrap();
+    let record = Arc::make_mut(record);
+    record.settings.exploded = Some(Exploded::View(apart));
+    record.settings.occurrences = Some(vec![vec![first]].into());
+    record.settings.hide = Some(vec![vec![first]].into());
+    s.doc_mut().put_drawing(Arc::new(d));
+    let held = settled(&mut s, sheet);
+    assert!(held.stale.contains(&front));
+    assert_eq!(automatic_scene_groups(&held.scene, front), marks);
+    assert!(held.annotation_failures.is_empty());
+    let held_export = run(&mut s, "drawing.export", params.clone());
+    assert!(held_export.get("annotation_failures").is_none(), "{held_export}");
+    let held_check = run(&mut s, "drawing.check", params.clone());
+    assert!(!held_check["findings"].as_array().unwrap().iter().any(|f| f["kind"] == "failed" && f["object"]["id"] == view), "{held_check}");
+
+    run(&mut s, "drawing.update", json!({}));
+    let drawn = settled(&mut s, sheet);
+    assert!(matches!(drawn.views.iter().find(|v| v.view == front).unwrap().status, Status::Placeholder(_)));
+    assert!(automatic_scene_groups(&drawn.scene, front).is_empty());
+    let failures: Vec<_> = drawn.annotation_failures.iter().filter(|f| f.view == front).collect();
+    assert_eq!(failures.len(), 2, "{failures:?}");
+    let automatic = failures.iter().find(|f| f.object == front).unwrap();
+    let manual = failures.iter().find(|f| f.object == line).unwrap();
+    assert!(automatic.reason.contains("exploded view"), "{}", automatic.reason);
+    assert!(manual.reason.contains("exploded view"), "{}", manual.reason);
+    let check = run(&mut s, "drawing.check", params.clone());
+    let findings = check["findings"].as_array().unwrap();
+    assert!(
+        findings.iter().any(|f| f["kind"] == "failed"
+            && f["object"]["kind"] == "view"
+            && f["object"]["id"] == view
+            && f["why"].as_str().unwrap().contains("automatic centre marks")),
+        "{check}"
+    );
+    assert!(
+        findings.iter().any(|f| f["kind"] == "failed" && f["object"]["kind"] == "centre_line" && f["object"]["id"] == ids::encode(line)),
+        "{check}"
+    );
+    assert!(!findings.iter().any(|f| f["kind"] == "failed" && f["object"]["kind"] == "centre_mark" && f["object"]["id"] == view), "{check}");
+    let scene = run(&mut s, "drawing.scene", params.clone());
+    let export = run(&mut s, "drawing.export", params);
+    assert_eq!(scene["annotation_failures"], export["annotation_failures"]);
+    assert_eq!(built(&s, sheet).annotation_failures, drawn.annotation_failures);
+}
+
+/// A generated mark that crosses the paper is checked as the view's annotation, including while
+/// a deferred sheet retains the accepted mark after the model and its rule have changed.
+#[test]
+fn automatic_mark_off_paper_is_checked_as_last_shown() {
+    let (mut s, sheet, front, _, _) = holed();
+    let view = ids::encode(front);
+    let params = json!({"sheet": ids::encode(sheet)});
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": true}));
+    let initial = settled(&mut s, sheet);
+    let marks = automatic_scene_groups(&initial.scene, front);
+    assert!(!marks.is_empty());
+    // The initial view is centred at x=150. Move its leftmost actual mark one millimetre past
+    // the paper edge, without relying on the model's frame or on a particular hole radius.
+    let left = marks.iter().map(|group| reach(group).0.x).fold(f64::INFINITY, f64::min);
+    run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"place": {"at": [149.0 - left, 150.0]}}}));
+    let placed = settled(&mut s, sheet);
+    let marks = automatic_scene_groups(&placed.scene, front);
+    assert!(marks.iter().any(|group| reach(group).0.x < 0.0));
+    let scene = run(&mut s, "drawing.scene", params.clone());
+    assert!(!scene["objects"].as_array().unwrap().iter().any(|object| object["kind"] == "centre_mark"));
+    let check = |s: &mut Session| run(s, "drawing.check", params.clone());
+    let automatic_off = |reply: &Value| {
+        reply["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| {
+                f["kind"] == "outside_sheet"
+                    && f["object"]["kind"] == "view"
+                    && f["object"]["id"] == view
+                    && f["why"].as_str().unwrap().contains("automatic centre marks")
+            })
+            .count()
+    };
+    assert_eq!(automatic_off(&check(&mut s)), 1);
+
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let accepted = settled(&mut s, sheet);
+    assert_eq!(automatic_scene_groups(&accepted.scene, front), marks);
+    in_the_model(
+        &mut s,
+        "solid.box",
+        json!({"length": 10, "width": 10, "height": 10, "corner": [200, 0, 0], "operation": "new", "body_name": "Extra"}),
+    );
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view, "enabled": false}));
+    let held = settled(&mut s, sheet);
+    assert!(held.stale.contains(&front));
+    assert_eq!(automatic_scene_groups(&held.scene, front), marks);
+    assert_eq!(automatic_off(&check(&mut s)), 1);
+    run(&mut s, "drawing.update", json!({}));
+    let updated = settled(&mut s, sheet);
+    assert!(automatic_scene_groups(&updated.scene, front).is_empty());
+    assert_eq!(automatic_off(&check(&mut s)), 0);
+}
+
+/// Posed views cannot scan the design's placement. A file can still hold a rule and a manual
+/// annotation on one: its deferred accepted frame is retained until its placeholder is updated.
+#[test]
+fn automatic_rule_on_posed_placeholder_is_refused_and_reports_accepted_failure() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let view_id = ids::encode(view);
+    let params = json!({"sheet": ids::encode(sheet)});
+    let other =
+        run(&mut s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "view": "top", "scale": "1:1", "position_mm": [260, 150]}))["view"]
+            .clone();
+    run(&mut s, "drawing.view.edit", json!({"view": other, "set": {"pose": [{"joint": "Hinge", "values": [90]}]}}));
+    let err = s.execute("drawing.auto_center_mark.set", &json!({"view": other, "enabled": true})).unwrap_err().to_string();
+    assert!(err.contains("position of its own"), "{err}");
+    let line = run(&mut s, "drawing.center_line.add", json!({"view": view_id, "a": [0, 0, 0], "b": [40, 0, 0], "overshoot_mm": 2.0}))["line"].clone();
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view": view_id, "enabled": true}));
+    let err =
+        s.execute("drawing.view.edit", &json!({"view": view_id, "set": {"pose": [{"joint": "Hinge", "values": [90]}]}})).unwrap_err().to_string();
+    assert!(err.contains("position of its own"), "{err}");
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let accepted = settled(&mut s, sheet);
+    assert!(accepted.annotation_failures.is_empty());
+    let line_id = ids::decode(line.as_str().unwrap()).unwrap();
+    assert!(accepted.scene.groups.iter().any(|group| group.object == line_id));
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).unwrap().id;
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let posed = d.views.iter().find(|v| ids::encode(v.id) == other.as_str().unwrap()).unwrap().settings.pose.clone();
+    let record = Arc::make_mut(d.views.iter_mut().find(|v| v.id == view).unwrap());
+    record.settings.pose = posed;
+    record.settings.occurrences = Some(vec![vec![leaf]].into());
+    record.settings.hide = Some(vec![vec![leaf]].into());
+    s.doc_mut().put_drawing(Arc::new(d));
+    let held = settled(&mut s, sheet);
+    assert!(held.stale.contains(&view));
+    assert!(held.annotation_failures.is_empty());
+    assert!(held.scene.groups.iter().any(|group| group.object == line_id));
+    let inspect = run(&mut s, "drawing.auto_center_mark.inspect", json!({"view": view_id}));
+    assert!(inspect["reason"].as_str().unwrap().contains("position of its own"), "{inspect}");
+    run(&mut s, "drawing.update", json!({}));
+    let fresh = settled(&mut s, sheet);
+    assert!(matches!(fresh.views.iter().find(|v| v.view == view).unwrap().status, Status::Placeholder(_)));
+    assert_eq!(fresh.annotation_failures, built(&s, sheet).annotation_failures);
+    assert!(fresh.annotation_failures.iter().any(|f| f.object == view && f.reason.contains("position of its own")));
+    assert!(fresh.annotation_failures.iter().any(|f| f.object == line_id && f.reason.contains("position of its own")));
+    let check = run(&mut s, "drawing.check", params.clone());
+    assert!(
+        check["findings"].as_array().unwrap().iter().any(|f| f["kind"] == "failed"
+            && f["object"]["kind"] == "view"
+            && f["object"]["id"] == view_id
+            && f["why"].as_str().unwrap().contains("automatic centre marks")),
+        "{check}"
+    );
+    assert!(
+        check["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "failed" && f["object"]["kind"] == "centre_line" && f["object"]["id"] == line),
+        "{check}"
+    );
+    let scene = run(&mut s, "drawing.scene", params.clone());
+    let export = run(&mut s, "drawing.export", params);
+    assert_eq!(scene["annotation_failures"], export["annotation_failures"]);
 }

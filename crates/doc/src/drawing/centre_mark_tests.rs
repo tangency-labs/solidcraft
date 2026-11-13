@@ -22,6 +22,7 @@ fn marked() -> (Drawing, u64) {
         place: ViewPlace::At([50.0, 50.0]),
         settings: ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() },
         reference_shown_percent: 0.0,
+        centre_marks: None,
     })]);
     let id = d.allocate_id(&mut ids).unwrap();
     d.add_centre_marks([Arc::new(CentreMark {
