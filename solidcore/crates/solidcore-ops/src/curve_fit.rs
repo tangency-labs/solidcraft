@@ -137,10 +137,15 @@ pub fn rebuild(curve: &Curve, degree: usize, spans: usize) -> Result<(Curve, f64
 
 /// Record edge `edge` of `body` (through `order`, its record's [`Order`]) as a free curve: the
 /// edge's curve trimmed to the edge ([`create_trimmed_nurbs_curve`]: its B-spline over the
-/// edge's interval, a trimmed or intersection edge's included) refitted as a clamped spline of
-/// `degree` (2 or 3) with `spans` uniform spans on `[0, 1]` ([`rebuild`]), running the way the
-/// edge's curve runs, and the largest distance in mm between the refit and the edge, kept
-/// when within `tol`. The distance is between the shapes, whatever their parameters: the
+/// edge's interval, a trimmed or intersection edge's included) as a clamped spline of `degree`
+/// (2 or 3) with at most `spans` spans on `[0, 1]`, running the way the edge's curve runs, and
+/// the largest distance in mm between it and the edge, kept when within `tol`.
+///
+/// A trimmed curve that already fits (its degree at most `degree`, its spans at most `spans`:
+/// a skin's section edge on the section's own knots) is the edge itself: raised to `degree`
+/// exactly ([`crate::curve_knots::set_degree`]) and put on `[0, 1]`, its bound the kernel's
+/// certified rounding. Any other is refitted with `spans` uniform spans ([`rebuild`]), and the
+/// distance is measured. The distance is between the shapes, whatever their parameters: the
 /// kernel's sampled closest-point maximum taken both ways
 /// ([`solidcore::curve::curve::Curve::curve_max_distance_between`], its samples by the knot
 /// counts and the largest gap refined by a local maximisation). It is measured, not certified:
@@ -182,6 +187,13 @@ pub fn edge_as_curve(
             "a rational edge: the refit takes polynomial splines (its fit's certified bound)",
         ));
     }
+    if let Some((own, bound)) = as_itself(&trimmed, degree, spans, tol)? {
+        return if bound <= tol {
+            Ok((own, bound))
+        } else {
+            Err(Error::PastTolerance { bound })
+        };
+    }
     // rebuild's own bound compares the two at one parameter; the edge's parameter is not the
     // refit's spacing, so that bound can stand far above the gap between the shapes
     let (fit, _) = rebuild(&trimmed, degree, spans)?;
@@ -216,6 +228,29 @@ pub fn edge_as_curve(
     } else {
         Err(Error::PastTolerance { bound })
     }
+}
+
+/// The polynomial spline `curve` as itself when it fits `degree` and `spans` (its degree and
+/// its span count at most those): raised to `degree` (exact, with the kernel's certified bound
+/// of the rounding) and its parameter mapped onto `[0, 1]`; `None` when it does not fit.
+fn as_itself(curve: &Curve, degree: usize, spans: usize, tol: f64) -> Result<Option<(Curve, f64)>> {
+    let Curve::Spline { knots, .. } = curve else {
+        return Ok(None);
+    };
+    let own_spans = knots
+        .windows(2)
+        .filter(|w| matches!(w, [a, b] if b > a))
+        .count();
+    if nurb_of(curve)?.degree() > degree || own_spans > spans {
+        return Ok(None);
+    }
+    let (raised, bound) = crate::curve_knots::set_degree(curve, degree, tol)?;
+    let bound = bound.ok_or(Error::Argument)?;
+    let mut unit = nurb_of(&raised)?;
+    run("curve_fit::edge_as_curve", |_| {
+        unit.reparam_to_interval(Interval { ul: 0.0, ur: 1.0 })?;
+        Ok(record_of(&unit).map(|c| Some((c, bound))))
+    })?
 }
 
 /// The kernel's curve of the record spline `curve` over its whole domain; `None` for a curve
