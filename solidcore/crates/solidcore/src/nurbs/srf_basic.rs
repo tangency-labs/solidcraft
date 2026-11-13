@@ -26,7 +26,7 @@
 //! | [`Surface::copy_into`], `Clone`              | `N_SrfCopy`                       |
 //! | [`Surface::counts_are_valid`]                | `N_SrfCountsAreValid`             |
 //! | [`Surface::weights_are_valid`]               | `N_SrfWeightsAreValid`            |
-//! | [`Surface::is_valid`], [`Surface::is_valid_with_kernel`] | `N_SrfIsValid`        |
+//! | [`Surface::is_valid`]                  | `N_SrfIsValid`        |
 //! | [`Surface::is_sized`]                        | `N_SrfIsSized`                    |
 //! | [`Surface::is_rational`]                     | `N_IsSrfRat`                      |
 //! | [`Surface::is_closed`], [`Surface::is_closed_tol`] | `N_SrfIsClosed`             |
@@ -80,14 +80,10 @@
 //!   anything.
 //! - `N_SrfIsFlatCheap` leaves its outputs unwritten when `N_PlanePtNormalToImplicit`
 //!   fails; [`Surface::is_flat_cheap`] returns only the error then.
-//! - [`Surface::is_valid`] matches upstream `N_SrfIsValid`;
-//!   [`Surface::is_valid_with_kernel`] forwards `k` to
-//!   [`KnotVector::validate_with_kernel`] for the opt-in `WR-24` span check.
 
 use std::sync::Arc;
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
-use crate::kernel::Kernel;
 use crate::limits;
 use crate::math::Vec3;
 use crate::nurbs::geom::{
@@ -743,8 +739,7 @@ impl Surface {
 
     /// Complete check: counts, weights, then both knot vectors (`N_SrfIsValid`).
     ///
-    /// Matches pinned C++ parity; see [`Surface::is_valid_with_kernel`] for the
-    /// opt-in `WR-24` knot-vector span check.
+    /// The knot vectors need a strictly positive span (`WR-24`).
     ///
     /// Errors with the first failing check's code ([`NurbsFailure::SurfaceDefinition`],
     /// [`NurbsFailure::Degree`], [`NurbsFailure::Weight`] or [`NurbsFailure::Knots`]).
@@ -754,21 +749,6 @@ impl Surface {
         let (knu, knv) = self.knot_vectors()?;
         knu.validate(self.p)?;
         knv.validate(self.q)?;
-        Ok(())
-    }
-
-    /// Complete check: counts, weights, then both knot vectors using `k`'s
-    /// [`crate::kernel::UpstreamFixes::knot_vector_valid_requires_span`] setting
-    /// (`N_SrfIsValid`, `WR-24`).
-    ///
-    /// Errors with the first failing check's code ([`NurbsFailure::SurfaceDefinition`],
-    /// [`NurbsFailure::Degree`], [`NurbsFailure::Weight`] or [`NurbsFailure::Knots`]).
-    pub fn is_valid_with_kernel(&self, k: &Kernel) -> Result<()> {
-        self.counts_are_valid()?;
-        self.weights_are_valid()?;
-        let (knu, knv) = self.knot_vectors()?;
-        knu.validate_with_kernel(k, self.p)?;
-        knv.validate_with_kernel(k, self.q)?;
         Ok(())
     }
 

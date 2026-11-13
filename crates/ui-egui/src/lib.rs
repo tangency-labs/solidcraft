@@ -2395,8 +2395,14 @@ impl SolveApp {
                 }
                 return;
             }
-            // Curve-pair constraints can consume an exact preselection. Leave ambiguous
-            // selections to the ordinary pick tool; never silently constrain a subset.
+            // Curve-pair constraints can consume an exact preselection: two curves, or for
+            // Collinear and Tangent a curve and an origin axis (#15461). Leave ambiguous selections to
+            // the ordinary pick tool; never silently constrain a subset.
+            let operand = |sel: &solidcraft_engine::Sel| match sel {
+                solidcraft_engine::Sel::SketchCurve { id, .. } => Some(json!(id)),
+                solidcraft_engine::Sel::Axis { name } if tools::takes_axis_curve(id) => tools::axis_operand(self, name),
+                _ => None,
+            };
             if matches!(
                 id,
                 "sketch.constraint.parallel"
@@ -2405,8 +2411,9 @@ impl SolveApp {
                     | "sketch.constraint.tangent"
                     | "sketch.constraint.concentric"
                     | "sketch.constraint.collinear"
-            ) && let [solidcraft_engine::Sel::SketchCurve { id: a, .. }, solidcraft_engine::Sel::SketchCurve { id: b, .. }] =
-                self.session.selection.as_slice()
+            ) && let [first, second] = self.session.selection.as_slice()
+                && matches!((first, second), (solidcraft_engine::Sel::SketchCurve { .. }, _) | (_, solidcraft_engine::Sel::SketchCurve { .. }))
+                && let (Some(a), Some(b)) = (operand(first), operand(second))
                 && a != b
             {
                 let params = json!({ "a": a, "b": b });
@@ -2950,6 +2957,10 @@ impl SolveApp {
     fn load_params(&self, path: &str, options: &serde_json::Map<String, Value>) -> Value {
         let mut params = options.clone();
         params.insert("path".into(), json!(path));
+        // The preferences' import options (a FreeCAD file's `history`), unless the caller chose.
+        for (k, v) in file_load::preferred_options(self, path) {
+            params.entry(k).or_insert(v);
+        }
         file_load::step_folder_option(self, path, &mut params);
         Value::Object(params)
     }
@@ -3367,6 +3378,8 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         params_dialog::install_expressions(ctx);
+        // Tab or Shift+Tab into any text or number box selects its text, app-wide.
+        ui_kit::install_keyboard_focus(ctx);
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);

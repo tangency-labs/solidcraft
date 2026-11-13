@@ -588,3 +588,82 @@ fn sectors_of_a_rounded_sketch_turned_120_degrees_union() {
     let off = (v - want).abs() / want;
     assert!(!(off.is_nan() || off > 1e-9), "{v}, closed form {want}");
 }
+
+/// A 120° pie slice of height 119 symmetric about +y, turned by `turn` about z: its legs run
+/// from the origin at 90° ∓ (60° + `widen`) to corners `rho` away, its arc is the circle about
+/// (0, `c`) through the corners (SolidCraft draws the arc through its rounded end points, so
+/// its centre can miss the apex).
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
+fn sector(widen: f64, rho: f64, c: f64, turn: f64) -> Body {
+    let half = PI / 3.0 + widen;
+    let p0 = [rho * (PI / 2.0 - half).cos(), rho * (PI / 2.0 - half).sin()];
+    let p1 = [-p0[0], p0[1]];
+    let (ct, st) = (turn.cos(), turn.sin());
+    let at = |p: [f64; 2]| [ct * p[0] - st * p[1], st * p[0] + ct * p[1], 0.0];
+    let profile = [
+        Curve::Line {
+            start: [0.0; 3],
+            end: at(p0),
+        },
+        Curve::Arc {
+            center: at([0.0, c]),
+            axis: [0.0, 0.0, 1.0],
+            reference: at([1.0, 0.0]),
+            radius: (p0[0].powi(2) + (p0[1] - c).powi(2)).sqrt(),
+            start: (p0[1] - c).atan2(p0[0]),
+            end: (p1[1] - c).atan2(p1[0]),
+        },
+        Curve::Line {
+            start: at(p1),
+            end: [0.0; 3],
+        },
+    ];
+    extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        119.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap()
+}
+
+/// Two pie slices side by side, the second turned by 120° + `apart` about the apex: their
+/// facing walls meet at the apex edge and part linearly, `apart` · 85.5 at the arc. Within
+/// the 1e-5 tolerance across the wall (`apart` <= 1e-7) the walls are one and the slices join
+/// into one solid; 3.3e-7 rad (2.8e-5 at the arc) and 1e-6 rad apart they are two walls, and
+/// the union is the two slices touching along the apex edge, V = 2 · r²/2 · 2π/3 · h exactly.
+/// Before, the radial sector read the two walls (closer than 0.001°) as coincident and merged
+/// their corner edges 2.8e-5 apart: not a closed solid. Overlapping slices (`apart` < 0) join
+/// into one solid of V = r²/2 · (4π/3 + apart) · h.
+#[test]
+fn pie_slices_whose_walls_part_beyond_tolerance_join_along_the_apex() {
+    all_fixes();
+    let (r, h) = (85.5, 119.0);
+    let slice = r * r / 2.0 * (2.0 * PI / 3.0) * h;
+    for apart in [0.0, 1e-8, 1e-7, 3.3e-7, 1e-6, -1e-8, -1e-7, -3.3e-7, -1e-6] {
+        let a = sector(0.0, r, 0.0, 0.0);
+        let b = sector(0.0, r, 0.0, 2.0 * PI / 3.0 + apart);
+        let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+        let report = u.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{apart}: {}", report.text);
+        let v = volume(&u);
+        // the wedge between the walls, which a join within tolerance may absorb or keep
+        let wedge = r * r * h * apart.abs();
+        if apart > 2e-7 {
+            assert_eq!(u.solid_count().unwrap(), 2, "{apart}");
+            assert_eq!(u.counts().unwrap(), [10, 17, 10], "{apart}");
+            assert!(near(v, 2.0 * slice), "{apart}: {v}");
+        } else {
+            assert_eq!(u.solid_count().unwrap(), 1, "{apart}");
+            assert_eq!(u.counts().unwrap(), [6, 12, 8], "{apart}");
+            let want = 2.0 * slice + r * r / 2.0 * apart.min(0.0) * h;
+            let err = (v - want).abs();
+            assert!(
+                !(err.is_nan() || err > wedge + 1e-7 * want),
+                "{apart}: {v}, closed form {want}"
+            );
+        }
+    }
+}

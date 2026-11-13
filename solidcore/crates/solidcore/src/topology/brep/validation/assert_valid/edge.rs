@@ -55,7 +55,7 @@ use crate::topology::{
 /// `m_pCurve->AssertValid(pAList, eTestLevel, SM_NO_WALK)` dispatched on the curve's
 /// class: the curve object reports as `key`, an ellipse's polar converter as
 /// `polar_key`. `trim_surface` is the face's surface of a UV trim (WR-560, read by the
-/// `SmBSplineCurve` checks with `Kernel::fixes.uv_trim_checks_on_surface`).
+/// `SmBSplineCurve` checks).
 /// `edge_ends` is the edge the curve is the 3D curve or a UV trim of (WR-668, read by
 /// the `SmBSplineCurve` checks; see [`edge_ends`]).
 #[allow(clippy::too_many_arguments)]
@@ -907,20 +907,16 @@ pub(super) fn edgeuse(
     // when Edgeuse has a UVTrimCurve - Check that it's valid
     if has_trim {
         let level = cx.rep.level;
-        // not upstream (WR-560, opt-in): the trim is measured on its face's surface
+        // not upstream (WR-560): the trim is measured on its face's surface
         // (`GetEdgeuse()->GetFace()->GetSurface()`)
-        let trim_surface = if k.fixes.uv_trim_checks_on_surface {
-            match eu1::face(b, eu)? {
-                Some(f) => b
-                    .face(f)?
-                    .surface
-                    .as_ref()
-                    .map(Surface::clone_for_evaluation)
-                    .transpose()?,
-                None => None,
-            }
-        } else {
-            None
+        let trim_surface = match eu1::face(b, eu)? {
+            Some(f) => b
+                .face(f)?
+                .surface
+                .as_ref()
+                .map(Surface::clone_for_evaluation)
+                .transpose()?,
+            None => None,
         };
         // not upstream (WR-668): the trim's edge (`GetEdgeuse()->GetEdge()`)
         let ends = match eu1::edge(b, eu)? {

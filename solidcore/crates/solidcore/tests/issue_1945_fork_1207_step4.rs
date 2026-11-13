@@ -44,7 +44,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_corner_ball_center_from_axes = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_chamfer_cone_stored_as_cone = true;
-    k.fixes.corner_blend_coons_patch_tangent_to_sides = true;
     k.fixes.corner_patch_face_side_twist = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
@@ -62,9 +61,7 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.edge_check_orders_tangent_faces = true;
-    k.fixes.bspline_check_min_radius = true;
     k.fixes.ellipse_step_interval_checks = true;
-    k.fixes.uv_trim_checks_on_surface = true;
     k.fixes.oscillating_skips_failed_guesses = true;
     k.fixes.refine_cc_range_ends = true;
     k.fixes.flat_corners_test_bits = true;
@@ -95,7 +92,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.boolean_outer_shell_first = true;
-    k.fixes.iso_curve_sliver_domain_is_degenerate = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.boolean2d_plane_covers_far_faces = true;
@@ -122,7 +118,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.corner_blend_stays_inside_neighbours = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_nx1_opposite_continuation_side_edge = true;

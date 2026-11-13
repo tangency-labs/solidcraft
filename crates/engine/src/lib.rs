@@ -776,7 +776,8 @@ impl SurfaceAnalysis {
     pub fn mode(self) -> solidcraft_viewport::AnalysisMode {
         use solidcraft_viewport::AnalysisMode as M;
         match self {
-            SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes },
+            // Bars standing upright around the viewer, half white: the picture as it always was.
+            SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes, direction: Vec3::new(0.0, 0.0, 1.0), width: 0.5 },
             SurfaceAnalysis::Draft { pull, angle } => M::Draft { pull, angle },
             SurfaceAnalysis::Curvature { radius } => M::Curvature { radius },
             SurfaceAnalysis::Environment => M::Environment,
@@ -1978,7 +1979,7 @@ impl Session {
     pub fn restore_checkpoint(&mut self, id: u64) -> Result<()> {
         let missing = || {
             EngineError::Other(format!(
-                "no checkpoint {id} (used up by restoring or forgetting it or an earlier one, or dropped: only the last {MAX_CHECKPOINTS} are kept)"
+                "no checkpoint {id} (used up by restoring it or an earlier one, or by forgetting it, or dropped: only the last {MAX_CHECKPOINTS} are kept)"
             ))
         };
         let i = self.checkpoints.iter().position(|c| c.id == id).ok_or_else(missing)?;
@@ -2007,11 +2008,10 @@ impl Session {
         Ok(())
     }
 
-    /// Forget checkpoint `id` (and later ones) without going back.
+    /// Forget checkpoint `id` without going back. Later checkpoints stay: a batch forgets the
+    /// checkpoint it took before its first step, and one a step of it took outlives the batch.
     pub fn drop_checkpoint(&mut self, id: u64) {
-        if let Some(i) = self.checkpoints.iter().position(|c| c.id == id) {
-            self.checkpoints.truncate(i);
-        }
+        self.checkpoints.retain(|c| c.id != id);
     }
 
     /// A scratch copy of the session (same design and model, no history or log) to try

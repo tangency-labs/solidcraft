@@ -5,7 +5,7 @@ struct U {
     screen: vec4<f32>, // viewport width, height (px), unused, silhouettes on (1)
     clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
     cap: vec4<f32>,    // colour of the inside of cut bodies
-    ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature), parameter
+    ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature, 6 values), parameter
     pull: vec4<f32>,   // draft pull direction
     acc_u: vec4<f32>,  // accessibility map axes (xyz, offset)
     acc_v: vec4<f32>,
@@ -93,10 +93,31 @@ struct TOut {
     @location(2) wp: vec3<f32>,
     // 1 + the section hatch of the body (0: the cap's own), from the palette.
     @location(3) @interpolate(flat) h: u32,
+    // The vertex's value (`AnalysisMode::Values`), and 1 where the triangle has values (0 for
+    // every vertex shader that gives none: a struct's fields start at zero).
+    @location(4) v: f32,
+    @location(5) @interpolate(flat) hv: u32,
 };
 
+/// A built triangle's vertex: its value word is an f32's bits, or all ones for none
+/// (`NO_VALUE`).
 @vertex
-fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32, @location(3) value: u32) -> TOut {
+    var o = tri_vertex(local, n, c);
+    let none = value == 0xffffffffu;
+    o.v = select(bitcast<f32>(value), 0.0, none);
+    o.hv = select(1u, 0u, none);
+    return o;
+}
+
+/// A vertex evaluated from a display plan on the GPU (no value).
+@vertex
+fn vs_tri_planned(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+    return tri_vertex(local, n, c);
+}
+
+/// A triangle vertex at `local` with normal `n` in palette entry `c`, without a value.
+fn tri_vertex(local: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
     var o: TOut;
     let p = placed(local);
     o.pos = u.vp * vec4<f32>(p, 1.0);
@@ -547,19 +568,27 @@ fn analysis(i: TOut, k: f32) -> vec4<f32> {
     if (dot(n, v) < 0.0) { n = -n; }
     let lit = 0.55 + 0.45 * max(dot(n, v), 0.0);
     if (u.ana.x < 1.5) {
-        // Reflections of upright light bars standing around the viewer: the stripe follows
-        // the reflected ray's sideways direction (horizontal on screen).
+        // Reflections of light bars along `pull` (upright, +Z, standing around the viewer by
+        // default): the stripe follows the reflected ray's direction across the bars.
         let r = reflect(-v, n);
-        var side = cross(v, vec3<f32>(0.0, 0.0, 1.0));
+        var side = cross(v, u.pull.xyz);
         if (length(side) < 1e-3) { side = vec3<f32>(1.0, 0.0, 0.0); }
         let x = dot(r, normalize(side));
-        let s = sin(x * u.ana.y * 3.14159265);
-        // A face whose normal lies in the upright plane through the view (every horizontal
-        // face) reflects straight ahead: its sideways part is zero, on the edge between a black
-        // and a white stripe, and rounding picked one or the other from frame to frame while
-        // the view turned (#2153). Straight ahead is white.
-        let c = select(0.08, 0.95, s > 0.0 || abs(x) < 1e-4);
+        // White for `ana.z` of each period (half: as `sin(x * stripes * pi) > 0` always drew it).
+        let s = fract(x * u.ana.y * 0.5);
+        // A face whose normal lies in the plane of the bars through the view (every horizontal
+        // face, under upright bars) reflects straight ahead: its sideways part is zero, on the
+        // edge between a black and a white stripe, and rounding picked one or the other from
+        // frame to frame while the view turned (#2153). Straight ahead is white.
+        let c = select(0.08, 0.95, s < u.ana.z || abs(x) < 1e-4);
         return out_color(vec4<f32>(vec3<f32>(c), 1.0));
+    }
+    if (u.ana.x > 5.5) {
+        // By the vertices' values, `ana.y` (flat) to `ana.z` (tight); a face without values by
+        // how fast its normal turns, as the curvature map at a radius of 1 mm.
+        var t = clamp(k, 0.0, 1.0);
+        if (i.hv == 1u) { t = clamp((i.v - u.ana.y) / max(u.ana.z - u.ana.y, 1e-12), 0.0, 1.0); }
+        return out_color(vec4<f32>(ramp(t) * lit, 1.0));
     }
     if (u.ana.x > 4.5) {
         // Reachable from the access direction: facing it and nothing above.
@@ -603,8 +632,12 @@ fn analysis(i: TOut, k: f32) -> vec4<f32> {
     }
     // Curvature from how fast the normal turns across the pixel.
     let t = clamp(k * u.ana.y, 0.0, 1.0);
-    let c = select(mix(u.ana_c[6].rgb, u.ana_c[7].rgb, t * 2.0 - 1.0), mix(u.ana_c[5].rgb, u.ana_c[6].rgb, t * 2.0), t < 0.5);
-    return out_color(vec4<f32>(c * lit, 1.0));
+    return out_color(vec4<f32>(ramp(t) * lit, 1.0));
+}
+
+/// The curvature colours' ramp at `t` (0 to 1): flat, through the middle colour, to tight.
+fn ramp(t: f32) -> vec3<f32> {
+    return select(mix(u.ana_c[6].rgb, u.ana_c[7].rgb, t * 2.0 - 1.0), mix(u.ana_c[5].rgb, u.ana_c[6].rgb, t * 2.0), t < 0.5);
 }
 
 /// A "bad" analysis face (negative draft, blocked): with the stripes on (colour vision modes), the
@@ -808,6 +841,23 @@ fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
 
 @vertex
 fn vs_line(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+    return line_vertex(vi, local_a, local_b, c, wbits);
+}
+
+/// A scene's own lines drawn again in another colour and width (a whole hovered body's edges,
+/// `LitEdges`): the draw's first vertex carries them, as `6 * style + corner`, so the lines are
+/// drawn from the buffer they are already in. `style`: the palette index from bit 8, a raised
+/// line (`lifted_width`, no normals) at bit 7, and the width in eighths of a pixel below it.
+@vertex
+fn vs_line_lit(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+    let style = vi / 6u;
+    let eighths = style & 127u;
+    var w = bitcast<u32>(f32(eighths) / 8.0);
+    if ((style & 128u) != 0u) { w = 0x80000000u | (eighths << 24u); }
+    return line_vertex(vi % 6u, local_a, local_b, style >> 8u, w);
+}
+
+fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u32) -> LOut {
     let a = placed(local_a);
     let b = placed(local_b);
     var pa = a;
