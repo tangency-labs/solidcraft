@@ -511,7 +511,13 @@ fn open_step(
     };
     let cache = cache.filter(|_| reuse && !solidcraft_io::is_native_cad_path(path) && solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let key = solidcraft_io::ImportCache::key(&bytes, path, &json!({"y_up": options.y_up, "names": format!("{:?}", options.names)}));
+    // Every `doc.open` option that changes the imported design is in the key: a reused import is
+    // the one this open asks for.
+    let key = solidcraft_io::ImportCache::key(
+        &bytes,
+        path,
+        &json!({"y_up": options.y_up, "names": format!("{:?}", options.names), "folder": options.folder}),
+    );
     let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
     if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
         let mut fresh = Session::opened_validating(doc, Some(&saved), validation);
@@ -2590,6 +2596,29 @@ mod tests {
         );
         assert_eq!(std::fs::read_dir(&cache_dir).unwrap().count(), 0, "disabled reuse never stores an import");
         assert_eq!(open_step(&path, &json!({}), Some(&cache), solidcraft_kernel::Validation::default()).unwrap().1["import_reused"], false);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// `doc.open` makes a `Group #N` history folder exactly when `folder: true` is given, whether
+    /// the import is fresh or reused from the cache, and whatever an earlier open asked for (#15870).
+    #[test]
+    fn a_reused_import_has_a_folder_exactly_when_asked() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-reuse-import-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache = solidcraft_io::ImportCache::new(dir.join("imports"));
+        // One cylinder placed twice: an Import feature and two rigid joints, so `folder: true` makes a folder.
+        let path = format!("{}/../../tests/step-conformance/cylinder_twice.step", env!("CARGO_MANIFEST_DIR"));
+        let open = |folder: bool| {
+            let (s, reply) = open_step(&path, &json!({"folder": folder}), Some(&cache), solidcraft_kernel::Validation::default()).unwrap();
+            let folders: Vec<_> = s.doc.timeline_groups.iter().map(|f| (f.id, f.name.clone(), f.features.len(), f.joints.len())).collect();
+            assert_eq!(reply.get("group").and_then(Value::as_u64), folders.first().map(|f| f.0), "the reply names the folder: {reply}");
+            (folders.into_iter().map(|(_, name, features, joints)| (name, features, joints)).collect::<Vec<_>>(), reply["import_reused"].clone())
+        };
+        let one = vec![("Group #1".to_string(), 1, 2)];
+        assert_eq!(open(false), (vec![], json!(false)), "no folder, fresh import");
+        assert_eq!(open(true), (one.clone(), json!(false)), "a folder, fresh import");
+        assert_eq!(open(true), (one, json!(true)), "a folder, reused import");
+        assert_eq!(open(false), (vec![], json!(true)), "no folder, reused import");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
