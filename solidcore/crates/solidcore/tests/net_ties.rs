@@ -2,6 +2,7 @@
 //! columns that meet at the seam of a closed surface, and the row that collapses to a pole. A
 //! control-point edit moves each tied group as one, so a closed surface stays closed and a pole
 //! stays a point.
+#![allow(clippy::unwrap_used)] // test helpers
 
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::vector3d::{Point3, Vec3};
