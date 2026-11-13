@@ -388,7 +388,9 @@ fn column_menu(
                         continue;
                     }
                     ui_kit::action_menu(ui, &format!("Faces on {}", body.name), |ui| {
-                        if let Ok(faces) = body.body.faces((body.body.size() * 2e-3).max(1e-3)) {
+                        // Measured once per body, at the same tolerance: this menu is drawn again
+                        // every frame while it is open, and measuring meshes the whole body.
+                        if let Ok(faces) = body.joint_faces() {
                             let mut seen = std::collections::BTreeSet::new();
                             let mesh = body.mesh();
                             let mut points = std::collections::BTreeMap::new();
@@ -399,7 +401,7 @@ fn column_menu(
                                     entry.insert((a + b + c) * (1. / 3.));
                                 }
                             }
-                            for face in faces {
+                            for face in faces.iter() {
                                 // A curved face centroid can lie on another surface.
                                 // Pick an interior triangle point on this actual face.
                                 let Some(point) = points.get(&face.index).copied() else { continue };

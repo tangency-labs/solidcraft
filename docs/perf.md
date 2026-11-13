@@ -737,6 +737,37 @@ renders the hover both ways.
 In Wireframe the model draws no faces, so a whole hovered body's faces are still copied (239 MB
 and about 150 ms for this assembly): a separate change.
 
+## A picked Move feature: each body's faces measured once (2026-11-13)
+
+A Move feature makes no body and names no faces, so the highlight of a picked or hovered one
+comes from `changed_faces`, which compares the states either side of the feature. It skipped
+the bodies a feature left alone (#14166), but a Move changes every body it moves: each was
+measured with `Body::faces` before and after, and `Body::faces` meshes the whole body. The
+highlight is built again at every hover change, and the feature's faces are asked for once for
+the selection and once more while the feature is under the pointer.
+
+Now a body's faces are measured once per geometry and tolerance (`ModelBody::faces_at`, shared
+by snapshots like its mesh), so a rebuild of the highlight meshes nothing. The same faces are
+lit: the measurements are the ones `Body::faces` gave, at the same tolerance. The Configuration
+Table's Add Column menu had the same cost: its Face Appearance list of a body's faces measured
+the body again at each frame while it was open, and now reads the joints' measurement
+(`ModelBody::joint_faces`, the same tolerance).
+
+Measured on an assembly of 103 moved bodies (imported STEP parts, 671 faces, about 1.7 million
+triangles in the design), Ryzen 5 7600X, NVIDIA GeForce RTX 5070, Windows, release build, through
+the control channel with `SOLIDCRAFT_PROFILE_FRAMES=1`. Inside one build of the highlight on
+`main`: 1554 ms in `changed_faces`, of it 1552 ms in `Body::faces`; drawing the lit faces 16 ms.
+
+| | before (`main`) | after |
+|---|---|---|
+| the pointer first comes onto the Move feature's row | 1.5 s | 1.6 s, once |
+| click the row | 3.0 s | 6 ms |
+| 25 pointer moves across the model, the feature picked | 28 s | no frame over 50 ms |
+| the pointer onto the first items of the feature's menu | 1.9 s | no frame over 50 ms |
+
+What is left: the first measurement of the moved bodies, once for each body's geometry (the
+1.6 s above), and again for the bodies a later edit of the Move makes.
+
 # Recompute performance
 
 `solidcraft-cli bench-edit <script> <param> "(<old>) * 1.02"` builds a design from its script
