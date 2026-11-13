@@ -39,6 +39,7 @@ pub mod p8;
 pub mod p9;
 pub mod planar_section;
 pub mod sheet;
+pub mod trim_extend;
 pub mod validation;
 pub mod vertex_fans;
 

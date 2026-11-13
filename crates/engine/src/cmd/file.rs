@@ -53,13 +53,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.prt/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, NX, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino, NX or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD, Rhino or NX file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD, Rhino or NX file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.prt/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, NX, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino, NX or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD, Rhino or NX file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD, Rhino or NX file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd, Rhino .3dm or experimental Siemens NX .prt file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd, Rhino .3dm or experimental Siemens NX .prt file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -262,6 +262,8 @@ struct StepOptions {
     /// `folder: true`: an import that brings more than one item gets a `Group #N` history folder
     /// (`import_folder`). `false` (the default) makes none, as before the option.
     folder: bool,
+    /// A FreeCAD file's feature history is rebuilt as features (else only its solids come in).
+    history: bool,
 }
 
 fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
@@ -283,14 +285,21 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
             ));
         }
     };
-    Ok(StepOptions { y_up, names, folder })
-}
 
-/// Read a STEP file as an Import feature.
-fn read_step(path: &str, names: solidcraft_io::StepNames) -> Result<(solidcraft_io::StepFeature, Vec<u8>)> {
-    let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let feature = solidcraft_io::step_import_feature_named(&bytes, path, names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    Ok((feature, bytes))
+    let history = match p.get("history") {
+        None | Some(Value::Null) => true,
+        Some(v) => match v.as_str().map(|h| h.trim().to_ascii_lowercase()).as_deref() {
+            Some("features") => true,
+            Some("solids") => false,
+            _ => {
+                return Err(bad(
+                    cmd,
+                    "`history` must be \"features\" (a FreeCAD file's sketches and features are rebuilt) or \"solids\" (only its solids)",
+                ));
+            }
+        },
+    };
+    Ok(StepOptions { y_up, names, folder, history })
 }
 
 /// Which way is up in a STEP or IGES file, from the program its header names: `("y", name)` for
@@ -311,6 +320,31 @@ fn quarter_turn_x() -> solidcraft_doc::Mat {
     solidcraft_doc::rigid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, std::f64::consts::FRAC_PI_2)
 }
 
+/// The design state a rebuilt-history insert may change: the document, its evaluated model, and
+/// the counters and editor state that go with them. When the insert fails they are put back, so
+/// the file's solids import into the design exactly as it was.
+struct DesignSnapshot {
+    doc: std::sync::Arc<Document>,
+    model: solidcraft_doc::Model,
+    revision: u64,
+    evaluations: usize,
+    active_sketch: Option<u64>,
+}
+
+impl DesignSnapshot {
+    fn of(s: &Session) -> Self {
+        Self { doc: s.doc.clone(), model: s.model.clone(), revision: s.revision, evaluations: s.evaluations, active_sketch: s.active_sketch }
+    }
+
+    fn restore(self, s: &mut Session) {
+        s.doc = self.doc;
+        s.model = self.model;
+        s.revision = self.revision;
+        s.evaluations = self.evaluations;
+        s.active_sketch = self.active_sketch;
+    }
+}
+
 /// Add an Import feature for a STEP file to the session's design, in a new component named
 /// after the file (#1386).
 ///
@@ -319,8 +353,43 @@ fn quarter_turn_x() -> solidcraft_doc::Mat {
 /// `diagnostics.profile` reports it.
 fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
     let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
-    let (sf, bytes) = read_step(path, options.names)?;
-    add_read_step(s, path, name, options, sf, &bytes, profiled)
+    let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    add_step_bytes(s, path, name, options, &bytes, profiled)
+}
+
+/// Add a STEP, IGES or native CAD file's `bytes`. A FreeCAD file's sketches and features come in
+/// when they can all be rebuilt and build what the file holds; else its solids, saying why.
+fn add_step_bytes(
+    s: &mut Session,
+    path: &str,
+    name: Option<&str>,
+    options: &StepOptions,
+    bytes: &[u8],
+    profiled: Option<solidcraft_profile::Mark>,
+) -> Result<Value> {
+    let mut not_rebuilt = None;
+    if options.history && solidcraft_io::is_freecad_path(path) {
+        match solidcraft_io::native_cad_design(bytes, path) {
+            // Inserting the rebuilt design can still fail: the target design may be at its
+            // feature limit, or a rebuilt feature may not build beside what it holds. The
+            // file's solids then come in as before, with the reason, and the design stays as
+            // it was (the attempt is put back).
+            Ok(design) => {
+                let before = DesignSnapshot::of(s);
+                match add_rebuilt(s, path, name, options, &design, bytes) {
+                    Ok(out) => return Ok(out),
+                    Err(e) => {
+                        before.restore(s);
+                        not_rebuilt = Some(format!("the feature history was not rebuilt, so the file's solids were imported instead: {e}"));
+                    }
+                }
+            }
+            Err(why) => not_rebuilt = Some(format!("the feature history was not rebuilt, so the file's solids were imported instead: {why}")),
+        }
+    }
+    let mut sf = solidcraft_io::step_import_feature_named(bytes, path, options.names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    sf.warnings.splice(0..0, not_rebuilt);
+    add_read_step(s, path, name, options, sf, bytes, profiled)
 }
 
 fn add_read_step(
@@ -368,6 +437,8 @@ fn add_read_step(
         bodies: created.clone(),
         created_bodies: created,
         warnings: sf.warnings,
+        history: None,
+        features_added: None,
         system: sf.import.system.clone(),
         content_sha256,
         exporter: known.map(|(_, exporter)| exporter.to_string()),
@@ -443,8 +514,7 @@ fn open_step(
     }
     let mut fresh = Session::new(Document::new(&stem));
     fresh.set_validation(validation);
-    let sf = solidcraft_io::step_import_feature_named(&bytes, path, options.names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let mut reply = add_read_step(&mut fresh, path, None, &options, sf, &bytes, profiled)?;
+    let mut reply = add_step_bytes(&mut fresh, path, None, &options, &bytes, profiled)?;
     reply["import_reused"] = json!(false);
     if let Some(cache) = cache
         && let Some(saved) = saved_geometry(&fresh, &fresh.doc)
@@ -453,6 +523,52 @@ fn open_step(
         log::info!("import was not cached: {e}");
     }
     Ok((fresh, reply))
+}
+
+/// Add a FreeCAD file's rebuilt history (`design`) in a new component named after the file.
+fn add_rebuilt(
+    s: &mut Session,
+    path: &str,
+    name: Option<&str>,
+    options: &StepOptions,
+    design: &solidcraft_io::NativeDesign,
+    bytes: &[u8],
+) -> Result<Value> {
+    let cname = import::component_name(path, name);
+    let (ids, placed) = import::add_design(s, design, &cname)?;
+    let turned = if options.y_up { turn_up(s, &placed)? } else { None };
+    let created: Vec<String> = s.model.state().bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| b.name.clone()).collect();
+    let feature = *ids.first().ok_or_else(|| EngineError::Other(format!("{path}: the rebuilt history made no feature")))?;
+    let reply = StepInserted {
+        path: path.to_string(),
+        feature,
+        name: placed.name.clone(),
+        bodies: created.clone(),
+        created_bodies: created,
+        warnings: design.warnings.clone(),
+        history: Some("features".to_string()),
+        features_added: Some(ids),
+        // A rebuilt history has no restated STEP header to take it from: name the program the
+        // file was read from.
+        system: "FreeCAD".to_string(),
+        content_sha256: {
+            use sha2::{Digest, Sha256};
+            format!("{:x}", Sha256::digest(bytes))
+        },
+        exporter: None,
+        exporter_up: None,
+        component: placed.component,
+        component_name: placed.name.clone(),
+        occurrence: placed.occurrence,
+        subcomponents: None,
+        rigid_joints: None,
+        stand_up: turned,
+        group: None,
+        transform: None,
+        profile: None,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
 
 /// The bodies an import feature built, by name.
@@ -745,6 +861,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             moved_to_origin: r.moved_to_origin,
             content_sha256: r.content_sha256,
             import_reused: r.import_reused,
+            history: r.history,
             param_warnings: Vec::new(),
         }));
     }
@@ -871,6 +988,9 @@ struct ImportedFile {
     content_sha256: Option<String>,
     #[serde(default)]
     import_reused: Option<bool>,
+    /// FreeCAD and `history: features` only: the rebuilt history came in.
+    #[serde(default)]
+    history: Option<String>,
 }
 
 /// The name a design never given one by its user is shown under.

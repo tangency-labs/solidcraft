@@ -1,5 +1,6 @@
 //! FreeCAD and Rhino files (read through cadmpeg) go the same way as STEP files: a new rigid
-//! component named after the file (#1426), with the `up` and `names` options (#1312).
+//! component named after the file (#1426), with the `up` and `names` options (#1312). A FreeCAD
+//! file's feature history is rebuilt as features in that component unless `history: solids`.
 
 use serde_json::{Value, json};
 
@@ -9,6 +10,7 @@ use crate::*;
 const BLOCK_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.FCStd");
 const BLOCK_3DM: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.3dm");
 const BLOCK_PRT: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.prt");
+const BRACKET_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/bracket.FCStd");
 
 /// `bytes` saved as `name` in a fresh temp directory.
 fn file(tag: &str, name: &str, bytes: &[u8]) -> (std::path::PathBuf, String) {
@@ -42,7 +44,7 @@ fn native_cad_files_come_in_as_a_component_named_after_the_file() {
         let (dir, path) = file(tag, name, bytes);
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]}));
-        let r = run(&mut s, "file.insert_step", json!({"path": path}));
+        let r = run(&mut s, "file.insert_step", json!({"path": path, "history": "solids"}));
         assert_eq!(r["component_name"], "block", "{name}: {r}");
         let feature = r["feature"].as_u64().unwrap();
         assert_eq!(s.doc.feature(feature).unwrap().kind.type_name(), "BaseFeature", "{name}");
@@ -115,5 +117,104 @@ fn nx_geometry_survives_save_without_the_source_and_insert_is_undoable() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.features, before.features);
     assert!((volume(&mut s) - 125.0).abs() < 1e-6);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A FreeCAD file's history comes in as features in a component named after the file, and stays
+/// parametric: a sketch dimension drives the part. A second copy's body is numbered and its
+/// features act on it. With `history: solids` the file's solids come in as one Import feature,
+/// without the shapes FreeCAD keeps hidden.
+#[test]
+fn a_freecad_history_comes_in_as_editable_features() {
+    let (dir, path) = file("hist", "bracket.FCStd", BRACKET_FCSTD);
+    let expected = 7840.0 - 50.0 * std::f64::consts::PI;
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path}));
+    assert_eq!((r["history"].as_str(), r["features"].as_u64(), r["component_name"].as_str()), (Some("features"), Some(5), Some("bracket")), "{r}");
+    let component = r["component"].as_u64().unwrap();
+    assert!(s.doc.features.iter().all(|f| f.component == component), "every feature is in the file's component");
+    assert_eq!(body_names(&s), ["Bracket"]);
+    let v = volume(&mut s);
+    assert!((v - expected).abs() < 0.05, "volume {v}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+
+    // The rectangle's 40 mm dimension is a parameter: 50 mm adds 10 × 20 × 10 mm³.
+    let param = s
+        .doc
+        .features
+        .iter()
+        .find_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Sketch { sketch, .. } if f.name == "Profile" => {
+                sketch.constraints.iter().find(|c| c.kind.value().is_some_and(|v| (v - 40.0).abs() < 1e-9)).and_then(|c| c.param.clone())
+            }
+            _ => None,
+        })
+        .expect("the 40 mm dimension");
+    s.doc_mut().set_param(&param, "50 mm", None, None).unwrap();
+    s.refresh();
+    let wider = volume(&mut s);
+    assert!((wider - (v + 2000.0)).abs() < 0.05, "volume {wider}");
+
+    let mut d = Session::default();
+    run(&mut d, "file.insert_step", json!({"path": path}));
+    run(&mut d, "file.insert_step", json!({"path": path}));
+    assert_eq!(body_names(&d), ["Bracket", "Bracket (2)"]);
+    assert!((volume(&mut d) - 2.0 * expected).abs() < 0.1, "each copy's pocket and fillet act on its own body");
+
+    let mut d = Session::default();
+    let r = run(&mut d, "file.insert_step", json!({"path": path, "history": "solids"}));
+    assert_eq!(d.doc.feature(r["feature"].as_u64().unwrap()).unwrap().kind.type_name(), "BaseFeature");
+    assert_eq!(body_names(&d).len(), 1, "the pad's, pocket's and tools' hidden shapes are not imported");
+    assert!((volume(&mut d) - expected).abs() < 0.05);
+    let e = d.execute("file.insert_step", &json!({"path": path, "history": "sketches"})).expect_err("an unknown history choice");
+    assert!(e.to_string().contains("history"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A rebuilt history that cannot be inserted (here the design is at its feature limit) falls
+/// back to the file's solids with a warning, and leaves the design as it was: no features,
+/// parameters or component of the attempt stay behind.
+#[test]
+fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
+    let (dir, path) = file("fallback", "bracket.FCStd", BRACKET_FCSTD);
+    let mut s = Session::default();
+    let dummy = |id: u64| solidcraft_doc::Feature {
+        id,
+        name: format!("Dummy{id}"),
+        suppressed: true,
+        body_names: Vec::new(),
+        param_names: Vec::new(),
+        component: 0,
+        edge_refs: Vec::new(),
+        edge_names: Vec::new(),
+        face_names: Vec::new(),
+        participants: Vec::new(),
+        shell_piece_order: false,
+        kernel_piece_order: false,
+        inserted: false,
+        link_faces: Vec::new(),
+        touching: solidcraft_doc::Touching::Separate,
+        kind: solidcraft_doc::FeatureKind::Sketch {
+            plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
+            sketch: solidcraft_doc::sketch::Sketch::new(),
+        },
+    };
+    // Room for the file's one Import feature, but not for the five features of its history.
+    let made = solidcraft_doc::MAX_FEATURES - 3;
+    {
+        let doc = s.doc_mut();
+        doc.features.extend((1..=made).map(|i| dummy(i as u64)));
+        doc.next_id = made as u64 + 1;
+    }
+    let before = s.doc.features.len();
+    let r = run(&mut s, "file.insert_step", json!({"path": path}));
+    assert!(r["history"].is_null(), "the solids came in: {r}");
+    let warnings: Vec<&str> = r["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    assert!(warnings.iter().any(|w| w.contains("feature history was not rebuilt")), "{warnings:?}");
+    assert_eq!(s.doc.features.len(), before + 1, "only the file's Import feature was added");
+    assert_eq!(s.doc.features.iter().filter(|f| !f.name.starts_with("Dummy")).count(), 1);
+    assert_eq!(s.doc.feature(r["feature"].as_u64().unwrap()).unwrap().kind.type_name(), "BaseFeature");
+    assert!(s.doc.params.iter().all(|p| !p.model), "the failed attempt's parameters are gone");
+    assert_eq!(s.doc.components.len(), 1, "only the solids import made a component");
     let _ = std::fs::remove_dir_all(&dir);
 }
