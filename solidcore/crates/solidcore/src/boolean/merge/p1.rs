@@ -46,7 +46,9 @@
 //! `CleanupRelations::kept_edges`, and those whose faces are all in `kept_faces`, stay.
 //! With that keep (WR-602, the fork's tangency-labs/smlib@cac11ea, the default since its
 //! flag was retired): of those, an edge with one face on both sides (a slit) is checked
-//! all the same, and the kept-faces test needs two faces.
+//! all the same, and the kept-faces test needs two faces. Not the fork's (#15768): a face a
+//! merge makes of a kept face is kept, whichever of the two ids it keeps, and the fillet
+//! passes as kept edges only the input edges it left whole (`kept_edges`).
 //! Opt-in `Kernel::fixes.cover_wraps_across_closed_seam` (WR-599, the fork's
 //! tangency-labs/smlib@16bf1cb): after each face merge `boolean_post_process` runs
 //! `HasSeamProblem` on the merged face and `SplitAtSeam` when a seam is crossed or missing.
@@ -527,7 +529,8 @@ pub struct CleanupRelations {
     pub mates: Relations,
     /// WR-459 (`Kernel::fixes.fillet_cleanup_keeps_target_faces`): the edges and faces
     /// the clean-up leaves alone (the fork's `m_sPostProcessKeptEdges`/`Faces`: a
-    /// fillet's target), and any edge between two kept faces. Empty otherwise.
+    /// fillet's target, the input edges it left whole), and any edge between two kept
+    /// faces, or faces merged from them. Empty otherwise.
     pub kept_edges: BTreeSet<EdgeId>,
     /// See [`CleanupRelations::kept_edges`].
     pub kept_faces: BTreeSet<FaceId>,
@@ -637,6 +640,9 @@ pub(crate) fn boolean_post_process_with_notifications(
         BTreeSet::new()
     };
     let mut left_inside_face: BTreeSet<EdgeId> = BTreeSet::new();
+    // WR-459: the input's faces, and each face a merge below makes of one of them: the
+    // merged face is that input face continued, whichever of the two ids it keeps.
+    let mut kept_faces = relations.kept_faces.clone();
     let mut next = 0;
     while let Some(&e) = edges.get(next) {
         next += 1;
@@ -654,9 +660,9 @@ pub(crate) fn boolean_post_process_with_notifications(
         if relations.kept_edges.contains(&e) && edge::faces(brep, e, None)?.len() != 1 {
             continue;
         }
-        if !relations.kept_faces.is_empty() {
+        if !kept_faces.is_empty() {
             let faces = edge::faces(brep, e, None)?;
-            if faces.len() >= 2 && faces.iter().all(|f| relations.kept_faces.contains(f)) {
+            if faces.len() >= 2 && faces.iter().all(|f| kept_faces.contains(f)) {
                 continue;
             }
         }
@@ -717,6 +723,9 @@ pub(crate) fn boolean_post_process_with_notifications(
         } else {
             f0
         };
+        if kept_faces.contains(&f0) || kept_faces.contains(&f1) {
+            kept_faces.insert(keep);
+        }
         // The native output starts as a default SmExtent2d and is written back
         // unconditionally, even if IsTopological left it untouched.
         let domain = topological.merged_face_domain.unwrap_or_default();

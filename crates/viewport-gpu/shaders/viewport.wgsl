@@ -5,7 +5,7 @@ struct U {
     screen: vec4<f32>, // viewport width, height (px), unused, silhouettes on (1)
     clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
     cap: vec4<f32>,    // colour of the inside of cut bodies
-    ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature), parameter
+    ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature, 6 values), parameter
     pull: vec4<f32>,   // draft pull direction
     acc_u: vec4<f32>,  // accessibility map axes (xyz, offset)
     acc_v: vec4<f32>,
@@ -65,6 +65,21 @@ fn palette_entry(i: u32) -> vec2<u32> {
     return textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).xy;
 }
 
+// The palette's PBR materials (`Material` in view.rs): for palette row r, texel row 2r holds each
+// entry's linear base colour and a PBR flag, row 2r + 1 its metallic fraction, roughness and IOR.
+@group(0) @binding(2) var pbr_materials: texture_2d<f32>;
+
+/// Palette entry `i`'s hatch word (`hatch`, under 256) with the entry's PBR finish packed above
+/// it: metallic in bits 8-15, roughness in 16-23, bit 24 set when the entry has one. An entry
+/// past the material texture has none (a load out of range is not defined).
+fn finish_h(i: u32, hatch: u32) -> u32 {
+    let at = vec2<u32>(i & 2047u, (i >> 11u) * 2u);
+    if (at.y + 1u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
+    let p = clamp(textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).xy, vec2<f32>(0.0), vec2<f32>(1.0));
+    let q = vec2<u32>(round(p * 255.0));
+    return hatch | (q.x << 8u) | (q.y << 16u) | (1u << 24u);
+}
+
 /// A palette entry's colour bytes as byte/255 (the old Unorm8x4 conversion, bit for bit).
 fn unpack_color(v: u32) -> vec4<f32> {
     return vec4<f32>(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32((v >> 24u) & 255u)) / 255.0;
@@ -91,19 +106,41 @@ struct TOut {
     @location(0) n: vec3<f32>,
     @location(1) c: vec4<f32>,
     @location(2) wp: vec3<f32>,
-    // 1 + the section hatch of the body (0: the cap's own), from the palette.
+    // Low byte: 1 + the section hatch of the body (0: the cap's own), from the palette; above
+    // it the entry's PBR finish (`finish_h`).
     @location(3) @interpolate(flat) h: u32,
+    // The vertex's value (`AnalysisMode::Values`), and 1 where the triangle has values (0 for
+    // every vertex shader that gives none: a struct's fields start at zero).
+    @location(4) v: f32,
+    @location(5) @interpolate(flat) hv: u32,
 };
 
+/// A built triangle's vertex: its value word is an f32's bits, or all ones for none
+/// (`NO_VALUE`).
 @vertex
-fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32, @location(3) value: u32) -> TOut {
+    var o = tri_vertex(local, n, c);
+    let none = value == 0xffffffffu;
+    o.v = select(bitcast<f32>(value), 0.0, none);
+    o.hv = select(1u, 0u, none);
+    return o;
+}
+
+/// A vertex evaluated from a display plan on the GPU (no value).
+@vertex
+fn vs_tri_planned(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+    return tri_vertex(local, n, c);
+}
+
+/// A triangle vertex at `local` with normal `n` in palette entry `c`, without a value.
+fn tri_vertex(local: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
     var o: TOut;
     let p = placed(local);
     o.pos = u.vp * vec4<f32>(p, 1.0);
     o.n = turned(n);
     let e = palette_entry(c);
     o.c = unpack_color(e.x);
-    o.h = e.y;
+    o.h = finish_h(c, e.y);
     o.wp = p;
     return o;
 }
@@ -129,7 +166,7 @@ fn vs_tri_inst(
     o.n = turned(pn);
     let e = palette_entry(c);
     o.c = unpack_color(e.x);
-    o.h = e.y;
+    o.h = finish_h(c, e.y);
     o.wp = wp;
     return o;
 }
@@ -162,7 +199,7 @@ fn vs_tri_inst_flat(
     o.rp = wp - u.eye.xyz;
     let e = palette_entry(c);
     o.c = unpack_color(e.x);
-    o.h = e.y;
+    o.h = finish_h(c, e.y);
     return o;
 }
 
@@ -347,8 +384,8 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
         if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
         var tint = u.cap.rgb;
         var turn = 1.0;
-        if (i.h > 0u) {
-            let k = i.h - 1u;
+        if ((i.h & 255u) > 0u) {
+            let k = (i.h & 255u) - 1u;
             tint = u.hatch[min(k >> 1u, 2u)].rgb;
             turn = select(1.0, -1.0, (k & 1u) == 1u);
         }
@@ -547,19 +584,27 @@ fn analysis(i: TOut, k: f32) -> vec4<f32> {
     if (dot(n, v) < 0.0) { n = -n; }
     let lit = 0.55 + 0.45 * max(dot(n, v), 0.0);
     if (u.ana.x < 1.5) {
-        // Reflections of upright light bars standing around the viewer: the stripe follows
-        // the reflected ray's sideways direction (horizontal on screen).
+        // Reflections of light bars along `pull` (upright, +Z, standing around the viewer by
+        // default): the stripe follows the reflected ray's direction across the bars.
         let r = reflect(-v, n);
-        var side = cross(v, vec3<f32>(0.0, 0.0, 1.0));
+        var side = cross(v, u.pull.xyz);
         if (length(side) < 1e-3) { side = vec3<f32>(1.0, 0.0, 0.0); }
         let x = dot(r, normalize(side));
-        let s = sin(x * u.ana.y * 3.14159265);
-        // A face whose normal lies in the upright plane through the view (every horizontal
-        // face) reflects straight ahead: its sideways part is zero, on the edge between a black
-        // and a white stripe, and rounding picked one or the other from frame to frame while
-        // the view turned (#2153). Straight ahead is white.
-        let c = select(0.08, 0.95, s > 0.0 || abs(x) < 1e-4);
+        // White for `ana.z` of each period (half: as `sin(x * stripes * pi) > 0` always drew it).
+        let s = fract(x * u.ana.y * 0.5);
+        // A face whose normal lies in the plane of the bars through the view (every horizontal
+        // face, under upright bars) reflects straight ahead: its sideways part is zero, on the
+        // edge between a black and a white stripe, and rounding picked one or the other from
+        // frame to frame while the view turned (#2153). Straight ahead is white.
+        let c = select(0.08, 0.95, s < u.ana.z || abs(x) < 1e-4);
         return out_color(vec4<f32>(vec3<f32>(c), 1.0));
+    }
+    if (u.ana.x > 5.5) {
+        // By the vertices' values, `ana.y` (flat) to `ana.z` (tight); a face without values by
+        // how fast its normal turns, as the curvature map at a radius of 1 mm.
+        var t = clamp(k, 0.0, 1.0);
+        if (i.hv == 1u) { t = clamp((i.v - u.ana.y) / max(u.ana.z - u.ana.y, 1e-12), 0.0, 1.0); }
+        return out_color(vec4<f32>(ramp(t) * lit, 1.0));
     }
     if (u.ana.x > 4.5) {
         // Reachable from the access direction: facing it and nothing above.
@@ -603,8 +648,12 @@ fn analysis(i: TOut, k: f32) -> vec4<f32> {
     }
     // Curvature from how fast the normal turns across the pixel.
     let t = clamp(k * u.ana.y, 0.0, 1.0);
-    let c = select(mix(u.ana_c[6].rgb, u.ana_c[7].rgb, t * 2.0 - 1.0), mix(u.ana_c[5].rgb, u.ana_c[6].rgb, t * 2.0), t < 0.5);
-    return out_color(vec4<f32>(c * lit, 1.0));
+    return out_color(vec4<f32>(ramp(t) * lit, 1.0));
+}
+
+/// The curvature colours' ramp at `t` (0 to 1): flat, through the middle colour, to tight.
+fn ramp(t: f32) -> vec3<f32> {
+    return select(mix(u.ana_c[6].rgb, u.ana_c[7].rgb, t * 2.0 - 1.0), mix(u.ana_c[5].rgb, u.ana_c[6].rgb, t * 2.0), t < 0.5);
 }
 
 /// A "bad" analysis face (negative draft, blocked): with the stripes on (colour vision modes), the
@@ -625,14 +674,16 @@ fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
-    return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a));
+    // An opaque body keeps its finish under the hover; a faded or see-through one stays plain.
+    return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a), i.c.a > 0.99);
 }
 
 /// A whole selected body, lit over the model from its own plan triangles in the selection colour.
 @fragment
 fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
-    return lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a));
+    // The selection colour stays flat and plain, so it reads the same on every finish.
+    return lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a), false);
 }
 
 /// Reference planes: shaded like `fs_tri`, but never cut by the section plane.
@@ -641,8 +692,9 @@ fn fs_tri_all(i: TOut) -> @location(0) vec4<f32> {
     return shade(i);
 }
 
+/// See-through, faded and reference faces: lit as before, without a material finish.
 fn shade(i: TOut) -> vec4<f32> {
-    return lit(i, 1.0);
+    return lit_color(i, 1.0, i.c, false);
 }
 
 fn product_light_unit(v: vec3<f32>) -> vec3<f32> {
@@ -675,8 +727,9 @@ fn product_light_sample(k: u32, p: vec3<f32>) -> mat2x3<f32> {
     return mat2x3<f32>(direction,colour.xyz*weight);
 }
 
+/// An opaque face, with its material finish where the viewport shows them.
 fn lit(i: TOut, visibility: f32) -> vec4<f32> {
-    return lit_color(i, visibility, i.c);
+    return lit_color(i, visibility, i.c, true);
 }
 
 /// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).
@@ -704,9 +757,109 @@ fn sky_lit(base: vec3<f32>, n: vec3<f32>, diff: f32, fill: f32, visibility: f32)
     return srgb_encode(light);
 }
 
+/// Whether opaque faces get a material finish (`finished`): the modeling viewport sends the
+/// world's up with bit 1 of `sky.w` set (Preferences › Graphics); the product preview and
+/// captures send none.
+fn finishes() -> bool {
+    return (u32(u.sky.w) & 2u) != 0u && dot(u.sky.xyz, u.sky.xyz) > 0.25;
+}
+
+// The studio finished faces are lit by (`Environment` in environment.rs): model-viewer's neutral
+// room, as is, at model-viewer's exposure for it (`STUDIO_EXPOSURE`), prefiltered for image-based
+// lighting (split-sum). Mip k of the specular map
+// is the studio through a GGX lobe of perceptual roughness k / (mips - 1); the diffuse map is its
+// cosine-weighted irradiance / π; the DFG table is the GGX environment BRDF's scale and bias.
+@group(0) @binding(3) var studio_specular: texture_2d<f32>;
+@group(0) @binding(4) var studio_diffuse: texture_2d<f32>;
+@group(0) @binding(5) var studio_s: sampler;
+@group(0) @binding(6) var studio_dfg: texture_2d<f32>;
+/// The specular map's mips (`SPECULAR_LEVELS`; WebGL2 cannot ask a texture for its count).
+const STUDIO_MIPS: f32 = 6.0;
+/// model-viewer's exposure for its neutral room under Khronos PBR Neutral (`COMMERCE_EXPOSURE`).
+const STUDIO_EXPOSURE: f32 = 1.3;
+
+/// Where the direction `d` (in the studio's frame, y up) lands on its equirectangular maps.
+fn studio_uv(d: vec3<f32>) -> vec2<f32> {
+    return vec2<f32>(0.5 + atan2(d.x, -d.z) / 6.283185307179586, acos(clamp(d.y, -1.0, 1.0)) / 3.141592653589793);
+}
+
+/// Khronos PBR Neutral tone mapping (KhronosGroup/ToneMapping, PBR_Neutral): base colours come
+/// out as assigned under unit white light, highlights roll off toward white.
+fn pbr_neutral(light: vec3<f32>) -> vec3<f32> {
+    let start_compression = 0.8 - 0.04;
+    let desaturation = 0.15;
+    let x = min(light.r, min(light.g, light.b));
+    let offset = select(0.04, x - 6.25 * x * x, x < 0.08);
+    var c = light - offset;
+    let peak = max(c.r, max(c.g, c.b));
+    if (peak < start_compression) { return c; }
+    let d = 1.0 - start_compression;
+    let new_peak = 1.0 - d * d / (peak + d - start_compression);
+    c *= new_peak / peak;
+    let g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
+    return mix(c, vec3<f32>(new_peak), g);
+}
+
+/// Khronos glTF Sample Renderer, getIBLGGXFresnel (Fdez-Agüera 2019): the split-sum's
+/// environment BRDF with roughness-dependent Fresnel and multiple scattering.
+fn ibl_ggx_fresnel(nv: f32, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
+    // The table holds texel centres; clamping to them keeps the sampler's repeat from wrapping.
+    let half_texel = 0.5 / vec2<f32>(textureDimensions(studio_dfg));
+    let f_ab = textureSampleLevel(studio_dfg, studio_s, clamp(vec2<f32>(nv, roughness), half_texel, 1.0 - half_texel), 0.0).rg;
+    let fr = max(vec3<f32>(1.0 - roughness), f0) - f0;
+    let k_s = f0 + fr * pow(1.0 - nv, 5.0);
+    let fss_ess = k_s * f_ab.x + f_ab.y;
+    let ems = 1.0 - (f_ab.x + f_ab.y);
+    let f_avg = f0 + (1.0 - f0) / 21.0;
+    let fms_ems = ems * fss_ess * f_avg / (1.0 - f_avg * ems);
+    return fss_ess + fms_ems;
+}
+
+/// An opaque face with a material finish, lit by the studio (image-based, split-sum, as the
+/// Khronos glTF Sample Renderer): the PBR appearance's metallic and roughness (`finish_h`), else
+/// a plain dielectric of roughness 0.5 (a product choice: satin). The studio turns with
+/// the viewer (its frame is the view's, kept level: `front` toward the eye), so whatever faces the
+/// eye is lit the same from any orbit angle. Ambient occlusion (`visibility`) shades the diffuse
+/// light and, by Lagarde's approximation, the specular (Filament). Khronos PBR Neutral, then
+/// encoded as `lit_color` does.
+fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32> {
+    let pbr = (i.h >> 24u) != 0u;
+    let metallic = select(0.0, f32((i.h >> 8u) & 255u) / 255.0, pbr);
+    let roughness = select(0.5, f32((i.h >> 16u) & 255u) / 255.0, pbr);
+    let a = roughness * roughness;
+    // The view per pixel in perspective: a flat face then reflects a gradient, not one colour.
+    let back = normalize(u.back.xyz);
+    var v = back;
+    if (u.eye.w > 0.5) { v = normalize(u.eye.xyz - i.wp); }
+    let nv = clamp(dot(n, v), 0.0, 1.0);
+    let up = normalize(u.sky.xyz);
+    var front = back - up * dot(back, up);
+    if (dot(front, front) < 1e-6) { front = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(up.x) > 0.9); }
+    front = normalize(front);
+    let side = cross(up, front);
+    // Filament getSpecularDominantDirection, whose roughness is a (perceptual squared).
+    let r = normalize(mix(reflect(-v, n), n, a * a));
+    let rl = vec3<f32>(dot(r, side), dot(r, up), dot(r, front));
+    let nl = vec3<f32>(dot(n, side), dot(n, up), dot(n, front));
+    // Khronos getIBLRadianceGGX: lod = perceptual roughness × (mips - 1).
+    let lod = roughness * (STUDIO_MIPS - 1.0);
+    // Filament SpecularAO_Lagarde, whose roughness is a.
+    let specular_ao = clamp(pow(nv + visibility, exp2(-16.0 * a - 1.0)) - 1.0 + visibility, 0.0, 1.0);
+    let specular = textureSampleLevel(studio_specular, studio_s, studio_uv(rl), lod).rgb * specular_ao;
+    let albedo = srgb_decode(base.rgb);
+    let diffuse = textureSampleLevel(studio_diffuse, studio_s, studio_uv(nl), 0.0).rgb * albedo * visibility;
+    // Khronos pbr.frag: a dielectric (F0 0.04, glTF's IOR 1.5) and a metal, mixed by metallic.
+    let dielectric = mix(diffuse, specular, ibl_ggx_fresnel(nv, roughness, vec3<f32>(0.04)));
+    let metal = specular * ibl_ggx_fresnel(nv, roughness, albedo);
+    let mapped = pbr_neutral(mix(dielectric, metal, metallic) * STUDIO_EXPOSURE);
+    if (u.back.w > 0.5) { return vec4<f32>(mapped, base.a); }
+    return vec4<f32>(srgb_encode(mapped), base.a);
+}
+
 /// [`lit`] in a colour of its own: a whole highlighted body is lit in its colour lifted by the
-/// hover amount, or in the selection colour, from the model's own plan triangles.
-fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
+/// hover amount, or in the selection colour, from the model's own plan triangles. `finish`: an
+/// opaque face, which takes its material finish (`finished`) where the viewport shows them.
+fn lit_color(i: TOut, visibility: f32, base: vec4<f32>, finish: bool) -> vec4<f32> {
     // A zero normal marks flat colour (selection fills, translucent planes).
     if (length(i.n) < 0.5) {
         return out_color(base);
@@ -731,12 +884,15 @@ fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
         let encoded=select(mapped*12.92,1.055*pow(mapped,vec3<f32>(1.0/2.4))-vec3<f32>(0.055),mapped>vec3<f32>(0.0031308));
         return vec4<f32>(encoded,base.a);
     }
+    if (finish && finishes()) {
+        return finished(i, n, visibility, base);
+    }
     let key = normalize(v * 0.8 + vec3<f32>(-0.3, 0.2, 0.6));
     let diff = max(dot(n, key), 0.0);
     let fill = max(dot(n, v), 0.0);
     let h = normalize(key + v);
     let spec = pow(max(dot(n, h), 0.0), 40.0) * 0.25;
-    if u.sky.w > 0.5 {
+    if (u32(u.sky.w) & 1u) != 0u {
         return out_color(vec4<f32>(min(sky_lit(base.rgb, n, diff, fill, visibility) + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
     }
     let k = 0.42 + 0.38 * diff + 0.25 * fill - (0.42 + 0.25 * fill) * (1.0 - visibility);
@@ -808,6 +964,23 @@ fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
 
 @vertex
 fn vs_line(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+    return line_vertex(vi, local_a, local_b, c, wbits);
+}
+
+/// A scene's own lines drawn again in another colour and width (a whole hovered body's edges,
+/// `LitEdges`): the draw's first vertex carries them, as `6 * style + corner`, so the lines are
+/// drawn from the buffer they are already in. `style`: the palette index from bit 8, a raised
+/// line (`lifted_width`, no normals) at bit 7, and the width in eighths of a pixel below it.
+@vertex
+fn vs_line_lit(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+    let style = vi / 6u;
+    let eighths = style & 127u;
+    var w = bitcast<u32>(f32(eighths) / 8.0);
+    if ((style & 128u) != 0u) { w = 0x80000000u | (eighths << 24u); }
+    return line_vertex(vi % 6u, local_a, local_b, style >> 8u, w);
+}
+
+fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u32) -> LOut {
     let a = placed(local_a);
     let b = placed(local_b);
     var pa = a;

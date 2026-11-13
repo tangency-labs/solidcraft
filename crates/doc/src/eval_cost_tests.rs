@@ -289,6 +289,24 @@ fn a_sketch_on_a_fixed_plane_costs_the_same_in_a_large_placed_design() {
     }
 }
 
+/// Construction geometry is an input of every feature: moving a construction plane moves the
+/// sketch on it, though the sketch itself is unchanged.
+#[test]
+fn moving_a_construction_plane_moves_the_sketch_on_it() {
+    let mut doc = Document::new("Datum");
+    let offset = |distance: &str| FeatureKind::ConstructionPlane {
+        plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: distance.into() },
+    };
+    let plane = doc.add_feature(offset("5 mm"), Some("Datum")).unwrap();
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Construction { feature: plane.into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 5.0).abs() < 1e-9);
+    doc.feature_mut(plane).unwrap().kind = offset("12 mm");
+    model.evaluate(&doc);
+    assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 12.0).abs() < 1e-9, "the sketch follows its plane");
+}
+
 #[test]
 fn a_sketch_on_a_face_still_sees_the_placed_bodies() {
     let parts = 3;

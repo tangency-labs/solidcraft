@@ -2508,6 +2508,21 @@ mod tests {
             );
             assert!(!kind.is_port_failure(), "{kind:?}");
         }
+        // 128, a round that ends where its edge runs on tangentially, is refused whatever its
+        // size (the way out is to blend the edge it runs on into with it): it is not sized,
+        // and its failure, as the cause builds it, offers no size that fits
+        let tangent = ErrorKind::TangentContinuationEnd;
+        assert_eq!(tangent.code(), 128);
+        assert!(tangent.is_refusal() && !tangent.sized());
+        let refused = SolidError::blend(
+            "blend::op",
+            blend::BlendFailure::NoRoom(
+                crate::blend::fillet_executive::NoRoomReason::TangentContinuationEndUnsupported,
+            ),
+        );
+        assert_eq!(refused.kind(), tangent);
+        assert!(refused.is_refusal() && !refused.sized());
+        assert_eq!(refused.fit(), None);
         assert!(ErrorKind::OffsetFolds.sized() && ErrorKind::OffsetCollapses.sized());
         assert!(ErrorKind::FilletTooLarge.sized());
         assert!(ErrorKind::PortInvariant.is_defect());

@@ -2455,9 +2455,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         }
         // Construction geometry, as the browser's Construction folder lists it.
-        Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
-            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-        }),
+        Target::Plane { id } => doc.feature(*id).is_some_and(|f| f.kind.is_construction()),
         Target::Feature { id } => feature(*id),
         // The browser lists History while it is docked there and the design has features.
         Target::HistoryFolder => app.preferences.history_in_browser && !doc.features.is_empty(),

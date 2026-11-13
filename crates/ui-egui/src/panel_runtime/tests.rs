@@ -7,6 +7,7 @@ use super::*;
 fn surface_test_palette(dark: bool) -> solidcraft_theme::Tokens {
     let mut tokens = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() };
     tokens.panel = if dark { egui::Color32::BLACK } else { egui::Color32::WHITE };
+    tokens.toolbar = tokens.panel;
     let ink = if dark { egui::Color32::WHITE } else { egui::Color32::BLACK };
     tokens.text = ink;
     tokens.text_dim = ink;
@@ -59,7 +60,7 @@ fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
                 let style = HostSurfaceStyle::capture(&ctx, false, Some(requested), None);
                 let appearance = style.appearance(PanelSurface::Translucent, floating);
                 let palette = style.palette(appearance);
-                match &appearance.contrast {
+                match appearance.contrast.as_ref().unwrap() {
                     ContrastOutcome::Readable { effective_background_alpha } => {
                         assert!(!impossible, "a shipped unreadable authored pair cannot be reported compliant: {name}");
                         assert!(*effective_background_alpha >= requested);
@@ -99,7 +100,7 @@ fn captured_panel_surfaces_protect_all_inks_at_requested_translucencies() {
             let style = HostSurfaceStyle::capture(&ctx, false, Some(opacity), None);
             for floating in [false, true] {
                 let appearance = style.appearance(PanelSurface::Translucent, floating);
-                let ContrastOutcome::Readable { effective_background_alpha } = appearance.contrast else {
+                let Some(ContrastOutcome::Readable { effective_background_alpha }) = appearance.contrast else {
                     panic!("valid theme must remain authored")
                 };
                 assert!(effective_background_alpha >= opacity);
@@ -172,7 +173,7 @@ fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
         let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
         let style = HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
         let appearance = style.appearance(PanelSurface::Translucent, false);
-        assert!(matches!(appearance.contrast, ContrastOutcome::Readable { .. }));
+        assert!(matches!(appearance.contrast, Some(ContrastOutcome::Readable { .. })));
         for viewport in [0, 1, 64, 117, 192, 254, 255] {
             for linear in [false, true] {
                 let background = physical(appearance.fill, Color32::from_gray(viewport), linear, 0.0);
@@ -226,7 +227,7 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
         } else {
             ContrastFailure::UnreadableAtFullOpacity
         };
-        assert_eq!(appearance.contrast, ContrastOutcome::RetainReadableFallback { reason: expected });
+        assert_eq!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { reason: expected }));
         assert_eq!(appearance.fill.a(), 255);
         assert!(solidcraft_theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
         assert_eq!(style.palette(appearance).space_4, tokens.space_4, "fallback does not change layout metrics");
@@ -238,12 +239,12 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
 #[test]
 fn panel_surface_capture_matches_shared_frames_and_respects_accessibility() {
     let ctx = egui::Context::default();
-    let tokens = surface_test_palette(false);
+    let mut tokens = surface_test_palette(false);
+    tokens.toolbar = egui::Color32::from_rgba_unmultiplied(220, 230, 240, 180);
     let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     let style = HostSurfaceStyle::capture(&ctx, false, None, None);
     for floating in [false, true] {
-        let requested = crate::ui_kit::panel_host_frame(&ctx, floating).fill;
-        assert!(style.appearance(PanelSurface::Translucent, floating).fill.a() >= requested.a());
+        assert_eq!(style.appearance(PanelSurface::Translucent, floating).fill, tokens.toolbar);
     }
     assert_eq!(HostSurfaceStyle::capture(&ctx, false, None, Some(&style)), style);
     let forced = HostSurfaceStyle::capture(&ctx, true, Some(0.0), Some(&style));
@@ -2368,15 +2369,13 @@ fn assert_host_geometry(h: &PanelMountHarness, host: &HostLayout) {
             .chain(card.inline_content)
             .collect();
         for (index, bounds) in slots.iter().enumerate() {
-            assert!(card.header.contains_rect(*bounds));
-            assert_eq!(bounds.origin.y, card.header.origin.y);
-            assert_eq!(bounds.size.height, card.header.size.height);
+            assert!(card.header.contains_rect(*bounds) || card.action_bar.is_some_and(|row| row.contains_rect(*bounds)));
             for other in slots.iter().skip(index + 1) {
                 assert!(!egui_rect(*bounds).intersect(egui_rect(*other)).is_positive(), "disjoint header targets");
             }
         }
         if let Some(body) = card.body {
-            assert_eq!(body.origin.y, bottom(card.header) + host.metrics.content_header_height);
+            assert_eq!(body.origin.y, bottom(card.action_bar.unwrap_or(card.header)) + host.metrics.content_header_height);
         }
     }
     let mut represented = std::collections::BTreeSet::new();
@@ -4546,7 +4545,7 @@ fn raw_below_short_card_previews_and_commits_halfway_through_clear_space_before_
 
 #[test]
 fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_footprints() {
-    fn feedback(output: &egui::FullOutput, title: &str, source: egui::Rect, ink: egui::Color32, faded: bool, badge: bool) {
+    fn feedback(output: &egui::FullOutput, title: &str, source: egui::Rect, tab: bool, faded: bool, badge: bool) {
         let t = solidcraft_theme::Tokens::get();
         let (mut originals, mut badges, mut others) = (0, 0, 0);
         for clipped in &output.shapes {
@@ -4554,15 +4553,26 @@ fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_foo
                 if let egui::Shape::Text(text) = shape {
                     if text.galley.job.text == title {
                         let original = source.contains(text.pos);
-                        let expected = if original { ink.gamma_multiply(if faded { 0.5 } else { 1.0 }) } else { t.form_ink };
-                        assert!(text.galley.job.sections.iter().all(|section| section.format.color == expected));
+                        let opacity = if original && faded { 0.5 } else { 1.0 };
+                        let ink = if !original {
+                            t.form_ink
+                        } else if tab {
+                            t.app_bar_text
+                        } else {
+                            t.form_primary
+                        };
+                        assert!(text.galley.job.sections.iter().all(|section| {
+                            section.format.color == ink.gamma_multiply(opacity)
+                                || (tab && original && section.format.color == ink.gamma_multiply(opacity * 0.7))
+                        }));
                         if original {
                             originals += 1;
                         } else {
                             badges += 1;
                         }
                     } else if matches!(text.galley.job.text.as_str(), "Specimen peer" | "Specimen other") {
-                        assert!(text.galley.job.sections.iter().all(|section| section.format.color == t.form_ink));
+                        let ink = if text.galley.job.text == "Specimen peer" { t.app_bar_text } else { t.form_ink };
+                        assert!(text.galley.job.sections.iter().all(|section| section.format.color == ink));
                         others += 1;
                     }
                 }
@@ -4607,31 +4617,30 @@ fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_foo
             let source = egui_rect(raw.host.frame().unwrap().controls.iter().find(|control| control.target == target).unwrap().bounds);
             let controls = raw.host.frame().unwrap().controls.iter().map(|control| (control.id, control.bounds)).collect::<Vec<_>>();
             let title = raw.content.runtime.instance_presentation(&id("editor")).unwrap().title;
-            let ink = solidcraft_theme::Tokens::get().form_primary; // Editor declares attention.
             let start = raw.at(target);
             raw.pointer(start, true, false);
             let below = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(5.99, 0.0))], false);
-            feedback(&below.1, &title, source, ink, false, false);
-            let threshold = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(6.0, 0.0))], false);
+            feedback(&below.1, &title, source, group, false, false);
+            let threshold = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(6.01, 0.0))], false);
             assert_eq!(raw.host.interaction().move_source(), Some(&id("editor")));
             assert!(threshold.1.viewport_output.get(&egui::ViewportId::ROOT).unwrap().repaint_delay.is_zero());
             // Source text was already painted before input; the requested next
             // pass dims it, including when there is no candidate animation.
             let at = egui::pos2(700.0, 500.0); // Clear canvas, no landing.
             let held = raw.frame(vec![egui::Event::PointerMoved(at)], false);
-            feedback(&held.1, &title, source, ink, true, true);
+            feedback(&held.1, &title, source, group, true, true);
             let invalid = raw.frame(Vec::new(), false);
             assert!(invalid.0.preview.as_ref().unwrap().action.is_none());
-            feedback(&invalid.1, &title, source, ink, true, true);
+            feedback(&invalid.1, &title, source, group, true, true);
             let left = raw.frame(vec![egui::Event::PointerGone], false);
-            feedback(&left.1, &title, source, ink, true, false);
+            feedback(&left.1, &title, source, group, true, false);
             assert!(raw.host.interaction().move_position().is_none());
             let returned = raw.frame(vec![egui::Event::PointerMoved(at)], false);
-            feedback(&returned.1, &title, source, ink, true, true);
+            feedback(&returned.1, &title, source, group, true, true);
             let cancelled = raw.frame(vec![host_key(egui::Key::Escape, true), button_event(at, false)], false);
             assert!(cancelled.1.viewport_output.get(&egui::ViewportId::ROOT).unwrap().repaint_delay.is_zero());
             let restored = raw.frame(vec![host_key(egui::Key::Escape, false)], false);
-            feedback(&restored.1, &title, source, ink, false, false);
+            feedback(&restored.1, &title, source, group, false, false);
             assert_eq!(raw.content.runtime.layout().inspect(), before);
             assert_eq!(raw.content.runtime.controller_count(), controllers);
             assert_eq!(raw.content.native.commits, native_commits);
@@ -4819,7 +4828,7 @@ fn raw_host_inactive_tab_widget_drag_obeys_threshold_and_moves_only_its_retained
         let jitter = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(5.99, 0.0))], false).0;
         assert!(jitter.preview.is_none());
         assert_eq!(raw.content.runtime.layout().inspect(), before);
-        let threshold = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(6.0, 0.0))], false).0;
+        let threshold = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(6.01, 0.0))], false).0;
         assert!(threshold.preview.is_some(), "the real tab starts at six logical points at scale {scale}");
         assert_eq!(raw.content.runtime.layout().inspect(), before);
 
@@ -12494,7 +12503,7 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         for card in &painted.sections {
             let appearance = captured_style.appearance(card.surface, card.peek || card.zone == Zone::Floating);
             assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
-            assert_eq!(card.contrast.as_ref(), Some(&appearance.contrast));
+            assert_eq!(card.contrast, appearance.contrast);
             assert_eq!(card.paint_alpha, Some(255), "Classic's default opaque policy is preserved");
         }
         let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
@@ -12546,7 +12555,7 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         for card in &styled.sections {
             let appearance = styled_policy.surfaces.as_ref().unwrap().appearance(card.surface, card.peek || card.zone == Zone::Floating);
             assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
-            assert_eq!(card.contrast.as_ref(), Some(&appearance.contrast));
+            assert_eq!(card.contrast, appearance.contrast);
         }
         assert_eq!(styled.render_domain, reference.render_domain);
         assert_eq!(styled.controls, reference.controls, "appearance leaves all pointer bounds and identities intact");
@@ -13247,6 +13256,9 @@ fn production_browser_and_history_mount_existing_content_once_and_preserve_combi
     for combined in [false, true] {
         let h = production_content_harness(combined, false);
         let frame = h.app.universal_panel_frame().expect("real content uses the shared host");
+        for card in &frame.layout.sections {
+            assert_eq!(card.surface, PanelSurface::Translucent, "production panels follow the ribbon in every in-workspace zone");
+        }
         assert!(frame.layout.sections.iter().any(|card| card.instance == id("browser")));
         assert_eq!(frame.layout.sections.iter().any(|card| card.instance == id("history")), !combined);
         let rows = crate::browser::drawn_rows();

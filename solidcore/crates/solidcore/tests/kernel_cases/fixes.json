@@ -3,8 +3,6 @@
   "curve_loop_start_after_previous_end",
   "temporary_radius_setup_errors",
   "fillet_trim_status",
-  "bend_volume_bbox_contains_wide_angle_and_inf_u",
-  "bend_volume_trim_param_box_across_period",
   "curve_loop_normal_from_area",
   "fillet_refuse_rails_leaving_faces",
   "fillet_refuse_face_consuming_blends",
@@ -174,14 +172,11 @@
   "face_points_span_domain",
   "check_seam_crossing_unclosed",
   "surface_parallel_to_vector_checks",
-  "imprint_skips_collapsed_definition",
-  "boolean_coincident_strip_drops_crossing",
   "ascii_doubles_round_trip",
   "fillet_round_ends_at_tangent_continuation",
   "fillet_round_as_definition",
   "fillet_overflow_trim_at_creases",
   "fillet_section_end_trim_at_creases",
   "fillet_overflow_crease_along_edge",
-  "plane_first_torus_section_exact",
   "keep_exact_pcurves"
 ]

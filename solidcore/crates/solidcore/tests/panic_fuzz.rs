@@ -1340,6 +1340,7 @@ fn run_sweep(k: &mut Kernel, s: &Sweep) -> solidcore::Result<Option<Brep>> {
                 orient_profile_perpendicular_to_path: bits & 8 != 0,
                 move_to_profile: bits & 16 != 0,
                 profile_at_path_start: bits & 32 != 0,
+                up: None,
             };
             let sc0 = sc.as_ref().and_then(|v| v.first());
             let sc1 = sc.as_ref().and_then(|v| v.get(1));
@@ -1947,6 +1948,7 @@ fn wide_step(k: &mut Kernel, step: &Step, bodies: &[Brep]) -> Option<Brep> {
                 orient_profile_perpendicular_to_path: bits & 8 != 0,
                 move_to_profile: bits & 16 != 0,
                 profile_at_path_start: bits & 32 != 0,
+                up: None,
             };
             let sc0 = scale.as_ref().and_then(|v| v.first());
             let sc1 = scale.as_ref().and_then(|v| v.get(1));
