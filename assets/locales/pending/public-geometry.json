@@ -5,7 +5,16 @@
     "cmd.geometry_publications": "Public Geometries",
     "cmd.geometry_import": "Copy Geometry from File",
     "cmd.geometry_update": "Update Geometry Copies",
-    "cmd.geometry_copies": "Geometry Copies"
+    "cmd.geometry_copies": "Geometry Copies",
+    "help.geometry.copies": "Lists the geometry copies of this design, each with its state. Click one to read its source file again and bring it up to date.",
+    "help.geometry.import": "Copies a public geometry of another design file, such as a skeleton's layout, into the active component. Use it to build a part on planes and sketches that an assembly shares.",
+    "ui.geometry_copies.none": "No geometry copies",
+    "ui.geometry_copy.missing": "File missing",
+    "ui.geometry_copy.not_allowed": "Location not allowed",
+    "ui.geometry_copy.out_of_date": "Out of date",
+    "ui.geometry_copy.unreadable": "Unreadable",
+    "ui.geometry_copy.up_to_date": "Up to date",
+    "ui.geometry_import.nothing": "That design shares no public geometry"
   },
   "ar": {
     "cmd.geometry_publish": "هندسة عامة",
@@ -13,7 +22,16 @@
     "cmd.geometry_publications": "الهندسات العامة",
     "cmd.geometry_import": "نسخ هندسة من ملف",
     "cmd.geometry_update": "تحديث نسخ الهندسة",
-    "cmd.geometry_copies": "نسخ الهندسة"
+    "cmd.geometry_copies": "نسخ الهندسة",
+    "help.geometry.copies": "يعرض نسخ الهندسة في هذا التصميم مع حالة كل منها. انقر على إحداها لإعادة قراءة ملفها المصدر وتحديثها.",
+    "help.geometry.import": "ينسخ هندسة عامة من ملف تصميم آخر، مثل تخطيط هيكل، إلى المكوّن النشط. استخدمه لبناء قطعة على المستويات والرسوم التي يتشاركها تجميع.",
+    "ui.geometry_copies.none": "لا توجد نسخ هندسة",
+    "ui.geometry_copy.missing": "الملف مفقود",
+    "ui.geometry_copy.not_allowed": "الموقع غير مسموح",
+    "ui.geometry_copy.out_of_date": "قديمة",
+    "ui.geometry_copy.unreadable": "غير قابلة للقراءة",
+    "ui.geometry_copy.up_to_date": "محدّثة",
+    "ui.geometry_import.nothing": "لا يشارك هذا التصميم أي هندسة عامة"
   },
   "de": {
     "cmd.geometry_publish": "Öffentliche Geometrie",
@@ -21,7 +39,16 @@
     "cmd.geometry_publications": "Öffentliche Geometrien",
     "cmd.geometry_import": "Geometrie aus Datei kopieren",
     "cmd.geometry_update": "Geometriekopien aktualisieren",
-    "cmd.geometry_copies": "Geometriekopien"
+    "cmd.geometry_copies": "Geometriekopien",
+    "help.geometry.copies": "Listet die Geometriekopien dieser Konstruktion mit ihrem Zustand auf. Ein Klick liest die Quelldatei erneut und aktualisiert die Kopie.",
+    "help.geometry.import": "Kopiert eine öffentliche Geometrie aus einer anderen Konstruktionsdatei, etwa das Layout eines Skeletts, in die aktive Komponente. Damit baut man ein Teil auf Ebenen und Skizzen auf, die eine Baugruppe teilt.",
+    "ui.geometry_copies.none": "Keine Geometriekopien",
+    "ui.geometry_copy.missing": "Datei fehlt",
+    "ui.geometry_copy.not_allowed": "Ort nicht erlaubt",
+    "ui.geometry_copy.out_of_date": "Veraltet",
+    "ui.geometry_copy.unreadable": "Nicht lesbar",
+    "ui.geometry_copy.up_to_date": "Aktuell",
+    "ui.geometry_import.nothing": "Diese Konstruktion teilt keine öffentliche Geometrie"
   },
   "fr": {
     "cmd.geometry_publish": "Géométrie publique",
@@ -29,7 +56,16 @@
     "cmd.geometry_publications": "Géométries publiques",
     "cmd.geometry_import": "Copier la géométrie depuis un fichier",
     "cmd.geometry_update": "Mettre à jour les copies de géométrie",
-    "cmd.geometry_copies": "Copies de géométrie"
+    "cmd.geometry_copies": "Copies de géométrie",
+    "help.geometry.copies": "Liste les copies de géométrie de cette conception, chacune avec son état. Cliquez sur l'une d'elles pour relire son fichier source et la mettre à jour.",
+    "help.geometry.import": "Copie une géométrie publique d'un autre fichier de conception, comme l'implantation d'un squelette, dans le composant actif. Utilisez-la pour construire une pièce sur les plans et esquisses partagés par un assemblage.",
+    "ui.geometry_copies.none": "Aucune copie de géométrie",
+    "ui.geometry_copy.missing": "Fichier introuvable",
+    "ui.geometry_copy.not_allowed": "Emplacement non autorisé",
+    "ui.geometry_copy.out_of_date": "Périmée",
+    "ui.geometry_copy.unreadable": "Illisible",
+    "ui.geometry_copy.up_to_date": "À jour",
+    "ui.geometry_import.nothing": "Cette conception ne partage aucune géométrie publique"
   },
   "he": {
     "cmd.geometry_publish": "גאומטריה ציבורית",
@@ -37,7 +73,16 @@
     "cmd.geometry_publications": "גאומטריות ציבוריות",
     "cmd.geometry_import": "העתקת גאומטריה מקובץ",
     "cmd.geometry_update": "עדכון העתקי גאומטריה",
-    "cmd.geometry_copies": "העתקי גאומטריה"
+    "cmd.geometry_copies": "העתקי גאומטריה",
+    "help.geometry.copies": "מציג את העתקי הגאומטריה של התכנון, כל אחד עם מצבו. לחיצה על אחד קוראת שוב את קובץ המקור שלו ומעדכנת אותו.",
+    "help.geometry.import": "מעתיק גאומטריה ציבורית מקובץ תכנון אחר, כמו פריסה של שלד, אל הרכיב הפעיל. השתמשו בו כדי לבנות חלק על מישורים וסקיצות שמכלול חולק.",
+    "ui.geometry_copies.none": "אין העתקי גאומטריה",
+    "ui.geometry_copy.missing": "הקובץ חסר",
+    "ui.geometry_copy.not_allowed": "המיקום אינו מורשה",
+    "ui.geometry_copy.out_of_date": "לא עדכני",
+    "ui.geometry_copy.unreadable": "לא קריא",
+    "ui.geometry_copy.up_to_date": "עדכני",
+    "ui.geometry_import.nothing": "התכנון הזה אינו חולק גאומטריה ציבורית"
   },
   "ja": {
     "cmd.geometry_publish": "公開ジオメトリ",
@@ -45,7 +90,16 @@
     "cmd.geometry_publications": "公開ジオメトリ一覧",
     "cmd.geometry_import": "ファイルからジオメトリをコピー",
     "cmd.geometry_update": "ジオメトリのコピーを更新",
-    "cmd.geometry_copies": "ジオメトリのコピー"
+    "cmd.geometry_copies": "ジオメトリのコピー",
+    "help.geometry.copies": "この設計のジオメトリのコピーを状態とともに一覧表示します。クリックするとソースファイルを読み直して更新します。",
+    "help.geometry.import": "別の設計ファイルの公開ジオメトリ（スケルトンのレイアウトなど）をアクティブなコンポーネントにコピーします。アセンブリが共有する平面やスケッチの上に部品を作るときに使います。",
+    "ui.geometry_copies.none": "ジオメトリのコピーはありません",
+    "ui.geometry_copy.missing": "ファイルがありません",
+    "ui.geometry_copy.not_allowed": "許可されていない場所",
+    "ui.geometry_copy.out_of_date": "最新ではありません",
+    "ui.geometry_copy.unreadable": "読み込めません",
+    "ui.geometry_copy.up_to_date": "最新",
+    "ui.geometry_import.nothing": "その設計には公開ジオメトリがありません"
   },
   "ko": {
     "cmd.geometry_publish": "공개 형상",
@@ -53,7 +107,16 @@
     "cmd.geometry_publications": "공개 형상 목록",
     "cmd.geometry_import": "파일에서 형상 복사",
     "cmd.geometry_update": "형상 복사본 업데이트",
-    "cmd.geometry_copies": "형상 복사본"
+    "cmd.geometry_copies": "형상 복사본",
+    "help.geometry.copies": "이 디자인의 형상 복사본을 상태와 함께 나열합니다. 하나를 클릭하면 원본 파일을 다시 읽어 최신 상태로 만듭니다.",
+    "help.geometry.import": "다른 디자인 파일의 공개 형상(스켈레톤의 배치 등)을 활성 구성 요소로 복사합니다. 어셈블리가 공유하는 평면과 스케치 위에 부품을 만들 때 사용합니다.",
+    "ui.geometry_copies.none": "형상 복사본 없음",
+    "ui.geometry_copy.missing": "파일 없음",
+    "ui.geometry_copy.not_allowed": "허용되지 않은 위치",
+    "ui.geometry_copy.out_of_date": "오래됨",
+    "ui.geometry_copy.unreadable": "읽을 수 없음",
+    "ui.geometry_copy.up_to_date": "최신",
+    "ui.geometry_import.nothing": "그 디자인은 공개 형상을 공유하지 않습니다"
   },
   "vi": {
     "cmd.geometry_publish": "Hình học công khai",
@@ -61,7 +124,16 @@
     "cmd.geometry_publications": "Các hình học công khai",
     "cmd.geometry_import": "Sao chép hình học từ tệp",
     "cmd.geometry_update": "Cập nhật các bản sao hình học",
-    "cmd.geometry_copies": "Các bản sao hình học"
+    "cmd.geometry_copies": "Các bản sao hình học",
+    "help.geometry.copies": "Liệt kê các bản sao hình học của thiết kế này cùng trạng thái của từng bản. Nhấp vào một bản để đọc lại tệp nguồn và cập nhật nó.",
+    "help.geometry.import": "Sao chép một hình học công khai của tệp thiết kế khác, như bố cục của một khung xương, vào thành phần đang hoạt động. Dùng nó để dựng chi tiết trên các mặt phẳng và phác thảo mà một cụm lắp chia sẻ.",
+    "ui.geometry_copies.none": "Không có bản sao hình học",
+    "ui.geometry_copy.missing": "Thiếu tệp",
+    "ui.geometry_copy.not_allowed": "Vị trí không được phép",
+    "ui.geometry_copy.out_of_date": "Đã cũ",
+    "ui.geometry_copy.unreadable": "Không đọc được",
+    "ui.geometry_copy.up_to_date": "Mới nhất",
+    "ui.geometry_import.nothing": "Thiết kế đó không chia sẻ hình học công khai nào"
   },
   "zh": {
     "cmd.geometry_publish": "公开几何",
@@ -69,6 +141,15 @@
     "cmd.geometry_publications": "公开几何列表",
     "cmd.geometry_import": "从文件复制几何",
     "cmd.geometry_update": "更新几何副本",
-    "cmd.geometry_copies": "几何副本"
+    "cmd.geometry_copies": "几何副本",
+    "help.geometry.copies": "列出此设计的几何副本及其状态。单击其中一个可重新读取其源文件并更新。",
+    "help.geometry.import": "将另一个设计文件的公开几何（例如骨架的布局）复制到活动组件中。用它在装配体共享的平面和草图上构建零件。",
+    "ui.geometry_copies.none": "没有几何副本",
+    "ui.geometry_copy.missing": "文件缺失",
+    "ui.geometry_copy.not_allowed": "位置不允许",
+    "ui.geometry_copy.out_of_date": "已过期",
+    "ui.geometry_copy.unreadable": "无法读取",
+    "ui.geometry_copy.up_to_date": "最新",
+    "ui.geometry_import.nothing": "该设计没有共享公开几何"
   }
 }

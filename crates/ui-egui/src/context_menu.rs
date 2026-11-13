@@ -76,6 +76,16 @@ pub enum Target {
         path: String,
         sketches: Vec<(u64, String)>,
     },
+    /// Copy Geometry from File: the public geometries the design file `path` shares.
+    GeometryFile {
+        path: String,
+        publications: Vec<String>,
+    },
+    /// Geometry Copies: each copy with its state word, as `geometry.copies` gave them when the
+    /// menu opened; a click updates it.
+    GeometryCopies {
+        copies: Vec<(String, String)>,
+    },
     /// View › Visual style: the four styles, the current one marked (#8868).
     VisualStyle,
     /// View › Navigation tool: Orbit, Pan, Zoom; the latched one marked (#8868).
@@ -413,6 +423,10 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             .iter()
             .map(|(from, name)| cmd(app, "sketch.replace", name).with(json!({ "sketch": sketch, "from": from, "file": path })))
             .collect(),
+        Target::GeometryFile { path, publications } => {
+            publications.iter().map(|name| cmd(app, "geometry.import", name).with(json!({ "path": path, "publication": name }))).collect()
+        }
+        Target::GeometryCopies { copies } => geometry_copy_items(app, copies),
         Target::EditSketch => {
             let items: Vec<Item> = app
                 .session
@@ -899,6 +913,45 @@ fn replace_sketch_from_file(app: &mut SolveApp, sketch: u64, at: Pos2) {
             _ => open_for(app, at, Target::ReplaceSketchFile { sketch, path, sketches }),
         }
     });
+}
+
+/// Copy Geometry from File: pick a design file, then one of the public geometries it shares in
+/// a menu under the button; a file that shares one is copied at once.
+pub(crate) fn copy_geometry_from_file(app: &mut SolveApp, opener: Option<Rect>) {
+    app.pick_open_for(&solidcraft_engine::io::DESIGN_EXTS, move |app, path| {
+        let Some(path) = path else { return };
+        let publications: Vec<String> = match app.session.execute("geometry.publications", &json!({ "path": path })) {
+            Ok(v) => v["publications"].as_array().into_iter().flatten().filter_map(|g| g["name"].as_str().map(str::to_string)).collect(),
+            Err(e) => return app.set_status(e.to_string(), true),
+        };
+        match publications.as_slice() {
+            [] => app.set_status(app.tr("ui.geometry_import.nothing").to_string(), true),
+            [one] => drop(app.run("geometry.import", json!({ "path": path, "publication": one }))),
+            _ => {
+                let at = opener.map(|r| r.left_bottom()).or(app.viewport.rect.map(|r| r.center())).unwrap_or(egui::pos2(300.0, 200.0));
+                open_for(app, at, Target::GeometryFile { path, publications });
+            }
+        }
+    });
+}
+
+/// The design's geometry copies and their states, for the Geometry Copies menu.
+pub(crate) fn geometry_copies(app: &mut SolveApp) -> Target {
+    let listed = app.session.execute("geometry.copies", &json!({})).unwrap_or_default();
+    let copies = listed["copies"].as_array().into_iter().flatten();
+    Target::GeometryCopies { copies: copies.filter_map(|c| Some((c["name"].as_str()?.to_string(), c["state"].as_str()?.to_string()))).collect() }
+}
+
+/// Geometry Copies: each copy, its state beside it, a click reads its file again.
+fn geometry_copy_items(app: &SolveApp, copies: &[(String, String)]) -> Vec<Item> {
+    let items: Vec<Item> = copies
+        .iter()
+        .map(|(name, state)| {
+            let state = app.tr(&format!("ui.geometry_copy.{state}")).to_string();
+            cmd(app, "geometry.update", name).key(&state).with(json!({ "copies": [name] }))
+        })
+        .collect();
+    if items.is_empty() { vec![act("geometry.copies", app.tr("ui.geometry_copies.none"), "construction").on(false)] } else { items }
 }
 
 /// Construction geometry's row: edit, delete, rename, show or hide; sketch on planes.
@@ -2440,6 +2493,8 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::Origin
         | Target::Units
         | Target::InsertDesign
+        | Target::GeometryFile { .. }
+        | Target::GeometryCopies { .. }
         | Target::EditSketch
         | Target::VisualStyle
         | Target::ViewTool

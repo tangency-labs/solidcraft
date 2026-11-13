@@ -2233,6 +2233,15 @@ impl SolveApp {
             linked_source::start_selected(self);
             return;
         }
+        if id == "geometry.import" {
+            context_menu::copy_geometry_from_file(self, opener);
+            return;
+        }
+        if id == "geometry.copies" {
+            let target = context_menu::geometry_copies(self);
+            self.open_choice_menu(opener, target);
+            return;
+        }
         if id == "file.insert_mesh" {
             // Insert Mesh is an explicit ask for a mesh: a PLY chosen here is read as one (its
             // faces), after asking its unit, where any other way of inserting it is a point cloud.

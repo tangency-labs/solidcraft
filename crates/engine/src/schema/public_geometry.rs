@@ -65,10 +65,14 @@ pub struct UnpublishResult {
     pub param_warnings: Vec<String>,
 }
 
-/// `geometry.publications` takes no parameters.
+/// List the public geometries of this design, or of another design file.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct PublicationsParams {}
+pub struct PublicationsParams {
+    /// Another design file, to list what it shares. Default: this design.
+    #[serde(default)]
+    pub path: Option<String>,
+}
 
 /// One public geometry.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -90,10 +94,11 @@ pub struct PublicationsResult {
     pub param_warnings: Vec<String>,
 }
 
-/// Copy a public geometry of another design file into the active component. Each plane, axis or
-/// point it shares becomes a construction feature here, with fixed geometry, under its published
-/// name, placed as it is in the source design. The copy keeps what it took: the file is read
-/// again only by `geometry.update`. A design can't copy from itself.
+/// Copy a public geometry of another design file into the active component. Each sketch, plane,
+/// axis or point it shares becomes a feature here, with fixed geometry, under its published name
+/// (`name (copy)` where a feature here already has it), placed as it is in the source design. A
+/// copied sketch keeps its curves where they are and none of its dimensions. The copy keeps what
+/// it took: the file is read again only by `geometry.update`. A design can't copy from itself.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ImportParams {
@@ -116,9 +121,9 @@ pub struct ImportResult {
     pub file: String,
     /// The public geometry it takes.
     pub publication: String,
-    /// The construction features made here, one per copied element.
+    /// The features made here, one per copied element.
     pub items: Vec<PublishedEntry>,
-    /// Published elements that are not copied yet (sketches).
+    /// Published elements the source design could not build (suppressed or failing).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

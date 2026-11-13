@@ -81,6 +81,45 @@ fn a_part_copies_a_skeleton_files_public_geometry_and_updates_on_demand() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A skeleton design saved at `path` sharing the sketch `Outline`, a rectangle `width` × 10 with
+/// its width dimensioned, in the public geometry `Shape`.
+fn outline(path: &Path, width: f64) {
+    let mut s = Session::default();
+    run(&mut s, "component.create_skeleton", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [width, 10]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": width}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "geometry.publish", json!({"name": "Shape", "items": ["Outline"]}));
+    run(&mut s, "file.save", json!({"path": path}));
+}
+
+#[test]
+fn a_copied_sketch_is_extruded_here_and_follows_an_update() {
+    let dir = folder("sketch");
+    let source = dir.join("skeleton.sc");
+    outline(&source, 20.0);
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+
+    let mut part = Session::default();
+    let made = run(&mut part, "geometry.import", json!({"path": source, "publication": "Shape"}));
+    assert_eq!(made["items"][0]["type"], "Sketch", "{made}");
+    assert!(made.get("skipped").is_none(), "{made}");
+    // The copy holds the curves where they were and none of the source design's dimensions.
+    let copied = part.doc.sketch(made["items"][0]["feature"].as_u64().unwrap()).unwrap();
+    assert!(copied.constraints.is_empty() && copied.curves.len() == 4 && copied.curves.iter().all(|c| c.fixed));
+    assert!(part.doc.params.is_empty());
+    run(&mut part, "solid.extrude", json!({"distance": 5}));
+    assert!((volume(&mut part) - 1000.0).abs() < 1e-6, "{}", volume(&mut part));
+
+    outline(&source, 30.0);
+    let updated = run(&mut part, "geometry.update", json!({}));
+    assert_eq!(updated["copies"][0]["changed"], json!(["Outline"]), "{updated}");
+    assert!((volume(&mut part) - 1500.0).abs() < 1e-6, "the extrude follows the copy: {}", volume(&mut part));
+    assert_eq!(run(&mut part, "geometry.update", json!({}))["copies"][0]["state"], "unchanged");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_geometry_copy_refuses_what_it_cannot_take_and_follows_its_features() {
     let dir = folder("refusals");
@@ -92,10 +131,11 @@ fn a_geometry_copy_refuses_what_it_cannot_take_and_follows_its_features() {
     assert!(refused(&mut part, json!({"path": source, "publication": "Nothing"})).contains("no public geometry"));
     assert!(refused(&mut part, json!({"path": dir.join("absent.sc"), "publication": "Layout"})).contains("not found"));
     assert!(refused(&mut part, json!({"publication": "Layout"})).contains("path"));
-    run(&mut part, "construct.plane.offset", json!({"base": "XY", "offset": 1, "name": "Deck"}));
-    assert!(refused(&mut part, json!({"path": source, "publication": "Layout"})).contains("already exists"));
-    assert!(part.doc.geometry_copies.is_empty() && part.doc.features.len() == 1, "a refused copy leaves nothing behind");
-    run(&mut part, "timeline.delete", json!({"feature": "Deck"}));
+    assert!(part.doc.geometry_copies.is_empty() && part.doc.features.is_empty(), "a refused copy leaves nothing behind");
+    // What it shares is listed without copying it.
+    let shared = run(&mut part, "geometry.publications", json!({"path": source}));
+    assert_eq!(shared["publications"][0]["name"], "Layout", "{shared}");
+    assert_eq!(shared["publications"][0]["items"].as_array().unwrap().len(), 2);
 
     run(&mut part, "geometry.import", json!({"path": source, "publication": "Layout", "name": "Frame"}));
     assert!(refused(&mut part, json!({"path": source, "publication": "Layout", "name": "frame"})).contains("already exists"));
@@ -108,6 +148,13 @@ fn a_geometry_copy_refuses_what_it_cannot_take_and_follows_its_features() {
     assert_eq!(part.doc.geometry_copies[0].items.len(), 1);
     run(&mut part, "timeline.delete", json!({"feature": "Wall"}));
     assert!(part.doc.geometry_copies.is_empty());
+
+    // A name taken here is no obstacle: the element comes in under its name and the copy's.
+    let mut busy = Session::default();
+    run(&mut busy, "construct.plane.offset", json!({"base": "XY", "offset": 1, "name": "Deck"}));
+    let made = run(&mut busy, "geometry.import", json!({"path": source, "publication": "Layout"}));
+    assert_eq!(made["items"][0]["feature"], busy.doc.features.iter().find(|f| f.name == "Deck (Layout)").unwrap().id, "{made}");
+    assert_eq!(height(&busy, "Deck (Layout)"), 40.0);
 
     // A design can't copy from itself.
     let mut own = Session::default();

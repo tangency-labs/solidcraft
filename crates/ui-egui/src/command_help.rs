@@ -70,6 +70,8 @@ pub const DOCUMENTED: &[&str] = &[
     "file.send_to_slicer",
     "frame.end_cap",
     "frame.member",
+    "geometry.copies",
+    "geometry.import",
     "inspect.accessibility",
     "inspect.center_of_mass",
     "inspect.colored_components",

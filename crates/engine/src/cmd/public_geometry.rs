@@ -46,12 +46,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&PUBLICATIONS_CONTRACT)
         .output(output_schema_for::<PublicationsResult>)
-        .params("→ publications: [{name, items: [{name, feature, type}]}], one per public geometry"),
+        .params("path?: another design file, to list what it shares (default: this design) → publications: [{name, items: [{name, feature, type}]}], one per public geometry"),
     CommandSpec::new("geometry.import", "Copy Geometry from File", crate::checked!("geometry.import", import))
         .icon("construction")
         .contract(&IMPORT_CONTRACT)
         .output(output_schema_for::<ImportResult>)
-        .params("path: the design file to copy from; publication: the public geometry to take; name?: the copy's name here. Its planes, axes and points become construction features of the active component, with fixed geometry, under their published names"),
+        .params("path: the design file to copy from; publication: the public geometry to take; name?: the copy's name here. Its sketches, planes, axes and points become features of the active component, with fixed geometry, under their published names"),
     CommandSpec::new("geometry.update", "Update Geometry Copies", crate::checked!("geometry.update", update))
         .icon("construction")
         .contract(&UPDATE_CONTRACT)
@@ -149,8 +149,12 @@ fn unpublish(s: &mut Session, p: &Value) -> Result<Value> {
     reply(UnpublishResult { name: gone.name, removed: gone.items.len(), param_warnings: Vec::new() })
 }
 
-fn publications(s: &mut Session, _: &Value) -> Result<Value> {
-    let publications = s.doc.public_geometry.iter().map(|g| Publication { name: g.name.clone(), items: entries(s, &g.items) }).collect();
+fn publications(s: &mut Session, p: &Value) -> Result<Value> {
+    let list = |s: &Session| s.doc.public_geometry.iter().map(|g| Publication { name: g.name.clone(), items: entries(s, &g.items) }).collect();
+    let publications = match str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096) {
+        Some(given) => list(&open(s, &absolute(Path::new(given))).map_err(|e| bad("geometry.publications", e.reason))?.0),
+        None => list(s),
+    };
     reply(PublicationsResult { publications, param_warnings: Vec::new() })
 }
 
@@ -165,10 +169,31 @@ fn fixed(geom: &ConstructGeom) -> FeatureKind {
     }
 }
 
-/// What a public geometry of a source design gives: its planes, axes and points by published
-/// name, and the names of the elements that are not copied yet.
+/// The sketch feature that holds a solved sketch where it came to: its points and curves held
+/// there, and nothing that reads the design it comes from (dimensions driven by that design's
+/// parameters, projections of its bodies). Ids are kept, so what was built on a copy finds its
+/// curves again after an update.
+fn fixed_sketch(solved: &solidcraft_doc::SolvedSketch) -> FeatureKind {
+    let mut sketch = solved.sketch.clone();
+    sketch.constraints.clear();
+    sketch.patterns.clear();
+    sketch.links.clear();
+    sketch.offsets.clear();
+    sketch.freeform_offsets.clear();
+    sketch.equations.clear();
+    for p in &mut sketch.points {
+        (p.fixed, p.link, p.exprs) = (true, None, None);
+    }
+    for c in &mut sketch.curves {
+        (c.fixed, c.link) = (true, None);
+    }
+    FeatureKind::Sketch { plane: PlaneRef::Custom { plane: solved.plane }, sketch }
+}
+
+/// What a public geometry of a source design gives: the fixed feature of each element by
+/// published name, and the names of the elements the source design could not build.
 struct Taken {
-    geometry: Vec<(String, ConstructGeom)>,
+    geometry: Vec<(String, FeatureKind)>,
     skipped: Vec<String>,
     digest: String,
     /// The public geometry's name as the source design spells it.
@@ -179,38 +204,51 @@ fn problem(state: LinkState, reason: String) -> LinkProblem {
     LinkProblem { state, reason }
 }
 
-/// Read the design at `file` and take its public geometry `publication`.
-fn take(s: &Session, file: &Path, publication: &str) -> std::result::Result<Taken, LinkProblem> {
+fn unreadable(file: &Path, e: String) -> LinkProblem {
     let shown = file.display().to_string();
+    problem(LinkState::Unreadable, if e.starts_with(&shown) { e } else { format!("{shown}: {e}") })
+}
+
+/// Read the design at `file`: the design, and its file's digest.
+fn open(s: &Session, file: &Path) -> std::result::Result<(Session, String), LinkProblem> {
     let own = s.path.as_deref();
     if own.is_some_and(|o| same_file(Path::new(o), file)) {
-        return Err(problem(LinkState::Unreadable, format!("{shown}: a design can't copy geometry from itself")));
+        return Err(unreadable(file, "a design can't copy geometry from itself".into()));
     }
     let bytes = read_linked_file(file, own)?;
-    let unreadable = |e: String| problem(LinkState::Unreadable, if e.starts_with(&shown) { e } else { format!("{shown}: {e}") });
-    let source = super::component_link::linked_session(&shown, &bytes, s.validation()).map_err(|e| unreadable(e.to_string()))?;
+    let source = super::component_link::linked_session(&file.display().to_string(), &bytes, s.validation());
+    Ok((source.map_err(|e| unreadable(file, e.to_string()))?, DesignLink::file_digest(&bytes)))
+}
+
+/// Read the design at `file` and take its public geometry `publication`.
+fn take(s: &Session, file: &Path, publication: &str) -> std::result::Result<Taken, LinkProblem> {
+    let (source, digest) = open(s, file)?;
     let group = source.doc.public_geometry.iter().find(|g| g.name.eq_ignore_ascii_case(publication));
-    let group = group.ok_or_else(|| unreadable(format!("no public geometry `{publication}`")))?;
-    let world = source.world_state().map_err(|e| unreadable(e.to_string()))?;
+    let group = group.ok_or_else(|| unreadable(file, format!("no public geometry `{publication}`")))?;
+    let world = source.world_state().map_err(|e| unreadable(file, e.to_string()))?;
     let (mut geometry, mut skipped) = (Vec::new(), Vec::new());
     for item in &group.items {
-        match world.construct.iter().find(|c| c.feature == item.feature) {
-            Some(c) => geometry.push((item.name.clone(), c.geom.clone())),
+        let construct = world.construct.iter().find(|c| c.feature == item.feature).map(|c| fixed(&c.geom));
+        match construct.or_else(|| world.sketches.iter().find(|k| k.feature == item.feature).map(|k| fixed_sketch(k))) {
+            Some(kind) => geometry.push((item.name.clone(), kind)),
             None => skipped.push(item.name.clone()),
         }
     }
-    Ok(Taken { geometry, skipped, digest: DesignLink::file_digest(&bytes), publication: group.name.clone() })
+    Ok(Taken { geometry, skipped, digest, publication: group.name.clone() })
 }
 
-/// Add the construction feature `name` holding `geom` to `component`.
-fn add(s: &mut Session, cmd: &str, component: u64, name: &str, geom: &ConstructGeom) -> Result<u64> {
-    if s.doc.features.iter().any(|f| f.name.eq_ignore_ascii_case(name)) {
-        return Err(bad(cmd, format!("a feature named `{name}` already exists here: rename it, or the published element in the source design")));
+/// Add the feature `kind` to `component` under the published name `item`, or under
+/// `item (copy)` where a feature here already has that name (most designs have a `Sketch1`).
+fn add(s: &mut Session, cmd: &str, component: u64, copy: &str, item: &str, kind: &FeatureKind) -> Result<u64> {
+    let free = |n: &str| !s.doc.features.iter().any(|f| f.name.eq_ignore_ascii_case(n));
+    let name = if free(item) { item.to_string() } else { format!("{item} ({copy})") };
+    if !free(&name) {
+        return Err(bad(cmd, format!("a feature named `{name}` already exists here: rename it")));
     }
-    if matches!(geom, ConstructGeom::Plane(_)) {
-        super::features::check_plane_name(name, cmd)?;
+    if matches!(kind, FeatureKind::ConstructionPlane { .. }) {
+        super::features::check_plane_name(&name, cmd)?;
     }
-    let id = s.doc_mut().add_feature(fixed(geom), Some(name))?;
+    let id = s.doc_mut().add_feature(kind.clone(), Some(&name))?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.component = component;
     }
@@ -240,12 +278,12 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
             .ok_or_else(|| bad(cmd, "too many geometry copies"))?,
     };
     if taken.geometry.is_empty() {
-        return Err(bad(cmd, format!("`{publication}` shares no plane, axis or point: nothing to copy yet")));
+        return Err(bad(cmd, format!("`{publication}` shares nothing the source design could build: nothing to copy")));
     }
     let component = s.active_component;
     let mut items = Vec::with_capacity(taken.geometry.len());
-    for (item, geom) in &taken.geometry {
-        items.push(PublishedItem { name: item.clone(), feature: add(s, cmd, component, item, geom)? });
+    for (item, kind) in &taken.geometry {
+        items.push(PublishedItem { name: item.clone(), feature: add(s, cmd, component, &name, item, kind)? });
     }
     let out = ImportResult {
         name: name.clone(),
@@ -293,20 +331,19 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
                 continue;
             }
         };
-        for (item, geom) in &taken.geometry {
+        for (item, kind) in &taken.geometry {
             let held = copy.items.iter().find(|i| i.name.eq_ignore_ascii_case(item)).map(|i| i.feature);
             match held.filter(|id| s.doc.feature(*id).is_some()) {
                 Some(id) => {
-                    let kind = fixed(geom);
-                    if s.doc.feature(id).is_some_and(|f| f.kind != kind) {
+                    if s.doc.feature(id).is_some_and(|f| f.kind != *kind) {
                         if let Some(f) = s.doc_mut().feature_mut(id) {
-                            f.kind = kind;
+                            f.kind = kind.clone();
                         }
                         changed.push(item.clone());
                     }
                 }
                 None => {
-                    let feature = add(s, cmd, copy.component, item, geom)?;
+                    let feature = add(s, cmd, copy.component, &copy.name, item, kind)?;
                     copy.items.retain(|i| !i.name.eq_ignore_ascii_case(item));
                     copy.items.push(PublishedItem { name: item.clone(), feature });
                     added.push(item.clone());
