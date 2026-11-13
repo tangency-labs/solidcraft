@@ -1,22 +1,30 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
-//! moved, the curve under an affine map, the curve seen in two views, its curvature comb, and the
-//! blend from one curve's end to another's. The curve is the record's ([`Curve`]); the knots, the
-//! map's carrying of the control points, the views' meeting, the curvature and the blend are the
-//! kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
+//! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
+//! blend from one curve's end to another's, and circles and arcs. The curve is the record's
+//! ([`Curve`]); the knots, the map's carrying of the control points, the views' meeting, the
+//! curvature, the blend and the circles are the kernel's
+//! ([`solidcore::nurbs::knots::clamped_uniform`],
 //! [`solidcore::nurbs::crv_basic::Curve::transform`],
 //! [`solidcore::intersect::views::curves_from_views`],
-//! [`solidcore::query::continuity::curve_comb`], [`solidcore::curve::blend::blend_curve`]). Ops
-//! checks the inputs and converts.
+//! [`solidcore::query::continuity::curve_comb`], [`solidcore::curve::blend::blend_curve`],
+//! [`solidcore::curve::ellipse::Ellipse::arc`],
+//! [`solidcore::curve::ellipse::Ellipse::circle_from_3_points`]). Ops checks the inputs and
+//! converts.
 
+use solidcore::curve::arc::ArcDefinition;
 use solidcore::curve::blend::{self as kblend, BlendEnd};
+use solidcore::curve::curve::Curve as KCurve;
+use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::from_parameters::{from_parameters, EdgeCurve};
+use solidcore::error::geom::GeomFailure;
 use solidcore::geom::certified::Verdict;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
+use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::knots::{clamped_uniform, MAX_DEGREE};
 use solidcore::nurbs::math::{MatrixType, RealMatrix};
 use solidcore::query::continuity;
-use solidcore::{SolidError, Vec3};
+use solidcore::{Point3, SolidError, Vec3};
 use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural};
 
 use crate::body::REGULAR_RATIO;
@@ -305,7 +313,116 @@ pub fn blend_curve(
     })?
 }
 
+/// The full circle about `centre` of `radius` in the plane square to `normal`, starting at
+/// `centre + radius * x_dir` (made unit) and running anticlockwise about `normal`: the kernel's
+/// circle of that arc definition ([`Ellipse::arc`] of an [`ArcDefinition`] from 0 to a full
+/// turn), proved on its plane and sphere ([`solidcore::curve::from_parameters::record_of`]), as
+/// its exact rational quadratic on `[0, 1]`, closed (its last control point its first). `normal`
+/// and `x_dir` need not be unit vectors; `x_dir` is square to `normal`, as the kernel's
+/// definition takes it (it is not projected into the plane).
+///
+/// # Errors
+/// [`Error::Argument`] for a number not finite or past the coordinate bound, a radius not above
+/// the kernel's smallest arc ([`solidcore::curve::arc::MIN_ARC`]), a `normal` or `x_dir` of no
+/// length, or an `x_dir` not square to `normal` (to the kernel's
+/// [`solidcore::curve::arc::SQUARE_TOL`]); [`Error::Record`] for a circle the record cannot
+/// hold; the kernel's status otherwise.
+pub fn circle(centre: [f64; 3], normal: [f64; 3], x_dir: [f64; 3], radius: f64) -> Result<Curve> {
+    if !coord_ok(&centre) || !coord_ok(&normal) || !coord_ok(&x_dir) || !coord_ok(&[radius]) {
+        return Err(Error::Argument);
+    }
+    let definition = ArcDefinition {
+        centre: point(centre),
+        axis: point(normal),
+        reference: point(x_dir),
+        radius,
+        start: 0.0,
+        end: std::f64::consts::TAU,
+    };
+    let made = run("curve::circle", |k| match Ellipse::arc(k, &definition) {
+        Ok(circle) => exact_record(k, &KCurve::from(circle)),
+        Err(SolidError::InvalidInput { .. }) => Ok(Err(Error::Argument)),
+        Err(e) => Err(e),
+    })??;
+    on_unit(&made)
+}
+
+/// The full circle through `points`, starting at `points[0]` and running from it through
+/// `points[1]` to `points[2]` ([`Ellipse::circle_from_3_points`], closed), as [`circle`] gives
+/// it: the exact rational quadratic on `[0, 1]`, closed.
+///
+/// # Errors
+/// [`Error::Argument`] for a coordinate not finite or past the coordinate bound, two points
+/// that coincide, or three on one line (the kernel's solve for the centre nearly singular);
+/// [`Error::Record`] for a circle the record cannot hold; the kernel's status otherwise.
+pub fn circle_through(points: [[f64; 3]; 3]) -> Result<Curve> {
+    through(points, true)
+}
+
+/// The arc from `points[0]` through `points[1]` to `points[2]`
+/// ([`Ellipse::circle_from_3_points`], open), as [`circle`] gives it: the exact rational
+/// quadratic on `[0, 1]`, from `points[0]` at 0 to `points[2]` at 1.
+///
+/// # Errors
+/// As [`circle_through`].
+pub fn arc_through(points: [[f64; 3]; 3]) -> Result<Curve> {
+    through(points, false)
+}
+
+/// [`circle_through`] (`closed`) and [`arc_through`].
+fn through(points: [[f64; 3]; 3], closed: bool) -> Result<Curve> {
+    let [a, b, c] = points;
+    if !points.iter().all(|p| coord_ok(p)) || a == b || b == c || c == a {
+        return Err(Error::Argument);
+    }
+    let made = run("curve::circle_through", |k| {
+        match Ellipse::circle_from_3_points(k, point(a), point(b), point(c), 3, closed) {
+            Ok(circle) => exact_record(k, &KCurve::from(circle)),
+            Err(e)
+                if matches!(
+                    e.geom_failure(),
+                    Some(GeomFailure::NearlySingular | GeomFailure::CoincidentPoints)
+                ) =>
+            {
+                Ok(Err(Error::Argument))
+            }
+            Err(e) => Err(e),
+        }
+    })??;
+    on_unit(&made)
+}
+
+/// The kernel's point (or vector) of `p`.
+fn point([x, y, z]: [f64; 3]) -> Point3 {
+    Point3::new(x, y, z)
+}
+
+/// The record of the kernel's circle or arc `conic`: its NURBS form, proved on the conic's
+/// plane and sphere ([`solidcore::curve::from_parameters::record_of`]), over its whole
+/// interval.
+fn exact_record(k: &Kernel, conic: &KCurve) -> solidcore::Result<Result<Curve>> {
+    let made = solidcore::curve::from_parameters::record_of(k, conic, &conic.natural_interval())?;
+    // a conic's record is its label beside its NURBS form; a B-spline's is the spline itself
+    let nurbs = made.nurbs.unwrap_or(made.curve);
+    Ok(match solidcore_convert::record_curve(nurbs) {
+        Ok(curve) => Ok(curve),
+        Err(Invalid(why)) => Err(Error::Record(why.to_owned())),
+    })
+}
+
+/// `curve` (a clamped spline or rational spline) with its knots mapped onto `[0, 1]`
+/// ([`solidcore::nurbs::crv_basic::Curve::reparam_to_interval`]): the same shape.
+fn on_unit(curve: &Curve) -> Result<Curve> {
+    let mut nurb = net_of(curve)?;
+    run("curve::on_unit", |_| {
+        nurb.reparam_to_interval(Interval { ul: 0.0, ur: 1.0 })?;
+        Ok(record_of(&nurb))
+    })?
+}
+
 #[cfg(test)]
+// The tests measure the circles' radii; ops itself computes none.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
@@ -828,5 +945,130 @@ mod tests {
             Err(Error::Argument)
         );
         assert_eq!(curve_comb(&line, [0.0, f64::NAN], 5), Err(Error::Argument));
+    }
+
+    /// The distance from `a` to `b`.
+    fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
+        a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt()
+    }
+
+    /// `c`'s degree, control point count and knots, for a rational spline.
+    fn rational(c: &Curve) -> (usize, &[[f64; 4]], &[f64]) {
+        let Curve::RationalSpline { knots, homogeneous } = c else {
+            panic!("a rational spline: {c:?}")
+        };
+        (knots.len() - homogeneous.len() - 1, homogeneous, knots)
+    }
+
+    /// Every one of 257 points of `c` across `[0, 1]` is `radius` from `centre` and in the
+    /// plane through it square to `normal` (a unit vector), to `tol`.
+    fn on_circle(c: &Curve, centre: [f64; 3], normal: [f64; 3], radius: f64, tol: f64) {
+        for i in 0..=256 {
+            let p = at(c, f64::from(i) / 256.0);
+            let r = dist(p, centre);
+            assert!((r - radius).abs() <= tol, "at {i}: radius {r}, not {radius}");
+            let off: f64 = (0..3).map(|j| (p[j] - centre[j]) * normal[j]).sum();
+            assert!(off.abs() <= tol, "at {i}: {off} off the plane");
+        }
+    }
+
+    #[test]
+    fn a_circle_is_an_exact_closed_rational_quadratic_on_its_plane() {
+        let centre = [1.0, 2.0, 3.0];
+        let c = circle(centre, [0.0, 0.0, 2.0], [3.0, 0.0, 0.0], 5.0).unwrap();
+        let (degree, cvs, knots) = rational(&c);
+        assert_eq!(degree, 2);
+        assert_eq!((knots[0], knots[knots.len() - 1]), (0.0, 1.0));
+        let (first, last) = (cvs[0], cvs[cvs.len() - 1]);
+        assert!(
+            first.iter().zip(last).all(|(a, b)| (a - b).abs() < 1e-12),
+            "closed: {first:?} and {last:?}"
+        );
+        on_circle(&c, centre, [0.0, 0.0, 1.0], 5.0, 1e-12 * 10.0);
+        // It starts on the reference and turns anticlockwise about the normal: a quarter of
+        // the way round it is on y.
+        let start = at(&c, 0.0);
+        assert!(dist(start, [6.0, 2.0, 3.0]) < 1e-12 * 10.0, "{start:?}");
+        let quarter = at(&c, 0.25);
+        assert!(quarter[1] > 2.0 + 2.5, "{quarter:?}");
+    }
+
+    #[test]
+    fn a_tilted_circle_lies_in_the_plane_square_to_its_normal() {
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let centre = [-4.0, 7.0, 0.5];
+        let c = circle(centre, [0.0, 1.0, 1.0], [1.0, 0.0, 0.0], 12.0).unwrap();
+        on_circle(&c, centre, [0.0, s, s], 12.0, 1e-12 * 20.0);
+        assert!(dist(at(&c, 0.0), [8.0, 7.0, 0.5]) < 1e-12 * 20.0);
+    }
+
+    #[test]
+    fn a_circle_with_a_bad_radius_or_frame_is_refused() {
+        let (o, z, x) = ([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        for r in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(circle(o, z, x, r), Err(Error::Argument), "{r}");
+        }
+        assert_eq!(circle(o, [0.0; 3], x, 1.0), Err(Error::Argument));
+        assert_eq!(circle(o, z, [0.0; 3], 1.0), Err(Error::Argument));
+        assert_eq!(circle(o, z, [0.0, 0.0, -3.0], 1.0), Err(Error::Argument));
+        // the reference is not projected into the plane
+        assert_eq!(circle(o, z, [1.0, 0.0, 1.0], 1.0), Err(Error::Argument));
+        assert_eq!(circle([f64::NAN, 0.0, 0.0], z, x, 1.0), Err(Error::Argument));
+    }
+
+    #[test]
+    fn a_circle_through_three_points_has_their_centre_and_starts_on_the_first() {
+        // (0, 0), (10, 0) and (0, 10) are on the circle about (5, 5) of radius sqrt 50.
+        let picks = [[0.0, 0.0, 2.0], [10.0, 0.0, 2.0], [0.0, 10.0, 2.0]];
+        let c = circle_through(picks).unwrap();
+        let (degree, cvs, _) = rational(&c);
+        assert_eq!(degree, 2);
+        let (first, last) = (cvs[0], cvs[cvs.len() - 1]);
+        assert!(
+            first.iter().zip(last).all(|(a, b)| (a - b).abs() < 1e-12),
+            "closed: {first:?} and {last:?}"
+        );
+        on_circle(&c, [5.0, 5.0, 2.0], [0.0, 0.0, 1.0], 50f64.sqrt(), 1e-11);
+        assert!(dist(at(&c, 0.0), picks[0]) < 1e-11);
+        assert!(dist(at(&c, 1.0), picks[0]) < 1e-11);
+    }
+
+    #[test]
+    fn an_arc_through_three_points_runs_from_the_first_through_the_second_to_the_third() {
+        // A half circle over the top, and three quarters round through the top and the left.
+        let (east, north, west, south) = (
+            [10.0, 0.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [-10.0, 0.0, 0.0],
+            [0.0, -10.0, 0.0],
+        );
+        let half = arc_through([east, north, west]).unwrap();
+        assert_eq!(rational(&half).0, 2);
+        on_circle(&half, [0.0; 3], [0.0, 0.0, 1.0], 10.0, 1e-11);
+        assert!(dist(at(&half, 0.0), east) < 1e-11);
+        assert!(dist(at(&half, 1.0), west) < 1e-11);
+        // the kernel's half circle is two quarters: the joint is the top
+        assert!(dist(at(&half, 0.5), north) < 1e-11, "{:?}", at(&half, 0.5));
+        assert!((0..=64).all(|i| at(&half, f64::from(i) / 64.0)[1] > -1e-11));
+
+        let most = arc_through([east, north, south]).unwrap();
+        on_circle(&most, [0.0; 3], [0.0, 0.0, 1.0], 10.0, 1e-11);
+        assert!(dist(at(&most, 0.0), east) < 1e-11);
+        assert!(dist(at(&most, 1.0), south) < 1e-11);
+        let samples: Vec<[f64; 3]> = (0..=256).map(|i| at(&most, f64::from(i) / 256.0)).collect();
+        assert!(samples.iter().any(|p| dist(*p, west) < 0.5), "through the west");
+        assert!(samples.iter().all(|p| p[0] < 1e-11 || p[1] > -1e-11), "not the south-east");
+    }
+
+    #[test]
+    fn three_points_on_a_line_or_two_on_one_another_make_no_circle() {
+        let line = [[0.0; 3], [1.0, 1.0, 1.0], [2.0, 2.0, 2.0]];
+        assert_eq!(circle_through(line), Err(Error::Argument));
+        assert_eq!(arc_through(line), Err(Error::Argument));
+        let twice = [[0.0; 3], [0.0; 3], [1.0, 0.0, 0.0]];
+        assert_eq!(circle_through(twice), Err(Error::Argument));
+        assert_eq!(arc_through(twice), Err(Error::Argument));
+        let nan = [[f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        assert_eq!(circle_through(nan), Err(Error::Argument));
     }
 }
