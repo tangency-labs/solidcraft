@@ -755,7 +755,7 @@ fn a_piece_half_way_round_the_axis_is_halved_for_its_arcs() {
         turn += b - a;
     }
     // The four arcs cover the turn between them (each a little wider than its quarter).
-    assert!(turn >= TAU && turn < TAU + 0.1, "{turn}");
+    assert!((TAU..TAU + 0.1).contains(&turn), "{turn}");
 }
 
 /// A control point that is not a number gives no arc (the whole turn is blocked), never one
