@@ -138,7 +138,7 @@ use crate::nurbs::b_spline_curve::{
 };
 use crate::nurbs::b_spline_curve_n_lib::{InValueType, TrimMode};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
-use crate::nurbs::math::NOW;
+use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 use crate::surface::surface::Surface;
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
@@ -805,6 +805,26 @@ impl Line {
         // convert to STEP parameter
         let step_param = self.convert_t_from_nurbs_to_step(t);
         self.point + step_param * self.scale * self.vector
+    }
+
+    /// Not upstream: the points of the line at the ends of `interval` (NURB domain), each
+    /// with the error bound of its coordinates, whose segment holds the line over
+    /// `interval`. A point is `P + s scale V` with `s` the STEP parameter; a rounded `s`
+    /// moves it along the line, the product and the sum round each coordinate by at most
+    /// `γ_3 (|P| + |s scale V|)`. `None` for numbers not finite.
+    #[must_use]
+    pub(crate) fn segment_over(&self, interval: &Extent1d) -> Option<[(Point3, f64); 2]> {
+        let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+        let end = |t: f64| {
+            let s = self.convert_t_from_nurbs_to_step(t);
+            let q = self.evaluate_point(t);
+            let e = gamma(3)
+                * (size(self.point) + (s * self.scale).abs() * size(self.vector))
+                * (1.0 + gamma(1));
+            (q.x.is_finite() && q.y.is_finite() && q.z.is_finite() && e.is_finite())
+                .then_some((q, e))
+        };
+        Some([end(interval.min())?, end(interval.max())?])
     }
 
     /// The point at the analytic domain start and the line vector over the domain

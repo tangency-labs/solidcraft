@@ -896,6 +896,21 @@ impl Curve {
         &self.kind
     }
 
+    /// Not upstream: points whose convex hull holds this curve over `interval`, each with
+    /// the error bound of its coordinates: a line's two ends
+    /// ([`Line::segment_over`](crate::curve::line::Line::segment_over)), a B-spline's
+    /// control points of the knot spans that meet `interval`
+    /// ([`BSplineCurve::hull_points_over`]). `None` for the other kinds, whose evaluation
+    /// is not their control polygon's, and when no hull is certain.
+    #[must_use]
+    pub(crate) fn hull_points_over(&self, interval: &Extent1d) -> Option<Vec<(Point3, f64)>> {
+        match &self.kind {
+            CurveKind::Line(l) => l.segment_over(interval).map(Vec::from),
+            CurveKind::BSpline(b) => b.hull_points_over(interval),
+            _ => None,
+        }
+    }
+
     /// The B-spline (base) of the kinds derived from `SmBSplineCurve` (`SM_CAST_PTR`):
     /// the B-spline, line, ellipse or circle, hyperbola and parabola; `None` for the
     /// others.
