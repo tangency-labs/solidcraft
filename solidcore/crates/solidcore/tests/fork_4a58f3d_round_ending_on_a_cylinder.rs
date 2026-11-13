@@ -14,7 +14,12 @@
 //! cylinder (`surface_max_distance_between` with no samples, the precise maximum) within the
 //! fillet's tolerance (100 times the bar's; a rib on the plane through its ends and the vertex
 //! would be 0.025 off), and SMLib's validity check at level 2. The fork prints 16.714056916
-//! removed (1.1e-7) and the rib 4.22e-6 off; the port gives both to the digits printed.
+//! removed (1.1e-7) and the rib 4.22e-6 off; the port gave both to the digits printed. Since
+//! the trim pieces integrate by Gauss-Kronrod (#14460) it removes 16.714056731385, 9.7e-8
+//! above the closed form: the Gauss-Kronrod pieces give it at every accuracy from 1e-9 to
+//! 1e-12, and the earlier Runge-Kutta trim pieces converge onto it (1.6e-9 off at 1e-9,
+//! 1.6e-11 at 1e-11, the same bits at 1e-12), so the fork's figure (and the earlier
+//! 16.714056916020, measured at 1e-7) is 1.85e-7 off the body's.
 //!
 //! The round's end on the cylinder is the blend corner's End on its end face, which builds
 //! the pinned Nx1 corner's construction (#2307 moved it unchanged).
@@ -204,7 +209,8 @@ fn a_round_ending_on_a_cylinder_meets_it_along_a_certified_rib() {
     assert!((removed - want).abs() <= 1e-6 * want, "{removed} vs {want}");
     assert_eq!(off.len(), 1, "{off:?}");
     assert!(off[0] <= tol, "{off:?} vs {tol}");
-    // the fork's printed values, to their last digit
-    assert!((removed - 16.714056916).abs() <= 5e-10, "{removed}");
+    // the body's volume (16.714056731384744 by Gauss-Kronrod, and by the earlier
+    // Runge-Kutta trim pieces forced to accuracy 1e-12), and the fork's rib
+    assert!((removed - 16.714_056_731_385).abs() <= 5e-10, "{removed}");
     assert!((off[0] - 4.22e-6).abs() <= 5e-9, "{off:?}");
 }

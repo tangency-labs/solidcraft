@@ -63,9 +63,12 @@ const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 /// What the rim's round removes alone (#2176's `the_neighbours_keep_their_rounds`, which
 /// pins the fork's 7.958672926831696: 18e96f1 and 63c7962, `SmApiFilletEdges` r 0.5).
 const RIM_REMOVED: f64 = 7.958_672_926_831_696;
-/// What the rim's round removes alone here: 4.5e-11 more than the fork's
-/// [`RIM_REMOVED`], the solidcore-native exact spine.
-const RIM_MEASURED: f64 = 7.958_672_926_877_170_5;
+/// What the rim's round removes alone here: 2.58e-10 less than the fork's [`RIM_REMOVED`].
+/// Forced to accuracy 1e-11 Gauss-Kronrod gives 7.958672926572945, and the earlier Runge-Kutta
+/// trim pieces forced to 1e-12 give 7.958672926567942, so the fork's figure is that far above
+/// both; with Runge-Kutta trim pieces solidcore measured 7.9586729268771705, 4.5e-11
+/// above the fork's (#14460).
+const RIM_MEASURED: f64 = 7.958_672_926_573_854;
 
 /// Every opt-in fix on (as in the issue), with WR-706 as given.
 fn kernel(wr706: bool) -> Kernel {
@@ -195,8 +198,7 @@ fn corner_arc_and_rim_round_together() {
 fn each_edge_alone_is_unchanged() {
     let (rim, faces) = removed(true, &[RIM]).unwrap();
     assert!((rim - RIM_REMOVED).abs() <= 1e-9, "rim {rim}");
-    // pinned at the value measured here, 4.5e-11 more than the fork's `RIM_REMOVED`
-    // (the solidcore-native exact spine)
+    // pinned at the value measured here (`RIM_MEASURED`)
     assert!((rim - RIM_MEASURED).abs() <= 1e-12, "rim {rim}");
     assert_eq!(faces, 9);
     let (corner, faces) = removed(true, &[CORNER]).unwrap();
@@ -215,17 +217,19 @@ fn each_edge_alone_is_unchanged() {
 #[test]
 fn without_the_fix_the_blend_corner_builds_both() {
     let (both, faces) = removed(false, &[RIM, CORNER]).unwrap();
-    // the rim plus the Pappus wedge: here 1.02e-10 less (asserted a decade above)
+    // the rim plus the Pappus wedge: here 7.8e-13 more (1.02e-10 less with Runge-Kutta trim
+    // pieces, the bound a decade above that)
     assert!(
         (both - RIM_MEASURED - pappus()).abs() <= 1.1e-9,
         "removed {both}"
     );
-    // pinned at the value measured here: 8.3e-11 more than the fork's 8.117808766409325,
-    // of which the rim's round alone is 4.5e-11, the solidcore-native exact spine. Since
-    // #2890 (precise properties integrate from the trims' base) 1.065e-10 below the rim plus
-    // the Pappus wedge; it was 8.117808766496637, 1.025e-10 below
+    // pinned at the value measured here: 7.8e-13 above the rim plus the Pappus wedge and
+    // 1.13e-10 below the fork's 8.117808766409325. Forced to accuracy 1e-11 Gauss-Kronrod
+    // gives 8.117808766295639, and the earlier Runge-Kutta trim pieces forced to 1e-12 give
+    // 8.117808766288363. With Runge-Kutta trim pieces it was 8.117808766492544, 1.065e-10 below the rim
+    // plus the wedge (#14460); before #2890 8.117808766496637
     assert!(
-        (both - 8.117_808_766_492_544).abs() <= 1e-12,
+        (both - 8.117_808_766_296_548).abs() <= 1e-12,
         "removed {both}"
     );
     assert_eq!(faces, 12);
