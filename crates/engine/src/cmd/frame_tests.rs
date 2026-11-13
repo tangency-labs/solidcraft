@@ -983,3 +983,32 @@ fn end_caps_refuse_bad_picks_and_values_atomically() {
     let v = measured(&mut s, "Post End Cap").1;
     assert!(rel(v, 38.0 * 38.0 * 2.0) < 1e-9, "{v}");
 }
+
+/// A frame member feature mirrors and patterns as a feature: each copy is every member it made,
+/// placed by the mirror or the pattern, and the copies follow the member's lines. Mirroring the
+/// feature was refused ("cannot be patterned or mirrored yet").
+#[test]
+fn a_member_feature_mirrors_and_patterns_and_follows_its_lines() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "700 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rails"}));
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [100, "L"]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Rails", "profile": square_tube(), "name": "Rail member", "body_name": "Rail"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Rail member"], "plane": "YZ"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Rail member"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 300}));
+    let check = |s: &mut Session, length: f64| {
+        let bs = bodies(s);
+        assert_eq!(bs.len(), 3, "{bs:?}");
+        for b in &bs {
+            assert!(rel(b.1, 444.0 * length) < 1e-9, "{b:?}");
+        }
+        let at = |lo: [f64; 3], hi: [f64; 3]| bs.iter().any(|b| near3(b.2, lo) && near3(b.3, hi));
+        assert!(at([80.0, 0.0, -20.0], [120.0, length, 20.0]), "the rail: {bs:?}");
+        assert!(at([-120.0, 0.0, -20.0], [-80.0, length, 20.0]), "its mirror in x = 0: {bs:?}");
+        assert!(at([80.0, 0.0, 280.0], [120.0, length, 320.0]), "its copy 300 up: {bs:?}");
+    };
+    check(&mut s, 700.0);
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "760 mm"}));
+    check(&mut s, 760.0);
+}

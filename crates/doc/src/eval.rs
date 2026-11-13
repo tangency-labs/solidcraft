@@ -8777,11 +8777,13 @@ fn replay(
             continue;
         }
         // A moved copy is copied again as a body: each instance is the copy the Move made,
-        // placed by the pattern (#5931).
-        if let FeatureKind::Move { copy: true, .. } = &src.kind {
+        // placed by the pattern (#5931). Frame members are too: each instance is every member
+        // the feature made, as it is here, placed by the pattern.
+        if matches!(src.kind, FeatureKind::Move { copy: true, .. } | FeatureKind::FrameMember { .. }) {
             let made: Vec<ModelBody> = st.bodies.iter().filter(|b| b.feature == src.id).cloned().collect();
             if made.is_empty() {
-                return Err(DocError::Invalid(format!("{} made no copy to repeat", src.name)));
+                let what = if matches!(src.kind, FeatureKind::FrameMember { .. }) { "member" } else { "copy" };
+                return Err(DocError::Invalid(format!("{} made no {what} to repeat", src.name)));
             }
             let mut output = 0;
             for (k, m) in mats.iter().enumerate() {
