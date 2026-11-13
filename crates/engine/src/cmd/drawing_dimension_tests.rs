@@ -2914,3 +2914,25 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
     let lost = json!(ids::encode(dimension));
     refuses(&mut s, &[(&lost, json!({"line_through_mm": [200, 190]}), "what it measures has no place to draw on its view")]);
 }
+
+/// An edit of a set's targets is read where its view draws its parts, as add reads the set
+/// (#13048), with its picks in the design's frame, as add's are. From the nut's bottom (z 20, not
+/// moved), the bolt's bottom corner (z 20 as the design places it) is in line with the origin on
+/// the assembled view, so it is refused there; the exploded view draws it 50 higher, so there it is
+/// added and reads 50.
+#[test]
+fn a_set_targets_edit_reads_where_its_view_draws_its_parts() {
+    let (mut s, views, bolt) = bolt_apart();
+    let nut = s.doc.occurrences.iter().find(|o| o.name.starts_with("Nut")).map(|o| o.id).unwrap();
+    let on = |x: f64, z: f64, path: u64| json!({"point": [x, 0.0, z], "path": [path]});
+    let set = json!({"baseline": {"origin": on(30.0, 20.0, nut), "targets": [on(30.0, 30.0, nut), on(0.0, 30.0, bolt)], "direction": "vertical"}});
+    let [assembled, exploded] = views.map(|view| add(&mut s, view, set.clone())["dimension"].clone());
+    let bottom = json!({"targets": {"add": [on(0.0, 20.0, bolt)]}});
+    let p = json!({"dimension": assembled, "set": bottom});
+    let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+    assert!(e.contains("a target in line with its origin has no distance to dimension"), "{e}");
+    assert_eq!(edit(&mut s, &exploded, bottom)["changed"], json!(["targets"]));
+    let read = run(&mut s, INSPECT, json!({"dimension": exploded}));
+    let values: Vec<f64> = read["members"].as_array().unwrap().iter().map(|m| m["value"].as_f64().unwrap()).collect();
+    assert!(values.len() == 3 && values.iter().zip([10.0, 60.0, 50.0]).all(|(v, want)| (v - want).abs() < 1e-6), "{read}");
+}

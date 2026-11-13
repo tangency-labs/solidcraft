@@ -471,16 +471,18 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     // On a staged copy first: a set's new targets are read before they are kept, as add reads a new
-    // dimension; a drag places the dimension as the rest of the edit leaves it.
+    // dimension, where its view draws its parts (#13048); a drag places the dimension as the rest of
+    // the edit leaves it.
     let mut placed = None;
     if targets.is_some() || drag.is_some() {
         let mut staged = Drawing::clone(s.drawing(EDIT)?);
         change(&mut staged, id, set, targets.clone(), None)?;
         if targets.is_some() {
-            if let Some(dimension) = staged.dimension(id) {
-                check_drawn(&staged, dimension.view, dimension.kind.paths(), EDIT)?;
-            }
-            let read = s.doc.resolve_dimensions(&s.model, &staged, &[id]).map_err(|e| bad(EDIT, e.to_string()))?;
+            let dimension = staged.dimension(id).ok_or_else(|| no_dimension(EDIT, id))?;
+            check_drawn(&staged, dimension.view, dimension.kind.paths(), EDIT)?;
+            let read = crate::drawing_view::ViewSessions::new(s)
+                .read_on(&staged, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
+                .map_err(|e| bad(EDIT, e.to_string()))?;
             if let Some(Status::Unmeasurable(why)) = read.first().map(|r| &r.status) {
                 return Err(bad(EDIT, why.clone()));
             }
