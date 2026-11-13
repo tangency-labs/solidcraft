@@ -127,17 +127,21 @@ pub struct InsertionGeometry<'a> {
 
 type TopologyKey<'a> = Box<dyn Fn(EntityRef) -> ObjectRef + 'a>;
 struct BodyKeys<'a> {
-    target: TopologyKey<'a>,
-    pseudo: TopologyKey<'a>,
-    intermediate: TopologyKey<'a>,
+    target: (u64, TopologyKey<'a>),
+    pseudo: (u64, TopologyKey<'a>),
+    intermediate: (u64, TopologyKey<'a>),
 }
 impl BodyKeys<'_> {
-    fn key_of(&self, role: InsertionBody) -> &dyn Fn(EntityRef) -> ObjectRef {
-        match role {
-            InsertionBody::Target => &*self.target,
-            InsertionBody::Pseudo => &*self.pseudo,
-            InsertionBody::Intermediate => &*self.intermediate,
-        }
+    /// A body's serial in the edits' context and its objects' keys under it: the serial is
+    /// kept beside the keys so that a caller can ready the records incrementally
+    /// ([`crate::topology::brep::p3::seed_topology_records_once`]).
+    fn keys_of(&self, role: InsertionBody) -> (u64, &dyn Fn(EntityRef) -> ObjectRef) {
+        let (serial, key) = match role {
+            InsertionBody::Target => &self.target,
+            InsertionBody::Pseudo => &self.pseudo,
+            InsertionBody::Intermediate => &self.intermediate,
+        };
+        (*serial, &**key)
     }
 }
 
@@ -179,12 +183,12 @@ impl<'a> InsertionGeometry<'a> {
             }
             identities.push(identity);
         }
-        let key = |role| -> Result<TopologyKey<'a>> {
+        let key = |role| -> Result<(u64, TopologyKey<'a>)> {
             let serial = view
                 .body(role)
                 .notify_serial()
                 .ok_or_else(|| invalid("missing actual body identity"))?;
-            Ok(Box::new(move |entity| topology_ref(serial, entity)))
+            Ok((serial, Box::new(move |entity| topology_ref(serial, entity))))
         };
         let keys = BodyKeys {
             target: key(InsertionBody::Target)?,
@@ -279,7 +283,12 @@ impl<'a> InsertionGeometry<'a> {
             .notifications
             .as_mut()
             .ok_or_else(|| invalid("missing insertion notification context"))?;
-        crate::topology::brep::p3::seed_records(notifications.records, body, &key_of);
+        crate::topology::brep::p3::seed_topology_records_once(
+            notifications.records,
+            body,
+            serial,
+            &key_of,
+        );
         let mut env = crate::topology::edge::NotifyEnv {
             records: notifications.records,
             attributes: notifications.attributes,

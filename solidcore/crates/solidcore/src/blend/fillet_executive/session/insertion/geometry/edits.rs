@@ -193,14 +193,19 @@ impl crate::intersect::curve_class::p6::MergeIntervalBrep<FilletObject> for Inse
         ) {
             return None;
         }
-        let key_of = self.topology_keys.as_ref()?.key_of(role);
+        let (serial, key_of) = self.topology_keys.as_ref()?.keys_of(role);
         let body = match role {
             InsertionBody::Target => &mut *self.target,
             InsertionBody::Pseudo => self.pseudo.brep_mut(),
             InsertionBody::Intermediate => &mut *self.intermediate,
         };
         let notifications = self.notifications.as_mut()?;
-        crate::topology::brep::p3::seed_records(notifications.records, body, key_of);
+        crate::topology::brep::p3::seed_topology_records_once(
+            notifications.records,
+            body,
+            serial,
+            key_of,
+        );
         Some(
             crate::intersect::curve_class::p6::MergeContextWithIdentity {
                 brep: body,

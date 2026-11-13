@@ -165,7 +165,7 @@ impl FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
-        p3::seed_records(notification_records, target, &key_of);
+        p3::seed_topology_records_once(notification_records, target, serial, &key_of);
         crate::geom::context::Context::with_notification_context(k, |k, context| {
             let mut env = crate::topology::edge::NotifyEnv {
                 records: notification_records,
@@ -265,7 +265,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             ));
         }
         let result = crate::geom::context::Context::with_notification_context(k, |k, context| {
-            p3::seed_records(notification_records, target, &key_of);
+            p3::seed_topology_records_once(notification_records, target, serial, &key_of);
             let mut env = crate::topology::edge::NotifyEnv {
                 records: notification_records,
                 attributes,
@@ -461,7 +461,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
-        p3::seed_records(notification_records, target, &key_of);
+        p3::seed_topology_records_once(notification_records, target, serial, &key_of);
         crate::geom::context::Context::with_notification_context(k, |_, context| {
             let mut env = crate::topology::edge::NotifyEnv {
                 records: notification_records,
@@ -489,7 +489,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
-        p3::seed_records(notification_records, target, &key_of);
+        p3::seed_topology_records_once(notification_records, target, serial, &key_of);
         let oriented =
             crate::geom::context::Context::with_notification_context(k, |k, context| {
                 let mut env = crate::topology::edge::NotifyEnv {

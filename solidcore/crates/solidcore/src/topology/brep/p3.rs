@@ -759,6 +759,47 @@ pub(crate) fn seed_records(
     records.or_default(p2::brep_ref(b).key);
 }
 
+/// [`seed_records`] of `b` under the topology identities of `serial` ([`topology_ref`]),
+/// giving each live object its record once per store and B-rep value: only the slots added
+/// since the last call for that value are visited, so a caller that readies one store before
+/// many steps of one operation does not re-walk the whole B-rep each time (solidcraft#15811).
+///
+/// Only adds, as [`seed_records`] does, so one store may serve several B-reps: a fillet readies
+/// its target, its pseudo body and its intermediate from one store, and each keeps its own
+/// progress. [`reseed_records`] must not be used there: it resets the store to one B-rep's
+/// objects, which would drop the others' records.
+///
+/// A store that keeps no progress (a reserved key) is readied the whole way, exactly as
+/// [`seed_records`] readies it.
+pub(crate) fn seed_topology_records_once(
+    records: &mut topo::NotifyRecords,
+    b: &mut Brep,
+    serial: u64,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) {
+    let id = progress_id(b, Some(serial), key_of);
+    let instance = b.progress_tag();
+    let brep_key = p2::brep_ref(b).key;
+    let b = &*b;
+    let slots = slot_counts(b);
+    let Some((_, progress)) = records.progress_for(id, instance) else {
+        seed_records(records, b, key_of);
+        return;
+    };
+    let from = progress.seeded_to;
+    for (seeded_to, slots) in progress.seeded_to.iter_mut().zip(slots) {
+        *seeded_to = slots.max(*seeded_to);
+    }
+    for (kind, (from, to)) in from.into_iter().zip(slots).enumerate() {
+        for index in (from..to).map_while(|i| u32::try_from(i).ok()) {
+            if is_live(b, kind, index) {
+                records.or_default(key_of(kind_entity(kind, index)).key);
+            }
+        }
+    }
+    records.or_default(brep_key);
+}
+
 /// How [`reseed_records`] names a B-rep's objects: `key_of` for the objects, `brep_key`
 /// for the B-rep, `entity_of` for `key_of`'s inverse on keys, and `serial`, the B-rep's
 /// serial as the edits that follow read it (for their seeding progress id).
@@ -6243,6 +6284,89 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// [`seed_topology_records_once`] leaves the store exactly as [`seed_records`] leaves it,
+    /// asks about every object only the first time for a B-rep value, and keeps the records of
+    /// the other B-reps the store serves. A fillet readies its target, its pseudo body and its
+    /// intermediate from one store before each of its many steps: seeding afresh each time
+    /// re-walks the whole body (solidcraft#15811), and [`reseed_records`] cannot be used instead
+    /// because it resets the store to one B-rep's objects and drops the others' records.
+    #[test]
+    fn seeding_once_asks_only_about_what_was_added_and_keeps_the_other_breps_records() {
+        use crate::topology::topology::NotifyRecords;
+        use std::cell::Cell;
+        let mut k = Kernel::default();
+        let mut one =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let mut two = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(10.0, 0.0, 0.0),
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let asked = Cell::new(0_usize);
+        let seed = |records: &mut NotifyRecords, b: &mut Brep, serial: u64| {
+            let key_of = |e: EntityRef| {
+                asked.set(asked.get() + 1);
+                topology_ref(serial, e)
+            };
+            asked.set(0);
+            seed_topology_records_once(records, b, serial, &key_of);
+            asked.get()
+        };
+        let keys_of = |b: &Brep, serial: u64| -> Vec<ObjectKey> {
+            std::iter::once(p2::brep_ref(b).key)
+                .chain(entities(b).map(|e| topology_ref(serial, e).key))
+                .collect()
+        };
+
+        // the first seeding asks about every object; a second asks only the keys the
+        // progress id is made of, one per kind
+        let mut records = NotifyRecords::new();
+        let objects = entity_count(&one);
+        let per_kind = KINDS;
+        assert!(seed(&mut records, &mut one, 7) > objects);
+        assert_eq!(seed(&mut records, &mut one, 7), per_kind);
+
+        // it leaves the store with the records a full seeding leaves, and no others
+        let mut fresh = NotifyRecords::new();
+        seed_records(&mut fresh, &one, &|e| topology_ref(7, e));
+        let mut want: Vec<ObjectKey> = keys_of(&one, 7);
+        want.sort_unstable();
+        want.dedup();
+        for key in &want {
+            assert!(
+                fresh.get_mut(key).is_some(),
+                "the full seeding missed {key:?}"
+            );
+            assert!(
+                records.get_mut(key).is_some(),
+                "seeding once missed {key:?}"
+            );
+        }
+        assert_eq!(records.values_mut().count(), want.len());
+        assert_eq!(fresh.values_mut().count(), want.len());
+
+        // a second B-rep in the same store keeps the first's records, and its own are added
+        let before: Vec<ObjectKey> = keys_of(&one, 7);
+        assert!(seed(&mut records, &mut two, 9) > 0);
+        for key in before {
+            assert!(records.get_mut(&key).is_some(), "{key:?} was dropped");
+        }
+        for key in keys_of(&two, 9) {
+            assert!(records.get_mut(&key).is_some(), "{key:?} is missing");
+        }
+        // and the first B-rep is still asked about nothing new: its progress is its own
+        assert_eq!(seed(&mut records, &mut one, 7), per_kind);
+
+        // an object added since is asked about, and nothing else is
+        let added = two.add_vertex(Point3::new(11.0, 1.0, 1.0)).unwrap();
+        let _ = added;
+        assert_eq!(seed(&mut records, &mut two, 9), per_kind + 1);
     }
 
     /// `reseed_records` leaves the store exactly as a fresh seeding of the B-rep leaves an

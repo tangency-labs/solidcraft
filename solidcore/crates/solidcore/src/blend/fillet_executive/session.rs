@@ -4466,7 +4466,12 @@ impl FaceShrinkAccess<FilletObject> for SessionObjects<'_> {
             .intermediate
             .as_mut()
             .ok_or_else(|| invalid("intermediate body is not allocated"))?;
-        crate::topology::brep::p3::seed_records(&mut self.notification_records, body, &key_of);
+        crate::topology::brep::p3::seed_topology_records_once(
+            &mut self.notification_records,
+            body,
+            serial,
+            &key_of,
+        );
         crate::topology::brep::p3::with_lent_context(k, |k, context| {
             let mut env = crate::topology::edge::NotifyEnv {
                 records: &mut self.notification_records,
@@ -4604,7 +4609,12 @@ impl SessionObjects<'_> {
             ));
         }
         crate::geom::context::Context::with_notification_context(k, |k, context| {
-            crate::topology::brep::p3::seed_records(&mut self.notification_records, body, &key_of);
+            crate::topology::brep::p3::seed_topology_records_once(
+                &mut self.notification_records,
+                body,
+                serial,
+                &key_of,
+            );
             let mut env = crate::topology::edge::NotifyEnv {
                 records: &mut self.notification_records,
                 attributes: &mut self.attributes,
@@ -4814,7 +4824,12 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                 .notify_serial()
                 .ok_or_else(|| invalid("intermediate body has no kernel identity"))?;
             let key_of = |entity| crate::topology::brep::p3::topology_ref(serial, entity);
-            crate::topology::brep::p3::seed_records(notification_records, body, &key_of);
+            crate::topology::brep::p3::seed_topology_records_once(
+                notification_records,
+                body,
+                serial,
+                &key_of,
+            );
             let store = SessionSolvers(solvers);
             crate::topology::brep::p3::with_lent_context(k, |k, context| {
                 let mut fillet = CornerFilletBrep {
@@ -5132,7 +5147,12 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
             .notify_serial()
             .ok_or_else(|| invalid("intermediate body has no kernel identity"))?;
         let key_of = |entity| crate::topology::brep::p3::topology_ref(serial, entity);
-        crate::topology::brep::p3::seed_records(&mut self.notification_records, body, &key_of);
+        crate::topology::brep::p3::seed_topology_records_once(
+            &mut self.notification_records,
+            body,
+            serial,
+            &key_of,
+        );
         crate::topology::brep::p3::with_lent_context(k, |k, context| {
             let mut env = crate::topology::edge::NotifyEnv {
                 records: &mut self.notification_records,
