@@ -316,6 +316,7 @@ pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
+pub(crate) mod verify_job;
 pub use solidcraft_ui_kit::start_page;
 pub mod starting;
 mod status_bar;
@@ -634,6 +635,8 @@ pub struct SolveApp {
     pub(crate) plugin_install: plugin_install::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
+    /// A signature check running on a worker (see [`verify_job`]).
+    verifying: Option<verify_job::Verifying>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub tool: Option<tools::Tool>,
@@ -953,6 +956,7 @@ impl SolveApp {
             easyprint: Default::default(),
             plugin_install: Default::default(),
             saving: None,
+            verifying: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             tool: None,
@@ -1785,8 +1789,22 @@ impl SolveApp {
                     self.home.add_recent(&p);
                     if matches!(id, "file.save" | "file.save_as") {
                         home::remember_session(&mut self.home, &self.session);
-                        // Say where it went, as an export does (#8693).
-                        let saved = self.tr("ui.design_saved").replace("{path}", &p);
+                        // Say where it went, as an export does (#8693), who signed it, and when
+                        // an earlier signature is in the file but does not cover this save.
+                        let signature = v.get("signature").and_then(Value::as_object);
+                        let earlier = signature.is_none() && self.session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+                        let saved = match signature {
+                            Some(signature) => {
+                                let key = signature
+                                    .get("user_id")
+                                    .and_then(Value::as_str)
+                                    .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
+                                    .unwrap_or("");
+                                self.tr("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                            }
+                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", &p),
+                            None => self.tr("ui.design_saved").replace("{path}", &p),
+                        };
                         self.set_status(saved, false);
                     }
                 }
@@ -2904,6 +2922,55 @@ impl SolveApp {
         self.set_status(text, false);
     }
 
+    /// Say what a design's signature check found (a `doc.open {verify: true}` or `file.verify`).
+    pub(crate) fn say_signature(&mut self, result: &serde_json::Value) {
+        let Some(signature) = result.get("signature") else { return };
+        let status = signature.get("status").and_then(serde_json::Value::as_str).unwrap_or("");
+        let key = signature
+            .get("records")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|records| records.last())
+            .map(|record| {
+                record
+                    .get("user_id")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| record.get("key_id").and_then(serde_json::Value::as_str))
+                    .unwrap_or("")
+                    .to_owned()
+            })
+            .unwrap_or_default();
+        let text = match status {
+            "valid" => {
+                let fingerprint = signature
+                    .get("records")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|records| records.last())
+                    .and_then(|record| record.get("key_id"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let trusted = self
+                    .preferences
+                    .trusted_signing_keys
+                    .split(|c: char| c == ',' || c.is_ascii_whitespace())
+                    .filter(|entry| !entry.is_empty())
+                    .any(|entry| entry.eq_ignore_ascii_case(fingerprint));
+                if trusted {
+                    solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
+                } else {
+                    solidcraft_ui_text::format("ui.open_signature_valid_untrusted", &[("key", fingerprint)])
+                }
+            }
+            "not_covered" => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
+            "invalid" => {
+                let reason = signature.get("reason").and_then(serde_json::Value::as_str).unwrap_or("");
+                solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", reason)])
+            }
+            "unsupported" => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
+            _ => return,
+        };
+        self.set_status(text, status == "invalid");
+    }
+
     /// Open the design (or file) at `path` here and now: it is read and evaluated before this
     /// returns, which blocks the thread for a large design. The app opens through
     /// [`Self::open_path_async`] or [`Self::open_path_answered`] (progress and Cancel, #10198);
@@ -2935,6 +3002,7 @@ impl SolveApp {
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
             self.say_newer_file();
+            self.say_signature(&r);
         }
     }
 
@@ -2967,6 +3035,9 @@ impl SolveApp {
             params.entry(k).or_insert(v);
         }
         file_load::step_folder_option(self, path, &mut params);
+        if self.preferences.verify_opened_designs && solidcraft_engine::io::is_design_path(path) {
+            params.insert("verify".into(), json!(true));
+        }
         Value::Object(params)
     }
 
@@ -3406,12 +3477,13 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         file_load::tick(self, ctx);
         save_job::tick(self, false);
+        verify_job::tick(self);
         edit_in_place::tick(self);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);

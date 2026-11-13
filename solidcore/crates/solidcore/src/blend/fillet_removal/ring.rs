@@ -33,7 +33,10 @@
 //!   use), the port returns [`SolidError::InvalidInput`].
 //! - No recursion.
 
-use super::{bspline_part, glue_edges, ner, null, own_edge_curve, set_vertex_point, sm_err, OP};
+use super::{
+    bspline_part, bspline_part_with_nurb, glue_edges, ner, null, own_edge_curve, set_vertex_point,
+    sm_err, OP,
+};
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, Result, SolidError};
@@ -525,7 +528,7 @@ impl RingFilletRemoval {
                 } else {
                     end - reach_param
                 };
-                let part = ner(bspline_part(&side_curve))?;
+                let part = ner(bspline_part_with_nurb(&side_curve)?)?;
                 let longer = Curve::from(ner(part.create_extended_curve(
                     far,
                     ContinuityType::CInfinity,
@@ -647,7 +650,7 @@ impl RingFilletRemoval {
                 }
                 uv.clone()
             } else {
-                let part = ner(bspline_part(uv))?;
+                let part = ner(bspline_part_with_nurb(uv)?)?;
                 Curve::from(ner(part.create_extended_curve(
                     new_t,
                     ContinuityType::CInfinity,

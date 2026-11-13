@@ -136,7 +136,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "good_drop_result_distances_in_order",
     "imprint_extends_edge_to_proto_vertex",
     "imprint_reuses_coincident_face_edge",
-    "imprint_skips_collapsed_definition",
     "internal_pole_row_through_knot",
     "join_touching_loops",
     "keep_operand_uv_trims",

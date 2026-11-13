@@ -38,10 +38,9 @@
 //! - **A whole turn within rounding (#2928, not upstream).** `MakeNurbWithSweepParams` sweeps
 //!   a window past 360° by no more than `SM_EFF_ZERO` of a turn as the whole turn, where
 //!   upstream asks `CreateCircleSegment` for the span as is and is refused past 360°.
-//! - **Meridians keep their kind (opt-in, not upstream).** With
-//!   `fixes.plane_first_torus_section_exact` (WR-721, #2405), `IntersectWithPlane` through the
-//!   axis rotates a circle generator (a torus's) as the circle it is, where upstream rotates
-//!   its `SmBSplineCurve` part.
+//! - **Meridians keep their kind (not upstream).** `IntersectWithPlane` through the axis
+//!   rotates a circle generator (a torus's) as the circle it is, where upstream rotates its
+//!   `SmBSplineCurve` part (WR-721, #2405).
 //! - **Derived class.** `SmSurfOfRevolution` derives from `SmBSplineSurface`; the base
 //!   object is the [`SurfOfRevolution::base`] field. The surface joins
 //!   [`crate::surface::surface::SurfaceKind`] with the units porting its remaining
@@ -463,14 +462,15 @@ impl SurfOfRevolution {
     /// whose outputs it then reads).
     pub fn new(
         k: &Kernel,
-        gen_curve: Curve,
+        mut gen_curve: Curve,
         origin: Point3,
         x_axis: Vec3,
         y_axis: Vec3,
         anal_uv_domain: Extent2d,
         swap_uv: bool,
     ) -> Result<Self> {
-        let base_gen = gen_base(&gen_curve)?;
+        // (the generator must be derived from SmBSplineCurve)
+        gen_base(&gen_curve)?;
         let mut surf = Self {
             base: BSplineSurface::new(),
             gen_curve: None,
@@ -496,7 +496,11 @@ impl SurfOfRevolution {
         // when curve is not planar
         // (when curve is not planar, mark that; else see if it is on the X/Z plane)
         if gen_curve.is_planar(k, tol_3d)?.is_planar {
-            let on = base_gen.is_on_plane(origin, y_axis, tol_3d, None)?;
+            // `pGenCurve->IsOnPlane(..)` is called on the generator itself, whose
+            // `GetOrCreateGwNurbPointer` runs its own `MakeNurb` (a two-point `SmLine` has no
+            // NURB yet): the NURB is made on the generator here, as upstream
+            gen_ensure_nurb(k, &mut gen_curve)?;
+            let on = gen_base(&gen_curve)?.is_on_plane(origin, y_axis, tol_3d, None)?;
             if !on.on_plane {
                 surf.planar_generator = false;
             }
@@ -1734,20 +1738,16 @@ impl SurfOfRevolution {
                     trans.translate(-self.position.origin());
                     trans.rotate_about_axis(rot_ang_rad, axis);
                     trans.translate(self.position.origin());
-                    let crv = match gen.kind() {
-                        // Not upstream (WR-721, #2405, opt-in): a circle generator (a
-                        // torus's) rotated as the circle it is, so the meridian keeps its
-                        // kind
-                        CurveKind::Ellipse(_) if k.fixes.plane_first_torus_section_exact => {
-                            let mut c = gen.clone();
-                            c.transform(k, &trans, None)?;
-                            c
-                        }
-                        _ => {
-                            let mut c = gen_base(&gen)?.copy();
-                            c.transform(&trans, None)?;
-                            Curve::from(c)
-                        }
+                    // Not upstream (WR-721, #2405): a circle generator (a torus's) rotated
+                    // as the circle it is, so the meridian keeps its kind
+                    let crv = if let CurveKind::Ellipse(_) = gen.kind() {
+                        let mut c = gen.clone();
+                        c.transform(k, &trans, None)?;
+                        c
+                    } else {
+                        let mut c = gen_base(&gen)?.copy();
+                        c.transform(&trans, None)?;
+                        Curve::from(c)
                     };
 
                     if side == 1 {
@@ -2374,6 +2374,37 @@ mod tests {
             None,
         );
         assert!(r.is_ok_and(|(_, x)| x.curves_3d.len() == x.curve_types.len()));
+    }
+
+    /// A lazy line generator (`Line::from_points`, no NURB yet, as upstream's two-point
+    /// `SmLine`) reaches `new`'s on-plane test, where upstream's virtual `MakeNurb` makes
+    /// its NURB. The profile `(1, 0, 0)`–`(2, 0, 1)` about Z is `S(u, v) = Rz(u) λ(v)`
+    /// (`u` in degrees, `v` the line's parameter on `[0, 1]`): `λ(1) = (2, 0, 1)` turned by
+    /// 90° is `(0, 2, 1)`, and the profile lies on the X/Z plane.
+    #[test]
+    fn a_lazy_line_generator_revolves_through_its_on_plane_test() {
+        for fixes in [
+            crate::kernel::UpstreamFixes::default(),
+            crate::kernel::UpstreamFixes::all(),
+        ] {
+            let k = Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let line = Line::from_points(Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 1.0), 3);
+            assert!(line.base().gw_nurb().is_none());
+            let s = SurfOfRevolution::create_canonical(
+                &k,
+                Curve::from(line),
+                Vec3::ZERO,
+                Vec3::Z,
+                false,
+            )
+            .unwrap();
+            assert!(s.planar_generator);
+            let p = s.evaluate_step_point(&k, Point2::new(90.0, 1.0)).unwrap();
+            assert!((p - Vec3::new(0.0, 2.0, 1.0)).length() <= 1e-12, "{p:?}");
+        }
     }
 
     #[test]
