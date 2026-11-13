@@ -2598,7 +2598,7 @@ mod tests {
     fn affected_bodies_menu_selects_a_body_in_both_timelines() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock": if left { "left" } else { "bottom" }})).unwrap();
             h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Block", "body_name": "Plate"})).unwrap();
             h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "cut", "name": "Pocket"})).unwrap();
             h.frames(4);
