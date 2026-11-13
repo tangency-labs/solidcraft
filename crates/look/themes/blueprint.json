@@ -139,6 +139,8 @@
     "overlay": "#0c223c",
     "panel": "#0c223c",
     "panel_header": "#112d4b",
+    "paper_dark": "#1f4e8f",
+    "paper_dark_ink": "#f1f6ff",
     "preview_add": "#a9def2",
     "preview_cut": "#ff968d55",
     "preview_new": "#d2e8f7",

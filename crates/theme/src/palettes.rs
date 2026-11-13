@@ -287,6 +287,16 @@ impl Tokens {
             sketch_centerline: Color32::from_rgb(200, 110, 60),
             bend_up: Color32::from_rgb(30, 140, 50),
             bend_down: Color32::from_rgb(200, 90, 20),
+            // The sheet colours of #4894 (22 and 30 Oct) and the drawing UI design's paper presets
+            // (#13159, D25), the same in both themes.
+            paper_white: Color32::from_rgb(0xF2, 0xF2, 0xF2),
+            paper_ink: Color32::from_rgb(0x1E, 0x1E, 0x1E),
+            paper_blueprint: Color32::from_rgb(0x1F, 0x4E, 0x8F),
+            paper_blueprint_ink: Color32::from_rgb(0xF1, 0xF6, 0xFF),
+            paper_prussian_blue: Color32::from_rgb(0x0A, 0x35, 0x55),
+            paper_prussian_blue_ink: Color32::from_rgb(0xD6, 0xE3, 0xEC),
+            paper_dark: Color32::from_rgb(0x2B, 0x2F, 0x36),
+            paper_dark_ink: Color32::from_rgb(0xD9, 0xDD, 0xE3),
             interference: Color32::from_rgb(235, 45, 40),
             comb_envelope: Color32::from_rgb(130, 40, 175),
             comb_teeth: Color32::from_rgb(215, 105, 0),
