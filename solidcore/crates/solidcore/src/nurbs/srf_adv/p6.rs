@@ -1767,14 +1767,16 @@ mod tests {
         assert!(create_sweep_scale(&bad, &c, Vec3::Z, &opts).is_err());
     }
 
-    /// A closed cubic through sixteen points of `(10 cos t, 10 sin t, lift cos 2t)`.
+    /// A closed cubic through sixteen points of `(10 cos t, 10 sin t, lift cos 2t)`: the closed
+    /// fit takes its points closed, the first repeated last (`a[0] == a[n]`).
     fn loop_traj(lift: f64) -> Curve {
-        let points: Vec<Vec3> = (0..16)
+        let mut points: Vec<Vec3> = (0..16)
             .map(|i| {
                 let t = std::f64::consts::TAU * f64::from(i) / 16.0;
                 Vec3::new(10.0 * t.cos(), 10.0 * t.sin(), lift * (2.0 * t).cos())
             })
             .collect();
+        points.push(points[0]);
         let b = crate::nurbs::b_spline_curve::BSplineCurve::interpolate_points(
             &points,
             None,

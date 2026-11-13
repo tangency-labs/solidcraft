@@ -19,12 +19,16 @@ use solidcore::SolidError;
 
 /// A closed cubic through sixteen points of `(10 cos t, 10 sin t, lift cos 2t)`.
 fn loop_rail(lift: f64) -> BSplineCurve {
-    let points: Vec<Point3> = (0..16)
+    // the closed fit takes its points closed: the first repeated last (`a[0] == a[n]`)
+    let mut points: Vec<Point3> = (0..16)
         .map(|i| {
             let t = std::f64::consts::TAU * f64::from(i) / 16.0;
             Point3::new(10.0 * t.cos(), 10.0 * t.sin(), lift * (2.0 * t).cos())
         })
         .collect();
+    if let Some(&first) = points.first() {
+        points.push(first);
+    }
     BSplineCurve::interpolate_points(&points, None, 3, None, None, true, ParamMethod::ChordLength)
         .expect("closed rail")
 }
@@ -94,12 +98,15 @@ fn kept_upright_each_section_stands_in_the_plane_of_the_up_direction_and_the_rai
 #[test]
 fn a_rail_running_along_the_up_direction_is_refused() {
     // a closed loop standing on edge in the plane x = 0: vertical at two points
-    let points: Vec<Point3> = (0..16)
+    let mut points: Vec<Point3> = (0..16)
         .map(|i| {
             let t = std::f64::consts::TAU * f64::from(i) / 16.0;
             Point3::new(0.0, 10.0 * t.cos(), 10.0 * t.sin())
         })
         .collect();
+    if let Some(&first) = points.first() {
+        points.push(first);
+    }
     let rail = BSplineCurve::interpolate_points(
         &points,
         None,

@@ -19,12 +19,16 @@ use solidcore::nurbs::crv_fit::p1::ParamMethod;
 /// A closed cubic through sixteen points of the loop `(10 cos t, 10 sin t, lift cos 2t)`: a saddle
 /// loop (planar at `lift` 0), smooth at its seam.
 fn loop_rail(lift: f64) -> BSplineCurve {
-    let points: Vec<Point3> = (0..16)
+    // the closed fit takes its points closed: the first repeated last (`a[0] == a[n]`)
+    let mut points: Vec<Point3> = (0..16)
         .map(|i| {
             let t = std::f64::consts::TAU * f64::from(i) / 16.0;
             Point3::new(10.0 * t.cos(), 10.0 * t.sin(), lift * (2.0 * t).cos())
         })
         .collect();
+    if let Some(&first) = points.first() {
+        points.push(first);
+    }
     BSplineCurve::interpolate_points(&points, None, 3, None, None, true, ParamMethod::ChordLength)
         .expect("closed rail")
 }
