@@ -1373,3 +1373,142 @@ fn a_member_id_used_twice_is_refused() {
         s.execute("frame.member", &json!({"sketch": "Rails", "lines": ["pair1"], "profile": tube(), "pairs": [upright()]})).unwrap_err().to_string();
     assert!(e.contains("`pair1` is used twice"), "{e}");
 }
+
+/// The rail along the box's bottom front edge, as `pairs` takes it.
+fn bottom_rail() -> Value {
+    json!({"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [600, 0, 0]}})
+}
+
+fn remove(s: &mut Session, members: Value) -> Value {
+    run(s, "frame.remove_member", json!({ "members": members }))
+}
+
+#[test]
+fn removing_a_pair_member_takes_out_its_pair() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    // The upright and the top rail share the corner (600, 0, 400).
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let solidcraft_doc::FeatureKind::FrameMember { names, .. } = member_kind(&s, &fid) else { panic!() };
+    let rail = member_boxes(&mut s).into_iter().find(|(name, _)| *name == names["pair2"]).unwrap();
+    let stored = stored_pairs(&s, &fid);
+    let r = remove(&mut s, json!([{"feature": fid, "line": "pair1"}]));
+    assert_eq!(r["feature"], fid, "{r}");
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, names: after, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2"]);
+    assert_eq!(stored_pairs(&s, &fid), json!([stored[1]]), "pair2, the shared point with it, is as it was");
+    assert_eq!(after.keys().collect::<Vec<_>>(), ["pair2"]);
+    assert_eq!(after["pair2"], names["pair2"]);
+    assert_eq!(next_pair, 3, "a removed pair's id is never given again");
+    let members = member_boxes(&mut s);
+    assert_eq!(members.len(), 1, "{members:?}");
+    assert_eq!(members.get(&rail.0), Some(&rail.1), "the rail keeps its name and place: {members:?}");
+}
+
+#[test]
+fn removing_a_line_member_lists_the_other_lines() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube()}))["feature"].clone();
+    let before = boxes(&mut s);
+    let bottom = line_at_y(&s, "Frame", 0.0);
+    remove(&mut s, json!([{"feature": fid, "line": bottom}]));
+    let solidcraft_doc::FeatureKind::FrameMember { lines, names, path_sketch, .. } = member_kind(&s, &fid) else { panic!() };
+    let others: Vec<String> = sketch_lines(&s, "Frame").into_iter().map(|l| l.0).filter(|id| *id != bottom).collect();
+    assert_eq!(lines, others);
+    assert!(path_sketch.is_some());
+    assert!(!names.contains_key(&bottom), "{names:?}");
+    let after = boxes(&mut s);
+    assert_eq!(after.len(), 3, "{after:?}");
+    for (name, bb) in &after {
+        assert_eq!(before.get(name), Some(bb), "{name} moved or was renamed: {before:?} → {after:?}");
+    }
+    assert_eq!(sketch_lines(&s, "Frame").len(), 4, "the line stays in its sketch");
+}
+
+#[test]
+fn removing_the_last_member_deletes_the_frame_member() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let made = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright()]}));
+    let fid = made["feature"].clone();
+    let kind = member_kind(&s, &fid);
+    let r = remove(&mut s, json!([{"feature": made["name"], "line": "pair1"}]));
+    assert_eq!(r["deleted"], made["name"], "{r}");
+    assert!(s.doc.feature(fid.as_u64().unwrap()).is_none());
+    assert!(member_boxes(&mut s).is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(member_kind(&s, &fid), kind, "one undo step brings it back, its member and name too");
+    assert_eq!(member_boxes(&mut s).len(), 1);
+}
+
+#[test]
+fn removing_every_line_of_a_mixed_frame_member_keeps_its_pairs() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let bottom = line_at_y(&s, "Base", 0.0);
+    let fid = run(&mut s, "frame.member", json!({"sketch": "Base", "lines": [bottom], "profile": tube(), "pairs": [upright()]}))["feature"].clone();
+    remove(&mut s, json!([{"feature": fid, "line": bottom}]));
+    let solidcraft_doc::FeatureKind::FrameMember { lines, path_sketch, pairs, .. } = member_kind(&s, &fid) else { panic!() };
+    assert!(lines.is_empty() && path_sketch.is_none(), "no lines left, not every line: {lines:?} {path_sketch:?}");
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(member_boxes(&mut s).len(), 1);
+}
+
+#[test]
+fn undo_and_redo_of_remove_tube() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let before = member_kind(&s, &fid);
+    let undo_steps = s.undo.len();
+    remove(&mut s, json!([{"feature": fid, "line": "pair1"}]));
+    assert_eq!(s.undo.len(), undo_steps + 1, "one undo step");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(member_kind(&s, &fid), before, "both members, pair1's name back");
+    assert_eq!(member_boxes(&mut s).len(), 2);
+    run(&mut s, "edit.redo", json!({}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(member_boxes(&mut s).len(), 1);
+}
+
+#[test]
+fn an_end_cap_on_a_removed_member_reports_a_broken_reference() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid =
+        run(&mut s, "frame.member", json!({"profile": square_tube(), "pairs": [upright(), bottom_rail()], "body_name": "Post"}))["feature"].clone();
+    let top = face_pick(&s, "Post", [618.5, 0.0, 400.0], [0.0, 0.0, 1.0]);
+    let cap = run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}))["feature"].as_u64().unwrap();
+    remove(&mut s, json!([{"feature": fid, "line": "pair1"}]));
+    assert!(s.doc.feature(cap).is_some(), "the End Cap is not deleted");
+    let error = s.model.result(cap).and_then(|r| r.error.clone());
+    assert!(error.is_some(), "the End Cap shows its broken reference");
+}
+
+#[test]
+fn remove_member_refuses() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let a = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright()]}))["feature"].clone();
+    let b = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [top_rail()]}))["feature"].clone();
+    let doc = s.doc.clone();
+    let undo_steps = s.undo.len();
+    let many: Vec<Value> = (0..=1000).map(|_| json!({"feature": a, "line": "pair1"})).collect();
+    for (p, why) in [
+        (json!({"members": [{"feature": "Nowhere", "line": "pair1"}]}), "Nowhere"),
+        (json!({"members": [{"feature": "Box", "line": "pair1"}]}), "not a Frame Member"),
+        (json!({"members": [{"feature": a, "line": "pair9"}]}), "pair9"),
+        (json!({"members": [{"feature": a, "line": "pair1"}, {"feature": b, "line": "pair1"}]}), "one Frame Member"),
+        (json!({"members": []}), "`members`"),
+        (json!({}), "`members`"),
+        (json!({"members": many}), "1000"),
+        (json!({"members": [{"feature": a}]}), "`members[0]`"),
+    ] {
+        let err = s.execute("frame.remove_member", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{why}: {err}");
+    }
+    assert_eq!(serde_json::to_value(&*s.doc).unwrap(), serde_json::to_value(&*doc).unwrap(), "nothing changed");
+    assert_eq!(s.undo.len(), undo_steps);
+}

@@ -4,7 +4,7 @@ use solidcraft_doc::frame::{self, MAX_MEMBERS};
 
 use super::{
     FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileListParams, ProfileListResult, ProfilePropertiesParams,
-    ProfilePropertiesResult,
+    ProfilePropertiesResult, RemoveMemberParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -63,6 +63,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ProfileListParams>(), &["family"]);
     assert_keys(input_schema_for::<ProfilePropertiesParams>(), &["density", "profile"]);
     assert_keys(input_schema_for::<ProfileInsertParams>(), &["anchor", "angle", "at", "fixed", "profile", "sketch"]);
+    assert_keys(input_schema_for::<RemoveMemberParams>(), &["members"]);
 }
 
 #[test]
@@ -178,6 +179,16 @@ fn strict_keeps_todays_errors() {
         insert(json!({"sketch": "Nowhere"})),
         // No sketch is being edited, and none is named.
         insert(json!({})),
+        // frame.remove_member
+        ("frame.remove_member", json!({})),
+        ("frame.remove_member", json!({"members": null})),
+        ("frame.remove_member", json!({"members": []})),
+        ("frame.remove_member", json!({"members": "pair1"})),
+        ("frame.remove_member", json!({"members": [{"feature": 1}]})),
+        ("frame.remove_member", json!({"members": [{"feature": true, "line": "pair1"}]})),
+        ("frame.remove_member", json!({"members": [{"feature": 1, "line": "pair1", "extra": 1}]})),
+        ("frame.remove_member", json!({"members": (0..=MAX_MEMBERS).map(|_| json!({"feature": 1, "line": "l"})).collect::<Vec<_>>()})),
+        ("frame.remove_member", json!({"members": [{"feature": "Nowhere", "line": "pair1"}]})),
     ]);
 }
 
