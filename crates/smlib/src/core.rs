@@ -73,7 +73,6 @@ impl Body {
 /// solidcore pin to a rev with a new flag fails until it is added here.
 pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
-    f.fillet_retry_radius_as_first = true;
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
@@ -138,7 +137,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
-    f.boolean_lists_virtual_surface_copies = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.ssi_singular_start_inside_direction = true;
@@ -154,7 +152,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_corner_ball_center_from_axes = true;
     f.boolean2d_plane_covers_far_faces = true;
     f.boolean_splits_definition_across_split = true;
-    f.curve_tight_box_interval_knots = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.torus_check_spindle_apex = true;
@@ -178,7 +175,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
-    f.ellipse_adjust_step_interval_keeps_turns = true;
     f.fillet_rail_end_on_continued_surface = true;
     f.glue_vertices_joins_every_region = true;
     f.fillet_removal_takes_ring_fillets = true;
@@ -230,7 +226,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
     f.validation_does_not_make_uv_trims = true;
-    f.iso_curve_uv_line_both_params = true;
     f.analytic_corner_failure_is_false = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
@@ -239,18 +234,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.check_seam_crossing_unclosed = true;
     f.ascii_doubles_round_trip = true;
     f.offset_edges_keep_source_tolerance = true;
-    f.ellipse_convert_to_2d_uses_both_axes = true;
-    f.circle_offset_antiparallel_normal = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
-    f.stop_tracking_checks_own_callback = true;
     f.plane_reparameterize_moves_origin = true;
-    f.crv_in_volume_mults_by_break_index = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
-    f.composite_curve_bbox_segment_intervals = true;
     f.knot_vector_valid_requires_span = true;
-    f.projected_curve_transform_when_owned = true;
-    f.curve_property_gs_branch_bounds = true;
     f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
     f.close_loop_relates_only_coincident_edges = true;
@@ -277,7 +265,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
-    f.ellipse_open_arc_keeps_end_angle = true;
     f.fillet_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
     f.plane_first_torus_section_exact = true;

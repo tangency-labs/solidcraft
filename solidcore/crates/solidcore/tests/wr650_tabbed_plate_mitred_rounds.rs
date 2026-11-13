@@ -158,7 +158,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.boolean2d_plane_covers_far_faces = true;
     k.fixes.boolean_cleanup_removes_slits = true;
-    k.fixes.boolean_lists_virtual_surface_copies = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.boolean_skips_faces_apart = true;
@@ -176,12 +175,10 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.curve_tight_box_interval_knots = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.edge_check_orders_tangent_faces = true;
-    k.fixes.ellipse_adjust_step_interval_keeps_turns = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.face_tight_box_searches_trim = true;
@@ -210,7 +207,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
-    k.fixes.fillet_retry_radius_as_first = true;
     k.fixes.fillet_run_on_past_far_end_only = true;
     k.fixes.fillet_split_edge_keeps_near_half = true;
     k.fixes.fillet_trace_reaches_rails = true;

@@ -302,7 +302,6 @@ fn write_issue_1818_operand() {
 /// SolidCraft's `core::fixes()` as `issue_1476_swept_bar_shell.rs` lists them.
 fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
-    f.fillet_retry_radius_as_first = true;
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
@@ -355,7 +354,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
-    f.boolean_lists_virtual_surface_copies = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;

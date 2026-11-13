@@ -35,6 +35,7 @@ impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
 impl Answer for [f64; 3] {}
 impl Answer for Vec<Option<f64>> {}
+impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
 
 fn array(v: Vec3) -> [f64; 3] {
@@ -539,6 +540,38 @@ impl Body {
                     Ok(c.map(|c| c.distance))
                 })
                 .collect()
+        })
+    }
+
+    /// The distance from each of `points` to every record face as it is trimmed, face by face in
+    /// record order: row `f` holds one entry per point, `None` where the kernel's solve answers
+    /// with a status, and `None` where no point of face `f` comes within `reach` of that point.
+    ///
+    /// The kernel skips a face no point comes within `reach` of, because a face lies inside its
+    /// own box: such a point is further than `reach` from the face. A caller that keeps only
+    /// distances within `reach` therefore reads what [`Body::face_distances`] gives face by face,
+    /// including each point's nearest face whenever that distance is within `reach`.
+    ///
+    /// The whole pass is one kernel call, where [`Body::face_distances`] is one call per face.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a coordinate that is not finite; the kernel's refusal of a `reach`
+    /// that is not finite and at least zero; any other kernel error.
+    pub fn face_distances_within(
+        &self,
+        order: &Order,
+        points: &[[f64; 3]],
+        reach: f64,
+    ) -> Result<Vec<Vec<Option<f64>>>> {
+        let faces = (0..order.faces.len())
+            .map(|f| order::face(order, f))
+            .collect::<Result<Vec<_>>>()?;
+        let points = points
+            .iter()
+            .map(|p| point(*p))
+            .collect::<Result<Vec<_>>>()?;
+        with_body("face_distances_within", self, |k, b| {
+            q::faces_closest_distances_within(k, b, BrepId::from_index(0), &faces, &points, reach)
         })
     }
 
