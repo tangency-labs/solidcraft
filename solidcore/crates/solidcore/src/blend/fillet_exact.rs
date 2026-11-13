@@ -31,6 +31,7 @@
 //! | `across`, `lines_meet`, `coaxial`, `inscribed_radius`, `pair_plane`, `points_with_contact`, `directions_with_dots`, `touching_point` (private) | `sm_Across`, `sm_LinesMeet`, `sm_Coaxial`, `sm_InscribedRadius`, `sm_PairPlane`, `sm_PointsWithContact`, `sm_DirectionsWithDots`, `sm_TouchingPoint` |
 //! | [`classify_ball_on_collapsed_offset`], `curve_crosses_quadric` (private) | none (solidcore #2403) |
 //! | `ball_on_face_along_arc` (private) | none (solidcore #2652) |
+//! | [`ball_past_an_end`], [`PastAnEnd`], `ball_on_line`, `past_end` (private) | not the fork's (#14846): a round with no section between its edge's ends, certified over the face it rolls on |
 //!
 //! Deviations:
 //! - **A round of the ball's radius as a face (solidcore #2403, not in the fork).** A
@@ -91,6 +92,7 @@ use crate::surface::torus::Torus;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::{Brep, EdgeId};
 
+mod past_end;
 pub mod rational;
 
 const OP: &str = "blend::fillet_exact";
@@ -2118,14 +2120,20 @@ struct TangentLine {
 /// Judged where one face F of the edge is a plane or a cylinder that ends at both of the
 /// edge's ends in a straight edge tangent to the face beyond (the R3 round of a block's rim
 /// between two of its planes, the edge the round's crease with a pocket), and the other face
-/// is a natural quadric other than a torus. A ball touching F along one of those edges T has
-/// its centre on the line T moved by the ball along F's normal (constant along T), and on the
-/// other face's offset: the two meet in closed form (a quadratic along the line), the point
-/// whose foot lies on T nearest the blended edge. Every ball touching F within F lies between
-/// those two in the order of the edge's sections (ARGUED: the balls on F are ordered by
-/// their foot across F); where both lie past one end's plane, by more than the solver's
-/// approximation tolerance, so do all of them. An end where the chain runs on into one of
-/// `joined` (the next round) is not an End and is not judged.
+/// is a plane, a sphere, a cylinder or a cone. A ball touching F along one of those edges T
+/// has its centre on the line T moved by the ball along F's normal (constant along T), and on
+/// the other face's offset: the two meet in closed form (a quadratic along the line), the
+/// point whose foot lies on T nearest the blended edge. Where both of those balls lie past
+/// one end's plane by more than the solver's approximation tolerance (a quick test), the end
+/// is refused only once every ball touching F at a foot within F and the other face's
+/// quadric is PROVEN to lie past that plane by more than that tolerance: an outward-rounded
+/// enclosure of all of their centres, over a bound of F's feet taken from enclosures of F's
+/// boundary edges (`past_end::every_ball_on_face_past_plane`, which documents the argument).
+/// Nothing is assumed of how the balls are ordered across F. Where that is not proven (an
+/// edge of F whose curve has no enclosure, the subdivision's budget spent, or a ball
+/// somewhere on F on the span's side), the end is not judged and the round is built as it
+/// would be without this refusal. An end where the chain runs on into one of `joined` (the
+/// next round) is not an End and is not judged.
 ///
 /// The radius named is computed from the same closed form, never by building: the root,
 /// bisected to rounding on `(0, radius)`, of the signed distance from that end's plane of the
@@ -2307,6 +2315,12 @@ pub fn ball_past_an_end(
         };
         let lines = [(ta, na), (tb, nb)];
         let sign = |x: f64| if x < 0.0 { -1.0 } else { 1.0 };
+        // F as a chart of its feet, with the centres of the balls of radius r on them
+        let chart = if face.kind == QuadricKind::Plane {
+            past_end::FaceChart::plane(face.point, na, sign(off) * r)
+        } else {
+            past_end::FaceChart::cylinder(&face, ta.vertex, na, sign(off) * r)
+        };
         // the signed distances from end `a`'s plane of the balls of radius `s` on the two
         // lines (`None`: one has no ball, not judged)
         let beyond = |s: f64, a: usize| -> Option<[f64; 2]> {
@@ -2319,7 +2333,7 @@ pub fn ball_past_an_end(
             }
             Some(out)
         };
-        for (a, &(at, _)) in ends.iter().enumerate() {
+        for (a, &(at, along)) in ends.iter().enumerate() {
             if end_runs_on(b, e, at, tol, joined)? {
                 continue;
             }
@@ -2327,6 +2341,23 @@ pub fn ball_past_an_end(
                 continue;
             };
             if !sigma.iter().all(|&d| d < -approx) {
+                continue;
+            }
+            // every ball on F past the plane, not only those on its tangent edges
+            let proven = match &chart {
+                Some(chart) => past_end::every_ball_on_face_past_plane(
+                    b,
+                    topo_face,
+                    chart,
+                    &other,
+                    sign(off_other) * r,
+                    (at, along),
+                    approx,
+                    tol,
+                )?,
+                None => false,
+            };
+            if !proven {
                 continue;
             }
             // the largest radius whose far ball is on the span's side: the far line's ball at

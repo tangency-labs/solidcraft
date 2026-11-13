@@ -3813,6 +3813,23 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 )?;
             }
         }
+        // Not the fork's (#16156): at the radius named, the refused solver's ball may have
+        // every position on its edge's faces past an end of the edge, which
+        // `refuse_balls_past_an_end` refuses at that radius: the refusal names the radius at
+        // which it first has a section between the ends where that is smaller.
+        if let Some((solver, _)) = worst_solver {
+            if self.fit_radius > 0.0 && self.fit_kind == FitKind::Radius {
+                let named = self.fit_radius;
+                if let Some(past) = access.creation_ball_past_an_end(k, solver, Some(named))? {
+                    if past.radius < named {
+                        self.note_open_fit(access, true, past.radius, FitKind::Radius, solver)?;
+                        if self.fit_radius < named {
+                            self.error.comment = format!("{}; but at that radius every position of the rolling ball on the edge's faces lies past an end of the edge (at ({}, {}, {})): a radius below {} has a section between the edge's ends", self.error.comment, g(past.at.x), g(past.at.y), g(past.at.z), g(past.radius));
+                        }
+                    }
+                }
+            }
+        }
         // An End's rail that runs past its side edge's far end is a second cause, which
         // the corner would refuse once built (SmBlendCorner::RefuseEndPastSideEdge): the
         // refusal names the smaller of the two radii (the fork's 41a39ec).

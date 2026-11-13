@@ -1216,3 +1216,151 @@ fn a_round_in_the_sliver_below_the_cutoff_builds_its_end_cap() {
         assert_b27_rails_on_faces(&input, &made, r, 4e-5);
     }
 }
+
+/// Edge 28 of `b27` rounded past the R3 round's own radius (3.5 and 4): the ball does not fit
+/// the R3 round, and the irregular-ball refusal used to name 2.99 (the round's radius less the
+/// fit margin), at which every ball on the edge's faces still lies past the End on x = 0 (2.99
+/// is refused there). The refusal now names the smaller of the two, the past-an-end cutoff
+/// less the fit margin, and that size builds: a valid solid, smaller than the input, its rails
+/// on the faces it rolls on.
+#[test]
+fn an_irregular_ball_refusal_names_the_past_an_end_size_when_that_is_smaller() {
+    let want = b27_edge_28_cutoff() - B27_FIT_MARGIN;
+    // the irregular ball's own size: the R3 round's radius less the fit margin
+    let irregular = 3.0 - B27_FIT_MARGIN;
+    let mut named = Vec::new();
+    for r in [3.5, 4.0] {
+        match b27_edge_28(r) {
+            Err(Error::TooLarge { size, why, .. }) => {
+                assert_eq!(why, Some(RoomReason::BallDoesNotFit), "r {r}");
+                assert!((size - want).abs() <= 1e-9, "r {r}: {size} against {want}");
+                assert!(size < irregular, "r {r}: {size} not below {irregular}");
+                named.push(size);
+            }
+            Err(e) => panic!("r {r}: {e:?}"),
+            Ok(_) => panic!("r {r}: built"),
+        }
+    }
+    let (input, _) = b27();
+    let before = input.volume(1e-9).unwrap();
+    let size = named[0];
+    let made = b27_edge_28(size).unwrap_or_else(|e| panic!("r {size}: {e:?}"));
+    assert!(made.check(CheckLevel::All).unwrap().is_valid(), "r {size}");
+    let after = made.volume(1e-9).unwrap();
+    assert!(
+        after > 0.0 && after < before,
+        "r {size}: {after} of {before}"
+    );
+    assert_b27_rails_on_faces(&input, &made, size, 1e-5);
+}
+
+/// The plane of the oblique end cut in [`obliquely_cut_bar`]: `2x + y - 2z = -12`, its unit
+/// normal (2, 1, -2) / 3 pointing out of the bar.
+const CUT: ([f64; 3], f64) = ([2.0 / 3.0, 1.0 / 3.0, -2.0 / 3.0], -4.0);
+
+/// A bar x in [0, 6], z in [0, 7.5] along y from -30, its rim x = 0, z = 7.5 rounded R3 (the
+/// cylinder about x = 3, z = 4.5 along y, between its tangent edges x = 0, z = 4.5 and x = 3,
+/// z = 7.5), its end cut off by the plane [`CUT`] (the half-space beyond removed). The cut
+/// meets the R3 round in an ellipse arc from (0, -3, 4.5) to (3, -3, 7.5) that bends back on
+/// itself: it reaches y = -0.515 at 135 degrees about the axis.
+fn obliquely_cut_bar() -> Body {
+    use solidcore_ops::affine::{rotation, then, translation};
+    fixes();
+    let bar = make_box([0.0, -30.0, 0.0], [6.0, 40.0, 7.5]).unwrap();
+    let rim = edge_at(&bar, [0.0, 0.0, 7.5]);
+    blend(&bar, Blend::Round, &[rim], &[3.0], &[], Corners::Filled).unwrap();
+    // a box whose face y = 0 turns onto the cut's plane: (0, 1, 0) onto the normal n about
+    // (0, 1, 0) x n, then out along n to the plane
+    let (n, d) = CUT;
+    let cutter = make_box([-60.0, 0.0, -60.0], [120.0, 120.0, 120.0]).unwrap();
+    let turn = rotation([0.0; 3], [n[2], 0.0, -n[0]], n[1].acos()).unwrap();
+    let out = translation([n[0] * d, n[1] * d, n[2] * d]).unwrap();
+    cutter.transform(&then(&turn, &out).unwrap()).unwrap();
+    boolean(bar, cutter, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// The index of the edge of `b` passing within 1e-6 of `p`.
+fn edge_near(b: &Body, p: [f64; 3]) -> usize {
+    use solidcore::query::api_queries::{edge_closest_point, get_edges};
+    let (k, brep) = common::kernel_copy(b);
+    let q = solidcore::math::Vec3::new(p[0], p[1], p[2]);
+    get_edges(&brep)
+        .unwrap()
+        .iter()
+        .position(|&e| {
+            edge_closest_point(&k, &brep, e, q)
+                .unwrap()
+                .closest
+                .distance
+                <= 1e-6
+        })
+        .unwrap()
+}
+
+/// The ball of radius r touching the R3 round of [`obliquely_cut_bar`] at angle t about its
+/// axis and the cut's plane from inside the bar: its centre lies on the radial line at 3 - r
+/// from the axis, and r inside the plane, `n . c = d - r`.
+fn cut_bar_ball(r: f64, t: f64) -> [f64; 3] {
+    let (n, d) = CUT;
+    let (x, z) = (3.0 + (3.0 - r) * t.cos(), 4.5 + (3.0 - r) * t.sin());
+    [x, (d - r - n[0] * x - n[2] * z) / n[1], z]
+}
+
+/// The crease's End planes, in closed form: at its end V on x = 0 (t = 180 degrees) and its
+/// end W on z = 7.5 (t = 90), each through the end, square to the crease there, signed
+/// positive into the edge's span. The crease is (3 + 3 cos t, y(t), 4.5 + 3 sin t) with
+/// y(t) = -12 - 2 x + 2 z; into the span from V it runs as t falls, from W as t rises.
+fn cut_bar_end_distances(c: [f64; 3]) -> [f64; 2] {
+    let point = |t: f64| {
+        let (x, z) = (3.0 + 3.0 * t.cos(), 4.5 + 3.0 * t.sin());
+        [x, -12.0 - 2.0 * x + 2.0 * z, z]
+    };
+    // d/dt of the crease: (-3 sin t, 6 sin t + 6 cos t, 3 cos t)
+    let into = |t: f64, sense: f64| {
+        let v = [-3.0 * t.sin(), 6.0 * t.sin() + 6.0 * t.cos(), 3.0 * t.cos()];
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        [sense * v[0] / l, sense * v[1] / l, sense * v[2] / l]
+    };
+    let signed = |t: f64, sense: f64| {
+        let (p, u) = (point(t), into(t, sense));
+        (c[0] - p[0]) * u[0] + (c[1] - p[1]) * u[1] + (c[2] - p[2]) * u[2]
+    };
+    [signed(PI, -1.0), signed(PI / 2.0, 1.0)]
+}
+
+/// The round of the oblique cut's crease on the R3 round at r 0.3 and 0.4 (#16156). The balls
+/// touching the R3 round along its two tangent edges both lie past the End plane at V, by
+/// more than 0.1 (closed form), as the past-an-end refusal's first test asks; but the crease
+/// bends back on itself, and the ball touching the round at 135 degrees lies on the span's
+/// side of both End planes, by more than 0.9: the round has sections between the edge's
+/// ends. The refusal used to judge from the two tangent edges' balls alone, assuming the
+/// balls between them lie no nearer the span, and refused it (`EndRollsIntoSmoothEnd`). It
+/// now refuses only where every ball on the R3 round is proven past the plane, which this is
+/// not: the round builds, a valid solid smaller than the bar.
+#[test]
+fn a_round_whose_balls_bend_back_between_the_ends_is_not_refused_past_an_end() {
+    let input = obliquely_cut_bar();
+    assert!(input.check(CheckLevel::All).unwrap().is_valid());
+    let before = input.volume(1e-9).unwrap();
+    let t = 3.0 * PI / 4.0;
+    let (x, z) = (3.0 + 3.0 * t.cos(), 4.5 + 3.0 * t.sin());
+    let crease = [x, -12.0 - 2.0 * x + 2.0 * z, z];
+    for r in [0.3, 0.4] {
+        // the premise, in closed form
+        let [at_v, _] = cut_bar_end_distances(cut_bar_ball(r, PI));
+        let [far_v, _] = cut_bar_end_distances(cut_bar_ball(r, PI / 2.0));
+        assert!(at_v < -0.1 && far_v < -0.1, "r {r}: {at_v}, {far_v}");
+        let [mid_v, mid_w] = cut_bar_end_distances(cut_bar_ball(r, t));
+        assert!(mid_v > 0.9 && mid_w > 0.9, "r {r}: {mid_v}, {mid_w}");
+        let body = input.copy().unwrap();
+        let e = edge_near(&body, crease);
+        match blend(&body, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Ok(_) => {
+                assert!(body.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+                let after = body.volume(1e-9).unwrap();
+                assert!(after > 0.0 && after < before, "r {r}: {after} of {before}");
+            }
+            Err(e) => panic!("r {r}: {e:?}"),
+        }
+    }
+}
