@@ -48,7 +48,7 @@ struct Polygon {
 
 impl Polygon {
     fn of(points: Vec<Vec3>) -> Result<Polygon> {
-        let mut chord = Vec::with_capacity(points.len());
+        let mut chord = Vec::new();
         let mut s = 0.0;
         chord.push(0.0);
         for w in points.windows(2) {
