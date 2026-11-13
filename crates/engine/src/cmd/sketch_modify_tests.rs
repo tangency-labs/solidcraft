@@ -283,6 +283,36 @@ fn analytic_trim_and_break_use_freeform_cutters() {
     assert!(shape.dist(Vec2::new(4.8296, 1.2941)) > 0.5);
 }
 
+/// #15619: two crossing lines trimmed back to a corner hold it with one Coincident. The first
+/// trim pins its new end on the other line; the second joins the ends, and that pin goes.
+#[test]
+fn two_crossing_lines_trimmed_to_a_corner_keep_one_constraint_there() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.line", json!({"points": [[-5, 0], [10, 0]], "connect": false}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -5], [0, 10]], "connect": false}))["curves"])[0].clone();
+    let at_corner = |s: &Session| -> Vec<ConstraintKind> {
+        let sk = sketch(s);
+        let near = |p: usize| sk.point(p).is_some_and(|q| q.dist(Vec2::new(0.0, 0.0)) < 1e-6);
+        sk.constraints
+            .iter()
+            .filter(|k| match k.kind {
+                ConstraintKind::Coincident { p, q } => near(p) || near(q),
+                ConstraintKind::PointOnCurve { p, .. } => near(p),
+                _ => false,
+            })
+            .map(|k| k.kind.clone())
+            .collect()
+    };
+    run(&mut s, "sketch.trim", json!({"curve": a, "at": [-3, 0]}));
+    let first = at_corner(&s);
+    assert!(matches!(first.as_slice(), [ConstraintKind::PointOnCurve { .. }]), "the first trim pins the end on the other line: {first:?}");
+    run(&mut s, "sketch.trim", json!({"curve": b, "at": [0, -3]}));
+    let second = at_corner(&s);
+    assert!(matches!(second.as_slice(), [ConstraintKind::Coincident { .. }]), "one Coincident holds the corner: {second:?}");
+    // Two free lines have 8 degrees of freedom; the corner takes 2.
+    assert_eq!(run(&mut s, "sketch.inspect", json!({}))["dof"], 6);
+}
+
 /// An ellipse's own axes do not cut it (they end on it, where a Center Rectangle's diagonals end
 /// at its corners): a lone ellipse trims away whole, its axes staying as when it is deleted, and
 /// a trim of its outline stops where a line crosses, not at an axis end.

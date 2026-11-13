@@ -285,11 +285,30 @@ fn pin(sk: &mut Sketch, p: usize, cutter: usize) -> Result<()> {
     if let Some(e) = ends.into_iter().find(|e| sk.point(*e).is_some_and(|q| q.dist(at) < TOL * 10.0)) {
         if e != p {
             add_c(sk, ConstraintKind::Coincident { p, q: e })?;
+            drop_implied_point_on_curve(sk, p, e);
         }
         return Ok(());
     }
     add_c(sk, ConstraintKind::PointOnCurve { p, c: cutter })?;
     Ok(())
+}
+
+/// Points `p` and `q` were just made coincident: a Point On Curve holding either one on a curve
+/// the other ends is implied by that and goes. Two crossing lines trimmed back to a corner kept
+/// the first trim's end-on-line beside the second trim's end-to-end, a constraint that held
+/// nothing (#15619).
+fn drop_implied_point_on_curve(sk: &mut Sketch, p: usize, q: usize) {
+    let ends_at = |c: usize, x: usize| sk.curves.get(c).and_then(|c| c.kind.ends()).is_some_and(|(a, b)| a == x || b == x);
+    let implied: Vec<bool> = sk
+        .constraints
+        .iter()
+        .map(|k| match k.kind {
+            ConstraintKind::PointOnCurve { p: x, c } => (x == p && ends_at(c, q)) || (x == q && ends_at(c, p)),
+            _ => false,
+        })
+        .collect();
+    let mut drop = implied.into_iter();
+    sk.constraints.retain(|_| !drop.next().unwrap_or(false));
 }
 
 /// Split curve `ci` at interior parameters `ts` (sorted). Returns the pieces in parameter
