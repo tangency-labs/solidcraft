@@ -14,7 +14,8 @@
 //! [`solidcore::curve::ellipse::Ellipse::circle_from_3_points`],
 //! [`solidcore::nurbs::crv_basic::Curve::extend_by_dist`],
 //! [`solidcore::nurbs::b_spline_curve::BSplineCurve::join_with`],
-//! [`solidcore::curve::curve::Curve::drop_point`]). Ops checks the inputs and
+//! [`solidcore::curve::curve::Curve::drop_point`],
+//! [`solidcore::intersect::api_intersectors::curve_crossings`]). Ops checks the inputs and
 //! converts.
 
 use solidcore::curve::arc::ArcDefinition;
@@ -766,6 +767,93 @@ pub fn closest_point(curve: &Curve, p: [f64; 3], tolerance: f64) -> Result<Optio
             point: [at.x, at.y, at.z],
             distance: dropped.distance,
         })))
+    })?
+}
+
+/// Where two free curves cross ([`crossings`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Crossing {
+    /// The first curve's parameter there, the record's.
+    pub a: f64,
+    /// The second curve's parameter there, the record's.
+    pub b: f64,
+    /// The first curve's point there.
+    pub on_a: [f64; 3],
+    /// The second curve's point there: `on_a` within the tolerance in space; as seen along a
+    /// direction, the point the second curve passes behind or in front of it.
+    pub on_b: [f64; 3],
+}
+
+/// Where curves `a` and `b` cross within `tolerance`, each over the record's own range (as
+/// [`closest_point`] takes it), in order along `a`: in space with `along` `None`, or as seen
+/// along the direction `along` (curves drawn in different planes, crossing in a view). The
+/// curves as the kernel's ([`from_parameters`]), their crossings the kernel's
+/// ([`solidcore::intersect::api_intersectors::curve_crossings`]), each curve's point at its
+/// parameter the kernel's evaluation, and the parameters the record's
+/// ([`solidcore::curve::from_parameters::record_parameter`]: radians on a circle or
+/// ellipse). Curves that do not cross give an empty list; an overlap is given by its start.
+///
+/// # Errors
+/// [`Error::Argument`] for a direction not finite, past the coordinate bound or of no length,
+/// a tolerance not finite and positive, or a curve the record or the kernel's constructors
+/// refuse (or whose range is unbounded); the kernel's status otherwise.
+pub fn crossings(
+    a: &Curve,
+    b: &Curve,
+    along: Option<[f64; 3]>,
+    tolerance: f64,
+) -> Result<Vec<Crossing>> {
+    if along.is_some_and(|d| !coord_ok(&d)) || !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Error::Argument);
+    }
+    let input = |c: &Curve| -> Result<_> {
+        if check_curve(c, &mut Budget::input()).is_err() {
+            return Err(Error::Argument);
+        }
+        let range = own_range(c).ok_or(Error::Argument)?;
+        let record = solidcore_convert::curve(c).map_err(|_| Error::Argument)?;
+        Ok((record, range))
+    };
+    let ((ra, range_a), (rb, range_b)) = (input(a)?, input(b)?);
+    run("curve::crossings", |k| {
+        let made = |record, range| match from_parameters(k, record, range) {
+            Ok(made) => Ok(Ok(made)),
+            Err(SolidError::InvalidInput { .. }) => Ok(Err(Error::Argument)),
+            Err(e) => Err(e),
+        };
+        let ka = match made(&ra, range_a)? {
+            Ok(m) => m,
+            Err(e) => return Ok(Err(e)),
+        };
+        let kb = match made(&rb, range_b)? {
+            Ok(m) => m,
+            Err(e) => return Ok(Err(e)),
+        };
+        let found = match solidcore::intersect::api_intersectors::curve_crossings(
+            k,
+            &ka.curve,
+            &ka.interval,
+            &kb.curve,
+            &kb.interval,
+            along.map(point),
+            tolerance,
+        ) {
+            Ok(found) => found,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let mut out = Vec::new();
+        for (ta, tb) in found {
+            let pa = ka.curve.evaluate_point(k, ta)?;
+            let pb = kb.curve.evaluate_point(k, tb)?;
+            out.push(Crossing {
+                a: record_parameter(&ra, range_a, ta, pa),
+                b: record_parameter(&rb, range_b, tb, pb),
+                on_a: [pa.x, pa.y, pa.z],
+                on_b: [pb.x, pb.y, pb.z],
+            });
+        }
+        Ok(Ok(out))
     })?
 }
 
