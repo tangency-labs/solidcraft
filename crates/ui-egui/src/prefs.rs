@@ -1552,6 +1552,10 @@ preference_settings! {
     hole_group: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_group");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+    /// The X, Y and Z origin axes run through the origin to the edges of the view, both ways, so
+    /// they stay in sight as references wherever the view is (#11123). Off by default: short axes
+    /// from the origin, solid then dashed, as before.
+    origin_axes_across_view: bool = false, PAGE_DESIGN => check_id("prefs.origin_axes_across_view");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
     /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
     /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is

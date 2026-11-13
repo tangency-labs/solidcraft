@@ -378,6 +378,7 @@ view.navigation_bar               the view: camera, layout, display
 view.navigator                    the view: navigator type; crates/engine/src/schema/view_navigation_tests.rs
 view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
+view.origin_axes_across_view       display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/view_home_tests.rs
 view.perspective                  the view: camera, layout, display
 view.previous_tab                 the view: camera, layout, display
 view.rename                       the view: camera, layout, display
