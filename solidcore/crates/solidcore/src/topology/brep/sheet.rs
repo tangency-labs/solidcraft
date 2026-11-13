@@ -403,7 +403,7 @@ pub fn face_spline_sheet(k: &mut Kernel, b: &Brep, f: FaceId) -> Result<Option<B
         return Ok(None);
     };
     let normal = plane.position().z_axis();
-    if fp2::loops(b, f, false, None)?.len() != 1 {
+    if loops(b, f, false, None)?.len() != 1 {
         return Err(not_rebuilt("a planar face with holes"));
     }
     let fu = fp2::upward_faceuse(b, f)?
@@ -855,7 +855,7 @@ mod tests {
 
         let m = merged_faces(&mut k, &b).unwrap();
         // one face of four edges: the bottom, the two sides and the arc
-        let faces = crate::topology::brep::p1::faces(&m.brep, None).unwrap();
+        let faces = faces(&m.brep, None).unwrap();
         assert_eq!(faces.len(), 1);
         assert_eq!(
             crate::topology::brep::p1::edges(&m.brep, None)
