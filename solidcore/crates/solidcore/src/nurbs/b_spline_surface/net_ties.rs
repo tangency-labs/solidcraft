@@ -109,22 +109,22 @@ impl BSplineSurface {
 
         let mut ties = Ties::default();
         // (the line, its opposite) in each clamped direction of more than one line
-        let mut seams = Vec::new();
-        let mut boundaries = Vec::new();
+        let mut seams: Vec<(Vec<Index>, Vec<Index>)> = Vec::new();
+        let mut boundaries: Vec<Vec<Index>> = Vec::new();
         if let (true, Some(last)) = (
             self.is_clamped_in(SurfParamType::U)?,
             nu.checked_sub(1).filter(|&l| l > 0),
         ) {
-            seams.push((u_line(0).collect::<Vec<_>>(), u_line(last).collect()));
-            boundaries.push(u_line(0).collect::<Vec<_>>());
+            seams.push((u_line(0).collect(), u_line(last).collect()));
+            boundaries.push(u_line(0).collect());
             boundaries.push(u_line(last).collect());
         }
         if let (true, Some(last)) = (
             self.is_clamped_in(SurfParamType::V)?,
             nv.checked_sub(1).filter(|&l| l > 0),
         ) {
-            seams.push((v_line(0).collect::<Vec<_>>(), v_line(last).collect()));
-            boundaries.push(v_line(0).collect::<Vec<_>>());
+            seams.push((v_line(0).collect(), v_line(last).collect()));
+            boundaries.push(v_line(0).collect());
             boundaries.push(v_line(last).collect());
         }
 
