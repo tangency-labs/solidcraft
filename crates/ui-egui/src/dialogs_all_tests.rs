@@ -1242,6 +1242,31 @@ fn dogbone_editor_refills_named_faces_after_sketch_resize() {
     apply_dogbone_editor(h, id);
 }
 
+/// A face pick Edit Feature cannot bring back (no stored name, and its point 2 mm above the
+/// pocket's floor, on no face) is not dropped: OK hands it to the command as stored, beside the
+/// edge pick that did come back, and it counts as a pick, so there is no "no corners" refusal.
+#[test]
+fn dogbone_editor_keeps_a_pick_it_cannot_bring_back() {
+    use solidcraft_engine::doc::FeatureKind;
+
+    let (h, id) = resized_pocket_dogbone_editor(json!({"edges":[[10,5,15]],"faces":[[20,10,10]],"diameter":3}));
+    let mut f = h.app.session.doc.feature(id).unwrap().clone();
+    let FeatureKind::Dogbone { faces, .. } = &mut f.kind else { panic!("{:?}", f.kind) };
+    faces[0].0 = Vec3::new(20.0, 10.0, 12.0);
+    f.face_names.clear();
+    let (crate::dialogs::Kind::Dogbone(k), inputs, extra) = crate::dialogs_dogbone::for_feature(&h.app, &f).unwrap() else { panic!("no Dogbone editor") };
+    assert!(inputs[0].items.iter().all(|p| matches!(p, Sel::Edge { .. })), "{:?}", inputs[0].items);
+    assert_eq!(inputs[0].items.len(), 1, "the edge comes back, the face does not");
+    let commands = crate::dialogs_dogbone::commands(&h.app, &k, &inputs, &extra).unwrap();
+    let [(command, params)] = commands.as_slice() else { panic!("{commands:?}") };
+    assert_eq!(command, "solid.dogbone");
+    assert_eq!(params["faces"], json!([[20.0, 10.0, 12.0]]), "{params}");
+    assert_eq!(params["edges"].as_array().map(Vec::len), Some(1), "{params}");
+    for key in ["kept_edges", "kept_faces", "kept_body"] {
+        assert!(params.get(key).is_none(), "{key} must not reach the command: {params}");
+    }
+}
+
 #[test]
 fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     use solidcraft_engine::doc::{Document, MeshData, naming};
