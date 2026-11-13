@@ -72,9 +72,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          b's z against a's as two faces meet - two plane or axis datums mate aligned, each part keeping its side of the datum, and flip mates them; \
          true: b's z along a's, so two origins given at one point with the same z and x stay as they are; \
          a point origin without x takes its x from z, so give x on both, or use joint.as_built, to keep a turned part where it is); \
-         offset?: mm or an expression; angle?: deg or an expression (an angle relation's tilt from mated; for other joints the default \
+         offset_x?, offset_y?: lateral mm in a's frame (expressions evaluated once); offset?: mm or an expression; angle?: deg or an expression (an angle relation's tilt from mated; for other joints the default \
          is none, or a half turn where that turns b less, so faces that already meet stay as they are); name?; quiet?: bool (leave \
-         out dof and fixed). An expression (text) is \
+         out dof and fixed). An expression for offset, angle or a value is \
          kept with the joint and worked out again whenever the design changes, so the joint follows the parameters it names; a joint whose \
          expression no longer works out (a parameter deleted) is left out of the solve with the reason in its errors",
     ),
@@ -173,7 +173,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<EditJointResult>)
         .params(
             "joint; a?, b?: joint origins as joint.create takes them (a side left out keeps its place; the two must stay on different occurrences); \
-             type?, flip?, offset?, angle? (a number, or an expression the joint then follows), suppressed?, name?; the joint re-solves, keeping \
+             type?, flip?, offset_x?, offset_y? (plain joints only; length expressions evaluated once), offset?, angle? (a number, or an expression the joint then follows), suppressed?, name?; the joint re-solves, keeping \
              its limits and expressions (a relation's values start again where its parts are); an edit that places it again (not a rename alone) \
              meets a loop it closes as joint.create does, turning an angle a half turn where only that meets it",
         ),
@@ -188,7 +188,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ListJointsResult>)
         .params(
-        "→ joints (type, occurrences, values, limits; expressions: {offset?, angle?, values?} when they were typed as expressions), origins, links, degrees of freedom, conflicts, floating: [{occurrences, joints}] \
+        "→ joints (type, occurrences, values, limits, offset_xy: [x,y] in mm; expressions: {offset?, angle?, values?} when they were typed as expressions), origins, links, degrees of freedom, conflicts, floating: [{occurrences, joints}] \
          (joint chains joined to nothing grounded: the solver places none of them, so driving them moves nothing)",
     ),
     CommandSpec::new("joint.inspect", "Inspect Joint", crate::checked!("joint.inspect", inspect::inspect))
@@ -197,7 +197,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectJointResult>)
         .params(
-        "joint?: id|name (default: every joint) → joints: [{id, name, type, suppressed, visible, flip, offset (mm), angle (deg), values: as joint.list \
+        "joint?: id|name (default: every joint) → joints: [{id, name, type, suppressed, visible, flip, offset (mm), offset_xy: [x,y] (mm), angle (deg), values: as joint.list \
          gives them, dofs, expressions?: {offset?, angle?, values?}, a, b: {occurrence, occurrence_name, component, component_name, path \
          (occurrence names from the top, `/` between), snap (as saved: type, pick, face, end, edge, corner, x, point, z, in the component's \
          coordinates), references: [{role: face|end|x|edge|corner, name, role_in_feature?: (top, side:c1…), feature?: {id, name, type} (the feature that made the face; \
@@ -1051,6 +1051,12 @@ pub(crate) fn value(s: &Session, v: &Value, angle: bool, cmd: &str) -> Result<f6
     s.doc.eval(&e, kind).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// Lateral offsets are evaluated once and stored as finite distances, like the dialog's X/Y.
+fn lateral_value(s: &Session, v: &Value, cmd: &str) -> Result<f64> {
+    let distance = value(s, v, false, cmd)?;
+    if distance.is_finite() && distance.abs() < 1e9 { Ok(distance) } else { Err(bad(cmd, "lateral offsets must be finite and smaller than 1e9 mm")) }
+}
+
 /// The expression a number was typed as, kept so the joint follows the parameters it names
 /// (`None` for a plain number, or for text that names no parameter, such as `"5 mm"`).
 fn typed(v: Option<&Value>) -> Option<String> {
@@ -1367,6 +1373,10 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
         Some(v) => value(s, v, false, cmd)?,
         None => 0.0,
     };
+    let offset_xy = [
+        p.get("offset_x").map(|v| lateral_value(s, v, cmd)).transpose()?.unwrap_or(0.0),
+        p.get("offset_y").map(|v| lateral_value(s, v, cmd)).transpose()?.unwrap_or(0.0),
+    ];
     let angle = match p.get("angle") {
         Some(v) => Some(value(s, v, true, cmd)?),
         None => None,
@@ -1384,6 +1394,7 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
         angle: angle.unwrap_or(0.0),
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        offset_xy,
         captured: None,
         constraint: None,
     };
@@ -1431,6 +1442,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
     };
@@ -2091,6 +2103,8 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         Some(v) => Some(value(s, v, false, cmd)?),
         None => None,
     };
+    let offset_x = p.get("offset_x").map(|v| lateral_value(s, v, cmd)).transpose()?;
+    let offset_y = p.get("offset_y").map(|v| lateral_value(s, v, cmd)).transpose()?;
     let angle = match p.get("angle") {
         Some(v) => Some(value(s, v, true, cmd)?),
         None => None,
@@ -2105,10 +2119,17 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         let orig_b = b.as_ref().unwrap_or(&j.b);
         check_sides(orig_a, orig_b, cmd)?;
     }
+    let saved = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "joint"))?;
+    if saved.constraint.is_some()
+        && kind.is_none_or(|k| k == saved.kind)
+        && (offset_x.is_some_and(|x| x != saved.offset_xy[0]) || offset_y.is_some_and(|y| y != saved.offset_xy[1]))
+    {
+        return Err(bad(cmd, "lateral offsets require a plain joint; assembly constraints keep their reference geometry"));
+    }
     let doc = s.doc_mut();
     let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) else { return Err(bad(cmd, "joint")) };
     // As they were: Edit Joint sends the type, offset and flip with every edit, changed or not.
-    let (was_kind, was_offset, was_flip, was_suppressed) = (j.kind, j.offset, j.flip, j.suppressed);
+    let (was_kind, was_offset, was_offset_xy, was_flip, was_suppressed) = (j.kind, j.offset, j.offset_xy, j.flip, j.suppressed);
     if let Some(a) = a {
         j.a = a;
     }
@@ -2136,6 +2157,12 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
                 j.exprs.set_value(i, None);
             }
         }
+    }
+    if let Some(x) = offset_x {
+        j.offset_xy[0] = x;
+    }
+    if let Some(y) = offset_y {
+        j.offset_xy[1] = y;
     }
     if let Some(o) = offset {
         j.offset = o;
@@ -2180,10 +2207,13 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         && !sides
         && kind.is_none_or(|k| k == was_kind)
         && offset.is_none_or(|o| (o - was_offset).abs() <= 1e-9)
+        && offset_x.is_none_or(|x| (x - was_offset_xy[0]).abs() <= 1e-9)
+        && offset_y.is_none_or(|y| (y - was_offset_xy[1]).abs() <= 1e-9)
         && bool_(p, "flip").is_none_or(|f| f == was_flip);
     // Otherwise a relation or a constraint whose type, offset, tilt or flip changes, or whose
     // sides move, starts again from where its parts are.
-    let reseat = !tilt_only && (kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides);
+    let reseat = !tilt_only
+        && (kind.is_some() || offset.is_some() || offset_x.is_some() || offset_y.is_some() || angle.is_some() || p.get("flip").is_some() || sides);
     if reseat {
         let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.starts_where_it_is()).cloned();
         if let Some(q) = edited.and_then(|j| joints::relation_values(&s.doc, &s.model.state(), &j))
@@ -2262,8 +2292,12 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         .joints
         .iter()
         .map(|j| {
-            let world = |o: &JointOrigin| {
-                s.doc.origin_world(&st, o).ok().map(|m| JointFrame { origin: [m[3][0], m[3][1], m[3][2]], z: [m[2][0], m[2][1], m[2][2]] })
+            let world = |o: &JointOrigin, is_a: bool| {
+                s.doc
+                    .origin_world(&st, o)
+                    .ok()
+                    .map(|m| if is_a { j.offset_frame_a(m) } else { m })
+                    .map(|m| JointFrame { origin: [m[3][0], m[3][1], m[3][2]], z: [m[2][0], m[2][1], m[2][2]] })
             };
             ListedJoint {
                 id: j.id,
@@ -2274,10 +2308,11 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
                 values: named_value_list(j, vals.get(&j.id).map(Vec::as_slice).unwrap_or_default()),
                 flip: j.flip,
                 offset: j.offset,
+                offset_xy: j.offset_xy,
                 suppressed: j.suppressed,
                 visible: s.joint_visible(j.id),
-                frame_a: world(&j.a),
-                frame_b: world(&j.b),
+                frame_a: world(&j.a, true),
+                frame_b: world(&j.b, false),
                 expressions: (!j.exprs.is_empty()).then(|| j.exprs.clone()),
                 constraint: j.constraint,
             }
