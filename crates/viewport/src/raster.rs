@@ -70,22 +70,89 @@ impl Pass {
     }
 }
 
-/// The CPU rasterizer's shading of colour `base` (linear 0..1) on a surface with normal `n` seen
+/// One sRGB channel as linear light: `srgb_decode` in `viewport.wgsl`.
+fn srgb_decode(c: f64) -> f64 {
+    if c > 0.04045 { ((c + 0.055) / 1.055).powf(2.4) } else { c / 12.92 }
+}
+
+/// Linear light back to an sRGB channel, worked out rather than looked up: `srgb_encode` in
+/// `viewport.wgsl`, which clamps its input the same way.
+fn srgb_encode_exact(c: f64) -> f64 {
+    let l = if c.is_finite() { c.clamp(0.0, 1.0) } else { 0.0 };
+    if l > 0.0031308 { 1.055 * l.powf(1.0 / 2.4) - 0.055 } else { l * 12.92 }
+}
+
+/// Steps of the [`srgb_encode`] table. Reading it and interpolating is about three times quicker
+/// than working the curve out on every subsample, and lands within a hundredth of one step of a
+/// 0..255 channel (`the_encode_table_matches_the_worked_out_curve`), which no picture can show.
+const ENCODE_STEPS: usize = 4096;
+
+/// [`srgb_encode_exact`] at every step, worked out once.
+fn encode_table() -> &'static [f64; ENCODE_STEPS + 1] {
+    static TABLE: std::sync::OnceLock<[f64; ENCODE_STEPS + 1]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| std::array::from_fn(|i| srgb_encode_exact(i as f64 / ENCODE_STEPS as f64)))
+}
+
+/// Linear light back to an sRGB channel, from the table.
+fn srgb_encode(c: f64) -> f64 {
+    let table = encode_table();
+    let l = if c.is_finite() { c.clamp(0.0, 1.0) } else { 0.0 };
+    let x = l * ENCODE_STEPS as f64;
+    // `l` is 0..=1, so the cast lands in 0..=ENCODE_STEPS and the reads below are in range.
+    let i = x as usize;
+    let lower = table.get(i).copied().unwrap_or(1.0);
+    let upper = table.get(i + 1).copied().unwrap_or(lower);
+    lower + (upper - lower) * (x - i as f64)
+}
+
+/// The CPU rasterizer's shading of colour `base` (sRGB 0..1) on a surface with normal `n` seen
 /// along `view_dir`: the light every picture without a GPU is lit by.
-pub fn shade(n: Vec3, view_dir: Vec3, base: [f64; 3]) -> [f64; 3] {
+///
+/// `sky` carries the world's up direction when the scene is shaded the way the viewport is under
+/// Preferences > Graphics > Keep the shape of dark parts ([`Scene::dark_parts_shading`]); `None`
+/// is the flat shading, which every picture used before. See [`shade_prepared`].
+pub fn shade(n: Vec3, view_dir: Vec3, base: [f64; 3], sky: Option<Vec3>) -> [f64; 3] {
+    let colour = if sky.is_some() { base.map(srgb_decode) } else { base };
+    shade_prepared(n, view_dir, colour, sky)
+}
+
+/// [`shade`] of a colour already in the space its path works in: linear light under `sky`, which
+/// lights the surface and encodes the total once, and sRGB without it, which multiplies the
+/// encoded colour by a lighting factor. [`render`] decodes once for each triangle rather than
+/// once for each subsample, which is why the two paths are split here.
+///
+/// This is `sky_lit` and `lit_color` in `crates/viewport-gpu/shaders/viewport.wgsl`, kept in step
+/// with them so a picture taken without a window matches the window, which
+/// `the_gpu_and_the_rasterizer_shade_a_face_alike` checks. The rasterizer draws no ambient
+/// occlusion, so the shader's `visibility` is 1 throughout.
+fn shade_prepared(n: Vec3, view_dir: Vec3, colour: [f64; 3], sky: Option<Vec3>) -> [f64; 3] {
     let n = if n.dot(view_dir) < 0.0 { -n } else { n };
     let key = (view_dir * 0.8 + Vec3::new(-0.3, 0.2, 0.6)).normalized().unwrap_or(view_dir);
     let diff = n.dot(key).max(0.0);
     let fill = n.dot(view_dir).max(0.0);
     let h = (key + view_dir).normalized().unwrap_or(view_dir);
     let spec = n.dot(h).max(0.0).powi(40) * 0.25;
-    let k = 0.42 + 0.38 * diff + 0.25 * fill;
-    [(base[0] * k + spec).min(1.0), (base[1] * k + spec).min(1.0), (base[2] * k + spec).min(1.0)]
+    let Some(up) = sky else {
+        let k = 0.42 + 0.38 * diff + 0.25 * fill;
+        return colour.map(|c| (c * k + spec).min(1.0));
+    };
+    // How far the surface faces the world's up axis, which the user may have set to Y (#3).
+    let facing = n.dot(up) * 0.5 + 0.5;
+    let fill_light = 0.18 + (0.42 - 0.18) * facing;
+    // Schlick's rise toward grazing, tempered as the shader tempers it.
+    let fresnel = 0.04 + 0.2 * (1.0 - fill).powi(5);
+    let light = 0.41 * diff + 0.66 * fill_light + 0.2 * fill;
+    let reflected = fresnel * fill_light;
+    // The shader adds the highlight to the encoded colour rather than to the light, so this does
+    // too; both move into linear light together or neither does.
+    colour.map(|c| (srgb_encode(c * light + reflected) + spec).min(1.0))
 }
 
 /// Render a scene with the camera into an RGBA canvas of `w × h` pixels.
 pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     let (w, h) = (w.clamp(1, MAX_DIM), h.clamp(1, MAX_DIM));
+    // The sky fill comes from the world's up axis, which the user may have set to Y (#3).
+    let sky = scene.dark_parts_shading.then(|| cam.up.dir());
     let (sw, sh) = (w * SS, h * SS);
     let mut c = Canvas::new(sw, sh);
     let (top, bot) = scene.background.unwrap_or((Rgb(236, 240, 245), Rgb(205, 212, 222)));
@@ -133,6 +200,9 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             for (ti, t) in m.triangles.iter().enumerate() {
                 let face = m.tri_face.get(ti).copied();
                 let base = sm.face_colors.iter().find(|(f, _)| Some(*f) == face).map_or(body, |(_, c)| c.f());
+                // `shade_prepared` wants linear light under the sky fill: decoding the triangle's
+                // colour here keeps `srgb_decode` out of the loops over its pixels below.
+                let lit_base = if sky.is_some() { base.map(srgb_decode) } else { base };
                 let wp = t.map(|k| m.positions.get(k as usize).copied().unwrap_or_default());
                 // Seen from inside: where a section cuts a solid body open, and the far side of
                 // a see-through one (drawn in the pass before its near side).
@@ -222,7 +292,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                                 c.put(x, y, tinted.map(|v| v * k), 1.0);
                                 continue;
                             }
-                            let mut col = shade(n, view_dir, base);
+                            let mut col = shade_prepared(n, view_dir, lit_base, sky);
                             let ndv = n.dot(view_dir).abs();
                             if curved && ndv < 0.14 {
                                 let a = 1.0 - ndv / 0.14;
@@ -386,6 +456,130 @@ mod tests {
     use crate::scene::{SceneLine, SceneMesh};
     use solidcore_tess::Mesh;
     use std::sync::Arc;
+
+    /// Turning the sky fill off gives back the shading every picture had before #7974, factor
+    /// and all, so a picture taken today is unchanged.
+    #[test]
+    fn the_flat_shading_is_the_formula_it_always_was() {
+        let view = Vec3::Z;
+        for n in [Vec3::Z, Vec3::X, Vec3::new(0.3, -0.5, 0.8).normalized().unwrap()] {
+            for base in [[0.05, 0.05, 0.05], [0.5, 0.5, 0.5], [0.9, 0.2, 0.1]] {
+                let key = (view * 0.8 + Vec3::new(-0.3, 0.2, 0.6)).normalized().unwrap_or(view);
+                let nn = if n.dot(view) < 0.0 { -n } else { n };
+                let spec = nn.dot((key + view).normalized().unwrap_or(view)).max(0.0).powi(40) * 0.25;
+                let k = 0.42 + 0.38 * nn.dot(key).max(0.0) + 0.25 * nn.dot(view).max(0.0);
+                let was = [(base[0] * k + spec).min(1.0), (base[1] * k + spec).min(1.0), (base[2] * k + spec).min(1.0)];
+                assert_eq!(shade(n, view, base, None), was, "normal {n:?}, colour {base:?}");
+            }
+        }
+    }
+
+    /// The table [`srgb_encode`] reads stands in for the curve [`srgb_encode_exact`] works out,
+    /// so reading it cannot show a different colour: the two stay within a hundredth of one step
+    /// of a 0..255 channel, everywhere.
+    #[test]
+    fn the_encode_table_matches_the_worked_out_curve() {
+        let mut worst: f64 = 0.0;
+        for i in 0..=100_000 {
+            let c = f64::from(i) / 100_000.0;
+            worst = worst.max((srgb_encode(c) - srgb_encode_exact(c)).abs() * 255.0);
+        }
+        assert!(worst < 0.01, "the table and the curve are {worst} of a channel step apart");
+        // Beyond both ends, and given nothing to work with, both answer the same way.
+        for c in [-1.0, 0.0, 1.0, 2.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(srgb_encode(c), srgb_encode_exact(c), "colour {c}");
+        }
+    }
+
+    /// The sky fill lifts a near-black surface the key light barely reaches well clear of black,
+    /// which is the whole point of it (#7974): in the flat shading a dark board is a hole.
+    #[test]
+    fn the_sky_fill_lifts_a_near_black_surface() {
+        let view = Vec3::Z;
+        let base = [0.05, 0.05, 0.05];
+        for n in [Vec3::new(0.3, -0.5, 0.8).normalized().unwrap(), Vec3::new(0.9, 0.1, 0.2).normalized().unwrap()] {
+            let flat = shade(n, view, base, None)[0];
+            let sky = shade(n, view, base, Some(Vec3::Z))[0];
+            assert!(flat < 0.06, "the flat shading leaves this face near black, not at {flat}");
+            assert!(sky > flat, "the sky fill leaves {sky} no lighter than the flat {flat} on normal {n:?}");
+        }
+    }
+
+    /// The sky fill shapes faces the key light treats alike: two normals the key and the eye fill
+    /// reach equally, one tilted up and one down, come out the same colour in the flat shading and
+    /// a step apart under the sky fill. The pair mirrors across the plane through the key and view
+    /// directions, which is what makes their key and fill terms equal while their Z parts differ.
+    #[test]
+    fn the_sky_fill_separates_faces_by_how_they_tilt() {
+        let view = -Vec3::Y;
+        let up = Vec3::new(0.837882, -0.349918, 0.418941);
+        let down = Vec3::new(-0.837882, -0.349918, -0.418941);
+        for base in [[0.05, 0.05, 0.05], [0.5, 0.5, 0.5]] {
+            let flat = |n| shade(n, view, base, None)[0];
+            assert!((flat(up) - flat(down)).abs() < 1e-6, "the flat shading already separates {} and {}", flat(up), flat(down));
+            let sky = |n| shade(n, view, base, Some(Vec3::Z))[0];
+            // Well over one step of a 0..255 channel, so it survives to the screen.
+            assert!(sky(up) - sky(down) > 0.01, "the sky barely separates {} and {} on colour {base:?}", sky(up), sky(down));
+        }
+    }
+
+    /// The sky follows the world's up axis: a pair of faces leaning the same way along Z and
+    /// opposite ways along Y is separated with Y up (#3) and not with Z up. As above, the pair
+    /// mirrors across the plane through the key and view directions.
+    #[test]
+    fn the_sky_fill_follows_the_up_axis() {
+        let view = -Vec3::Z;
+        let base = [0.5, 0.5, 0.5];
+        let a = Vec3::new(0.499255, 0.748927, -0.435722);
+        let b = Vec3::new(-0.499255, -0.748927, -0.435722);
+        let gap = |up| (shade(a, view, base, up)[0] - shade(b, view, base, up)[0]).abs();
+        assert!(gap(None) < 1e-4, "the flat shading already separates the pair by {}", gap(None));
+        assert!(gap(Some(Vec3::Z)) < 1e-4, "neither face leans along Z, so Z up should not separate them");
+        assert!(gap(Some(Vec3::Y)) > 0.01, "with Y up the pair should separate, not by {}", gap(Some(Vec3::Y)));
+    }
+
+    /// A mid-grey face stays about where it was: the sky fill is meant to read as better shaping,
+    /// not as the whole model getting brighter.
+    #[test]
+    fn the_sky_fill_keeps_mid_tones_near_where_they_were() {
+        let view = Vec3::Z;
+        let base = [0.5, 0.5, 0.5];
+        for n in [Vec3::Z, Vec3::new(0.3, -0.5, 0.8).normalized().unwrap()] {
+            let flat = shade(n, view, base, None)[0];
+            let sky = shade(n, view, base, Some(Vec3::Z))[0];
+            assert!((sky - flat).abs() < 0.1, "flat {flat} and sky {sky} are further apart than intended on {n:?}");
+        }
+    }
+
+    /// A picture follows the scene's setting: the same scene drawn twice differs only when the
+    /// sky fill is on, and the colours it draws are the ones [`shade`] works out.
+    #[test]
+    fn a_picture_follows_the_scenes_shading_setting() {
+        let mesh = Arc::new(Mesh {
+            positions: vec![Vec3::new(-80.0, 0.0, -80.0), Vec3::new(80.0, 0.0, -80.0), Vec3::new(0.0, 0.0, 80.0)],
+            normals: vec![Vec3::new(0.0, -1.0, 0.0); 3],
+            triangles: vec![[0, 1, 2]],
+            tri_face: vec![0],
+            ..Default::default()
+        });
+        let picture = |dark_parts_shading| {
+            let scene = Scene {
+                meshes: vec![SceneMesh::solid(mesh.clone(), Rgb(20, 20, 24))],
+                background: Some((Rgb(255, 255, 255), Rgb(255, 255, 255))),
+                radius: 200.0,
+                dark_parts_shading,
+                ..Default::default()
+            };
+            render(&scene, &Camera::default(), 64, 64).rgba
+        };
+        let (flat, sky) = (picture(false), picture(true));
+        let at = (32 * 64 + 32) * 4;
+        let middle = |p: &[u8]| p.get(at..at + 3).map(<[u8]>::to_vec).unwrap_or_default();
+        assert_ne!(middle(&flat), vec![255, 255, 255], "the triangle covers the middle of the picture");
+        assert_ne!(middle(&flat), middle(&sky), "the setting changes what the picture shows");
+        // Lighter under the sky fill, which is what a near-black surface is given it for.
+        assert!(middle(&sky)[0] > middle(&flat)[0], "sky {:?} is no lighter than flat {:?}", middle(&sky), middle(&flat));
+    }
 
     /// Lines are cut by the section in 3D: the kept piece ends on the plane.
     #[test]

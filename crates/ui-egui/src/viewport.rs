@@ -745,13 +745,7 @@ fn supersampling(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 
 /// The shader's sky (#7974): the world's up direction, and 1 to shade in linear light with a sky
 /// fill (Preferences › Graphics), else zero.
 pub(crate) fn sky_uniform(on: bool, up: solidcraft_viewport::UpAxis) -> [f32; 4] {
-    if !on {
-        return [0.0; 4];
-    }
-    match up {
-        solidcraft_viewport::UpAxis::Z => [0.0, 0.0, 1.0, 1.0],
-        solidcraft_viewport::UpAxis::Y => [0.0, 1.0, 0.0, 1.0],
-    }
+    solidcraft_viewport_gpu::view::sky_uniform(on, up)
 }
 
 fn ao_samples(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4], size_px: [f32; 2]) -> u32 {

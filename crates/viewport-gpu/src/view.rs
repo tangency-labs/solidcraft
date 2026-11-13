@@ -242,6 +242,17 @@ fn octahedral6(n: [f32; 3]) -> u32 {
 /// lights, and the sky (`uniform_bytes`).
 const UNIFORM_SIZE: u64 = 480 + 16 * solidcraft_viewport::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
 
+/// [`Frame::sky`]: the world's up direction, and 1 to shade in linear light with a sky fill
+/// (Preferences > Graphics > Keep the shape of dark parts, #7974), else zeros. Every drawn frame
+/// builds it here, so the window and a picture taken without one ask for the same shading.
+pub fn sky_uniform(on: bool, up: solidcraft_viewport::UpAxis) -> [f32; 4] {
+    if !on {
+        return [0.0; 4];
+    }
+    let d = up.dir();
+    [d.x as f32, d.y as f32, d.z as f32, 1.0]
+}
+
 /// The identity, column-major: a scene drawn where it was built.
 const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
 
@@ -1181,7 +1192,7 @@ pub struct Frame {
     /// cut body whose palette entries carry a hatch ([`Palette::set_hatch`]) is tinted toward.
     pub hatch: [[f32; 3]; solidcraft_viewport::hatch::HATCH_COLOURS],
     /// The world's up direction and 1 to shade in linear light with a sky fill that follows it
-    /// (#7974); 0 shades as before.
+    /// (#7974); 0 shades as before. [`sky_uniform`] builds it.
     pub sky: [f32; 4],
     /// Bodies being dragged (a component's Move triad), drawn moved; `None`: none.
     pub moving: Option<MovingLayer>,

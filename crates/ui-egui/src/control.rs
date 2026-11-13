@@ -499,6 +499,8 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
     )
     .map_err(|e| e.to_string())?;
     scene.plain_cap = !crate::viewport::section_hatch(app);
+    // The shading the window uses, so a picture of the view matches it (#7974).
+    scene.dark_parts_shading = app.preferences.dark_parts_shading;
     if app.preferences.section_hatch == crate::prefs::SectionHatch::One {
         scene.part_hatch = None;
     }
