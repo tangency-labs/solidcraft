@@ -234,7 +234,7 @@ fn a_minimal_circle_that_only_touches_its_walls_is_unreached() {
                 "{theta} {eps}"
             );
         }
-        // 1e-9 g* short (over 1e-10 mm deep, past the kernel's length tolerance): a cut.
+        // 1e-9 g* short (over 1e-10 mm deep, past the numeric zero tolerance): a cut.
         assert!(relief(largest * (1.0 - 1e-9)).is_ok(), "{theta}");
     }
     // The largest gap as typed for a square corner.
@@ -265,7 +265,8 @@ fn a_t_bone_bites_the_wall_it_is_told_to() {
     assert!(close3(short.centre, Vec3::new(0.0, R, 0.0)));
     assert!(close(off_wall(short.centre, a), R, 1e-12));
     assert!(close(off_wall(short.centre, b), 0.0, 1e-12));
-    // Equal walls: Longer takes the first, Shorter the second.
+    // Equal walls: Longer takes the wall from which the void turns counter-clockwise about
+    // up(Z) = Z (a × b = Z, so a), Shorter the other.
     let eq = |side| {
         wedge_relief(a, b, Vec3::Z, 3.0, 3.0, &opts(Style::TBone { side }))
             .unwrap()

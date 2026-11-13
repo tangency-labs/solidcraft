@@ -221,7 +221,7 @@ fn up(axis: Vec3) -> Vec3 {
 /// beyond the wall's line (the sagitta of a chord that long; a stretch clamped at the corner goes
 /// deeper for its length), and at most `L² / r` when the centre's foot on the line lies on the
 /// wall (where it does not, a circle of these styles passes through the corner and the stretch is
-/// empty). So a longer stretch cuts deeper than the kernel's length tolerance [`EFF_ZERO`], and a
+/// empty). So a longer stretch cuts deeper than the numeric zero tolerance [`EFF_ZERO`], and a
 /// shorter one at most eight times that: the circle only touches the wall (a T-bone's other wall
 /// at 90°, a minimal circle whose gap is within rounding of the largest that reaches), and a
 /// cylinder tangent to a face is no cut to send to the boolean.
