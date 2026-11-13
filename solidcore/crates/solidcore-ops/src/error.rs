@@ -56,7 +56,8 @@ pub enum Error {
     /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
     CornerUnsupported,
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
-    /// back a corner only where every edge meeting it is blended, all convex or all concave.
+    /// back a corner only where every edge meeting it is blended, all convex or all concave, or
+    /// of mixed convexity with curvature-continuous rounds between planes.
     CornerRefused {
         /// The corner's index among the call's corners.
         corner: usize,
