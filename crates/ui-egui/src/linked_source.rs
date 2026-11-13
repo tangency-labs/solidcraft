@@ -1,5 +1,5 @@
-//! Explicitly choose a linked component's source; all its instances share that source. Extract
-//! makes a component that is not linked the source of its own design file.
+//! Explicitly choose a linked component's source, for all its placements or for one of them.
+//! Extract makes a component that is not linked the source of its own design file.
 
 use std::sync::Arc;
 
@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 
 use crate::SolveApp;
 
+/// Relink Source for the selection, which must name exactly one linked component, through
+/// its browser rows or placements.
 pub(crate) fn start_selected(app: &mut SolveApp) {
     let mut components = app.tree.picked_components.clone();
     for selection in &app.session.selection {
@@ -21,14 +23,16 @@ pub(crate) fn start_selected(app: &mut SolveApp) {
     if let [component] = components.as_slice()
         && app.session.doc.links.contains_key(component)
     {
-        start(app, *component);
+        start(app, *component, None);
     } else {
         app.set_status(app.tr("ui.relink_select_one").to_string(), true);
     }
 }
 
-pub(crate) fn start(app: &mut SolveApp, component: u64) {
-    if app.file_picker_busy() || app.file_load.busy() {
+/// Ask for the design a linked component shows instead: in all its placements, or with
+/// `occurrence` in that one only.
+pub(crate) fn start(app: &mut SolveApp, component: u64, occurrence: Option<u64>) {
+    if app.file_picker_busy() || app.file_load_holds() {
         return;
     }
     if !app.session.doc.links.contains_key(&component) {
@@ -49,14 +53,18 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
         }
         // Picked in the file dialog: its server is the user's choice.
         let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-        let relinked =
-            solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.relink", json!({"component": component, "path": path})));
+        let mut params = json!({"component": component, "path": path});
+        if let Some(occurrence) = occurrence {
+            params["occurrence"] = json!(occurrence);
+        }
+        let relinked = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.relink", params));
         if let Ok(result) = relinked {
+            let done = if occurrence.is_some() { app.tr_label("ui.relink_one_done") } else { app.tr_label("ui.relink_done") }.to_string();
             let warnings: Vec<&str> = result["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).collect();
             if warnings.is_empty() {
-                app.set_status(app.tr_label("ui.relink_done").to_string(), false);
+                app.set_status(done, false);
             } else {
-                let text = format!("{} {}", app.tr_label("ui.relink_done"), warnings.join("; "));
+                let text = format!("{done} {}", warnings.join("; "));
                 app.session.echo(text.clone());
                 app.set_status(text, true);
             }
@@ -66,7 +74,7 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
 
 /// Ask where the component's design goes, then move its history there and link it.
 pub(crate) fn extract(app: &mut SolveApp, component: u64) {
-    if app.file_picker_busy() || app.file_load.busy() {
+    if app.file_picker_busy() || app.file_load_holds() {
         return;
     }
     let Some(name) = app.session.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()) else { return };
@@ -251,15 +259,16 @@ pub fn link_copies(app: &mut SolveApp, accept: bool) -> bool {
 pub fn show_copies(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(c) = app.menu.link_copies.clone() else { return };
     let name = app.session.doc.components.iter().find(|x| x.id == c.linked).map(|x| x.name.clone()).unwrap_or_default();
-    let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new("sc_link_copies"), "help", crate::i18n::tr_label("Link Identical Copies"))
-        .actions("Link", "Keep", None)
-        .show(ctx, true, |ui| {
-            let text = crate::i18n::format("ui.link_copies_text", &[("name", &name)]);
-            crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Report("copies", false));
-            for (id, copy) in &c.copies {
-                crate::ui_kit::text(ui, &format!("  • {copy}"), crate::ui_kit::Text::Report(&format!("copy:{id}"), false));
-            }
-        });
+    let (closed, action) =
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_link_copies"), "help", solidcraft_ui_text::tr_label("Link Identical Copies"))
+            .actions("Link", "Keep", None)
+            .show(ctx, true, |ui| {
+                let text = solidcraft_ui_text::format("ui.link_copies_text", &[("name", &name)]);
+                crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Report("copies", false));
+                for (id, copy) in &c.copies {
+                    crate::ui_kit::text(ui, &format!("  • {copy}"), crate::ui_kit::Text::Report(&format!("copy:{id}"), false));
+                }
+            });
     match action {
         crate::ui_kit::Action::Ok => drop(link_copies(app, true)),
         crate::ui_kit::Action::Cancel => drop(link_copies(app, false)),
@@ -292,8 +301,8 @@ mod tests {
         (app, component, occurrence, folder, moved)
     }
 
-    fn menu(app: &SolveApp, target: Target) -> Option<context_menu::Item> {
-        context_menu::items(app, &target).into_iter().find(|i| i.id == "ui.relinkSource")
+    fn menu(app: &SolveApp, target: Target) -> Option<crate::ui_kit::Item> {
+        context_menu::entries(app, &target).into_iter().find(|i| i.id == "ui.relinkSource")
     }
 
     fn answer(app: &mut SolveApp, path: Option<String>) {
@@ -328,24 +337,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(folder);
     }
 
+    /// #12227: a placement's menu relinks that placement alone when the component has others.
+    #[test]
+    fn relink_menu_relinks_one_placement_of_several() {
+        let (mut app, component, occurrence, folder, moved) = fixture("one");
+        let rows = |app: &SolveApp, target: &Target| -> Vec<String> { context_menu::entries(app, target).into_iter().map(|i| i.id).collect() };
+        assert!(
+            !rows(&app, &Target::Occurrence { path: vec![occurrence] }).contains(&"ui.relinkPlacement".to_string()),
+            "one placement: only the row for all"
+        );
+        let second = app.run("occurrence.copy", json!({"occurrence": occurrence, "translate": [90,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+        assert!(!rows(&app, &Target::Component { id: component }).contains(&"ui.relinkPlacement".to_string()), "no placement to relink");
+        let target = Target::Occurrence { path: vec![second] };
+        let ids = rows(&app, &target);
+        let at = ids.iter().position(|id| id == "ui.relinkPlacement").expect("a row for this placement");
+        assert_eq!(ids[at + 1], "ui.relinkSource", "right above the row for all instances");
+        let item = context_menu::entries(&app, &target).into_iter().find(|i| i.id == "ui.relinkPlacement").unwrap();
+        assert_eq!(item.params, Some(json!({"component": component, "occurrence": second})));
+        answer(&mut app, Some(moved.to_string_lossy().into_owned()));
+        context_menu::run_item(&mut app, &item, egui::Pos2::ZERO);
+        crate::file_picker::tick(&mut app, &egui::Context::default());
+        let shows = |app: &SolveApp, o: u64| app.session.doc.occurrences.iter().find(|x| x.id == o).unwrap().component;
+        assert_eq!(shows(&app, occurrence), component);
+        assert_ne!(shows(&app, second), component);
+        assert!(app.session.doc.links[&shows(&app, second)].path.ends_with("moved.solidcraft"));
+        assert!(app.status.as_ref().is_some_and(|(s, _, error)| s.contains("this instance") && !error), "{:?}", app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
     #[test]
     fn relink_picker_cancel_bad_file_and_changed_document_keep_the_link() {
         let (mut app, component, _, folder, moved) = fixture("cancel");
         let before = serde_json::to_value(&*app.session.doc).unwrap();
         let undo = app.session.undo.len();
         answer(&mut app, None);
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before);
         assert_eq!(app.session.undo.len(), undo);
         answer(&mut app, Some(folder.join("missing.solidcraft").to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before);
         assert_eq!(app.session.undo.len(), undo);
         assert!(app.status.as_ref().is_some_and(|(_, _, error)| *error));
         answer(&mut app, Some(moved.to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         // The ordinary UI blocks edits while picking. Simulate a host replacing/editing the
         // session directly to exercise the continuation's independent stale-target guard.
         app.session.execute("component.rename", &json!({"component": component, "name": "Changed"})).unwrap();
@@ -379,7 +416,7 @@ mod tests {
         part.execute("solid.box", &json!({"length": 10, "width": 20, "height": 45})).unwrap();
         part.execute("file.save", &json!({"path": plain})).unwrap();
         answer(&mut app, Some(plain.to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert!(app.session.doc.links[&component].path.ends_with("plain.json"));
         let _ = std::fs::remove_dir_all(folder);
@@ -393,16 +430,18 @@ mod tests {
         let made = app.run("component.create", json!({"name": "Bracket", "grounded": false})).unwrap();
         let (component, occurrence) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
         app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
-        let find = |app: &SolveApp, id: u64| context_menu::items(app, &Target::Component { id }).into_iter().find(|i| i.id == "ui.extractComponent");
+        let find =
+            |app: &SolveApp, id: u64| context_menu::entries(app, &Target::Component { id }).into_iter().find(|i| i.id == "ui.extractComponent");
         assert!(find(&app, 0).is_none());
         // Not offered while the component can't go: here, moved without Capture Position
         app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [5, 0, 0], "capture": false})).unwrap();
         assert!(find(&app, component).is_none());
         app.run("component.revert_position", json!({})).unwrap();
-        // In Relink Source's place, right after Properties
-        let ids: Vec<String> = context_menu::items(&app, &Target::Component { id: component }).into_iter().map(|i| i.id).collect();
-        let properties = ids.iter().position(|i| i == "ui.properties").unwrap();
-        assert_eq!(ids.get(properties + 1).map(String::as_str), Some("ui.extractComponent"));
+        // In Relink Source's place in the Component flyout, right below New Component
+        let rows = context_menu::items(&app, &Target::Component { id: component });
+        let ids: Vec<&str> = rows.iter().find(|i| i.label == "Component").unwrap().children.iter().map(|i| i.id.as_str()).collect();
+        let create = ids.iter().position(|i| *i == "component.create").unwrap();
+        assert_eq!(ids.get(create + 1), Some(&"ui.extractComponent"));
         let item = find(&app, component).unwrap();
         let chosen = folder.join("bracket").to_string_lossy().into_owned();
         app.services.pick_save = Some(Box::new(move |name, extensions| {
@@ -463,7 +502,11 @@ mod tests {
         let mut app = SolveApp::new(Session::default(), Default::default());
         app.run("component.insert_design", json!({"path": file})).unwrap();
         let volume = |app: &SolveApp| {
-            app.session.world_state().bodies.iter().map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).sum::<f64>()
+            crate::open_meshing::session_world(&app.session)
+                .bodies
+                .iter()
+                .map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume)
+                .sum::<f64>()
         };
         let ctx = egui::Context::default();
         let settle = |app: &mut SolveApp| {
@@ -556,7 +599,7 @@ mod tests {
     }
 
     fn volume(app: &SolveApp) -> f64 {
-        app.session.world_state().bodies.iter().map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).sum()
+        crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).sum()
     }
 
     /// Away to the blank tab and back to the assembly.
@@ -765,7 +808,7 @@ mod tests {
         changed.execute("solid.box", &json!({"length": 10, "width": 20, "height": 45})).unwrap();
         changed.execute("file.save", &json!({"path": moved})).unwrap();
         answer(&mut app, Some(moved.to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert!(app.status.as_ref().is_some_and(|(s, _, error)| s.contains("check this component's joints") && *error));
         assert!(app.session.log.iter().any(|s| s.contains("check this component's joints")));

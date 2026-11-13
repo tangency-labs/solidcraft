@@ -12,7 +12,7 @@ use solidcraft_engine::{Sel, Session};
 use crate::SolveApp;
 use crate::dialogs::{Kind, combo, form_row};
 use crate::selection::{EDGES, FACES, SelInput};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// One family of the library.
 #[derive(Clone, Debug, PartialEq)]
@@ -20,6 +20,8 @@ pub struct Family {
     pub id: String,
     pub name: String,
     pub standard: String,
+    /// `metric` or `inch`: the Unit system list shows the families of one at a time.
+    pub system: String,
     /// Size names and their table rows.
     pub sizes: Vec<(String, Value)>,
     pub lengths: Option<Vec<f64>>,
@@ -43,6 +45,7 @@ pub fn families(v: &Value) -> Vec<Family> {
             Some(Family {
                 name: f.get("name").and_then(Value::as_str).unwrap_or(&id).to_string(),
                 standard: f.get("standard").and_then(Value::as_str).unwrap_or("").to_string(),
+                system: f.get("system").and_then(Value::as_str).unwrap_or("metric").to_string(),
                 sizes,
                 lengths: f.get("lengths").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).collect()),
                 id,
@@ -55,11 +58,14 @@ pub fn families(v: &Value) -> Vec<Family> {
 /// name for a family the catalogs don't know.
 pub(crate) fn family_name(f: &Family) -> String {
     let id = format!("parts.family.{}", f.id);
-    match crate::i18n::tr(&id) {
+    match solidcraft_ui_text::tr(&id) {
         shown if shown == id => f.name.clone(),
         shown => shown.to_string(),
     }
 }
+
+/// The Unit system list: each system's id in the library and its label.
+const SYSTEMS: [(&str, &str); 2] = [("metric", "Metric"), ("inch", "Inch")];
 
 #[derive(Clone, Debug)]
 pub struct Pt {
@@ -120,6 +126,12 @@ pub fn insert_params(lib: &[Family], k: &Pt, holes: &[Sel]) -> Result<Value, Str
     Ok(p)
 }
 
+/// A length (mm) of a part of the family: in fractional inches for an inch family, in the
+/// design's units otherwise.
+pub(crate) fn length_label(app: &SolveApp, family: &str, mm: f64) -> String {
+    solidcraft_engine::cmd::part_length_label(family, mm).unwrap_or_else(|| crate::prefs::show_mm(app, mm, 1))
+}
+
 /// Where the Length list opens for a size: the index of the length an insert of it gets when
 /// none is asked for, which `parts.library` reports beside the size's table values. The list
 /// carries no item of its own for it, so a size whose default is missing opens on the first.
@@ -158,16 +170,42 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     };
     if lib.is_empty() {
         ui.vertical(|ui| {
-            crate::ui_kit::text(ui, crate::i18n::tr_label("the parts library is not available"), crate::ui_kit::Text::Note("parts_unavailable"));
+            crate::ui_kit::text(
+                ui,
+                solidcraft_ui_text::tr_label("the parts library is not available"),
+                crate::ui_kit::Text::Note("parts_unavailable"),
+            );
         });
         return false;
     }
-    let names: Vec<String> =
-        lib.iter().map(|f| if f.standard.is_empty() { family_name(f) } else { format!("{} ({})", family_name(f), f.standard) }).collect();
+    // The Unit system list picks metric or inch; Type lists that system's families. The system
+    // shown is the chosen family's, so a new system moves the choice to its first family.
+    let current = lib.get(k.family).map_or("metric", |f| f.system.as_str());
+    let mut system = SYSTEMS.iter().position(|s| s.0 == current).unwrap_or(0);
+    let was_system = system;
+    choice_row(ui, "Unit system", "pt_system", &mut system, &SYSTEMS.map(|s| s.1));
+    let system_id = SYSTEMS.get(system).map_or("metric", |s| s.0);
+    if system != was_system
+        && let Some(first) = lib.iter().position(|f| f.system == system_id)
+    {
+        k.family = first;
+        k.size = 0;
+        k.length = None;
+    }
+    let shown: Vec<usize> = (0..lib.len()).filter(|i| lib.get(*i).is_some_and(|f| f.system == system_id)).collect();
+    let names: Vec<String> = shown
+        .iter()
+        .filter_map(|i| lib.get(*i))
+        .map(|f| if f.standard.is_empty() { family_name(f) } else { format!("{} ({})", family_name(f), f.standard) })
+        .collect();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    let before = k.family;
-    choice_row(ui, "Type", "pt_family", &mut k.family, &refs);
-    if k.family != before {
+    let mut pick = shown.iter().position(|i| *i == k.family).unwrap_or(0);
+    let before = pick;
+    choice_row(ui, "Type", "pt_family", &mut pick, &refs);
+    if pick != before
+        && let Some(i) = shown.get(pick)
+    {
+        k.family = *i;
         k.size = 0;
         k.length = None;
     }
@@ -180,7 +218,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
         k.length = None;
     }
     if let Some(ls) = &f.lengths {
-        let labels: Vec<String> = ls.iter().map(|l| crate::prefs::show_mm(app, *l, 1)).collect();
+        let labels: Vec<String> = ls.iter().map(|l| length_label(app, &f.id, *l)).collect();
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         let mut i = k.length.unwrap_or_else(|| default_length(f, k.size, ls));
         form_row(ui, "Length", |ui| {
@@ -188,10 +226,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             k.length = Some(i);
         });
     }
-    text_row(ui, "Name", &mut k.name, crate::i18n::tr("parts.automatic_name"));
+    text_row(ui, "Name", &mut k.name, solidcraft_ui_text::tr("parts.automatic_name"));
     // The part, and its table values.
     let key = (k.family, k.size, k.length);
-    let tex_id = egui::Id::new("sc_part_picture");
+    let tex_id = egui::Id::unique("sc_part_picture");
     if k.picture != Some(key) {
         let tex = insert_params(&lib, k, &[])
             .ok()
@@ -210,7 +248,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             ui.add(egui::Image::new(&tx).fit_to_exact_size(vec2(180.0, 112.0)).corner_radius(t.radius_sm));
         }
         None => {
-            crate::ui_kit::text(ui, crate::i18n::tr_label("no picture"), crate::ui_kit::Text::Note("parts_picture"));
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr_label("no picture"), crate::ui_kit::Text::Note("parts_picture"));
         }
     });
     if let Some((_, row)) = f.sizes.get(k.size)
@@ -230,7 +268,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     }
     if inputs.first().is_some_and(|i| i.items.is_empty()) {
         ui.vertical(|ui| {
-            crate::ui_kit::text(ui, crate::i18n::tr("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
         });
     }
     false
@@ -272,7 +310,7 @@ fn dimension_label(key: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
 
     fn lib() -> Vec<Family> {
         families(&json!({"families": [
@@ -296,13 +334,15 @@ mod tests {
     /// don't know keeps the library's name.
     #[test]
     fn family_names_follow_the_language() {
+        crate::i18n::install();
         let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap());
         assert!(l.len() >= 7, "{}", l.len());
-        let _german = crate::i18n::scope("de");
+        let _german = solidcraft_ui_text::scope("de");
         for f in &l {
             assert_ne!(family_name(f), f.name, "{}", f.id);
         }
-        let unknown = Family { id: "spring".into(), name: "Spring".into(), standard: String::new(), sizes: vec![], lengths: None };
+        let unknown =
+            Family { id: "spring".into(), name: "Spring".into(), standard: String::new(), system: "metric".into(), sizes: vec![], lengths: None };
         assert_eq!(family_name(&unknown), "Spring");
     }
 
@@ -339,16 +379,49 @@ mod tests {
         assert!(insert_params(&[], &k, &[]).is_err());
     }
 
+    /// #10316: the Unit system list above Type picks metric or inch, and Type then lists that
+    /// system's families only.
+    #[test]
+    fn the_system_list_picks_the_families_type_shows() {
+        let chosen = |h: &crate::scenario::Harness| {
+            let Kind::Part(k) = &h.app.dialog.as_ref().unwrap().kind else { panic!("not Insert Part") };
+            commands(&h.app, k, &[]).unwrap()[0].1.clone()
+        };
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.start("parts.insert");
+        h.frames(3);
+        assert!(h.widget_near("Metric", "Unit system").is_some());
+        assert_eq!(chosen(&h)["family"], "socket_head_cap_screw");
+        h.step(&json!({"click":{"handle":"dialog:Unit system"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Unit system:Inch"}})).unwrap();
+        h.frames(2);
+        assert_eq!((chosen(&h)["family"].as_str(), chosen(&h)["size"].as_str()), (Some("hex_cap_screw_inch"), Some("1/4-20 UNC")));
+        // Type now lists the inch families and no metric one.
+        h.step(&json!({"click":{"handle":"dialog:Type"}})).unwrap();
+        assert!(crate::scenario::handle_at("dialog:Type:Plain washer, USS (wide) (ANSI B18.22.1 Type A)").is_some());
+        assert!(crate::scenario::handle_at("dialog:Type:Hex nut (ISO 4032)").is_none());
+        h.step(&json!({"click":{"handle":"dialog:Type:Hex nut (inch) (ASME B18.2.2)"}})).unwrap();
+        h.frames(2);
+        assert_eq!(chosen(&h)["family"], "hex_nut_inch");
+        // Back to metric: the first metric family again.
+        h.step(&json!({"click":{"handle":"dialog:Unit system"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Unit system:Metric"}})).unwrap();
+        h.frames(2);
+        assert_eq!(chosen(&h)["family"], "socket_head_cap_screw");
+    }
+
     /// Every dimension the library gives for a size is labelled in words, in each family.
     #[test]
     fn every_library_dimension_has_a_label_in_words() {
+        crate::i18n::install();
         let mut s = solidcraft_engine::Session::default();
         let l = families(&s.execute("parts.library", &json!({})).unwrap());
         assert!(l.len() >= 7, "{}", l.len());
         for f in &l {
             for (size, row) in &f.sizes {
                 for key in row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| !matches!(k.as_str(), "size" | "default_length")) {
-                    let label = dimension_label(key).map(crate::i18n::tr);
+                    let label = dimension_label(key).map(solidcraft_ui_text::tr);
                     assert!(
                         label.is_some_and(|l| l.starts_with(char::is_uppercase) && !l.contains('_') && !l.starts_with("parts.")),
                         "{} {size}: {key} is labelled {label:?}",

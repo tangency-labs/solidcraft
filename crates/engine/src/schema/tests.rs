@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use super::check::schema_keys;
 use super::features::{BoxParams, ExtrudeParams};
+use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use super::*;
 use crate::Session;
 
@@ -366,8 +367,11 @@ fn issues_are_read_from_the_commands_own_contract() {
     let issues = super::issues("solid.box", &json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"}));
     assert_eq!(messages(&issues), ["unknown key `operaton`; did you mean `operation`?"]);
     assert_eq!(issues, box_contract().check(&json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"})));
-    // No contract, or no such command: nothing to say.
-    assert!(super::issues("solid.fillet", &json!({"nonsense": 1})).is_empty());
+    // No contract, or no such command: nothing to say. The first command without a contract
+    // stands for them all, so converting a command doesn't break this.
+    if let Some(c) = crate::cmd::command_specs().into_iter().find(|c| c.contract.is_none()) {
+        assert!(super::issues(c.id, &json!({"nonsense": 1})).is_empty(), "{}", c.id);
+    }
     assert!(super::issues("no.such", &json!({"nonsense": 1})).is_empty());
 }
 
@@ -479,6 +483,11 @@ pub(super) fn conforms(root: &Value, node: &Value, v: &Value) -> bool {
     {
         return false;
     }
+    if let Some(branches) = node.get("allOf").and_then(Value::as_array)
+        && !branches.iter().all(|b| conforms(root, b, v))
+    {
+        return false;
+    }
     if node.get("not").is_some_and(|n| conforms(root, n, v)) {
         return false;
     }
@@ -500,8 +509,15 @@ pub(super) fn conforms(root: &Value, node: &Value, v: &Value) -> bool {
     if !typed {
         return false;
     }
+    // `prefixItems` checks the leading elements; `items` then covers the rest.
+    let prefix = node.get("prefixItems").and_then(Value::as_array);
+    if let (Some(prefix), Some(a)) = (prefix, v.as_array())
+        && !prefix.iter().zip(a).all(|(p, x)| conforms(root, p, x))
+    {
+        return false;
+    }
     if let (Some(items), Some(a)) = (node.get("items"), v.as_array())
-        && !a.iter().all(|x| conforms(root, items, x))
+        && !a.iter().skip(prefix.map_or(0, Vec::len)).all(|x| conforms(root, items, x))
     {
         return false;
     }
@@ -774,7 +790,7 @@ fn face_and_edge_refs_match_the_pick_readers() {
     assert!(parse::<EdgeRef>(json!({"body": "A", "index": 1.0})).is_none());
     assert_eq!(edge_schema["anyOf"][2]["properties"]["index"]["type"], "integer");
     assert_eq!(parse::<EdgeRef>(json!({"body": "A", "index": 4})), Some(EdgeRef::Index { body: "A".into(), index: 4 }));
-    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcraft_geom::Vec3::new(1.0, 2.0, 3.0))));
+    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcore_record::Vec3::new(1.0, 2.0, 3.0))));
 }
 
 /// The pick lists take 1 to 1000 picks, as `face_points` and `edge_points` do, and so do their
@@ -907,7 +923,8 @@ fn shared_types_keep_the_handlers_messages() {
     for (id, p, probe) in [
         ("solid.shell", json!({"thickness": 1, "faces": 5}), json!({"faces": 5})),
         ("solid.shell", json!({"thickness": 1, "faces": null}), json!({"faces": null})),
-        ("solid.shell", json!({"thickness": 1, "faces": []}), json!({"faces": []})),
+        // `solid.shell` takes no faces (a closed hollow body); the draft refuses them.
+        ("solid.draft", json!({"angle": 1, "faces": []}), json!({"faces": []})),
         ("solid.shell", json!({"thickness": 1, "faces": [true]}), json!({"faces": [true]})),
         ("solid.shell", json!({"thickness": 1, "faces": [""]}), json!({"faces": [""]})),
         ("solid.fillet", json!({"radius": 1, "edges": {}}), json!({"edges": {}})),
@@ -992,8 +1009,10 @@ fn references_match_the_reference_reader() {
         (json!({"plane": 2.5, "axis": "X"}), false),
         (json!({"point": [1, 2, 3], "plane": 2.5}), true),
         (json!({"axis": "X"}), true),
+        (json!({"axis": "o:2/3/origin/X"}), true),
         (json!({"axis": 1, "construct_point": "P"}), true),
         (json!({"construct_point": "P"}), true),
+        (json!({"construct_point": "o:2/3/origin/O"}), true),
         (json!({"construct_point": 1}), false),
         (json!("Shelf"), true),
         (json!(""), true),
@@ -1120,6 +1139,87 @@ fn axis_lines_match_the_axis_reader() {
     }
 }
 
+/// A revolve's `axis` is accepted as `features::axis_param` reads it before it looks anything up,
+/// and its schema says the same, apart from what a schema can't say (below).
+#[test]
+fn revolve_axes_match_the_axis_reader() {
+    let schema = input_schema_for::<RevolveAxis>();
+    let schema = schema.as_value();
+    for (v, accepted) in [
+        (json!("y"), true),
+        (json!("Z"), true),
+        (json!("z"), true),
+        (json!("l1"), true),
+        (json!("Spindle"), true),
+        (json!(""), true),
+        (json!({"dir": [0, 0, 1]}), true),
+        (json!({"dir": [0, 0, 0]}), true),
+        (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
+        (json!({"origin": ["1 mm", 0, {"x": 1}], "dir": [0, 0, 1]}), false),
+        (json!({"origin": ["1 mm", "w / 2", 0], "dir": [0, 0, 1]}), true),
+        (json!({"origin": {"x": 1, "y": 2, "z": "3 mm"}, "dir": [0, 0, 1]}), true),
+        (json!({"origin": "o", "dir": [0, 0, 1]}), false),
+        (json!({"origin": null, "dir": [0, 0, 1]}), false),
+        (json!({"origin": [1, 2], "dir": [0, 0, 1]}), false),
+        (json!({"origin": [0, 0, 0]}), false),
+        (json!({"dir": [0, 1]}), false),
+        (json!({"dir": "y"}), false),
+        (json!({"dir": [0, 0, 1], "type": "sketch_line", "extra": 1}), true),
+        // A line of another sketch, named by its owner (#6548), also as saved with its type.
+        (json!({"sketch": 12, "curve": "l1"}), true),
+        (json!({"sketch": "Axis", "curve": "l1"}), true),
+        (json!({"curve": "l1"}), true),
+        (json!({"type": "sketch_line", "sketch": 12, "curve": "l1"}), true),
+        (json!({"sketch": 12}), false),
+        (json!({"sketch": 12, "curve": 5}), false),
+        (json!({"type": "world", "axis": "X"}), true),
+        (json!({"type": "world", "axis": "X", "origin": 5, "dir": "q"}), true),
+        (json!({"type": "world", "axis": "x"}), false),
+        (json!({"type": "world", "axis": 5}), false),
+        (json!({"type": "world"}), false),
+        (json!({"type": "world", "dir": [0, 0, 1]}), false),
+        (json!({"edge": [1, 2, 3]}), true),
+        (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),
+        (json!({"face": "x", "dir": [0, 0, 1]}), false),
+        (json!({"type": "face", "at": [1, 2, 3]}), true),
+        (json!({"type": "vertex", "at": [1, 2, 3]}), false),
+        (json!({"face": "x", "vertex": [1, 2, 3]}), false),
+        (json!({}), false),
+        (json!(5), false),
+        (json!(true), false),
+        (json!(null), false),
+        (json!([0, 0, 1]), false),
+    ] {
+        assert_eq!(parse::<RevolveAxis>(v.clone()).is_some(), accepted, "{v}");
+        assert_eq!(conforms(schema, schema, &v), accepted, "schema {v}");
+    }
+    // Where the schema can't follow the reader: a saved edge is read whole by serde.
+    let v = json!({"type": "edge", "at": "x"});
+    assert!(parse::<RevolveAxis>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
+}
+
+/// Revolve's `direction` and `convention` take what the handler reads, and its `to` is a point.
+#[test]
+fn revolve_keywords_match_the_handler() {
+    for (v, accepted) in
+        [(json!("symmetric"), true), (json!("SYMMETRIC"), true), (json!(" symmetric"), false), (json!("negative"), false), (json!(true), false)]
+    {
+        assert_eq!(parse::<RevolveDirection>(v.clone()).is_some(), accepted, "{v}");
+        let schema = input_schema_for::<RevolveDirection>();
+        assert_eq!(conforms(schema.as_value(), schema.as_value(), &v), accepted && v == json!("symmetric"), "schema {v}");
+    }
+    for (v, accepted) in [
+        (json!("sketch_normal"), true),
+        (json!("legacy_axis_start"), true),
+        (json!("Sketch_Normal"), false),
+        (json!("legacy_per_side"), false),
+        (json!(null), false),
+    ] {
+        assert_eq!(parse::<RevolveConventionParam>(v.clone()).is_some(), accepted, "{v}");
+    }
+    assert!(parse::<RevolveToPoint>(json!([1, 2, 3])).is_some() && parse::<RevolveToPoint>(json!([1, 2])).is_none());
+}
+
 /// A construction plane's name is refused when `features::check_plane_name` refuses it. (The
 /// schema can't say which names: see `PlaneName`.)
 #[test]
@@ -1129,4 +1229,39 @@ fn plane_names_match_check_plane_name() {
         assert_eq!(parse::<PlaneName>(json!(name)).is_none(), refused.is_some(), "{name:?}");
     }
     assert!(parse::<PlaneName>(json!(5)).is_none());
+}
+
+#[test]
+fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
+    use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
+    use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch"]);
+    assert_keys(input_schema_for::<ExitParams>(), &["restore_marker"]);
+    let mut s = crate::Session::default();
+    let run = |s: &mut crate::Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    s.param_check = ParamCheck::Strict;
+    let before = s.doc.to_json();
+    for marker in [json!(-1), json!(3), json!(1.5), json!(true), json!([])] {
+        assert!(s.execute("sketch.edit", &json!({"sketch": id, "restore_marker": marker})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.active_sketch, None);
+    }
+    for exit in ["sketch.finish", "sketch.cancel"] {
+        let r = run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+        let schema = output_schema_for::<EditResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        for params in [json!({"restore_marker": "yes"}), json!({"unknown": true})] {
+            assert!(s.execute(exit, &params).is_err());
+            assert_eq!(s.active_sketch, Some(id));
+            assert_eq!(s.doc.marker, Some(1));
+        }
+        let r = run(&mut s, exit, json!({}));
+        let schema = if exit == "sketch.finish" { output_schema_for::<FinishResult>() } else { output_schema_for::<CancelResult>() };
+        assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        assert_eq!(s.doc.to_json(), before);
+    }
 }

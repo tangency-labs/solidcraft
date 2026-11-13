@@ -304,6 +304,28 @@ pub fn value_in_unit(v: Value, unit: &str) -> f64 {
     }
 }
 
+/// The number a reply reports for a value: millimetres for a length, degrees for an angle,
+/// as-is for a unit-less or compound value. One meaning of `value` in every reply (#10747).
+pub fn reported_value(v: Value) -> f64 {
+    match v.kind() {
+        Some(Kind::Angle) => v.v.to_degrees(),
+        _ => v.v,
+    }
+}
+
+/// The number a person would read for `v`: the shortest decimal that reads back after
+/// rounding off the last few bits (12 significant digits), so `30 deg` stored as
+/// 29.999999999999996 reports 30 and `0.1 + 0.2` reports 0.3. Only what is *reported*
+/// is rounded; stored values and evaluation keep full precision (#10747).
+pub fn round_reported(v: f64) -> f64 {
+    if !v.is_finite() {
+        return v;
+    }
+    // `:.11e` keeps 12 significant digits; parsing back gives the f64 nearest that decimal,
+    // which serializes as the shortest form that reads back to it.
+    format!("{v:.11e}").parse().unwrap_or(v)
+}
+
 fn unit(name: &str) -> Option<Value> {
     UNITS.iter().find(|(n, _, _)| *n == name).map(|(_, k, s)| match k {
         Kind::Angle => Value::angle(*s),
@@ -609,11 +631,12 @@ pub fn is_literal(s: &str) -> bool {
     }
 }
 
-/// Is the expression a bare number without a unit, like `20` or `-1.5`? A leading `=` only marks
+/// Is the expression a bare number without a unit, like `20`, `-1.5` or `2,5`? A leading `=` only marks
 /// a formula (#4681), so `=20` is the same bare number.
 pub fn is_bare_number(s: &str) -> bool {
-    let number = s.trim().strip_prefix('=').unwrap_or(s);
-    is_literal(s) && number.trim().trim_start_matches(['-', '+']).trim().parse::<f64>().is_ok()
+    // One number token, as the lexer reads it, so a decimal comma (`2,5`) and a mixed number
+    // (`2 1/8`) count like `2.5` and `2.125`.
+    is_literal(s) && lex(s).is_ok_and(|toks| matches!(toks.as_slice(), [Tok::Num(_)] | [Tok::Op('-' | '+'), Tok::Num(_)]))
 }
 
 /// Is `s` shaped like a parameter name: a letter or `_`, then letters, digits and `_`? The shape
@@ -950,12 +973,22 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             let a = one()?;
             unit_fn(a.v.abs(), a)
         }
-        "sign" => Value::num(one()?.v.signum()),
+        "sign" => {
+            let x = one()?.v;
+            // `f64::signum` gives 1 for +0 and -1 for -0; the sign of zero is 0.
+            Value::num(if x == 0.0 { 0.0 } else { x.signum() })
+        }
         "floor" | "ceil" | "round" | "trunc" => {
             let a = one()?;
             // Round in the value's own default unit (round(2.4 in) = 2 in for an inch parameter).
             let scale = scale_bare(Value::num(1.0), a.len, a.ang, d);
             let x = if scale != 0.0 { a.v / scale } else { a.v };
+            // Unit conversions leave a rounding error of an ulp or two (`3 in / 1 in` is
+            // 2.9999999999999996): a value that close to a whole number is that number, so `floor`
+            // does not drop to 2. The tolerance is relative to the whole number, so a tiny value
+            // never snaps to 0, and it stays under 1/8 so no real fraction is absorbed.
+            let nearest = x.round();
+            let x = if (x - nearest).abs() <= (4.0 * f64::EPSILON * nearest.abs()).min(0.125) { nearest } else { x };
             let r = match f {
                 "floor" => x.floor(),
                 "ceil" => x.ceil(),
@@ -1408,6 +1441,53 @@ mod tests {
         }
     }
 
+    /// `sign(0)` is 0, not 1 (Rust's `signum` takes the sign bit, so it calls zero positive).
+    #[test]
+    fn sign_of_zero_is_zero() {
+        for (e, want) in
+            [("sign(0)", 0.0), ("sign(-0)", 0.0), ("sign(0 mm)", 0.0), ("sign(5)", 1.0), ("sign(-2 mm)", -1.0), ("sign(width - 40)", 0.0)]
+        {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
+        }
+    }
+
+    /// `floor`, `ceil`, `trunc` and `round` work on the number a person typed, not on float noise:
+    /// `3 in / 1 in` is 2.9999999999999996 in floats, and `floor` of it must still be 3.
+    #[test]
+    fn rounding_functions_ignore_float_noise() {
+        for (e, want) in [("floor(3 in / 1 in)", 3.0), ("ceil(3 in / 1 in)", 3.0), ("trunc(3 in / 1 in)", 3.0), ("floor(-3 in / 1 in)", -3.0)] {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
+        }
+        let d = Defaults { len: 25.4, ang: std::f64::consts::PI / 180.0 };
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        for e in ["floor(3 in)", "ceil(3 in)", "trunc(3 in)", "round(3 in)"] {
+            let got = eval_with_defaults(e, &look, d).unwrap().to_kind_in(Kind::Length, d).unwrap();
+            assert!((got - 76.2).abs() < 1e-9, "{e} gave {got}");
+        }
+        let got = eval_with_defaults("floor(30 deg)", &look, Defaults::default()).unwrap().to_kind(Kind::Angle).unwrap();
+        assert!((got - 30f64.to_radians()).abs() < 1e-9, "floor(30 deg) gave {got}");
+        // A real fraction still rounds the way its name says, however small, and large values keep working.
+        for (e, want) in [
+            ("floor(2.9999)", 2.0),
+            ("ceil(3.0001)", 4.0),
+            ("floor(100.99999995)", 100.0),
+            ("ceil(100.00000005)", 101.0),
+            ("floor(1000000000.7)", 1_000_000_000.0),
+            ("ceil(1000000000.7)", 1_000_000_001.0),
+            ("trunc(1000000000.7)", 1_000_000_000.0),
+            ("round(1000000000.7)", 1_000_000_001.0),
+            ("ceil(1e-16)", 1.0),
+            ("floor(-1e-16)", -1.0),
+            ("trunc(1e-16)", 0.0),
+            ("trunc(-1e-16)", 0.0),
+            ("round(1e-16)", 0.0),
+            ("round(-1e-16)", 0.0),
+            ("floor(1000000000000000.5)", 1_000_000_000_000_000.0),
+        ] {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
+        }
+    }
+
     /// A count from a length (`(L - 20) / 210`, the 210 read as unit-less) names the fix (#5901).
     #[test]
     fn a_length_where_a_count_is_expected_says_to_divide_by_a_length() {
@@ -1636,5 +1716,37 @@ mod tests {
         }
         defs[2].expr = "bad +".into();
         assert!(eval_params(&defs, 1.0).1.contains_key("c"));
+    }
+
+    /// #10747: reported numbers are the shortest decimals that read back after rounding off
+    /// the last few bits (12 significant digits); stored values keep full precision.
+    #[test]
+    fn round_reported_reads_as_a_person_would() {
+        for (noisy, read) in [
+            (30f64.to_radians().to_degrees(), 30.0),
+            (0.1 + 0.2, 0.3),
+            (3.0 * 25.4, 76.2),
+            (1.2 * 25.4, 30.48),
+            (29.999999999999996, 30.0),
+            (0.30000000000000004, 0.3),
+            (-0.1 - 0.2, -0.3),
+        ] {
+            assert_eq!(round_reported(noisy), read, "{noisy}");
+        }
+        // A number with real digits of its own keeps them up to 12 significant digits.
+        assert_eq!(round_reported(1.234567890123), 1.23456789012);
+        assert_eq!(round_reported(1.0000000000001), 1.0);
+        // Zero and non-finite values pass through.
+        assert_eq!(round_reported(0.0), 0.0);
+        assert!(round_reported(f64::INFINITY).is_infinite());
+        assert!(round_reported(f64::NAN).is_nan());
+    }
+
+    /// #10747: `value` means millimetres and degrees in every reply.
+    #[test]
+    fn reported_value_is_mm_and_degrees() {
+        assert_eq!(reported_value(Value::length(50.8)), 50.8);
+        assert_eq!(round_reported(reported_value(Value::angle(30f64.to_radians()))), 30.0);
+        assert_eq!(reported_value(Value::num(4.0)), 4.0);
     }
 }

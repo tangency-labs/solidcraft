@@ -27,7 +27,7 @@ fn dense_error(s: &Seg2, plane: &Plane, v: &PixelCurveView, path: &SampledPath) 
 
 #[test]
 fn exact_arcs_ellipses_rational_and_looping_control_hulls_bound_pixels() {
-    let mut degree7 = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+    let mut degree7 = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
     for (i, p) in degree7.iter_mut().enumerate() {
         *p = Vec2::new(i as f64 / 4.0 - 0.875, if i % 2 == 0 { -0.8 } else { 0.8 });
     }
@@ -139,7 +139,7 @@ fn reference_controls(segment: &Seg2, plane: &Plane) -> Option<(Vec<Vec<H>>, H)>
         Seg2::Line { a, b } => vec![vec![h(a, 1.0), h(b, 1.0)]],
         Seg2::Cubic { p0, p1, p2, p3 } => vec![vec![h(p0, 1.0), h(p1, 1.0), h(p2, 1.0), h(p3, 1.0)]],
         Seg2::Conic { a, apex, b, w } if w > 0.0 => vec![vec![h(a, 1.0), h(apex, w), h(b, 1.0)]],
-        Seg2::Bezier { n, p } if (1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) => {
+        Seg2::Bezier { n, p } if (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(&n) => {
             vec![p[..=n as usize].iter().map(|p| h(*p, 1.0)).collect()]
         }
         Seg2::Arc { center, radius, start, sweep }
@@ -323,7 +323,7 @@ fn same_path(a: &SampledPath, b: &SampledPath) -> bool {
 /// unclipped, with ample and with nearly spent budgets.
 #[test]
 fn samples_the_same_points_bit_for_bit_as_the_reference() {
-    let mut degree9 = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+    let mut degree9 = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
     for (i, p) in degree9.iter_mut().enumerate().take(10) {
         let t = i as f64 / 9.0;
         *p = Vec2::new(t * 2.0 - 1.0, ((i % 3) as f64 - 1.0) * 0.8);
@@ -423,4 +423,266 @@ fn sampler_cost_against_the_reference() {
         new.sort_by(f64::total_cmp);
         println!("SAMPLER clip={clip} reference_ms={:.3} new_ms={:.3} ratio={:.3}", old[4], new[4], new[4] / old[4]);
     }
+}
+
+// Silhouette extraction is another display-only approximation, tested here with
+// the other tessellated display paths rather than in a per-regression test file.
+fn silhouette_cylinder(split_vertices: bool) -> solidcraft_geom::Mesh {
+    let mut mesh = solidcraft_geom::Mesh::default();
+    const SLICES: usize = 32;
+    for i in 0..SLICES {
+        let angle = std::f64::consts::TAU * i as f64 / SLICES as f64;
+        mesh.positions.extend([Vec3::new(angle.cos(), angle.sin(), -2.0), Vec3::new(angle.cos(), angle.sin(), 2.0)]);
+    }
+    for i in 0..SLICES {
+        let a = (i * 2) as u32;
+        let b = ((i + 1) % SLICES * 2) as u32;
+        mesh.triangles.extend([[a, b, b + 1], [a, b + 1, a + 1]]);
+    }
+    if split_vertices {
+        let original = mesh.positions;
+        mesh.positions = Vec::new();
+        for triangle in &mut mesh.triangles {
+            for index in triangle {
+                let mut point = original[*index as usize];
+                // Normal splits can also differ in the sign of a zero component.
+                if point.y == 0.0 && mesh.positions.len().is_multiple_of(2) {
+                    point.y = -0.0;
+                }
+                *index = mesh.positions.len() as u32;
+                mesh.positions.push(point);
+            }
+        }
+    }
+    mesh
+}
+
+fn prepare_silhouettes(mesh: &solidcraft_geom::Mesh, max_edges: usize) -> crate::PreparedSilhouettes {
+    let mut builder = crate::SilhouetteBuilder::new(max_edges);
+    let mut zero = 0;
+    assert!(!builder.advance(mesh, &mut zero));
+    // Each call is allowed just one triangle or adjacency entry. Completion
+    // must therefore require multiple calls even for this small cylinder.
+    let mut calls = 0;
+    loop {
+        calls += 1;
+        assert!(calls <= mesh.triangles.len() * 4 + 2);
+        let mut work = 1;
+        if builder.advance(mesh, &mut work) {
+            break;
+        }
+        assert_eq!(work, 0);
+    }
+    assert!(calls > mesh.triangles.len());
+    builder.finish().unwrap()
+}
+
+#[test]
+fn mesh_silhouettes_show_two_straight_cylinder_sides_and_follow_the_camera() {
+    use crate::SilhouetteView::{Orthographic, Perspective};
+    for split_vertices in [false, true] {
+        let mesh = silhouette_cylinder(split_vertices);
+        let prepared = prepare_silhouettes(&mesh, 1000);
+        assert!(!prepared.budget_limited());
+        // One candidate per vertical facet join; no quad diagonals or open rims.
+        assert_eq!(prepared.candidates().len(), 32);
+        let segments = |view| prepared.candidates().iter().filter_map(|edge| edge.segment(view)).collect::<Vec<_>>();
+        for toward_eye in [Vec3::X, Vec3::Y] {
+            let outline = segments(Orthographic { toward_eye });
+            assert_eq!(outline.len(), 2);
+            for [a, b] in &outline {
+                assert!((a.z - b.z).abs() > 3.99);
+                assert!((a.x - b.x).abs() < 1e-12 && (a.y - b.y).abs() < 1e-12);
+                assert!(a.dot(toward_eye).abs() < 1e-12);
+                assert!((a.x.hypot(a.y) - 1.0).abs() < 1e-12);
+            }
+            assert!(outline[0][0].dot(outline[1][0]) < 4.0);
+        }
+        assert!(segments(Orthographic { toward_eye: Vec3::Z }).is_empty());
+        let perspective = segments(Perspective { eye: Vec3::new(3.0, 0.0, 0.0) });
+        assert_eq!(perspective.len(), 2);
+        // A finite eye moves the tangencies toward the eye; a constant view
+        // direction would leave them at x=0 and fail this assertion.
+        assert!(perspective.iter().all(|[a, b]| a.x > 0.1 && b.x > 0.1));
+        assert!(perspective[0][0].y * perspective[1][0].y < 0.0);
+        assert!(segments(Perspective { eye: Vec3::new(f64::NAN, 0.0, 0.0) }).is_empty());
+        assert!(segments(Orthographic { toward_eye: Vec3::ZERO }).is_empty());
+    }
+}
+
+#[test]
+fn mesh_silhouettes_ignore_invalid_planar_and_nonmanifold_edges_under_a_budget() {
+    use solidcraft_geom::Mesh;
+    let planar = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::X + Vec3::Y, Vec3::Y, Vec3::new(f64::NAN, 0.0, 0.0)],
+        triangles: vec![[0, 1, 2], [0, 2, 3], [0, 0, 1], [0, 1, 4], [0, 1, u32::MAX]],
+        ..Mesh::default()
+    };
+    let prepared = prepare_silhouettes(&planar, 100);
+    assert!(prepared.candidates().is_empty());
+    let nonmanifold = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::Z, Vec3::X, Vec3::Y, -Vec3::X],
+        triangles: vec![[0, 1, 2], [1, 0, 3], [0, 1, 4]],
+        ..Mesh::default()
+    };
+    // Only the first edge fits. Its third incident triangle arrives after the
+    // allocation cap is reached, and must still invalidate its silhouette.
+    let prepared = prepare_silhouettes(&nonmanifold, 1);
+    assert!(prepared.budget_limited());
+    assert!(prepared.candidates().is_empty());
+    let cylinder = silhouette_cylinder(false);
+    let prepared = prepare_silhouettes(&cylinder, 0);
+    assert!(prepared.budget_limited());
+    assert!(prepared.candidates().is_empty());
+}
+
+fn silhouette_cone() -> solidcraft_geom::Mesh {
+    let mut mesh = solidcraft_geom::Mesh { positions: vec![Vec3::Z, -Vec3::Z], ..Default::default() };
+    const SLICES: u32 = 32;
+    for i in 0..SLICES {
+        let angle = std::f64::consts::TAU * f64::from(i) / f64::from(SLICES);
+        mesh.positions.push(Vec3::new(angle.cos(), angle.sin(), -1.0));
+        let a = i + 2;
+        let b = (i + 1) % SLICES + 2;
+        mesh.triangles.extend([[0, a, b], [1, b, a]]);
+    }
+    mesh
+}
+
+fn silhouette_sphere() -> solidcraft_geom::Mesh {
+    // The two poles each have one exact vertex; no near-zero-radius rings or
+    // coincident pole triangles are needed to close this sphere.
+    let mut mesh = solidcraft_geom::Mesh { positions: vec![Vec3::Z, -Vec3::Z], ..Default::default() };
+    const LATITUDES: u32 = 12;
+    const LONGITUDES: u32 = 24;
+    let index = |latitude: u32, longitude: u32| 2 + (latitude - 1) * LONGITUDES + longitude % LONGITUDES;
+    for latitude in 1..LATITUDES {
+        let theta = std::f64::consts::PI * f64::from(latitude) / f64::from(LATITUDES);
+        for longitude in 0..LONGITUDES {
+            let phi = std::f64::consts::TAU * f64::from(longitude) / f64::from(LONGITUDES);
+            mesh.positions.push(Vec3::new(theta.sin() * phi.cos(), theta.sin() * phi.sin(), theta.cos()));
+            if latitude + 1 < LATITUDES {
+                let [a, b, c, d] =
+                    [index(latitude, longitude), index(latitude, longitude + 1), index(latitude + 1, longitude + 1), index(latitude + 1, longitude)];
+                mesh.triangles.extend([[a, d, c], [a, c, b]]);
+            }
+        }
+    }
+    for longitude in 0..LONGITUDES {
+        mesh.triangles
+            .extend([[0, index(1, longitude), index(1, longitude + 1)], [1, index(LATITUDES - 1, longitude + 1), index(LATITUDES - 1, longitude)]]);
+    }
+    mesh
+}
+
+fn silhouette_torus() -> solidcraft_geom::Mesh {
+    let mut mesh = solidcraft_geom::Mesh::default();
+    const MAJOR: u32 = 32;
+    const MINOR: u32 = 16;
+    let index = |u: u32, v: u32| (u % MAJOR) * MINOR + v % MINOR;
+    for u in 0..MAJOR {
+        let theta = std::f64::consts::TAU * f64::from(u) / f64::from(MAJOR);
+        for v in 0..MINOR {
+            let phi = std::f64::consts::TAU * f64::from(v) / f64::from(MINOR);
+            let radius = 3.0 + phi.cos();
+            mesh.positions.push(Vec3::new(radius * theta.cos(), radius * theta.sin(), phi.sin()));
+            let [a, b, c, d] = [index(u, v), index(u + 1, v), index(u + 1, v + 1), index(u, v + 1)];
+            mesh.triangles.extend([[a, b, c], [a, c, d]]);
+        }
+    }
+    mesh
+}
+
+fn silhouette_loop_count(segments: &[[Vec3; 2]]) -> usize {
+    use std::collections::{BTreeMap, BTreeSet};
+    let key = |p: Vec3| [p.x, p.y, p.z].map(|x| if x == 0.0 { 0 } else { x.to_bits() });
+    let mut neighbors = BTreeMap::<_, Vec<_>>::new();
+    for [a, b] in segments {
+        assert!([a.x, a.y, a.z, b.x, b.y, b.z].iter().all(|v| v.is_finite()));
+        assert!(a.dist(*b) > 0.0);
+        let (a, b) = (key(*a), key(*b));
+        neighbors.entry(a).or_default().push(b);
+        neighbors.entry(b).or_default().push(a);
+    }
+    assert!(!neighbors.is_empty());
+    assert!(neighbors.values().all(|adjacent| adjacent.len() == 2), "every outline vertex must have two incident segments");
+    let mut visited = BTreeSet::new();
+    let mut loops = 0;
+    for start in neighbors.keys() {
+        if visited.contains(start) {
+            continue;
+        }
+        loops += 1;
+        let mut pending = vec![*start];
+        while let Some(point) = pending.pop() {
+            if visited.insert(point) {
+                pending.extend(neighbors[&point].iter().copied());
+            }
+        }
+    }
+    loops
+}
+
+#[test]
+fn mesh_silhouettes_close_cone_sphere_and_torus_outlines_in_both_projections() {
+    use crate::SilhouetteView::{Orthographic, Perspective};
+    for (name, mesh, loops) in [("cone", silhouette_cone(), 1), ("sphere", silhouette_sphere(), 1), ("torus", silhouette_torus(), 2)] {
+        let prepared = prepare_silhouettes(&mesh, 10_000);
+        assert!(!prepared.budget_limited());
+        let segments = |view| prepared.candidates().iter().filter_map(|edge| edge.segment(view)).collect::<Vec<_>>();
+        let top = segments(Orthographic { toward_eye: Vec3::Z });
+        assert_eq!(silhouette_loop_count(&top), loops, "{name} from above");
+        let slanted = segments(Orthographic { toward_eye: Vec3::new(0.7, 0.2, 1.0) });
+        assert_eq!(silhouette_loop_count(&slanted), loops, "{name} at an angle");
+        assert_ne!(top, slanted, "{name} outlines must follow the camera");
+        let perspective = segments(Perspective { eye: Vec3::new(7.0, 2.0, 10.0) });
+        assert_eq!(silhouette_loop_count(&perspective), loops, "{name} in perspective");
+    }
+}
+
+#[test]
+fn mesh_silhouettes_connect_sphere_poles_and_skip_degenerate_pole_triangles() {
+    let mut sphere = silhouette_sphere();
+    let prepare = |mesh: &solidcraft_geom::Mesh| {
+        prepare_silhouettes(mesh, 10_000)
+            .candidates()
+            .iter()
+            .filter_map(|edge| edge.segment(crate::SilhouetteView::Orthographic { toward_eye: Vec3::X }))
+            .collect::<Vec<_>>()
+    };
+    let outline = prepare(&sphere);
+    assert_eq!(silhouette_loop_count(&outline), 1);
+    for pole in [Vec3::Z, -Vec3::Z] {
+        assert!(outline.iter().flatten().any(|point| *point == pole));
+    }
+    let duplicate = sphere.positions.len() as u32;
+    sphere.positions.push(Vec3::Z);
+    sphere.triangles.extend([[0, duplicate, 2], [1, 1, 3], [0, 0, 0]]);
+    assert_eq!(prepare(&sphere), outline);
+}
+
+#[test]
+fn mesh_silhouette_cancellation_releases_adjacency_within_the_shared_work_budget() {
+    let cylinder = silhouette_cylinder(false);
+    let mut builder = crate::SilhouetteBuilder::new(1000);
+    // The first two triangles form a quad: five distinct adjacency entries.
+    assert!(!builder.advance(&cylinder, &mut 2));
+    let mut zero = 0;
+    assert!(!builder.discard(&mut zero));
+    for _ in 0..2 {
+        let mut work = 2;
+        assert!(!builder.discard(&mut work));
+        assert_eq!(work, 0);
+    }
+    let mut work = 2;
+    assert!(builder.discard(&mut work));
+    assert_eq!(work, 1, "only the last retained edge needs releasing");
+    assert!(builder.advance(&cylinder, &mut work));
+    assert_eq!(work, 1, "a canceled builder must not resume triangle traversal");
+    assert!(builder.finish().is_none(), "cancellation cannot publish partial silhouettes");
+
+    let mut prepared = crate::SilhouetteBuilder::new(1000);
+    assert!(prepared.advance(&cylinder, &mut 1000));
+    assert!(prepared.discard(&mut zero), "completed adjacency needs no more traversal to cancel");
+    assert!(prepared.finish().is_none());
 }

@@ -5,7 +5,7 @@
 //! still share its end points.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use crate::model::{CurveKind, Result, Sketch, SketchError};
 
@@ -98,7 +98,7 @@ impl Sketch {
     /// `equation` kept beside it. Returns the curve's index.
     pub fn add_equation_curve(&mut self, at: &[Vec2], closed: bool, mut equation: EquationCurve) -> Result<usize> {
         let pts = self.equation_points(at, closed, None)?;
-        let curve = self.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: closed }, None)?;
+        let curve = self.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: closed, nurbs: None, handles: Vec::new() }, None)?;
         equation.curve = self.curves.get(curve).map(|c| c.id.clone()).ok_or_else(|| SketchError::Invalid("the new curve is missing".into()))?;
         self.equations.push(equation);
         Ok(curve)
@@ -119,7 +119,7 @@ impl Sketch {
         let pts = self.equation_points(at, closed, Some((first, keep_end)))?;
         let unused: Vec<usize> = old.iter().copied().filter(|p| !pts.contains(p)).collect();
         if let Some(c) = self.curves.get_mut(curve) {
-            c.kind = CurveKind::Spline { pts, control: false, degree: 3, periodic: closed };
+            c.kind = CurveKind::Spline { pts, control: false, degree: 3, periodic: closed, nurbs: None, handles: Vec::new() };
         }
         // The old points no other curve uses (the in-between points, and an end a closed curve
         // no longer has) go, with the constraints on them.
@@ -142,7 +142,7 @@ impl Sketch {
         if at.len() < wanted || at.len() > crate::curves::MAX_SPLINE_POINTS {
             return Err(SketchError::Invalid(format!("an equation curve needs {wanted} to {} points", crate::curves::MAX_SPLINE_POINTS)));
         }
-        if self.points.len().saturating_add(at.len()) > crate::model::MAX_POINTS {
+        if self.points.len().saturating_add(at.len()) > crate::limits::max_points() {
             return Err(SketchError::TooLarge);
         }
         let place = |sk: &mut Sketch, existing: Option<usize>, p: Vec2| -> Result<usize> {

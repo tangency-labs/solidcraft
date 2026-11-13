@@ -1,0 +1,17 @@
+[package]
+name = "solidcraft-control-egui"
+description = "The window's own control requests any egui app answers alike: ui.screenshot and ui.resize"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-control = { workspace = true }
+serde_json = { workspace = true }
+# The window's own requests (`ui.screenshot`, `ui.resize`) go through egui.
+egui = { workspace = true }
+# Screenshots are saved in the format their path names.
+image = { workspace = true }

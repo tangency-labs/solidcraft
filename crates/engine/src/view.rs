@@ -2,17 +2,23 @@
 //! grid and the origin. Used by the headless snapshot renderer; the GPU viewport draws the same
 //! content.
 
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
-use solidcraft_geom::{Aabb3, Plane, Vec3};
-use solidcraft_render::{AnalysisColors, Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
-use solidcraft_sketch::Sketch;
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_color::AnalysisColors;
+use solidcraft_geom::Aabb3;
+use solidcraft_sketch::{CurveKind, Sketch};
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 
-use crate::{Sel, Session};
+/// The grid's spacing and reach for a view, shared with the other apps that draw a grid.
+pub use solidcraft_viewport::grid::{grid_ext, grid_step};
+
+use crate::{Result, Sel, Session};
 
 /// Colours (shared with the GPU viewport).
 pub mod colors {
-    use solidcraft_render::Rgb;
+    use solidcraft_viewport::Rgb;
     pub const BODY: Rgb = Rgb(176, 186, 198);
     pub const BODY_SELECTED: Rgb = Rgb(110, 170, 235);
     pub const EDGE: Rgb = Rgb(40, 44, 52);
@@ -23,6 +29,8 @@ pub mod colors {
     /// Fixed (locked) geometry.
     pub const SKETCH_LOCKED: Rgb = Rgb(0, 140, 60);
     pub const SKETCH_CENTERLINE: Rgb = Rgb(200, 110, 60);
+    /// Isocurve Analysis curves: the light theme's accent.
+    pub const ISOCURVE: Rgb = Rgb(38, 120, 218);
     /// Linked (projected) reference geometry.
     pub const SKETCH_PROJECTED: Rgb = Rgb(150, 60, 190);
     /// Linked geometry whose reference was lost.
@@ -38,7 +46,7 @@ pub mod colors {
     pub const BG_TOP: Rgb = Rgb(240, 243, 247);
     pub const BG_BOTTOM: Rgb = Rgb(203, 210, 221);
     /// What the section cap is tinted toward.
-    pub const SECTION_CAP: Rgb = solidcraft_render::SECTION_CAP;
+    pub const SECTION_CAP: Rgb = solidcraft_viewport::SECTION_CAP;
 }
 
 /// The colours a headless scene is drawn in. [`Palette::DEFAULT`] is [`colors`], the light
@@ -70,6 +78,10 @@ pub struct Palette {
     pub axes: [Rgb; 3],
     /// What the section cap is tinted toward.
     pub cap: Rgb,
+    /// The section hatch's other colours, after the cap's (`Scene::part_hatch`).
+    pub hatch: [Rgb; 2],
+    /// Isocurve Analysis: the faces' isoparametric curves.
+    pub isocurve: Rgb,
     /// The surface analysis colours.
     pub analysis: AnalysisColors,
 }
@@ -93,6 +105,8 @@ impl Palette {
         sketch_centerline: colors::SKETCH_CENTERLINE,
         axes: [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z],
         cap: colors::SECTION_CAP,
+        hatch: solidcraft_viewport::SECTION_HATCH,
+        isocurve: colors::ISOCURVE,
         analysis: AnalysisColors::DEFAULT,
     };
 }
@@ -105,8 +119,9 @@ impl Default for Palette {
 
 /// Bounds of everything visible now, in world space: shown bodies where their occurrences,
 /// joints and moves place them, and the sketches the view draws (not ones used by a feature,
-/// hidden ones, or ones in hidden components). What Home, Fit and the orbit pivot frame.
-pub fn bounds(s: &Session) -> Aabb3 {
+/// hidden ones, or ones in hidden components). What Home, Fit and the orbit pivot frame. A model
+/// that cannot be placed is the error.
+pub fn bounds(s: &Session) -> Result<Aabb3> {
     bounds_by(s, |body| body.mesh_bounds())
 }
 
@@ -122,12 +137,12 @@ pub fn shown_point_clouds(s: &Session) -> impl Iterator<Item = &solidcraft_doc::
 /// [`bounds`] without meshing anything: a body not meshed yet counts with its outline
 /// ([`solidcraft_kernel::Body::outline_bounds`]), which a face curving out past all of its edges
 /// can exceed. Frames a design whose bodies are still being meshed.
-pub fn unmeshed_bounds(s: &Session) -> Aabb3 {
+pub fn unmeshed_bounds(s: &Session) -> Result<Aabb3> {
     bounds_by(s, |body| body.cached_mesh().map(|m| m.bounds()).unwrap_or_else(|| body.outline_bounds()))
 }
 
-fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> Aabb3 {
-    let st = s.world_state();
+fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> Result<Aabb3> {
+    let st = s.world_state()?;
     let mut b = Aabb3::EMPTY;
     for body in st.bodies.iter().filter(|x| s.body_visible(&x.name)) {
         b = b.union(&of(body));
@@ -135,7 +150,7 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> A
     for ss in st.sketches.iter().filter(|x| sketch_shown(s, x.feature)) {
         // All four corners: on a tilted plane two opposite ones don't span the rectangle.
         if let Some((lo, hi)) = ss.sketch.bounds() {
-            for p in [lo, hi, solidcraft_geom::Vec2::new(lo.x, hi.y), solidcraft_geom::Vec2::new(hi.x, lo.y)] {
+            for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
                 b.add(ss.plane.to_world(p));
             }
         }
@@ -150,7 +165,7 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> A
             b.add(p);
         }
     }
-    b
+    Ok(b)
 }
 
 /// The origin plane a grid lies on.
@@ -207,20 +222,6 @@ pub fn grid_plane(back: Vec3, last: GridPlane) -> GridPlane {
         return last;
     }
     GridPlane::Ground
-}
-
-/// Grid spacing (minor, major) for a view of the given half height.
-pub fn grid_step(half_height: f64) -> (f64, f64) {
-    let raw = (half_height / 10.0).max(1e-3);
-    let p = 10f64.powf(raw.log10().floor());
-    let minor = if raw / p < 2.0 {
-        p
-    } else if raw / p < 5.0 {
-        2.0 * p
-    } else {
-        5.0 * p
-    };
-    (minor, minor * 5.0)
 }
 
 /// How wide the cross-fade between two grid levels is, in powers of ten of the view's height
@@ -400,6 +401,142 @@ pub fn grid_lines(half_height: f64, at: f64, reach: f64, cap: i64) -> Vec<GridLi
     merged.into_iter().map(|(line, own, shared)| if shared { line } else { GridLineAt { weight: own, ..line } }).filter(|l| l.weight > 0.0).collect()
 }
 
+/// The step of the grid's lines the viewport draws at this zoom (#9843).
+///
+/// Away from a cross-fade it is the step of the level the grid is drawn at. In a cross-fade that
+/// level is the one with the bigger weight, and its lines are drawn as long as it has lines of
+/// its own: the levels 2 and 5 do not nest, so each of them fades its own lines out over its
+/// half of the cross-fade, and at the middle of it only the lines the two share (every 10 mm)
+/// are drawn. The crossings the user can see are then those, and there is no crossing at 5 mm
+/// to snap to.
+fn grid_drawn_step(half_height: f64) -> f64 {
+    let (minor, _) = grid_step(half_height);
+    let Some(b) = grid_blend(half_height) else {
+        return minor;
+    };
+    let (own_lo, own_hi) = b.own();
+    // A nested level that still draws its own lines is drawn at its own step: the crossings the
+    // user sees are the finer ones.
+    if b.nested && own_lo > 0.0 {
+        return b.lo;
+    }
+    // The level with the bigger weight is the one the grid is drawn at (`grid_step`).
+    let (level, own) = if b.s >= 0.5 { (b.hi, own_hi) } else { (b.lo, own_lo) };
+    if own > 0.0 { level } else { grid_shared_step(&b) }
+}
+
+/// The step of the lines two levels of a cross-fade share: the lines both of them draw.
+///
+/// The levels that nest (1 and 2, 5 and 10) share the lines of the coarser one. The levels that
+/// do not nest (2 and 5) share only the lines every 10 mm, which is the finer level's major
+/// step.
+fn grid_shared_step(b: &GridBlend) -> f64 {
+    if b.nested { b.hi } else { b.lo * 5.0 }
+}
+
+/// The grid a sketch's points snap to: the crossings of the lines the viewport draws, and the
+/// finer lattice between them.
+///
+/// The crossings are the lines the viewport draws, so their step is the step of the lines that
+/// are drawn ([`grid_drawn_step`]). The finer lattice is a tenth of the level the grid is drawn
+/// at, so a value that is not on a crossing (an exact inch, say) can still be placed.
+pub fn sketch_grid_step(half_height: f64) -> (f64, f64) {
+    let (minor, _) = grid_step(half_height);
+    (grid_drawn_step(half_height), minor / 10.0)
+}
+
+/// The crossing of the drawn grid's lines nearest `p`, when the pointer means that crossing:
+/// the point the user can see and means (#7114).
+///
+/// The crossing takes the pointer when the pointer means it, and the finer lattice holds it
+/// otherwise: the rule is in `sketch_grid_takes_crossing`.
+pub fn sketch_grid_crossing(p: Vec2, minor: f64, fine: f64) -> Option<Vec2> {
+    let crossing = Vec2::new((p.x / minor).round() * minor, (p.y / minor).round() * minor);
+    let taken = sketch_grid_takes_crossing(crossing.dist(p), sketch_grid_lattice(p, fine).dist(p), fine);
+    taken.then_some(crossing)
+}
+
+/// How close the pointer has to be to a point of the finer lattice for it to count as being on
+/// it exactly: a thousandth of a fine step.
+///
+/// The pointer comes from the screen, so it is never exactly on a lattice point: the harness
+/// leaves the pointer of the scenario `s12_pattern_bodies` at `14.000001516401388`, a millionth
+/// and a half off. The tolerance is a thousandth of a fine step, so it swallows that noise and
+/// the noise of any other view (both grow with the view), and it is still two hundred times
+/// smaller than the quarter of a fine step the last clause measures.
+const SKETCH_GRID_EXACT: f64 = 1e-3;
+
+/// How many fine steps the crossing of the drawn grid may take the pointer (#9843).
+///
+/// The crossing is a point of the finer lattice too, so the pointer may land on it from two fine
+/// steps away at most: the point does not move farther than that from where the pointer was.
+const SKETCH_GRID_CROSSING_STEPS: f64 = 2.0;
+
+/// Whether the crossing of the drawn grid's lines takes the pointer that is `d` away from it,
+/// when the finer lattice's point is `l` away from it.
+///
+/// The rules, in order:
+///
+/// 1. **A pointer that is on a point of the finer lattice keeps that exact value.** The drawn
+///    grid does not carry it off to the crossing beside it, so a value the user placed (`14`,
+///    an exact radius) stays where it is.
+/// 2. **The crossing takes the pointer when it is within a fine step of it.** That is the
+///    crossing's own place on the finer lattice and the one right beside it, which is the case
+///    the issue is about: the pointer is aimed at the crossing the user can see.
+/// 3. **The crossing takes the pointer further out only when the finer lattice cannot hold
+///    it, and only from two fine steps away.** A pointer that is more than a quarter of a fine
+///    step away from any point of the lattice has no exact value to hold, so the crossing is
+///    the better answer; but the crossing takes it only when it is no farther than two fine
+///    steps, so that the point does not move more than two fine steps from where the pointer
+///    was (#9843).
+/// 4. Otherwise the finer lattice holds the pointer.
+fn sketch_grid_takes_crossing(d: f64, l: f64, fine: f64) -> bool {
+    // The exact value of a lattice point wins over the crossing beside it (rule 1).
+    if l <= fine * SKETCH_GRID_EXACT && d > fine * SKETCH_GRID_EXACT {
+        return false;
+    }
+    // The crossing takes the pointer within a fine step of it, or when the lattice cannot hold
+    // it and the crossing is no farther than two fine steps (rules 2 and 3).
+    d <= fine || (l > fine / 4.0 && d <= fine * SKETCH_GRID_CROSSING_STEPS)
+}
+
+/// The point of the finer lattice between the crossings nearest `p`.
+pub fn sketch_grid_lattice(p: Vec2, fine: f64) -> Vec2 {
+    Vec2::new(sketch_grid_lattice_axis(p.x, fine), sketch_grid_lattice_axis(p.y, fine))
+}
+
+/// The point of the finer lattice between the crossings nearest `v`.
+pub fn sketch_grid_lattice_axis(v: f64, fine: f64) -> f64 {
+    (v / fine).round() * fine
+}
+
+/// The point of the grid a sketch's point lands on: the crossing of the drawn grid's lines when
+/// the pointer means one, and the finer lattice between the crossings otherwise (#7114).
+pub fn sketch_grid_point(p: Vec2, minor: f64, fine: f64) -> Vec2 {
+    match sketch_grid_crossing(p, minor, fine) {
+        Some(crossing) => crossing,
+        None => sketch_grid_lattice(p, fine),
+    }
+}
+
+/// The free coordinate of a sketch's point that lines up with another point: the crossing of the
+/// drawn grid's lines when the point can be on one, and on the finer lattice between the
+/// crossings otherwise.
+///
+/// `free` is the coordinate the pointer gives and `fixed` the one the point lines up with, on the
+/// other axis. The crossing has to run through `fixed`: a point that lines up with something off
+/// the drawn grid is on no crossing of it, so there the finer lattice holds the point.
+pub fn sketch_grid_free(free: f64, fixed: f64, minor: f64, fine: f64) -> f64 {
+    let on_line = (fixed / minor).round() * minor;
+    if (on_line - fixed).abs() > minor * 1e-6 {
+        return sketch_grid_lattice_axis(free, fine);
+    }
+    let crossing = (free / minor).round() * minor;
+    let lattice = sketch_grid_lattice_axis(free, fine);
+    let taken = sketch_grid_takes_crossing((crossing - free).abs(), (lattice - free).abs(), fine);
+    if taken { crossing } else { lattice }
+}
+
 /// How the grid fades out with the distance from the middle of the view (#4214).
 ///
 /// The grid used to stop at a fixed distance, so its edge showed as a cut across the picture. It
@@ -499,17 +636,6 @@ pub fn grid_far_reach(cam: &Camera, far: f64, c: Vec3, n: Vec3) -> f64 {
     (far - depth) / len
 }
 
-/// The grid's half size for a view of the given half height, seen at the given slant (the cosine
-/// of the angle between the view and the grid's plane): the grid reaches as far on its plane as
-/// the view is wide, which stretches as the plane is seen at a slant (#3087).
-///
-/// The picture and the window share it, so that they draw the same grid (#4214).
-pub fn grid_ext(half_height: f64, major: f64, slant: f64) -> f64 {
-    let major = major.max(1e-3);
-    let ext = (half_height * 3.0 / major).ceil() * major;
-    (ext / slant.abs().max(0.25) / major).ceil() * major
-}
-
 /// Sketch curves as world polylines with their colour.
 pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool]) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     sketch_lines_with_sampler(sk, plane, active, determined, world_curve_parts)
@@ -547,6 +673,9 @@ fn sketch_lines_in(
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
+        if c.spline_handle_of.is_some() {
+            continue;
+        }
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -603,10 +732,59 @@ fn sketch_lines_in(
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
+    if c.spline_handle_of.is_some() {
+        return false;
+    }
     if c.link.is_some() && !sk.is_text_curve(i) {
         return !sk.view.hide_projected;
     }
     !(c.construction && sk.view.hide_construction)
+}
+
+/// One tangent guide of a selected fit spline: the guide runs from `mirror` through `fit` to
+/// `handle`. `point` is the stored handle point, `None` while the spline only shows where its
+/// handles start (they are stored by the first drag of one, #6502).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SplineGuide {
+    pub fit: Vec2,
+    pub handle: Vec2,
+    pub mirror: Vec2,
+    pub point: Option<usize>,
+}
+
+/// The tangent guides spline `curve` shows while it is selected: one per fit point, from its
+/// stored handles, or else from where [`Sketch::spline_handle_preview`] would start them. Empty
+/// for a curve that is not a fit spline or cannot take handles.
+pub fn spline_tangent_guides(sk: &Sketch, curve: usize) -> Vec<SplineGuide> {
+    let Some(CurveKind::Spline { pts, control: false, handles, .. }) = sk.curves.get(curve).map(|c| &c.kind) else {
+        return Vec::new();
+    };
+    let guide = |fit: Vec2, handle: Vec2, point| SplineGuide { fit, handle, mirror: fit * 2.0 - handle, point };
+    if !handles.is_empty() {
+        return pts.iter().zip(handles).filter_map(|(fit, handle)| Some(guide(sk.point(*fit)?, sk.point(*handle)?, Some(*handle)))).collect();
+    }
+    let Some(preview) = sk.spline_handle_preview(curve) else { return Vec::new() };
+    pts.iter().zip(preview).filter_map(|(fit, handle)| Some(guide(sk.point(*fit)?, handle, None))).collect()
+}
+
+/// The full, two-sided display segment for a spline's tangent construction line.
+pub fn spline_handle_display_line(sk: &Sketch, i: usize) -> Option<(Vec2, Vec2)> {
+    let helper = sk.curves.get(i)?;
+    let parent = helper.spline_handle_of.as_deref()?;
+    let (CurveKind::Line { a, b }, parent_index) = (&helper.kind, sk.curve_index(parent)?) else {
+        return None;
+    };
+    let CurveKind::Spline { pts, handles, .. } = &sk.curves.get(parent_index)?.kind else {
+        return None;
+    };
+    let (fit_point, handle_point) = pts
+        .iter()
+        .zip(handles)
+        .find_map(|(fit, handle)| ((*fit == *a && *handle == *b) || (*fit == *b && *handle == *a)).then_some((*fit, *handle)))?;
+    let origin = sk.point(fit_point)?;
+    let handle = sk.point(handle_point)?;
+    let direction = handle - origin;
+    Some((origin - direction, handle))
 }
 
 /// Point roles shown and picked individually. Associated offsets keep their generated
@@ -635,6 +813,14 @@ impl<'a> SketchPointVisibility<'a> {
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
             hidden.extend(interior.filter_map(|i| sk.points.get(i).map(|p| p.id.as_str())));
         }
+        for handle in sk.curves.iter().flat_map(|curve| match &curve.kind {
+            CurveKind::Spline { handles, .. } => handles.as_slice(),
+            _ => &[],
+        }) {
+            if let Some(point) = sk.points.get(*handle) {
+                hidden.insert(point.id.as_str());
+            }
+        }
         Self { hidden }
     }
 
@@ -655,23 +841,24 @@ pub fn component_color(s: &Session, component: u64) -> Option<[u8; 3]> {
     Some(s.doc.component_identification_color(component))
 }
 
-/// The scene for a headless render, cut by the session's section.
-pub fn scene(s: &Session, cam: &Camera) -> Scene {
+/// The scene for a headless render, cut by the session's section. A model that cannot be placed
+/// is the error.
+pub fn scene(s: &Session, cam: &Camera) -> Result<Scene> {
     scene_with_section(s, cam, s.section)
 }
 
 /// The scene for a headless render, cut by `section` (origin, normal) instead of the session's:
 /// the app passes the cut its viewport shows (an open Section Analysis dialog's preview, a
 /// sketch's Slice), so model renders match the window.
-pub fn scene_with_section(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>) -> Scene {
+pub fn scene_with_section(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>) -> Result<Scene> {
     scene_with_guides(s, cam, section, Guides::default())
 }
 
 /// The plane of the sketch that is open, if any: it always shows a grid, whatever the Grid switch
 /// says (outside a sketch the grid is the user's choice).
-pub fn open_sketch_plane(s: &Session) -> Option<Plane> {
-    let id = s.active_sketch?;
-    s.world_state().sketch(id).map(|ss| ss.plane)
+pub fn open_sketch_plane(s: &Session) -> Result<Option<Plane>> {
+    let Some(id) = s.active_sketch else { return Ok(None) };
+    Ok(s.world_state()?.sketch(id).map(|ss| ss.plane))
 }
 
 /// The grid on a sketch plane: its centre (the view target's foot on the plane, snapped to the
@@ -699,14 +886,14 @@ impl Default for Guides {
 }
 
 /// [`scene_with_section`] with the grid and the axes shown or left out.
-pub fn scene_with_guides(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>, guides: Guides) -> Scene {
+pub fn scene_with_guides(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>, guides: Guides) -> Result<Scene> {
     scene_with_palette_and_guides(s, cam, section, world_curve_parts, &Palette::DEFAULT, guides)
 }
 
 /// A headless scene using supplied display paths for its visible sketch curves.
 /// Callers can use the same pixel sampler as a GPU viewport without changing the
 /// body, grid, appearance, section or sketch styling policies of [`scene`].
-pub fn scene_with_sketch_sampler(s: &Session, cam: &Camera, sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>) -> Scene {
+pub fn scene_with_sketch_sampler(s: &Session, cam: &Camera, sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>) -> Result<Scene> {
     scene_with_section_and_sketch_sampler(s, cam, s.section, sampler)
 }
 
@@ -716,7 +903,7 @@ pub fn scene_with_section_and_sketch_sampler(
     cam: &Camera,
     section: Option<(Vec3, Vec3)>,
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
-) -> Scene {
+) -> Result<Scene> {
     scene_with_palette(s, cam, section, sampler, &Palette::DEFAULT)
 }
 
@@ -727,7 +914,7 @@ pub fn scene_with_palette(
     section: Option<(Vec3, Vec3)>,
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
-) -> Scene {
+) -> Result<Scene> {
     build_scene(s, cam, section, Guides::default(), sampler, p, false)
 }
 
@@ -739,7 +926,7 @@ pub fn scene_with_palette_and_guides(
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     guides: Guides,
-) -> Scene {
+) -> Result<Scene> {
     build_scene(s, cam, section, guides, sampler, p, false)
 }
 
@@ -753,7 +940,7 @@ pub fn scene_with_thread_markings(
     p: &Palette,
     guides: Guides,
     cosmetic_threads: bool,
-) -> Scene {
+) -> crate::Result<Scene> {
     build_scene(s, cam, section, guides, sampler, p, cosmetic_threads)
 }
 
@@ -765,25 +952,26 @@ fn build_scene(
     mut sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     cosmetic_threads: bool,
-) -> Scene {
-    let st = s.world_state();
+) -> Result<Scene> {
+    let st = s.world_state()?;
     let section = section.filter(|(o, n)| o.is_finite() && n.is_finite() && n.len() > 1e-9);
     let mut sc = Scene {
         background: Some(p.background),
         clip: section.map(|(o, n)| (n, n.dot(o))),
         cap: Some(p.cap),
         plain_cap: !s.section_hatch,
+        part_hatch: Some([p.cap, p.hatch[0], p.hatch[1]]),
         analysis: s.analysis.map(|a| SceneAnalysis { mode: a.mode(), colors: p.analysis }),
         ..Default::default()
     };
-    let b = bounds(s);
+    let b = bounds(s)?;
     sc.radius = (b.diagonal() * 0.5).max(cam.half_height()).max(10.0) + b.center().dist(cam.target);
     // Grid on the ground plane (XY with Z up, XZ with Y up), drawn under the model as in the viewport.
     if guides.grid {
         let major = grid_step(cam.half_height()).1;
         // Headless pictures keep the grid on the ground, the viewport's default; an open sketch
         // has its own plane's grid (world coordinates, no camera frame).
-        let (c, u, v, slant, w): (Vec3, Vec3, Vec3, f64, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_plane(s) {
+        let (c, u, v, slant, w): (Vec3, Vec3, Vec3, f64, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_plane(s)? {
             let (c, u, v) = sketch_grid_frame(&pl, cam.target, major);
             let n = u.cross(v);
             (c, u, v, cam.back().dot(n), Box::new(|p| p))
@@ -803,7 +991,7 @@ fn build_scene(
         let fade = GridFade::new(cam.half_height(), slant, ext, far_reach);
         // The grid's centre on each axis, from the plane's origin (the world's, or the sketch
         // plane's): a level fading in near a switch of the spacing lies on its own places (#9570).
-        let origin = open_sketch_plane(s).map_or(Vec3::ZERO, |pl| pl.origin);
+        let origin = open_sketch_plane(s)?.map_or(Vec3::ZERO, |pl| pl.origin);
         let (at_u, at_v) = ((c - origin).dot(u), (c - origin).dot(v));
         // Two lines through the point `c + u * t`: one along v, one along u.
         for (along, across, at) in [(v, u, at_u), (u, v, at_v)] {
@@ -847,6 +1035,8 @@ fn build_scene(
         .flatten()
         .collect();
     let mut thread_budget = crate::cosmetic_threads::Budget::default();
+    // Where the section cuts each closed solid body, by its mesh in `sc.meshes`: their hatches.
+    let mut cuts: Vec<(usize, u64, Vec<(Vec3, Vec3)>)> = Vec::new();
     for body in st.bodies.iter().filter(|b| s.body_visible(&b.name)) {
         let selected = selected_occurrences.contains(&body.name) || s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == body.name));
         let mesh = body.mesh();
@@ -868,7 +1058,17 @@ fn build_scene(
         // A see-through appearance is drawn see-through, as the viewport draws it; a selected
         // body is drawn solid, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
-        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity });
+        let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_viewport::SEE_THROUGH;
+        sc.meshes.push(SceneMesh {
+            mesh: Arc::clone(&mesh),
+            color,
+            face_colors,
+            opacity,
+            closed: body.is_closed(),
+            hatch: Default::default(),
+            values: None,
+        });
+        let at = sc.meshes.len() - 1;
         if cosmetic_threads
             && thread_budget.available()
             && s.doc.model_body_opacity(body) >= 0.999
@@ -886,10 +1086,27 @@ fn build_scene(
         }
         // The outline of the body where the section cuts it.
         if let Some((o, n)) = section {
-            for (a, b) in section_segments(&mesh, o, n) {
-                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
+            let segments = section_segments(&mesh, o, n);
+            for (a, b) in &segments {
+                sc.lines.push(SceneLine { points: vec![*a, *b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
+            }
+            if cut_solid && !segments.is_empty() {
+                cuts.push((at, solidcraft_viewport::hatch::seed(&body.name), segments));
             }
         }
+    }
+    if let Some((_, n)) = section {
+        let parts: Vec<solidcraft_viewport::hatch::CutPart> =
+            cuts.iter().map(|(_, seed, segments)| solidcraft_viewport::hatch::CutPart { seed: *seed, segments }).collect();
+        for ((at, _, _), hatch) in cuts.iter().zip(solidcraft_viewport::hatch::hatches(&parts, n)) {
+            if let Some(m) = sc.meshes.get_mut(*at) {
+                m.hatch = hatch;
+            }
+        }
+    }
+    // Isocurve Analysis: the isoparametric curves of each face it shows, on the faces.
+    for line in s.isocurve_lines().iter().flat_map(|lines| lines.iter()) {
+        sc.lines.push(SceneLine { points: line.points.clone(), color: p.isocurve, alpha: 1.0, width: 1.4, on_top: false });
     }
     for ss in &st.sketches {
         let active = s.active_sketch == Some(ss.feature);
@@ -900,7 +1117,7 @@ fn build_scene(
             sc.lines.push(SceneLine { points: pts, color: col, alpha: 1.0, width: if cons { 1.0 } else { 1.6 }, on_top: active });
         }
     }
-    sc
+    Ok(sc)
 }
 
 /// Where the plane through `o` with normal `n` cuts a mesh: one segment per crossed triangle,
@@ -935,85 +1152,158 @@ fn cut_triangle(m: &solidcraft_geom::Mesh, t: &[u32; 3], o: Vec3, n: Vec3, eps: 
     }
 }
 
-/// A mesh's triangles sorted into slabs along one normal, so cuts with that normal at any
-/// height look only at the triangles of one slab: dragging a Section Analysis keeps the normal
-/// and moves the cut, and an imported part can have millions of triangles. The same segments
-/// as [`section_segments`].
+/// A mesh's triangles sorted into the cells of a grid by where their boxes sit, each cell
+/// keeping the box around its triangles, so a cut with any plane looks only at the triangles of
+/// the cells the plane crosses: an imported part can have millions of triangles, and dragging a
+/// Section Analysis moves the cut and, when tilted, turns its normal every frame (#10373). The
+/// same segments, in the same order, as [`section_segments`].
 pub struct SectionIndex {
-    normal: Vec3,
-    /// The lowest height (`normal · p`) of the mesh, and the slab thickness.
-    start: f64,
-    step: f64,
-    /// Per slab, the triangles whose heights reach into it.
-    slabs: Vec<Vec<u32>>,
+    /// Per cell holding triangles, the centre and half size of the box around them, and where
+    /// they are in `tris` (in mesh order).
+    cells: Vec<(Vec3, Vec3, u32, u32)>,
+    tris: Vec<u32>,
+    /// Triangles with a corner that is not finite: cut on every plane, as `section_segments`
+    /// does.
+    always: Vec<u32>,
+    /// The largest coordinate of the mesh, for the cell test's rounding margin.
+    reach: f64,
     eps: f64,
 }
 
-/// Slabs a [`SectionIndex`] makes, at most.
-const SECTION_SLABS: usize = 4096;
+/// How many mean triangle widths a [`SectionIndex`] cell is wide, and most cells of its grid.
+const SECTION_CELL_WIDTHS: f64 = 4.0;
+const SECTION_GRID: usize = 1 << 22;
 
 impl SectionIndex {
-    pub fn new(m: &solidcraft_geom::Mesh, normal: Vec3) -> SectionIndex {
-        let heights: Vec<Option<(f64, f64)>> = m
+    pub fn new(m: &solidcraft_geom::Mesh) -> SectionIndex {
+        let finite_tri = |t: &[u32; 3]| m.tri(t).filter(|p| p.iter().all(|q| q.is_finite()));
+        let mut always = Vec::new();
+        let mut centres = Aabb3::EMPTY;
+        let (mut widths, mut count) = (0.0, 0usize);
+        for (i, t) in m.triangles.iter().enumerate() {
+            match finite_tri(t) {
+                Some([a, b, c]) => {
+                    let (lo, hi) = (a.min(b).min(c), a.max(b).max(c));
+                    centres.add((lo + hi) * 0.5);
+                    widths += (hi - lo).len();
+                    count += 1;
+                }
+                None if m.tri(t).is_some() => always.extend(u32::try_from(i)),
+                None => {}
+            }
+        }
+        // Cells as wide as a few triangles, on the axes the part spans: a part's triangles lie
+        // on its surface, so cells sized from the part's volume would hold far more.
+        let size = if centres.is_empty() { Vec3::ZERO } else { centres.size() };
+        let ext = [size.x, size.y, size.z];
+        let dims_for = |side: f64| ext.map(|e| if e > 0.0 && side > 0.0 { (e / side).ceil().clamp(1.0, SECTION_GRID as f64) as usize } else { 1 });
+        let cells_of = |d: [usize; 3]| d.iter().fold(1usize, |p, k| p.saturating_mul(*k));
+        let mut side = widths / count.max(1) as f64 * SECTION_CELL_WIDTHS;
+        while cells_of(dims_for(side)) > SECTION_GRID && side.is_finite() {
+            side *= 1.25;
+        }
+        let dims = dims_for(side);
+        let cells = cells_of(dims).min(SECTION_GRID);
+        let at = |v: f64, lo: f64, e: f64, d: usize| {
+            let k = if e > 0.0 { ((v - lo) / e * d as f64).floor() } else { 0.0 };
+            if k.is_finite() { (k.max(0.0) as usize).min(d.saturating_sub(1)) } else { 0 }
+        };
+        let of: Vec<Option<usize>> = m
             .triangles
             .iter()
             .map(|t| {
-                let d = m.tri(t)?.map(|q| normal.dot(q));
-                Some((d[0].min(d[1]).min(d[2]), d[0].max(d[1]).max(d[2])))
+                let [a, b, c] = finite_tri(t)?;
+                let p = (a.min(b).min(c) + a.max(b).max(c)) * 0.5;
+                let [x, y, z] =
+                    [at(p.x, centres.min.x, ext[0], dims[0]), at(p.y, centres.min.y, ext[1], dims[1]), at(p.z, centres.min.z, ext[2], dims[2])];
+                Some(((z * dims[1] + y) * dims[0] + x).min(cells.saturating_sub(1)))
             })
             .collect();
-        let (lo, hi) = heights.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (l, h)| (a.min(*l), b.max(*h)));
-        let count = if lo.is_finite() && hi.is_finite() { (m.triangles.len() / 64).clamp(1, SECTION_SLABS) } else { 0 };
-        let step = if count > 0 && hi > lo { (hi - lo) / count as f64 } else { 1.0 };
-        let mut index = SectionIndex { normal, start: lo, step, slabs: vec![Vec::new(); count], eps: section_nudge(m) };
-        for (i, h) in heights.iter().enumerate() {
-            let (Some((l, h)), Ok(i)) = (h, u32::try_from(i)) else { continue };
-            for k in index.slab(*l)..=index.slab(*h) {
-                if let Some(slab) = index.slabs.get_mut(k) {
-                    slab.push(i);
-                }
+        // Counted per cell, then each cell's first slot (the last entry: the total).
+        let mut starts = vec![0u32; cells + 1];
+        for c in of.iter().flatten() {
+            if let Some(s) = starts.get_mut(*c) {
+                *s += 1;
             }
         }
-        index
-    }
-
-    /// The normal this index was made for.
-    pub fn normal(&self) -> Vec3 {
-        self.normal
-    }
-
-    fn slab(&self, height: f64) -> usize {
-        let k = ((height - self.start) / self.step).floor();
-        if k.is_finite() { (k.max(0.0) as usize).min(self.slabs.len().saturating_sub(1)) } else { 0 }
+        let mut total = 0u32;
+        for s in &mut starts {
+            (*s, total) = (total, total.saturating_add(*s));
+        }
+        let mut fill = starts.clone();
+        let mut tris = vec![0u32; total as usize];
+        for (i, c) in of.iter().enumerate() {
+            let (Some(c), Ok(i)) = (c, u32::try_from(i)) else { continue };
+            if let Some(at) = fill.get_mut(*c) {
+                if let Some(slot) = tris.get_mut(*at as usize) {
+                    *slot = i;
+                }
+                *at += 1;
+            }
+        }
+        let mut reach: f64 = 0.0;
+        let cells = starts
+            .windows(2)
+            .filter_map(|w| match *w {
+                [a, e] if e > a => {
+                    let mut b = Aabb3::EMPTY;
+                    for i in tris.get(a as usize..e as usize).unwrap_or(&[]) {
+                        for p in m.triangles.get(*i as usize).and_then(|t| m.tri(t)).into_iter().flatten() {
+                            b.add(p);
+                        }
+                    }
+                    reach = reach.max(b.min.x.abs().max(b.min.y.abs()).max(b.min.z.abs()).max(b.max.x.abs()).max(b.max.y.abs()).max(b.max.z.abs()));
+                    Some((b.center(), b.size() * 0.5, a, e))
+                }
+                _ => None,
+            })
+            .collect();
+        SectionIndex { cells, tris, always, reach, eps: section_nudge(m) }
     }
 
     /// [`section_segments`] of `m` (the mesh this index was made from) at the plane through
-    /// `o` with this index's normal.
-    pub fn segments(&self, m: &solidcraft_geom::Mesh, o: Vec3) -> Vec<(Vec3, Vec3)> {
-        let mut out = Vec::new();
-        let at = self.normal.dot(o);
-        if self.slabs.is_empty() || !at.is_finite() || at < self.start {
-            return out;
+    /// `o` with normal `n`; nothing for a plane that is not finite.
+    pub fn segments(&self, m: &solidcraft_geom::Mesh, o: Vec3, n: Vec3) -> Vec<(Vec3, Vec3)> {
+        if !(o.is_finite() && n.is_finite()) {
+            return Vec::new();
         }
-        for i in self.slabs.get(self.slab(at)).into_iter().flatten() {
-            if let Some(t) = m.triangles.get(*i as usize) {
-                cut_triangle(m, t, o, self.normal, self.eps, &mut out);
+        let an = Vec3::new(n.x.abs(), n.y.abs(), n.z.abs());
+        // Rounding in `cut_triangle`'s heights is far below this margin, so a cell left out
+        // holds no triangle it would cut.
+        let margin = 1e-9 * (an.x + an.y + an.z) * (self.reach + o.x.abs().max(o.y.abs()).max(o.z.abs()) + 1.0);
+        let at = n.dot(o);
+        // The cut triangles' segments, by triangle, then in mesh order.
+        let mut found: Vec<(u32, (Vec3, Vec3))> = Vec::new();
+        let mut out = Vec::with_capacity(1);
+        let mut cut = |i: u32| {
+            if let Some(t) = m.triangles.get(i as usize) {
+                cut_triangle(m, t, o, n, self.eps, &mut out);
+                found.extend(out.pop().map(|seg| (i, seg)));
+            }
+        };
+        self.always.iter().for_each(|i| cut(*i));
+        for (centre, half, first, end) in &self.cells {
+            if (n.dot(*centre) - at).abs() <= an.dot(*half) + margin {
+                self.tris.get(*first as usize..*end as usize).unwrap_or(&[]).iter().for_each(|i| cut(*i));
             }
         }
-        out
+        found.sort_unstable_by_key(|(i, _)| *i);
+        found.into_iter().map(|(_, seg)| seg).collect()
     }
 }
 
 /// Is a sketch drawn? The sketch being edited always is; otherwise not in a hidden component,
-/// Sketches folder or group (even one shown on its own). The sketch immediately before a
-/// rollback marker is shown regardless of its individual visibility; other hidden sketches, and
-/// ones used by a feature unless shown on their own, retain their stored visibility.
+/// Sketches folder or group (even one shown on its own), and not when hidden with its own eye.
+/// The sketch immediately before a rollback marker is shown even when a feature uses it, so a
+/// step on the History bar shows what it adds (#5202); other sketches used by a feature are
+/// shown only when shown on their own. The user's own hide wins over the marker (#12125): the
+/// browser shows the eye off, and hiding the sketch again must take it away.
 pub fn sketch_shown(s: &Session, id: u64) -> bool {
     let v = &s.visibility;
     if s.active_sketch == Some(id) || s.feature_edit_sketch == Some(id) {
         return true;
     }
-    if !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches") {
+    if !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches") || v.hidden_sketches.contains(&id) {
         return false;
     }
     if s.doc
@@ -1024,18 +1314,15 @@ pub fn sketch_shown(s: &Session, id: u64) -> bool {
     {
         return true;
     }
-    if v.hidden_sketches.contains(&id) {
-        return false;
-    }
     v.shown_sketches.contains(&id) || !sketch_consumed(s, id)
 }
 
-/// Is a sketch used by a later feature? A sheet metal base or contour flange uses its sketch as
-/// an Extrude does: shown, its lines lie on the sheet's edges and take the clicks meant for
-/// them (#6804). So does a Hole at sketch points: shown, its points are drawn in the holes
-/// (#9082). A Single hole snapped to one point (#2110) does not: it was placed on a face, not
-/// built from the sketch, and hiding the sketch would take its other points from the next
-/// Single hole's snap.
+/// Is a sketch used by a later feature? A sheet metal base or contour flange, or a perforation's
+/// outline, uses its sketch as an Extrude does: shown, its lines lie on the sheet's edges and
+/// faces and take the clicks meant for them (#6804). So does a Hole at sketch points: shown, its
+/// points are drawn in the holes (#9082). A Single hole snapped to one point (#2110) does not: it
+/// was placed on a face, not built from the sketch, and hiding the sketch would take its other
+/// points from the next Single hole's snap.
 pub fn sketch_consumed(s: &Session, id: u64) -> bool {
     if let Ok(mut cache) = s.consumed_sketches_cache.lock() {
         if cache.as_ref().is_none_or(|c| !std::ptr::eq(c.doc.as_ptr(), Arc::as_ptr(&s.doc))) {
@@ -1063,9 +1350,11 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
     doc.features.iter().filter_map(|f| match &f.kind {
         FeatureKind::Extrude { sketch, .. }
         | FeatureKind::Revolve { sketch, .. }
+        | FeatureKind::CellGrid { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
-        | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. } => Some(sketch.0),
+        | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
+        | FeatureKind::SheetPerforate { sketch: Some(sketch), .. } => Some(sketch.0),
         _ => None,
     })
 }
@@ -1093,15 +1382,15 @@ pub(crate) mod sketch_work {
 }
 
 /// Camera framing the model (iso view).
-pub fn home_camera(s: &Session) -> Camera {
+pub fn home_camera(s: &Session) -> Result<Camera> {
     let mut c = Camera::default();
-    let b = bounds(s);
+    let b = bounds(s)?;
     if !b.is_empty() {
-        c.fit(&b);
+        c.fit(&solidcraft_render::view_bounds(&b));
     } else {
         c.distance = 150.0;
     }
-    c
+    Ok(c)
 }
 
 /// Construction planes of the timeline, as evaluated: (feature id, name, plane).
@@ -1113,6 +1402,49 @@ pub fn construction_planes(s: &Session) -> Vec<(u64, String, Plane)> {
             _ => None,
         })
         .collect()
+}
+
+/// The planar body face each construction plane was made from, as it is now: (plane name, body
+/// name, the face's indices on that body), for a plane of the design (not a component's) whose
+/// definition reaches an attached face: an Offset Plane on a face, and planes offset, turned,
+/// flipped or moved through a point from it. The viewport draws such a plane over its face, which
+/// its origin, the plane's point nearest the world origin, can be far from (#4345). A plane on a
+/// face found again only by its picked point or name, or whose face is gone, has none.
+pub fn construction_plane_faces(s: &Session) -> Vec<(String, String, Vec<usize>)> {
+    let st = s.model.state();
+    s.doc
+        .features
+        .iter()
+        .filter(|f| !f.suppressed && f.component == 0)
+        .filter_map(|f| {
+            let solidcraft_doc::FeatureKind::ConstructionPlane { plane } = &f.kind else { return None };
+            let anchor = plane_face_anchor(&s.doc, plane, 0).filter(|a| a.path.is_empty())?;
+            let body = st.body(&anchor.target.body)?;
+            let (faces, _) = s.doc.anchored_face_indices(&st, body, &anchor.target).ok()?;
+            (!faces.is_empty()).then(|| (f.name.clone(), anchor.target.body.clone(), faces))
+        })
+        .collect()
+}
+
+/// The face anchor a plane's definition reaches: its own, its base's (offset, turned, flipped,
+/// moved through a point) or, through a construction plane it is built on, that plane's.
+fn plane_face_anchor<'a>(
+    doc: &'a solidcraft_doc::Document,
+    plane: &'a solidcraft_doc::PlaneRef,
+    depth: usize,
+) -> Option<&'a solidcraft_doc::FaceAnchor> {
+    use solidcraft_doc::PlaneRef;
+    match plane {
+        PlaneRef::Face { anchor, .. } => anchor.as_deref(),
+        PlaneRef::Offset { base, .. } | PlaneRef::ThroughPoint { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => {
+            plane_face_anchor(doc, base, depth + 1)
+        }
+        PlaneRef::Construction { feature } if depth < 32 => match &doc.feature(feature.0)?.kind {
+            solidcraft_doc::FeatureKind::ConstructionPlane { plane } => plane_face_anchor(doc, plane, depth + 1),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Construction axes, as evaluated: (feature id, name, origin, unit direction).
@@ -1175,10 +1507,22 @@ mod tests {
         s.execute("solid.cylinder", &json!({"diameter": 14, "height": 30, "base": [50, 15, 0], "operation": "new"})).unwrap();
         s.execute("appearance.assign", &json!({"bodies": ["Body2"], "color": [220, 60, 40]})).unwrap();
         s.execute("appearance.assign", &json!({"faces": [[20, 15, 20]], "body": "Body1", "color": [40, 170, 80]})).unwrap();
-        let cam = home_camera(&s);
-        let sc = scene(&s, &cam);
+        let cam = home_camera(&s).unwrap();
+        let sc = scene(&s, &cam).unwrap();
         assert!(sc.meshes.iter().any(|m| m.color == Rgb(220, 60, 40)));
         assert!(sc.meshes.iter().any(|m| m.face_colors.iter().any(|(_, c)| *c == Rgb(40, 170, 80))));
+    }
+
+    /// A headless picture draws each body's own display mesh, the allocation the model holds:
+    /// the renderer's mesh is the model's type, so nothing is copied or converted on the way.
+    #[test]
+    fn snapshot_scene_shares_the_bodies_meshes() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let sc = scene(&s, &home_camera(&s).unwrap()).unwrap();
+        let state = s.model.state();
+        let body = state.bodies.first().unwrap().mesh();
+        assert!(sc.meshes.iter().any(|m| Arc::ptr_eq(&m.mesh, &body)));
     }
 
     /// A render can leave out the ground grid and the origin's axes (a box straddling Z 0 is cut
@@ -1187,16 +1531,16 @@ mod tests {
     fn guides_leave_the_grid_and_the_axes_out() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20, "corner": [10, -15, -10]})).unwrap();
-        let cam = home_camera(&s);
+        let cam = home_camera(&s).unwrap();
         let grid = [colors::GRID, colors::GRID_MAJOR];
         let axes = [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z];
         let count = |sc: &Scene, colours: &[Rgb]| sc.grid.iter().chain(&sc.lines).filter(|l| colours.contains(&l.color)).count();
-        let all = scene(&s, &cam);
+        let all = scene(&s, &cam).unwrap();
         let (grid_lines, edges) = (count(&all, &grid), count(&all, &[colors::EDGE]));
         assert!(grid_lines > 20 && edges >= 12, "{grid_lines} grid lines, {edges} edges");
         assert_eq!(count(&all, &axes), 3);
-        assert_eq!(all.lines.len(), scene_with_guides(&s, &cam, s.section, Guides::default()).lines.len());
-        let render = |g: Guides| scene_with_guides(&s, &cam, s.section, g);
+        assert_eq!(all.lines.len(), scene_with_guides(&s, &cam, s.section, Guides::default()).unwrap().lines.len());
+        let render = |g: Guides| scene_with_guides(&s, &cam, s.section, g).unwrap();
         let no_grid = render(Guides { grid: false, axes: true });
         assert_eq!((count(&no_grid, &grid), count(&no_grid, &axes), count(&no_grid, &[colors::EDGE])), (0, 3, edges));
         let no_axes = render(Guides { grid: true, axes: false });
@@ -1211,10 +1555,10 @@ mod tests {
     fn hidden_origin_axes_stay_out_of_renders() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
-        let cam = home_camera(&s);
+        let cam = home_camera(&s).unwrap();
         let axes = [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z];
         let shown = |s: &Session| -> Vec<Rgb> {
-            let sc = scene(s, &cam);
+            let sc = scene(s, &cam).unwrap();
             axes.into_iter().filter(|c| sc.lines.iter().any(|l| l.color == *c)).collect()
         };
         assert_eq!(shown(&s), axes);
@@ -1222,7 +1566,7 @@ mod tests {
         assert_eq!(shown(&s), [colors::AXIS_X, colors::AXIS_Z]);
         s.execute("browser.visibility", &json!({"folder": "origin", "visible": false})).unwrap();
         assert!(shown(&s).is_empty());
-        let sc = scene_with_guides(&s, &cam, None, Guides { grid: true, axes: true });
+        let sc = scene_with_guides(&s, &cam, None, Guides { grid: true, axes: true }).unwrap();
         assert!(sc.grid.iter().any(|l| l.color == colors::GRID), "the grid is not part of the origin");
         s.execute("browser.visibility", &json!({"folder": "origin", "visible": true})).unwrap();
         assert_eq!(shown(&s), axes);
@@ -1234,14 +1578,14 @@ mod tests {
     fn the_section_cuts_the_scene() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
-        let cam = home_camera(&s);
-        assert!(scene(&s, &cam).clip.is_none());
+        let cam = home_camera(&s).unwrap();
+        assert!(scene(&s, &cam).unwrap().clip.is_none());
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
-        let sc = scene(&s, &cam);
+        let sc = scene(&s, &cam).unwrap();
         let (n, d) = sc.clip.unwrap();
         assert!((n - Vec3::new(0.0, -1.0, 0.0)).len() < 1e-12 && (d + 15.0).abs() < 1e-12, "{n:?} {d}");
         assert_eq!(sc.cap, Some(colors::SECTION_CAP));
-        assert!(!section_segments(&s.world_state().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
+        assert!(!section_segments(&s.world_state().unwrap().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
     }
 
     /// The surface analysis shades the headless scene too, in the palette's colours.
@@ -1249,11 +1593,11 @@ mod tests {
     fn the_surface_analysis_shades_the_scene() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
-        let cam = home_camera(&s);
-        assert!(scene(&s, &cam).analysis.is_none());
+        let cam = home_camera(&s).unwrap();
+        assert!(scene(&s, &cam).unwrap().analysis.is_none());
         s.analysis = Some(crate::SurfaceAnalysis::Curvature { radius: 5.0 });
-        let a = scene(&s, &cam).analysis.unwrap();
-        assert_eq!((a.mode, a.colors), (solidcraft_render::AnalysisMode::Curvature { radius: 5.0 }, Palette::DEFAULT.analysis));
+        let a = scene(&s, &cam).unwrap().analysis.unwrap();
+        assert_eq!((a.mode, a.colors), (solidcraft_viewport::AnalysisMode::Curvature { radius: 5.0 }, Palette::DEFAULT.analysis));
     }
 
     /// The CPU rasterizer (the last tier of headless pictures, `SOLIDCRAFT_GPU=cpu` or no adapter
@@ -1262,8 +1606,8 @@ mod tests {
     fn cpu_pictures_draw_silhouettes_on_curved_surfaces() {
         let mut s = Session::default();
         s.execute("solid.sphere", &json!({"diameter": 20})).unwrap();
-        let cam = home_camera(&s);
-        let img = solidcraft_render::render(&scene(&s, &cam), &cam, 400, 400);
+        let cam = home_camera(&s).unwrap();
+        let img = solidcraft_viewport::render(&scene(&s, &cam).unwrap(), &cam, 400, 400);
         let dark = img.rgba.chunks(4).filter(|p| p[0] < 70 && p[1] < 70 && p[2] < 75).count();
         assert!(dark > 40, "silhouette pixels: {dark}");
     }
@@ -1273,12 +1617,12 @@ mod tests {
     fn cpu_pictures_show_the_section() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
-        let cam = home_camera(&s);
-        let whole = solidcraft_render::render(&scene(&s, &cam), &cam, 200, 140).rgba;
+        let cam = home_camera(&s).unwrap();
+        let whole = solidcraft_viewport::render(&scene(&s, &cam).unwrap(), &cam, 200, 140).rgba;
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
-        let sc = scene(&s, &cam);
+        let sc = scene(&s, &cam).unwrap();
         assert!(sc.clip.is_some());
-        let cut = solidcraft_render::render(&sc, &cam, 200, 140).rgba;
+        let cut = solidcraft_viewport::render(&sc, &cam, 200, 140).rgba;
         let changed = whole.chunks(4).zip(cut.chunks(4)).filter(|(a, b)| a != b).count();
         assert!(changed > 500, "{changed} pixels changed");
     }
@@ -1293,10 +1637,12 @@ mod tests {
         // Cut away the front half (y < 15), so the iso camera looks into the cut.
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
         for fov in [0.0, 0.6] {
-            let mut cam = home_camera(&s);
+            let mut cam = home_camera(&s).unwrap();
             cam.fov = fov;
-            let mut sc = scene(&s, &cam);
-            assert!(!section_segments(&s.world_state().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
+            let mut sc = scene(&s, &cam).unwrap();
+            // The cap in the cap colour: a part's hatch colour is the one its name picks.
+            sc.part_hatch = None;
+            assert!(!section_segments(&s.world_state().unwrap().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
             // A marker inside the body, behind the cut face.
             let red = Rgb(255, 0, 0);
             sc.lines.push(SceneLine {
@@ -1306,7 +1652,7 @@ mod tests {
                 width: 3.0,
                 on_top: false,
             });
-            let img = solidcraft_render::render(&sc, &cam, 300, 220);
+            let img = solidcraft_viewport::render(&sc, &cam, 300, 220);
             let px = || img.rgba.chunks(4);
             let marker = px().filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60).count();
             assert_eq!(marker, 0, "fov {fov}: the inside shows through the cut face");
@@ -1323,11 +1669,11 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         s.execute("appearance.assign", &json!({"bodies": ["Body1"], "color": [40, 160, 90]})).unwrap();
-        let cam = home_camera(&s);
+        let cam = home_camera(&s).unwrap();
         let mut picture = |hatch: bool| {
             let plane = json!({"origin": [0, 15, 0], "normal": [0, -1, 0]});
             s.execute("inspect.section", &json!({"plane": plane, "hatch": hatch})).unwrap();
-            solidcraft_render::render(&scene(&s, &cam), &cam, 300, 220).rgba
+            solidcraft_viewport::render(&scene(&s, &cam).unwrap(), &cam, 300, 220).rgba
         };
         // Pixels in the body's exact colour: only a plain cut has them (lit faces are shaded).
         let solid = |img: &[u8]| img.chunks(4).filter(|p| p[..3] == [40, 160, 90]).count();
@@ -1336,6 +1682,48 @@ mod tests {
         assert_eq!(solid(&hatched), 0, "the hatched cut is tinted");
         let shades = |img: &[u8]| img.chunks(4).map(|p| [p[0], p[1], p[2]]).collect::<std::collections::BTreeSet<_>>().len();
         assert!(shades(&hatched) > shades(&plain), "the hatch adds its stripes' shades");
+    }
+
+    /// A post standing on a plate, cut through: the post's cut is its own (blue) cap down to the
+    /// plate, whichever body came first; the plate's top (the same plane as the post's bottom,
+    /// seen through the cut) does not show through it (the viewport: `solidcraft-gpu`'s depth tests).
+    #[test]
+    fn cpu_picture_a_body_standing_on_another_keeps_its_own_cap() {
+        let plate = ("solid.box", json!({"length": 80, "width": 50, "height": 10, "body_name": "Plate"}));
+        let post = ("solid.cylinder", json!({"radius": 12, "height": 40, "base": [20, 25, 10], "body_name": "Post"}));
+        for post_first in [false, true] {
+            let mut s = Session::default();
+            for (c, p) in if post_first { [&post, &plate] } else { [&plate, &post] } {
+                s.execute(c, p).unwrap();
+            }
+            s.execute("appearance.assign", &json!({"bodies": ["Plate"], "appearance": "ABS - Red"})).unwrap();
+            s.execute("appearance.assign", &json!({"bodies": ["Post"], "appearance": "ABS - Blue"})).unwrap();
+            s.execute("inspect.section", &json!({"plane": {"origin": [0, 25, 0], "normal": [0, -1, 0]}})).unwrap();
+            // The home view, and one looking into the cut at an angle (#4622 review).
+            let oblique = |c: &mut Camera| (c.target, c.yaw, c.pitch, c.distance) = (Vec3::new(30.0, 25.0, 12.0), 0.25, 0.4, 90.0);
+            for (fov, angled) in [(0.0, false), (0.6, false), (0.0, true), (0.6, true)] {
+                let mut cam = home_camera(&s).unwrap();
+                cam.fov = fov;
+                if angled {
+                    oblique(&mut cam);
+                }
+                let sc = scene(&s, &cam).unwrap();
+                let img = solidcraft_viewport::render(&sc, &cam, 400, 400);
+                let vp = cam.view_proj(1.0, sc.radius);
+                let mut wrong = Vec::new();
+                for x in (10..=30).map(f64::from) {
+                    for z in [11.0, 12.0, 13.0, 14.0] {
+                        let q = vp.apply(Vec3::new(x, 25.0, z));
+                        let (px, py) = (((q[0] / q[3] + 1.0) * 200.0) as usize, ((1.0 - q[1] / q[3]) * 200.0) as usize);
+                        let p = &img.rgba[(py * 400 + px) * 4..][..3];
+                        if i16::from(p[2]) <= i16::from(p[0]) + 25 {
+                            wrong.push(((x, z), p.to_vec()));
+                        }
+                    }
+                }
+                assert!(wrong.is_empty(), "fov {fov}, angled {angled}, post first {post_first}: not the post's cap at {wrong:?}");
+            }
+        }
     }
 
     /// The viewport asks whether each sketch is used several times a frame: the features are
@@ -1370,6 +1758,111 @@ mod tests {
         s.doc_mut().features.retain(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::Extrude { .. }));
         assert_eq!(Arc::as_ptr(&s.doc), address, "doc_mut still edits in place");
         assert_eq!(shown(&s), [true; 4], "an edit through doc_mut is read again");
+    }
+
+    /// The crossing of the drawn grid's lines takes the pointer when the pointer means it, and
+    /// the finer lattice holds the pointer otherwise (#7114).
+    ///
+    /// The numbers are the ones the harness's camera gives: a half height of 80 makes the
+    /// drawn grid's step 5 and the finer lattice's step 0.5.
+    ///
+    /// A pointer that is exactly on a point of the finer lattice holds that exact value: the
+    /// drawn grid does not carry it off to the crossing beside it. That is what keeps the
+    /// radius of the circle of the scenario `s12_pattern_bodies` at 4: the click at `x=14`
+    /// lands on the lattice's own point 14 and not on the crossing 15 beside it.
+    ///
+    /// A pointer that is not on a lattice point but is within a fine step of a crossing is
+    /// aimed at that crossing: that is the case the issue is about, and the test of the issue
+    /// is the pointer at `20.3125`, a sixteenth of a cell off the crossing 20.
+    #[test]
+    fn the_crossing_of_the_drawn_grid_takes_the_pointer_that_means_it() {
+        let point = |p: Vec2, minor: f64| sketch_grid_point(p, minor, minor / 10.0);
+        let near = |a: Vec2, b: Vec2| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9;
+        // The drawn grid's step 5 and the finer lattice's step 0.5.
+        // A pointer off a crossing but within a fine step of it lands on the crossing: the
+        // pointer is at 20.3125, the crossing is at 20.0, and the distance is 0.3125.
+        assert!(near(point(Vec2::new(20.3125, 20.0), 5.0), Vec2::new(20.0, 20.0)));
+        // A pointer exactly on a point of the finer lattice keeps that exact value: the
+        // pointer at 10.5 is 0.5 from the crossing 10.0, and it stays.
+        assert!(near(point(Vec2::new(10.5, 20.0), 5.0), Vec2::new(10.5, 20.0)));
+        assert!(near(point(Vec2::new(14.5, 20.0), 5.0), Vec2::new(14.5, 20.0)));
+        assert!(near(point(Vec2::new(9.5, 20.0), 5.0), Vec2::new(9.5, 20.0)));
+        // The radius of the circle of the scenario s12_pattern_bodies: the click at 14 is on
+        // the lattice's own point and stays, a whole fine step from the crossing 15.
+        assert!(near(point(Vec2::new(14.0, 10.0), 5.0), Vec2::new(14.0, 10.0)));
+        // A pointer on a crossing is on the crossing and on the lattice at once.
+        assert!(near(point(Vec2::new(10.0, 20.0), 5.0), Vec2::new(10.0, 20.0)));
+        // With small cells the lattice holds more of the pointer: at a step of 1 the pointer
+        // at 20.5 is 0.5 from the crossing 21.0, half a cell, and the lattice holds it.
+        assert!(near(point(Vec2::new(20.5, 20.0), 1.0), Vec2::new(20.5, 20.0)));
+        // But the pointer at 20.05 is 0.05 from the crossing 20.0, within a fine step of
+        // 0.1, so the crossing takes it.
+        assert!(near(point(Vec2::new(20.05, 20.0), 1.0), Vec2::new(20.0, 20.0)));
+        assert!(near(point(Vec2::new(20.0, 20.0), 1.0), Vec2::new(20.0, 20.0)));
+        // The free coordinate of a point that lines up with another one follows the same rule.
+        let free = |v: f64, fixed: f64, minor: f64| sketch_grid_free(v, fixed, minor, minor / 10.0);
+        assert!((free(20.3125, 20.0, 5.0) - 20.0).abs() < 1e-9);
+        assert!((free(10.5, 20.0, 5.0) - 10.5).abs() < 1e-9);
+        assert!((free(14.0, 10.0, 5.0) - 14.0).abs() < 1e-9);
+    }
+
+    /// A point snaps only to a crossing the grid draws (#7114).
+    ///
+    /// At the middle of the cross-fade between the levels 2 and 5 the grid draws only the lines
+    /// the two levels share, every 10 mm: the level of 5 mm is not drawn there, so there is no
+    /// crossing at 5 mm for the point to land on. The step the sketch snaps to is the step of
+    /// the lines that are drawn, not the step of the level that is fading out.
+    #[test]
+    fn a_point_snaps_only_to_a_crossing_the_grid_draws() {
+        // The lines the viewport draws at that zoom: the ones the two levels share.
+        let drawn: Vec<f64> = grid_lines(50.0, 0.0, 40.0, 8).iter().map(|l| l.offset).collect();
+        assert!(drawn.iter().all(|o| (o / 10.0).round() * 10.0 == *o), "the lines drawn: {drawn:?}");
+        assert!(!drawn.iter().any(|o| (*o - 5.0).abs() < 1e-9), "there is no line at 5 mm");
+        // The step the sketch snaps to: the one of the lines that are drawn.
+        let (minor, fine) = sketch_grid_step(50.0);
+        assert_eq!(minor, 10.0, "the step of the lines that are drawn");
+        assert_eq!(fine, 0.5, "the finer lattice's step");
+        // A pointer at 5.3125 is not near a crossing of the drawn grid: it does not land on the
+        // crossing 5 that is not drawn.
+        let p = sketch_grid_point(Vec2::new(5.3125, 10.0), minor, fine);
+        assert!(p.dist(Vec2::new(5.0, 10.0)) > 1e-9, "the point landed on the crossing 5 that is not drawn: {p:?}");
+    }
+
+    /// The finer lattice holds the point when the grid refuses the crossing (#7114).
+    ///
+    /// The grid's helpers never give the pointer back: when there is no crossing to take it, the
+    /// point lands on the finer lattice, which holds the value the user placed.
+    #[test]
+    fn the_fine_lattice_holds_the_point_when_the_grid_refuses_the_crossing() {
+        let (minor, fine) = sketch_grid_step(50.0);
+        // At that zoom the grid draws the lines every 10 mm only: there is no crossing at 5 mm,
+        // so the point lands on the lattice's own point 5.5.
+        let p = sketch_grid_point(Vec2::new(5.3125, 10.0), minor, fine);
+        assert!(p.dist(Vec2::new(5.5, 10.0)) < 1e-9, "the point lands at {p:?}");
+        // The pointer itself is never the answer.
+        assert!(p.dist(Vec2::new(5.3125, 10.0)) > 1e-9, "the point landed on the pointer");
+    }
+
+    /// The crossing of the drawn grid does not take a pointer that is more than two fine steps
+    /// away from it (#7114).
+    ///
+    /// With the drawn step 5 and the fine step 0.5, a pointer at 21.2 is 1.2 mm from the
+    /// crossing 20 (two and a half fine steps) and 0.2 from the lattice's own point 21: the
+    /// lattice holds the pointer, so the point does not move more than two fine steps away from
+    /// where it was.
+    #[test]
+    fn the_crossing_of_the_grid_does_not_take_a_pointer_more_than_two_fine_steps_away() {
+        let p = sketch_grid_point(Vec2::new(21.2, 20.0), 5.0, 0.5);
+        assert!(p.dist(Vec2::new(21.0, 20.0)) < 1e-9, "the point lands at {p:?}");
+    }
+
+    /// The nested cross-fade: while the finer level still draws its own lines, the crossings the
+    /// user sees are the finer ones, so a point snaps to them (#9843).
+    #[test]
+    fn a_nested_cross_fade_snaps_to_the_visible_crossing() {
+        let (minor, fine) = sketch_grid_step(110.0);
+        assert_eq!(minor, 5.0, "the finer level's lines are still drawn");
+        assert_eq!(sketch_grid_point(Vec2::new(5.7, 10.0), minor, fine), Vec2::new(5.0, 10.0));
     }
 }
 

@@ -1,0 +1,19 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#759"
+ ],
+ "what": "a cylinder r10 x 30 with its top face taken off, the open rim patched g2 (Curvature) and stitched: a dome over the tube that closes it",
+ "source": "invariants",
+ "method": "the patch meets the cylinder's wall along the rim circle: at G2 the dome's tangent plane is the wall's (vertical), so the cap rises from the rim, and its curvature across the rim is the wall's (0 along the axis). The dome's shape is the fill's own: no volume; one closed valid solid whose rim seam reaches g2 is the right answer.",
+ "body_count": 1,
+ "continuity": {
+  "order": "g2",
+  "edges": [
+   [
+    10,
+    0,
+    30
+   ]
+  ]
+ }
+}

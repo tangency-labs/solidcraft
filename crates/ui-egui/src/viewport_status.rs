@@ -51,10 +51,10 @@ pub(crate) fn section_setting(app: &SolveApp, origin: [f64; 3], normal: [f64; 3]
     let distance = crate::prefs::show_mm(app, offset, 1);
     let mut text = match axis {
         Some(axis) => format!("{axis} {distance}"),
-        None => crate::i18n::format("ui.viewport_status_section_tilted", &[("offset", &distance)]),
+        None => solidcraft_ui_text::format("ui.viewport_status_section_tilted", &[("offset", &distance)]),
     };
     if hatch {
-        text = crate::i18n::format("ui.viewport_status_section_hatch", &[("setting", &text)]);
+        text = solidcraft_ui_text::format("ui.viewport_status_section_hatch", &[("setting", &text)]);
     }
     Some(text)
 }
@@ -82,12 +82,12 @@ pub(crate) fn presentation(app: &SolveApp, effect: &Effect) -> Option<StatusItem
     }
     let command = solidcraft_engine::find_command(&effect.command)?;
     let setting = match effect.setting {
-        StatusSetting::Zebra { stripes } => crate::i18n::format("ui.viewport_status_stripes", &[("count", &stripes.to_string())]),
+        StatusSetting::Zebra { stripes } => solidcraft_ui_text::format("ui.viewport_status_stripes", &[("count", &stripes.to_string())]),
         StatusSetting::Draft { pull, angle_deg } => format!("{} · {angle_deg}°", direction(pull)),
         StatusSetting::Environment => String::new(),
-        StatusSetting::Accessibility { direction: from } => crate::i18n::format("ui.viewport_status_from", &[("direction", &direction(from))]),
+        StatusSetting::Accessibility { direction: from } => solidcraft_ui_text::format("ui.viewport_status_from", &[("direction", &direction(from))]),
         StatusSetting::Curvature { radius_mm } => format!("R {}", crate::prefs::show_mm(app, radius_mm, 1)),
-        StatusSetting::Continuity { edge_count } => crate::i18n::format("ui.viewport_status_edges", &[("count", &edge_count.to_string())]),
+        StatusSetting::Continuity { edge_count } => solidcraft_ui_text::format("ui.viewport_status_edges", &[("count", &edge_count.to_string())]),
         StatusSetting::Section { origin_mm, normal, hatch } => section_setting(app, origin_mm, normal, hatch)?,
     };
     Some(StatusItem {
@@ -167,7 +167,7 @@ pub(crate) fn reconcile(app: &mut SolveApp, ctx: &egui::Context) {
     app.viewport_status.reconcile_summary(ctx, members);
     // The popup is a separate foreground host: the badge's Background layer cannot
     // shield it. Tools deliberately remain eligible for their existing row actions.
-    let higher_owner = app.prefs_window.open
+    let higher_owner = app.prefs_window.shell.open
         || app.dialog.is_some()
         || app.keymap.open
         || app.ui.palette_open

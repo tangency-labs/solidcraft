@@ -10,18 +10,27 @@
 //! size), and the decoder itself runs under the same limit.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_doc::canvas::{Canvas, base64_decode, image_info};
-use solidcraft_geom::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_io::Geom2;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
+use crate::schema::canvas::{CanvasToSketchParams, CanvasTraced};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("canvas.to_sketch", "Canvas to Sketch", to_sketch).icon("canvas").params(concat!(
-    "canvas?: id or name (default: the last canvas); name?: the new sketch's name. Traces the canvas image (dark drawing on a light background, ",
-    "or the reverse) into a new sketch on the canvas plane, lying exactly on the image: lines, splines and holes"
-))];
+const TO_SKETCH_CONTRACT: TypedContract<CanvasToSketchParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("canvas.to_sketch", "Canvas to Sketch", crate::checked!("canvas.to_sketch", to_sketch))
+    .icon("canvas")
+    .contract(&TO_SKETCH_CONTRACT)
+    .output(output_schema_for::<CanvasTraced>)
+    .params(concat!(
+        "canvas?: id or name (default: the last canvas); name?: the new sketch's name. Traces the canvas image (dark drawing on a light background, ",
+        "or the reverse) into a new sketch on the canvas plane, lying exactly on the image: lines, splines and holes"
+    ))];
 
 const WORK_RES: u32 = 512;
 const MAX_LOOPS: usize = 2000;
@@ -75,9 +84,10 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("{} sketch", canvas.name));
     let r = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), canvas.plane.clone(), None)?;
-    let id = r.get("sketch").and_then(Value::as_u64);
+    // `sketch.create` always reports the id of the sketch it made.
+    let id = r.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the canvas"))?;
     let tol = (sc * 0.01).max(1e-6);
-    let made = super::sketch::edit(s, &json!({}), cmd, false, |sk, _| {
+    let made = super::sketch::edit_solve(s, &json!({}), cmd, false, |sk, _| {
         let (cs, _) = super::sketch_import::add_geometry(sk, &geom, &|q| q, 1.0, tol)?;
         Ok(cs.len())
     });
@@ -91,7 +101,10 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     };
     finish(s, &json!({}))?;
     let holes = loops.iter().filter(|l| l.depth % 2 == 1).count();
-    Ok(json!({"sketch": id, "name": name, "canvas": canvas.id, "curves": curves, "outlines": loops.len() - holes, "holes": holes, "info": info}))
+    super::sketch_canvas::canvas_reply(
+        cmd,
+        CanvasTraced { sketch: id, name, canvas: canvas.id, curves, outlines: loops.len() - holes, holes, info, param_warnings: Vec::new() },
+    )
 }
 
 fn pick(s: &Session, p: &Value, cmd: &str) -> Result<Canvas> {

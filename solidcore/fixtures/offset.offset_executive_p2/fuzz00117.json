@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "fuzz": {
+        "base": "pe_Fillet_box_diff_cyl_f2_d0_out_ext",
+        "mutations": [
+          "/config/member_approx_tol = -0.0"
+        ],
+        "seed": 18246873986750999459
+      },
+      "inputs": {
+        "config": {
+          "extend_convex": true,
+          "inset": false,
+          "member_approx_tol": -0.0,
+          "member_distance": 0.5,
+          "merge_results": false
+        },
+        "faces": [
+          {
+            "index": 2,
+            "origin": "source"
+          }
+        ],
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Fillet/box_diff_cyl.smb"
+          }
+        },
+        "tolerance": 0.0001
+      },
+      "name": "fuzz00117"
+    }
+  ],
+  "fuzz_failure": {
+    "case": "fuzz00117",
+    "detail": "values.result.geometry[0]: cpp=1e-5 rust=0e0",
+    "verdict": "differs"
+  }
+}

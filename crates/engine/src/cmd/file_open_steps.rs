@@ -30,13 +30,17 @@ pub struct OpenSteps {
     stop: usize,
     /// The model came from the file and needs no evaluation.
     adopted: bool,
+    /// Whether a signature check was asked for, and (when it was) its result, made on the worker
+    /// so landing the design does not hash its payloads on the window thread.
+    verify: bool,
+    checked: Option<Option<solidcraft_io::ProvenanceReport>>,
 }
 
 impl OpenSteps {
     /// Read the design file `doc.open` would open with parameters `p`, without evaluating it.
     /// `None` when `p` names a file `doc.open` reads in another way (a CAD, mesh or drawing file,
     /// or a point cloud), or asks for something only those take: run `doc.open` for it.
-    pub fn start(p: &Value) -> Result<Option<OpenSteps>> {
+    pub fn start(p: &Value, validation: solidcraft_kernel::Validation) -> Result<Option<OpenSteps>> {
         let Some(path) = p.get("path").and_then(Value::as_str) else { return Ok(None) };
         let other = solidcraft_io::is_step_path(path)
             || solidcraft_io::is_mesh_path(path)
@@ -47,9 +51,14 @@ impl OpenSteps {
             return Ok(None);
         }
         let read_only = bool_(p, "read_only").unwrap_or(false);
+        let verify = bool_(p, "verify").unwrap_or(false);
         // Stamped before it is read, as `doc.open` does.
         let disk = solidcraft_io::design_lock::stamp(path);
         let (mut doc, saved) = read_design(&mut Session::default(), path)?;
+        // A file with provenance must not adopt its excluded cache: the shield would then vouch
+        // for geometry the signature does not cover.
+        let signed = solidcraft_io::has_design_provenance(path);
+        let checked = verify.then(|| solidcraft_io::read_design_provenance_file(path));
         super::super::component_link::resolve_design_links(&mut doc, Some(path));
         // What `Session::opened` does before it evaluates.
         solidcraft_io::vfs::install_checks();
@@ -57,7 +66,8 @@ impl OpenSteps {
         let doc = Arc::new(doc);
         let marker = doc.marker;
         let stop = marker.unwrap_or(usize::MAX).min(doc.features.len());
-        let adopted = Session::saved_model(&doc, saved.as_ref());
+        // A model saved under another check mode holds that mode's results: evaluated again.
+        let adopted = if signed { None } else { Session::saved_model(&doc, saved.as_ref()).filter(|model| model.validation() == validation) };
         let steps = OpenSteps {
             path: path.to_string(),
             read_only,
@@ -68,7 +78,9 @@ impl OpenSteps {
             next: if adopted.is_some() { stop } else { 0 },
             stop,
             adopted: adopted.is_some(),
-            model: adopted.unwrap_or_default(),
+            model: adopted.unwrap_or_else(|| under(validation)),
+            verify,
+            checked,
         };
         Ok(Some(steps))
     }
@@ -114,12 +126,24 @@ impl OpenSteps {
     /// yet evaluated are evaluated now.
     pub fn finish(mut self, s: &mut Session) -> Result<Value> {
         Arc::make_mut(&mut self.doc).marker = self.marker;
+        // The results so far hold another mode's checks: evaluated again, as `Session::opened` would.
+        if self.model.validation() != s.validation() {
+            self.model = under(s.validation());
+            self.adopted = false;
+        }
         if !self.adopted {
             // Every result is current: this takes them all and keeps the placement proof
             // `Session::opened` keeps.
             self.model.evaluate_shared(&self.doc);
         }
         let opened = Session::with_model(self.doc, self.visibility, self.model).located(Some(&self.path));
-        opened_design(s, opened, &self.path, self.read_only, self.disk)
+        opened_design(s, opened, &self.path, self.read_only, self.disk, self.verify, self.checked)
     }
+}
+
+/// A model with no results yet, checking its features under `validation`.
+fn under(validation: solidcraft_kernel::Validation) -> Model {
+    let mut model = Model::default();
+    model.set_validation(validation);
+    model
 }

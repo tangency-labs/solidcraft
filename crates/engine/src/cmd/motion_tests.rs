@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -15,6 +16,13 @@ fn occ(s: &Session, component: &str) -> u64 {
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
 }
 
+/// The call that deletes item `id` with `delete`: Edit Contact Set deletes with `delete: true`;
+/// Delete Motion Study and Delete Exploded View take only the item, and strict refuses any other
+/// key (#12155).
+fn deletion(delete: &str, key: &str, id: u64) -> Value {
+    if delete == "contact.edit" { json!({key: id, "delete": true}) } else { json!({key: id}) }
+}
+
 #[test]
 fn deleted_motion_item_ids_are_not_reused_after_reopening() {
     for (create, delete, key, params) in [
@@ -28,13 +36,13 @@ fn deleted_motion_item_ids_are_not_reused_after_reopening() {
             run(&mut s, "component.create", json!({"name": name}));
         }
         let first = run(&mut s, create, params.clone())[key].as_u64().unwrap();
-        let deletion = json!({key: first, "delete": true});
-        run(&mut s, delete, deletion.clone());
+        let deleting = deletion(delete, key, first);
+        run(&mut s, delete, deleting.clone());
         let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
         *s.doc_mut() = doc;
         let second = run(&mut s, create, params)[key].as_u64().unwrap();
         assert!(second > first, "{create}: deleted item {first} was reused as {second}");
-        assert!(s.execute(delete, &deletion).is_err());
+        assert!(s.execute(delete, &deleting).is_err());
     }
 }
 
@@ -59,7 +67,7 @@ fn default_names_skip_names_in_use() {
         let (first, one) = made(&mut s);
         let (_, two) = made(&mut s);
         assert_eq!([one, two], [format!("{prefix}1"), format!("{prefix}2")]);
-        run(&mut s, delete, json!({key: first, "delete": true}));
+        run(&mut s, delete, deletion(delete, key, first));
         assert_eq!(made(&mut s).1, format!("{prefix}1"), "{create}: the free name, not {prefix}2 again");
     }
     // Placements: with the first deleted, a copy takes a name none has.
@@ -147,7 +155,7 @@ fn assert_joint_only_moves(s: &mut Session, joint: &str) {
     use std::sync::Arc;
     let definitions = s.model.state();
     let meshes: Vec<_> = definitions.bodies.iter().map(|b| b.mesh()).collect();
-    for body in &s.world_state().bodies {
+    for body in &s.world_state().unwrap().bodies {
         std::hint::black_box(body.mesh());
         std::hint::black_box(body.display_plan());
     }
@@ -167,7 +175,7 @@ fn assert_joint_only_moves(s: &mut Session, joint: &str) {
         for (b, mesh) in current.bodies.iter().zip(&meshes) {
             assert!(Arc::ptr_eq(&b.mesh(), mesh), "{}: canonical mesh replaced", b.name);
         }
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let (_, work) = crate::kernel::profile::capture(|| {
             for b in &world.bodies {
                 let local = definitions.body(b.definition_name()).unwrap().mesh();
@@ -240,7 +248,7 @@ fn joint_pose_second_occurrence_shares_the_definition() {
     let mut s = joined_motion_part(PartAuthoring::InComponent, JoinSelection::Named);
     let second = run(&mut s, "occurrence.copy", json!({"component":"Rotor","translate":[40,0,0]}))["occurrence"].as_u64().unwrap();
     run(&mut s, "joint.as_built", json!({"type":"revolute","name":"Copy turn","a":0,"b":second,"at":{"occurrence":0,"point":[40,0,0],"z":[0,0,1]}}));
-    assert_eq!(s.world_state().bodies.len(), 2);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 2);
     assert_joint_only_moves(&mut s, "Copy turn");
     assert_motion_matches_full_rebuild(&s);
 }
@@ -679,6 +687,25 @@ fn motion_study_plays_and_exports() {
     assert_eq!(run(&mut s, "motion.list", json!({}))["studies"].as_array().map(Vec::len), Some(0));
 }
 
+/// A placement's name in a motion CSV is one field, whatever it holds (#12728). A comma is kept in
+/// quotes, where it used to become a space; a quote or a line break no longer splits the row; and a
+/// name that a spreadsheet would run as a formula opens as text.
+#[test]
+fn a_motion_csv_keeps_each_placement_name_in_its_field() {
+    let mut s = rail();
+    run(&mut s, "motion.study", json!({"name": "Push", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 10], [100, -5]]}]}));
+    run(&mut s, "component.rename", json!({"component": "B", "name": "=B, \"x\"\ny"}));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-motion-names-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let csv = dir.join("names.csv");
+    run(&mut s, "motion.export", json!({"study": "Push", "samples": 2, "path": csv.to_string_lossy()}));
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(text.contains(",A:1,") && text.contains(",\"'=B, \"\"x\"\"\ny:1\","), "{text}");
+    // A header, a row for each placement at each of the two samples, and the line break in each of B's rows.
+    assert_eq!(text.matches('\n').count(), 1 + 2 * 2 + 2, "{text}");
+}
+
 /// Regression (#9741): `motion.study` takes degrees for angle keys, so `motion.list` must give
 /// the keys back in those same units — feeding a listed study straight back to `motion.study`
 /// must not turn a 90° key into 1.57°.
@@ -717,10 +744,22 @@ fn exploded_views_show_without_changing_the_design() {
     run(&mut s, "explode.show", json!({"view": "Apart"}));
     // Centres at x 5 and 25 → middle 15: each moves 10 mm further out.
     let bb = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["bodies"][0]["bbox"]["min"][0].as_f64().unwrap_or(f64::NAN);
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert!((bb(&mut s, &names[0]) + 10.0).abs() < 1e-6, "{names:?}");
     assert!((bb(&mut s, &names[1]) - 30.0).abs() < 1e-6);
     assert_eq!(s.doc.occurrences, before, "shown only");
+    // The design's placements are not the view's: the properties report where the design
+    // places B, and Capture Position has nothing of the view's to keep (it stays shown).
+    let b_id = occ(&s, "B");
+    let centre =
+        |s: &mut Session| run(s, "occurrence.properties", json!({"occurrence": b_id}))["total"]["center_of_mass"][0].as_f64().unwrap_or(f64::NAN);
+    run(&mut s, "explode.show", json!({"view": null}));
+    let placed = centre(&mut s);
+    run(&mut s, "explode.show", json!({"view": "Apart"}));
+    assert!((centre(&mut s) - placed).abs() < 1e-9, "{} shown, {placed} placed", centre(&mut s));
+    assert_eq!(run(&mut s, "component.capture_position", json!({}))["captured"], 0);
+    assert_eq!(s.doc.occurrences, before, "the exploded view is never captured");
+    assert!((bb(&mut s, &names[1]) - 30.0).abs() < 1e-6, "still shown");
     run(&mut s, "explode.show", json!({"view": null}));
     assert!(bb(&mut s, &names[0]).abs() < 1e-6);
     run(&mut s, "explode.create", json!({"name": "Hand", "moves": [{"occurrence": "B", "translate": [0, 0, 50]}]}));
@@ -729,6 +768,37 @@ fn exploded_views_show_without_changing_the_design() {
         (run(&mut s, "inspect.measure", json!({"bodies": [names[1]]}))["bodies"][0]["bbox"]["min"][2].as_f64().unwrap_or(0.0) - 50.0).abs() < 1e-6
     );
     assert_eq!(run(&mut s, "explode.list", json!({}))["views"].as_array().map(Vec::len), Some(2));
+}
+
+/// An exploded view's move is a world translation: a part inside a component turned 90° about z
+/// moves the way the view gives, not along the turned component's own x (#13939).
+#[test]
+fn an_exploded_part_inside_a_turned_component_moves_the_way_given() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Frame"}));
+    run(&mut s, "solid.box", json!({"length": 60, "width": 20, "height": 10, "center": [30, 10, 5], "body_name": "Rail"}));
+    run(&mut s, "component.create", json!({"name": "Pin", "parent": "Frame"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 30, "center": [30, 10, 25], "body_name": "Peg"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let frame = occ(&s, "Frame");
+    run(&mut s, "occurrence.ground", json!({"occurrence": frame, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": frame, "space": "world", "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+    let centre = |s: &mut Session| {
+        let bbox = run(s, "inspect.measure", json!({"bodies": ["Peg"]}))["bodies"][0]["bbox"].clone();
+        let mid = |k: usize| (bbox["min"][k].as_f64().unwrap_or(f64::NAN) + bbox["max"][k].as_f64().unwrap_or(f64::NAN)) / 2.0;
+        Vec3::new(mid(0), mid(1), mid(2))
+    };
+    let placed = centre(&mut s);
+    assert!(placed.dist(Vec3::new(-10.0, 30.0, 25.0)) < 1e-6, "turned with the frame: {placed:?}");
+
+    let pin = occ(&s, "Pin");
+    let r = run(&mut s, "explode.create", json!({"name": "Out", "moves": [{"occurrence": pin, "translate": [80, 0, 0]}]}));
+    assert_eq!(r["moves"][0]["translate"], json!([80.0, 0.0, 0.0]), "the view keeps the world move it was given");
+    run(&mut s, "explode.show", json!({"view": "Out"}));
+    let shown = centre(&mut s);
+    assert!(shown.dist(placed + Vec3::new(80.0, 0.0, 0.0)) < 1e-6, "80 mm along world x: {placed:?} -> {shown:?}");
+    run(&mut s, "explode.show", json!({"view": null}));
+    assert!(centre(&mut s).dist(placed) < 1e-6, "assembled again");
 }
 
 /// #9142: on a part of plain bodies (the sample plate) Exploded View opened its dialog and failed
@@ -759,8 +829,8 @@ fn exploded_view_is_greyed_out_until_there_are_two_components() {
 }
 
 /// Pictures drawn by the CPU rasterizer (the engine has no GPU): real views of the scene.
-fn cpu(scene: &crate::render::Scene, cam: &crate::render::Camera, w: u32, h: u32) -> Result<crate::capture::Picture, String> {
-    Ok(crate::capture::Picture { rgba: crate::render::render(scene, cam, w as usize, h as usize).rgba, renderer: "cpu" })
+fn cpu(scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32) -> Result<crate::capture::Picture, String> {
+    Ok(crate::capture::Picture { rgba: solidcraft_viewport::render(scene, cam, w as usize, h as usize).rgba, renderer: "cpu" })
 }
 
 /// A folder of its own for one test's files.
@@ -883,7 +953,7 @@ fn an_animation_is_drawn_from_the_camera_given() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let record = {
         let seen = seen.clone();
-        move |scene: &crate::render::Scene, cam: &crate::render::Camera, w: u32, h: u32| {
+        move |scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32| {
             seen.lock().unwrap().push(*cam);
             cpu(scene, cam, w, h)
         }
@@ -933,7 +1003,7 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let record = {
         let seen = seen.clone();
-        move |scene: &crate::render::Scene, cam: &crate::render::Camera, w: u32, h: u32| {
+        move |scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32| {
             let mut lows: Vec<[i64; 2]> =
                 scene.meshes.iter().map(|m| m.mesh.bounds().min).map(|v| [(v.x * 1e3).round() as i64, (v.z * 1e3).round() as i64]).collect();
             lows.sort();
@@ -954,7 +1024,7 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
         assert_eq!(gif_frames(&std::fs::read(&gif).unwrap()), (24, 16, seen.len()));
         seen
     };
-    let lows = |seen: &[(Vec<[i64; 2]>, crate::render::Camera)]| seen.iter().map(|(l, _)| l.clone()).collect::<Vec<_>>();
+    let lows = |seen: &[(Vec<[i64; 2]>, solidcraft_viewport::Camera)]| seen.iter().map(|(l, _)| l.clone()).collect::<Vec<_>>();
     // A at x 0, B at x 20: each moves 10 mm out, at a steady pace.
     let at = |x: i64| vec![[x * 1000, 0], [(20 - x) * 1000, 0]];
     let apart = frames(json!({"view": "Apart", "samples": 3}));
@@ -964,8 +1034,8 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
     assert_eq!(lows(&round), [at(0), at(-5), at(-10), at(-5), at(0)]);
     // One camera for the whole clip, framing the parts assembled and exploded alike.
     assert!(round.iter().all(|(_, c)| *c == round[0].1));
-    let mut framed = crate::render::Camera::default();
-    framed.fit(&solidcraft_geom::Aabb3 { min: Vec3::new(-10.0, 0.0, 0.0), max: Vec3::new(40.0, 10.0, 10.0) });
+    let mut framed = solidcraft_viewport::Camera::default();
+    framed.fit(&solidcraft_render::view_bounds(&solidcraft_geom::Aabb3 { min: Vec3::new(-10.0, 0.0, 0.0), max: Vec3::new(40.0, 10.0, 10.0) }));
     assert!(round[0].1.target.dist(framed.target) < 1e-9 && (round[0].1.distance - framed.distance).abs() < 1e-9, "{:?}", round[0].1);
     // Without samples: 41 frames, or 81 with back (the middle one exploded).
     assert_eq!(frames(json!({"view": "Apart"})).len(), 41);
@@ -1185,4 +1255,312 @@ fn an_in_context_sketch_follows_only_the_parts_it_reads() {
     assert_eq!(s.model.last_recomputed, 0);
     assert!(std::sync::Arc::ptr_eq(&model, &s.model.state()));
     same_bodies(&s.model.state(), &rebuilt(&s));
+}
+
+/// `deepest` as it was before its triangles were indexed: every sample point and edge tested
+/// against every triangle of the other mesh. The reference the indexed one must equal.
+fn deepest_scanning(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, tol: f64) -> f64 {
+    let tb = super::tris(b);
+    let bx = b.bounds();
+    let mut pts: Vec<Vec3> = a.positions.clone();
+    let mut edges: Vec<(Vec3, Vec3)> = Vec::new();
+    for [p, q, r] in super::tris(a) {
+        pts.extend([(p + q) * 0.5, (q + r) * 0.5, (r + p) * 0.5, (p + q + r) * (1.0 / 3.0)]);
+        edges.extend([(p, q), (q, r), (r, p)]);
+    }
+    let outside = |p: Vec3| {
+        p.x < bx.min.x - tol || p.x > bx.max.x + tol || p.y < bx.min.y - tol || p.y > bx.max.y + tol || p.z < bx.min.z - tol || p.z > bx.max.z + tol
+    };
+    let nearest = |p: Vec3| tb.iter().map(|[a, b, c]| super::closest(p, *a, *b, *c).dist(p)).fold(f64::MAX, f64::min);
+    let mut best = 0.0f64;
+    for p in pts.into_iter().take(200_000) {
+        if outside(p) {
+            continue;
+        }
+        let d = nearest(p);
+        if d > tol.max(best) && super::inside(p, &tb) {
+            best = d;
+        }
+    }
+    for (p, q) in edges.into_iter().take(200_000) {
+        if p.x.max(q.x) < bx.min.x - tol
+            || p.x.min(q.x) > bx.max.x + tol
+            || p.y.max(q.y) < bx.min.y - tol
+            || p.y.min(q.y) > bx.max.y + tol
+            || p.z.max(q.z) < bx.min.z - tol
+            || p.z.min(q.z) > bx.max.z + tol
+        {
+            continue;
+        }
+        let d = q - p;
+        let len2 = d.dot(d);
+        if len2 <= 0.0 {
+            continue;
+        }
+        let mut hits: Vec<f64> =
+            tb.iter().filter_map(|t| super::contact_sweep::segment_hits_triangle(p, q, t)).map(|h| (h - p).dot(d) / len2).collect();
+        if hits.len() < 2 {
+            continue;
+        }
+        hits.sort_by(|x, y| x.total_cmp(y));
+        hits.dedup_by(|x, y| (*x - *y).abs() < 1e-6);
+        let mut deepest = 0.0f64;
+        for pair in hits.chunks(2) {
+            if pair.len() < 2 {
+                break;
+            }
+            let m = p + d * ((pair[0] + pair[1]) * 0.5);
+            let deep = nearest(m);
+            if deep > tol.max(deepest) && super::inside(m, &tb) {
+                deepest = deep;
+            }
+        }
+        best = best.max(deepest);
+    }
+    best
+}
+
+/// A fixed-seed generator for the meshes below (splitmix64).
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+    /// Uniform in [lo, hi).
+    fn range(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (hi - lo) * ((self.next() >> 11) as f64 / (1u64 << 53) as f64)
+    }
+    fn point(&mut self, centre: Vec3, r: f64) -> Vec3 {
+        centre + Vec3::new(self.range(-r, r), self.range(-r, r), self.range(-r, r))
+    }
+}
+
+fn mesh_of(positions: Vec<Vec3>, triangles: Vec<[u32; 3]>) -> solidcraft_geom::Mesh {
+    solidcraft_geom::Mesh { positions, triangles, ..Default::default() }
+}
+
+/// A closed lumpy sphere: `n` segments round, `n / 2` rings, each vertex's radius jittered.
+fn blob(rng: &mut Rng, centre: Vec3, r: f64, n: usize) -> solidcraft_geom::Mesh {
+    let rings = (n / 2).max(2);
+    let mut positions = vec![centre + Vec3::new(0.0, 0.0, r), centre - Vec3::new(0.0, 0.0, r)];
+    for i in 1..rings {
+        let phi = std::f64::consts::PI * i as f64 / rings as f64;
+        for j in 0..n {
+            let th = std::f64::consts::TAU * j as f64 / n as f64;
+            let rr = r * rng.range(0.8, 1.2);
+            positions.push(centre + Vec3::new(rr * phi.sin() * th.cos(), rr * phi.sin() * th.sin(), rr * phi.cos()));
+        }
+    }
+    let at = |i: usize, j: usize| (2 + (i - 1) * n + j % n) as u32;
+    let mut triangles = Vec::new();
+    for j in 0..n {
+        triangles.push([0, at(1, j), at(1, j + 1)]);
+        triangles.push([1, at(rings - 1, j + 1), at(rings - 1, j)]);
+        for i in 1..rings - 1 {
+            triangles.push([at(i, j), at(i + 1, j), at(i + 1, j + 1)]);
+            triangles.push([at(i, j), at(i + 1, j + 1), at(i, j + 1)]);
+        }
+    }
+    mesh_of(positions, triangles)
+}
+
+/// A closed axis-aligned box (faces square to the axes), its sides split `n` ways.
+fn boxed(lo: Vec3, hi: Vec3, n: usize) -> solidcraft_geom::Mesh {
+    let mut positions = Vec::new();
+    let mut triangles = Vec::new();
+    let lerp = |a: f64, b: f64, t: f64| a + (b - a) * t;
+    // Each face as (fixed axis, its value, whether it faces +).
+    for (axis, side) in [(0, false), (0, true), (1, false), (1, true), (2, false), (2, true)] {
+        let base = positions.len() as u32;
+        for i in 0..=n {
+            for j in 0..=n {
+                let (s, t) = (i as f64 / n as f64, j as f64 / n as f64);
+                let v = if side { 1.0 } else { 0.0 };
+                let c = match axis {
+                    0 => [v, s, t],
+                    1 => [t, v, s],
+                    _ => [s, t, v],
+                };
+                positions.push(Vec3::new(lerp(lo.x, hi.x, c[0]), lerp(lo.y, hi.y, c[1]), lerp(lo.z, hi.z, c[2])));
+            }
+        }
+        let at = |i: usize, j: usize| base + (i * (n + 1) + j) as u32;
+        for i in 0..n {
+            for j in 0..n {
+                let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+                if side {
+                    triangles.extend([[a, b, c], [a, c, d]]);
+                } else {
+                    triangles.extend([[a, c, b], [a, d, c]]);
+                }
+            }
+        }
+    }
+    mesh_of(positions, triangles)
+}
+
+/// Loose triangles near `centre`: ordinary ones, slivers, repeated and collinear vertices, and
+/// ones lying all but along the parity ray or along an axis.
+fn soup(rng: &mut Rng, centre: Vec3, r: f64, n: usize) -> solidcraft_geom::Mesh {
+    let mut positions = Vec::new();
+    for k in 0..n {
+        let a = rng.point(centre, r);
+        let [b, c] = match k % 6 {
+            0 | 1 => [rng.point(centre, r), rng.point(centre, r)],
+            // A sliver: c a hair off the line ab.
+            2 => {
+                let b = rng.point(centre, r);
+                [b, (a + b) * 0.5 + Vec3::new(1.0, -1.0, 0.5) * (r * 1e-9 * rng.range(0.0, 1.0))]
+            }
+            // Repeated or collinear vertices.
+            3 => {
+                let b = rng.point(centre, r);
+                if rng.next().is_multiple_of(2) { [b, b] } else { [b, a + (b - a) * 2.0] }
+            }
+            // All but along the parity ray.
+            4 => {
+                let tilt = Vec3::new(1.0, -0.5, 0.3) * (r * rng.range(0.0, 1e-6));
+                let across = super::RAY.cross(Vec3::new(1.0, 0.0, 0.0));
+                [a + super::RAY * (r * rng.range(0.1, 1.0)) + tilt, a + across * (r * rng.range(0.1, 1.0))]
+            }
+            // Square to an axis.
+            _ => [a + Vec3::new(r * rng.range(0.1, 1.0), 0.0, 0.0), a + Vec3::new(0.0, r * rng.range(0.1, 1.0), 0.0)],
+        };
+        positions.extend([a, b, c]);
+    }
+    let triangles = (0..n as u32).map(|k| [3 * k, 3 * k + 1, 3 * k + 2]).collect();
+    mesh_of(positions, triangles)
+}
+
+/// Each query of the index answers as a scan of every triangle would: the nearest distance
+/// (bit for bit), ray parity and the multiset of segment hits.
+fn assert_queries_match(rng: &mut Rng, m: &solidcraft_geom::Mesh, label: &str) {
+    let tb = super::tris(m);
+    let surface = super::Surface::new(tb.clone());
+    let bx = m.bounds();
+    let (centre, r) = (bx.center(), bx.diagonal().max(1e-12));
+    for k in 0..60 {
+        // Points near the surface as well as anywhere around it.
+        let p = match (k % 3, tb.get(rng.next() as usize % tb.len().max(1))) {
+            (0, Some([a, b, c])) => {
+                (*a + *b + *c) * (1.0 / 3.0) + Vec3::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)) * (r * 1e-3)
+            }
+            _ => rng.point(centre, r * 0.7),
+        };
+        let scan = tb.iter().map(|[a, b, c]| super::closest(p, *a, *b, *c).dist(p)).fold(f64::MAX, f64::min);
+        assert_eq!(surface.distance(p, f64::NEG_INFINITY).to_bits(), scan.to_bits(), "{label}: distance from {p:?}");
+        let cut = rng.range(0.0, r);
+        let early = surface.distance(p, cut);
+        assert!(if scan > cut { early.to_bits() == scan.to_bits() } else { early <= cut }, "{label}: distance from {p:?} beyond {cut}");
+        assert_eq!(surface.inside(p), super::inside(p, &tb), "{label}: inside {p:?}");
+        let q = if k % 2 == 0 { rng.point(centre, r * 0.7) } else { p + super::RAY * rng.range(-r, r) + Vec3::new(1e-9, 0.0, 0.0) * r };
+        let mut want: Vec<[u64; 3]> = tb
+            .iter()
+            .filter_map(|t| super::contact_sweep::segment_hits_triangle(p, q, t))
+            .map(|h| [h.x.to_bits(), h.y.to_bits(), h.z.to_bits()])
+            .collect();
+        let mut got: Vec<[u64; 3]> = surface.segment_hits(p, q).into_iter().map(|h| [h.x.to_bits(), h.y.to_bits(), h.z.to_bits()]).collect();
+        want.sort_unstable();
+        got.sort_unstable();
+        assert_eq!(got, want, "{label}: hits of {p:?}→{q:?}");
+    }
+}
+
+/// The overlap check's deepest point, with the other mesh's triangles indexed, is the scan's to
+/// the bit, on fixed-seed random meshes: lumpy closed spheres, boxes and loose triangles
+/// (slivers, repeated vertices, triangles along the parity ray), from a thousandth of a
+/// millimetre to a metre, passing into each other or apart.
+#[test]
+fn the_overlap_depth_with_an_index_is_the_scan_of_every_triangle() {
+    let mut rng = Rng(0x5eed_1445_0001);
+    let mut deep = 0;
+    for case in 0..120 {
+        let scale = 10f64.powf(rng.range(-3.0, 3.0));
+        let centre = rng.point(Vec3::ZERO, 100.0 * scale);
+        let make = |rng: &mut Rng, c: Vec3| match rng.next() % 4 {
+            0 | 1 => {
+                let n = 6 + rng.next() as usize % 20;
+                let r = scale * rng.range(0.5, 2.0);
+                blob(rng, c, r, n)
+            }
+            2 => {
+                let half = Vec3::new(rng.range(0.3, 2.0), rng.range(0.3, 2.0), rng.range(0.3, 2.0)) * scale;
+                boxed(c - half, c + half, 1 + rng.next() as usize % 4)
+            }
+            _ => {
+                let n = 30 + rng.next() as usize % 60;
+                soup(rng, c, scale, n)
+            }
+        };
+        let a = make(&mut rng, centre);
+        let near = rng.point(centre, 1.5 * scale);
+        let b = make(&mut rng, near);
+        for tol in [1e-4 * scale.max(1.0), 0.0, 1e-2 * scale] {
+            let (want, got) = (deepest_scanning(&a, &b, tol), super::deepest(&a, &b, tol));
+            assert_eq!(got.to_bits(), want.to_bits(), "case {case}, tol {tol}: {got} vs {want}");
+            deep += usize::from(want > tol);
+        }
+        assert_queries_match(&mut rng, &b, &format!("case {case}"));
+    }
+    assert!(deep > 60, "the cases reach into each other often enough to test the depth: {deep}");
+}
+
+/// The slow case (#14450): an arm whose r3 pin sits inside a post's r5 pin, its plate meeting
+/// the post's stop block as it turns. The arm's bodies turned about the pin, through the angles
+/// where the plate meets the block's corners, give the depth the scan gives, bit for bit.
+#[test]
+fn the_overlap_depth_of_pins_in_each_other_is_the_scan_of_every_triangle() {
+    let mut s = Session::default();
+    for (name, corner, size, radius) in [("Post", [40.0, 10.0, 0.0], [10.0, 10.0, 20.0], 5), ("Arm", [10.0, -2.0, 0.0], [50.0, 4.0, 20.0], 3)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "corner": corner}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": radius, "height": 20, "operation": "new"}));
+    }
+    let (post, arm) = (occ(&s, "Post"), occ(&s, "Arm"));
+    let mesh = |b: &solidcraft_kernel::Body| b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-3).max(1e-3))).unwrap();
+    let bodies = super::placed(&s);
+    let of = |o: u64| bodies.iter().filter(|(path, _)| path.contains(&o)).map(|(_, b)| (mesh(b), b.size())).collect::<Vec<_>>();
+    let (posts, arms) = (of(post), of(arm));
+    assert!(posts.len() == 2 && arms.len() == 2, "two bodies a part");
+    let mut overlapping = 0;
+    for deg in [0.0f64, 5.0, 10.92, 11.5, 20.0, 45.0, 180.0, 300.0, 332.6] {
+        let (sin, cos) = deg.to_radians().sin_cos();
+        for (ma, sa) in &arms {
+            let mut turned = ma.clone();
+            for p in &mut turned.positions {
+                *p = Vec3::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos, p.z);
+            }
+            for (mb, sb) in &posts {
+                let tol = 1e-4 * sa.max(*sb).max(1.0);
+                for (x, y) in [(&turned, mb), (mb, &turned)] {
+                    let (want, got) = (deepest_scanning(x, y, tol), super::deepest(x, y, tol));
+                    assert_eq!(got.to_bits(), want.to_bits(), "{deg}°: {got} vs {want}");
+                    overlapping += usize::from(want > tol);
+                }
+            }
+        }
+    }
+    // The pins are in each other at every angle (seen at least one way round), and the plate
+    // meets the block at some.
+    assert!(overlapping > 9, "{overlapping}");
+}
+
+#[test]
+fn occurrence_centres_use_exact_body_bounds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "component.from_bodies", json!({"bodies": ["Plate"]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Lid"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0]}));
+    let c = super::centres(&s);
+    assert_eq!(c.len(), 2);
+    assert!((c[0].1.x - 5.0).abs() < 1e-4);
+    assert!((c[1].1.x - 35.0).abs() < 1e-4);
 }

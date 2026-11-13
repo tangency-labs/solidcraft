@@ -1,19 +1,21 @@
 //! Persistent face and edge names as values, and their text form.
 //!
 //! A face name says what made the face: a feature and its role there (`F2:top`, `F2:side:l4`), a
-//! fillet or chamfer and the edge it rounds (`F5:blend:<edge>`), a shell and the face it offsets
-//! (`F3:inner:<face>`), or, without history, a body and an index (`Body1:face:3`). Suffixes
+//! fillet or chamfer and the edge it rounds (`F5:blend(<edge>)`), a shell and the face it offsets
+//! (`F3:inner(<face>)`), or, without history, a body and an index (`Body1:face:3`). Suffixes
 //! follow: a pattern copy (`@F7.2`), a piece of a split face told apart by the faces around it
 //! (`#[<face>,…]`, `#k` after it for a tie), an older design's numbered piece (`#k`). An edge is
-//! the two faces it separates, `~k` for one of several between them.
+//! the two faces it separates, `~k` for one of several between them; a seam, whose two sides are
+//! the same face, names that face once.
 //!
 //! The text form, read by [`FaceName::parse`] and [`EdgeName::parse`] and written by `Display`:
 //!
 //! ```text
-//! edge     = face { "|" face } [TIE]       one face for an open boundary, more where several meet
+//! edge     = face { "|" face } [TIE]       one face for an open boundary or a seam (both of an
+//!                                          edge's sides on one face), more where several meet
 //! face     = base { suffix }
-//! base     = FEATURE ":" "blend" ":" ( edge | NUMBER )
-//!          | FEATURE ":" "inner" ":" face
+//! base     = FEATURE ":" "blend" "(" edge ")"
+//!          | FEATURE ":" "inner" "(" face ")"
 //!          | FEATURE ":" role
 //!          | text                              (`<body>:face:<k>`, or any other text)
 //! suffix   = COPY | "#[" face { "," face } "]" [HASH] | HASH
@@ -21,19 +23,20 @@
 //! HASH     = "#" NUMBER        TIE  = "~" NUMBER
 //! ```
 //!
-//! Suffixes after a nested name are ambiguous in the text: in `F5:blend:A|B#[…]` the qualifier
-//! may split `B` (the fillet rounds an edge of a piece made before it) or the fillet face itself
-//! (a later cut split it), and so for a shell's inner wall `F3:inner:X#[…]`. A suffix naming a
-//! feature later than the outer face's belongs to the outer face; any other stays inside, so a
-//! later cut told apart only by older faces reads as a piece of the inner name. A `~k` ending an
-//! edge numbers that edge, not a blend's edge inside it.
+//! A name inside a name ends at its `)`, and that says which face a suffix qualifies: in
+//! `F5:blend(A|B#[…])` the qualifier splits `B` (the fillet rounds an edge of a piece made before
+//! it) and in `F5:blend(A|B)#[…]` it splits the fillet face itself (a later cut split it), and so
+//! for a shell's inner wall `F3:inner(X#[…])`. The older form, a nested name after a colon
+//! (`F5:blend:A|B`), is still read, and there a suffix after the nested name is the nested name's
+//! unless it names a later feature than the outer face's. A `~k` ending an edge numbers that
+//! edge, not a blend's edge inside it.
 //!
 //! Finding a face by name still goes through `naming::strip_piece` and `parent_piece`, which
 //! read a trailing qualifier as the whole name's; they move here once the text form says where a
 //! qualifier belongs.
 //!
 //! Reading is bounded in length and depth and never panics; whatever it reads writes back as the
-//! same text.
+//! same name, in the current form.
 
 /// The longest name read.
 /// The longest name read. Names of pieces list their neighbours and grow with every split: a face
@@ -165,12 +168,87 @@ pub enum NameError {
 /// written into a name and read back, and it must read back as itself. A list would have
 /// to follow every change of the grammar (#5861), and would miss an id that reads back as
 /// something else (`s1.l4` reads as profile 1 of curve `l4`).
+///
+/// The parentheses are the one exception: they are the name's own, for the name it holds
+/// (`F5:blend(F2:side:l2|F2:top)`), and the round trip cannot see that an id holds one.
+/// The name `F0:side:c(1` reads back as itself, but the name it lands in
+/// (`F5:blend(F2:side:c(1|F2:top)`) closes at the wrong `)`, so the id is refused.
 pub fn text_fits_name(text: &str) -> bool {
+    if text.contains('(') || text.contains(')') {
+        return false;
+    }
     let name = format!("F0:side:{text}");
     match FaceName::parse(&name) {
         Ok(f) => f.to_string() == name && matches!(&f.base, Base::Made { role: Role::Side { profile: None, curve }, .. } if curve == text),
         Err(_) => false,
     }
+}
+
+/// Whether two names are the same face, whichever text form they are written in.
+///
+/// A name saved before the parentheses reads as the same name, so a design written by an older
+/// build still finds its faces (#5857). The two forms are compared as the names they are, not
+/// as text: the older form says where a suffix belongs only by the feature it names, so the
+/// same text can mean two different faces.
+pub fn same_face(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    match (FaceName::parse(a), FaceName::parse(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
+
+/// Whether two names are the same edge, whichever text form they are written in.
+pub fn same_edge(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    match (EdgeName::parse(a), EdgeName::parse(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
+
+/// Whether `name` is written in the older form, with a name inside a name after a colon.
+///
+/// A name in that form says where a suffix belongs only by the feature it names, so it is read
+/// as the name it was (#5857).
+pub fn in_old_form(name: &str) -> bool {
+    name.contains(":blend:") || name.contains(":inner:")
+}
+
+/// The name as it is written now: a name written in the older form reads as the name it was, and
+/// is written as today's name (`F5:blend(A|B)` for `F5:blend:A|B`). A name already written in
+/// today's form is kept as it is, and a name that does not read is kept as it is too.
+pub fn written_now(name: &str) -> std::borrow::Cow<'_, str> {
+    if !in_old_form(name) {
+        return std::borrow::Cow::Borrowed(name);
+    }
+    match FaceName::parse(name) {
+        Ok(f) => std::borrow::Cow::Owned(f.to_string()),
+        Err(_) => std::borrow::Cow::Borrowed(name),
+    }
+}
+
+/// Whether `current` (today's name) is the same face as `wanted` (a stored name, read).
+///
+/// Only the names that hold a name inside a name can differ in text between the two forms, so
+/// the others are compared as they are.
+pub fn same_face_read(current: &str, wanted: &FaceName) -> bool {
+    if !holds_a_name(current) {
+        return false;
+    }
+    match FaceName::parse(current) {
+        Ok(c) => c == *wanted,
+        Err(_) => false,
+    }
+}
+
+/// Whether `name` holds a name inside a name, in either form.
+fn holds_a_name(name: &str) -> bool {
+    name.contains(":blend:") || name.contains(":inner:") || name.contains(":blend(") || name.contains(":inner(")
 }
 
 impl FaceName {

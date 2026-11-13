@@ -21,7 +21,7 @@ scripts and AI agents can drive the same commands you use.
 - Sheet metal with flat patterns and DXF export, and a plastic-enclosure subset.
 - A Render workspace with GPU rendering, studio lighting, materials and image export
   (first release in 0.22.0).
-- Import and export of STEP, IGES, 3MF, STL, OBJ and DXF, and FreeCAD and Rhino files.
+- Import and export of STEP, IGES, 3MF, STL, OBJ and DXF, GLB export for viewers and renderers, and FreeCAD and Rhino files.
 - Autosave and crash recovery, and the browser build of the same app.
 
 The full list of commands is in [docs/features.md](docs/features.md). Release notes for each
@@ -224,6 +224,12 @@ completed drawings publish atomically. The browser still exports synchronously.
   texture rendering and expanded component families are not implemented by this entry.
 
 ## Render foundation
+
+- Wood surface images (#1345): native CPU and GPU opaque rendering share physical
+  repeat frames and filtered mip chains. Imported maps retain exact bytes and
+  declared provenance in the design, reopen offline, and expose grain-angle
+  controls. Scalar face appearances suppress body maps. Planar projection and
+  CPU encoding/optical limits remain explicit; see [portable surfaces](docs/render-portable-surfaces-and-stages.md).
 
 - Original starter appearances (#1722): 34 opaque recipes through existing commands, with six explicitly unavailable glass recipes and preserved legacy looks; see [the contract](docs/render-starter-appearances.md).
 
@@ -662,7 +668,9 @@ completed drawings publish atomically. The browser still exports synchronously.
   pieces survive unfold/refold as one logical sheet group, including split flanged sheets.
   Cut-outs made in the flat pattern cross bends at any angle or curved: their edges fold to
   helices and curves on the bend, their walls square to the sheet. Free-form bases use bounded
-  sampling.
+  sampling. A fold crosses the sheet's own outer edges the same way, slanted or on any curve,
+  with the outline exact in the flat pattern and its DXF, and flanges and other folds still go
+  on the panels.
   Parallel prismatic partial-depth cuts retain pocket side and depth through transfer and
   unfold/refold, with separate pocket contours in preview and DXF. Planar Intersect preserves
   exact holes and retained islands, including the union of multiple selected profiles, and
@@ -723,7 +731,7 @@ and reference-object placement remain separate work, as do loft rails and center
   a seekable reader defers original blobs until after provisional display.
   See [container format](docs/design-container.md) and [performance measurements](docs/perf.md).
 - Warm saves with explicit `cache: true` can include a versioned native B-rep cache through SolidCraft-owned topology
-  and geometry records, with a separate truck adapter and bounded binary reader. Exact
+  and geometry records, with a separate kernel adapter and bounded binary reader. Exact
   face-source certificates and operation history survive codec round trips. A provisional
   picture can be generated before original blobs are read; editing and measurement wait
   for authoritative reconstruction. Cached metadata binds preview and reconstruction to
@@ -772,5 +780,6 @@ and reference-object placement remain separate work, as do loft rails and center
   reported case returns from 86 to 49 faces with unchanged material and bounds; regressions
   cover stepped stock, STEP round trips and saved projections from removed pieces.
 
-truck (Apache-2.0) behind our own `kernel` crate, with our own blend operation and boolean
-retry/validation; see `plan/adr/0001-geometry-kernel.md` (local) — summary in README.
+solidcore (Apache-2.0), the Rust port of NVIDIA's SMLib, vendored in `solidcore` behind
+our own `kernel` crate, with our own boundary and boolean retry/validation; see
+`plan/adr/0001-geometry-kernel.md` (local) — summary in README.

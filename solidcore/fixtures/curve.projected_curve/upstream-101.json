@@ -1,0 +1,255 @@
+{
+ "cases": [
+  {
+   "name": "rotation_aux_tilted_vs_x_equal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:986 TestSmProjectedCurveRotationAxes (v1.0.1; upstream's base is a default SmLine, here a linear B-spline)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "ctor": 0,
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "vec": [
+      0,
+      0,
+      1
+     ],
+     "aux": [
+      1,
+      0,
+      1
+     ],
+     "ptype": 2,
+     "owns": 0
+    },
+    "op": "equal",
+    "other": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "ctor": 0,
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "vec": [
+      0,
+      0,
+      1
+     ],
+     "aux": [
+      1,
+      0,
+      0
+     ],
+     "ptype": 2,
+     "owns": 0
+    }
+   }
+  },
+  {
+   "name": "rotation_aux_tilted_state",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:986 TestSmProjectedCurveRotationAxes (v1.0.1; upstream's base is a default SmLine, here a linear B-spline)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "ctor": 0,
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "vec": [
+      0,
+      0,
+      1
+     ],
+     "aux": [
+      1,
+      0,
+      1
+     ],
+     "ptype": 2,
+     "owns": 0
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "rotation_aux_y_vs_x_unequal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:986 TestSmProjectedCurveRotationAxes (v1.0.1; upstream's base is a default SmLine, here a linear B-spline) (control: a different axis)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "ctor": 0,
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "vec": [
+      0,
+      0,
+      1
+     ],
+     "aux": [
+      0,
+      1,
+      0
+     ],
+     "ptype": 2,
+     "owns": 0
+    },
+    "op": "equal",
+    "other": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "ctor": 0,
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "vec": [
+      0,
+      0,
+      1
+     ],
+     "aux": [
+      1,
+      0,
+      0
+     ],
+     "ptype": 2,
+     "owns": 0
+    }
+   }
+  }
+ ]
+}

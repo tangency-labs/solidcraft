@@ -3,18 +3,21 @@
 //! joint values and a point's path with their velocities and accelerations; `motion.interference`
 //! answers the pairs of parts that pass through each other along the way.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::joints;
 use solidcraft_doc::motion::MotionStudy;
 use solidcraft_doc::{Document, Mat, apply_point, mat_mul};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::Aabb3;
 
 use super::contact_sweep::{ContactGeometry, Member};
 use super::{drive_with_contact, joint_id, keyed, occurrences, path_world, study_index, traced_point, values_at};
 use crate::params::{bad, bool_, num};
+use crate::schema::motion::PartPlace;
+use crate::schema::motion_analysis::{CollidingPair, MotionInterference, MotionPlot, PlotSeries, PlottedPoint, StudyStop};
 use crate::{EngineError, Result, Session};
 
 pub const PLOT_DOC: &str = "study: id|name; joints?: [id|name] (default: every joint that moves); occurrence? and point? (a point \
@@ -29,11 +32,14 @@ pub const PLOT_DOC: &str = "study: id|name; joints?: [id|name] (default: every j
 
 pub const INTERFERENCE_DOC: &str = "study: id|name; occurrences?: [ids or names] (two or more, checked against each other; \
      default every occurrence), with against?: [ids or names] (then each of `occurrences` is checked only against these, such \
-     as an arm against the parts it must miss), or contact_sets?: true (the pairs of the design's contact sets); samples? \
+     as an arm against the parts it must miss), or contact_sets?: true (the pairs of the design's contact sets); exclude_pairs?: [[a, b]] (occurrences by id or name: \
+     pairs of bodies under a and b are not checked); samples? \
      (2…1000, default the study's steps + 1); budget_s?: seconds (above 0, at most 86400; default a fixed work budget): the \
      time the check may take instead, looked at between samples, for a mechanism such as a gear train that needs longer → collisions: [{a, b, first_step, last_step, steps: [[from, to]…] (the step ranges where they overlap), \
-     depth_mm (how far into each other, the most at deepest_step), volume_mm3 (their overlap there; null when it was not \
-     cheap to work out)}], clear (every sample checked and none collide; never while truncated), \
+     volume_mm3 (the most volume they share at a sample, worked out exactly from the bodies), deepest_step (the first sample \
+     sharing that volume), not_measured (null, or why the volume was not worked out at every sample they overlap, such as \
+     a budget it ran past: then volume_mm3 and deepest_step are null, never an estimate), depth_mm (how far into each \
+     other at most: an estimate from points of the bodies' contact meshes, not exact)}], clear (every sample checked and none collide; never while truncated), \
      pairs (checked), samples (taken), truncated (the work budget, or budget_s, ran out; checked_to: the last step checked), budget_s \
      (when given), stopped_at, \
      stopped_by_loop. The study plays as motion.play plays it but contact sets do not stop it, on a copy (the design is not \
@@ -46,10 +52,13 @@ const MAX_SERIES: usize = 256;
 /// Most collision work over a whole study (see `ContactGeometry::hits`).
 const MAX_WORK: usize = 500_000_000;
 /// Longest time an interference check may be given (`budget_s`): a day, as `inspect.interference`.
-const MAX_BUDGET_S: f64 = 86_400.0;
-/// Most colliding pairs whose overlap volume is worked out, and most body booleans that takes.
+pub(super) const MAX_BUDGET_S: f64 = 86_400.0;
+/// Most pairs `exclude_pairs` may list.
+const MAX_EXCLUDED: usize = 10_000;
+/// Most colliding pairs whose overlap volume is worked out, and most body booleans that takes
+/// over the whole study (one per pair of overlapping bodies at each sample a pair collides).
 const MAX_VOLUMES: usize = 16;
-const MAX_BOOLEANS: usize = 64;
+const MAX_BOOLEANS: usize = 256;
 
 /// How many samples `p` asks for (`min`…`MAX_SAMPLES`, default the study's steps + 1).
 fn samples(p: &Value, m: &MotionStudy, min: usize, cmd: &str) -> Result<usize> {
@@ -74,8 +83,8 @@ fn step_of(m: &MotionStudy, k: usize, n: usize) -> f64 {
 /// Plays study `m` on a copy of the design in `n` samples, each driven from the one before (so
 /// closed loops follow on their branch, as `motion.play` places them; contact sets stop it only
 /// when `contact`). `each` sees the copy at every sample and answers whether to go on. Returns
-/// where the motion stopped short (all null when it did not).
-fn play(s: &Session, m: &MotionStudy, n: usize, contact: bool, mut each: impl FnMut(&Session, usize) -> Result<bool>) -> Result<Value> {
+/// where the motion stopped short (all `None` when it did not).
+fn play(s: &Session, m: &MotionStudy, n: usize, contact: bool, mut each: impl FnMut(&Session, usize) -> Result<bool>) -> Result<Stopped> {
     let mut t = s.scratch();
     // Played from where the parts are placed: moves only shown are not where joints are solved.
     t.pending_moves.clear();
@@ -87,14 +96,22 @@ fn play(s: &Session, m: &MotionStudy, n: usize, contact: bool, mut each: impl Fn
         let want = values_at(&t, m, step_of(m, k, n));
         let (r, _) = drive_with_contact(&mut t, &want, &given)?;
         let go = each(&t, k)?;
-        if r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() {
-            return Ok(json!({"stopped_at": k, "stopped_by_loop": r["stopped_by_loop"], "stopped_by_contact": r["stopped_by_contact"]}));
+        let (by_loop, by_contact) = (r["stopped_by_loop"].as_object(), r["stopped_by_contact"].as_object());
+        if by_loop.is_some() || by_contact.is_some() {
+            return Ok(Stopped { stop: StudyStop { stopped_at: Some(k), stopped_by_loop: by_loop.cloned() }, by_contact: by_contact.cloned() });
         }
         if !go {
             break;
         }
     }
-    Ok(json!({"stopped_at": null, "stopped_by_loop": null, "stopped_by_contact": null}))
+    Ok(Stopped { stop: StudyStop { stopped_at: None, stopped_by_loop: None }, by_contact: None })
+}
+
+/// Where [`play`] stopped short: the replies' `stopped_at` and `stopped_by_loop`, and the
+/// contact that stopped it (which only a plot reports: interference plays without contact).
+struct Stopped {
+    stop: StudyStop,
+    by_contact: Option<Map<String, Value>>,
 }
 
 /// The derivative of samples `v` spaced `h` apart: central differences inside, second-order
@@ -202,12 +219,9 @@ pub(super) fn plot(s: &mut Session, p: &Value) -> Result<Value> {
     let seconds_per_step = duration.map(|d| d / f64::from(m.steps));
     let h = f64::from(m.steps) / (n - 1) as f64 * seconds_per_step.unwrap_or(1.0);
     let per = if duration.is_some() { "s" } else { "step" };
-    let steps: Vec<f64> = (0..taken).map(|k| step_of(&m, k, n)).collect();
-    let mut out = json!({"study": m.name, "steps": m.steps, "samples": taken, "step": steps});
-    if let Some(sps) = seconds_per_step {
-        out["time"] = steps.iter().map(|st| st * sps).collect();
-    }
-    let joints_out: Vec<Value> = series
+    let step: Vec<f64> = (0..taken).map(|k| step_of(&m, k, n)).collect();
+    let time = seconds_per_step.map(|sps| step.iter().map(|st| st * sps).collect());
+    let joints_out: Vec<PlotSeries> = series
         .iter()
         .zip(values.iter_mut())
         .map(|((id, i), v)| {
@@ -223,13 +237,21 @@ pub(super) fn plot(s: &mut Session, p: &Value) -> Result<Value> {
                     unwrap_degrees(v);
                 }
             }
-            json!({"joint": id, "name": j.map(|j| j.name.clone()), "index": i, "dof": j.and_then(|j| j.kind.dofs().get(*i).copied()),
-                "unit": unit, "velocity_unit": format!("{unit}/{per}"), "acceleration_unit": format!("{unit}/{per}²"),
-                "value": v, "velocity": derivative(v, h), "acceleration": second_derivative(v, h)})
+            PlotSeries {
+                joint: *id,
+                name: j.map(|j| j.name.clone()),
+                index: *i,
+                dof: j.and_then(|j| j.kind.dofs().get(*i).copied()),
+                unit,
+                velocity_unit: format!("{unit}/{per}"),
+                acceleration_unit: format!("{unit}/{per}²"),
+                velocity: derivative(v, h),
+                acceleration: second_derivative(v, h),
+                value: std::mem::take(v),
+            }
         })
         .collect();
-    out["joints"] = json!(joints_out);
-    if let Some((occ, _)) = &point {
+    let followed = point.as_ref().map(|(occ, _)| {
         let axis = |c: usize| -> Vec<f64> { path.iter().map(|q| [q.x, q.y, q.z].get(c).copied().unwrap_or(0.0)).collect() };
         let d: Vec<(Vec<f64>, Vec<f64>)> = (0..3).map(|c| (derivative(&axis(c), h), second_derivative(&axis(c), h))).collect();
         let vec_at = |k: usize, second: bool| -> Vec3 {
@@ -237,16 +259,33 @@ pub(super) fn plot(s: &mut Session, p: &Value) -> Result<Value> {
             Vec3::new(c(0), c(1), c(2))
         };
         let (vel, acc): (Vec<Vec3>, Vec<Vec3>) = (0..path.len()).map(|k| (vec_at(k, false), vec_at(k, true))).unzip();
-        let xyz = |list: &[Vec3]| -> Value { list.iter().map(|v| json!([v.x, v.y, v.z])).collect() };
+        let xyz = |list: &[Vec3]| -> Vec<[f64; 3]> { list.iter().map(|v| [v.x, v.y, v.z]).collect() };
         let name = s.doc.occurrences.iter().find(|o| Some(&o.id) == occ.last()).map_or_else(|| "root".to_string(), |o| o.name.clone());
-        out["point"] = json!({"occurrence": name, "unit": "mm", "velocity_unit": format!("mm/{per}"), "acceleration_unit": format!("mm/{per}²"),
-            "position": xyz(&path), "velocity": xyz(&vel), "acceleration": xyz(&acc),
-            "speed": vel.iter().map(|v| v.len()).collect::<Vec<_>>(), "acceleration_norm": acc.iter().map(|v| v.len()).collect::<Vec<_>>()});
-    }
-    for k in ["stopped_at", "stopped_by_loop", "stopped_by_contact"] {
-        out[k] = stop[k].clone();
-    }
-    Ok(out)
+        PlottedPoint {
+            occurrence: name,
+            unit: "mm",
+            velocity_unit: format!("mm/{per}"),
+            acceleration_unit: format!("mm/{per}²"),
+            position: xyz(&path),
+            velocity: xyz(&vel),
+            acceleration: xyz(&acc),
+            speed: vel.iter().map(|v| v.len()).collect(),
+            acceleration_norm: acc.iter().map(|v| v.len()).collect(),
+        }
+    });
+    let reply = MotionPlot {
+        study: m.name,
+        steps: m.steps,
+        samples: taken,
+        step,
+        time,
+        joints: joints_out,
+        point: followed,
+        stop: stop.stop,
+        stopped_by_contact: stop.by_contact,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// One pair of parts that collides along a study.
@@ -254,15 +293,26 @@ struct Collision {
     names: (String, String),
     /// The samples where they overlap, in order.
     samples: Vec<usize>,
+    /// The most sampled mesh depth.
     depth: f64,
-    deepest: usize,
-    /// The design at the deepest sample (its placements).
-    at_deepest: Arc<Document>,
+    /// The most exact shared volume and the first sample sharing it, or why it is not measured
+    /// (a sample's volume was not worked out).
+    most_volume: std::result::Result<(f64, usize), String>,
 }
 
-/// The volume the parts under occurrences `a` and `b` share, placed as in `doc` (`None`: not
-/// worked out). Only bodies whose boxes overlap are intersected, at most `booleans` of them.
-fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usize) -> Option<f64> {
+impl Collision {
+    /// Takes the exact shared volume at sample `k`, or why it was not worked out. A volume
+    /// larger by no more than the booleans' rounding is a tie, which keeps the earlier sample.
+    fn take_volume(&mut self, k: usize, volume: std::result::Result<f64, String>) {
+        if let Ok((best, at)) = self.most_volume {
+            self.most_volume = volume.map(|v| if v > best + 1e-9 * best.max(1.0) { (v, k) } else { (best, at) });
+        }
+    }
+}
+
+/// The volume the parts under occurrences `a` and `b` share, placed as in `doc`, or why it was
+/// not worked out. Only bodies whose boxes overlap are intersected, at most `booleans` of them.
+fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usize) -> std::result::Result<f64, String> {
     let st = s.model.state();
     // The bodies under each (and not under the other), with their world frames and boxes.
     let mut sides: [Vec<(Mat, Aabb3, &solidcraft_doc::ModelBody)>; 2] = Default::default();
@@ -275,31 +325,38 @@ fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usi
         };
         for body in st.bodies.iter().filter(|x| doc.model_body_component(x) == comp && !x.body.is_mesh()) {
             let frame = doc.model_body_offset(body).map(|o| mat_mul(&m, o)).unwrap_or(m);
-            let local = body.mesh().bounds();
+            let local = body.body.exact_bounds().unwrap_or_else(|_| body.outline_bounds());
             let mut world = Aabb3::EMPTY;
             for c in 0..8 {
                 let pick = |bit: usize, lo: f64, hi: f64| if c & bit == 0 { lo } else { hi };
                 let corner = Vec3::new(pick(1, local.min.x, local.max.x), pick(2, local.min.y, local.max.y), pick(4, local.min.z, local.max.z));
                 world.add(apply_point(&frame, corner));
             }
-            sides.get_mut(side)?.push((frame, world, body));
+            if let Some(list) = sides.get_mut(side) {
+                list.push((frame, world, body));
+            }
         }
     }
+    let [first, second] = &sides;
     let mut total = 0.0;
-    for (fa, xa, ba) in sides.first()? {
-        for (fb, xb, bb) in sides.get(1)? {
+    for (fa, xa, ba) in first {
+        for (fb, xb, bb) in second {
             if xa.max.x < xb.min.x || xb.max.x < xa.min.x || xa.max.y < xb.min.y || xb.max.y < xa.min.y || xa.max.z < xb.min.z || xb.max.z < xa.min.z
             {
                 continue;
             }
-            *booleans = booleans.checked_sub(1)?;
-            let (pa, pb) = (solidcraft_kernel::transform_matrix(&ba.body, *fa).ok()?, solidcraft_kernel::transform_matrix(&bb.body, *fb).ok()?);
-            if let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).ok()? {
-                total += solidcraft_kernel::measure(&shared).ok()?.volume;
+            *booleans = booleans.checked_sub(1).ok_or_else(|| format!("the check's {MAX_BOOLEANS} body intersections ran out"))?;
+            let failed = |e: &dyn std::fmt::Display| format!("the intersection of {} and {} could not be made ({e})", ba.name, bb.name);
+            let (pa, pb) = (
+                solidcraft_kernel::transform_matrix(&ba.body, *fa).map_err(|e| failed(&e))?,
+                solidcraft_kernel::transform_matrix(&bb.body, *fb).map_err(|e| failed(&e))?,
+            );
+            if let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).map_err(|e| failed(&e))? {
+                total += solidcraft_kernel::measure(&shared).map_err(|e| failed(&e))?.volume;
             }
         }
     }
-    Some(total)
+    Ok(total)
 }
 
 /// Contiguous runs of samples, as study step ranges.
@@ -358,7 +415,44 @@ pub(super) fn checked_pairs(s: &Session, p: &Value, cmd: &str) -> Result<Contact
         let a = occurrences(s, p, cmd)?;
         geometry.keep_pairs(|x, y| (a.contains(&x) && b.contains(&y)) || (a.contains(&y) && b.contains(&x)));
     }
+    geometry.exclude(&excluded_pairs(s, p, cmd)?);
     Ok(geometry)
+}
+
+/// `exclude_pairs`: `[[a, b]…]`, occurrences by id or name (#5963).
+pub(super) fn excluded_pairs(s: &Session, p: &Value, cmd: &str) -> Result<Vec<(u64, u64)>> {
+    let list = match p.get("exclude_pairs") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(list)) => list,
+        Some(_) => return Err(bad(cmd, "`exclude_pairs` must list pairs: [[a, b]…]")),
+    };
+    if list.len() > MAX_EXCLUDED {
+        return Err(bad(cmd, format!("`exclude_pairs` lists more than {MAX_EXCLUDED} pairs")));
+    }
+    list.iter()
+        .map(|pair| match pair.as_array().map(Vec::as_slice) {
+            Some([a, b]) => {
+                let ids = occurrences(s, &json!({"occurrences": [a, b]}), cmd)?;
+                match ids.as_slice() {
+                    [a, b] => Ok((*a, *b)),
+                    _ => Err(bad(cmd, "each of `exclude_pairs` names two different occurrences")),
+                }
+            }
+            _ => Err(bad(cmd, "each of `exclude_pairs` is a pair: [a, b]")),
+        })
+        .collect()
+}
+
+/// Where a body placed through `path` (occurrence ids, from the top) sits: its component and
+/// the occurrences' names (#5963).
+pub(crate) fn part_place(doc: &Document, path: &[u64]) -> PartPlace {
+    let occurrence = |id: &u64| doc.occurrences.iter().find(|o| o.id == *id);
+    let component = path.last().and_then(occurrence).map(|o| o.component).unwrap_or(0);
+    PartPlace {
+        component: doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default(),
+        path: path.iter().map(|id| occurrence(id).map(|o| o.name.clone()).unwrap_or_default()).collect(),
+        path_ids: path.to_vec(),
+    }
 }
 
 pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
@@ -385,6 +479,7 @@ fn interference_within(s: &mut Session, p: &Value, budget: usize, seconds: Optio
     let geometry = checked_pairs(s, p, cmd)?;
     let mut found: BTreeMap<(u64, u64), Collision> = BTreeMap::new();
     let (mut work, mut checked, mut truncated) = (0usize, 0usize, false);
+    let mut booleans = MAX_BOOLEANS;
     let stop = play(s, &m, n, false, |t, k| {
         if deadline.is_some_and(|d| web_time::Instant::now() >= d) {
             truncated = true;
@@ -408,18 +503,25 @@ fn interference_within(s: &mut Session, p: &Value, budget: usize, seconds: Optio
         for ((a, an), (b, bn), depth) in hits {
             // Each pair once, the older occurrence (the lower id) first.
             let ((a, an), (b, bn)) = if a <= b { ((a, an), (b, bn)) } else { ((b, bn), (a, an)) };
+            // The first MAX_VOLUMES pairs found have their shared volume worked out.
+            let slots = found.len() < MAX_VOLUMES;
             let c = found.entry((a, b)).or_insert_with(|| Collision {
                 names: (an, bn),
                 samples: Vec::new(),
                 depth: 0.0,
-                deepest: k,
-                at_deepest: t.doc.clone(),
+                most_volume: if slots {
+                    Ok((0.0, k))
+                } else {
+                    Err(format!("more than {MAX_VOLUMES} pairs collide: only the first {MAX_VOLUMES} found have their volumes worked out"))
+                },
             });
-            if c.samples.last() != Some(&k) {
-                c.samples.push(k);
+            if c.samples.last() == Some(&k) {
+                continue;
             }
-            if depth > c.depth {
-                (c.depth, c.deepest, c.at_deepest) = (depth, k, t.doc.clone());
+            c.samples.push(k);
+            c.depth = c.depth.max(depth);
+            if c.most_volume.is_ok() {
+                c.take_volume(k, shared_volume(s, &t.doc, a, b, &mut booleans));
             }
         }
         Ok(true)
@@ -436,31 +538,45 @@ fn interference_within(s: &mut Session, p: &Value, budget: usize, seconds: Optio
     }
     let mut list: Vec<(&(u64, u64), &Collision)> = found.iter().collect();
     list.sort_by_key(|(_, c)| c.samples.first().copied().unwrap_or(usize::MAX));
-    let mut booleans = MAX_BOOLEANS;
-    let collisions: Vec<Value> = list
+    let collisions: Vec<CollidingPair> = list
         .iter()
-        .enumerate()
-        .map(|(i, ((a, b), c))| {
-            let volume = if i < MAX_VOLUMES { shared_volume(s, &c.at_deepest, *a, *b, &mut booleans) } else { None };
+        .map(|(_, c)| {
+            let (volume, deepest, not_measured) = match &c.most_volume {
+                Ok((v, at)) => (Some(*v), Some(step_of(&m, *at, n)), None),
+                Err(why) => (None, None, Some(why.clone())),
+            };
             let first = c.samples.first().map(|k| step_of(&m, *k, n));
             let last = c.samples.last().map(|k| step_of(&m, *k, n));
-            json!({"a": c.names.0, "b": c.names.1, "first_step": first, "last_step": last, "steps": ranges(&m, &c.samples, n),
-                "depth_mm": c.depth, "deepest_step": step_of(&m, c.deepest, n), "volume_mm3": volume})
+            CollidingPair {
+                a: c.names.0.clone(),
+                b: c.names.1.clone(),
+                first_step: first,
+                last_step: last,
+                steps: ranges(&m, &c.samples, n),
+                depth_mm: c.depth,
+                deepest_step: deepest,
+                volume_mm3: volume,
+                not_measured,
+            }
         })
         .collect();
     // A check cut short says nothing about the steps it did not reach, so it is not clear (#7855).
     let clear = collisions.is_empty() && !truncated;
-    let mut out = json!({"study": m.name, "steps": m.steps, "clear": clear, "collisions": collisions,
-        "pairs": geometry.pair_count(), "samples": checked, "truncated": truncated});
-    if truncated {
-        out["checked_to"] = json!(checked.checked_sub(1).map(|k| step_of(&m, k, n)));
-    }
-    if let Some(v) = seconds {
-        out["budget_s"] = json!(v);
-    }
-    out["stopped_at"] = stop["stopped_at"].clone();
-    out["stopped_by_loop"] = stop["stopped_by_loop"].clone();
-    Ok(out)
+    let reply = MotionInterference {
+        study: m.name.clone(),
+        steps: m.steps,
+        clear,
+        collisions,
+        pairs: geometry.pair_count(),
+        samples: checked,
+        truncated,
+        // At least one sample was checked (none is refused above), so this is a step.
+        checked_to: if truncated { checked.checked_sub(1).map(|k| step_of(&m, k, n)) } else { None },
+        budget_s: seconds,
+        stop: stop.stop,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(test)]

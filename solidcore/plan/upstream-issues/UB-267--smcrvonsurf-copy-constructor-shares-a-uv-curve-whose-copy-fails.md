@@ -1,0 +1,9 @@
+#### UB-267. The `SmCrvOnSurf` copy constructor shares an owned UV curve whose `Copy` fails (double delete) [PSIRT]
+- **Severity:** Crash / undefined behaviour
+- **Area:** Curves
+- **Location:** `source/SMLib/src/SmCrvOnSurf.cpp`, `SmCrvOnSurf::SmCrvOnSurf(const SmCrvOnSurf&)` (def. `:186`): `m_pUVCurve` starts as the source's pointer (`:189`); when the copy owns its curve, `crCurveToCopy.m_pUVCurve->Copy(*pContext, m_pUVCurve)` (`:211`) ignores the status and `m_pUVCurve->SetOwner(this)` (`:212`) runs on the shared pointer.
+- **What happens:** `SmHermiteCurve` has no `Copy`; the base `SmCurve::Copy` returns `SM_ERR` and leaves `m_pUVCurve` pointing at the source's UV curve. Both objects then own one curve, and the second destructor deletes it again. `SmCrvOnSurf::Copy` and `SmTangentField` (which does not override `Copy`) go through this constructor. UB-48 lists the same pattern in four other copy constructors.
+- **Trigger:** copy an `SmCrvOnSurf` or `SmTangentField` that owns an `SmHermiteCurve` UV curve (owner flag 1 to 3), then delete both. A curve on surface read with `SmCurve::ReadFromDB` owns its UV curve, and its record may hold a Hermite UV curve (`SmHermiteCurve_TYPE` is a readable curve record), so a crafted file reaches this when the curve read is copied.
+- **How found:** crash in the C++ reference run (generated difftest cases).
+- **Confirmed:** yes. Every `wh` case of `curve.tangent_field` (a tangent field with a Hermite UV curve, written, read back through `SmCurve::ReadFromDB`, then copied, the copy evaluated and both deleted) ended the difftest process in SIGSEGV against the v1.0.1 (3fd5b95) reference build. With the copy skipped, the same 160 cases run and match.
+- **Rust port:** not affected (safe Rust). `CrvOnSurf::copy` returns the UV curve's `Copy` error (`SM_ERR`). The `curve.tangent_field` shim skips `Copy` for an input Hermite UV curve (record `-2`), and the runner does the same.

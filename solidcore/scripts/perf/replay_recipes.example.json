@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "rounds": 3,
+  "threads": 2,
+  "timeout_seconds": 300,
+  "niceness": 10,
+  "max_load": 2,
+  "warmup_case": "box-cylinder",
+  "variants": [
+    {
+      "id": "baseline",
+      "binary": "binaries/baseline-cli",
+      "build_profile": "release",
+      "compatibility": "shipped"
+    },
+    {
+      "id": "candidate",
+      "binary": "binaries/candidate-cli",
+      "build_profile": "release",
+      "compatibility": "experiment"
+    }
+  ],
+  "cases": [
+    {
+      "id": "box-cylinder",
+      "recipe": "recipes/boolean-box-cylinder-join.json"
+    }
+  ]
+}

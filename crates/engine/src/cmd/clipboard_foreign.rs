@@ -2,10 +2,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::{Document, Feature, FeatureKind, Mat, PlaneRef};
 
 use crate::params::{bad, vec3};
+use crate::schema::timeline_clipboard::{PasteResult, Pasted};
 use crate::{Result, Sel, Session};
 
 const CMD: &str = "timeline.paste";
@@ -18,7 +19,7 @@ fn independent_plane(plane: &PlaneRef, depth: usize) -> Result<()> {
     }
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } => Ok(()),
-        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, line: None, .. } => {
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, line: None, pivot: None, .. } => {
             independent_plane(base, depth + 1)
         }
         _ => Err(bad(CMD, "the copied sketch's plane depends on model geometry; convert it to a fixed plane before pasting into another design")),
@@ -32,7 +33,7 @@ fn independent_links(sketch: &solidcraft_sketch::Sketch, features: &BTreeSet<u64
             L::Text { .. } | L::SketchAxis { .. } => true,
             L::SketchCurve { sketch, .. } | L::SketchPoint { sketch, .. } => features.contains(sketch),
             L::Origin | L::Axis { .. } => !moved,
-            L::Plane { name } => !moved && solidcraft_geom::Plane::named(name).is_some(),
+            L::Plane { name } => !moved && solidcore_record::Plane::named(name).is_some(),
             _ => false,
         };
         if !supported {
@@ -182,19 +183,16 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 Value::Number(n) => n.to_string(),
                 _ => return Err(bad(CMD, "`component` must be a component id or name")),
             };
-            s.doc.find_component(&key).ok_or_else(|| bad(CMD, format!("no component `{key}`")))?
+            s.doc.resolve_component(&key).map_err(|error| bad(CMD, error.to_string()))?.ok_or_else(|| bad(CMD, format!("no component `{key}`")))?
         }
     };
     let path = match p.get("component_path") {
-        Some(v) => v
-            .as_array()
-            .filter(|a| a.len() <= 64)
-            .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
-            .ok_or_else(|| bad(CMD, "`component_path` must list 0..64 occurrence ids"))?,
+        Some(v) => super::clipboard::component_path_form(v).ok_or_else(|| bad(CMD, "`component_path` must list 0..64 occurrence ids"))?,
         None if component == s.active_component => s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(component)),
-        None => super::component::placing::placement_of(s, &s.placed_document(), component, None, "component_path", CMD)?.0,
+        None => super::component::placing::placement_of(s, &s.design_document(), component, None, "component_path", CMD)?.0,
     };
-    let placed = s.placed_document();
+    // The target as the design places it, without an exploded view shown.
+    let placed = s.design_document();
     let frame = placed.path_transform(component, &path).ok_or_else(|| bad(CMD, "that path is not a placement of the target"))?;
     let into_target = solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(CMD, "the target's frame is not invertible"))?;
     drop(placed);
@@ -248,7 +246,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         }
         ids.insert(feature.id, id);
         names.insert(feature.name.clone(), name.clone());
-        made.push(json!({"id": id, "name": name, "from": feature.name}));
+        made.push(Pasted { id, name: name.clone(), from: feature.name.clone() });
     }
     parameters(scratch.doc_mut(), &copy.doc, &copy.features, &mut mapped)?;
     let source_values = copy.doc.param_values().0;
@@ -271,7 +269,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
-        feature.remap_clone(&ids, &names, &BTreeMap::new(), &mapped)?;
+        feature.remap_clone(&ids, &names, &BTreeMap::new(), &mapped, &BTreeMap::new(), &copy.doc)?;
         if let FeatureKind::Sketch { plane, sketch } = &mut feature.kind {
             // 3D wires carry their own coordinate space, independently of the sketch plane.
             for wire in &mut sketch.wires {
@@ -306,5 +304,6 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     }
     scratch.selection = ids.values().map(|id| Sel::Feature { id: *id }).collect();
     s.accept_computed(scratch);
-    Ok(json!({"pasted": made, "errors": [], "notices": []}))
+    serde_json::to_value(PasteResult { pasted: made, errors: Vec::new(), notices: Vec::new(), param_warnings: Vec::new() })
+        .map_err(|e| bad(CMD, e.to_string()))
 }

@@ -1,0 +1,84 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Holed sketch"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     20,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     10,
+     10
+    ],
+    "radius": 4
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "sketch": "Holed sketch",
+    "profiles": [
+     {
+      "point": [
+       2,
+       2
+      ]
+     }
+    ],
+    "body_name": "Holed"
+   }
+  },
+  {
+   "command": "surface.untrim",
+   "params": {
+    "face": {
+     "body": "Holed",
+     "point": [
+      2,
+      2,
+      0
+     ]
+    },
+    "holes": "all",
+    "in_place": true
+   }
+  }
+ ]
+}

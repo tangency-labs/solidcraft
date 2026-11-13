@@ -1,0 +1,19 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     20,
+     20
+    ],
+    "diameter": 6.6,
+    "type": "countersink",
+    "cs_diameter": 12,
+    "cs_angle": 90
+   }
+  }
+ ]
+}

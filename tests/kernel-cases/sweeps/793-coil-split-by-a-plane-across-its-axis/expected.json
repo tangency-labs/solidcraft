@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#793"
+ ],
+ "what": "a 6-turn coil (centre diameter 40, wire 2 mm, pitch 4) split by the plane z = 12.5 square to its axis (\"boolean Intersect: no result\")",
+ "source": "analytic",
+ "method": "the wire is a circle of radius 1 turned by a screw motion about Z (section in a plane through the axis): V = pi r^2 * 2 pi R * N = pi * 2 pi 20 * 6 = 2368.7. Splitting does not change the total, the plane cuts the helix obliquely and each half stays one connected spiral: two bodies whose volumes add up to the coil.",
+ "body_count": 2,
+ "volume_mm3": 2368.705056261446,
+ "bbox": {
+  "min": [
+   -21,
+   -21,
+   -1
+  ],
+  "max": [
+   21,
+   21,
+   25
+  ]
+ }
+}

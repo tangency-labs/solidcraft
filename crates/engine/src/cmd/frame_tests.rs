@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use crate::Session;
@@ -241,6 +242,73 @@ fn members_follow_every_line_of_a_rectangle() {
 }
 
 #[test]
+fn members_are_made_of_a_standard_size_by_name() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": {"size": "RSC 203x89"}}));
+    let bs = bodies(&mut s);
+    let names: Vec<&str> = bs.iter().map(|b| b.0.as_str()).collect();
+    assert_eq!(names, ["RSC 203x89", "RSC 203x89 (2)", "RSC 203x89 (3)", "RSC 203x89 (4)"]);
+    // Each member is the size's section, 37.9 cm² in the BS 4 table, the length of its line.
+    let props = run(&mut s, "frame.profile.properties", json!({"profile": {"size": "RSC 203x89"}}));
+    let area = f(&props["area"]);
+    assert!(rel(area, 3790.0) < 0.005, "{props}");
+    assert_eq!(props["size"], json!("RSC 203x89"));
+    assert_eq!(props["profile"]["flange_slope"], json!(5.0), "{props}");
+    let v = total_volume(&mut s);
+    assert!(rel(v, area * 2000.0) < MEASURED, "{v} vs {}", area * 2000.0);
+    // The bottom line runs along +X: the channel, 88.9 wide and 203.2 deep, is centred on it.
+    assert!(bs.iter().any(|b| near3(b.2, [0.0, -44.45, -101.6]) && near3(b.3, [600.0, 44.45, 101.6])), "{bs:?}");
+    // The design keeps the size's name and dimensions, and reopens to the same members.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("RSC 203x89") && saved.contains("5 deg"), "{saved}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let after = bodies(&mut reopened);
+    assert_eq!(after.iter().map(|b| b.0.as_str()).collect::<Vec<_>>(), names);
+    assert!(rel(total_volume(&mut reopened), v) < 1e-9);
+    // The reported profile, slope in degrees, is the same section given by its dimensions.
+    let again = run(&mut s, "frame.profile.properties", json!({"profile": props["profile"]}));
+    assert!(rel(f(&again["area"]), area) < 1e-12 && rel(f(&again["iyy"]), f(&props["iyy"])) < 1e-12, "{again}");
+    // In an inch design the size is still in millimetres.
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let inch = run(&mut s, "frame.profile.properties", json!({"profile": {"size": "SHS 100x100x5"}}));
+    assert!((f(&inch["width"]) - 100.0).abs() < 1e-9, "{inch}");
+}
+
+#[test]
+fn standard_sizes_are_listed_and_refused_with_the_reason() {
+    let mut s = Session::default();
+    let out = run(&mut s, "frame.profile.list", json!({}));
+    let sizes = out["sizes"].as_array().unwrap();
+    for family in sizes {
+        let names = family["names"].as_array().unwrap();
+        assert!(!names.is_empty() && !family["source"].as_str().unwrap_or_default().is_empty(), "{family}");
+        // The first and last size of each family make a section of their kind.
+        for name in [&names[0], &names[names.len() - 1]] {
+            let r = run(&mut s, "frame.profile.properties", json!({"profile": {"size": name}}));
+            assert_eq!(r["profile"]["kind"], family["kind"], "{r}");
+        }
+    }
+    let rsc = sizes.iter().find(|f| f["family"] == "RSC").unwrap();
+    for name in ["RSC 203x89", "RSC 152x76"] {
+        assert!(rsc["names"].as_array().unwrap().contains(&json!(name)), "{rsc}");
+    }
+    let only = run(&mut s, "frame.profile.list", json!({"family": "SHS"}));
+    assert_eq!(only["sizes"].as_array().map(Vec::len), Some(1));
+    assert!(s.execute("frame.profile.list", &json!({"family": "XYZ"})).unwrap_err().to_string().contains("`family`"));
+    rectangle_frame(&mut s);
+    for (profile, why) in [
+        (json!({"size": "RSC 203x89", "height": 200}), "brings its own dimensions"),
+        (json!({"size": "RSC 999x99"}), "unknown size"),
+        (json!({"size": "RSC 203x89", "kind": "rect_tube"}), "is a channel profile"),
+    ] {
+        let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": profile})).unwrap_err().to_string();
+        assert!(err.contains(why), "{profile}: {err}");
+    }
+    assert!(bodies(&mut s).is_empty());
+}
+
+#[test]
 fn members_follow_a_parameter_edit() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "W", "expression": "600 mm"}));
@@ -323,6 +391,55 @@ fn anchor_angle_and_mirror_place_the_profile() {
     let m = place(json!({"mirror": true}));
     assert!(near3(m.2, [0.0, 0.0, 0.0]) && near3(m.3, [1000.0, 60.0, 40.0]), "{m:?}");
     assert!(plain.4[1] < 30.0 && m.4[1] > 30.0, "{plain:?} {m:?}");
+}
+
+#[test]
+fn a_located_member_keeps_its_profile_point_on_the_line_when_the_section_changes() {
+    let place = |width: f64, height: f64, locate: Value| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [1000, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let p = json!({"sketch": "Rail", "profile": {"kind": "angle", "width": width, "height": height, "thickness": 5}, "locate": locate});
+        run(&mut s, "frame.member", p);
+        bodies(&mut s).remove(0)
+    };
+    // The angle is drawn about its heel: locate [0, 0] puts the heel on the line, as the
+    // bottom_left anchor does, and it stays there when the legs grow.
+    let small = place(60.0, 40.0, json!([0, 0]));
+    assert!(near3(small.2, [0.0, 0.0, 0.0]) && near3(small.3, [1000.0, 60.0, 40.0]), "{small:?}");
+    let large = place(80.0, 50.0, json!([0, 0]));
+    assert!(near3(large.2, [0.0, 0.0, 0.0]) && near3(large.3, [1000.0, 80.0, 50.0]), "{large:?}");
+    // A point 10 across and 5 up from the heel on the line moves the profile back by that much.
+    let off = place(60.0, 40.0, json!([10, 5]));
+    assert!(near3(off.2, [0.0, -10.0, -5.0]) && near3(off.3, [1000.0, 50.0, 35.0]), "{off:?}");
+    // A bad point is refused with the reason.
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    for bad in [json!([1]), json!(["a", 0]), json!([0, 1e9])] {
+        let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "locate": bad})).unwrap_err().to_string();
+        assert!(err.contains("`locate`"), "{bad}: {err}");
+    }
+    // A design file with a point the command would refuse fails the feature, with the reason.
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "locate": [0, 0]}));
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    fn far(v: &mut Value) {
+        match v {
+            Value::Object(o) => {
+                if let Some(l) = o.get_mut("locate") {
+                    *l = json!([1e8, 0.0]);
+                }
+                o.values_mut().for_each(far);
+            }
+            Value::Array(a) => a.iter_mut().for_each(far),
+            _ => {}
+        }
+    }
+    far(&mut saved);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    let fid = reopened.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })).unwrap().id;
+    let failing = reopened.model.result(fid).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(failing.contains("`locate`"), "{failing}");
 }
 
 #[test]
@@ -637,4 +754,354 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), ["Rail", "Rail (2)", "Rail (3)", "Rail (4)"]);
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
+}
+
+/// A 300 mm post up Z from the origin of `profile`, its member body `Post`, made by the feature
+/// `Post member` from the 3D sketch `Post path`.
+fn capped_post(profile: Value) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": profile}));
+    s
+}
+
+/// The face of `body` through `point` facing along `normal`, as the view picks it.
+fn face_pick(s: &Session, body: &str, point: [f64; 3], normal: [f64; 3]) -> Value {
+    let st = s.model.state();
+    let b = st.body(body).unwrap();
+    let at = solidcore_record::Vec3::new(point[0], point[1], point[2]);
+    let n = solidcore_record::Vec3::new(normal[0], normal[1], normal[2]);
+    let i = (0..b.body.face_count())
+        .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().dot(n) > 0.999 && (pl.origin - at).dot(n).abs() < 1e-6))
+        .unwrap();
+    json!({"body": body, "index": i, "face": point})
+}
+
+fn square_tube() -> Value {
+    json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0})
+}
+
+fn measured(s: &mut Session, name: &str) -> Measured {
+    bodies(s).into_iter().find(|b| b.0 == name).unwrap_or_else(|| panic!("no body {name}"))
+}
+
+#[test]
+fn an_end_cap_is_flush_with_the_outside_unless_offset() {
+    let mut s = capped_post(square_tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let r = run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}));
+    assert_eq!(r["created_bodies"], json!(["Post End Cap"]), "{r}");
+    // No offset: the plate is the profile's outside, 40 x 40, 6 thick, on top.
+    let cap = measured(&mut s, "Post End Cap");
+    assert!(rel(cap.1, 40.0 * 40.0 * 6.0) < 1e-9, "{cap:?}");
+    assert!(near3(cap.2, [-20.0, -20.0, 300.0]) && near3(cap.3, [20.0, 20.0, 306.0]), "{cap:?}");
+    // The bottom end faces down: its cap hangs below the post. Offset by half its thickness of
+    // 4: a 36 x 36 plate.
+    let bottom = face_pick(&s, "Post", [18.5, 0.0, 0.0], [0.0, 0.0, -1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [bottom], "thickness": 4, "ratio": 0.5}));
+    let cap = measured(&mut s, "Post End Cap (2)");
+    assert!(near3(cap.2, [-18.0, -18.0, -4.0]) && near3(cap.3, [18.0, 18.0, 0.0]), "{cap:?}");
+}
+
+/// A cap made while another is suppressed doesn't take that one's name: restored, each keeps its
+/// own, so what refers to the second cap by name still finds it.
+#[test]
+fn an_end_cap_made_while_another_is_suppressed_keeps_a_name_of_its_own() {
+    let mut s = capped_post(square_tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let bottom = face_pick(&s, "Post", [18.5, 0.0, 0.0], [0.0, 0.0, -1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6, "name": "Top cap"}));
+    run(&mut s, "timeline.suppress", json!({"feature": "Top cap"}));
+    let r = run(&mut s, "frame.end_cap", json!({"faces": [bottom], "thickness": 4, "name": "Bottom cap"}));
+    assert_eq!(r["created_bodies"], json!(["Post End Cap (2)"]), "{r}");
+    run(&mut s, "timeline.suppress", json!({"feature": "Top cap", "suppressed": false}));
+    // The top cap on top, the bottom one below the post, each under the name it was made with.
+    assert!(measured(&mut s, "Post End Cap").2[2] > 299.0);
+    assert!(measured(&mut s, "Post End Cap (2)").3[2] < 1e-6);
+}
+
+#[test]
+fn end_cap_corner_chamfers_cut_each_corner() {
+    let mut s = capped_post(square_tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 5, "offset": 2, "chamfer": 4}));
+    // 36 x 36 less four 4 x 4 corner triangles.
+    let v = measured(&mut s, "Post End Cap").1;
+    assert!(rel(v, (36.0 * 36.0 - 4.0 * 8.0) * 5.0) < 1e-9, "{v}");
+}
+
+#[test]
+fn end_cap_on_a_rounded_tube_keeps_the_rounding_less_the_inset() {
+    // Outer radius 6 (twice the wall): inset 3 leaves 34 x 34 with corners of radius 3.
+    let mut s = capped_post(tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let before = s.doc.to_json();
+    let e = s.execute("frame.end_cap", &json!({"faces": [top.clone()], "thickness": 6, "ratio": 0.5, "chamfer": 2})).unwrap_err().to_string();
+    assert!(e.contains("at least the corner rounding"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "frame.end_cap", json!({"faces": [top.clone()], "thickness": 6, "ratio": 0.5}));
+    let v = measured(&mut s, "Post End Cap").1;
+    assert!(rel(v, (34.0 * 34.0 - (4.0 - PI) * 9.0) * 6.0) < MEASURED, "{v}");
+    run(&mut s, "edit.undo", json!({}));
+    // A chamfer as long as the rounding cuts it away: four 3 x 3 triangles off the 34 square.
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6, "ratio": 0.5, "chamfer": 3}));
+    let v = measured(&mut s, "Post End Cap").1;
+    assert!(rel(v, (34.0 * 34.0 - 4.0 * 4.5) * 6.0) < 1e-9, "{v}");
+}
+
+#[test]
+fn an_end_cap_on_an_i_beam_closes_its_whole_end_square() {
+    // An I-beam is open, so its cap is the 50 x 100 rectangle round it, in by 1: 48 x 98.
+    let mut s = capped_post(json!({"kind": "i_beam", "height": 100, "width": 50, "web": 4.5, "flange": 7}));
+    let post = measured(&mut s, "Post");
+    let mid = [(post.2[0] + post.3[0]) / 2.0, (post.2[1] + post.3[1]) / 2.0, 300.0];
+    let top = face_pick(&s, "Post", mid, [0.0, 0.0, 1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6, "offset": 1}));
+    let cap = measured(&mut s, "Post End Cap");
+    assert!(rel(cap.1, 48.0 * 98.0 * 6.0) < 1e-9, "{cap:?}");
+    // A 2 mm chamfer cuts the rectangle's four corners.
+    run(&mut s, "edit.undo", json!({}));
+    let top = face_pick(&s, "Post", mid, [0.0, 0.0, 1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top.clone()], "thickness": 6, "offset": 1, "chamfer": 2}));
+    let v = measured(&mut s, "Post End Cap").1;
+    assert!(rel(v, (48.0 * 98.0 - 4.0 * 2.0) * 6.0) < 1e-9, "{v}");
+    // An inset of half the beam's width leaves no plate, and nothing changes.
+    run(&mut s, "edit.undo", json!({}));
+    let before = s.doc.to_json();
+    let e = s.execute("frame.end_cap", &json!({"faces": [top], "thickness": 6, "offset": 25})).unwrap_err().to_string();
+    assert!(e.contains("leaves no plate"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn an_inward_end_cap_cuts_the_member_back() {
+    let mut s = capped_post(json!({"kind": "round_tube", "diameter": 40, "wall": 3}));
+    let ring = PI * (400.0 - 289.0);
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let r = run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 4, "ratio": 0.5, "direction": "inward"}));
+    assert_eq!(r["changed_bodies"], json!(["Post"]), "{r}");
+    let post = measured(&mut s, "Post");
+    assert!(rel(post.1, ring * 296.0) < MEASURED, "{post:?}");
+    assert!((post.3[2] - 296.0).abs() < 1e-6, "{post:?}");
+    // Radius 20 less an inset of 2, 4 thick, flush with the old end.
+    let cap = measured(&mut s, "Post End Cap");
+    assert!(rel(cap.1, PI * 18.0 * 18.0 * 4.0) < MEASURED, "{cap:?}");
+    assert!((cap.2[2] - 296.0).abs() < 1e-6 && (cap.3[2] - 300.0).abs() < 1e-6, "{cap:?}");
+}
+
+/// The post's body moved into a component placed 50 along Y, capped from the top of the design:
+/// the cap is authored in the design's frame, the post is stored in its component's. The inward
+/// cut is made where the post is, so it is cut back by the cap's thickness, not missed.
+fn a_post_in_a_placed_component() -> Session {
+    let mut s = capped_post(square_tube());
+    let holder = run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": "Holder:1", "translate": [0, 50, 0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    std::sync::Arc::make_mut(&mut s.doc).body_components.insert("Post".into(), holder);
+    s.refresh();
+    s
+}
+
+#[test]
+fn an_inward_end_cap_cuts_a_member_in_a_placed_component_where_it_stands() {
+    let mut s = a_post_in_a_placed_component();
+    let post = measured(&mut s, "Post");
+    assert!(near3(post.2, [-20.0, 30.0, 0.0]) && near3(post.3, [20.0, 70.0, 300.0]), "{post:?}");
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let top = json!({"body": top["body"], "index": top["index"], "face": [18.5, 50.0, 300.0]});
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 4, "direction": "inward"}));
+    // 40 x 40 x 3 tube, 296 long after the cut; the cap 40 x 40 x 4 where the end was.
+    let post = measured(&mut s, "Post");
+    assert!(near3(post.2, [-20.0, 30.0, 0.0]) && near3(post.3, [20.0, 70.0, 296.0]), "{post:?}");
+    assert!(rel(post.1, (1600.0 - 34.0 * 34.0) * 296.0) < 1e-9, "{post:?}");
+    let cap = measured(&mut s, "Post End Cap");
+    assert!(near3(cap.2, [-20.0, 30.0, 296.0]) && near3(cap.3, [20.0, 70.0, 300.0]), "{cap:?}");
+}
+
+/// Moving the occurrence a capped member is placed by rebuilds the cap: the incremental model
+/// gives what a model built from scratch does.
+#[test]
+fn moving_a_capped_members_occurrence_rebuilds_the_cap_as_from_scratch() {
+    let mut s = a_post_in_a_placed_component();
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let top = json!({"body": top["body"], "index": top["index"], "face": [18.5, 50.0, 300.0]});
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 4, "direction": "inward"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Holder:1", "translate": [30, 0, 0]}));
+    let warm = bodies(&mut s);
+    let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let cold = bodies(&mut cold);
+    assert_eq!(warm.len(), cold.len(), "{warm:?} vs {cold:?}");
+    for (w, c) in warm.iter().zip(&cold) {
+        assert!(w.0 == c.0 && rel(w.1, c.1) < 1e-9 && near3(w.2, c.2) && near3(w.3, c.3), "{w:?} vs {c:?}");
+    }
+}
+
+/// Editing a cap down to its second end leaves that cap its own name: the first end's name goes
+/// with the end, so what was set on it (a material, a reference) doesn't move to the other cap.
+#[test]
+fn an_end_cap_edit_that_drops_an_end_keeps_each_remaining_cap_its_name() {
+    let mut s = capped_post(square_tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let bottom = face_pick(&s, "Post", [18.5, 0.0, 0.0], [0.0, 0.0, -1.0]);
+    let r = run(&mut s, "frame.end_cap", json!({"faces": [top, bottom.clone()], "thickness": 6, "name": "Caps"}));
+    assert_eq!(r["created_bodies"], json!(["Post End Cap", "Post End Cap (2)"]), "{r}");
+    run(&mut s, "timeline.redefine", json!({"feature": "Caps", "command": "frame.end_cap", "params": {"faces": [bottom], "thickness": 6}}));
+    let st = s.model.state();
+    assert!(st.body("Post End Cap").is_none(), "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    drop(st);
+    assert!(measured(&mut s, "Post End Cap (2)").3[2] < 1e-6, "the bottom cap keeps its name");
+}
+
+/// Editing a cap from one end onto another: the new end's cap is not given the removed end's
+/// name, which stays kept back as a renamed body's is.
+#[test]
+fn an_end_cap_edit_onto_another_end_does_not_hand_it_the_removed_ends_name() {
+    let mut s = capped_post(square_tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let bottom = face_pick(&s, "Post", [18.5, 0.0, 0.0], [0.0, 0.0, -1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6, "name": "Cap"}));
+    run(&mut s, "timeline.redefine", json!({"feature": "Cap", "command": "frame.end_cap", "params": {"faces": [bottom], "thickness": 6}}));
+    assert!(s.model.state().body("Post End Cap").is_none());
+    assert!(measured(&mut s, "Post End Cap (2)").3[2] < 1e-6, "the bottom end's cap has a name of its own");
+}
+
+/// An end added before one the cap already closes doesn't take that one's name: the kept end's
+/// cap keeps it, and the new one is numbered after it.
+#[test]
+fn an_end_added_before_a_kept_end_leaves_that_cap_its_name() {
+    let mut s = capped_post(square_tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let bottom = face_pick(&s, "Post", [18.5, 0.0, 0.0], [0.0, 0.0, -1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [bottom.clone()], "thickness": 6, "name": "Cap"}));
+    run(&mut s, "timeline.redefine", json!({"feature": "Cap", "command": "frame.end_cap", "params": {"faces": [top, bottom], "thickness": 6}}));
+    assert!(measured(&mut s, "Post End Cap").3[2] < 1e-6, "the bottom cap keeps its name");
+    assert!(measured(&mut s, "Post End Cap (2)").2[2] > 299.0, "the new top cap is numbered after it");
+}
+
+#[test]
+fn end_caps_follow_member_edits_renames_undo_and_reopen() {
+    let mut s = capped_post(square_tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let bottom = face_pick(&s, "Post", [18.5, 0.0, 0.0], [0.0, 0.0, -1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top, bottom], "thickness": 6, "ratio": 0.5, "name": "Caps"}));
+    run(&mut s, "body.rename", json!({"body": "Post", "name": "Column"}));
+    let params = json!({"sketch": "Post path", "body_name": "Column", "profile": {"kind": "rect_tube", "width": 60, "height": 40, "wall": 3, "outer_radius": 0}});
+    run(&mut s, "timeline.redefine", json!({"feature": "Post member", "command": "frame.member", "params": params}));
+    let cap = measured(&mut s, "Post End Cap");
+    assert!(rel(cap.1, 54.0 * 34.0 * 6.0) < 1e-9, "{cap:?}");
+    assert!(near3(cap.2, [-27.0, -17.0, 300.0]), "{cap:?}");
+    assert!(measured(&mut s, "Post End Cap (2)").2[2] < -5.9);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(rel(reopened.model.state().body("Post End Cap").unwrap().mesh().measure().volume, 54.0 * 34.0 * 6.0) < 1e-7);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().body("Post End Cap").is_none());
+    run(&mut s, "edit.redo", json!({}));
+    assert!(rel(measured(&mut s, "Post End Cap").1, 34.0 * 34.0 * 6.0) < 1e-9);
+}
+
+#[test]
+fn end_caps_refuse_bad_picks_and_values_atomically() {
+    let mut s = capped_post(square_tube());
+    run(&mut s, "solid.box", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let side = face_pick(&s, "Post", [20.0, 0.0, 150.0], [1.0, 0.0, 0.0]);
+    let block = face_pick(&s, "Block", [105.0, 5.0, 10.0], [0.0, 0.0, 1.0]);
+    // The same end face picked at another point on it is still the same end.
+    let top_again = face_pick(&s, "Post", [0.0, 18.5, 300.0], [0.0, 0.0, 1.0]);
+    let good = json!({"faces": [top.clone()], "thickness": 6});
+    let cases = [
+        (json!({"faces": [side]}), "not an end"),
+        (json!({"faces": [block]}), "not on a frame member"),
+        (json!({"faces": [top.clone(), top.clone()]}), "twice"),
+        (json!({"faces": [top, top_again.clone()]}), "twice"),
+        (json!({"faces": [top_again.clone(), top_again], "direction": "inward"}), "twice"),
+        (json!({"faces": []}), ""),
+        (json!({"offset": 20}), "leaves no plate"),
+        (json!({"ratio": 4}), "leaves no plate"),
+        (json!({"offset": 1, "ratio": 0.5}), "not both"),
+        (json!({"chamfer": 25}), "too large"),
+        (json!({"thickness": -1}), "thickness"),
+        (json!({"thickness": "1e99 mm"}), ""),
+        (json!({"thickness": 0}), "thickness"),
+        (json!({"ratio": "-1"}), "ratio"),
+        (json!({"direction": "sideways"}), ""),
+        (json!({"direction": "inward", "thickness": 300, "offset": 0}), "longer member"),
+        (json!({"unsupported": true}), ""),
+    ];
+    for (change, why) in cases {
+        let mut p = good.clone();
+        for (k, v) in change.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        let before = s.doc.to_json();
+        let e = s.execute("frame.end_cap", &p).map(|_| ()).unwrap_err().to_string();
+        assert!(e.contains(why), "{p}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+    // An angle is open too: its cap is the 40 x 40 square round it, in by 1 (half of 2).
+    let mut s = capped_post(json!({"kind": "angle", "width": 40, "height": 40, "thickness": 4}));
+    let end = face_pick(&s, "Post", [-18.0, -19.0, 300.0], [0.0, 0.0, 1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [end], "thickness": 2, "ratio": 0.5}));
+    let v = measured(&mut s, "Post End Cap").1;
+    assert!(rel(v, 38.0 * 38.0 * 2.0) < 1e-9, "{v}");
+}
+
+/// Members longer than 810 mm mirrored as bodies measure as their sources, across a named plane
+/// and across a plane by origin and normal: SMLib's mirror gave each straight edge as a B-spline
+/// 1,234,567 edge lengths long, which the copy's measure refused ("invalid B-rep record: flat
+/// arrays", #14413, #15379).
+#[test]
+fn long_members_mirrored_as_bodies_measure_as_their_sources() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rails"}));
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [100, 1100]]}));
+    run(&mut s, "sketch.line", json!({"points": [[300, -200], [300, 1800]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let channel = json!({"kind": "channel", "height": 152.4, "width": 76.2, "web": 6.4, "flange": 9, "root_radius": 12.2, "toe_radius": 2.4});
+    run(&mut s, "frame.member", json!({"sketch": "Rails", "lines": ["l1"], "profile": channel, "body_name": "Channel"}));
+    run(&mut s, "frame.member", json!({"sketch": "Rails", "lines": ["l2"], "profile": tube(), "body_name": "Tube"}));
+    run(&mut s, "solid.mirror", json!({"bodies": ["Channel", "Tube"], "plane": "YZ"}));
+    run(&mut s, "solid.mirror", json!({"bodies": ["Channel"], "plane": {"origin": [1000, 0, 0], "normal": [1, 0, 0]}}));
+    let bs = bodies(&mut s);
+    let get = |name: &str| bs.iter().find(|b| b.0 == name).cloned().unwrap_or_else(|| panic!("no {name} in {bs:?}"));
+    for (source, copy, x0) in [("Channel", "Channel (2)", 0.0), ("Tube", "Tube (2)", 0.0), ("Channel", "Channel (3)", 1000.0)] {
+        let (a, b) = (get(source), get(copy));
+        assert!(rel(b.1, a.1) < 1e-9, "{copy}: volume {} against {}", b.1, a.1);
+        // Mirrored in x = x0: x runs the other way, y and z stay.
+        assert!(near3(b.2, [2.0 * x0 - a.3[0], a.2[1], a.2[2]]) && near3(b.3, [2.0 * x0 - a.2[0], a.3[1], a.3[2]]), "{copy}: {b:?} from {a:?}");
+    }
+}
+
+/// A frame member feature mirrors and patterns as a feature: each copy is every member it made,
+/// placed by the mirror or the pattern, and the copies follow the member's lines. Mirroring the
+/// feature was refused ("cannot be patterned or mirrored yet").
+#[test]
+fn a_member_feature_mirrors_and_patterns_and_follows_its_lines() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "700 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rails"}));
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [100, "L"]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Rails", "profile": square_tube(), "name": "Rail member", "body_name": "Rail"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Rail member"], "plane": "YZ"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Rail member"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 300}));
+    let check = |s: &mut Session, length: f64| {
+        let bs = bodies(s);
+        assert_eq!(bs.len(), 3, "{bs:?}");
+        for b in &bs {
+            assert!(rel(b.1, 444.0 * length) < 1e-9, "{b:?}");
+        }
+        let at = |lo: [f64; 3], hi: [f64; 3]| bs.iter().any(|b| near3(b.2, lo) && near3(b.3, hi));
+        assert!(at([80.0, 0.0, -20.0], [120.0, length, 20.0]), "the rail: {bs:?}");
+        assert!(at([-120.0, 0.0, -20.0], [-80.0, length, 20.0]), "its mirror in x = 0: {bs:?}");
+        assert!(at([80.0, 0.0, 280.0], [120.0, length, 320.0]), "its copy 300 up: {bs:?}");
+    };
+    check(&mut s, 700.0);
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "760 mm"}));
+    check(&mut s, 760.0);
 }

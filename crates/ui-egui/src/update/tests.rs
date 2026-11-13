@@ -622,6 +622,37 @@ fn release_notes_read_as_markdown() {
     assert_eq!(inline("**[x](y)**"), vec![Span::Strong("x".into())]);
 }
 
+#[test]
+fn a_pipe_table_reads_as_one_entry_per_row() {
+    let md = "## Files\n\n| File | Author | Licence |\n|---|---|---|\n| a.png | `cargo xtask` | MIT |\n| b.svg | | [CC0](https://x/cc0) |\n\nAfter.";
+    let b = parse_markdown(md);
+    let text = |s: &str| vec![Span::Text(s.into())];
+    assert_eq!(b.len(), 5, "{b:?}");
+    assert_eq!(b.get(1), Some(&Block::Row { header: true, cells: vec![text("File"), text("Author"), text("Licence")] }));
+    assert_eq!(b.get(2), Some(&Block::Row { header: false, cells: vec![text("a.png"), vec![Span::Code("cargo xtask".into())], text("MIT")] }));
+    assert_eq!(b.get(4), Some(&Block::Paragraph(text("After."))));
+    // A row reads as its first cell in bold, then the others between dots; an empty cell drops out.
+    let Some(Block::Row { header, cells }) = b.get(3) else { panic!("{b:?}") };
+    assert_eq!(
+        row_spans(cells, *header),
+        vec![Span::Strong("b.svg".into()), Span::Text(" · ".into()), Span::Link { text: "CC0".into(), url: Some("https://x/cc0".into()) }]
+    );
+    let Some(Block::Row { header, cells }) = b.get(1) else { panic!("{b:?}") };
+    assert_eq!(
+        row_spans(cells, *header),
+        vec![
+            Span::Text("File".into()),
+            Span::Text(" · ".into()),
+            Span::Text("Author".into()),
+            Span::Text(" · ".into()),
+            Span::Text("Licence".into())
+        ]
+    );
+    for s in ["|", "||", "|---|", "| a", "|-|-", "| é |"] {
+        let _ = parse_markdown(s);
+    }
+}
+
 /// #2943: a release note's links keep where they go, so the window can open them; only web
 /// addresses are kept (a relative or other link shows as text that opens nothing).
 #[test]
@@ -674,20 +705,104 @@ fn the_version_links_to_its_release_notes() {
 }
 
 #[test]
-fn web_preferences_explain_reload_without_update_controls() {
-    let mut h = crate::scenario::Harness::new();
-    h.app.updater.kind = Some(InstallKind::Web);
-    let mut texts = Vec::new();
-    for _ in 0..2 {
-        let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| prefs_rows(&mut h.app, ui));
-        output.textures_delta.clear();
-        texts =
-            output.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.text().to_string()) } else { None }).collect();
+fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
+    use egui::accesskit::{Role, Toggled};
+    let _language = solidcraft_ui_text::scope("en");
+    for kind in [InstallKind::Dev, InstallKind::Web, InstallKind::Flatpak("io.solidcraft.SolidCraft".into())] {
+        for checked in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.language = "en".into();
+            h.app.preferences.check_updates = checked;
+            h.app.updater.kind = Some(kind.clone());
+            h.app.updater.feed = None;
+            assert!(!available(&mut h.app));
+            let memo = h.app.preferences.update.clone();
+            let launch_checked = h.app.updater.launch_checked;
+            let last_manual = h.app.updater.last_manual;
+            h.call("ui.prefs", json!({"open":"General"}));
+            crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let button = crate::scenario::rect_of("prefs:check_now").unwrap();
+            assert!(body.contains_rect(button));
+            assert!(body.contains_rect(crate::scenario::rect_of("prefs:check_updates").unwrap()));
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            for (label, role) in [("Check now", Role::Button), ("Check at start and once a day", Role::CheckBox)] {
+                let controls: Vec<_> = tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(label)).collect();
+                assert_eq!(controls.len(), 1, "{kind:?}: one {label} control");
+                assert!(controls[0].1.is_disabled(), "{kind:?}: {label} is disabled");
+                if role == Role::CheckBox {
+                    assert_eq!(controls[0].1.toggled(), Some(if checked { Toggled::True } else { Toggled::False }));
+                }
+            }
+            let reason = solidcraft_ui_text::tr("update.check_unavailable");
+            assert_eq!(tree.nodes.iter().filter(|(_, node)| node.role() == Role::Label && node.value() == Some(reason)).count(), 1);
+            let texts: Vec<_> = h
+                .shapes
+                .iter()
+                .filter_map(|shape| if let egui::Shape::Text(text) = &shape.shape { Some(text.galley.text()) } else { None })
+                .collect();
+            assert!(texts.contains(&reason), "{kind:?}: the unavailable reason is painted");
+            assert!(h.widget("Up to date").is_none(), "unavailability is not a successful check");
+            let note = match &kind {
+                InstallKind::Web => solidcraft_ui_text::tr("update.prefs_web").to_string(),
+                InstallKind::Flatpak(id) => solidcraft_ui_text::format(
+                    "update.prefs_flatpak",
+                    &[("version", current_version()), ("command", &format!("flatpak update {id}"))],
+                ),
+                _ => solidcraft_ui_text::format("update.prefs_dev", &[("version", current_version())]),
+            };
+            assert!(
+                tree.nodes.iter().any(|(_, node)| node.role() == Role::Button && node.label() == Some(note.as_str()) && !node.is_disabled()),
+                "the platform help stays accessible as an enabled help button"
+            );
+            assert!(!texts.contains(&note.as_str()), "the longer explanation stays behind the help icon");
+            assert!(crate::scenario::rect_of("prefs:updates_help").is_some());
+            h.step(&json!({"click":{"handle":"prefs:check_now"}})).unwrap();
+            h.step(&json!({"widget":"Check at start and once a day"})).unwrap();
+            assert_eq!(h.app.preferences.check_updates, checked);
+            assert_eq!(h.app.preferences.update, memo);
+            assert_eq!(h.app.updater.status, Status::Idle);
+            assert_eq!(h.app.updater.launch_checked, launch_checked);
+            assert_eq!(h.app.updater.last_manual, last_manual);
+            assert!(h.app.updater.rx.is_none() && h.app.updater.job.is_none() && h.app.updater.release.is_none());
+            assert!(!h.app.updater.open, "attempting the disabled action does not open the checker");
+        }
     }
-    assert!(!texts.iter().any(|t| t.contains("development build")), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == crate::i18n::tr("update.check_automatically")), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == crate::i18n::tr("update.check_now")), "{texts:?}");
-    assert!(texts.iter().any(|t| t == crate::i18n::tr("update.prefs_web")), "{texts:?}");
+}
+
+#[test]
+fn general_updates_show_real_status_and_time_and_check_now_uses_the_existing_feed() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.language = "en".into();
+    h.app.preferences.check_updates = false;
+    h.app.preferences.update.last_check = 1_700_000_000.0;
+    h.app.updater.feed = Some(feed);
+    h.app.updater.kind = Some(InstallKind::WindowsMsi);
+    h.app.updater.managed = Some(None);
+    h.app.updater.status = Status::UpToDate;
+    h.call("ui.prefs", json!({"open":"General"}));
+    crate::prefs::reveal_preference(&mut h, "prefs:check_now");
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    for (label, role) in [("Check now", egui::accesskit::Role::Button), ("Check at start and once a day", egui::accesskit::Role::CheckBox)] {
+        let controls: Vec<_> = tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(label)).collect();
+        assert_eq!(controls.len(), 1);
+        assert!(!controls[0].1.is_disabled(), "available update controls stay enabled");
+        if role == egui::accesskit::Role::CheckBox {
+            assert_eq!(controls[0].1.toggled(), Some(egui::accesskit::Toggled::False));
+        }
+    }
+    let checked = solidcraft_ui_text::format("prefs.general.last_check", &[("time", &solidcraft_engine::crash::utc(1_700_000_000))]);
+    assert!(h.widget(&checked).is_some(), "the persisted check time is shown");
+    let button = crate::scenario::rect_of("prefs:check_now").unwrap();
+    h.step(&json!({"click":[button.center().x, button.center().y]})).unwrap();
+    wait_for_check(&mut h);
+    assert_eq!(h.app.updater.release.as_ref().map(|r| r.version().to_string()), Some(version));
+    assert!(h.app.preferences.update.last_check > 1_700_000_000.0);
+    assert!(!h.app.preferences.check_updates, "a manual check keeps the schedule preference");
 }
 
 fn no_env(_: &str) -> Option<String> {
@@ -937,4 +1052,74 @@ fn cancel_download_leaves_downloading_immediately() {
     );
     assert!(h.widget("Updating to 999.1.0.").is_none());
     let _ = gate_tx.send(());
+}
+
+#[test]
+fn graphics_restart_asks_to_save_and_cancel_preserves_the_design() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.started = true;
+    h.app.preferences.save_prompt_one_at_a_time = true;
+    let program = std::env::current_exe().unwrap();
+    h.app.services.graphics_restart = Some((program, Vec::new()));
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    restart_graphics(&mut h.app);
+    assert!(!h.app.quit_requested);
+    assert!(h.app.docs.quitting.is_some());
+    assert!(h.app.session.is_dirty());
+    crate::documents::control(&mut h.app, &json!({"answer":"cancel"}));
+    tick(&mut h.app, &h.ctx);
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
+    assert!(h.app.session.is_dirty());
+    assert!(!take_graphics_restart(&mut h.app));
+    assert!(take_launch(&mut h.app).is_none());
+}
+
+#[test]
+fn graphics_restart_uses_normal_quit_and_keeps_the_saved_tab_paths() {
+    let mut h = crate::scenario::Harness::new();
+    let program = std::env::current_exe().unwrap();
+    h.app.services.graphics_restart = Some((program.clone(), Vec::new()));
+    h.app.session.path = Some("/saved/design.sc".into());
+    h.app.session.mark_saved();
+    restart_graphics(&mut h.app);
+    assert!(h.app.quit_requested);
+    assert_eq!(h.app.preferences.open_designs, ["/saved/design.sc"]);
+    assert!(take_graphics_restart(&mut h.app));
+    assert_eq!(take_launch(&mut h.app), Some((program, Vec::new())));
+    assert!(!take_graphics_restart(&mut h.app));
+}
+
+#[test]
+fn an_installer_completing_during_graphics_restart_owns_the_pending_launch() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.preferences.save_prompt_one_at_a_time = true;
+    let program = std::env::current_exe().unwrap();
+    h.app.services.graphics_restart = Some((program.clone(), vec!["--control".into(), "7878".into()]));
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    restart_graphics(&mut h.app);
+    assert!(h.app.updater.graphics_restart && h.app.docs.quitting.is_some() && !h.app.quit_requested);
+
+    let installer = PathBuf::from("solidcraft-installer");
+    let arguments = vec!["install-package".to_string()];
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.job = Some((rx, Arc::new(install::Progress::default())));
+    tx.send(Ok(install::Outcome::Installer(installer.clone(), arguments.clone()))).unwrap();
+    poll_install(&mut h.app);
+    assert!(!take_graphics_restart(&mut h.app), "the installer must not receive graphics restart options or design paths");
+    #[cfg(windows)]
+    let expected = install::relaunch_after(&installer, &arguments, &program);
+    #[cfg(not(windows))]
+    let expected = (installer, arguments);
+    assert_eq!(take_launch(&mut h.app), Some(expected));
+    assert!(h.app.docs.quitting.is_some() && !h.app.quit_requested, "the unsaved-design question still applies");
+}
+
+#[test]
+fn graphics_restart_without_a_native_host_never_closes_the_app() {
+    let mut h = crate::scenario::Harness::new();
+    restart_graphics(&mut h.app);
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
+    assert!(take_launch(&mut h.app).is_none());
+    assert!(!take_graphics_restart(&mut h.app));
 }

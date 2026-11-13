@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5236",
+  "tangency-labs/solidcraft#3317"
+ ],
+ "what": "the end edge of a cylinder r10 filleted r10, making a hemispherical end: refused ('the blend is larger than a corner radius'); r 9.99 worked",
+ "source": "analytic",
+ "method": "the round of radius equal to the cylinder's is the hemisphere r10 on the cylinder's first 20 mm: V = pi 100 20 + (2/3) pi 1000 = 8377.580. Faces: side, bottom, the spherical end = 3",
+ "body_count": 1,
+ "faces": 3,
+ "volume_mm3": 8377.5804,
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -28,7 +28,8 @@ pub enum Verdict {
 
 /// Methods the bridged MCP server uses; nothing else (clicks, preferences, quitting, the chat
 /// itself) is the agent's.
-const METHODS: &[&str] = &["engine.commands", "document.inspect", "engine.execute", "engine.batch", "ui.view", "ui.render", "ui.screenshot"];
+const METHODS: &[&str] =
+    &["engine.commands", "document.inspect", "engine.execute", "engine.batch", "ui.view", "ui.render", "ui.screenshot", "mcp.options"];
 
 /// Parameter names that hold a file or folder and nothing else.
 const FILE_KEYS: &[&str] = &["file", "files", "dir", "folder", "out", "output", "filename", "target_path"];
@@ -67,12 +68,18 @@ fn reads_only(id: &str) -> bool {
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
-        || matches!(id, "edit.checkpoint" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers" | "engine.describe")
+        || matches!(
+            id,
+            "edit.checkpoint" | "selection.get" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers" | "engine.describe"
+        )
 }
 
 /// Commands that read or write a file by their nature: any string they are given in a path
 /// parameter is a file, whatever it looks like.
 fn is_file_verb(id: &str) -> bool {
+    if id == "plugin.inspect" {
+        return true;
+    }
     id.starts_with("library.") || ["export", "import", "save", "open", "insert", "load", "write", "recover"].iter().any(|v| id.contains(v))
 }
 
@@ -120,6 +127,14 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
     }
     if id.starts_with("app.") || id.starts_with("prefs.") {
         return Verdict::Refuse(format!("`{id}` is not available in the agent chat"));
+    }
+    // External executable code always needs a user decision; the digest is not consent by itself.
+    if id.eq_ignore_ascii_case("plugin.run") {
+        let shown =
+            |key: &str| params.get(key).and_then(Value::as_str).unwrap_or_default().chars().filter(|c| !c.is_control()).take(200).collect::<String>();
+        let path = shown("path");
+        let entry = shown("entry");
+        return Verdict::Ask(solidcraft_ui_text::format("ui.plugin_run_consent", &[("entry", &entry), ("path", &path)]));
     }
     // Files, and commands that replace or reload the whole design.
     let file_command = id.starts_with("file.") || id.starts_with("doc.") || matches!(id, "render.export" | "render.start");
@@ -248,6 +263,7 @@ mod tests {
         assert_eq!(exec("solid.box", json!({"x": 10})), Verdict::Run { change: true });
         assert_eq!(exec("sketch.inspect", json!({"sketch": 1})), Verdict::Run { change: false });
         assert_eq!(exec("inspect.measure", json!({})), Verdict::Run { change: false });
+        assert_eq!(exec("selection.get", json!({})), Verdict::Run { change: false });
         assert_eq!(request("document.inspect", &json!({}), 0), Verdict::Run { change: false });
         assert_eq!(exec("engine.describe", json!({"command": "solid.box"})), Verdict::Run { change: false });
     }
@@ -342,6 +358,21 @@ mod tests {
         for m in ["app.quit", "ui.click", "ui.prefs", "ui.agent_chat", "engine.script", "ui.key", "ui.file"] {
             assert!(matches!(request(m, &json!({}), 0), Verdict::Refuse(_)), "{m}");
         }
+        // How a host page keeps the design (#8517) is not the agent's.
+        for m in ["document.export", "document.import", "document.saved"] {
+            assert!(matches!(request(m, &json!({}), 0), Verdict::Refuse(_)), "{m}");
+        }
+    }
+
+    #[test]
+    fn external_plugin_code_always_requires_consent() {
+        crate::i18n::install();
+        for id in ["plugin.run", "PLUGIN.RUN", "Plugin.Run"] {
+            let verdict = exec(id, json!({"path":"sample","approval":"from-inspect","entry":"make"}));
+            let Verdict::Ask(question) = verdict else { panic!("external plugin needs consent") };
+            assert!(question.contains("sample") && question.contains("make"), "{question}");
+        }
+        assert!(matches!(exec("plugin.inspect", json!({"path":"sample"})), Verdict::Ask(_)));
     }
 
     #[test]
@@ -350,6 +381,11 @@ mod tests {
         assert!(matches!(request("engine.execute", &json!({"command": "edit.undo"}), 0), Verdict::Ask(_)));
         let batch = json!({"commands": [{"command": "solid.box"}, {"command": "edit.undo"}, {"command": "edit.undo"}]});
         assert!(matches!(request("engine.batch", &batch, 0), Verdict::Ask(_)));
+    }
+
+    #[test]
+    fn the_mcp_server_may_read_its_output_options() {
+        assert_eq!(request("mcp.options", &json!({}), 0), Verdict::Run { change: false });
     }
 
     #[test]

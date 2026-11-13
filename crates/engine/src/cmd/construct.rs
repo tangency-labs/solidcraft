@@ -7,9 +7,9 @@
 //! persistent names.
 
 use serde_json::Value;
-use solidcraft_doc::construct::{AxisDef, GeoRef, PointDef};
+use solidcore_record::Vec3;
+use solidcraft_doc::construct::{AxisDef, DatumItem, GeoRef, PointDef};
 use solidcraft_doc::{FeatureKind, PlaneRef};
-use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr, plane_param, sketch_id};
@@ -141,7 +141,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_tangent")
         .contract(&PLANE_TANGENT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("face: ref (cylinder, cone, sphere or torus); at?: [x,y,z] where it touches (default: the face pick); name?"),
+        .params("face: ref (cylinder, cone, sphere or torus); at?: [x,y,z] where it touches (default: the face pick); reference?: plane or planar face ref (the plane touches where the face turns towards it: parallel to it, on the side of `at`); angle?: expr (with reference, default 0 deg: turned that far about the face's axis; not on a sphere); name?"),
     CommandSpec::new("construct.plane.along_path", "Plane Along Path", crate::checked!("construct.plane.along_path", plane_along))
         .at("SOLID", "CONSTRUCT")
         .icon("plane_along_path")
@@ -171,7 +171,7 @@ pub(crate) fn is_model_axis(v: &Value) -> bool {
 pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
     let Some(v) = v.filter(|v| is_model_axis(v)) else { return Ok(None) };
     let g = geo(s, Some(v), cmd, "axis")?;
-    let (o, d) = solidcraft_doc::construct::model_axis(&s.world_state(), &g).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
+    let (o, d) = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &*s.world_state()?, &g, 0).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
     Ok(Some((g, o, d)))
 }
 
@@ -265,21 +265,47 @@ pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Resu
             }
         }
         Ok(GeoForm::Point(p)) => GeoRef::Point { p },
-        Ok(GeoForm::Plane(plane)) => GeoRef::Plane { plane: plane_param(s, Some(plane), cmd)? },
+        Ok(GeoForm::Plane(plane)) => {
+            // A bare component origin datum key (`o:2/origin/O`, `o:2/origin/X`, `o:2/origin/XY`)
+            // names a point or an axis as often as a plane, and only the plane items reach
+            // `plane_param`'s own datum branch. A feature of the same name still wins (the one
+            // resolution order), so the string is left to `plane_param` then; the O, X, Y and Z
+            // items are saved as their datum, so the reference follows the placement.
+            let datum = plane
+                .as_str()
+                .map(str::trim)
+                .filter(|k| s.doc.find_feature(k).is_none())
+                .and_then(crate::origins::datum)
+                .filter(|d| matches!(d.item, DatumItem::O | DatumItem::X | DatumItem::Y | DatumItem::Z));
+            match datum {
+                Some(datum) => GeoRef::Datum { datum },
+                None => GeoRef::Plane { plane: plane_param(s, Some(plane), cmd)? },
+            }
+        }
         Ok(GeoForm::Axis(a)) => {
             if ["x", "y", "z"].contains(&a.to_ascii_lowercase().as_str()) {
                 GeoRef::World { axis: a.to_ascii_uppercase() }
             } else {
                 match s.doc.find_feature(a).map(|f| &f.kind) {
                     Some(FeatureKind::ConstructionAxis { .. }) => GeoRef::Axis { name: a.into() },
-                    _ => return Err(bad(cmd, format!("no axis `{a}`"))),
+                    // A component origin axis: saved as its datum, so it follows the placement.
+                    _ => match crate::origins::datum(a).filter(|d| matches!(d.item, DatumItem::X | DatumItem::Y | DatumItem::Z)) {
+                        Some(datum) => GeoRef::Datum { datum },
+                        None => return Err(bad(cmd, format!("no axis `{a}`"))),
+                    },
                 }
             }
         }
-        Ok(GeoForm::ConstructPoint(n)) => match s.doc.find_feature(n).map(|f| &f.kind) {
-            Some(FeatureKind::ConstructionPoint { .. }) => GeoRef::ConstructPoint { name: n.into() },
-            _ => return Err(bad(cmd, format!("no construction point `{n}`"))),
-        },
+        Ok(GeoForm::ConstructPoint(n)) => {
+            match s.doc.find_feature(n).map(|f| &f.kind) {
+                Some(FeatureKind::ConstructionPoint { .. }) => GeoRef::ConstructPoint { name: n.into() },
+                // A component origin's O point: its datum, so it follows the placement.
+                _ => match crate::origins::datum(n).filter(|d| d.item == DatumItem::O) {
+                    Some(datum) => GeoRef::Datum { datum },
+                    None => return Err(bad(cmd, format!("no construction point `{n}`"))),
+                },
+            }
+        }
         Err(GeoFormError::Saved(e)) => return Err(bad(cmd, format!("`{what}`: {e}"))),
         Err(GeoFormError::Unknown) => return Err(bad(cmd, format!("`{what}` must be {REF}"))),
     };
@@ -376,28 +402,47 @@ fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn plane_edges(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "construct.plane.two_edges";
-    let (a, b) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?);
-    plane(s, p, PlaneRef::TwoEdges { a: Box::new(a), b: Box::new(b) })
+    plane_of_picks(s, p, "construct.plane.two_edges")
 }
 
 fn plane_axis_point(s: &mut Session, p: &Value) -> Result<Value> {
-    let kind = plane_axis_point_kind(s, p)?;
-    add_feature(s, p, kind)
-}
-
-/// Shared parser for the constructor and its world-to-authoring-frame boundary.
-pub(crate) fn plane_axis_point_kind(s: &Session, p: &Value) -> Result<FeatureKind> {
-    let cmd = "construct.plane.axis_point";
-    let axis = geo(s, p.get("axis"), cmd, "axis")?;
-    let point = geo(s, p.get("point"), cmd, "point")?;
-    Ok(FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis: Box::new(axis), point: Box::new(point) } })
+    plane_of_picks(s, p, "construct.plane.axis_point")
 }
 
 fn plane_points(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "construct.plane.three_points";
-    let (a, b, c) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?, geo(s, p.get("c"), cmd, "c")?);
-    plane(s, p, PlaneRef::ThreePoints { a: Box::new(a), b: Box::new(b), c: Box::new(c) })
+    plane_of_picks(s, p, "construct.plane.three_points")
+}
+
+fn plane_of_picks(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let made = picked_plane(s, cmd, p)?.ok_or_else(|| bad(cmd, "not a plane made of picks"))?;
+    plane(s, p, made)
+}
+
+/// The construction planes made of picks alone, read from `cmd`'s parameters as that command
+/// reads them (`None`: `cmd` makes no such plane). Shared by the constructors and the
+/// world-to-authoring-frame boundary, which maps an edit's saved references once (`frames`).
+pub(crate) fn picked_plane(s: &Session, cmd: &str, p: &Value) -> Result<Option<PlaneRef>> {
+    let pick = |key: &str| geo(s, p.get(key), cmd, key).map(Box::new);
+    Ok(Some(match cmd {
+        "construct.plane.two_edges" => PlaneRef::TwoEdges { a: pick("a")?, b: pick("b")? },
+        "construct.plane.axis_point" => PlaneRef::AxisPoint { axis: pick("axis")?, point: pick("point")? },
+        "construct.plane.three_points" => PlaneRef::ThreePoints { a: pick("a")?, b: pick("b")?, c: pick("c")? },
+        "construct.plane.perpendicular" => PlaneRef::Perpendicular { plane: pick("plane")?, line: pick("line")? },
+        _ => return Ok(None),
+    }))
+}
+
+/// A plane made of picks as its command and saved references, each under the parameter of
+/// the command that takes it ([`picked_plane`] backwards; `None`: not such a plane). Edit
+/// Feature fills the command's form from it.
+pub fn picked_plane_refs(plane: &PlaneRef) -> Option<(&'static str, Vec<(&'static str, &GeoRef)>)> {
+    Some(match plane {
+        PlaneRef::TwoEdges { a, b } => ("construct.plane.two_edges", vec![("a", &**a), ("b", &**b)]),
+        PlaneRef::AxisPoint { axis, point } => ("construct.plane.axis_point", vec![("axis", &**axis), ("point", &**point)]),
+        PlaneRef::ThreePoints { a, b, c } => ("construct.plane.three_points", vec![("a", &**a), ("b", &**b), ("c", &**c)]),
+        PlaneRef::Perpendicular { plane, line } => ("construct.plane.perpendicular", vec![("plane", &**plane), ("line", &**line)]),
+        _ => return None,
+    })
 }
 
 fn plane_tangent(s: &mut Session, p: &Value) -> Result<Value> {
@@ -408,7 +453,20 @@ fn plane_tangent(s: &mut Session, p: &Value) -> Result<Value> {
         (None, GeoRef::Face { at, .. }) => *at,
         _ => return Err(bad(cmd, "`at` is required: where the plane touches the face")),
     };
-    plane(s, p, PlaneRef::Tangent { face: Box::new(face), at })
+    let reference = match p.get("reference").filter(|v| !v.is_null()) {
+        Some(_) => Some(Box::new(geo(s, p.get("reference"), cmd, "reference")?)),
+        None => None,
+    };
+    let angle = match p.get("angle").filter(|v| !v.is_null()) {
+        Some(_) if reference.is_none() => return Err(bad(cmd, "`angle` turns the plane from a `reference`: give one")),
+        Some(_) => {
+            let angle = req_expr(cmd, p, "angle")?;
+            check_expr(s, &angle, solidcraft_doc::expr::Kind::Angle, cmd, "angle")?;
+            Some(angle)
+        }
+        None => None,
+    };
+    plane(s, p, PlaneRef::Tangent { face: Box::new(face), at, reference, angle })
 }
 
 fn plane_along(s: &mut Session, p: &Value) -> Result<Value> {
@@ -419,7 +477,5 @@ fn plane_along(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn plane_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "construct.plane.perpendicular";
-    let (base, line) = (geo(s, p.get("plane"), cmd, "plane")?, geo(s, p.get("line"), cmd, "line")?);
-    plane(s, p, PlaneRef::Perpendicular { plane: Box::new(base), line: Box::new(line) })
+    plane_of_picks(s, p, "construct.plane.perpendicular")
 }

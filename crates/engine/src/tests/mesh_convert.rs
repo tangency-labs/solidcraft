@@ -1,10 +1,12 @@
 use super::*;
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, MeshData};
-use solidcraft_geom::Vec3;
 
-fn imported_box() -> Session {
+/// A design whose only feature imports a 10 x 20 x 30 mm box as the mesh body `Mesh`. The
+/// schema tests (`schema/mesh_tests.rs`) convert it too.
+pub(crate) fn imported_box() -> Session {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {
@@ -14,6 +16,7 @@ fn imported_box() -> Session {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: Some([0.2, 0.5, 0.8]),
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -39,9 +42,14 @@ fn edits_share_an_imported_meshs_triangles_with_undo() {
     run(&mut s, "edit.undo", json!({}));
     let (p, t) = arrays(&s);
     assert!(std::sync::Arc::ptr_eq(&p, &positions) && std::sync::Arc::ptr_eq(&t, &triangles), "shared after undo");
-    let saved =
-        serde_json::to_value(MeshData { name: "M".into(), positions: vec![1.5, 2.0, 3.0].into(), triangles: vec![0, 0, 0].into(), color: None })
-            .unwrap();
+    let saved = serde_json::to_value(MeshData {
+        name: "M".into(),
+        positions: vec![1.5, 2.0, 3.0].into(),
+        triangles: vec![0, 0, 0].into(),
+        color: None,
+        corner_normals: Default::default(),
+    })
+    .unwrap();
     assert_eq!(saved, json!({"name":"M","positions":[1.5,2.0,3.0],"triangles":[0,0,0]}));
     let back: MeshData = serde_json::from_value(saved).unwrap();
     assert_eq!(&back.positions[..], &[1.5, 2.0, 3.0]);
@@ -141,7 +149,8 @@ fn exported_binary_stl_with_a_bore_reconstructs_analytic_faces() {
     assert!(!body.is_mesh());
     assert!(body.validity().is_empty());
     assert_eq!(solidcraft_kernel::measure(body).unwrap().merged.face_types.get("cylinder"), Some(&1));
-    assert_eq!(body.faces(0.01).unwrap().len(), 10);
+    // The L's six sides, the two caps and the bore, one full-turn wall.
+    assert_eq!(body.faces(0.01).unwrap().len(), 9);
     std::fs::remove_file(path).unwrap();
 }
 
@@ -230,9 +239,9 @@ fn send_to_slicer_needs_a_slicer_and_bodies() {
     assert!(s.execute("file.send_to_slicer", &json!({"slicer":"no such slicer anywhere"})).is_err());
 }
 
-/// The chosen-programs list is process-wide: tests that set it take turns.
-#[cfg(unix)]
-static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// The chosen-programs list and the made-up slicers are process-wide: tests that set them take
+/// turns.
+pub(crate) static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `file.save_mesh` with a `slicer` writes where the caller said and hands that file over, by the
 /// same steps as `file.send_to_slicer`.
@@ -266,11 +275,9 @@ fn save_mesh_with_a_chosen_program_writes_the_file_where_asked_and_sends_it_ther
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-/// Puts back what the tests of the send commands make up, even when one fails.
-#[cfg(unix)]
-struct MadeUp;
+/// Puts back what the tests of the slicer commands make up, even when one fails.
+pub(crate) struct MadeUp;
 
-#[cfg(unix)]
 impl Drop for MadeUp {
     fn drop(&mut self) {
         *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
@@ -504,8 +511,31 @@ fn open_in_easyprint_hands_the_host_a_3mf_or_an_stl_that_reads_back() {
     let seen = seen.lock().unwrap();
     assert_eq!((seen[0].0.ends_with(".3mf"), seen[1].0.ends_with(".stl")), (true, true), "{:?}", seen.iter().map(|u| &u.0).collect::<Vec<_>>());
     assert!(seen[0].1.starts_with(b"PK"), "a 3MF is a zip");
-    // A binary STL: 80-byte header, a count, 50 bytes a triangle, and a box has 12.
-    assert_eq!(seen[1].1.len(), 84 + 50 * 12);
+    // The STL reads back as the imported mesh: its triangles, closed (every side shared by two
+    // triangles, each way once), enclosing the 10 × 20 × 30 box's 6000 mm³.
+    let imported = match &s.doc.features[0].kind {
+        FeatureKind::MeshImport { meshes, .. } => meshes[0].triangles.len() / 3,
+        other => panic!("{other:?}"),
+    };
+    let tris = solidcraft_io::read_stl(&seen[1].1).unwrap();
+    assert_eq!(tris.len(), imported);
+    let key = |p: [f32; 3]| p.map(f32::to_bits);
+    let mut sides = std::collections::HashMap::<_, i32>::new();
+    for t in &tris {
+        for i in 0..3 {
+            let (a, b) = (key(t[i]), key(t[(i + 1) % 3]));
+            *sides.entry(if a < b { (a, b) } else { (b, a) }).or_default() += if a < b { 1 } else { -1 };
+        }
+    }
+    assert!(sides.values().all(|n| *n == 0), "an open or inconsistently wound STL");
+    let at = |p: [f32; 3]| Vec3::new(p[0].into(), p[1].into(), p[2].into());
+    let volume: f64 = tris.iter().map(|t| at(t[0]).dot(at(t[1]).cross(at(t[2]))) / 6.0).sum();
+    assert!((volume - 6000.0).abs() < 1e-6, "{volume}");
+    let (lo, hi) = tris
+        .iter()
+        .flatten()
+        .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), p| (std::array::from_fn(|i| lo[i].min(p[i])), std::array::from_fn(|i| hi[i].max(p[i]))));
+    assert_eq!((lo, hi), ([0.0; 3], [10.0, 20.0, 30.0]));
 }
 
 #[test]
@@ -537,6 +567,7 @@ fn open_in_easyprint_reports_a_host_that_cannot_start_and_a_model_over_the_limit
                 positions: vec![0., 0., 0., 1., 0., 0., 0., 1., 0.].into(),
                 triangles: [0u32, 1, 2].repeat(2_100_000).into(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -606,4 +637,41 @@ fn conversion_from_another_branch_names_the_component_to_activate() {
     assert!(error.contains("activate component 'Mesh 1' first"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
+}
+
+/// A mesh body of a component placed twice converts under its second placement's name, the one
+/// the selection and the Browser hold: the conversion edits the component, so both placements
+/// then show the solid. Given as `body` and taken from the selection.
+#[test]
+fn a_second_placements_mesh_body_converts_by_the_name_the_world_shows() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mesh-convert-placed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cube.stl").to_string_lossy().to_string();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "file.save_mesh", json!({"path": stl}));
+    for by_selection in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "file.insert_mesh", json!({"path": stl}));
+        run(&mut s, "occurrence.copy", json!({"component": "cube", "translate": [0, 40, 0]}));
+        let definition = s.model.state().bodies[0].name.clone();
+        let world = s.world_state().unwrap();
+        let second = world.bodies.iter().map(|b| b.name.clone()).find(|n| *n != definition).expect("a second placement");
+        assert!(world.bodies.len() == 2 && world.bodies.iter().all(|b| b.body.is_mesh()), "two placed mesh bodies");
+        if by_selection {
+            s.selection = vec![Sel::Body { name: second.clone() }];
+            run(&mut s, "mesh.convert", json!({"tolerance": "0.05 mm"}));
+        } else {
+            run(&mut s, "mesh.convert", json!({"body": second, "tolerance": "0.05 mm"}));
+        }
+        let world = s.world_state().unwrap();
+        assert_eq!(world.bodies.len(), 2);
+        assert!(world.bodies.iter().all(|b| !b.body.is_mesh()), "by selection {by_selection}: both placements show the solid");
+        match &s.doc.features.last().unwrap().kind {
+            FeatureKind::MeshConvert { body, .. } => assert_eq!(body.to_string(), definition, "the feature names the component's body"),
+            other => panic!("{other:?}"),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

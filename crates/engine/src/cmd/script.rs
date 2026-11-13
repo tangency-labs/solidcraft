@@ -11,15 +11,30 @@ use solidcraft_doc::{Document, Feature, FeatureKind, Param, expr};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
+use crate::schema::timeline_clipboard::{AddParams, AddResult, ExportScriptParams, ExportScriptResult, Script, ScriptAbout, ScriptStep};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const ADD_CONTRACT: TypedContract<AddParams> = TypedContract::new();
+const EXPORT_SCRIPT_CONTRACT: TypedContract<ExportScriptParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("timeline.add", "Add Recorded Feature", add).icon("new").params(
+    CommandSpec::new("timeline.add", "Add Recorded Feature", crate::checked!("timeline.add", add))
+        .icon("new")
+        .contract(&ADD_CONTRACT)
+        .output(output_schema_for::<AddResult>)
+        .params(
         "feature: a feature as the design file and timeline.inspect hold it ({type, name?, id?, …}; the name is kept even when another \
          feature has it, the id is kept and refused when another feature has it, so later steps can refer to them); params?: [{name, expression, unit?, comment?}] (the model parameters its sketch \
          dimensions use); the feature goes at the marker → feature, name, error, warning",
     ),
-    CommandSpec::new("timeline.export_script", "Export Command Script", export_script).icon("export").noundo().doc_only().params(
+    CommandSpec::new("timeline.export_script", "Export Command Script", crate::checked!("timeline.export_script", export_script))
+        .icon("export")
+        .noundo()
+        .doc_only()
+        .contract(&EXPORT_SCRIPT_CONTRACT)
+        .output(output_schema_for::<ExportScriptResult>)
+        .params(
         "path?: write the script to this file → script: {commands: [...]} that rebuilds the design (solidcraft-cli eval/run), \
          steps, omitted: what the script leaves out (appearances, folders, views, configurations, print-face assignments); components and assemblies \
          are not supported yet",
@@ -36,6 +51,19 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(Value::as_object)
         .ok_or_else(|| bad(cmd, "`feature` must be a feature object, as a design file or timeline.inspect has it"))?;
     let mut raw = raw.clone();
+    if let Some(Value::Object(def)) = raw.remove("definition") {
+        for (k, v) in def {
+            raw.entry(k).or_insert(v);
+        }
+    }
+    for meta in ["omitted", "inputs", "error", "warning", "boolean_diagnostics", "rolled_back", "type_name"] {
+        raw.remove(meta);
+    }
+    if let Some(kind_str) = raw.get("type").and_then(Value::as_str)
+        && let Some(canonical) = FeatureKind::type_name_to_kind_key(kind_str)
+    {
+        raw.insert("type".into(), json!(canonical));
+    }
     resolve_legacy_names(&mut raw, &s.doc);
     let feature = recorded_feature(cmd, &raw)?;
     let params = step_params(cmd, p.get("params"))?;
@@ -43,7 +71,14 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     s.refresh();
     let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     let r = s.model.result(id);
-    Ok(json!({"feature": id, "name": name, "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone())}))
+    let reply = AddResult {
+        feature: id,
+        name,
+        error: r.and_then(|r| r.error.clone()),
+        warning: r.and_then(|r| r.warning.clone()),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// timeline.add keeps accepting legacy name-keyed pattern and mirror seeds and construction
@@ -126,7 +161,8 @@ fn recorded_feature(cmd: &str, raw: &Map<String, Value>) -> Result<Feature> {
     Ok(f)
 }
 
-fn step_params(cmd: &str, v: Option<&Value>) -> Result<Vec<Param>> {
+/// The model parameters of a `timeline.add` step. The reader the command's contract uses too.
+pub(crate) fn step_params(cmd: &str, v: Option<&Value>) -> Result<Vec<Param>> {
     let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
     let list = v.as_array().filter(|a| a.len() <= MAX_STEP_PARAMS).ok_or_else(|| bad(cmd, "`params` must be a list of parameters"))?;
     let text = |p: &Value, k: &str| match p.get(k) {
@@ -151,15 +187,15 @@ fn export_script(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.export_script";
     let (commands, omitted) = script_steps(&s.doc)?;
     let steps = commands.len();
-    let script = json!({
-        "about": {
-            "design": s.doc.name,
-            "format": solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT),
-            "version": env!("CARGO_PKG_VERSION"),
-            "replay": "solidcraft-cli eval script.json (timeline.add steps need a build that reads this design format)",
+    let script = Script {
+        about: ScriptAbout {
+            design: s.doc.name.clone(),
+            format: solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT),
+            replay: "solidcraft-cli eval script.json (timeline.add steps need a build that reads this design format)".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
         },
-        "commands": commands,
-    });
+        commands,
+    };
     let path = str_(p, "path");
     if let Some(path) = path {
         let text = serde_json::to_string_pretty(&script).map_err(|e| EngineError::Other(e.to_string()))?;
@@ -167,11 +203,12 @@ fn export_script(s: &mut Session, p: &Value) -> Result<Value> {
     } else if p.get("path").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`path` must be a file path"));
     }
-    Ok(json!({"script": script, "steps": steps, "omitted": omitted, "path": path}))
+    let path = path.map(str::to_string);
+    serde_json::to_value(ExportScriptResult { omitted, path, script, steps, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn step(command: &str, params: Value) -> Value {
-    json!({"command": command, "params": params})
+    serde_json::to_value(ScriptStep { command: command.to_string(), params }).unwrap_or_default()
 }
 
 fn not_supported(what: &str) -> EngineError {

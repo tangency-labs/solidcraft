@@ -2,7 +2,8 @@
 //! origin, so a sketch drawn far from the origin (an imported part placed there) stays in view.
 
 use serde_json::json;
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
@@ -88,7 +89,7 @@ fn the_viewport_menu_looks_at_a_plane_under_the_cursor() {
     let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
     let look = items.iter().find(|i| i.id == "ui.lookAt").cloned().expect("a plane's menu has Look At");
     crate::context_menu::run_item(&mut h.app, &look, egui::Pos2::ZERO);
-    let normal = solidcraft_engine::geom::Plane::named("XZ").unwrap().normal();
+    let normal = solidcore_record::Plane::named("XZ").unwrap().normal();
     assert!((h.app.cam.back().cross(normal)).len() < 1e-6, "facing the plane along its normal: {:?}", h.app.cam.back());
 }
 
@@ -101,7 +102,7 @@ fn look_at_squares_a_vertical_sketch_to_the_screen() {
     h.app.run("sketch.create", json!({"plane": "XZ", "name": "Wall"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]})).unwrap();
     crate::dialogs::look_at_sketch(&mut h.app);
-    let plane = h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+    let plane = crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
     let (right, up, back) = h.app.cam.basis();
     assert!((back.cross(plane.normal())).len() < 1e-6, "facing the sketch: back={back:?} n={:?}", plane.normal());
     assert!(right.dot(plane.x).abs() > 0.999, "sketch x to the right: right={right:?} x={:?}", plane.x);
@@ -125,9 +126,35 @@ fn editing_a_sketch_in_a_turned_component_faces_its_world_plane() {
     h.app.run("occurrence.move", json!({"occurrence": occ.id, "axis": [1, 0, 0], "angle": "90 deg", "capture": true})).unwrap();
     let id = h.app.session.doc.find_feature("Face").map(|f| f.id).unwrap();
     h.app.edit_sketch(id);
-    let plane = h.app.session.world_state().sketch(id).unwrap().plane;
+    let plane = crate::open_meshing::session_world(&h.app.session).sketch(id).unwrap().plane;
     let (right, up, back) = h.app.cam.basis();
     assert!((back.cross(plane.normal())).len() < 1e-5, "facing world plane: back={back:?} n={:?}", plane.normal());
     assert!(right.dot(plane.x).abs() > 0.99, "x right: {right:?} vs {:?}", plane.x);
     assert!(up.dot(plane.y) > 0.99, "y up: {up:?} vs {:?}", plane.y);
+}
+
+/// #13111: the viewport menu's Look At on a construction plane. It resolved only the origin
+/// planes by name, so a plane of the model's own (here one tilted 45°) fell through to the
+/// selection's Look At, which does nothing without a selection and left the camera where it was.
+#[test]
+fn the_viewport_menu_looks_at_a_construction_plane() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.look_at_anim = false;
+    h.app
+        .run(
+            "construct.plane.three_points",
+            json!({"a": {"point": [0, 0, 0]}, "b": {"point": [10, 0, 0]}, "c": {"point": [0, 10, 10]}, "name": "Tilted"}),
+        )
+        .unwrap();
+    let want = crate::dialogs::plane_by_name(&h.app.session, "Tilted").expect("the plane exists");
+    assert!(want.normal().z.abs() > 0.1 && want.normal().z.abs() < 0.99, "a tilted plane: {:?}", want.normal());
+    let before = h.app.cam.back();
+    h.app.menu.plane = Some("Tilted".to_string());
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let look = items.iter().find(|i| i.id == "ui.lookAt").cloned().expect("a plane's menu has Look At");
+    crate::context_menu::run_item(&mut h.app, &look, egui::Pos2::ZERO);
+    assert!((h.app.cam.back() - before).len() > 1e-3, "the camera moved");
+    assert!((h.app.cam.back().cross(want.normal())).len() < 1e-6, "facing the plane along its normal: {:?}", h.app.cam.back());
+    assert!(near(h.app.cam.target, want.origin), "centred on the plane's origin: {:?}", h.app.cam.target);
 }

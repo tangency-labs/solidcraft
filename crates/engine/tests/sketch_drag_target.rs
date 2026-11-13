@@ -3,7 +3,8 @@
 mod four_bar;
 
 use serde_json::json;
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 #[test]
 fn angular_drag_keeps_the_horizontal_construction_line() {
@@ -216,6 +217,36 @@ fn grab(s: &solidcraft_engine::Session, line: &str, fraction: f64) -> Vec2 {
     let a = four_bar::point(s, &format!("{line}.start")).unwrap();
     let b = four_bar::point(s, &format!("{line}.end")).unwrap();
     a + (b - a) * fraction
+}
+
+#[test]
+fn a_live_line_grab_can_move_in_a_large_staircase() {
+    let mut s = solidcraft_engine::Session::default();
+    s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+    let mut points = vec![[10, 0], [10, 20]];
+    for i in 0..43 {
+        let [x, y] = points.last().copied().unwrap();
+        points.push(if i % 2 == 0 { [x + 5, y] } else { [x, y + 5] });
+    }
+    s.execute("sketch.line", &json!({"points":points,"infer":true})).unwrap();
+    s.execute("sketch.constraint.horizontal_vertical", &json!({"points":["origin","l1.start"],"mode":"horizontal"})).unwrap();
+
+    // Rigid translation cannot move the first endpoint off Y = 0. The line can
+    // follow the grab by changing its length while both endpoints move sideways.
+    let target = Vec2::new(11.0, 12.0);
+    for _ in 0..8 {
+        let from = grab(&s, "l1", 0.5);
+        let result = s.execute("sketch.drag", &json!({"entity":"l1","from":[from.x,from.y],"to":[target.x,target.y],"live":true})).unwrap();
+        let after = grab(&s, "l1", 0.5);
+        assert_eq!(result["sketch"]["solved"], true, "{result}");
+        if after.dist(target) < 1e-6 {
+            break;
+        }
+        assert!(after.dist(target) < from.dist(target), "the live drag stalled: {result}");
+        assert_eq!(result["retry"], true, "{result}");
+    }
+    assert!(four_bar::point(&s, "l1.start").unwrap().dist(Vec2::new(11.0, 0.0)) < 1e-6);
+    assert!(four_bar::point(&s, "l1.end").unwrap().dist(Vec2::new(11.0, 24.0)) < 1e-6);
 }
 
 #[test]

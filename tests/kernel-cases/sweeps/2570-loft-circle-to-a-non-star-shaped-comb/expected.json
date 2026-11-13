@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2570",
+  "tangency-labs/solidcraft#3670"
+ ],
+ "what": "a loft between a circle and a 20-edge comb outline (not star-shaped from its centroid: the teeth turn the vertex directions back on themselves), 40 mm apart (the circle was wound about ten times, the app froze)",
+ "source": "invariants",
+ "method": "no closed form for the circle-to-comb pairing, so only invariants: the loft builds one closed valid solid, and as every ruling joins a point of the comb to a point of the circle, the solid lies in the hull of both sections: bbox x +-18, y -2..18 (the circle r 10 about (0,8) reaches below the comb), z 0..40.",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -18,
+   -2,
+   0
+  ],
+  "max": [
+   18,
+   18,
+   40
+  ]
+ }
+}

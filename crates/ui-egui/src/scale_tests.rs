@@ -2,6 +2,7 @@
 //! design with many bodies must not make every frame or every click slower per body squared.
 
 use serde_json::json;
+use solidcraft_engine::geom::MeshGeom;
 
 use crate::scenario::Harness;
 
@@ -40,7 +41,7 @@ fn ms(f: impl FnOnce()) -> f64 {
 fn frame_and_cheap_command_cost_by_body_count() {
     for n in [50, 500, 5000] {
         let mut h = grid(n);
-        h.app.session.world_state().warm_meshes(|| true);
+        h.app.session.world_state().unwrap().warm_meshes(|| true);
         let scene_cold = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let scene_again = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let idle = ms(|| h.frames(10)) / 10.0;
@@ -80,9 +81,9 @@ fn appearance_and_selection_rebuild_cost() {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
     for n in [200usize, 1000, 5000] {
         let mut h = grid(n);
-        h.app.session.world_state().warm_meshes(|| true);
+        h.app.session.world_state().unwrap().warm_meshes(|| true);
         h.frames(2);
-        let body = h.app.session.world_state().bodies[0].name.clone();
+        let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
         let cold = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let again = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let proj = crate::viewport::projection(&h.app, rect);
@@ -95,7 +96,7 @@ fn appearance_and_selection_rebuild_cost() {
         let colour = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("appearance.assign", json!({"bodies":[body.clone()],"color":"#336699","opacity":0.5})).unwrap();
         let opacity_class = ms(|| drop(crate::viewport::build_scene(&h.app)));
-        let theme_name = if crate::theme::is_dark() { "light" } else { "dark" };
+        let theme_name = if solidcraft_theme::is_dark() { "light" } else { "dark" };
         let _ = h.call("ui.prefs", json!({"theme": theme_name}));
         let theme = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let geometry = match h.app.run("solid.move", json!({"bodies":[body.clone()], "translate":[1.0, 0.0, 0.0]})) {
@@ -123,17 +124,17 @@ fn large_body_scene_rebuild_cost() {
                 .run("solid.torus", json!({"major": 100, "minor": 10, "center": [k as f64 * 220.0, 0.0, 0.0], "body_name": format!("T{k}")}))
                 .unwrap();
         }
-        h.app.session.world_state().warm_meshes(|| true);
+        h.app.session.world_state().unwrap().warm_meshes(|| true);
         h.frames(2);
-        let bodies = h.app.session.world_state().bodies.len();
-        let triangles: usize = h.app.session.world_state().bodies.iter().map(|b| b.mesh().triangles.len()).sum();
-        let body = h.app.session.world_state().bodies[0].name.clone();
+        let bodies = h.app.session.world_state().unwrap().bodies.len();
+        let triangles: usize = h.app.session.world_state().unwrap().bodies.iter().map(|b| b.mesh().triangles.len()).sum();
+        let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
         let cold = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("appearance.assign", json!({"bodies":[body.clone()],"color":"#336699"})).unwrap();
         let colour = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("appearance.assign", json!({"bodies":[body.clone()],"color":"#336699","opacity":0.5})).unwrap();
         let opacity_class = ms(|| drop(crate::viewport::build_scene(&h.app)));
-        let theme_name = if crate::theme::is_dark() { "light" } else { "dark" };
+        let theme_name = if solidcraft_theme::is_dark() { "light" } else { "dark" };
         let _ = h.call("ui.prefs", json!({"theme": theme_name}));
         let theme = ms(|| drop(crate::viewport::build_scene(&h.app)));
         println!(
@@ -164,7 +165,7 @@ fn assembly(unique: usize, placed: usize) -> Harness {
             json!({"components": ["Wheel"], "dir1": [1, 0, 0], "count1": p1, "spacing1": 100, "dir2": [0, 1, 0], "count2": p2, "spacing2": 100}),
         )
         .unwrap();
-    h.app.session.world_state().warm_meshes(|| true);
+    h.app.session.world_state().unwrap().warm_meshes(|| true);
     h.frames(3);
     h
 }
@@ -178,7 +179,7 @@ fn assembly_scene_rebuild_cost() {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
     for (unique, placed) in [(100, 100), (300, 500)] {
         let mut h = assembly(unique, placed);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let bodies = st.bodies.len();
         let triangles: usize = st.bodies.iter().map(|b| b.mesh().triangles.len()).sum();
         let part = st.bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
@@ -198,7 +199,7 @@ fn assembly_scene_rebuild_cost() {
         let opacity_class = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("appearance.assign", json!({"components": ["Wheel"], "color": "#cc6633"})).unwrap();
         let component_colour = ms(|| drop(crate::viewport::build_scene(&h.app)));
-        let theme_name = if crate::theme::is_dark() { "light" } else { "dark" };
+        let theme_name = if solidcraft_theme::is_dark() { "light" } else { "dark" };
         let _ = h.call("ui.prefs", json!({"theme": theme_name}));
         let theme = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("browser.visibility", json!({"visible": false, "items": [part.clone()]})).unwrap();
@@ -224,7 +225,7 @@ fn assembly_tree_hover_highlight_cost() {
     for (unique, placed) in [(100, 100), (300, 500)] {
         let mut h = assembly(unique, placed);
         let _ = crate::viewport::build_scene(&h.app);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let part = st.bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
         let wheels: Vec<String> = st.bodies.iter().filter(|b| b.component != 0).map(|b| b.name.clone()).collect();
         let everything: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
@@ -262,7 +263,7 @@ pub(crate) fn view_frame(
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size as f32, size as f32));
     let proj = crate::viewport::projection(app, rect);
     let e = proj.cam.eye().to_f32();
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let none = || std::sync::Arc::new(std::sync::Mutex::new(None));
     crate::gpu::Frame {
         product: false,
@@ -277,7 +278,9 @@ pub(crate) fn view_frame(
         pv_key: 0,
         pv_slot: none(),
         pv_hide: false,
+        preview_bounds: None,
         view_proj: proj.vp.to_f32(),
+        turned_depth: Some(proj.vp.turned_depth_f32()),
         back: proj.cam.back().to_f32(),
         size_px: [size as f32; 2],
         clip: [0.0; 4],
@@ -290,11 +293,13 @@ pub(crate) fn view_frame(
         outline: false,
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
-        ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
         selection_tint: [0.4, 0.6, 0.9],
+        hatch: Default::default(),
+        moving: None,
     }
 }
 
@@ -302,7 +307,7 @@ pub(crate) fn view_frame(
 /// component, the whole design), each hover change building, uploading and drawing the highlight.
 #[cfg(not(target_arch = "wasm32"))]
 fn hover_rows(h: &mut Harness, frames: &mut crate::gpu::OffscreenFrames, size: u32, model_key: u64, label: &str) -> String {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let part = st.bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
     let wheels: Vec<String> = st.bodies.iter().filter(|b| b.component != 0).map(|b| b.name.clone()).collect();
     let everything: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
@@ -367,7 +372,7 @@ fn assembly_tree_hover_frame_cost() {
         h.app.run("component.activate", json!({"component": "Wheel"})).unwrap();
         println!("{}", hover_rows(&mut h, &mut frames, SIZE, base + 1_000_000, &format!("{label} mode=component_active")));
         h.app.run("component.activate", json!({"component": 0})).unwrap();
-        let parts: Vec<String> = h.app.session.world_state().bodies.iter().filter(|b| b.component == 0).map(|b| b.name.clone()).collect();
+        let parts: Vec<String> = h.app.session.world_state().unwrap().bodies.iter().filter(|b| b.component == 0).map(|b| b.name.clone()).collect();
         h.app.run("appearance.assign", json!({"bodies": parts, "color": "#88aacc", "opacity": 0.5})).unwrap();
         println!("{}", hover_rows(&mut h, &mut frames, SIZE, base + 2_000_000, &format!("{label} mode=glass_parts")));
     }
@@ -383,7 +388,7 @@ fn frame_cost_of_a_design_file() {
     let doc = solidcraft_engine::io::read_design(&bytes).unwrap();
     let mut h = Harness::new();
     h.app.session = solidcraft_engine::Session::new(doc);
-    h.app.session.world_state().warm_meshes(|| true);
+    h.app.session.world_state().unwrap().warm_meshes(|| true);
     h.frames(3);
     let idle = ms(|| h.frames(5)) / 5.0;
     let keys: Vec<String> =
@@ -393,7 +398,7 @@ fn frame_cost_of_a_design_file() {
     let expanded = ms(|| h.frames(5)) / 5.0;
     let scene = ms(|| drop(crate::viewport::build_scene(&h.app)));
     let scene_again = ms(|| drop(crate::viewport::build_scene(&h.app)));
-    let bodies = h.app.session.world_state().bodies.len();
+    let bodies = h.app.session.world_state().unwrap().bodies.len();
     let rename = ms(|| {
         h.app.run("body.rename", json!({"body": "Body1", "name": "Renamed"})).unwrap();
         h.frame();
@@ -454,7 +459,7 @@ fn whole_body_highlight_cost_from_the_models_own_triangles() {
         h.app.run("solid.torus", json!({"major": 100, "minor": 10, "center": [k as f64 * 220.0, 0.0, 0.0], "body_name": name.clone()})).unwrap();
         names.push(name);
     }
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let triangles: usize = st.bodies.iter().map(|b| b.mesh().triangles.len()).sum();
     st.warm_meshes(|| true);
     for b in &st.bodies {
@@ -486,11 +491,11 @@ fn step_file_cost() {
     };
     let import = ms(|| drop(h.app.run("file.insert_step", json!({"path": path.to_string_lossy()})).unwrap()));
     phase(&mut line, "import", import);
-    let world = ms(|| drop(h.app.session.world_state()));
+    let world = ms(|| drop(h.app.session.world_state().unwrap()));
     phase(&mut line, "world", world);
-    let mesh = ms(|| h.app.session.world_state().warm_meshes(|| true));
+    let mesh = ms(|| h.app.session.world_state().unwrap().warm_meshes(|| true));
     phase(&mut line, "mesh", mesh);
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let bodies: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
     let triangles: usize = st.bodies.iter().map(|b| b.mesh().triangles.len()).sum();
     let components = h.app.session.doc.components.len();
@@ -518,7 +523,7 @@ fn step_file_cost() {
     phase(&mut line, "opacity_command", opacity_command);
     let opacity = ms(|| drop(crate::viewport::build_scene(&h.app)));
     phase(&mut line, "opacity_scene", opacity);
-    let theme_name = if crate::theme::is_dark() { "light" } else { "dark" };
+    let theme_name = if solidcraft_theme::is_dark() { "light" } else { "dark" };
     let _ = h.call("ui.prefs", json!({"theme": theme_name}));
     let theme = ms(|| drop(crate::viewport::build_scene(&h.app)));
     phase(&mut line, "theme_scene", theme);
@@ -590,7 +595,7 @@ fn zoomed_view_frame_cost() {
         (t[3], frames.stats().triangles)
     };
     let (whole, whole_tris) = still(&h, &mut frames);
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let b = st.bodies.iter().find(|b| b.component == 0).unwrap().mesh().bounds();
     drop(st);
     h.app.cam.target = b.center();
@@ -617,7 +622,7 @@ fn zoomed_view_frame_cost() {
 #[test]
 #[ignore = "manual highlight measurement"]
 fn many_selected_bodies_hover_cost() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let mut h = match std::env::var_os("SOLIDCRAFT_SCALE_DESIGN") {
         Some(path) => {
             let mut h = Harness::new();
@@ -627,7 +632,7 @@ fn many_selected_bodies_hover_cost() {
         }
         None => grid(1440),
     };
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     st.warm_meshes(|| true);
     for b in &st.bodies {
         let _ = b.display_plan();
@@ -707,7 +712,7 @@ fn sketch_scene_cost_while_the_camera_moves() {
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.app.run("sketch.insert_svg", json!({"text": blob_logo(k)})).unwrap();
         h.frames(3);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let sid = h.app.session.active_sketch.expect("the sketch is open");
         let (curves, profiles) = st.sketch(sid).map_or((0, 0), |ss| (ss.sketch.curves.len(), ss.profiles.len()));
         drop(st);
@@ -770,7 +775,7 @@ fn orbit_frame_cost() {
     } else {
         assembly(300, 500)
     };
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     st.warm_meshes(|| true);
     for b in &st.bodies {
         let _ = b.display_plan();
@@ -854,4 +859,69 @@ fn orbit_frame_cost() {
         line.push_str(&format!(" [{name}]={:.2}", median(t)));
     }
     println!("{line}");
+}
+
+/// The Render workspace's live product preview on an assembly: extracting the product scene
+/// and building its blocks cold, again with nothing changed, and after a part's colour and
+/// opacity edits, with the preview's cache kept as the live preview keeps it. Run with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore = "manual product preview measurement"]
+fn product_preview_rebuild_cost() {
+    for (unique, placed) in [(100, 100), (300, 500)] {
+        let mut h = assembly(unique, placed);
+        let part = crate::open_meshing::session_world(&h.app.session).bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
+        let mut cache = crate::render_workspace::ProductCache::default();
+        let extract = |h: &Harness| solidcraft_engine::product_scene::extract(&h.app.session).unwrap();
+        let time = |h: &Harness, cache: &mut crate::render_workspace::ProductCache| {
+            let scene = extract(h);
+            let placements = solidcraft_engine::product_scene::placements(&h.app.session, &scene);
+            ms(|| drop(crate::render_workspace::gpu_scene_cached(&scene, &placements, u64::MAX, cache).unwrap()))
+        };
+        let cold = time(&h, &mut cache);
+        let again = time(&h, &mut cache);
+        h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699"})).unwrap();
+        let colour = time(&h, &mut cache);
+        h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699", "opacity": 0.5})).unwrap();
+        let opacity = time(&h, &mut cache);
+        let extract_ms = ms(|| drop(extract(&h)));
+        let shown = extract(&h);
+        let instanced = crate::render_workspace::gpu_scene_cached(
+            &shown,
+            &solidcraft_engine::product_scene::placements(&h.app.session, &shown),
+            u64::MAX,
+            &mut crate::render_workspace::ProductCache::default(),
+        )
+        .unwrap()
+        .1;
+        // Every body PBR, then one roughness change for all of them.
+        let bodies: Vec<String> = crate::open_meshing::session_world(&h.app.session).bodies.iter().map(|b| b.name.clone()).collect();
+        let pbr = |r: f64| json!({"bodies": &bodies, "color": "#b47846", "pbr": {"metallic": 1.0, "roughness": r, "dielectric_ior": 1.5}});
+        h.app.run("appearance.assign", pbr(0.2)).unwrap();
+        let to_pbr = time(&h, &mut cache);
+        let pbr_bytes: usize = {
+            let e = extract(&h);
+            crate::render_workspace::gpu_scene_cached(
+                &e,
+                &solidcraft_engine::product_scene::placements(&h.app.session, &e),
+                u64::MAX,
+                &mut crate::render_workspace::ProductCache::default(),
+            )
+            .unwrap()
+            .1
+        }
+        .blocks
+        .iter()
+        .map(|b| b.bytes.vertices.len())
+        .sum();
+        h.app.run("appearance.assign", pbr(0.6)).unwrap();
+        let roughness = time(&h, &mut cache);
+        println!(
+            "PRODUCTCACHE bodies={} cold_ms={cold:.1} unchanged_ms={again:.1} colour_ms={colour:.1} opacity_ms={opacity:.1} extract_ms={extract_ms:.1} to_pbr_ms={to_pbr:.1} pbr_bytes={pbr_bytes} roughness_ms={roughness:.1} instanced_meshes={} placements={} block_bytes={}",
+            unique + placed,
+            instanced.instanced.len(),
+            instanced.instanced.iter().map(|m| m.count()).sum::<usize>(),
+            instanced.blocks.iter().map(|b| b.bytes.vertices.len()).sum::<usize>(),
+        );
+    }
 }

@@ -1,0 +1,7 @@
+/* Screenshots come in the app's dark and light themes: show the one that matches the book's.
+   light and rust are the book's light themes; coal, navy and ayu its dark ones. */
+html.light img.dark-ui,
+html.rust img.dark-ui,
+html:not(.light):not(.rust) img.light-ui {
+    display: none;
+}
