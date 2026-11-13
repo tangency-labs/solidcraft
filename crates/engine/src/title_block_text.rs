@@ -3,7 +3,8 @@
 //! drawing's font and language.
 //!
 //! - [`shown`] works out each text cell's text: the text typed over it on the sheet, or its content
-//!   with each field read ([`Values::text`]). `drawing.inspect` lists it, and the sheet scene sets it.
+//!   with each field read ([`read`], [`Values::text`]). `drawing.inspect` lists it, and the sheet scene
+//!   sets it. A note's text reads its fields by the same [`read`].
 //! - [`lay`] measures each label as one line at its place, and each value's lines in its value box,
 //!   broken between words to the box's width when its fit wraps. What doesn't fit is shown whole
 //!   and noted ([`Warning`]). A text the drawing's font can't set is left off the sheet and noted
@@ -17,8 +18,8 @@ use solidcore_record::Vec2;
 use solidcraft_doc::Document;
 use solidcraft_doc::bom::{Mass, Tree};
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::fields::{Component, Values};
-use solidcraft_geom::cell::{HAlign, Part, Source, Warning, place_lines};
+use solidcraft_doc::drawing::fields::{Component, Documented, Values};
+use solidcraft_geom::cell::{Content, HAlign, Part, Source, Warning, place_lines};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::title_block::{CellKind, TextCell, TitleBlock, TitleBlockLayout};
 use solidcraft_geom::{Aabb2, EPS};
@@ -67,30 +68,71 @@ impl Set {
     }
 }
 
-/// The text cells of sheet `at`'s title block as the sheet shows them, in the block's order. The
-/// component it documents is weighed in `tree` only when a cell reads its material or mass.
+/// The text cells of sheet `at`'s title block as the sheet shows them, in the block's order: each
+/// the text typed over it, or its content as [`read`] reads it. A cell that shows a logo shows no
+/// text (`TextCell::image`).
 pub fn shown(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec<CellText> {
-    let Some(sheet) = d.sheets.get(at) else { return Vec::new() };
-    let Some(block) = &sheet.title_block else { return Vec::new() };
-    let texts = || block.cells.iter().filter_map(|cell| if let CellKind::Text(text) = &cell.kind { Some((&cell.name, &text.content)) } else { None });
-    let weighs = texts()
-        .flat_map(|(_, content)| &content.0)
-        .any(|part| matches!(part, Part::Field { source: Source::Component, key, .. } if key == "material" || key == "mass"));
+    let mut out = Vec::new();
+    shown_with(doc, tree, d, at, |cell, _, _| out.push(cell));
+    out
+}
+
+/// [`shown`], each cell given to `each` with its own content and the values its fields read, for a
+/// caller that reads more of them than the sheet shows (`drawing.check`'s empty fields).
+pub fn shown_with(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize, mut each: impl FnMut(CellText, &Content, &Values)) {
+    let Some(sheet) = d.sheets.get(at) else { return };
+    let Some(block) = &sheet.title_block else { return };
+    let texts: Vec<(&String, &Content)> = block
+        .cells
+        .iter()
+        .filter_map(|cell| match &cell.kind {
+            CellKind::Text(text) if text.image.is_none() => Some((&cell.name, &text.content)),
+            _ => None,
+        })
+        .collect();
+    with_values(doc, tree, d, at, texts.iter().map(|(_, content)| *content), |values| {
+        for &(name, content) in &texts {
+            let value = values.text(content);
+            let cell = match sheet.title_block_overrides.get(name) {
+                Some(typed) => CellText { name: name.clone(), text: typed.clone(), replaced: Some(value) },
+                None => CellText { name: name.clone(), text: value, replaced: None },
+            };
+            each(cell, content, values);
+        }
+    });
+}
+
+/// `contents` as sheet `at` of `d` shows them, in their order: text as written, each field read
+/// ([`Values::text`]). The component the sheet documents is weighed in `tree` only when a field reads
+/// its material or mass. A title block's cells and a note's text read their fields by this one rule.
+pub fn read<'c>(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize, contents: impl Iterator<Item = &'c Content> + Clone) -> Vec<String> {
+    with_values(doc, tree, d, at, contents.clone(), |values| contents.map(|content| values.text(content)).collect())
+}
+
+/// `answer` given what sheet `at` of `d` reads its fields from ([`Values`]), for `contents`: the
+/// component the sheet documents is weighed in `tree` only when one of them reads its material or
+/// mass. [`read`] and a note's inspect read through this one rule.
+pub fn with_values<'c, R>(
+    doc: &Document,
+    tree: &mut Tree<'_>,
+    d: &Drawing,
+    at: usize,
+    mut contents: impl Iterator<Item = &'c Content>,
+    answer: impl FnOnce(&Values) -> R,
+) -> R {
+    let weighs = contents.any(|content| {
+        content.0.iter().any(|part| matches!(part, Part::Field { source: Source::Component, key, .. } if key == "material" || key == "mass"))
+    });
     // What the model says of the component it documents: a component since deleted has nothing.
-    let id = sheet.documents.map(|documents| documents.component);
+    let id = d.sheets.get(at).and_then(|sheet| sheet.documents).map(|documents| documents.component);
     let (mass, materials) = id.filter(|_| weighs).and_then(|id| tree.component(id).ok()).unzip();
     let mass = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(format_mass(grams)) } else { None });
     let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
-    let component = id.and_then(|id| documented(doc, id, material.as_deref(), mass.as_deref()));
-    let values = Values { drawing: d, sheet: at, component };
-    let cell = |(name, content): (&String, _)| {
-        let value = values.text(content);
-        match sheet.title_block_overrides.get(name) {
-            Some(typed) => CellText { name: name.clone(), text: typed.clone(), replaced: Some(value) },
-            None => CellText { name: name.clone(), text: value, replaced: None },
-        }
+    let component = match id {
+        None => Documented::Nothing,
+        Some(id) => documented(doc, id, material.as_deref(), mass.as_deref()).map_or(Documented::Gone, Documented::Present),
     };
-    texts().map(cell).collect()
+    answer(&Values { drawing: d, sheet: at, component })
 }
 
 /// Component `id` of the design (0: the design itself) as a title block's fields read it, with

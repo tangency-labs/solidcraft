@@ -28,6 +28,7 @@ use crate::schema::drawing::{
     DrawingCreateParams, DrawingSetParams, SheetTemplateChange, TemplateApplyParams, TemplateApplyResult, TemplateEntry, TemplateListParams,
     TemplateListResult, TemplateSaveParams, TemplateSaveResult,
 };
+use crate::schema::drawing_view::LineGroupParam;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::title_block_text::{self, CellText, Note};
 use crate::{EngineError, Result, Session};
@@ -95,7 +96,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it, a cell that shows a logo, its `image` in `title_block`, left out: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", crate::checked!("drawing.set", set))
         .in_drawing()
@@ -116,18 +117,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("key, or keys: [keys] → metadata, removed: [keys that were there]"),
 ];
 
-/// A `line_group` as given, for a drawing, a sheet or a view: one of ISO 128's groups, by its wide line.
-pub(crate) fn line_group_of(v: &Value) -> std::result::Result<LineGroup, String> {
-    serde_json::from_value(v.clone()).map_err(|_| format!("`line_group` is one of {}", LineGroup::NAMES.join(", ")))
-}
-
-/// [`line_group_of`], refused as `cmd`.
+/// A sheet's `line_group` as given, refused as `cmd` in the words every line group is.
 pub(super) fn line_group(cmd: &str, v: &Value) -> Result<LineGroup> {
-    line_group_of(v).map_err(|e| bad(cmd, e))
+    serde_json::from_value::<LineGroupParam>(v.clone()).map(|group| group.0).map_err(|e| bad(cmd, format!("`line_group` {e}")))
 }
 
 /// `font` as given: a font family's name, never a file (drawings name fonts by family, so they
-/// travel).
+/// travel). Checked as given, before the trim, so a control character or an overlong name is
+/// refused even where trimming would hide it; `Drawing::validate` checks the trimmed name the
+/// drawing keeps, and a drawing read from a file.
 fn font<'a>(cmd: &str, font: Option<&'a str>) -> Result<Option<&'a str>> {
     if let Some(family) = font {
         solidcraft_sketch::check_family(family).map_err(|e| bad(cmd, e.to_string()))?;
@@ -170,7 +168,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(projection) = request.projection {
         d.projection = projection;
     }
-    if let Some(group) = request.line_group {
+    if let Some(LineGroupParam(group)) = request.line_group {
         d.line_group = group;
     }
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
@@ -197,7 +195,8 @@ fn template_apply(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Bool(dry_run)) => *dry_run,
         Some(_) => return Err(bad(cmd, "`dry_run` is true or false")),
     };
-    let (applied, changed) = template::apply(s.drawing(cmd)?, &chosen).map_err(fail)?;
+    let record = s.drawing(cmd)?.clone();
+    let (applied, changed) = template::apply(&record, &chosen, &mut s.ids).map_err(fail)?;
     // The views on a sheet whose room changed: listed when they fall outside or over the block, never moved.
     let views: Vec<u64> = changed.iter().filter(|c| c.paper || c.border || c.title_block).flat_map(|c| applied.on_sheet(c.sheet).views).collect();
     let outside = super::drawing_view::outside_results(crate::drawing_view::outside(s, &applied, &views, cmd)?);
@@ -428,15 +427,24 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
 /// Each parts list with how many balloons point at each of its rows, its editor's ballooned column
 /// (`drawing.inspect`): null for a list that can't be made, its component deleted or too large.
 fn parts_lists(d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
+    let lists = ballooned(d, tree).into_iter().map(|(id, rows)| {
+        let rows = rows.map(|rows| rows.into_iter().map(|(item, balloons)| json!({"item": item, "balloons": balloons})).collect::<Vec<_>>());
+        json!({"table": ids::encode(id), "ballooned": rows})
+    });
+    lists.collect()
+}
+
+/// Each parts list of `d` by id, with how many balloons point at each of its rows by item, in its
+/// order: none for a list that can't be made. One count for `drawing.inspect` and `drawing.check`.
+pub(super) fn ballooned(d: &Drawing, tree: &mut Tree<'_>) -> Vec<(u64, Option<Vec<(String, usize)>>)> {
     let reading = d.balloons_by_list();
     let lists = d.tables.iter().filter_map(|t| if let Kind::PartsList(list) = &t.kind { Some((t.id, list)) } else { None });
     lists
         .map(|(id, list)| {
-            let ballooned = bom::list_with(tree, &list.request(), true).ok().map(|listed| {
-                let rows = balloons_by_row(reading.get(&id).map_or(&[], Vec::as_slice), &listed, tree);
-                rows.into_iter().map(|(item, balloons)| json!({"item": item, "balloons": balloons})).collect::<Vec<_>>()
-            });
-            json!({"table": ids::encode(id), "ballooned": ballooned})
+            let rows = bom::list_with(tree, &list.request(), true)
+                .ok()
+                .map(|listed| balloons_by_row(reading.get(&id).map_or(&[], Vec::as_slice), &listed, tree));
+            (id, rows)
         })
         .collect()
 }
@@ -493,7 +501,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(updates) = request.updates {
             d.updates = updates;
         }
-        if let Some(group) = request.line_group {
+        if let Some(LineGroupParam(group)) = request.line_group {
             d.line_group = group;
         }
         if let Some(font) = font(cmd, request.font.as_deref())? {

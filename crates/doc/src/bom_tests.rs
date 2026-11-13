@@ -757,6 +757,7 @@ fn saved_numbers_are_read_leniently_and_go_with_their_component() {
         group: Group::PartNumber,
         fold: false,
         purchased_contents: false,
+        suppressed_parts: false,
         items: vec![saved(key(a), 4), saved(key(a), 9), saved(key(b), 0), saved(key(c), MAX_ITEM + 1)],
     });
     assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("4", "A", ""), item("5", "B", "p"), item("6", "C", "p")]);
@@ -922,4 +923,218 @@ fn item_of_reads_a_balloons_row() {
     assert_eq!(all.item_of(&tree, &vec![at["Bolt"]; 65]), Err(Unlisted::NotFound));
     assert!(of_sub.item_of(&tree, &vec![at["Sub"]; 65]).is_err());
     assert_eq!(all.item_of(&tree, &[]), Err(Unlisted::NoRow));
+}
+
+/// A 10 mm box in `component`, suppressed as a configuration row would set it.
+fn boxed(doc: &mut Document, component: u64, suppressed: bool) -> u64 {
+    let kind = serde_json::from_value(json!({"type": "box", "corner": [0, 0, 0], "length": "10", "width": "10", "height": "10"})).unwrap();
+    let id = doc.add_feature(kind, None).unwrap();
+    let f = doc.feature_mut(id).unwrap();
+    (f.component, f.suppressed) = (component, suppressed);
+    id
+}
+
+/// A rectangle sketch in `component`, and an extrude of it, suppressed or not: the sketch's id.
+fn sketched(doc: &mut Document, component: u64, extrude_suppressed: Option<bool>) -> u64 {
+    let mut sketch = solidcraft_sketch::Sketch::new();
+    let corners: Vec<_> = [(0., 0.), (5., 0.), (5., 5.), (0., 5.)]
+        .into_iter()
+        .map(|(x, y)| sketch.add_point(solidcore_record::Vec2::new(x, y), None).unwrap())
+        .collect();
+    for i in 0..4 {
+        sketch.add_line_pts(corners[i], corners[(i + 1) % 4], None).unwrap();
+    }
+    let plane = crate::PlaneRef::Custom { plane: solidcore_record::Plane::XY };
+    let sk = doc.add_feature(crate::FeatureKind::Sketch { plane, sketch }, None).unwrap();
+    doc.feature_mut(sk).unwrap().component = component;
+    if let Some(suppressed) = extrude_suppressed {
+        let extrude = crate::FeatureKind::Extrude {
+            thin: None,
+            sketch: crate::SketchId(sk),
+            profiles: crate::ProfileSel::All,
+            extent: serde_json::from_value(json!({"distance": "2"})).unwrap(),
+            operation: crate::Operation::NewBody,
+            targets: vec![],
+        };
+        let id = doc.add_feature(extrude, None).unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        (f.component, f.suppressed) = (component, suppressed);
+    }
+    sk
+}
+
+/// What `request` lists for `doc` as its model evaluates, with each row's members.
+fn evaluated(doc: &Document, request: Request) -> Bom {
+    let mut model = crate::Model::new();
+    model.evaluate(doc);
+    let state = model.state();
+    list_with(&mut Tree::new(doc, &state), &request, true).unwrap()
+}
+
+/// Two parts with a box each, the second's suppressed: a configuration switched it off.
+fn one_switched_off() -> (Document, u64) {
+    let mut doc = Document::default();
+    let (on, _) = add(&mut doc, "On", 0);
+    let (off, _) = add(&mut doc, "Off", 0);
+    boxed(&mut doc, on, false);
+    let feature = boxed(&mut doc, off, true);
+    (doc, feature)
+}
+
+/// Cam (10 Nov 2026): a part a configuration switches off is not included. It counts nowhere, in
+/// every view, and weighs nothing as before; `suppressed_parts` lists it as placed.
+#[test]
+fn a_part_a_configuration_switches_off_counts_nowhere() {
+    let (doc, _) = one_switched_off();
+    for v in View::ALL {
+        let bom = evaluated(&doc, Request { mass: true, ..view(v) });
+        assert_eq!((rows(&bom), bom.total.occurrences), (vec![row("1", "On", Normal, 1, 1)], 1), "{v:?}");
+        let shown = evaluated(&doc, Request { mass: true, suppressed_parts: true, ..view(v) });
+        assert_eq!(rows(&shown), [row("1", "Off", Normal, 1, 1), row("2", "On", Normal, 1, 1)], "{v:?}");
+        assert_eq!(shown.rows[0].mass, Mass::Unknown(Unknown::NothingToWeigh));
+        assert!(matches!(bom.total.mass, Mass::Grams(g) if g > 0.0), "{v:?}");
+        assert_eq!(bom.total.mass, shown.total.mass, "the assembly weighs the same: {v:?}");
+    }
+}
+
+/// Only a part with no bodies and a suppressed feature of its own is switched off: an empty part, a
+/// virtual one, one with a sketch alone, and one with a live body beside a suppressed feature are
+/// listed; one whose extrude is suppressed, its sketch not, is switched off.
+#[test]
+fn only_a_part_without_bodies_and_with_a_suppressed_feature_is_switched_off() {
+    let mut doc = Document::default();
+    add(&mut doc, "Empty", 0);
+    let (grease, _) = add(&mut doc, "Grease", 0);
+    set_virtual(&mut doc, grease);
+    set(&mut doc, grease, "bom_quantity", "3 m");
+    let (drawn, _) = add(&mut doc, "Sketch only", 0);
+    sketched(&mut doc, drawn, None);
+    let (trimmed, _) = add(&mut doc, "Trimmed", 0);
+    boxed(&mut doc, trimmed, false);
+    boxed(&mut doc, trimmed, true);
+    let (flat, _) = add(&mut doc, "Flat", 0);
+    sketched(&mut doc, flat, Some(true));
+    let names = |bom: &Bom| -> Vec<String> { bom.rows.iter().map(|r| r.names.join("; ")).collect() };
+    for v in View::ALL {
+        let bom = evaluated(&doc, view(v));
+        assert_eq!(names(&bom), ["Empty", "Grease", "Sketch only", "Trimmed"], "{v:?}");
+        assert_eq!(bom.rows[1].quantity, Quantity::Length(3000.0));
+    }
+    // The extrude switched on again: the part is listed.
+    let extrude = doc.features.iter().rposition(|f| f.component == flat).unwrap();
+    doc.features[extrude].suppressed = false;
+    assert_eq!(names(&evaluated(&doc, Request::default())), ["Empty", "Flat", "Grease", "Sketch only", "Trimmed"]);
+}
+
+/// A subassembly holding only a switched-off part is still a row where it is one (it places
+/// something), with nothing under it; a folded part holding one doesn't list it.
+#[test]
+fn a_switched_off_part_leaves_its_subassembly_and_its_kit() {
+    let mut doc = Document::default();
+    let (sub, osub) = add(&mut doc, "Sub", 0);
+    boxed(&mut doc, sub, true);
+    let (off, ooff) = add(&mut doc, "Off", sub);
+    boxed(&mut doc, off, true);
+    assert!(rows(&evaluated(&doc, view(View::PartsOnly))).is_empty());
+    assert_eq!(rows(&evaluated(&doc, view(View::FirstLevel))), [row("1", "Sub", Normal, 1, 1)]);
+    assert_eq!(rows(&evaluated(&doc, view(View::AllLevels))), [row("1", "Sub", Normal, 1, 1)], "nothing under it");
+    // A balloon left on it reads no row.
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let mut tree = Tree::new(&doc, &state);
+    let all = list_with(&mut tree, &view(View::AllLevels), true).unwrap();
+    assert_eq!(all.item_of(&tree, &[osub, ooff]), Err(Unlisted::NoRow));
+    let (kit, _) = add(&mut doc, "Kit", 0);
+    number(&mut doc, kit, "K-1");
+    boxed(&mut doc, kit, false);
+    let (pin, _) = add(&mut doc, "Pin", kit);
+    boxed(&mut doc, pin, false);
+    place(&mut doc, off, kit);
+    let kits = evaluated(&doc, folded(View::PartsOnly));
+    assert_eq!(rows(&kits), [row("1", "Kit", Normal, 1, 1), row("1.1", "Pin", Normal, 1, 1)]);
+    // Shown, it is listed in the kit and, through the subassembly, as a row of its own.
+    let shown = evaluated(&doc, Request { suppressed_parts: true, ..folded(View::PartsOnly) });
+    let want = [row("1", "Kit", Normal, 1, 1), row("1.1", "Off", Normal, 1, 1), row("1.2", "Pin", Normal, 1, 1), row("2", "Off", Normal, 1, 1)];
+    assert_eq!(rows(&shown), want);
+}
+
+/// What an assembly is made of leaves out a part switched off inside it: its static material names
+/// nothing, as its bodies weigh nothing, whether or not the list shows it.
+#[test]
+fn a_switched_off_parts_static_material_names_nothing_around_it() {
+    let mut doc = Document::default();
+    let (sub, _) = add(&mut doc, "Sub", 0);
+    let (on, _) = add(&mut doc, "On", sub);
+    boxed(&mut doc, on, false);
+    set(&mut doc, on, "material", "S355");
+    let (off, _) = add(&mut doc, "Off", sub);
+    boxed(&mut doc, off, true);
+    set(&mut doc, off, "material", "Brass");
+    for request in [view(View::FirstLevel), Request { suppressed_parts: true, ..view(View::FirstLevel) }] {
+        let bom = evaluated(&doc, request);
+        assert_eq!(bom.rows[0].materials, ["S355"], "{request:?}");
+    }
+}
+
+/// A feature rolled back (the marker before it) isn't switched off by a configuration, suppressed
+/// or not: its part is listed as before.
+#[test]
+fn a_part_rolled_back_is_listed_as_before() {
+    let (mut doc, _) = one_switched_off();
+    let (later, _) = add(&mut doc, "Later", 0);
+    let (later_off, _) = add(&mut doc, "Later off", 0);
+    boxed(&mut doc, later, false);
+    boxed(&mut doc, later_off, true);
+    doc.marker = Some(2);
+    let names: Vec<String> = evaluated(&doc, Request::default()).rows.iter().map(|r| r.names.join("; ")).collect();
+    assert_eq!(names, ["Later", "Later off", "On"]);
+}
+
+/// A numbered row a configuration switches off keeps its number, and has it again when switched
+/// on; a numbering made with `suppressed_parts` keeps it, so its view lists the same rows.
+#[test]
+fn a_switched_off_row_keeps_its_number_and_a_numbering_keeps_the_option() {
+    let (mut doc, feature) = one_switched_off();
+    let suppress = |doc: &mut Document, on: bool| doc.feature_mut(feature).unwrap().suppressed = on;
+    suppress(&mut doc, false);
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "Off", ""), item("2", "On", "")]);
+    suppress(&mut doc, true);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("2", "On", "")]);
+    assert!(!recorded(&mut doc), "nothing new to save");
+    suppress(&mut doc, false);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "Off", ""), item("2", "On", "")]);
+    // Numbered with the option, the view lists the part while it is off, and saves its number.
+    let shown = Request { suppressed_parts: true, view: View::FirstLevel, ..Request::default() };
+    suppress(&mut doc, true);
+    assert!(numbered(&mut doc, Request { view: View::FirstLevel, ..Request::default() }, RENUMBER));
+    let saved = doc.assembly.item_numbers.iter().find(|n| n.view == View::FirstLevel).unwrap();
+    assert_eq!((saved.items.len(), saved.request().suppressed_parts), (1, false));
+    assert!(numbered(&mut doc, shown, RENUMBER));
+    let saved = doc.assembly.item_numbers.iter().find(|n| n.view == View::FirstLevel).unwrap();
+    assert_eq!((saved.items.len(), saved.request()), (2, shown));
+}
+
+/// `show_suppressed_parts` is saved with a numbering only when true, and a design without it reads
+/// false.
+#[test]
+fn a_numberings_suppressed_parts_option_is_saved_only_when_true() {
+    let numbering = ItemNumbers {
+        source: 0,
+        view: View::AllLevels,
+        group: Group::PartNumber,
+        fold: false,
+        purchased_contents: false,
+        suppressed_parts: true,
+        items: Vec::new(),
+    };
+    let saved = serde_json::to_value(&numbering).unwrap();
+    assert_eq!(saved["show_suppressed_parts"], json!(true));
+    assert_eq!(serde_json::from_value::<ItemNumbers>(saved).unwrap(), numbering);
+    let off = ItemNumbers { suppressed_parts: false, ..numbering };
+    let saved = serde_json::to_value(&off).unwrap();
+    assert!(saved.get("show_suppressed_parts").is_none(), "{saved}");
+    let older = json!({"source": 0, "levels": "all", "items": []});
+    assert_eq!(serde_json::from_value::<ItemNumbers>(older).unwrap(), off);
 }

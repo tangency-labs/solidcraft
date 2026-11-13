@@ -52,7 +52,17 @@ fn measured() -> (Drawing, [u64; 3]) {
     let mut added = [0; 3];
     for ((kind, text), id) in kinds.into_iter().zip(texts).zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
-        d.add_dimensions([Arc::new(Dimension { id: *id, view, kind, offset_mm: -10.0, text, decimals: 2, override_text: None, last_good: None })]);
+        d.add_dimensions([Arc::new(Dimension {
+            id: *id,
+            view,
+            kind,
+            offset_mm: -10.0,
+            text,
+            decimals: 2,
+            override_text: None,
+            last_good: None,
+            from_model: None,
+        })]);
     }
     d.validate().unwrap();
     (d, added)
@@ -267,6 +277,7 @@ fn a_radial_dimension_saves_its_edge_and_whether_it_is_a_diameter() {
         decimals: 1,
         override_text: None,
         last_good: None,
+        from_model: None,
     })]);
     d.validate().unwrap();
     let radial_id = ids::encode(id);
@@ -305,6 +316,7 @@ fn a_chain_saves_its_points_in_order_and_keeps_its_rules() {
         decimals: 1,
         override_text: None,
         last_good: None,
+        from_model: None,
     })]);
     d.validate().unwrap();
     let chain_id = ids::encode(id);
@@ -356,6 +368,7 @@ fn a_cylinder_sphere_or_cone_dimension_saves_its_face() {
             decimals: 1,
             override_text: None,
             last_good: None,
+            from_model: None,
         })]);
         d.validate().unwrap();
         let encoded = ids::encode(id);
@@ -399,6 +412,7 @@ fn a_silhouettes_dimension_saves_each_face_and_side() {
         decimals: 1,
         override_text: None,
         last_good: None,
+        from_model: None,
     })]);
     d.validate().unwrap();
     let silhouettes = ids::encode(id);
@@ -445,6 +459,75 @@ fn a_last_good_value_saves_only_when_there_is_one() {
     assert_eq!(read.to_json().unwrap(), d.to_json().unwrap(), "the same bytes again");
     dim(&mut v, &id).as_object_mut().unwrap().remove("last_good");
     assert_eq!(Drawing::from_json(&v.to_string()).unwrap().dimension(linear).unwrap().last_good, None);
+}
+
+/// A dimension brought in from the model saves which model dimension it shows, a sketch's constraint
+/// or a feature's parameter, and reads back as saved; one with none writes none, and an older drawing
+/// reads with none. `showing` finds the dimension that shows a model dimension, on any view, and a
+/// file a hand edit doubled one in still opens, `showing` giving the first.
+#[test]
+fn a_dimension_saves_which_model_dimension_it_shows() {
+    let (mut d, [linear, length, _]) = measured();
+    let (linear_id, length_id) = (ids::encode(linear), ids::encode(length));
+    assert_eq!(dim(&mut file(&d), &linear_id).get("from_model"), None, "none: not written");
+    let width = ModelDimension::Sketch { sketch: 3, constraint: "c12".into() };
+    let depth = ModelDimension::Feature { feature: 7, param: "Distance".into() };
+    assert_eq!((d.showing(&width), d.showing(&depth)), (None, None));
+    let at = |d: &Drawing, id| d.dimension_index(id).unwrap();
+    let i = at(&d, linear);
+    Arc::make_mut(&mut d.dimensions[i]).from_model = Some(width.clone());
+    let j = at(&d, length);
+    Arc::make_mut(&mut d.dimensions[j]).from_model = Some(depth.clone());
+    let mut v = file(&d);
+    assert_eq!(dim(&mut v, &linear_id)["from_model"], json!({"sketch": {"sketch": 3, "constraint": "c12"}}));
+    assert_eq!(dim(&mut v, &length_id)["from_model"], json!({"feature": {"feature": 7, "param": "Distance"}}));
+    let read = Drawing::from_json(&v.to_string()).unwrap();
+    assert_eq!(read, d);
+    assert_eq!(read.to_json().unwrap(), d.to_json().unwrap(), "the same bytes again");
+    assert_eq!((read.showing(&width), read.showing(&depth)), (Some(linear), Some(length)));
+    // Another constraint of the sketch, or the same id in another sketch, is another model dimension.
+    assert_eq!(read.showing(&ModelDimension::Sketch { sketch: 3, constraint: "c13".into() }), None);
+    assert_eq!(read.showing(&ModelDimension::Sketch { sketch: 4, constraint: "c12".into() }), None);
+    assert_eq!(read.showing(&ModelDimension::Feature { feature: 3, param: "c12".into() }), None);
+    // An older drawing has none.
+    dim(&mut v, &linear_id).as_object_mut().unwrap().remove("from_model");
+    assert_eq!(Drawing::from_json(&v.to_string()).unwrap().dimension(linear).unwrap().from_model, None);
+    // Doubled by hand: it opens, and the first dimension by id shows it.
+    let mut doubled = file(&d);
+    dim(&mut doubled, &length_id)["from_model"] = json!({"sketch": {"sketch": 3, "constraint": "c12"}});
+    let read = Drawing::from_json(&doubled.to_string()).unwrap();
+    assert_eq!(read.showing(&width), Some(linear.min(length)));
+}
+
+/// A model dimension's constraint id or parameter label is 1 to 256 bytes without control
+/// characters, its kind one of the two, and nothing else is in it; a file with any other is refused.
+#[test]
+fn a_model_dimensions_rules_are_kept_on_reading() {
+    let (d, [linear, ..]) = measured();
+    let id = ids::encode(linear);
+    let rule = format!("damaged drawing: dimension {id}: the model dimension it shows is named in 1 to 256 bytes, without control characters");
+    let shows = |from: Value| refused(&d, |v| dim(v, &id)["from_model"] = from);
+    let sketch = |name: &str| shows(json!({"sketch": {"sketch": 3, "constraint": name}}));
+    let feature = |name: &str| shows(json!({"feature": {"feature": 7, "param": name}}));
+    for fits in ["x".repeat(256), "é".repeat(128), "c1".into()] {
+        assert_eq!([sketch(&fits), feature(&fits)], ["read", "read"], "{} bytes", fits.len());
+    }
+    for bad in [String::new(), "x".repeat(257), "c\n1".into(), "c\u{7}".into()] {
+        assert_eq!([sketch(&bad), feature(&bad)], [rule.clone(), rule.clone()], "{bad:?}");
+    }
+    let damaged = [
+        json!({"sketch": {"sketch": 3}}),
+        json!({"sketch": {"sketch": -1, "constraint": "c1"}}),
+        json!({"sketch": {"sketch": 3, "constraint": "c1", "param": "Distance"}}),
+        json!({"view": {"view": 3, "name": "c1"}}),
+        json!("sketch"),
+        json!({"sketch": {"sketch": 3, "constraint": "c1"}, "feature": {"feature": 7, "param": "Distance"}}),
+    ];
+    for from in damaged {
+        assert!(shows(from.clone()).starts_with("damaged drawing: "), "{from}");
+    }
+    // Any feature id reads: one the design no longer has only leaves its model dimension unshown.
+    assert_eq!(shows(json!({"feature": {"feature": u64::MAX, "param": "Distance"}})), "read");
 }
 
 /// A last good value is from 0 to the largest number a drawing saves; a file with any other is

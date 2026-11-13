@@ -1,6 +1,7 @@
 use super::*;
-use crate::{Camera, ProductMesh, StandardView};
+use crate::ProductMesh;
 use solidcraft_geom::{Aabb3, Mesh};
+use solidcraft_viewport::{Camera, StandardView};
 use std::sync::Arc;
 
 fn request() -> ImageRequest {
@@ -109,7 +110,7 @@ fn glass_is_sorted_back_to_front_independently_of_body_order() {
 fn physical_transmission_keeps_the_exact_scalar_cpu_preview() {
     let original = square("Glass", [80, 180, 140], 0.25, Vec3::ZERO);
     let mut glass = original.clone();
-    glass.surface = Some(crate::surface::OpaqueSurface::new(Vec3::new(0.2, 0.4, 0.3), 0.0, 0.1, 1.5).unwrap());
+    glass.surface = Some(solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.2, 0.4, 0.3), 0.0, 0.1, 1.5).unwrap());
     glass.transmission = Some(crate::transmission::Transmission::new(Vec3::new(-0.7_f64.ln(), -0.9_f64.ln(), 0.0) / 10.0, None).unwrap());
     let expected = finish(ImageTask::new(scene(vec![original]), request(), CancelToken::default()).unwrap());
     let actual = finish(ImageTask::new(scene(vec![glass]), request(), CancelToken::default()).unwrap());
@@ -216,11 +217,28 @@ fn every_way_in_checks_what_an_image_request_must_be() {
     assert_eq!(refused(&traced), invalid, "studio weights on a ray traced image");
 }
 
+/// The ray tracer admits its source at its internal size (twice each side when it supersamples), while its codec and
+/// kept previews have the final size.
+#[cfg(feature = "raytrace-cpu")]
+#[test]
+fn the_ray_tracer_admits_at_its_internal_size_and_encodes_at_the_final_size() {
+    let scene = scene(vec![square("Square", [100; 3], 1.0, Vec3::ZERO)]);
+    let traced = ImageRequest { integrator: crate::job::Integrator::Raytrace, ..request() };
+    let doubled = ImageRequest { width: 2 * traced.width, height: 2 * traced.height, ..traced.clone() };
+    let admitted = |r: &ImageRequest, size| admit_raytrace_source(&scene, r, crate::job::CpuBudget::Compact, size).unwrap();
+    let at_final = admitted(&traced, (traced.width, traced.height));
+    let at_internal = admitted(&traced, (doubled.width, doubled.height));
+    let at_doubled = admitted(&doubled, (doubled.width, doubled.height));
+    assert_eq!(at_internal.pixel_scratch_bytes, at_doubled.pixel_scratch_bytes, "the source is admitted at the internal size");
+    assert!(at_internal.pixel_scratch_bytes > at_final.pixel_scratch_bytes);
+    assert_eq!(at_internal.encoded_limit, at_final.encoded_limit, "the codec has the final size");
+}
+
 #[test]
 fn registered_executor_geometry_admission_excludes_the_cpu_raster_estimate() {
-    // A library-bounded source: about 100 MiB of face appearances on a small mesh at the
+    // A library-bounded source: about 120 MiB of face appearances on a small mesh at the
     // largest image. Its CPU raster estimate is above 384 MiB at a registered executor's cap.
-    let count = (100 * 1024 * 1024 / std::mem::size_of::<FaceAppearance>()).min(1_000_000);
+    let count = (120 * 1024 * 1024 / std::mem::size_of::<FaceAppearance>()).min(1_000_000);
     let mut body = square("appearances", [200; 3], 1.0, Vec3::ZERO);
     body.faces = vec![FaceAppearance { transmission: None, face: 0, color: [200; 3], opacity: 1.0, surface: None }; count];
     let source = scene(vec![body]);
@@ -343,7 +361,7 @@ fn product_render_output_is_pinned() {
         ])
     };
     let mut glossy = opaque();
-    glossy.meshes[0].surface = Some(crate::surface::OpaqueSurface::new(Vec3::new(0.6, 0.3, 0.1), 1.0, 0.3, 1.5).unwrap());
+    glossy.meshes[0].surface = Some(solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.6, 0.3, 0.1), 1.0, 0.3, 1.5).unwrap());
     let front = request().camera;
     let glass = scene(vec![square("Far", [240, 20, 20], 0.5, front.back() * -5.0), square("Near", [20, 20, 240], 0.5, front.back() * 5.0)]);
     // Larger than the view: triangles cross every edge of the picture.
@@ -640,6 +658,18 @@ fn a_picture_is_admitted_under_its_own_pixel_work_cap() {
     // A small part of that picture counts only what it draws.
     let part = PictureRequest { tiles: vec![PixelWindow { x0: 28_000, y0: 19_000, x1: 28_064, y1: 19_064 }], ..a0.clone() };
     assert!(admit_picture(&big(100), &part).unwrap().projected_pixel_tests.unwrap() <= 100 * 12 * 64 * 64);
+    // Each tile looks at every triangle again, so tiles times triangles is held to its own cap, by name, at its edge.
+    // The triangles lie away from the corner tile, so they cost it no pixel tests: 2^28 tests of one unit each would
+    // be over the 250 M pixel cap and refused on that count instead.
+    let mut many = one_triangle([[50.5, 25.5], [51.5, 25.5], [50.5, 26.5]]);
+    let mesh = Arc::make_mut(&mut many.meshes[0].mesh);
+    (mesh.triangles, mesh.tri_face) = (mesh.triangles.repeat(1 << 14), mesh.tri_face.repeat(1 << 14));
+    let corner = PixelWindow { x0: 0, y0: 0, x1: 1, y1: 1 };
+    // 2^14 tiles of 2^14 triangles is the cap exactly.
+    assert!(admit_picture(&many, &PictureRequest { tiles: vec![corner; 1 << 14], ..small.clone() }).is_ok());
+    let error = admit_picture(&many, &PictureRequest { tiles: vec![corner; (1 << 14) + 1], ..small.clone() }).unwrap_err();
+    assert_eq!(error.code, ErrorCode::LimitExceeded);
+    assert!(error.message.contains(&format!("{MAX_PICTURE_TILE_VISITS} tile visits")), "{}", error.message);
 
     let mut unseen = block("Unseen", [100; 3], Vec3::ZERO, Vec3::new(10.0, 2.0, 5.0));
     unseen.opacity = 0.0;
@@ -942,12 +972,12 @@ fn picture_timing() {
     }
 }
 
-/// The sRGB tables give exactly `geom::srgb`'s codes and values: at every code start and the
+/// The sRGB tables give exactly `color::srgb`'s codes and values: at every code start and the
 /// floating-point numbers around it, at the edges of the band where the formula decides, and
 /// across a million values spread over 0 to 1 and outside it.
 #[test]
 fn srgb_tables_give_the_formulas_codes() {
-    use solidcraft_geom::srgb;
+    use solidcraft_color::srgb;
     for code in 0..=255u8 {
         assert_eq!(decode(code).to_bits(), srgb::decode8(code).to_bits(), "code {code}");
     }

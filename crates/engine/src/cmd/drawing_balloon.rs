@@ -92,6 +92,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let record = s.drawing(ADD)?.clone();
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
+    crate::drawing_view::refuse_apart(&record, view, "balloons", ADD)?;
     let edge = s.doc.edge_reference(&s.model, &request.edge.pick, &request.edge.path).map_err(|why| bad(ADD, why.to_string()))?;
     check_drawn(&record, view, [edge.path.as_slice()], ADD)?;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;

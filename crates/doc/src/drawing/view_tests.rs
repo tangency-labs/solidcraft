@@ -11,7 +11,7 @@ use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
 use crate::drawing::{Excluded, Sheet, Source};
-use crate::drawing_view::OccurrencePaths;
+use crate::drawing_view::{Exploded, JointPose, OccurrencePaths, Pose, StudyStep};
 use crate::format::DRAWING;
 use crate::ids::IdSource;
 
@@ -201,6 +201,176 @@ fn what_a_view_shows_keeps_its_limits_on_reading() {
         v["views"][at]["settings"]["hide"] = lists(25, 64);
     });
     assert!(both.contains("4096 ids in all"), "{both}");
+}
+
+/// Which exploded view a view draws saves in its settings by the exploded view's id, follows down its
+/// chain until a view sets its own (`assembled` included), and reads back as the same bytes; a view
+/// that sets none saves none and draws assembled.
+#[test]
+fn an_exploded_choice_follows_its_parent_and_saves_as_it_is() {
+    let (mut d, _, [front, right, top]) = three();
+    let resolved = |d: &Drawing, id: u64| d.resolve_view(id).unwrap().exploded;
+    assert_eq!(resolved(&d, top), Setting { value: Exploded::Assembled, set_by: SetBy::Default });
+    view_mut(&mut d, front).settings.exploded = Some(Exploded::View(77));
+    d.validate().unwrap();
+    assert_eq!(resolved(&d, top), Setting { value: Exploded::View(77), set_by: SetBy::Parent(front) });
+    assert_eq!(resolved(&d, front), Setting { value: Exploded::View(77), set_by: SetBy::This });
+    // Assembled is a setting of its own: the views below it draw assembled whatever the base draws.
+    view_mut(&mut d, right).settings.exploded = Some(Exploded::Assembled);
+    assert_eq!(resolved(&d, top), Setting { value: Exploded::Assembled, set_by: SetBy::Parent(right) });
+    let v = file(&d);
+    let listed = v["views"].as_array().unwrap();
+    let saved = |id: u64| listed.iter().find(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    // The design's ids, as occurrence paths save them: numbers.
+    assert_eq!(saved(front)["settings"], json!({"scale": "1:2", "exploded": {"view": 77}}));
+    assert_eq!(saved(right)["settings"], json!({"visual_style": "visible_hidden", "exploded": "assembled"}));
+    assert_eq!(saved(top).get("settings"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+}
+
+/// An exploded choice reads whatever exploded view it names (one the design no longer has draws a
+/// placeholder, never refuses the file), and anything that isn't a choice is refused.
+#[test]
+fn an_exploded_choice_keeps_its_limits_on_reading() {
+    let (d, _, _) = three();
+    let at = d.views.iter().position(|view| matches!(view.kind, ViewKind::Base { .. })).unwrap();
+    let with = |choice: Value| {
+        refused(&d, |v| {
+            v["views"][at]["settings"]["exploded"] = choice;
+        })
+    };
+    // What each reads as: "read", or a part of why it is refused ("" for refused, whatever the words).
+    let cases = [
+        (json!({"view": 999_999}), "read"),
+        (json!({"view": u64::MAX}), "read"),
+        (json!({"view": 0}), "read"),
+        (json!("assembled"), "read"),
+        (json!(null), "read"),
+        (json!("exploded"), "unknown variant"),
+        (json!({"view": "7"}), "invalid type"),
+        (json!({"view": -1}), "invalid value"),
+        (json!({"view": 1.5}), "invalid type"),
+        (json!({"view": 7, "amount": 1}), ""),
+        (json!({"view": null}), ""),
+        (json!([]), ""),
+        (json!(1.5), ""),
+    ];
+    for (choice, says) in cases {
+        let e = with(choice.clone());
+        assert!(if says.is_empty() { e != "read" } else { e.contains(says) }, "{choice}: {e}");
+    }
+}
+
+/// A view's position saves in its settings as its joints' values, by the joints' ids, follows down its
+/// chain until a view sets its own (`designed` included), and reads back as the same bytes; a view
+/// that sets none saves none and draws the design as it places its parts.
+#[test]
+fn a_pose_follows_its_parent_and_saves_as_it_is() {
+    let (mut d, _, [front, right, top]) = three();
+    let resolved = |d: &Drawing, id: u64| d.resolve_view(id).unwrap().pose;
+    assert_eq!(resolved(&d, top), Setting { value: Pose::Designed, set_by: SetBy::Default });
+    let joints = [JointPose { joint: 77, values: vec![std::f64::consts::FRAC_PI_2] }, JointPose { joint: 78, values: vec![0.5, -12.0] }];
+    let opened = Pose::Joints(Arc::from(joints));
+    view_mut(&mut d, front).settings.pose = Some(opened.clone());
+    d.validate().unwrap();
+    assert_eq!(resolved(&d, top), Setting { value: opened.clone(), set_by: SetBy::Parent(front) });
+    assert_eq!(resolved(&d, front), Setting { value: opened, set_by: SetBy::This });
+    // Designed is a setting of its own: the views below it draw the design's placement whatever the base draws.
+    view_mut(&mut d, right).settings.pose = Some(Pose::Designed);
+    assert_eq!(resolved(&d, top), Setting { value: Pose::Designed, set_by: SetBy::Parent(right) });
+    let v = file(&d);
+    let listed = v["views"].as_array().unwrap();
+    let saved = |id: u64| listed.iter().find(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    // The design's ids, as an exploded choice saves them: numbers; the values in radians and mm.
+    let pose = json!({"joints": [{"joint": 77, "values": [std::f64::consts::FRAC_PI_2]}, {"joint": 78, "values": [0.5, -12.0]}]});
+    assert_eq!(saved(front)["settings"], json!({"scale": "1:2", "pose": pose}));
+    assert_eq!(saved(right)["settings"], json!({"visual_style": "visible_hidden", "pose": "designed"}));
+    assert_eq!(saved(top).get("settings"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+}
+
+/// A view's position at a motion study's step saves as the study's id and the step, follows down its
+/// chain as joint values do until a view sets its own, and reads back as the same bytes.
+#[test]
+fn a_study_step_follows_its_parent_and_saves_as_it_is() {
+    let (mut d, _, [front, right, top]) = three();
+    let resolved = |d: &Drawing, id: u64| d.resolve_view(id).unwrap().pose;
+    let at = Pose::Study(StudyStep { id: 31, step: 40 });
+    view_mut(&mut d, front).settings.pose = Some(at.clone());
+    d.validate().unwrap();
+    assert_eq!(resolved(&d, top), Setting { value: at.clone(), set_by: SetBy::Parent(front) });
+    view_mut(&mut d, right).settings.pose = Some(Pose::Designed);
+    assert_eq!(resolved(&d, top), Setting { value: Pose::Designed, set_by: SetBy::Parent(right) });
+    let v = file(&d);
+    let saved = v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(front))).cloned().unwrap();
+    assert_eq!(saved["settings"], json!({"scale": "1:2", "pose": {"study": {"id": 31, "step": 40}}}));
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+}
+
+/// A position's limits are kept on reading, at each side of each limit. A joint the design no longer
+/// has reads (the view skips it, never refuses the file), and anything that isn't a position is refused.
+#[test]
+fn a_pose_keeps_its_limits_on_reading() {
+    let (d, _, _) = three();
+    let at = d.views.iter().position(|view| matches!(view.kind, ViewKind::Base { .. })).unwrap();
+    let with = |pose: Value| {
+        refused(&d, |v| {
+            v["views"][at]["settings"]["pose"] = pose;
+        })
+    };
+    // Joints 0.. of a position, each with `values` values.
+    let joints = |count: u64, values: usize| {
+        let listed: Vec<Value> = (0..count).map(|joint| json!({"joint": joint, "values": vec![0.25; values]})).collect();
+        json!({"joints": listed})
+    };
+    let one = |values: Value| json!({"joints": [{"joint": 7, "values": values}]});
+    // What each reads as: "read", or a part of why it is refused ("" for refused, whatever the words).
+    let cases = [
+        (joints(64, 6), "read"),
+        (joints(65, 1), "at most 64 joints"),
+        (joints(1, 7), "1..6 values"),
+        (joints(1, 0), "1..6 values"),
+        (json!({"joints": []}), "at least one joint"),
+        (one(json!([1e9, -1e9])), "read"),
+        // A float past 1e9 is the file's own number check, before the position's.
+        (one(json!([1.000001e9])), "is out of range"),
+        // A whole number passes the file's check, so the position refuses it.
+        (one(json!([1_000_001_000_u64])), "at most 1000000000"),
+        (one(json!([-1_000_001_000_i64])), "at most 1000000000"),
+        (json!({"joints": [{"joint": 999_999, "values": [1]}]}), "read"),
+        (json!({"joints": [{"joint": 7, "values": [1]}, {"joint": 7, "values": [2]}]}), "each joint once"),
+        (json!("designed"), "read"),
+        (json!(null), "read"),
+        (json!({"joints": [{"joint": -1, "values": [1]}]}), "invalid value"),
+        (json!({"joints": [{"joint": "7", "values": [1]}]}), "invalid type"),
+        (one(json!(["1"])), "invalid type"),
+        (json!({"joints": [{"joint": 7, "values": [1], "limit": 2}]}), "unknown field"),
+        (json!({"joints": [{"joint": 7}]}), "missing field"),
+        (json!("posed"), "unknown variant"),
+        (json!([]), ""),
+        (json!(1.5), ""),
+        // A study step: a study the design no longer has reads (the view draws the design's placement).
+        (json!({"study": {"id": 999_999, "step": 0}}), "read"),
+        (json!({"study": {"id": 3, "step": u32::MAX}}), "read"),
+        (json!({"study": {"id": 3, "step": u64::from(u32::MAX) + 1}}), "invalid value"),
+        (json!({"study": {"id": 3, "step": -1}}), "invalid value"),
+        (json!({"study": {"id": 3, "step": 2.5}}), "invalid type"),
+        (json!({"study": {"id": -1, "step": 0}}), "invalid value"),
+        (json!({"study": {"step": 0}}), "missing field"),
+        (json!({"study": {"id": 3}}), "missing field"),
+        (json!({"study": {"id": 3, "step": 0, "at": 1}}), "unknown field"),
+        (json!({"study": 3}), "invalid type"),
+    ];
+    for (pose, says) in cases {
+        let e = with(pose.clone());
+        assert!(if says.is_empty() { e != "read" } else { e.contains(says) }, "{}: {e}", pose.to_string().chars().take(60).collect::<String>());
+    }
 }
 
 /// Seeded changes to a view's saved choice: each reads or is refused, never panics, and what reads

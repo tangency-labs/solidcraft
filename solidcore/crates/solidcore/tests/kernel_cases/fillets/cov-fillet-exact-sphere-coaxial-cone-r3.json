@@ -1,0 +1,167 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  4.08734674385334,
+                  0.0,
+                  9.126532561466677
+                ],
+                [
+                  4.08734674385334,
+                  0.0,
+                  9.126532561466677
+                ]
+              ],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              -4.087346743853337,
+              3.401633650767595e-15,
+              9.126532561466675
+            ]
+          ],
+          "tolerance": 1.7035594040459683
+        },
+        "kind": "round",
+        "sizes": [
+          3.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-exact-sphere-coaxial-cone-r3",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "the ball's centre (outside both) runs on the sphere R13 and on the cone moved 3 out, both about z: a circle, so the round is the ball's arc turned about z: rational, of degrees (2, 2). V0 = the ball and the frustum less their overlap (the frustum below the edge at z = 9.1265, the ball's cap above it): 4597.853510151037; the round adds 2 pi times the first moment of its section: 9.688315962175.",
+    "source": "analytic",
+    "sources": [],
+    "splines": [
+      {
+        "degree": [
+          2,
+          2
+        ]
+      }
+    ],
+    "surface_types": [
+      "bspline",
+      "cone",
+      "plane",
+      "sphere"
+    ],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 4607.541826113212,
+    "what": "a ball R10 and a frustum about z through its centre (R5 at z = 0 to R3 at z = 20) joined: the concave circle where the cone leaves the ball rounded r3"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4
+    }
+  },
+  "records": "cov-fillet-exact-sphere-coaxial-cone-r3.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ball",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1468.2830149189754,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4,
+      "volume_mm3": 4607.541826242339
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "make_sphere",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a ball R10 and a frustum about z through its centre (R5 at z = 0 to R3 at z = 20) joined: the concave circle where the cone leaves the ball rounded r3",
+  "why_not": []
+}

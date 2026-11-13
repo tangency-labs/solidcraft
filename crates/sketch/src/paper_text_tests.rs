@@ -86,7 +86,7 @@ impl Drop for Folder {
 }
 
 fn gothic() -> Vec<u8> {
-    std::fs::read(repo_fonts()[0].join("biz-udp-gothic/BIZUDPGothic-Regular.ttf")).unwrap()
+    std::fs::read(repo_font("biz-udp-gothic/BIZUDPGothic-Regular.ttf")).unwrap()
 }
 
 /// The runs on an A3 sheet as one group, with their font: what `Scene::validate` holds them to.
@@ -105,10 +105,16 @@ fn err(text: &str, family: Option<&str>, style: &TextStyle) -> String {
     paper_text_in(&repo_fonts(), text, family, "", AT, 5.0, 0.0, style).unwrap_err().to_string()
 }
 
-/// The repository's fonts as the only installed ones: Liberation Sans, IBM Plex Mono, BIZ
-/// UDPGothic and IBM Plex Sans (a variable face).
+/// The repository's fonts as the only installed ones: Liberation Sans (this crate's), IBM Plex
+/// Mono and IBM Plex Sans (a variable face; the shared look crate's), and BIZ UDPGothic.
 fn repo_fonts() -> Vec<PathBuf> {
-    vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts")]
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    vec![root.join("../../assets/fonts"), root.join("../look/fonts"), root.join("assets/fonts")]
+}
+
+/// A repository font file, `family-dir/file`, from whichever folder of [`repo_fonts`] holds it.
+fn repo_font(file: &str) -> PathBuf {
+    repo_fonts().into_iter().map(|dir| dir.join(file)).find(|p| p.exists()).unwrap_or_else(|| panic!("no repository font {file}"))
 }
 
 fn set_in(text: &str, family: &str) -> (Vec<TextRun>, Font) {
@@ -518,7 +524,7 @@ fn a_font_fallen_back_to_takes_its_nearest_style() {
     assert!(runs.iter().all(|r| r.slant > 0.0), "{runs:?}");
     // Each font's own: a chosen face that is italic doesn't lean, the one fallen back to does.
     let leaning = Folder::new("italic", &["a.ttf"]);
-    let mut mono = std::fs::read(repo_fonts()[0].join("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
+    let mut mono = std::fs::read(repo_font("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
     os2(&mut mono, 62, 0x01);
     std::fs::write(leaning.0.join("mono.ttf"), mono).unwrap();
     let (runs, _) = mixed(paper_text_in(&leaning.dirs(), "A\u{30c6}", Some("IBM Plex Mono"), "", AT, 5.0, 0.0, &style).unwrap().unwrap());
@@ -527,7 +533,7 @@ fn a_font_fallen_back_to_takes_its_nearest_style() {
     let bold = TextStyle { bold: true, ..TextStyle::default() };
     // A bold face to choose: IBM Plex Mono, marked bold in its OS/2 fsSelection.
     let folder = Folder::new("bold", &["a.ttf"]);
-    let mut mono = std::fs::read(repo_fonts()[0].join("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
+    let mut mono = std::fs::read(repo_font("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
     os2(&mut mono, 62, 0x20);
     std::fs::write(folder.0.join("mono.ttf"), mono).unwrap();
     let (runs, fonts) = mixed(paper_text_in(&folder.dirs(), "A\u{30c6}", Some("IBM Plex Mono"), "", AT, 5.0, 0.0, &bold).unwrap().unwrap());
@@ -566,7 +572,7 @@ fn on_the_web_each_script_waits_for_its_own_font() {
     };
     let provide = |font: WebFont| {
         let asset = if font == WebFont::Japanese { "biz-udp-gothic/BIZUDPGothic-Regular.ttf" } else { font.file() };
-        provide_web_font(font, std::fs::read(repo_fonts()[0].join(asset)).unwrap());
+        provide_web_font(font, std::fs::read(repo_font(asset)).unwrap());
     };
     // A script the web has no font for asks for nothing, and text its own font sets neither.
     let e = refused("\u{e01}", "");
@@ -676,7 +682,7 @@ fn fuzz_fallback_is_a_scene_or_a_refusal() {
 #[test]
 fn a_family_is_found_by_name_among_the_installed_fonts() {
     let (runs, font) = set_in("Title 12", "ibm plex mono");
-    let file = std::fs::read(repo_fonts()[0].join("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
+    let file = std::fs::read(repo_font("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
     let id: [u8; 32] = Sha256::new().chain_update(&file).chain_update(0u32.to_le_bytes()).finalize().into();
     assert_eq!((font.postscript_name.as_str(), font.id), ("IBMPlexMono-Regular", id));
     assert!(*font.bytes == *file, "the file's own bytes");
@@ -735,7 +741,7 @@ fn collection(files: &[Vec<u8>]) -> Vec<u8> {
 /// none.
 #[test]
 fn a_fonts_family_is_its_own_faces() {
-    let read = |file: &str| std::fs::read(repo_fonts()[0].join(file)).unwrap();
+    let read = |file: &str| std::fs::read(repo_font(file)).unwrap();
     let mono = read("ibm-plex-mono/IBMPlexMono-Regular.ttf");
     // The collection alone in its folder: a family is looked for there.
     let folder = Patched::new("collection", |_| {});
@@ -773,7 +779,7 @@ struct Patched(PathBuf);
 
 impl Patched {
     fn new(name: &str, patch: impl FnOnce(&mut Vec<u8>)) -> Patched {
-        let mut bytes = std::fs::read(repo_fonts()[0].join("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
+        let mut bytes = std::fs::read(repo_font("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
         patch(&mut bytes);
         let dir = std::env::temp_dir().join(format!("solidcraft-paper-fonts-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

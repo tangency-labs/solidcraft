@@ -13,10 +13,10 @@
 use std::io::Cursor;
 
 use image::{DynamicImage, ImageDecoder, ImageReader};
+use solidcraft_color::srgb::{decode8, encode8};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::paper::MAX_IMAGE_PIXELS;
 use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid};
-use solidcraft_geom::srgb::{decode8, encode8};
 
 use crate::texture_input::is_whole;
 

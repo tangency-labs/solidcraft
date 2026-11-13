@@ -1,0 +1,165 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "3088-coil-thread-joined-flush-with-a-cylinder",
+  "expected": {
+    "bbox": {
+      "max": [
+        15.4,
+        15.4,
+        40
+      ],
+      "min": [
+        -15.4,
+        -15.4,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the wire is a 4 x 4 square, radial 11.4..15.4, axial +-2 about a path rising from z = 2 to 38, so its end faces touch z = 0 and z = 40. Inside r = 15 it merges with the cylinder; the ridge outside r = 15 is a 0.4 x 4 section at centroid radius 15.2 turned 4 times by the screw: V = pi 15^2 40 + 1.6 * 2 pi 15.2 * 4 = 28885.5. bbox r 15.4, z 0..40.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3088",
+      "tangency-labs/solidcraft#3758"
+    ],
+    "volume_mm3": 28885.562148990564,
+    "what": "a 4-turn square coil (4 mm wire, pitch 9, outer diameter 30.8, section inside) joined round a cylinder of radius 15 and height 40, its ends flush with the cylinder end faces (hang of several minutes, crash report)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 78,
+      "faces": 34,
+      "vertices": 46
+    }
+  },
+  "records": "3088-coil-thread-joined-flush-with-a-cylinder.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body2",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5534.008525864176,
+      "body_count": 1,
+      "edges": 56,
+      "faces": 22,
+      "vertices": 36,
+      "volume_mm3": 28885.56214908528
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3088",
+    "tangency-labs/solidcraft#3758"
+  ],
+  "traced_ops": [
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a 4-turn square coil (4 mm wire, pitch 9, outer diameter 30.8, section inside) joined round a cylinder of radius 15 and height 40, its ends flush with the cylinder end faces (hang of several minutes, crash report)",
+  "why_not": []
+}

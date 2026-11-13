@@ -74,3 +74,22 @@ fn a_setback_not_past_the_radius_is_refused_naming_the_least() {
     assert!(least.is_some_and(|l| (l - 5.0).abs() < 1e-9), "{least:?}");
     assert_eq!(crate::fillet_least_setback(&b, Vec3::new(30.0, 20.0, 10.0), 5.0).unwrap(), None);
 }
+
+/// tangency-labs/solidcraft#13913: the 40 x 30 x 20 box's corner (40, 30, 20), its three edges
+/// rounded r3, set back 3.5. The corner's fill (solidcore's own here, no patch replaces it) is
+/// certified convex only from a setback of 3.5595 (solidcore's `SetbackTooShort`, from the fill's
+/// convex test), so 3.5 is refused naming it as the smallest that builds; set back that far, it
+/// builds, a valid body.
+#[test]
+fn a_setback_too_short_for_the_fill_is_refused_naming_the_one_that_builds() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let edges = [Vec3::new(20.0, 30.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(40.0, 30.0, 10.0)];
+    let corner = Vec3::new(40.0, 30.0, 20.0);
+    let why = match fillet_setback(&b, &edges, 3.0, &[(corner, 3.5)]) {
+        Err(KernelError::Invalid(why)) => why,
+        other => panic!("setback 3.5: {:?}", other.map(|b| b.face_count())),
+    };
+    assert!(why.contains(&format!("{SETBACK_AT_LEAST}3.5595 mm")), "{why}");
+    let out = fillet_setback(&b, &edges, 3.0, &[(corner, 3.5595)]).unwrap();
+    assert!(out.validity().is_empty(), "{:?}", out.validity());
+}

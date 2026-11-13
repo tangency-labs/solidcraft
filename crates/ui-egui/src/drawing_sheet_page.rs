@@ -37,8 +37,8 @@ use solidcraft_engine::geom::{Aabb2, Region2Geom, Seg2Geom};
 use solidcraft_engine::render::Camera;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit::{self, Container, Surface};
+use solidcraft_theme::Tokens;
 
 /// The least and most the page zooms, as a share of true size.
 pub const ZOOM: std::ops::RangeInclusive<f64> = 0.05..=32.0;
@@ -147,7 +147,7 @@ pub fn stage_and_paper(paper: Color32, backdrop: Color32) -> (Color32, Color32) 
 pub fn sheet_colours(app: &SolveApp) -> (Color32, Color32, Color32) {
     let t = Tokens::get();
     let colour = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::Auto);
-    let (paper, ink) = colour.paper(&t, crate::theme::is_dark());
+    let (paper, ink) = colour.paper(&t, solidcraft_theme::is_dark());
     let (stage, paper) = stage_and_paper(paper, t.viewport_top);
     (stage, paper, ink)
 }
@@ -408,7 +408,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     // Views a deferred drawing holds stay out of date without being worked on: their words say so.
     let waiting = view.stale.len() + view.stale_dimensions.len();
     if working {
-        let text = crate::i18n::format("ui.sheet_page.working", &[("count", &waiting.max(1).to_string())]);
+        let text = solidcraft_ui_text::format("ui.sheet_page.working", &[("count", &waiting.max(1).to_string())]);
         hint(&painter, free_area(app, canvas), &text);
     }
     zoom_card(app, ui, canvas, at.scale / base);
@@ -450,6 +450,7 @@ fn kind_name(kind: ObjectKind) -> &'static str {
     match kind {
         ObjectKind::View => "view",
         ObjectKind::Dimension => "dimension",
+        ObjectKind::Note => "note",
         ObjectKind::TitleBlock => "title_block",
         ObjectKind::PartsList => "parts_list",
         ObjectKind::RevisionTable => "revision_table",
@@ -525,11 +526,11 @@ pub(crate) fn words(status: &Status, out_of_date: bool) -> Vec<String> {
     let mut words = Vec::new();
     match status {
         Status::Drawn => {}
-        Status::Placeholder(why) => words.push(crate::i18n::format("ui.sheet_page.placeholder", &[("reason", &why.to_string())])),
-        Status::Failed(why) => words.push(crate::i18n::format("ui.sheet_page.failed", &[("reason", why)])),
+        Status::Placeholder(why) => words.push(solidcraft_ui_text::format("ui.sheet_page.placeholder", &[("reason", &why.to_string())])),
+        Status::Failed(why) => words.push(solidcraft_ui_text::format("ui.sheet_page.failed", &[("reason", why)])),
     }
     if out_of_date {
-        words.push(crate::i18n::tr("ui.sheet_page.needs_update").to_owned());
+        words.push(solidcraft_ui_text::tr("ui.sheet_page.needs_update").to_owned());
     }
     words
 }
@@ -669,14 +670,14 @@ impl Marks {
         for _ in 0..8 {
             match marks(scene, tol) {
                 Ok(marks) => {
-                    let error = (tol != tolerance).then(|| crate::i18n::tr("ui.sheet_page.coarse").to_owned());
+                    let error = (tol != tolerance).then(|| solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned());
                     return Marks { generation, tolerance, marks, error };
                 }
                 Err(Fault::TooMany) => tol *= 8.0,
                 Err(Fault::Invalid(why)) => return Marks { generation, tolerance, marks: Vec::new(), error: Some(why) },
             }
         }
-        Marks { generation, tolerance, marks: Vec::new(), error: Some(crate::i18n::tr("ui.sheet_page.coarse").to_owned()) }
+        Marks { generation, tolerance, marks: Vec::new(), error: Some(solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned()) }
     }
 
     fn paint(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32) {

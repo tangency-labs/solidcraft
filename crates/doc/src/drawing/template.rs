@@ -8,7 +8,7 @@
 //! template file reads as a drawing does, then is held to the template rules ([`read`]).
 //!
 //! A template applied to a drawing ([`apply`]) gives each sheet its paper, drawing border and title
-//! block, and moves nothing on it.
+//! block, and moves nothing on it. A logo in a block travels with it, its file brought into the drawing.
 //!
 //! The built-ins ([`BUILT_INS`]) are made in code when asked for, never stored: ISO A4 to A0, each
 //! for a part and for an assembly, one sheet with the ISO border and the built-in title block
@@ -19,17 +19,19 @@
 //! built-in never changes a drawing made from an earlier one: a drawing keeps copies, never names.
 //! An older name (`iso-a3`, before the built-ins came in two kinds) reads as that size's part one.
 
-use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use solidcraft_geom::cell::Part;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
 use solidcraft_geom::revision::RevisionRecord;
-use solidcraft_geom::title_block::{self, CellKind};
+use solidcraft_geom::title_block::{self, CellKind, TitleBlock};
 
 use super::Drawing;
+use super::image::ImageFile;
 use crate::format::DRAWING;
-use crate::ids::IdSource;
+use crate::ids::{self, IdSource};
 use crate::{DocError, Document, Result};
 
 /// The built-in templates, by name: each ISO size for a part and for an assembly.
@@ -80,6 +82,7 @@ pub fn check(template: &Drawing) -> Result<()> {
         (!template.balloons.is_empty(), "balloons"),
         (template.revisions.ids().next().is_some(), "revision rows"),
         (template.sheets.iter().any(|sheet| sheet.documents.is_some()), "a sheet that documents a component"),
+        (!template.sheet_images.is_empty(), "images placed on its sheets"),
     ];
     let has: Vec<&str> = has.into_iter().filter(|(has, _)| *has).map(|(_, what)| what).collect();
     if has.is_empty() {
@@ -108,16 +111,18 @@ pub fn instantiate(template: &Drawing, name: &str, taken: &BTreeSet<u64>, id_sou
 }
 
 /// `drawing` as a template: its format, and nothing it draws or documents (its sources, views,
-/// dimensions, balloons, revision rows, and the component each sheet documents), nor its number,
-/// which drawings made from it get their own of. Its other properties, its revision numbering and
-/// the text typed over its cells of plain text stay; text typed over a cell that shows a field
-/// (a parameter, a value or a reference) goes with the design that field reads.
+/// dimensions, balloons, placed images, revision rows, and the component each sheet documents),
+/// nor its number, which drawings made from it get their own of. Its other properties, its revision
+/// numbering, its logos and the text typed over its cells of plain text stay; text typed over a cell
+/// that shows a field (a parameter, a value or a reference) goes with the design that field reads.
 pub fn from_drawing(drawing: &Drawing) -> Result<Drawing> {
     let mut template = drawing.clone();
     template.sources.clear();
     template.views.clear();
     template.dimensions.clear();
     template.balloons.clear();
+    template.sheet_images.clear();
+    template.drop_unused_images();
     Arc::make_mut(&mut template.properties).remove(crate::metadata::PART_NUMBER);
     let mut revisions = RevisionRecord::default();
     (revisions.numbering, revisions.per_sheet) = (template.revisions.numbering, template.revisions.per_sheet);
@@ -160,14 +165,17 @@ pub struct Restyled {
 /// block of the template's sheet in its place (its last for the sheets past its own), and keeps the
 /// text typed over a cell while the new block has a text cell of that name. Nothing on a sheet
 /// moves. Answers the drawing, and what changed on each sheet that did.
-pub fn apply(drawing: &Drawing, template: &Drawing) -> Result<(Drawing, Vec<Restyled>)> {
+pub fn apply(drawing: &Drawing, template: &Drawing, id_source: &mut IdSource) -> Result<(Drawing, Vec<Restyled>)> {
     check(template)?;
     let mut d = drawing.clone();
+    let logos = logos_in(&mut d, template, id_source)?;
     let mut changed = Vec::new();
-    for (at, sheet) in d.sheets.iter_mut().enumerate() {
+    for at in 0..d.sheets.len() {
         let Some(from) = template.sheets.get(at).or(template.sheets.last()) else { continue };
+        let block = from.title_block.as_ref().map(|block| with_logos(block, &logos));
+        let Some(sheet) = d.sheets.get_mut(at) else { continue };
         let paper = sheet.sheet != from.sheet;
-        let (border, title_block) = (sheet.border != from.border, sheet.title_block != from.title_block);
+        let (border, title_block) = (sheet.border != from.border, sheet.title_block != block);
         // A sheet's typed text is always its own block's ([`Drawing::validate`]), so the same block loses none.
         if !(paper || border || title_block) {
             continue;
@@ -175,11 +183,38 @@ pub fn apply(drawing: &Drawing, template: &Drawing) -> Result<(Drawing, Vec<Rest
         let sheet = Arc::make_mut(sheet);
         sheet.sheet = from.sheet;
         sheet.border = from.border;
-        let lost = sheet.set_title_block(from.title_block.clone());
+        let lost = sheet.set_title_block(block);
         changed.push(Restyled { sheet: sheet.id, paper, border, title_block, lost });
     }
+    // A logo goes with the block that showed it.
+    d.drop_unused_images();
     d.validate()?;
     Ok((d, changed))
+}
+
+/// Each logo file `template` shows, brought into `d` once however many of its sheets show it: the
+/// template's id for it, to `d`'s. One only a sheet past `d`'s last shows goes with what's unused.
+fn logos_in(d: &mut Drawing, template: &Drawing, id_source: &mut IdSource) -> Result<BTreeMap<u64, u64>> {
+    let mut brought = BTreeMap::new();
+    for logo in template.logos() {
+        if let Entry::Vacant(entry) = brought.entry(logo) {
+            let file = template.images.by_id(logo).ok_or_else(|| DocError::Invalid(format!("the template has no image {}", ids::encode(logo))))?;
+            let id = d.allocate_id(id_source)?;
+            entry.insert(d.keep_file(ImageFile { id, ..file.clone() }));
+        }
+    }
+    Ok(brought)
+}
+
+/// `block` with each logo cell naming its file's id in the drawing (`logos`, from [`logos_in`]).
+fn with_logos(block: &TitleBlock, logos: &BTreeMap<u64, u64>) -> TitleBlock {
+    let mut block = block.clone();
+    for cell in &mut block.cells {
+        if let CellKind::Text(text) = &mut cell.kind {
+            text.image = text.image.and_then(|logo| logos.get(&logo).copied());
+        }
+    }
+    block
 }
 
 /// The built-in `name`'s paper size, its title ("ISO A3") and whether it is an assembly's; none for

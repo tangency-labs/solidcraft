@@ -1,7 +1,7 @@
 use super::*;
 use crate::scenario::{Harness, handle_at, rect_of};
 use crate::semantic_content::{self, ContentOwner, ContentRequest};
-use crate::shell::{LayoutMode, SHELL_GAP};
+use crate::ui_kit::{LayoutMode, SHELL_GAP};
 
 #[test]
 fn clicked_browser_folders_toggle_visibility_with_v() {
@@ -118,20 +118,49 @@ fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"B"})).unwrap();
     h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
     h.settle();
-    h.app.menu.rename = Some(crate::context_menu::Rename {
-        what: crate::context_menu::RenameWhat::Body("B".into()),
-        text: "A".into(),
-        at: egui::Pos2::ZERO,
-        focused: true,
-        inline: true,
-    });
-    h.frames(2);
+    // Open B's name for editing in its row (a delayed second click) and type a taken name.
+    h.step(&json!({"click":{"handle":"row:B"}})).unwrap();
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:B"}})).unwrap();
+    h.frames(30);
+    assert!(h.app.menu.rename.as_ref().is_some_and(|r| r.inline), "B's row is being renamed");
+    h.step(&json!({"text":"A"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     h.frames(2);
     assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
     let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
     assert!(error && text.contains("another body is called"), "{text}");
     assert!(h.app.session.world_state().unwrap().body("B").is_some(), "the body keeps its name");
+}
+
+/// Renaming a component to a name another component has takes the next free number; a name
+/// nobody has stays as typed.
+#[test]
+fn a_component_renamed_to_a_taken_name_takes_the_next_number() {
+    let mut h = Harness::new();
+    let id = |v: Value| v["component"].as_u64().unwrap();
+    let a = id(h.app.run("component.create", json!({"name": "Bracket"})).unwrap());
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let b = id(h.app.run("component.create", json!({"name": "Plate"})).unwrap());
+    let name_of = |h: &Harness, c: u64| h.app.session.doc.components.iter().find(|k| k.id == c).map(|k| k.name.clone()).unwrap();
+    let rename = |h: &mut Harness, c: u64, text: &str| {
+        let r = crate::context_menu::Rename {
+            what: crate::context_menu::RenameWhat::Component(c),
+            text: text.into(),
+            at: egui::Pos2::ZERO,
+            focused: false,
+            inline: true,
+            inline_id: None,
+        };
+        crate::context_menu::commit_rename(&mut h.app, &r).unwrap();
+    };
+    rename(&mut h, b, "Bracket");
+    assert_eq!(name_of(&h, b), "Bracket (2)");
+    assert_eq!(name_of(&h, a), "Bracket", "the other keeps its name");
+    rename(&mut h, b, "Bracket (2)");
+    assert_eq!(name_of(&h, b), "Bracket (2)", "its own name is not taken");
+    rename(&mut h, a, "Base");
+    assert_eq!(name_of(&h, a), "Base");
 }
 
 #[test]
@@ -184,6 +213,8 @@ fn folder_visibility_shortcut_does_not_take_dialog_body_picks_or_chevrons() {
     h.step(&json!({"click":{"chevron":"Bodies"}})).unwrap();
     h.step(&json!({"key":"V"})).unwrap();
     assert!(!h.app.session.folder_hidden("c0/bodies"), "the fold arrow does not pick a visibility target");
+    // The click below picks the body, so Bodies must start empty (#13098 fills in an only body).
+    h.app.preferences.export_selects_only_body = false;
     h.app.start("file.save_mesh");
     h.settle();
     h.step(&json!({"click":{"handle":"row:Bodies"}})).unwrap();
@@ -267,6 +298,104 @@ fn browser_body_clicks_respect_the_active_dialog_input() {
 }
 
 #[test]
+fn browser_name_rows_rename_on_a_delayed_second_click() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.settle();
+
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the body");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    h.frames(30);
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Body(name), inline: true, .. }) if name == "One"
+    ));
+
+    h.step(&json!({"key":"Escape"})).unwrap();
+    let feature = h.app.session.doc.features.first().map(|feature| feature.id).unwrap();
+    let feature_row = format!("row:browser-feature:c0:{feature}");
+    h.step(&json!({"click":{"handle":feature_row}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the feature");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":feature_row}})).unwrap();
+    h.frames(30);
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(id), inline: true, .. }) if *id == feature
+    ));
+    let feature_name = h.app.session.doc.feature(feature).map(|feature| feature.name.clone()).unwrap_or_default();
+    assert!(crate::scenario::handle_at(&format!("rename:{feature_name}")).is_some(), "the feature name is edited in its row");
+    h.step(&json!({"text":"Renamed feature"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.feature(feature).map(|feature| feature.name.as_str()), Some("Renamed feature"));
+}
+
+/// With no dialog open a construction row is selected like any other row, so a delayed second
+/// click renames it.
+#[test]
+fn a_construction_row_renames_on_a_delayed_second_click() {
+    let mut h = Harness::new();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":20})).unwrap();
+    h.app.tree.expanded.insert("c0/construction".into());
+    h.settle();
+    let feature = h.app.session.doc.features.last().map(|feature| feature.id).unwrap();
+    let name = h.app.session.doc.feature(feature).map(|feature| feature.name.clone()).unwrap_or_default();
+    let row = format!("row:{name}");
+    h.step(&json!({"click":{"handle":row}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the plane");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":row}})).unwrap();
+    h.frames(30);
+    assert!(
+        matches!(h.app.menu.rename.as_ref(), Some(crate::context_menu::Rename { inline: true, .. })),
+        "{:?}",
+        h.app.menu.rename.as_ref().map(|r| &r.what)
+    );
+}
+
+#[test]
+fn browser_sketch_rename_stays_inline() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.tree.expanded.insert("c0/sketches".into());
+    h.settle();
+
+    h.step(&json!({"click":{"handle":"row:Profile"}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the sketch");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:Profile"}})).unwrap();
+    h.frames(30);
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(_), inline: true, .. })
+    ));
+    assert!(crate::scenario::handle_at("rename:Profile").is_some(), "the sketch name is edited in its row");
+    h.step(&json!({"text":"Profile renamed"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.features.first().map(|feature| feature.name.as_str()), Some("Profile renamed"));
+}
+
+#[test]
+fn browser_sketches_after_history_marker_are_not_listed() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Earlier"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Later"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+    h.app.tree.expanded.insert("c0/sketches".into());
+    h.settle();
+
+    let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
+    assert!(labels.contains(&"Earlier".to_owned()), "{labels:?}");
+    assert!(!labels.contains(&"Later".to_owned()), "{labels:?}");
+}
+
+#[test]
 fn browser_card_shrinks_and_scrolls_without_covering_history() {
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1400,"height":900}));
@@ -309,21 +438,21 @@ fn browser_card_shrinks_and_scrolls_without_covering_history() {
 
 #[test]
 fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for mode in [LayoutMode::Floating, LayoutMode::Docked] {
             for tab in ["MODEL", "SKETCH", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"] {
                 let ctx = crate::fonts::test_context();
                 let mut app = SolveApp::new(Default::default(), Default::default());
                 app.ui.layout = mode;
                 app.ui.tab = tab.into();
-                crate::theme::TabAccent::publish(&app, &ctx);
-                let accent = crate::theme::TabAccent::for_tab(&Tokens::get(), tab);
+                app.publish_tab_accent(&ctx);
+                let accent = crate::workspace::tab_accent(&Tokens::get(), tab);
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };
-                    row_rect = draw_row(ui, egui::Id::new("selected-row"), &row).rect.unwrap();
+                    row_rect = draw_row(ui, egui::Id::unique("selected-row"), &row).rect.unwrap();
                 });
                 assert_eq!(row_rect.height(), 26.0);
                 assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == row_rect && r.fill == accent.soft)));
@@ -335,7 +464,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -393,16 +522,16 @@ fn a_second_click_on_a_document_settings_entry_closes_its_window() {
 
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(h.app.prefs_window.open, "{mode:?}: the first click opens Preferences");
+        assert!(h.app.prefs_window.shell.open, "{mode:?}: the first click opens Preferences");
         let decimals = h.app.preferences.angle_decimals;
         h.app.preferences.angle_decimals = decimals + 2;
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(!h.app.prefs_window.open, "{mode:?}: the second click closes it");
+        assert!(!h.app.prefs_window.shell.open, "{mode:?}: the second click closes it");
         assert_eq!(h.app.preferences.angle_decimals, decimals, "{mode:?}: and puts back what changed there, as × does");
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(h.app.prefs_window.open, "{mode:?}: a third opens it again");
+        assert!(h.app.prefs_window.shell.open, "{mode:?}: a third opens it again");
         h.step(&json!({"key":"Escape"})).unwrap();
 
         h.step(&row("Parameters")).unwrap();
@@ -595,7 +724,7 @@ fn browser_title_uses_a_single_semibold_run() {
         ui.set_width(250.0);
         browser_header(&mut app, ui, true);
     });
-    let title = crate::i18n::tr("ui.browser_title");
+    let title = solidcraft_ui_text::tr("ui.browser_title");
     let titles: Vec<_> = output
         .shapes
         .iter()
@@ -605,7 +734,7 @@ fn browser_title_uses_a_single_semibold_run() {
         })
         .collect();
     assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::fonts::semibold(Tokens::get().font_heading));
+    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(Tokens::get().font_heading));
 }
 
 #[test]
@@ -646,7 +775,7 @@ fn browser_width_rejects_hostile_preferences_and_tiny_windows_still_fit() {
     assert_eq!(browser_width(-100.0), MIN_BROWSER_WIDTH);
     assert_eq!(browser_width(f32::MAX), MAX_BROWSER_WIDTH);
     let available = Rect::from_min_size(Pos2::ZERO, vec2(100.0, 300.0));
-    for top_gap in [0.0, crate::shell::SHELL_GAP] {
+    for top_gap in [0.0, crate::ui_kit::SHELL_GAP] {
         let bounds = panel_bounds(available, None, MAX_BROWSER_WIDTH, top_gap);
         assert!(available.contains_rect(bounds));
     }
@@ -667,9 +796,9 @@ fn a_long_body_name_stays_inside_the_card_and_ends_in_an_ellipsis() {
 
 #[test]
 fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for collapsed in [false, true] {
             let ctx = crate::fonts::test_context();
             ctx.global_style_mut(|style| style.animation_time = 0.0);
@@ -677,7 +806,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             app.ui.tab = "SURFACE".into();
             app.preferences.timeline_left = true;
             app.preferences.timeline_left_browser_collapsed = collapsed;
-            crate::theme::TabAccent::publish(&app, &ctx);
+            app.publish_tab_accent(&ctx);
             let bounds = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 700.0));
             let draw = |app: &mut SolveApp, events| {
                 crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(bounds), events, ..Default::default() }, |ui| {
@@ -694,7 +823,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             draw(&mut app, vec![egui::Event::PointerMoved(at)]);
             let output = draw(&mut app, vec![egui::Event::PointerMoved(at)]);
             assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::PointingHand);
-            let accent = crate::theme::TabAccent::current(&ctx);
+            let accent = solidcraft_theme::TabAccent::current(&ctx);
             let mut hover = None;
             for shape in &output.shapes {
                 crate::test_support::each_shape(&shape.shape, &mut |shape| {
@@ -719,7 +848,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 /// #6907: a mesh body's row has its own icon and tooltip, so it can be told from a solid one.
@@ -738,6 +867,7 @@ fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -751,8 +881,8 @@ fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
     let row = |name: &str| rows.iter().find(|e| e.key == name).unwrap_or_else(|| panic!("no {name} row in {:?}", body_rows(&h.app)));
     assert_eq!((row("Mesh").icon, row("Mesh").tip), ("mesh_body", Some("ui.body_kind_mesh")));
     assert_eq!((row("Solid").icon, row("Solid").tip), ("body", Some("ui.body_kind_solid")));
-    assert_eq!(crate::i18n::tr("ui.body_kind_mesh"), "Mesh body");
-    assert_eq!(crate::i18n::tr("ui.body_kind_solid"), "Solid body");
+    assert_eq!(solidcraft_ui_text::tr("ui.body_kind_mesh"), "Mesh body");
+    assert_eq!(solidcraft_ui_text::tr("ui.body_kind_solid"), "Solid body");
     // Its own drawing in the mesh colours, not the solid body's grey cube.
     let icon = crate::icon_svg::resolve("mesh_body");
     assert!(!icon.placeholder);
@@ -1053,6 +1183,39 @@ fn hiding_or_showing_body_or_sketch_updates_row_dimming() {
     assert!(!body_hidden(&h, "One"));
 }
 
+/// #7267: the design's top row is named after its file, like its tab, even when the file was
+/// renamed away from the name stored in the design; a rename since the last save shows at once.
+#[test]
+fn the_top_row_follows_the_file_name_like_the_tab() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("component.rename", json!({"component": 0, "name": "Plate"})).unwrap();
+    h.app.session.mark_saved();
+    h.settle();
+    assert!(handle_at("row:Plate").is_some(), "an unsaved design shows its own name");
+    // The file was saved as one name and renamed on disk: the document itself is unchanged.
+    h.app.session.path = Some("parts/Plate rev C.solidcraft".into());
+    h.settle();
+    assert!(handle_at("row:Plate rev C").is_some(), "the top row shows the file's name");
+    assert!(handle_at("row:Plate").is_none(), "not the name stored in the design");
+    assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Plate rev C", "the tab shows the same name");
+    h.app.run("component.rename", json!({"component": 0, "name": "Lid"})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Lid").is_some(), "a rename since the last save shows on the top row");
+    assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Lid");
+    // With the preference off, a saved design's tab and top row show its own name, as before.
+    h.app.session.mark_saved();
+    h.app.session.path = Some("parts/Plate rev D.solidcraft".into());
+    h.app.preferences.names_from_file = false;
+    h.settle();
+    assert!(handle_at("row:Lid").is_some(), "the design's own name, not the file's");
+    assert!(handle_at("row:Plate rev D").is_none());
+    assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Lid");
+    h.app.preferences.names_from_file = true;
+    h.settle();
+    assert!(handle_at("row:Plate rev D").is_some(), "on again: the file's name");
+}
+
 /// Draw content without either panel host. Changing submission order does not change IDs,
 /// screen placement or the input stream, so these exercise the adapters' shared boundary.
 fn semantic_frame(h: &mut Harness, owners: &[ContentOwner], events: Vec<egui::Event>, modifiers: egui::Modifiers) {
@@ -1104,7 +1267,7 @@ fn semantic_frame_transitions(
             semantic_content::finalize(&mut h.app, ui.ctx());
             // App paths may converge after an early return; finalization must be idempotent.
             semantic_content::finalize(&mut h.app, ui.ctx());
-            if ui.ctx().data_mut(|data| data.remove_temp::<bool>(egui::Id::new("semantic-test-discard"))).unwrap_or(false) {
+            if ui.ctx().data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("semantic-test-discard"))).unwrap_or(false) {
                 ui.ctx().request_discard("repeat semantic layout after input");
             }
         })
@@ -1516,7 +1679,7 @@ fn semantic_row_commands_are_consumed_once_across_layout_repeats() {
     let undo = h.app.session.undo.len();
     semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(at)], egui::Modifiers::NONE);
     semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, true, egui::Modifiers::NONE)], egui::Modifiers::NONE);
-    h.ctx.data_mut(|data| data.insert_temp(egui::Id::new("semantic-test-discard"), true));
+    h.ctx.data_mut(|data| data.insert_temp(egui::Id::unique("semantic-test-discard"), true));
     semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, false, egui::Modifiers::NONE)], egui::Modifiers::NONE);
     assert!(body_hidden(&h, "One"), "a repeated layout cannot toggle the eye back on");
     assert_eq!(h.app.session.undo.len(), undo + 1);
@@ -1802,7 +1965,7 @@ fn switching_semantic_documents_preserves_unrelated_payload_and_capture() {
     }
     let from = semantic_at(ContentOwner::BROWSER, "One");
     semantic_drag_start(&mut h, &owners, from);
-    let external = egui::Id::new("external capture");
+    let external = egui::Id::unique("external capture");
     egui::DragAndDrop::set_payload(&h.ctx, "external payload".to_string());
     h.ctx.set_dragged_id(external);
     crate::documents::switch(&mut h.app, tab);
@@ -2199,4 +2362,49 @@ fn parked_reveals_are_pruned_against_their_own_document_when_the_target_is_remov
     assert_eq!(h.app.tree.timeline_reveal, Some(feature), "the request returns to A before ordinary target pruning");
     semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
     assert_no_pending_reveals(&h);
+}
+
+/// #7533: the first click of a double-click that comes a little after a click on the same name
+/// does not rename it; the double-click edits the feature, and a rename waits out the
+/// double-click delay.
+#[test]
+fn a_double_click_after_a_slow_click_edits_instead_of_renaming() {
+    let mut h = Harness::new();
+    let feature = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.settle();
+    let row = json!({"handle": format!("row:browser-feature:c0:{feature}")});
+    h.step(&json!({"click": row})).unwrap();
+    h.frames(30);
+    h.step(&json!({"click": row})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the rename waits out the double-click delay");
+    h.step(&json!({"click": row, "double": true})).unwrap();
+    h.frames(30);
+    assert!(h.app.menu.rename.is_none(), "a double-click drops the held rename");
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == feature)), "the double-click edits the feature");
+    crate::dialogs::cancel(&mut h.app);
+    h.frames(40);
+    // A double-click a while after an earlier double-click edits again.
+    h.step(&json!({"click": row, "double": true})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none());
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == feature)), "the second double-click edits too");
+}
+
+/// A component's body placed twice is two body rows in the Browser; the header's count agrees
+/// with the rows it lists instead of counting the model's bodies ("1 body" over two rows).
+#[test]
+fn the_browser_header_counts_one_body_per_placement() {
+    let (mut h, _, _) = crate::test_support::component_box();
+    h.app.preferences.browser_components_open = true;
+    h.settle();
+    assert_eq!(listed_bodies(&h.app.session), 1);
+    h.app.run("occurrence.copy", json!({"component": "Block", "translate": [0, 40, 0]})).unwrap();
+    h.settle();
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 2);
+    // One body row under each placement's row, both labelled with the body's own name.
+    let rows = drawn_rows();
+    let body_rows = rows.iter().filter(|(label, ..)| label == "Body1").count();
+    assert_eq!(body_rows, 2, "a body row per placement: {rows:?}");
+    assert_eq!(listed_bodies(&h.app.session), body_rows, "the header counts the rows it lists");
 }

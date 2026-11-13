@@ -18,6 +18,8 @@ pub struct ContentOwner(pub u64);
 impl ContentOwner {
     pub const BROWSER: Self = Self(0);
     pub const HISTORY: Self = Self(1);
+    /// The design tree over the view while a dialog holds the left column (`dialog_tree`, #6710).
+    pub const DESIGN_TREE: Self = Self(2);
 }
 
 /// Runtime identity of the document and presentation which produced an interaction.
@@ -36,8 +38,12 @@ pub(crate) struct FeatureDrag {
 /// Existing row compositions. This interface deliberately contains no panel or host policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContentRequest {
-    Browser { shrink_height: bool },
+    Browser {
+        shrink_height: bool,
+    },
     ActiveBodiesOrigin,
+    /// The design's Origin, Bodies and Construction rows, for `dialog_tree` (#6710).
+    DesignTree,
 }
 
 pub type DrawnRow = (String, Rect, Option<Rect>, Option<bool>);
@@ -98,6 +104,10 @@ pub(crate) struct Frame {
     active: Option<(ContentOwner, ContentRequest)>,
     last_bodies: Vec<String>,
     last_plane: Option<String>,
+    /// The feature and joint a row lit last frame, cleared only while the viewport still shows
+    /// them: the timeline sets `hover_feature` earlier in the frame.
+    last_feature: Option<u64>,
+    last_joint: Option<u64>,
     plane_underlay: Option<String>,
     finalized: bool,
 }
@@ -118,15 +128,15 @@ impl Frame {
 }
 
 fn active_id() -> egui::Id {
-    egui::Id::new("sc_semantic_content_owner")
+    egui::Id::unique("sc_semantic_content_owner")
 }
 
 fn output_id(owner: ContentOwner) -> egui::Id {
-    egui::Id::new(("sc_semantic_content_output", owner))
+    egui::Id::unique(("sc_semantic_content_output", owner))
 }
 
 fn capture_id() -> egui::Id {
-    egui::Id::new("sc_semantic_content_eye_owner")
+    egui::Id::unique("sc_semantic_content_eye_owner")
 }
 
 #[derive(Clone, Copy)]
@@ -153,7 +163,7 @@ struct InputClaims {
 pub(crate) fn claim_action(ui: &Ui, widget: egui::Id) -> bool {
     let frame = ui.ctx().cumulative_frame_nr();
     ui.ctx().data_mut(|data| {
-        let claims = data.get_temp_mut_or_default::<InputClaims>(egui::Id::new("sc_semantic_content_input_claims"));
+        let claims = data.get_temp_mut_or_default::<InputClaims>(egui::Id::unique("sc_semantic_content_input_claims"));
         if claims.frame != frame {
             claims.frame = frame;
             claims.actions.clear();
@@ -163,7 +173,7 @@ pub(crate) fn claim_action(ui: &Ui, widget: egui::Id) -> bool {
 }
 
 fn row_capture_id() -> egui::Id {
-    egui::Id::new("sc_semantic_content_row_capture")
+    egui::Id::unique("sc_semantic_content_row_capture")
 }
 
 pub(crate) fn current_source(app: &SolveApp) -> Option<ContentSource> {
@@ -228,6 +238,19 @@ pub(crate) fn set_external_body_hover(app: &mut SolveApp, bodies: Vec<String>) {
     app.viewport.hover_bodies = bodies;
 }
 
+/// The timeline's own write of the hovered feature. A Browser row that lit the same feature a
+/// frame earlier no longer owns it, so expiring the Browser's hover leaves the timeline's alone.
+pub(crate) fn set_timeline_feature_hover(app: &mut SolveApp, feature: Option<u64>) {
+    if feature.is_some() {
+        app.tree.content.last_feature = None;
+        app.viewport.hover_feature = feature;
+    } else if app.tree.content.last_feature.is_none() {
+        app.viewport.hover_feature = None;
+    }
+}
+
+/// Expire previous hover contributions owned by browser or content trees before applying
+/// new actions for the current frame, returning the previous bodies and construction plane.
 fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
     let old_bodies = std::mem::take(&mut app.tree.content.last_bodies);
     let old_plane = app.tree.content.last_plane.take();
@@ -239,6 +262,16 @@ fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
     let plane_underlay = app.tree.content.plane_underlay.take();
     if old_plane.is_some() && app.viewport.hover_plane == old_plane {
         app.viewport.hover_plane = plane_underlay;
+    }
+    if let Some(feature) = app.tree.content.last_feature.take()
+        && app.viewport.hover_feature == Some(feature)
+    {
+        app.viewport.hover_feature = None;
+    }
+    if let Some(joint) = app.tree.content.last_joint.take()
+        && app.viewport.hover_joint == Some(joint)
+    {
+        app.viewport.hover_joint = None;
     }
     (old_bodies, old_plane)
 }
@@ -392,7 +425,12 @@ pub(crate) fn release_eye(ctx: &egui::Context) -> Option<ContentSource> {
 /// A reveal is acknowledged only after its row is presented in the scroll viewport. An
 /// offscreen target requests scrolling again on the next frame until that happens.
 pub(crate) fn scroll_acknowledged(ui: &Ui, rect: Rect) -> bool {
-    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    scroll_acknowledged_at(ui, rect, egui::Align::Center)
+}
+
+/// [`scroll_acknowledged`] placing `rect` at `align` in the viewport.
+pub(crate) fn scroll_acknowledged_at(ui: &Ui, rect: Rect, align: egui::Align) -> bool {
+    ui.scroll_to_rect(rect, Some(align));
     presented(ui) && ui.is_rect_visible(rect) && ui.clip_rect().contains(rect.center())
 }
 
@@ -400,6 +438,8 @@ fn presented(ui: &Ui) -> bool {
     ui.is_visible() && ui.opacity() > 0.0
 }
 
+/// Finalize content tree hover state, pointer ownership, and drag interactions across panels
+/// for the current frame, requesting a repaint if visible hover highlights changed.
 pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     ensure_session(app, ctx);
     if app.tree.content.finalized {
@@ -424,6 +464,7 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Keep the previous contribution until finalization: floating viewports paint before
     // their overlaid panels. Expire only our contribution, leaving other producers intact.
+    let lit_before = (app.viewport.hover_feature, app.viewport.hover_joint);
     let (old_bodies, old_plane) = expire_hover(app);
     // Egui's response hit testing supplies pointer ownership, including occlusion and capture.
     // Stable owner iteration only breaks ties; submission order never decides the winner.
@@ -458,9 +499,20 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
             app.tree.content.last_plane.clone_from(&actions.hover_plane);
             app.viewport.hover_plane.clone_from(&actions.hover_plane);
         }
+        if let Some(feature) = actions.hover_feature {
+            app.viewport.hover_feature = Some(feature);
+            app.tree.content.last_feature = Some(feature);
+        }
+        if let Some(joint) = actions.hover_joint {
+            app.viewport.hover_joint = Some(joint);
+            app.tree.content.last_joint = Some(joint);
+        }
         crate::browser::apply_content_actions(app, actions);
     }
-    if old_bodies != app.tree.content.last_bodies || old_plane != app.tree.content.last_plane {
+    if old_bodies != app.tree.content.last_bodies
+        || old_plane != app.tree.content.last_plane
+        || lit_before != (app.viewport.hover_feature, app.viewport.hover_joint)
+    {
         ctx.request_repaint();
     }
 }

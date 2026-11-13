@@ -24,8 +24,8 @@ pub struct SheetSceneParams {
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
 /// (object and source: the placement), then each view's strokes (object: the view), then each
-/// dimension's lines and arrowheads (object: the dimension), then the title block's (object: the
-/// sheet).
+/// dimension's lines and arrowheads (object: the dimension) and each note of a view (object: the
+/// note), then each note on the sheet, then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -37,14 +37,14 @@ impl JsonSchema for SheetPaperScene {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         paper_scene_schema(
             generator,
-            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::TitleBlock],
+            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::Note, ObjectKind::TitleBlock],
             true,
         )
     }
 }
 
 /// One view on the sheet: `drawn`, `placeholder` (nothing to measure, so no lines) or `failed`,
-/// with why.
+/// with why. A drawn view can say why too, as a note does: its position names joints that are gone.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SheetSceneView {
     pub view: String,
@@ -58,7 +58,7 @@ pub struct SheetSceneView {
 
 impl From<ViewState> for SheetSceneView {
     fn from(v: ViewState) -> Self {
-        SheetSceneView { view: ids::encode(v.view), status: v.status.name(), reason: v.status.reason(), stats: v.stats.map(Into::into) }
+        SheetSceneView { view: ids::encode(v.view), status: v.status.name(), reason: v.status.reason().or(v.why), stats: v.stats.map(Into::into) }
     }
 }
 
@@ -68,6 +68,21 @@ impl From<ViewState> for SheetSceneView {
 pub struct SheetSceneDimension {
     pub dimension: String,
     pub view: String,
+    pub status: &'static str,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One note of the sheet: on a view (or what it shows) or on the sheet itself; where what it points
+/// at stands with the model, in `drawing.dimension.inspect`'s words (ok when it points at nothing);
+/// and whether it is in the scene, with why not, or what of it is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneNote {
+    pub note: String,
+    /// The view it moves with; none for a note on the sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
     pub status: &'static str,
     pub drawn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -207,8 +222,8 @@ pub struct DimensionStatusResult {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
-    /// Its sheet shows it as it last was: its view is out of date, or it was read from another model
-    /// or record than it has now.
+    /// Its sheet shows it as it last was, or not at all: its view is out of date, it was read from
+    /// another model or record than it has now, or its view draws an exploded view and holds it back.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub out_of_date: bool,
 }
@@ -236,11 +251,16 @@ pub struct SheetSceneResult {
     pub scene: SheetPaperScene,
     /// Each view on the sheet, in id order.
     pub views: Vec<SheetSceneView>,
-    /// The sheet's border, then each view on it, then each dimension drawn, in paint order.
+    /// The sheet's border, then each view on it, then each dimension and note drawn, in paint order:
+    /// each that is on paper. What draws nothing and has no boundary isn't one.
     pub objects: Vec<SheetObjectResult>,
     /// Each dimension of a view on the sheet, by view and id.
     pub dimensions: Vec<SheetSceneDimension>,
-    /// The views and dimensions a deferred drawing shows as they last were.
+    /// Each note of a view on the sheet, by view and id, then each note on the sheet, by id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<SheetSceneNote>,
+    /// The views, dimensions and notes a deferred drawing shows as they last were, and the dimensions
+    /// and notes on its model a view drawing an exploded view holds back.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

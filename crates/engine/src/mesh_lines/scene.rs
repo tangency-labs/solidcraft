@@ -657,7 +657,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_render::Camera;
+    use solidcraft_viewport::Camera;
     #[test]
     fn coverage_handles_disjoint_spans_and_early_complete_coverage() {
         let mut c = Coverage::default();
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn repeated_surface_over_one_million_triangles_keeps_one_mesh_and_exports_all_placements() {
-        use solidcraft_render::StandardView;
+        use solidcraft_viewport::StandardView;
         use std::sync::Arc;
         let mut mesh = Mesh::default();
         for y in 0..=100 {

@@ -78,20 +78,21 @@ impl Direction {
 }
 
 /// Usable logical units: egui applies scale exactly once, outside this contract.
-/// Free/native flow starts at aspect 1, switches Tall->Wide above 1.1, Wide->Tall
-/// below 0.9, and retains the previous flow inside that band.
-pub fn responsive(zone: Zone, usable: Size, previous: Option<Flow>) -> PanelResult<(Flow, SizeClass)> {
+/// Free/native flow follows the assigned logical aspect. The previous argument
+/// remains for source compatibility; a stretched parent never determines flow.
+pub fn responsive(zone: Zone, usable: Size, _previous: Option<Flow>) -> PanelResult<(Flow, SizeClass)> {
     usable.validate()?;
     let aspect = usable.width / usable.height;
     let flow = match zone {
         Zone::Left | Zone::Right => Flow::Tall,
         Zone::Bottom => Flow::Wide,
-        Zone::Floating | Zone::Window => match previous {
-            Some(Flow::Tall) if aspect <= 1.1 => Flow::Tall,
-            Some(Flow::Wide) if aspect >= 0.9 => Flow::Wide,
-            _ if aspect >= 1.0 => Flow::Wide,
-            _ => Flow::Tall,
-        },
+        Zone::Floating | Zone::Window => {
+            if aspect >= 1.0 {
+                Flow::Wide
+            } else {
+                Flow::Tall
+            }
+        }
     };
     let shorter = usable.width.min(usable.height);
     let class = if shorter < 240.0 {
@@ -144,7 +145,7 @@ pub struct ResolvedPanel {
     pub section: SectionId,
     pub zone: Zone,
     pub outer: LogicalRect,
-    pub body: LogicalRect,
+    pub body: Option<LogicalRect>,
     pub painted: Vec<LogicalRect>,
     pub input: Vec<InputRegion>,
 }
@@ -153,11 +154,13 @@ impl ResolvedPanel {
         valid_id(&self.instance.0)?;
         valid_id(&self.section.0)?;
         self.outer.validate()?;
-        self.body.validate()?;
-        if !self.outer.contains_rect(self.body) {
-            return Err(error(Rule::Bounds, "usable body outside outer host"));
+        if let Some(body) = self.body {
+            body.validate()?;
+            if !self.outer.contains_rect(body) {
+                return Err(error(Rule::Bounds, "usable body outside outer host"));
+            }
         }
-        if self.painted.is_empty() || self.painted.len() > MAX_TABS || self.input.len() > MAX_INSTANCES {
+        if self.painted.len() > MAX_TABS || self.input.len() > MAX_INSTANCES {
             return Err(error(Rule::CollectionLimit, "resolved region count"));
         }
         for rect in &self.painted {
@@ -235,134 +238,632 @@ impl ResolvedLayout {
     }
 }
 
-/// Reference geometry for synthetic mounts. Production docking owns its richer
-/// resolver; both return the same meaningful geometry contract. No layout writes.
+/// Width-dependent, side-effect-free measurement request. Heights include all
+/// shared chrome, body, footer, padding and spacing at this exact assigned width.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContentMeasureRequest {
+    pub instance: InstanceId,
+    pub width: f32,
+    pub chrome_height: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SideContentMeasure {
+    pub request: ContentMeasureRequest,
+    pub needed_height: f32,
+    pub policy: SideHeightPolicy,
+}
+
+/// Immutable input to the allocator. Availability and measurements are captured
+/// by the adapter; allocation never calls content or changes layout preferences.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AllocationEnvironment {
+    pub capacity: LogicalRect,
+    pub direction: Direction,
+    pub header_height: f32,
+    pub footer_height: f32,
+    pub gap: f32,
+    pub inline_max_height: f32,
+    pub min_viewport: Size,
+    pub scroll: Point,
+    pub available: Vec<InstanceId>,
+    pub content: Vec<SideContentMeasure>,
+    pub content_revision: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AllocatedSection {
+    pub section: SectionId,
+    pub instance: InstanceId,
+    pub outer: LogicalRect,
+    pub collapsed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AllocatedGeometry {
+    pub sections: Vec<AllocatedSection>,
+    pub extent: Size,
+    pub scroll: Point,
+}
+
+impl AllocationEnvironment {
+    pub fn validate(&self) -> PanelResult<()> {
+        validate_allocation_capacity(self.capacity)?;
+        self.scroll.validate()?;
+        self.min_viewport.validate()?;
+        if self.scroll.x < 0.0 || self.scroll.y < 0.0 {
+            return Err(error(Rule::Bounds, "negative panel scroll"));
+        }
+        for value in [self.header_height, self.footer_height, self.gap] {
+            if !value.is_finite() || !(0.0..=256.0).contains(&value) {
+                return Err(error(Rule::Bounds, "invalid allocation chrome"));
+            }
+        }
+        if self.header_height <= 0.0 {
+            return Err(error(Rule::Bounds, "header height must be positive"));
+        }
+        if self.available.len() > MAX_INSTANCES || self.content.len() > MAX_INSTANCES {
+            return Err(error(Rule::CollectionLimit, "allocation environment bound"));
+        }
+        if !self.inline_max_height.is_finite() || !(0.0..=88.0).contains(&self.inline_max_height) {
+            return Err(error(Rule::Bounds, "invalid inline allocation threshold"));
+        }
+        let mut available = std::collections::BTreeSet::new();
+        for id in &self.available {
+            valid_id(&id.0)?;
+            if !available.insert(id) {
+                return Err(error(Rule::DuplicateId, "duplicate availability"));
+            }
+        }
+        let mut measures = std::collections::BTreeSet::new();
+        for measure in &self.content {
+            valid_id(&measure.request.instance.0)?;
+            if !measure.request.width.is_finite()
+                || measure.request.width <= 0.0
+                || measure.request.width > MAX_LOGICAL
+                || !measure.request.chrome_height.is_finite()
+                || measure.request.chrome_height < 0.0
+                || !measure.needed_height.is_finite()
+                || measure.needed_height < measure.request.chrome_height
+                || measure.needed_height > MAX_LOGICAL
+            {
+                return Err(error(Rule::Bounds, "invalid intrinsic content measure"));
+            }
+            if !measures.insert((&measure.request.instance, measure.request.width.to_bits(), measure.request.chrome_height.to_bits())) {
+                return Err(error(Rule::DuplicateId, "duplicate content measure"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Capacity may be empty, unlike a positive panel/body rectangle.
+pub fn validate_allocation_capacity(bounds: LogicalRect) -> PanelResult<()> {
+    bounds.origin.validate()?;
+    if !bounds.size.width.is_finite()
+        || !bounds.size.height.is_finite()
+        || bounds.size.width < 0.0
+        || bounds.size.height < 0.0
+        || bounds.size.width > MAX_LOGICAL
+        || bounds.size.height > MAX_LOGICAL
+        || (bounds.origin.x + bounds.size.width).abs() > MAX_LOGICAL
+        || (bounds.origin.y + bounds.size.height).abs() > MAX_LOGICAL
+    {
+        return Err(error(Rule::Bounds, "invalid allocation capacity"));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct AxisLimit {
+    min: f32,
+    max: f32,
+    weight: f32,
+    preferred: Option<f32>,
+    priority: u16,
+}
+
+/// Bounded water filling starts at minima, redistributes only available surplus,
+/// and leaves a real gap when every member reaches its maximum.
+fn distribute(items: &[AxisLimit], available: f32) -> Vec<f32> {
+    let mut sizes: Vec<_> = items.iter().map(|item| item.min).collect();
+    let mut remaining = (f64::from(available) - sizes.iter().map(|v| f64::from(*v)).sum::<f64>()).max(0.0);
+    let tiers: std::collections::BTreeSet<_> = items.iter().filter(|item| item.preferred.is_some()).map(|item| item.priority).collect();
+    for tier in tiers.iter().rev() {
+        let requested: f64 = items
+            .iter()
+            .filter(|item| item.priority == *tier)
+            .map(|item| item.preferred.map_or(0.0, |wanted| f64::from(wanted.clamp(item.min, item.max)) - f64::from(item.min)))
+            .sum();
+        let factor = if requested > 0.0 { (remaining / requested).min(1.0) } else { 0.0 };
+        for (item, size) in items.iter().zip(&mut sizes) {
+            if item.priority == *tier
+                && let Some(wanted) = item.preferred
+            {
+                let increment = (f64::from(wanted.clamp(item.min, item.max)) - f64::from(item.min)) * factor;
+                let mut next = (f64::from(*size) + increment) as f32;
+                if f64::from(next) > f64::from(*size) + increment {
+                    next = f32::from_bits(next.to_bits().saturating_sub(1));
+                }
+                remaining = (remaining - (f64::from(next) - f64::from(*size))).max(0.0);
+                *size = next;
+            }
+        }
+        // This tier exhausted the mathematical budget. Inward f32 rounding
+        // leaves real uncovered space, never priority for a lower tier/weight.
+        if factor < 1.0 && requested > 0.0 {
+            return sizes;
+        }
+    }
+    for _ in 0..items.len() {
+        let total: f64 = items
+            .iter()
+            .zip(&sizes)
+            .filter(|(item, size)| item.preferred.is_none() && item.max > **size && item.weight > 0.0)
+            .map(|(item, _)| f64::from(item.weight))
+            .sum();
+        if remaining <= 0.0 || total <= 0.0 {
+            break;
+        }
+        let mut consumed = 0.0;
+        for (item, size) in items.iter().zip(&mut sizes) {
+            if item.preferred.is_none() && item.max > *size && item.weight > 0.0 {
+                let increment = (remaining * f64::from(item.weight) / total).min(f64::from(item.max) - f64::from(*size));
+                let mut next = (f64::from(*size) + increment) as f32;
+                // Round surplus inward: a collection of f32 round-ups must not
+                // advertise a capacity fit which actually crosses its boundary.
+                if f64::from(next) > f64::from(*size) + increment {
+                    next = f32::from_bits(next.to_bits().saturating_sub(1));
+                }
+                consumed += f64::from(next) - f64::from(*size);
+                *size = next.min(item.max);
+            }
+        }
+        if consumed <= 0.0 {
+            break;
+        }
+        remaining = (remaining - consumed).max(0.0);
+    }
+    sizes
+}
+
+/// Deterministic presentation identity, without changing remembered activation.
+pub fn presented_instance<'a>(section: &'a Section, available: &[InstanceId]) -> Option<&'a InstanceId> {
+    if section.tabs.is_empty() || section.tabs.len() > MAX_TABS || available.len() > MAX_INSTANCES {
+        return None;
+    }
+    if section.tabs.contains(&section.active) && available.contains(&section.active) {
+        Some(&section.active)
+    } else {
+        section.tabs.iter().find(|id| available.contains(id))
+    }
+}
+
+fn presented<'a>(section: &'a Section, env: &AllocationEnvironment) -> Option<&'a InstanceId> {
+    presented_instance(section, &env.available)
+}
+
+struct AllocationColumn<'a> {
+    column: &'a Column,
+    members: Vec<&'a Section>,
+    width: f32,
+}
+
+fn allocation_columns<'a>(layout: &'a Layout, registry: &PanelRegistry, env: &AllocationEnvironment) -> PanelResult<Vec<AllocationColumn<'a>>> {
+    let mut columns = Vec::new();
+    let mut limits = Vec::new();
+    for zone in [Zone::Left, Zone::Right] {
+        for column in layout.columns.iter().filter(|column| column.zone == zone) {
+            let members: Vec<_> =
+                layout.sections.iter().filter(|section| section.column.as_ref() == Some(&column.id) && presented(section, env).is_some()).collect();
+            if members.is_empty() {
+                continue;
+            }
+            // Unavailable members still constrain widths, just like inactive tabs.
+            let (min, max) = column_bounds(layout, registry, &column.id)?;
+            let preferred = column.width.clamp(min, max);
+            limits.push(AxisLimit { min, max: preferred, weight: (preferred - min).max(0.001), preferred: None, priority: 0 });
+            columns.push(AllocationColumn { column, members, width: 0.0 });
+        }
+    }
+    let gaps = env.gap * columns.len().saturating_sub(1) as f32;
+    for (column, width) in columns.iter_mut().zip(distribute(&limits, (env.capacity.size.width - gaps).max(0.0))) {
+        column.width = width;
+    }
+    Ok(columns)
+}
+
+pub fn allocation_measure_requests(
+    layout: &Layout,
+    registry: &PanelRegistry,
+    env: &AllocationEnvironment,
+) -> PanelResult<Vec<ContentMeasureRequest>> {
+    validate(layout, registry)?;
+    env.validate()?;
+    let mut requests = Vec::new();
+    for column in allocation_columns(layout, registry, env)? {
+        if let Some(section) = column.members.first().filter(|_| column.members.len() == 1)
+            && !section.collapsed
+            && let Some(instance) = presented(section, env)
+        {
+            requests.push(ContentMeasureRequest {
+                instance: instance.clone(),
+                width: column.width,
+                chrome_height: env.header_height + env.footer_height,
+            });
+        }
+    }
+    Ok(requests)
+}
+
+fn section_height_limit(layout: &Layout, registry: &PanelRegistry, section: &Section, env: &AllocationEnvironment) -> PanelResult<AxisLimit> {
+    if section.collapsed {
+        return Ok(AxisLimit { min: env.header_height, max: env.header_height, weight: 0.0, preferred: None, priority: 0 });
+    }
+    let (min, max) = tab_bounds(layout, registry, section)?;
+    let free_width = section.size.width.min(env.capacity.size.width).clamp(min.width, max.width);
+    let free_height = section.size.height.min(env.capacity.size.height).clamp(min.height, max.height);
+    let inline = (section.location.zone() == Zone::Bottom && section.size.height <= env.inline_max_height)
+        || (matches!(section.location.zone(), Zone::Floating | Zone::Window) && free_height <= env.inline_max_height && free_width >= free_height);
+    let chrome = if inline { env.header_height } else { env.header_height + env.footer_height };
+    let min = min.height.max(chrome);
+    if min > max.height {
+        return Err(error(Rule::IncompatibleTabs, "chrome exceeds composite height"));
+    }
+    Ok(AxisLimit {
+        min,
+        max: max.height,
+        weight: section.weight,
+        preferred: if section.location.zone().side() { section.preferred_extent } else { None },
+        priority: section.extent_priority,
+    })
+}
+
+fn measure_for<'a>(env: &'a AllocationEnvironment, request: &ContentMeasureRequest) -> PanelResult<&'a SideContentMeasure> {
+    env.content
+        .iter()
+        .find(|measure| measure.request == *request)
+        .ok_or_else(|| error(Rule::Revision, "missing or stale assigned-width content metrics"))
+}
+
+/// The exact bounds used for allocation and host command/gesture admission.
+pub fn effective_allocation_bounds(
+    layout: &Layout,
+    registry: &PanelRegistry,
+    section: &Section,
+    env: &AllocationEnvironment,
+) -> PanelResult<(Size, Size)> {
+    env.validate()?;
+    if layout.section(&section.id)? != section {
+        return Err(error(Rule::Revision, "allocation section became stale"));
+    }
+    let (mut min, mut max) = tab_bounds(layout, registry, section)?;
+    if let Some(column) = &section.column {
+        let (low, high) = column_bounds(layout, registry, column)?;
+        min.width = low;
+        max.width = high;
+    }
+    let height = section_height_limit(layout, registry, section, env)?;
+    min.height = height.min;
+    max.height = height.max;
+    if section.location.zone().side() && !section.collapsed {
+        let count = layout.sections.iter().filter(|member| member.column == section.column && presented(member, env).is_some()).count();
+        if count == 1
+            && let Some(instance) = presented(section, env)
+        {
+            let width = allocation_columns(layout, registry, env)?
+                .iter()
+                .find(|column| Some(&column.column.id) == section.column.as_ref())
+                .map(|column| column.width)
+                .ok_or_else(|| error(Rule::MissingTarget, "presented column missing"))?;
+            let request = ContentMeasureRequest { instance: instance.clone(), width, chrome_height: env.header_height + env.footer_height };
+            let measure = measure_for(env, &request)?;
+            if measure.policy == SideHeightPolicy::Content {
+                max.height = measure.needed_height.clamp(min.height, max.height);
+            }
+        }
+    }
+    Ok((min, max))
+}
+
+/// Closest feasible shared Bottom thickness using proposed presentation bounds.
+/// Both regimes delegate chrome/composite constraints to the same allocator.
+pub fn bottom_resize_height(layout: &Layout, registry: &PanelRegistry, env: &AllocationEnvironment, requested: f32) -> PanelResult<f32> {
+    validate(layout, registry)?;
+    env.validate()?;
+    if !requested.is_finite() {
+        return Err(error(Rule::Bounds, "nonfinite Bottom thickness"));
+    }
+    let (registered_min, registered_max) = bottom_height_bounds(layout, registry)?;
+    let expanded_min = f32::from_bits(env.inline_max_height.to_bits().saturating_add(1));
+    let regions = [(registered_min, registered_max.min(env.inline_max_height)), (registered_min.max(expanded_min), registered_max)];
+    let mut proposed = layout.clone();
+    let mut best: Option<f32> = None;
+    for (mut low, mut high) in regions {
+        if low > high {
+            continue;
+        }
+        let probe = requested.clamp(low, high);
+        for section in &mut proposed.sections {
+            if section.location.zone() == Zone::Bottom {
+                section.size.height = probe;
+            }
+        }
+        let mut compatible = true;
+        for section in proposed
+            .sections
+            .iter()
+            .filter(|section| section.location.zone() == Zone::Bottom && !section.collapsed && presented(section, env).is_some())
+        {
+            match effective_allocation_bounds(&proposed, registry, section, env) {
+                Ok((min, max)) => {
+                    low = low.max(min.height);
+                    high = high.min(max.height);
+                }
+                Err(failure) if failure.rule == Rule::IncompatibleTabs => {
+                    compatible = false;
+                    break;
+                }
+                Err(failure) => return Err(failure),
+            }
+        }
+        if !compatible || low > high {
+            continue;
+        }
+        let next = requested.clamp(low, high);
+        if best.is_none_or(|old| (f64::from(next) - f64::from(requested)).abs() < (f64::from(old) - f64::from(requested)).abs()) {
+            best = Some(next);
+        }
+    }
+    best.ok_or_else(|| error(Rule::IncompatibleTabs, "Bottom row has no feasible proposed thickness"))
+}
+
+/// Authoritative allocation for committed presentation and every proposal.
+/// Extent is independent of clipping. Right and Bottom anchor to that extent,
+/// so minima remain nonoverlapping even in an empty/tiny visible capacity.
+pub fn allocate_layout(layout: &Layout, registry: &PanelRegistry, env: &AllocationEnvironment) -> PanelResult<AllocatedGeometry> {
+    validate(layout, registry)?;
+    env.validate()?;
+    let columns = allocation_columns(layout, registry, env)?;
+    let bottoms: Vec<_> =
+        layout.sections.iter().filter(|section| section.location.zone() == Zone::Bottom && presented(section, env).is_some()).collect();
+    let mut bottom_height = 0.0_f32;
+    let mut bottom_limits = Vec::new();
+    for section in &bottoms {
+        let (min, max) = tab_bounds(layout, registry, section)?;
+        let h = section_height_limit(layout, registry, section, env)?;
+        bottom_height = bottom_height.max(section.size.height.clamp(h.min, h.max));
+        bottom_limits.push(AxisLimit {
+            min: min.width,
+            max: max.width,
+            weight: section.weight,
+            preferred: if section.collapsed { None } else { section.preferred_extent },
+            priority: section.extent_priority,
+        });
+    }
+    let bottom_gap = if bottoms.is_empty() || columns.is_empty() { 0.0 } else { env.gap };
+    let side_available = (env.capacity.size.height - bottom_height - bottom_gap).max(0.0);
+    let mut heights = Vec::new();
+    let mut side_height = 0.0_f32;
+    for column in &columns {
+        let mut limits = Vec::new();
+        for section in &column.members {
+            limits.push(section_height_limit(layout, registry, section, env)?);
+        }
+        if column.members.len() == 1
+            && let (Some(section), Some(limit)) = (column.members.first(), limits.first_mut())
+            && !section.collapsed
+            && let Some(instance) = presented(section, env)
+        {
+            let request =
+                ContentMeasureRequest { instance: instance.clone(), width: column.width, chrome_height: env.header_height + env.footer_height };
+            let measure = measure_for(env, &request)?;
+            // Sole presentation follows actual content/declared Fill, retaining
+            // an explicit stack preference only for a later multi-section state.
+            limit.preferred = None;
+            limit.weight = 1.0;
+            if measure.policy == SideHeightPolicy::Content {
+                limit.max = measure.needed_height.clamp(limit.min, limit.max);
+            }
+        }
+        let gaps = env.gap * column.members.len().saturating_sub(1) as f32;
+        let sizes = distribute(&limits, (side_available - gaps).max(0.0));
+        side_height = side_height.max((sizes.iter().map(|size| f64::from(*size)).sum::<f64>() + f64::from(gaps)) as f32);
+        heights.push(sizes);
+    }
+    let widths: Vec<_> = distribute(&bottom_limits, (env.capacity.size.width - env.gap * bottoms.len().saturating_sub(1) as f32).max(0.0));
+    let columns_width =
+        (columns.iter().map(|column| f64::from(column.width)).sum::<f64>() + f64::from(env.gap) * columns.len().saturating_sub(1) as f64) as f32;
+    let bottom_width =
+        (widths.iter().map(|width| f64::from(*width)).sum::<f64>() + f64::from(env.gap) * bottoms.len().saturating_sub(1) as f64) as f32;
+    let mut free_min = Size { width: 0.0, height: 0.0 };
+    for section in &layout.sections {
+        if section.location.zone() == Zone::Floating && presented(section, env).is_some() {
+            let (min, _) = tab_bounds(layout, registry, section)?;
+            free_min.width = free_min.width.max(min.width);
+            free_min.height = free_min.height.max(section_height_limit(layout, registry, section, env)?.min);
+        }
+    }
+    let extent = Size {
+        width: env.capacity.size.width.max(columns_width).max(bottom_width).max(free_min.width),
+        height: env.capacity.size.height.max(side_height + bottom_height + bottom_gap).max(free_min.height),
+    };
+    if !extent.width.is_finite() || !extent.height.is_finite() || extent.width > MAX_LOGICAL || extent.height > MAX_LOGICAL {
+        return Err(error(Rule::Bounds, "panel scroll extent exceeds bound"));
+    }
+    let scroll = Point {
+        x: env.scroll.x.min((extent.width - env.capacity.size.width).max(0.0)),
+        y: env.scroll.y.min((extent.height - env.capacity.size.height).max(0.0)),
+    };
+    let origin = Point { x: env.capacity.origin.x - scroll.x, y: env.capacity.origin.y - scroll.y };
+    let mut result = AllocatedGeometry { sections: Vec::new(), extent, scroll };
+    let mut offsets = [0.0_f64; 2];
+    for (column, sizes) in columns.iter().zip(heights) {
+        let side = usize::from(column.column.zone == Zone::Right);
+        let offset = offsets.get(side).copied().unwrap_or(0.0);
+        let x = (if env.direction.edge(column.column.zone)? == PhysicalEdge::Left {
+            f64::from(origin.x) + offset
+        } else {
+            f64::from(origin.x) + f64::from(extent.width) - offset - f64::from(column.width)
+        }) as f32;
+        let mut y = f64::from(origin.y);
+        for (section, height) in column.members.iter().zip(sizes) {
+            if let Some(instance) = presented(section, env) {
+                push_allocation(&mut result, section, instance, x, y as f32, column.width, height)?;
+                y += f64::from(height) + f64::from(env.gap);
+            }
+        }
+        if let Some(offset) = offsets.get_mut(side) {
+            *offset += f64::from(column.width) + f64::from(env.gap);
+        }
+    }
+    let mut cursor = 0.0_f64;
+    for (section, width) in bottoms.iter().zip(widths) {
+        let height_limit = section_height_limit(layout, registry, section, env)?;
+        let height = bottom_height.clamp(height_limit.min, height_limit.max);
+        let x = (if env.direction == Direction::Ltr {
+            f64::from(origin.x) + cursor
+        } else {
+            f64::from(origin.x) + f64::from(extent.width) - cursor - f64::from(width)
+        }) as f32;
+        if let Some(instance) = presented(section, env) {
+            push_allocation(&mut result, section, instance, x, origin.y + extent.height - height, width, height)?;
+        }
+        cursor += f64::from(width) + f64::from(env.gap);
+    }
+    for section in &layout.sections {
+        if let SectionLocation::Floating { origin } = &section.location
+            && let Some(instance) = presented(section, env)
+        {
+            let (min, max) = tab_bounds(layout, registry, section)?;
+            let width = section.size.width.min(env.capacity.size.width).clamp(min.width, max.width);
+            let height_limit = section_height_limit(layout, registry, section, env)?;
+            let height = section.size.height.min(env.capacity.size.height).clamp(height_limit.min, height_limit.max);
+            let x = origin.x.clamp(env.capacity.origin.x, (env.capacity.origin.x + env.capacity.size.width - width).max(env.capacity.origin.x))
+                - scroll.x;
+            let y = origin.y.clamp(env.capacity.origin.y, (env.capacity.origin.y + env.capacity.size.height - height).max(env.capacity.origin.y))
+                - scroll.y;
+            push_allocation(&mut result, section, instance, x, y, width, height)?;
+        }
+    }
+    Ok(result)
+}
+
+fn push_allocation(
+    result: &mut AllocatedGeometry,
+    section: &Section,
+    instance: &InstanceId,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> PanelResult<()> {
+    let outer = LogicalRect { origin: Point { x, y }, size: Size { width, height } };
+    outer.validate()?;
+    result.sections.push(AllocatedSection { section: section.id.clone(), instance: instance.clone(), outer, collapsed: section.collapsed });
+    Ok(())
+}
+
+/// Synthetic/reference convenience adapter. Product hosts capture real intrinsic
+/// metrics through allocation_measure_requests, rather than using preferred size.
 pub fn resolve_geometry(service: &LayoutService, capacity: LogicalRect, direction: Direction, chrome: f32) -> PanelResult<ResolvedLayout> {
-    capacity.validate()?;
-    if !chrome.is_finite() || chrome < 0.0 || chrome > 256.0 {
-        return Err(error(Rule::Bounds, "invalid header/footer chrome extent"));
+    if !chrome.is_finite() || chrome <= 0.0 || chrome > 256.0 {
+        return Err(error(Rule::Bounds, "invalid shared chrome height"));
+    }
+    let mut env = AllocationEnvironment {
+        capacity,
+        direction,
+        header_height: chrome / 2.0,
+        footer_height: chrome / 2.0,
+        gap: 0.0,
+        inline_max_height: 0.0,
+        min_viewport: Size { width: 1.0, height: 1.0 },
+        scroll: Point { x: 0.0, y: 0.0 },
+        available: service
+            .layout()
+            .instances
+            .iter()
+            .filter(|instance| service.availability(&instance.id) == Availability::Available)
+            .map(|instance| instance.id.clone())
+            .collect(),
+        content: Vec::new(),
+        content_revision: service.inspect().revision,
+    };
+    for request in allocation_measure_requests(service.layout(), service.registry(), &env)? {
+        let section = service.layout().containing(&request.instance)?;
+        env.content.push(SideContentMeasure {
+            needed_height: section.size.height.max(request.chrome_height),
+            policy: service.registry().get(&service.layout().instance(&request.instance)?.kind)?.side_height_policy,
+            request,
+        });
+    }
+    let mut allocation = allocate_layout(service.layout(), service.registry(), &env)?;
+    // The reference adapter may model explicit native hosts. They have their
+    // own viewport and never consume the in-app allocator's capacity.
+    if service.capabilities().native_windows {
+        for section in &service.layout().sections {
+            if let SectionLocation::Window { origin, .. } = &section.location
+                && let Some(instance) = presented(section, &env)
+            {
+                let height = if section.collapsed { env.header_height } else { section.size.height };
+                push_allocation(&mut allocation, section, instance, origin.x, origin.y, section.size.width, height)?;
+            }
+        }
     }
     let mut result = ResolvedLayout::default();
-    let mut left = capacity.origin.x;
-    let mut right = capacity.origin.x + capacity.size.width;
-    let mut bottom = capacity.origin.y + capacity.size.height;
-    let mut left_y = capacity.origin.y;
-    let mut right_y = capacity.origin.y;
-    let mut bottom_x = capacity.origin.x;
-    let mut rail_y = capacity.origin.y;
-    let mut occupied: Vec<LogicalRect> = Vec::new();
-    for section in &service.layout().sections {
-        let id = &section.active;
-        let zone = section.location.zone();
-        let peek = &service.interaction().peek;
-        let active = peek.as_ref().filter(|p| section.tabs.contains(p)).unwrap_or(id);
-        let available = service.availability(active) == Availability::Available;
-        let reason = if !available {
-            Some(UnpresentedReason::Unavailable)
-        } else if zone == Zone::Window && !service.capabilities().native_windows {
-            Some(UnpresentedReason::NativeUnsupported)
-        } else if section.collapsed && peek.as_ref() != Some(active) {
-            Some(UnpresentedReason::Collapsed)
-        } else {
+    for card in allocation.sections {
+        let body_height = card.outer.size.height - chrome;
+        let body = if card.collapsed || body_height <= 0.0 {
             None
+        } else {
+            Some(LogicalRect {
+                origin: Point { x: card.outer.origin.x, y: card.outer.origin.y + chrome / 2.0 },
+                size: Size { width: card.outer.size.width, height: body_height },
+            })
         };
-        if let Some(reason) = reason {
-            result.unpresented.push(UnpresentedSection { section: section.id.clone(), reason: reason.clone() });
-            if reason == UnpresentedReason::Collapsed {
-                append_rail(&mut result, service, active, capacity, direction, zone, &mut rail_y)?;
-            }
-            continue;
-        }
-        let size = section.size;
-        let origin = match &section.location {
-            SectionLocation::Floating { origin } | SectionLocation::Window { origin, .. } => *origin,
-            SectionLocation::Dock { zone } => match direction.edge(*zone)? {
-                PhysicalEdge::Left => Point { x: left, y: left_y },
-                PhysicalEdge::Right => Point { x: right - size.width, y: right_y },
-                PhysicalEdge::Bottom => Point { x: bottom_x, y: bottom - size.height },
-            },
-        };
-        let outer = LogicalRect { origin, size };
-        let overlaps_dock = zone.docked()
-            && !section.collapsed
-            && occupied.iter().any(|r| {
-                r.origin.x < origin.x + size.width
-                    && origin.x < r.origin.x + r.size.width
-                    && r.origin.y < origin.y + size.height
-                    && origin.y < r.origin.y + r.size.height
-            });
-        if !capacity.contains_rect(outer) || size.height <= chrome || overlaps_dock {
-            result.unpresented.push(UnpresentedSection { section: section.id.clone(), reason: UnpresentedReason::MinimumOverflow });
-            append_rail(&mut result, service, active, capacity, direction, zone, &mut rail_y)?;
-            continue;
-        }
-        if zone.docked() && !section.collapsed {
-            occupied.push(outer);
-            match direction.edge(zone)? {
-                PhysicalEdge::Left => {
-                    left_y += size.height;
-                    left = left.max(origin.x);
-                }
-                PhysicalEdge::Right => {
-                    right_y += size.height;
-                    right = right.min(origin.x + size.width);
-                }
-                PhysicalEdge::Bottom => {
-                    bottom_x += size.width;
-                    bottom = bottom.min(origin.y + size.height);
-                }
-            }
-        }
-        let body =
-            LogicalRect { origin: Point { x: origin.x, y: origin.y + chrome / 2.0 }, size: Size { width: size.width, height: size.height - chrome } };
-        let panel = ResolvedPanel {
-            instance: active.clone(),
-            section: section.id.clone(),
-            zone,
-            outer,
-            body,
-            painted: vec![outer],
-            input: vec![InputRegion {
-                control: ControlId::new(format!("host.{}", section.id.0).chars().take(MAX_ID_BYTES).collect::<String>())?,
+        let zone = service.layout().section(&card.section)?.location.zone();
+        let painted = if zone == Zone::Window { vec![card.outer] } else { intersect_rect(card.outer, capacity).into_iter().collect::<Vec<_>>() };
+        let title_key = service.registry().get(&service.layout().instance(&card.instance)?.kind)?.title_key.clone();
+        let input = painted
+            .iter()
+            .map(|bounds| InputRegion {
+                control: ControlId(card.instance.0.clone()),
                 role: InputRole::Surface,
-                bounds: outer,
+                bounds: *bounds,
                 keyboard_focusable: true,
-                accessible_name: service.registry().get(&service.layout().instance(active)?.kind)?.title_key.clone(),
-            }],
-        };
-        panel.validate()?;
-        result.panels.push(panel);
+                accessible_name: title_key.clone(),
+            })
+            .collect();
+        result.panels.push(ResolvedPanel { instance: card.instance, section: card.section, zone, outer: card.outer, body, painted, input });
+    }
+    for section in &service.layout().sections {
+        if !result.panels.iter().any(|panel| panel.section == section.id) {
+            result.unpresented.push(UnpresentedSection {
+                section: section.id.clone(),
+                reason: if section.location.zone() == Zone::Window {
+                    if service.capabilities().native_windows { UnpresentedReason::Unavailable } else { UnpresentedReason::NativeUnsupported }
+                } else {
+                    UnpresentedReason::Unavailable
+                },
+            });
+        }
     }
     result.validate()?;
     Ok(result)
 }
 
-fn append_rail(
-    result: &mut ResolvedLayout,
-    service: &LayoutService,
-    active: &InstanceId,
-    capacity: LogicalRect,
-    direction: Direction,
-    zone: Zone,
-    rail_y: &mut f32,
-) -> PanelResult<()> {
-    // Rails are bounded chrome, not below-minimum content bodies. If every entry
-    // cannot fit, the complete unpresented list remains available to a host's rail.
-    let width = 32.0_f32.min(capacity.size.width);
-    let height = 32.0_f32.min(capacity.size.height);
-    if *rail_y + height <= capacity.origin.y + capacity.size.height {
-        let right = direction.edge(if zone.docked() { zone } else { Zone::Left })? == PhysicalEdge::Right;
-        let x = if right { capacity.origin.x + capacity.size.width - width } else { capacity.origin.x };
-        result.rails.push(InputRegion {
-            control: ControlId::new(format!("rail.{}", result.rails.len()))?,
-            role: InputRole::Rail,
-            bounds: LogicalRect { origin: Point { x, y: *rail_y }, size: Size { width, height } },
-            keyboard_focusable: true,
-            accessible_name: service.registry().get(&service.layout().instance(active)?.kind)?.title_key.clone(),
-        });
-        *rail_y += height;
+pub fn intersect_rect(a: LogicalRect, b: LogicalRect) -> Option<LogicalRect> {
+    if validate_allocation_capacity(a).is_err() || validate_allocation_capacity(b).is_err() {
+        return None;
     }
-    Ok(())
+    let x = a.origin.x.max(b.origin.x);
+    let y = a.origin.y.max(b.origin.y);
+    let width = (a.origin.x + a.size.width).min(b.origin.x + b.size.width) - x;
+    let height = (a.origin.y + a.size.height).min(b.origin.y + b.size.height) - y;
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    Some(LogicalRect { origin: Point { x, y }, size: Size { width, height } })
 }
 
 /// Surfaces child resolves theme tokens. Invalid authored pairs retain raw import
@@ -400,11 +901,21 @@ impl ContrastOutcome {
 /// default (bottom/native opaque, sides/free translucent). No colour implementation.
 pub fn group_surface<'a>(zone: Zone, specs: impl IntoIterator<Item = &'a PanelSpec>) -> PanelSurface {
     let mut translucent = false;
+    let mut text_heavy = false;
+    let mut count = 0;
     for spec in specs {
+        count += 1;
+        text_heavy |= spec.text_heavy;
         if spec.surface == PanelSurface::Opaque {
             return PanelSurface::Opaque;
         }
         translucent |= spec.surface == PanelSurface::Translucent;
     }
-    if translucent || !matches!(zone, Zone::Bottom | Zone::Window) { PanelSurface::Translucent } else { PanelSurface::Opaque }
+    if translucent {
+        PanelSurface::Translucent
+    } else if matches!(zone, Zone::Bottom | Zone::Window) || (count > 1 && text_heavy) {
+        PanelSurface::Opaque
+    } else {
+        PanelSurface::Translucent
+    }
 }

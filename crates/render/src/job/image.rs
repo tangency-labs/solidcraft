@@ -11,11 +11,12 @@ use std::sync::LazyLock;
 
 use serde::Serialize;
 use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_color::srgb;
 use solidcraft_geom::pixel_grid::{MAX_SIDE_PX, PixelGrid};
-use solidcraft_geom::srgb;
 
 use super::{CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, Result};
-use crate::{Camera, FaceAppearance, Mat4, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
+use crate::{FaceAppearance, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
+use solidcraft_viewport::{Camera, Mat4};
 
 #[cfg(test)]
 #[path = "image_tests.rs"]
@@ -28,6 +29,13 @@ pub const MAX_PIXEL_TESTS: u64 = 128_000_000;
 /// A picture's, however large: a fixed bound on its time, about a minute at worst on one thread, when
 /// every test paints a surface.
 pub const MAX_PICTURE_PIXEL_TESTS: u64 = 250_000_000;
+/// Each tile of a picture looks at every triangle again, projecting it to find its part in the tile: at most this
+/// many looks in all, a bound on that part of its time (1024 tiles at [`MAX_TRIANGLES`]).
+pub const MAX_PICTURE_TILE_VISITS: u64 = 1 << 28;
+// Existing source/task/host fixed preparation allowance. Cursor backing is
+// charged separately; this value is unchanged by prepared submission metadata.
+pub(crate) const PREPARATION_METADATA_BYTES: u64 = 262_144;
+
 const MAX_STEP: usize = 16_384;
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -37,6 +45,16 @@ pub struct Admission {
     /// Supersampled raster work only; absent for ray tracing and registered executors.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projected_pixel_tests: Option<u64>,
+    /// Present when the job explicitly refreshes its photon map every pass.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caustic_work: Option<super::caustics::CausticWork>,
+    /// CPU worker count selected during admission and retained through execution.
+    /// Auto records the available parallelism at admission; other producers omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_workers: Option<u16>,
+    /// Native host RAM snapshot and shared reservations; absent without a native host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_memory: Option<super::HostMemoryAdmission>,
     pub geometry_bytes: u64,
     pub pixel_scratch_bytes: u64,
     pub preparation_bytes: u64,
@@ -63,8 +81,20 @@ fn add_bytes(sum: &mut u64, count: usize, size: usize, maximum: u64) -> Result<(
 /// counted even when another owner already holds them. Allocator and codec internals are estimates.
 /// Includes the CPU raster work estimate and its 384 MiB per-job check.
 pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
-    if request.environment.is_some() || request.textures.is_some() {
-        return Err(JobError::new(ErrorCode::InvalidRequest, "captured GPU environments and textures require a registered image executor"));
+    admit_inner(scene, request, true)
+}
+
+/// Internal byte/header estimate, never a successful public preflight. A host
+/// must finish the strict certificate under its reserved envelope before use.
+pub(crate) fn admit_layout(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    admit_inner(scene, request, false)
+}
+
+fn admit_inner(scene: &ProductScene, request: &ImageRequest, certify: bool) -> Result<Admission> {
+    #[cfg(not(feature = "raytrace-cpu"))]
+    let _ = certify;
+    if request.environment.is_some() || (request.textures.is_some() && request.integrator != super::Integrator::Raytrace) {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "captured GPU environments and raster textures require a registered image executor"));
     }
     match request.integrator {
         super::Integrator::Raster => {
@@ -82,7 +112,11 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> 
                 let defaults = super::RaytraceOptions::default();
                 let options = request.raytrace.as_ref().unwrap_or(&defaults);
                 options.validate()?;
-                crate::raytrace::image::admit(scene, request, options)
+                if certify {
+                    crate::raytrace::image::admit(scene, request, options)
+                } else {
+                    crate::raytrace::image::admit_layout(scene, request, options)
+                }
             }
             #[cfg(not(feature = "raytrace-cpu"))]
             {
@@ -125,13 +159,27 @@ fn admit_source(scene: &ProductScene, request: &ImageRequest, max_triangles: u64
 /// Ray tracing has no raster projected-triangle lists. Keep a conservative
 /// pixel/codec allowance, then let the ray tracer charge its actual BVH and film.
 #[cfg(feature = "raytrace-cpu")]
-pub(crate) fn admit_raytrace_source(scene: &ProductScene, request: &ImageRequest, budget: super::CpuBudget) -> Result<Admission> {
+pub(crate) fn admit_raytrace_source(
+    scene: &ProductScene,
+    request: &ImageRequest,
+    budget: super::CpuBudget,
+    dimensions: (u32, u32),
+) -> Result<Admission> {
     budget.validate_execution()?;
-    budget.validate_image(request.width, request.height, request.raytrace.as_ref().and_then(|o| o.progressive))?;
-    let source = admit_source_with_budget(scene, request, budget.limits().max_triangles, budget)?;
+    budget.validate_image(
+        dimensions.0,
+        dimensions.1,
+        request.raytrace.as_ref().map(super::RaytraceOptions::camera_sampling).transpose()?.flatten(),
+    )?;
+    validate_request(request)?;
+    let limits = budget.limits();
+    let source =
+        admit_source_with_limits(scene, dimensions, limits.max_triangles, limits.max_bodies, limits.max_geometry_bytes, budget.image_limits(false))?;
     let mut a = source.admission;
+    // The codec and retained previews have the requested final dimensions.
+    a.encoded_limit = u64::from(request.width) * u64::from(request.height) * 8 + 65_536;
     a.pixel_scratch_bytes = source.raster_scratch_bytes;
-    a.preparation_bytes = 262_144;
+    a.preparation_bytes = PREPARATION_METADATA_BYTES;
     a.estimated_total_bytes = a
         .geometry_bytes
         .checked_add(a.pixel_scratch_bytes)
@@ -173,7 +221,7 @@ pub fn admit_geometry_with_limits(
         || max_geometry_bytes == 0
         || max_geometry_bytes > 4 * 1024 * 1024 * 1024
         || image_limits.max_dimension > 16_384
-        || image_limits.max_pixels > 67_108_864
+        || image_limits.max_pixels > 134_217_728
         || image_limits.max_scratch_bytes > super::NATIVE_CPU_POOL_BYTES
     {
         return Err(limit("registered source envelope exceeds implementation bounds"));
@@ -266,6 +314,9 @@ fn admit_source_with_limits(
             triangles,
             face_appearances: faces,
             projected_pixel_tests: None,
+            caustic_work: None,
+            cpu_workers: None,
+            host_memory: None,
             geometry_bytes: geometry,
             pixel_scratch_bytes: 0,
             preparation_bytes: 0,
@@ -285,7 +336,7 @@ fn admit_raster(source: Source) -> Result<Admission> {
         .triangles
         .checked_mul(48)
         .and_then(|n| a.face_appearances.checked_mul(160).and_then(|f| n.checked_add(f)))
-        .and_then(|n| n.checked_add(source.bodies * 128 + 262_144))
+        .and_then(|n| n.checked_add(source.bodies * 128 + PREPARATION_METADATA_BYTES))
         .ok_or_else(|| limit("work list size overflow"))?;
     let total = a
         .geometry_bytes
@@ -507,7 +558,6 @@ impl Projection {
                 Ok(View {
                     vp: camera.view_proj(sw as f64 / sh as f64, radius),
                     back: camera.back(),
-                    light: crate::raster::Light::new(camera.back()),
                     eye: (camera.fov > 0.0).then(|| camera.eye()),
                     reference: camera.target,
                     sw,
@@ -549,7 +599,7 @@ impl Projection {
                 if vp.0.iter().flatten().any(|v| !v.is_finite()) {
                     return Err(request("an orthographic frame too large for its pixel grid"));
                 }
-                Ok(View { vp, back: n, light: crate::raster::Light::new(n), eye: None, reference: o, sw, sh })
+                Ok(View { vp, back: n, eye: None, reference: o, sw, sh })
             }
         }
     }
@@ -614,6 +664,14 @@ pub fn admit_picture(scene: &ProductScene, request: &PictureRequest) -> Result<A
         limits.max_geometry_bytes,
         budget.image_limits(false),
     )?)?;
+    // Checked first: counting the pixel tests below takes as many looks.
+    if request.tiles.len() as u64 * admission.triangles > MAX_PICTURE_TILE_VISITS {
+        return Err(limit(&format!(
+            "a picture of {} tiles and {} triangles exceeds {MAX_PICTURE_TILE_VISITS} tile visits; draw it in fewer tiles",
+            request.tiles.len(),
+            admission.triangles
+        )));
+    }
     let view = request.projection.view(scene, request.supersample.factor())?;
     let ss = request.supersample.factor();
     admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &request.roles, &request.tiles, ss, MAX_PICTURE_PIXEL_TESTS)?);
@@ -625,7 +683,6 @@ struct View {
     vp: Mat4,
     /// Toward the eye (an orthographic view's direction).
     back: Vec3,
-    light: crate::raster::Light,
     /// A perspective view's eye.
     eye: Option<Vec3>,
     /// A point the glass's back-to-front depth is measured from.
@@ -668,8 +725,12 @@ fn look(body: &crate::ProductMesh, look: Option<&FaceAppearance>, paint: bool, [
         return Err(invalid("opaque PBR requires opacity 1"));
     }
     let normals = if surface.is_some() {
-        [crate::surface::unit_direction(na), crate::surface::unit_direction(nb), crate::surface::unit_direction(nc)]
-            .map(|n| n.map_err(|e| invalid(&e.to_string())))
+        [
+            solidcraft_viewport::surface::unit_direction(na),
+            solidcraft_viewport::surface::unit_direction(nb),
+            solidcraft_viewport::surface::unit_direction(nc),
+        ]
+        .map(|n| n.map_err(|e| invalid(&e.to_string())))
     } else {
         [Ok(na), Ok(nb), Ok(nc)]
     };
@@ -737,7 +798,7 @@ struct Triangle {
     inv_w: [f64; 3],
     colour: [f64; 3],
     opacity: f64,
-    surface: Option<crate::surface::OpaqueSurface>,
+    surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     /// Off for a depth-only body.
     paint: bool,
     area: f64,
@@ -771,7 +832,7 @@ impl Triangle {
 struct Look {
     colour: [u8; 3],
     opacity: f64,
-    surface: Option<crate::surface::OpaqueSurface>,
+    surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     paint: bool,
     normals: [Vec3; 3],
 }
@@ -1347,12 +1408,12 @@ fn raster_pixel(
         [mapped.x, mapped.y, mapped.z]
     } else if let Some(weights) = studio_weights {
         let [r, g, b] = t.colour;
-        let surface = crate::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
+        let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
         let radiance = crate::studio::shade_weighted(surface, n, view.back, weights).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        view.light.shade(n, t.colour)
+        solidcraft_viewport::shade(n, view.back, t.colour)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));

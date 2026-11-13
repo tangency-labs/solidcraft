@@ -43,7 +43,9 @@
 //! drawing saves (a whole number past it reads, then saves as one the file's check refuses); the
 //! offset and the text place are on paper ([`is_paper_coordinate`]); at most [`MAX_DECIMALS`]
 //! decimals; an override text of 1 to [`MAX_TEXT_BYTES`] bytes; a last good value from 0 to
-//! [`MAX_REAL`]; at most [`MAX_DIMENSIONS`] dimensions, listed by id.
+//! [`MAX_REAL`]; a model dimension's constraint id or parameter label of 1 to
+//! [`MAX_MODEL_NAME_BYTES`] bytes; at most [`MAX_DIMENSIONS`] dimensions, listed by id. Two
+//! dimensions that show one model dimension aren't refused, so a file a hand edit doubled opens.
 //!
 //! [`Document::resolve_dimensions`] finds what a dimension measures again, strictly: an edge by
 //! its name, or the one edge between the faces it names, never the piece nearest an old pick; a
@@ -69,6 +71,7 @@ use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::prelude::*;
 
+use super::coverage::{edge_makers, face_maker};
 use super::{Drawing, Units, add_by_id, in_id_order, require};
 use crate::config::MAX_REFERENCE_NAME_BYTES;
 use crate::construct::{MAX_VERTEX_EDGES, as_circle, as_line, point_tolerance, shared_ends};
@@ -121,6 +124,8 @@ pub const MAX_CANDIDATES: usize = 16;
 pub const MAX_TEXT_BYTES: usize = 1024;
 /// The most points a chain of dimensions runs through.
 pub const MAX_CHAIN_POINTS: usize = 64;
+/// The longest constraint id or parameter label a model dimension names, in bytes.
+pub const MAX_MODEL_NAME_BYTES: usize = 256;
 /// What a diameter's number follows: Ø (U+00D8), as tolerance texts write it. The diameter sign
 /// U+2300 isn't in the bundled fonts, so it would print as a missing glyph.
 const DIAMETER_SIGN: &str = "Ø";
@@ -147,6 +152,30 @@ pub struct Dimension {
     /// What it last read (model millimetres, or radians for an angle), as of the last save.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_good: Option<f64>,
+    /// The model dimension it shows, when it was brought in from the model: each shows once on the
+    /// drawing ([`Drawing::showing`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_model: Option<ModelDimension>,
+}
+
+/// One of the model's own dimensions, by what defines it: ids, so it is still the same one after
+/// the model is edited.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ModelDimension {
+    /// A sketch's dimension: the sketch's feature and the constraint's own id.
+    Sketch { sketch: u64, constraint: String },
+    /// A feature's parameter: the feature and the parameter's label (`Distance`).
+    Feature { feature: u64, param: String },
+}
+
+impl ModelDimension {
+    /// The constraint id or the parameter label.
+    pub fn name(&self) -> &str {
+        match self {
+            ModelDimension::Sketch { constraint: name, .. } | ModelDimension::Feature { param: name, .. } => name,
+        }
+    }
 }
 
 /// What a dimension measures.
@@ -191,17 +220,23 @@ pub enum DimensionKind {
 }
 
 impl DimensionKind {
+    /// Each model reference it measures, in its order: the one list of them that what reads a
+    /// dimension's references goes through.
+    pub fn references(&self) -> Vec<Reference<'_>> {
+        match self {
+            DimensionKind::Linear { a, b, .. } => vec![Reference::Point(a), Reference::Point(b)],
+            DimensionKind::Length { edge, .. } | DimensionKind::Radial { edge, .. } => vec![Reference::Edge(edge)],
+            DimensionKind::Angle { a, b, .. } => vec![Reference::Edge(a), Reference::Edge(b)],
+            DimensionKind::Chain { points, .. } => points.iter().map(Reference::Point).collect(),
+            DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => vec![Reference::Face(face)],
+            DimensionKind::Silhouettes { a, b, .. } => vec![Reference::Face(&a.face), Reference::Face(&b.face)],
+            DimensionKind::Faces { a, b, .. } => vec![Reference::Face(a), Reference::Face(b)],
+        }
+    }
+
     /// The occurrence path of each model reference it measures, in its order.
     pub fn paths(&self) -> Vec<&[u64]> {
-        match self {
-            DimensionKind::Linear { a, b, .. } => vec![&a.path, &b.path],
-            DimensionKind::Length { edge, .. } | DimensionKind::Radial { edge, .. } => vec![&edge.path],
-            DimensionKind::Angle { a, b, .. } => vec![&a.path, &b.path],
-            DimensionKind::Chain { points, .. } => points.iter().map(|point| point.path.as_slice()).collect(),
-            DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => vec![&face.path],
-            DimensionKind::Silhouettes { a, b, .. } => vec![&a.face.path, &b.face.path],
-            DimensionKind::Faces { a, b, .. } => vec![&a.path, &b.path],
-        }
+        self.references().into_iter().map(Reference::path).collect()
     }
 
     /// Whether it reads an angle, as its label says: between two edges, or a cone's.
@@ -295,6 +330,12 @@ impl Drawing {
         self.dimension_index(id).and_then(|i| self.dimensions.get(i)).map(|d| &**d)
     }
 
+    /// The dimension that shows model dimension `model`, if one does: the first, on any view of any
+    /// sheet.
+    pub fn showing(&self, model: &ModelDimension) -> Option<u64> {
+        self.dimensions.iter().find(|d| d.from_model.as_ref() == Some(model)).map(|d| d.id)
+    }
+
     /// Where dimension `id` is in [`Drawing::dimensions`].
     pub fn dimension_index(&self, id: u64) -> Option<usize> {
         self.dimensions.binary_search_by_key(&id, |d| d.id).ok()
@@ -356,6 +397,13 @@ impl Drawing {
         require(is_paper_coordinate(d.offset_mm) && text, off_paper)?;
         require(d.decimals <= MAX_DECIMALS, || format!("it shows at most {MAX_DECIMALS} decimals"))?;
         require(d.last_good.is_none_or(is_last_good), || format!("its last good value is from 0 to {MAX_REAL}"))?;
+        let name_fits = |model: &ModelDimension| {
+            let name = model.name();
+            !name.is_empty() && name.len() <= MAX_MODEL_NAME_BYTES && !name.chars().any(char::is_control)
+        };
+        require(d.from_model.as_ref().is_none_or(name_fits), || {
+            format!("the model dimension it shows is named in 1 to {MAX_MODEL_NAME_BYTES} bytes, without control characters")
+        })?;
         match &d.override_text {
             Some(text) => require(!text.is_empty() && text.len() <= MAX_TEXT_BYTES, || {
                 format!("the text shown instead of its number is 1 to {MAX_TEXT_BYTES} bytes")
@@ -496,12 +544,24 @@ pub enum Candidate {
     Face { body: String, index: usize },
 }
 
-/// One reference a record keeps, for [`Document::finds_one`].
-#[derive(Clone, Copy, Debug)]
+/// One model reference a record keeps ([`DimensionKind::references`], a note's anchor's), for
+/// [`Document::finds_one`], its path and what it covers.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Reference<'a> {
     Edge(&'a ModelEdge),
     Point(&'a ModelPoint),
     Face(&'a ModelFace),
+}
+
+impl<'a> Reference<'a> {
+    /// The occurrences its body is placed through, as [`ModelEdge::path`].
+    pub fn path(self) -> &'a [u64] {
+        match self {
+            Reference::Edge(edge) => &edge.path,
+            Reference::Point(point) => &point.path,
+            Reference::Face(face) => &face.path,
+        }
+    }
 }
 
 /// How a command names an edge (or a face) to measure, before it is saved by name
@@ -782,16 +842,6 @@ pub(super) struct Edges {
     pub(super) exact: bool,
     body: usize,
     frame: Mat,
-}
-
-/// The features that made the faces an edge's name says it separates.
-fn edge_makers(name: &str) -> Vec<FeatureId> {
-    EdgeName::parse(name).map_or_else(|_| Vec::new(), |edge| edge.faces.iter().filter_map(FaceName::feature).collect())
-}
-
-/// The feature that made the face a name says: none for a name without history.
-fn face_maker(name: &str) -> Option<FeatureId> {
-    FaceName::parse(name).ok()?.feature()
 }
 
 /// One body's face names, read once for the leads a lost reference lists: the edge each blend face

@@ -28,7 +28,7 @@ pub const PENDING_ICONS: &[(&str, &str)] = &[
     ("drawing.balloon", "drawing_balloon"),
     ("drawing.revision_table", "drawing_revision_table"),
     ("drawing.update.planned", "drawing_update"),
-    ("drawing.check", "drawing_check"),
+    ("drawing.check.planned", "drawing_check"),
     ("drawing.revision", "drawing_revision"),
     ("drawing.print", "drawing_print"),
 ];
@@ -58,7 +58,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.balloon", "Balloon", "3874").at("DRAWING PARTS", "ASSEMBLY").icon("placeholder"),
     planned!("drawing.revision_table", "Revision Table", "4894").at("DRAWING PARTS", "TABLES").icon("placeholder"),
     planned!("drawing.update.planned", "Update Drawing", "4892").at("DRAWING REVIEW", "CHANGES").icon("placeholder"),
-    planned!("drawing.check", "Check Drawing", "4894").at("DRAWING REVIEW", "CHANGES").icon("placeholder"),
+    planned!("drawing.check.planned", "Check Drawing", "4894").at("DRAWING REVIEW", "CHANGES").icon("placeholder"),
     planned!("drawing.revision", "Add Drawing Revision", "4894").at("DRAWING REVIEW", "REVISION").icon("placeholder"),
     planned!("drawing.export.planned", "Export Drawing", "4890").at("DRAWING REVIEW", "OUTPUT").icon("export"),
     planned!("drawing.print", "Print Drawing", "4890").at("DRAWING REVIEW", "OUTPUT").icon("placeholder"),

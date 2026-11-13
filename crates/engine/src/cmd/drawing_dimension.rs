@@ -8,11 +8,11 @@
 
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{
-    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Silhouette, Status, TextPlace, check_chain_length,
+    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, Silhouette, Status, TextPlace, check_chain_length,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
@@ -70,7 +70,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              it, {point} or {body, index}, each with path?: the \
              occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10;              a linear, length or chain one's on the side away from what it measures); \
              text?: centred (default) or {at: [x, y]} from the view's centre; decimals?: 0..6 (default 2); override_text? (not a \
-             chain's) → what drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
+             chain's); dry_run?: true to answer what it would add, adding nothing (no id is taken, no undo step) → what \
+             drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
              view can't measure, or on a part it doesn't draw, is refused. One undo step; no model is evaluated.",
         ),
     CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit))
@@ -119,7 +120,19 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let request: AddParams = crate::schema::read(ADD, p)?;
-    let record = s.drawing(ADD)?.clone();
+    if request.dry_run == Some(true) {
+        // As selection.delete and sketch.trim.path: the add itself, on a copy of the session, so the
+        // answer is the add's and nothing it takes (an id, an undo step, a last good value) stays.
+        let mut reply = added(&mut s.scratch(), request)?;
+        reply["dry_run"] = json!(true);
+        return Ok(reply);
+    }
+    added(s, request)
+}
+
+/// The dimension `request` asks for, added to the open drawing of `s`, and what inspect answers for it.
+fn added(s: &mut Session, request: AddParams) -> Result<Value> {
+    let mut record = Drawing::clone(s.drawing(ADD)?);
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
     let (doc, model) = (&s.doc, &s.model);
@@ -127,7 +140,6 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let corner = |c: &CornerParam| doc.corner_reference(model, &c.pick, &c.path).map_err(|why| bad(ADD, why.to_string()));
     let face = |f: &FaceParam| doc.face_reference(model, &f.pick, &f.path).map_err(|why| bad(ADD, why.to_string()));
     let choose_diameter = matches!(request.kind, KindParam::Radial { diameter: None, .. });
-    let choose_side = request.offset_mm.is_none();
     let kind = match request.kind {
         KindParam::Linear { a, b, direction, reading } => DimensionKind::Linear {
             a: corner(&a)?,
@@ -161,40 +173,103 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             DimensionKind::Chain { points, direction: direction.unwrap_or(LinearDirection::Aligned) }
         }
     };
-    check_drawn(&record, view, kind.paths(), ADD)?;
-    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
-    let mut dimension = Dimension {
-        id,
+    let new = NewDimension {
         view,
         kind,
-        offset_mm: request.offset_mm.unwrap_or(DEFAULT_OFFSET_MM),
-        text: request.text.unwrap_or(TextPlace::Centred),
-        decimals: request.decimals.unwrap_or(DEFAULT_DECIMALS),
+        offset_mm: request.offset_mm,
+        text: request.text,
+        decimals: request.decimals,
         override_text: request.override_text,
-        last_good: None,
+        choose_diameter,
     };
-    // Read before it is added: a dimension its view can't measure would show nothing.
-    let mut staged = Drawing::clone(&record);
-    staged.add_dimensions([Arc::new(dimension.clone())]);
-    let read = s.doc.resolve_dimensions(&s.model, &staged, &[id]).map_err(|e| bad(ADD, e.to_string()))?;
-    if let Some(Status::Unmeasurable(why)) = read.first().map(|r| &r.status) {
-        return Err(bad(ADD, why.clone()));
-    }
-    if choose_diameter && let DimensionKind::Radial { diameter, .. } = &mut dimension.kind {
-        *diameter = read.first().is_some_and(|r| diameter_by_default(&r.points));
-    }
-    if choose_side
-        && let DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. } | DimensionKind::Chain { direction, .. } =
-            &dimension.kind
-        && let Some(r) = read.first()
-    {
-        dimension.offset_mm = DEFAULT_OFFSET_MM * side_by_default(s, &record, view, *direction, &r.points);
-    }
+    let (dimension, _) = placed(s, &mut record, ADD, new)?.map_err(Refused::error)?;
+    let id = dimension.id;
     s.edit_drawing(ADD, |d| {
         d.add_dimensions([Arc::new(dimension)]);
         Ok(())
     })?;
     answer(s, ADD, id)
+}
+
+/// A new dimension before it is placed: its view, what it measures, and what the request gave of
+/// the rest.
+pub(crate) struct NewDimension {
+    pub view: u64,
+    pub kind: DimensionKind,
+    pub offset_mm: Option<f64>,
+    pub text: Option<TextPlace>,
+    pub decimals: Option<u8>,
+    pub override_text: Option<String>,
+    /// A radial dimension whose diameter is left to the default.
+    pub choose_diameter: bool,
+}
+
+/// Why [`placed`] won't place a new dimension, as the command would say it.
+pub(crate) enum Refused {
+    /// Its view doesn't draw what it measures.
+    NotDrawn(EngineError),
+    /// Its view can't measure it.
+    Unmeasurable(EngineError),
+}
+
+impl Refused {
+    pub(crate) fn error(self) -> EngineError {
+        match self {
+            Refused::NotDrawn(e) | Refused::Unmeasurable(e) => e,
+        }
+    }
+}
+
+/// `new` as `drawing.dimension.add` places it on `record`, with how it reads, and nothing added: an
+/// error when its view draws its parts apart ([`crate::drawing_view::refuse_apart`]); refused
+/// when its view doesn't draw what it measures or can't measure it; a new id; a radial one
+/// a diameter when it is a whole circle, if left to the default; a linear, length or chain one,
+/// with no offset given, on the side away from what it measures. It is read on `record` itself,
+/// which is left as it was. One rule for every command that adds a dimension.
+pub(crate) fn placed(
+    s: &mut Session,
+    record: &mut Drawing,
+    cmd: &str,
+    new: NewDimension,
+) -> Result<std::result::Result<(Dimension, Option<Resolved>), Refused>> {
+    crate::drawing_view::refuse_apart(record, new.view, "dimensions", cmd)?;
+    if let Err(e) = check_drawn(record, new.view, new.kind.paths(), cmd) {
+        return Ok(Err(Refused::NotDrawn(e)));
+    }
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(cmd, e.to_string()))?;
+    let mut dimension = Dimension {
+        id,
+        view: new.view,
+        kind: new.kind,
+        offset_mm: new.offset_mm.unwrap_or(DEFAULT_OFFSET_MM),
+        text: new.text.unwrap_or(TextPlace::Centred),
+        decimals: new.decimals.unwrap_or(DEFAULT_DECIMALS),
+        override_text: new.override_text,
+        last_good: None,
+        from_model: None,
+    };
+    // Read before it is added: a dimension its view can't measure would show nothing. Its id is the
+    // newest, so taking it out again leaves the record as it was.
+    record.add_dimensions([Arc::new(dimension.clone())]);
+    let read = s.doc.resolve_dimensions(&s.model, record, &[id]).map_err(|e| bad(cmd, e.to_string()));
+    record.dimensions.retain(|d| d.id != id);
+    let read = read?;
+    if let Some(Status::Unmeasurable(why)) = read.first().map(|r| &r.status) {
+        return Ok(Err(Refused::Unmeasurable(bad(cmd, why.clone()))));
+    }
+    if new.choose_diameter
+        && let DimensionKind::Radial { diameter, .. } = &mut dimension.kind
+    {
+        *diameter = read.first().is_some_and(|r| diameter_by_default(&r.points));
+    }
+    if new.offset_mm.is_none()
+        && let DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. } | DimensionKind::Chain { direction, .. } =
+            &dimension.kind
+        && let Some(r) = read.first()
+    {
+        dimension.offset_mm = DEFAULT_OFFSET_MM * side_by_default(s, record, new.view, *direction, &r.points);
+    }
+    Ok(Ok((dimension, read.into_iter().next())))
 }
 
 fn repair(s: &mut Session, p: &Value) -> Result<Value> {
@@ -513,6 +588,7 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         exact: r.exact,
         candidates,
         warnings: drawn_warning(&d, dimension.view, dimension.kind.paths()),
+        dry_run: false,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

@@ -32,3 +32,32 @@ pub struct AddResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
+
+/// What `drawing.title_block.logo` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct LogoParams {
+    /// A text cell's name in a sheet's title block.
+    pub cell: String,
+    /// The PNG or JPEG file to show in place of the cell's text, or null for its text again. Its
+    /// bytes are saved in the design and its path isn't.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schemars(required)]
+    pub file: Option<String>,
+    /// The sheets, by id or name: every sheet whose block has the cell when not given.
+    #[serde(default)]
+    pub sheets: Option<Vec<String>>,
+}
+
+/// What `drawing.title_block.logo` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LogoResult {
+    /// The sheets it set.
+    pub sheets: Vec<String>,
+    /// The image file the cell shows; null when it shows its text.
+    pub image: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

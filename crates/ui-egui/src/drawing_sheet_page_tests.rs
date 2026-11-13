@@ -202,7 +202,7 @@ fn sheet_colour_is_screen_only() {
         h.app.preferences.drawing_sheet_colour = colour.id().into();
         h.frames(2);
         let p = page(&mut h);
-        let (paper, ink) = colour.paper(&t, crate::theme::is_dark());
+        let (paper, ink) = colour.paper(&t, solidcraft_theme::is_dark());
         let (stage, paper) = stage_and_paper(paper, t.viewport_top);
         assert_eq!((&p["stage"], &p["paper"]), (&json!(hex(stage)), &json!(hex(paper))), "{colour:?}");
         assert_eq!(p["ink"], json!(hex(ink)), "{colour:?}");
@@ -357,6 +357,8 @@ fn a_view_is_outlined_only_near_its_edge() {
     assert!(outlined(&hit(ObjectKind::View, true)));
     assert!(!outlined(&hit(ObjectKind::View, false)), "inside a view the sheet stays clean");
     assert!(outlined(&hit(ObjectKind::Dimension, false)));
+    assert!(outlined(&hit(ObjectKind::Note, false)));
+    assert_eq!(kind_name(ObjectKind::Note), "note");
     assert!(outlined(&hit(ObjectKind::TitleBlock, false)));
 }
 

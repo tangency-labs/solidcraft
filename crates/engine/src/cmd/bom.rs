@@ -11,28 +11,46 @@
 //! them (bill of materials types, folding, materials, mass, item numbers) are
 //! `solidcraft_doc::bom`'s.
 
+use std::collections::BTreeMap;
+
 use serde_json::{Map, Value, json};
 use solidcraft_doc::BomType;
 use solidcraft_doc::bom::{self, Bom, Group, ItemNumbers, MAX_ITEM, Mass, Numbering, Order, Quantity, Request, Row, Tree, Uncounted, View};
-use solidcraft_doc::metadata::{BOM_KEYS, BOM_QUANTITY, BOM_TYPE, MATERIAL, MAX_KEYS, Owner, PART_ONLY, VIRTUAL, check_text, key_list};
+use solidcraft_doc::metadata::{BOM_KEYS, BOM_QUANTITY, DESCRIPTION, MAX_KEYS, Owner, PART_NUMBER, PART_ONLY, REVISION, check_text, key_list};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
-use crate::schema::bom::{BomParams, OccurrenceBomTypeParams, OccurrenceBomTypeResult};
+use crate::schema::bom::{
+    BomParams, ComponentMetadataParams, ComponentMetadataResult, ComponentMetadataSetParams, ComponentMetadataSetResult, OccurrenceBomTypeParams,
+    OccurrenceBomTypeResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const BOM_CONTRACT: TypedContract<BomParams> = TypedContract::new();
 const OCCURRENCE_BOM_TYPE_CONTRACT: TypedContract<OccurrenceBomTypeParams> = TypedContract::new();
+const METADATA_CONTRACT: TypedContract<ComponentMetadataParams> = TypedContract::new();
+const METADATA_SET_CONTRACT: TypedContract<ComponentMetadataSetParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("component.metadata", "Part Properties", read).icon("settings").noundo().doc_only().params(
-        "component: id or name (0 or \"root\": the design's own properties) → component, name, part_number, description, revision, \
+    CommandSpec::new("component.metadata", "Part Properties", crate::checked!("component.metadata", read))
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .contract(&METADATA_CONTRACT)
+        .output(output_schema_for::<ComponentMetadataResult>)
+        .params(
+            "component: id or name (0 or \"root\": the design's own properties) → component, name, part_number, description, revision, \
          bom_type, material (its static material or null), bom_quantity (or null) and virtual (components only), metadata (as saved, other tools' keys too), \
          properties: {name: text}",
-    ),
-    CommandSpec::new("component.metadata.set", "Change Part Properties", set).icon("settings").doc_only().params(
-        "component: id or name (not the root: use document.metadata.set); part_number?, description?, revision?: text (empty or null \
+        ),
+    CommandSpec::new("component.metadata.set", "Change Part Properties", crate::checked!("component.metadata.set", set))
+        .icon("settings")
+        .doc_only()
+        .contract(&METADATA_SET_CONTRACT)
+        .output(output_schema_for::<ComponentMetadataSetResult>)
+        .params(
+            "component: id or name (not the root: use document.metadata.set); part_number?, description?, revision?: text (empty or null \
          removes); bom_type?: normal|phantom|reference|purchased|inseparable (empty or null: normal); material?: text, a static \
          material: what its bill of materials rows say it is made of, in place of its bodies' materials (it doesn't change the \
          mass; empty or null clears it); bom_quantity?: an expression, what one placement means in a bill of materials: a \
@@ -42,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          keys, as document.metadata's properties lists them, bom_type, material, bom_quantity, virtual, or a reverse-DNS key \
          holding an object); properties?: {name: text, …} (free properties; empty or null removes). All or nothing, one undo step → component, metadata, \
          properties, changed: [keys]",
-    ),
+        ),
     CommandSpec::new("occurrence.bom_type", "Bill of Materials Type", crate::checked!("occurrence.bom_type", occurrence_type))
         .icon("bom")
         .doc_only()
@@ -65,7 +83,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component?: id or name (default the design); levels?: flat (default: every part at any depth, counted through its \
          subassemblies) | top (the component's direct children, subassemblies as one row each) | all (as top, each subassembly's \
          own rows listed after it, to any depth: items 1.1, 1.1.1, as in the CSV); show_purchased_contents?: true (in all, a \
-         purchased part's contents listed under it too); group_by?: [\"part_number\"] \
+         purchased part's contents listed under it too); show_suppressed_parts?: true (a part a configuration switches off, with \
+         no bodies and a suppressed feature of its own, listed as placed; by default it counts nowhere); group_by?: [\"part_number\"] \
          (default; components without a part number get a row per definition) | [\"definition\"]; group_children?: true (a component \
          with a part number is one row, the parts placed inside it listed under it as children: [{item, part_number, description, \
          revision, each, count, definition, material, mass_g?}], not as rows of their own); mass?: true (measures each part: \
@@ -91,7 +110,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          by the next change), locked and duplicate when true",
         ),
     CommandSpec::new("assembly.bom.renumber", "Renumber Items", renumber).icon("bom").params(
-        "component?, levels?, group_by?, group_children?, show_purchased_contents?: the view, as assembly.bom takes them; \
+        "component?, levels?, group_by?, group_children?, show_purchased_contents?, show_suppressed_parts?: the view, as assembly.bom takes them; \
          start?: 1; step?: 1 (whole numbers, 1 to 999999); order?: list (default: by part number, as an unnumbered view \
          lists) | item (in item-number order, closing the gaps). Numbers every row from start by step, each level on its \
          own (in all levels, within its parent); locked rows keep their numbers and the others skip them; rows that are \
@@ -100,7 +119,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          assembly.bom gives it",
     ),
     CommandSpec::new("assembly.bom.item.set", "Change Item Number", item_set).icon("bom").params(
-        "component?, levels?, group_by?, group_children?, show_purchased_contents?: the view, as assembly.bom takes them; \
+        "component?, levels?, group_by?, group_children?, show_purchased_contents?, show_suppressed_parts?: the view, as assembly.bom takes them; \
          row: the row's item as the view shows it now (\"3\", or \"1.2\" under row 1); item?: 1 to 999999 (a number \
          another row has is allowed: both are marked duplicate); locked?: true|false (a renumber keeps a locked number). \
          A view not numbered yet is numbered first, every row keeping the number it shows. One undo step → the view as \
@@ -121,7 +140,7 @@ fn key(v: Option<&Value>) -> Option<String> {
 
 fn component_id(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     let k = key(p.get("component")).ok_or_else(|| bad(cmd, "`component` must be a component id or name"))?;
-    s.doc.find_component(&k).ok_or_else(|| bad(cmd, format!("no component `{k}`")))
+    s.doc.resolve_component(&k).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{k}`")))
 }
 
 fn read(s: &mut Session, p: &Value) -> Result<Value> {
@@ -129,28 +148,30 @@ fn read(s: &mut Session, p: &Value) -> Result<Value> {
     let id = component_id(s, p, cmd)?;
     // The root is the design: its own properties, and no free ones.
     let (name, m, properties) = if id == 0 {
-        (&s.doc.name, &s.doc.metadata, json!({}))
+        (&s.doc.name, &s.doc.metadata, BTreeMap::new())
     } else {
         let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
-        (&c.name, &c.metadata, json!(c.properties))
+        (&c.name, &c.metadata, c.properties.clone())
     };
-    let mut out = Map::new();
-    out.insert("component".into(), json!(id));
-    out.insert("name".into(), json!(name));
-    for k in BOM_KEYS {
-        out.insert(k.to_string(), json!(m.text(k)));
-    }
+    let text = |k: &str| m.text(k).map(str::to_string);
     // A bill of materials type, static material, quantity and virtual flag are a component's;
     // the design has none.
-    if id != 0 {
-        out.insert(BOM_TYPE.into(), json!(m.bom_type().as_str()));
-        out.insert(MATERIAL.into(), json!(m.material()));
-        out.insert(BOM_QUANTITY.into(), json!(m.bom_quantity()));
-        out.insert(VIRTUAL.into(), json!(m.is_virtual()));
-    }
-    out.insert("metadata".into(), json!(m));
-    out.insert("properties".into(), properties);
-    Ok(Value::Object(out))
+    let part = id != 0;
+    let reply = ComponentMetadataResult {
+        component: id,
+        name: name.clone(),
+        part_number: text(PART_NUMBER),
+        description: text(DESCRIPTION),
+        revision: text(REVISION),
+        bom_type: part.then(|| m.bom_type().as_str().to_string()),
+        material: part.then(|| m.material().map(str::to_string)),
+        bom_quantity: part.then(|| m.bom_quantity().map(str::to_string)),
+        r#virtual: part.then(|| m.is_virtual()),
+        metadata: m.0.clone(),
+        properties,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// A free property as it may be saved (`None`: remove it), or why not.
@@ -243,8 +264,15 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         c.metadata = metadata;
         c.properties = properties;
     }
-    let c = s.doc.components.iter().find(|c| c.id == id);
-    Ok(json!({"component": id, "metadata": c.map(|c| &c.metadata), "properties": c.map(|c| &c.properties), "changed": changed}))
+    let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
+    let reply = ComponentMetadataSetResult {
+        component: id,
+        metadata: c.metadata.0.clone(),
+        properties: c.properties.clone(),
+        changed,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// The word that clears an occurrence's own bill of materials type.
@@ -310,7 +338,15 @@ fn request(s: &Session, p: &Value, cmd: &str) -> Result<Request> {
         Some(Value::Bool(b)) => Ok(*b),
         Some(_) => Err(bad(cmd, format!("`{k}` is true or false"))),
     };
-    Ok(Request { source, view, group, fold: flag("group_children")?, mass: flag("mass")?, purchased_contents: flag("show_purchased_contents")? })
+    Ok(Request {
+        source,
+        view,
+        group,
+        fold: flag("group_children")?,
+        mass: flag("mass")?,
+        purchased_contents: flag("show_purchased_contents")?,
+        suppressed_parts: flag("show_suppressed_parts")?,
+    })
 }
 
 fn group_key(g: &str, cmd: &str) -> Result<Group> {
@@ -392,14 +428,11 @@ fn row_json(row: &Row, item: &[u32], mass: bool, numbered: bool, nested: bool) -
     v
 }
 
-/// A CSV field, always quoted.
-fn quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('"', "\"\""))
-}
-
-/// The bill of materials as CSV: fixed columns, every field quoted, each row followed by the rows
-/// listed under it. A column added later goes at the end, so the others keep their places.
+/// The bill of materials as CSV: fixed columns, every field quoted, and a field a spreadsheet
+/// would run as a formula written as text; each row followed by the rows listed under it. A column
+/// added later goes at the end, so the others keep their places.
 fn csv(list: &Bom) -> String {
+    let quote = solidcraft_doc::csv::quoted;
     let mut out = ["item", "part_number", "description", "revision", "count", "definition", "material", "quantity"].map(quote).join(",");
     out.push('\n');
     for (item, r) in list.rows_deep() {
@@ -428,6 +461,7 @@ fn bom(s: &mut Session, p: &Value) -> Result<Value> {
     out.insert("group_by".into(), json!([request.group.as_str()]));
     out.insert("group_children".into(), json!(request.fold));
     out.insert("show_purchased_contents".into(), json!(request.purchased_contents));
+    out.insert("show_suppressed_parts".into(), json!(request.suppressed_parts));
     out.insert("mass".into(), json!(request.mass));
     if let Some(path) = str_(p, "path") {
         let format = match str_(p, "format").map(str::to_ascii_lowercase) {

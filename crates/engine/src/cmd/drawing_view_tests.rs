@@ -9,7 +9,7 @@ use solidcraft_geom::paper::NoPictures;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 
 use super::*;
-use crate::drawing_scene::tests::two_cubes;
+use crate::drawing_scene::tests::{add_a_pin, hinge_pair, two_cubes};
 use crate::schema::tests::conforms;
 
 const EPS: f64 = 1e-9;
@@ -297,7 +297,8 @@ fn a_views_line_group_follows_its_sheet_and_links_with_its_parent() {
     assert_eq!(inspect_view(&mut s, right)["settings"]["line_group"]["from"], "sheet", "linking clears it");
     edit_view(&mut s, right, json!({"linked": false}));
     assert_eq!(inspect_view(&mut s, right)["settings"]["line_group"]["set"], "0.35", "unlinking keeps the value it had");
-    assert!(edit_refused(&mut s, front, json!({"line_group": "0.6"})).contains("line_group"));
+    let why = edit_refused(&mut s, front, json!({"line_group": "0.6"}));
+    assert!(why.ends_with("`set.line_group` must be one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2"), "{why}");
 }
 
 /// A copy is one undo step of new views, independent of the ones it came from: with its linked
@@ -994,7 +995,7 @@ fn the_meshs_chord_follows_the_scale() {
     assert!(e.contains("finer than 0.0001 mm") && e.contains("chord_mm 0.1"), "{e}");
     let v = snap(&mut s, json!({"scale": "1000:1", "chord_mm": 0.2}));
     assert!((v["status"]["model_chord_mm"].as_f64().unwrap() - 2e-4).abs() < 1e-15, "{v}");
-    let dxf = s.execute("file.export_view_dxf", &json!({"camera": solidcraft_render::Camera::default(), "tolerance": 2})).unwrap_err().to_string();
+    let dxf = s.execute("file.export_view_dxf", &json!({"camera": solidcraft_viewport::Camera::default(), "tolerance": 2})).unwrap_err().to_string();
     assert!(dxf.contains("tolerance must be 0.0001..1 mm"), "{dxf}");
 }
 
@@ -2005,6 +2006,642 @@ fn a_deleted_occurrence_leaves_the_views_that_named_it() {
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "drawing.open", json!({"drawing": drawing}));
     assert!((width(&mut s, on_second) - 10.0).abs() < 1e-6);
+}
+
+/// The two cubes of [`two_cubes`] with an exploded view, Apart, that moves the second 30 mm further
+/// along x, and a drawing of them, open, with an assembled base view at 1:1 centred at (150, 150):
+/// the session, the view, the two occurrences and Apart's id.
+fn exploded_pair() -> (Session, u64, [u64; 2], u64) {
+    let (mut s, [first, second]) = two_cubes();
+    let made = run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": second, "translate": [30, 0, 0]}]}));
+    let apart = made["view"].as_u64().unwrap();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [150, 150]}));
+    (s, view, [first, second], apart)
+}
+
+/// The first cube's bottom front edge, through its occurrence, as dimensions, balloons and notes
+/// pick it.
+fn first_cubes_edge(first: u64) -> Value {
+    json!({"point": [5, 0, 0], "path": [first]})
+}
+
+/// Two views of one assembly, one exploded and one not, draw differently: the cubes 10 mm apart
+/// are 40 mm across, and 70 mm with the second moved out. Inspect says which each draws and who set
+/// it, and both come back the same after saving and opening the design (#13048).
+#[test]
+fn two_views_one_exploded_draw_differently_and_both_come_back() {
+    let (mut s, assembled, _, apart) = exploded_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (reply, exploded) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [150, 250], "exploded": "Apart"}));
+    assert!((width(&mut s, assembled) - 40.0).abs() < 1e-6);
+    assert!((width(&mut s, exploded) - 70.0).abs() < 1e-6, "{reply}");
+    let inspected = inspect_view(&mut s, exploded);
+    assert_eq!(inspected["settings"]["exploded"], json!({"value": {"view": apart}, "from": "this", "set": {"view": apart}}), "{inspected}");
+    let inspected = inspect_view(&mut s, assembled);
+    assert_eq!(inspected["settings"]["exploded"], json!({"value": "assembled", "from": "default", "set": null}), "{inspected}");
+
+    let folder = crate::tests::Folder::new("exploded-views");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "file.save", json!({"path": folder.path("pair.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("pair.solidcraft")}));
+    assert_eq!(opened.doc.drawings, s.doc.drawings);
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert!((width(&mut opened, assembled) - 40.0).abs() < 1e-6);
+    assert!((width(&mut opened, exploded) - 70.0).abs() < 1e-6);
+}
+
+/// Drawing a view exploded changes nothing in the design: the occurrences keep their placements,
+/// nothing is left moved in the session, and the parts list keeps its rows (#13048).
+#[test]
+fn an_exploded_view_leaves_the_design_and_its_parts_list_rows() {
+    let (mut s, view, _, apart) = exploded_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    run(&mut s, "drawing.table.add", json!({"sheet": sheet, "kind": "parts_list"}));
+    let (placed, rows) = (s.doc.occurrences.clone(), run(&mut s, "drawing.inspect", json!({}))["parts_lists"].clone());
+    assert!(rows.as_array().is_some_and(|lists| !lists.is_empty()), "{rows}");
+    let steps = s.undo.len();
+    let reply = edit_view(&mut s, view, json!({"exploded": apart}));
+    assert_eq!((reply["changed"].clone(), s.undo.len()), (json!(["exploded"]), steps + 1));
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6);
+    // The sheet drawn as a command reads it, as well as the view.
+    run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    assert_eq!(s.doc.occurrences, placed);
+    assert!(s.pending_moves.is_empty() && s.exploded.is_empty());
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["parts_lists"], rows);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((width(&mut s, view) - 40.0).abs() < 1e-6);
+}
+
+/// A projected view draws its parent's exploded view, naming it, and is among the edit's followers;
+/// then it sets `assembled`, and draws assembled whatever its parent draws.
+#[test]
+fn a_projected_view_draws_its_parents_exploded_view_until_it_sets_its_own() {
+    let (mut s, view, _, apart) = exploded_pair();
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [150, 250]}}));
+    let reply = edit_view(&mut s, view, json!({"exploded": "Apart"}));
+    assert_eq!(reply["followers"], json!([ids::encode(above)]), "{reply}");
+    assert!((width(&mut s, above) - 70.0).abs() < 1e-6);
+    let inspected = inspect_view(&mut s, above);
+    assert_eq!(
+        inspected["settings"]["exploded"],
+        json!({"value": {"view": apart}, "from": "parent", "parent": ids::encode(view), "set": null}),
+        "{inspected}"
+    );
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    assert!((width(&mut s, above) - 40.0).abs() < 1e-6, "assembled is a choice of its own");
+    edit_view(&mut s, above, json!({"exploded": null}));
+    assert!((width(&mut s, above) - 70.0).abs() < 1e-6, "null follows the parent again");
+}
+
+/// Dimensions, balloons and notes on a view's model read the design's placements, so on an exploded
+/// view they would measure the parts assembled: they are refused there until they read what the
+/// view draws. An edit that would explode a view holding one, itself or through a view that follows
+/// it, is refused and changes nothing; one whose follower draws assembled goes ahead. A note on the
+/// view itself is no hindrance, unless a branch points at its model; on an exploded view, a note's
+/// branches can't be edited.
+#[test]
+fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
+    let (mut s, view, [first, _], apart) = exploded_pair();
+    let on_view = |view: u64| ids::encode(view);
+    let unchanged = |s: &mut Session, view: u64, set: Value, says: &str| {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(s, view, set);
+        assert!(e.contains(says), "{e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    };
+    let blocked = "not supported yet: an exploded view with dimensions, balloons or notes on its model";
+
+    run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]}));
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    run(&mut s, "edit.undo", json!({}));
+    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
+    run(&mut s, "drawing.note.add", note);
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    run(&mut s, "edit.undo", json!({}));
+    let branched = json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Deburr", "branches": [{"edge": first_cubes_edge(first)}]});
+    run(&mut s, "drawing.note.add", branched.clone());
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    run(&mut s, "edit.undo", json!({}));
+    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Exploded"}))["note"].clone();
+    edit_view(&mut s, view, json!({"exploded": apart}));
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6, "a note on the view isn't on its model");
+
+    // New ones on an exploded view.
+    let e = s
+        .execute("drawing.dimension.add", &json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("not supported yet: dimensions on an exploded view"), "{e}");
+    let e =
+        s.execute("drawing.balloon.add", &json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: balloons on an exploded view"), "{e}");
+    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
+    let e = s.execute("drawing.note.add", &note).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
+    let e = s.execute("drawing.note.add", &branched).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let add = json!({"note": plain, "set": {"branches": {"remove": [], "add": [{"edge": first_cubes_edge(first)}]}}});
+    let e = s.execute("drawing.note.edit", &add).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+
+    // Through a follower: its dimension blocks its parent's edit, until it draws assembled itself.
+    edit_view(&mut s, view, json!({"exploded": "assembled"}));
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": on_view(view), "side": "above", "place": {"at": [150, 250]}}));
+    run(&mut s, "drawing.dimension.add", json!({"view": on_view(above), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, view, json!({"exploded": apart}));
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 40.0).abs() < 1e-6);
+}
+
+/// A shaded view's pictures are rendered from the design as it places its parts, so an exploded view
+/// can't be shaded yet. Whichever setting would make one, the exploded choice, a style or following a
+/// shaded parent, it is refused and changes nothing, on the view itself or on a view that follows it;
+/// a follower that draws assembled is no hindrance (#13048).
+#[test]
+fn an_exploded_view_is_never_shaded() {
+    let (mut s, view, _, apart) = exploded_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let unchanged = |s: &mut Session, view: u64, set: Value| {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(s, view, set);
+        assert!(e.contains("not supported yet: a shaded view of an exploded view"), "{e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    };
+    let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "visual_style": "shaded", "exploded": "Apart"}));
+    assert!(e.contains("not supported yet: a shaded view of an exploded view"), "{e}");
+
+    // Exploding a shaded view, and shading an exploded one.
+    edit_view(&mut s, view, json!({"visual_style": "shaded"}));
+    unchanged(&mut s, view, json!({"exploded": apart}));
+    edit_view(&mut s, view, json!({"visual_style": "visible", "exploded": apart}));
+    unchanged(&mut s, view, json!({"visual_style": "shaded"}));
+    unchanged(&mut s, view, json!({"reference_style": "shaded"}));
+
+    // Through a follower: a shaded one blocks its parent's edit, until it draws assembled itself.
+    edit_view(&mut s, view, json!({"exploded": "assembled"}));
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [150, 250]}}));
+    edit_view(&mut s, above, json!({"visual_style": "shaded"}));
+    unchanged(&mut s, view, json!({"exploded": apart}));
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, view, json!({"exploded": apart}));
+
+    // An exploded follower of a shaded parent can't follow its styles.
+    edit_view(&mut s, view, json!({"exploded": "assembled", "visual_style": "shaded"}));
+    edit_view(&mut s, above, json!({"visual_style": "visible", "exploded": apart}));
+    unchanged(&mut s, above, json!({"linked": true}));
+    assert!((width(&mut s, above) - 70.0).abs() < 1e-6);
+}
+
+/// Deleting an exploded view never refuses the drawing: a view that named it is a placeholder that
+/// says why, its choice stays for an undo, and undoing the delete draws it exploded again.
+#[test]
+fn a_deleted_exploded_view_leaves_the_views_that_named_it() {
+    let (mut s, view, _, apart) = exploded_pair();
+    edit_view(&mut s, view, json!({"exploded": apart}));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "explode.delete", json!({"view": apart}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let gone = inspect_view(&mut s, view);
+    assert_eq!(
+        (gone["extents"]["status"].as_str(), gone["extents"]["provenance"].as_str()),
+        (Some("placeholder"), Some("no_exploded_view")),
+        "{gone}"
+    );
+    assert_eq!(gone["settings"]["exploded"]["value"], json!({"view": apart}), "the choice stays, for an undo: {gone}");
+    // The sheet is drawn too, the view as its placeholder.
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    let drawn = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view))));
+    assert_eq!(drawn.map(|v| v["status"].clone()), Some(json!("placeholder")), "{scene}");
+    let d = s.drawing("test").unwrap();
+    assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6);
+}
+
+/// Making or editing a view refuses an exploded choice that isn't one, with its reason, and leaves
+/// the drawing and the undo steps as they were.
+#[test]
+fn hostile_exploded_choices_are_refused() {
+    let (mut s, view, _, _) = exploded_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let cases = [
+        (json!("Nowhere"), "no exploded view"),
+        (json!(999_999), "no exploded view"),
+        (json!(-1), "exploded"),
+        (json!(1e300), "exploded"),
+        (json!(f64::NAN.to_string()), "no exploded view"),
+        (json!([]), "exploded"),
+        (json!({"view": "Apart"}), "exploded"),
+        (json!(""), "exploded"),
+        (json!("x".repeat(100_000)), "exploded"),
+    ];
+    for (choice, says) in cases {
+        let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "exploded": choice}));
+        assert!(e.contains(says), "{choice}: {e}");
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, view, json!({"exploded": choice}));
+        assert!(e.contains(says), "{choice}: {e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{choice}");
+    }
+}
+
+/// A view's height on its sheet: [`hinge_pair`]'s top view is 40 mm with the leaf flat, 20 mm with it
+/// turned up square.
+fn height(s: &mut Session, id: u64) -> f64 {
+    boundary(&inspect_view(s, id)).0.y
+}
+
+/// Two views of one hinge, one drawing the design's placement and one with the leaf turned up, draw
+/// differently. Inspect says what each sets and who set it, the saved values in radians and what it
+/// draws in degrees, and both come back the same after saving and opening the design (#13048).
+#[test]
+fn two_views_one_posed_draw_differently_and_both_come_back() {
+    let (mut s, designed, hinge) = hinge_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let pose = json!([{"joint": "Hinge", "values": [90]}]);
+    let (reply, posed) = create(&mut s, BASE, json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 250], "pose": pose}));
+    assert!((height(&mut s, designed) - 40.0).abs() < 1e-6);
+    assert!((height(&mut s, posed) - 20.0).abs() < 1e-6, "{reply}");
+    let saved = json!({"joints": [{"joint": hinge, "values": [std::f64::consts::FRAC_PI_2]}]});
+    let inspected = inspect_view(&mut s, posed);
+    assert_eq!(inspected["settings"]["pose"]["value"], saved, "{inspected}");
+    assert_eq!((&inspected["settings"]["pose"]["from"], &inspected["settings"]["pose"]["set"]), (&json!("this"), &saved), "{inspected}");
+    assert_eq!(inspected["settings"]["pose"]["drawn"], json!([{"joint": hinge, "name": "Hinge", "values": [90.0]}]), "{inspected}");
+    let inspected = inspect_view(&mut s, designed);
+    assert_eq!(inspected["settings"]["pose"], json!({"value": "designed", "from": "default", "set": null}), "{inspected}");
+
+    let folder = crate::tests::Folder::new("posed-views");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "file.save", json!({"path": folder.path("hinge.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("hinge.solidcraft")}));
+    assert_eq!(opened.doc.drawings, s.doc.drawings);
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert!((height(&mut opened, designed) - 40.0).abs() < 1e-6);
+    assert!((height(&mut opened, posed) - 20.0).abs() < 1e-6);
+}
+
+/// Drawing a view in a position of its own changes nothing in the design: the joint keeps its value,
+/// the occurrences their placements, and nothing is left moved. The edit is one undo step.
+#[test]
+fn a_posed_view_leaves_the_design() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (joints, placed) = (s.doc.assembly.joints.clone(), s.doc.occurrences.clone());
+    let steps = s.undo.len();
+    let reply = edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    assert_eq!((reply["changed"].clone(), s.undo.len()), (json!(["pose"]), steps + 1));
+    assert!((height(&mut s, view) - 20.0).abs() < 1e-6);
+    run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    assert_eq!((&s.doc.assembly.joints, &s.doc.occurrences), (&joints, &placed));
+    assert!(s.pending_moves.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert!((height(&mut s, view) - 40.0).abs() < 1e-6);
+}
+
+/// A projected view draws its parent's position until it sets its own: `designed` draws the design's
+/// placement whatever its parent draws, and null follows the parent again.
+#[test]
+fn a_projected_view_draws_its_parents_position_until_it_sets_its_own() {
+    let (mut s, view, _) = hinge_pair();
+    let (_, front) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "below", "place": {"at": [150, 60]}}));
+    let depth = |s: &mut Session| height(s, front);
+    let flat = depth(&mut s);
+    let reply = edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    assert_eq!(reply["followers"], json!([ids::encode(front)]), "{reply}");
+    let turned = depth(&mut s);
+    assert!((flat - 2.0).abs() < 1e-6 && (turned - 20.0).abs() < 1e-6, "{flat} {turned}");
+    assert_eq!(inspect_view(&mut s, front)["settings"]["pose"]["from"], json!("parent"));
+    edit_view(&mut s, front, json!({"pose": "designed"}));
+    assert!((depth(&mut s) - 2.0).abs() < 1e-6, "designed is a choice of its own");
+    edit_view(&mut s, front, json!({"pose": null}));
+    assert!((depth(&mut s) - 20.0).abs() < 1e-6, "null follows the parent again");
+}
+
+/// A value past its joint's limit draws at the limit, as `joint.drive` puts it, and inspect says what
+/// it draws beside what is saved.
+#[test]
+fn a_pose_past_a_limit_is_clamped_and_said() {
+    let (mut s, view, hinge) = hinge_pair();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "joint.limits", json!({"joint": "Hinge", "min": 0, "max": 60}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    // The leaf at 60°: 20 cos 60° = 10 mm beyond the plate's 20.
+    assert!((height(&mut s, view) - 30.0).abs() < 1e-6);
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert_eq!(pose["value"], json!({"joints": [{"joint": hinge, "values": [std::f64::consts::FRAC_PI_2]}]}), "saved as asked: {pose}");
+    let drawn = pose["drawn"][0]["values"][0].as_f64().unwrap();
+    assert!((drawn - 60.0).abs() < 1e-9, "{pose}");
+}
+
+/// A joint the design no longer has is skipped: the view draws with the rest (here none, so the design's
+/// own placement, and its copy solves no joint), inspect names it, and the sheet's entry for the view
+/// says how many are gone, as a drawn note says why beside its lines. Undoing the delete draws the
+/// position again.
+#[test]
+fn a_pose_naming_a_gone_joint_skips_it() {
+    let (mut s, view, hinge) = hinge_pair();
+    edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "joint.delete", json!({"joint": "Hinge"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((height(&mut s, view) - 40.0).abs() < 1e-6, "drawn as the design places it");
+    let resolved = s.drawing("test").unwrap().resolve_view(view).unwrap();
+    crate::cmd::joints::solve_counts::take();
+    crate::drawing_view::copy_for(&s, &crate::drawing_view::Choice::of(&resolved)).unwrap();
+    assert_eq!(crate::cmd::joints::solve_counts::take().0, 0, "no joint left to drive, none solved");
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert_eq!((&pose["skipped"], &pose["drawn"]), (&json!([hinge]), &json!([])), "{pose}");
+    // The sheet draws it too.
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    let drawn = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view)))).cloned();
+    let entry = drawn.map(|v| (v["status"].clone(), v["reason"].clone()));
+    assert_eq!(entry, Some((json!("drawn"), json!("its position names 1 joint the design no longer has"))), "{scene}");
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((height(&mut s, view) - 20.0).abs() < 1e-6, "the joint back, the position drawn");
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    let drawn = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view)))).cloned();
+    assert_eq!(drawn.map(|v| v.get("reason").cloned()), Some(None), "nothing gone, nothing said: {scene}");
+}
+
+/// Makes motion study Open in [`hinge_pair`]'s design, turning Hinge along `points` ([step, degrees])
+/// over `steps` steps, or makes it again with them: with the drawing closed, then open again.
+fn study(s: &mut Session, steps: u32, points: Value) {
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(s, "drawing.close", json!({}));
+    let again = if s.doc.assembly.studies.is_empty() { json!({}) } else { json!({"study": "Open"}) };
+    let mut p = json!({"name": "Open", "steps": steps, "keys": [{"joint": "Hinge", "points": points}]});
+    p.as_object_mut().unwrap().extend(again.as_object().unwrap().clone());
+    run(s, "motion.study", p);
+    run(s, "drawing.open", json!({"drawing": drawing}));
+}
+
+/// The top view's height with the leaf at `degrees`: the plate's 20 mm and the leaf's 20 cos.
+fn turned(degrees: f64) -> f64 {
+    20.0 + 20.0 * degrees.to_radians().cos()
+}
+
+/// A view at a step of a motion study draws the assembly as `motion.play` sets it there, and the design
+/// is left as it was. Inspect says the study, the step and the values it draws, in degrees. The view
+/// keeps the step, not the values, so it follows the study when the study changes (#13048).
+#[test]
+fn a_view_at_a_study_step_draws_as_play_sets_it_and_follows_the_study() {
+    let (mut s, view, hinge) = hinge_pair();
+    study(&mut s, 10, json!([[0, 0], [10, 90]]));
+    let (joints, placed) = (s.doc.assembly.joints.clone(), s.doc.occurrences.clone());
+    edit_view(&mut s, view, json!({"pose": {"study": "Open", "step": 10}}));
+    assert!((height(&mut s, view) - turned(90.0)).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"pose": {"study": "Open", "step": 5}}));
+    assert!((height(&mut s, view) - turned(45.0)).abs() < 1e-6);
+    assert_eq!((&s.doc.assembly.joints, &s.doc.occurrences), (&joints, &placed), "the design is left as it was");
+    assert!(s.pending_moves.is_empty());
+    let id = s.doc.assembly.studies[0].id;
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert_eq!(pose["value"], json!({"study": {"id": id, "step": 5}}), "{pose}");
+    assert_eq!(pose["study"], json!({"id": id, "name": "Open", "step": 5}), "{pose}");
+    assert_eq!((&pose["drawn"][0]["joint"], &pose["skipped"]), (&json!(hinge), &json!([])), "{pose}");
+    assert!((pose["drawn"][0]["values"][0].as_f64().unwrap() - 45.0).abs() < 1e-9, "{pose}");
+    // The study turned to 60° at its end: step 5 is now 30°.
+    study(&mut s, 10, json!([[0, 0], [10, 60]]));
+    assert!((height(&mut s, view) - turned(30.0)).abs() < 1e-6);
+}
+
+/// A saved step past the study's end, once the study is made shorter, draws the study's last step, as
+/// `motion.play` holds a step there, and inspect gives the step it draws. A study the design no longer
+/// has draws the design's placement, and the sheet says why, as for a gone joint.
+#[test]
+fn a_study_step_past_the_end_draws_the_last_and_a_gone_study_is_said() {
+    let (mut s, view, _) = hinge_pair();
+    study(&mut s, 10, json!([[0, 0], [10, 90]]));
+    edit_view(&mut s, view, json!({"pose": {"study": "Open", "step": 10}}));
+    study(&mut s, 5, json!([[0, 0], [10, 90]]));
+    // The key reaches 90° at step 10; the study now ends at step 5, where it is at 45°.
+    assert!((height(&mut s, view) - turned(45.0)).abs() < 1e-6);
+    assert_eq!(inspect_view(&mut s, view)["settings"]["pose"]["study"]["step"], json!(5));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "motion.delete", json!({"study": "Open"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((height(&mut s, view) - 40.0).abs() < 1e-6, "drawn as the design places it");
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert_eq!((pose.get("study"), &pose["drawn"]), (None, &json!([])), "{pose}");
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    let drawn = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view)))).cloned();
+    let entry = drawn.map(|v| (v["status"].clone(), v["reason"].clone()));
+    assert_eq!(entry, Some((json!("drawn"), json!("its position names a motion study the design no longer has"))), "{scene}");
+}
+
+/// Making or editing a view refuses a study step the design can't draw, with its reason, and leaves the
+/// drawing and the undo steps as they were: an unknown study, a step outside the study's timeline or
+/// not a whole one, and a step that isn't one.
+#[test]
+fn hostile_study_steps_are_refused() {
+    let (mut s, view, _) = hinge_pair();
+    study(&mut s, 10, json!([[0, 0], [10, 90]]));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let cases = [
+        (json!({"study": "Nowhere", "step": 1}), "no motion study `Nowhere`"),
+        (json!({"study": 999_999, "step": 1}), "no motion study `999999`"),
+        (json!({"study": "Open", "step": 11}), "motion study `Open`: 0 to 10"),
+        (json!({"study": "Open", "step": -1}), "0 to 10"),
+        (json!({"study": "Open", "step": 2.5}), "0 to 10"),
+        (json!({"study": "Open", "step": u64::MAX}), "0 to 10"),
+        (json!({"study": "Open", "step": "5"}), "0 to 10"),
+        (json!({"study": [1], "step": 1}), "`study` must be an id or a name"),
+        (json!({"study": "Open"}), "pose"),
+        (json!({"study": "Open", "step": 1, "at": 1}), "pose"),
+    ];
+    for (pose, says) in cases {
+        let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "pose": pose}));
+        assert!(e.contains(says), "{pose}: {e}");
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, view, json!({"pose": pose}));
+        assert!(e.contains(says), "{pose}: {e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{pose}");
+    }
+}
+
+/// A nut on a thread: the design's own plate, 40 x 20 x 2 mm from the origin, and a 10 x 10 x 5 mm
+/// nut on it in component Nut, on cylindrical joint Thread about the vertical through the nut's
+/// centre, which a screw link advances 2 mm a turn. Motion study Turn keys only the thread's turn,
+/// 0 to 720° over 10 steps. A drawing, open, with a front view at 1:1. The session and the view.
+fn screw_nut() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 2, "body_name": "Plate"}));
+    run(&mut s, "component.create", json!({"name": "Nut", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [15, 5, 2], "body_name": "Nut", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let at = json!({"occurrence": 0, "point": [20, 10, 2], "z": [0, 0, 1]});
+    run(&mut s, "joint.as_built", json!({"type": "cylindrical", "name": "Thread", "a": 0, "b": "Nut", "at": at}));
+    run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": 2}));
+    let keys = json!([{"joint": "Thread", "index": 0, "points": [[0, 0], [10, 720]]}]);
+    run(&mut s, "motion.study", json!({"name": "Turn", "steps": 10, "keys": keys}));
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": [150, 150]});
+    let view = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    (s, view)
+}
+
+/// Inspect gives the values a posed view draws as the solver places them: the thread at two turns,
+/// the nut's travel follows its screw link, 4 mm, though the joint saves none.
+#[test]
+fn a_posed_view_says_the_travel_its_screw_link_draws() {
+    let (mut s, view) = screw_nut();
+    // The plate's 2 mm and the nut's 5 above it.
+    assert!((height(&mut s, view) - 7.0).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"pose": [{"joint": "Thread", "values": [720, 0]}]}));
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert!((height(&mut s, view) - 11.0).abs() < 1e-6, "{pose}");
+    let values = &pose["drawn"][0]["values"];
+    assert!((values[0].as_f64().unwrap_or(f64::NAN) - 720.0).abs() < 1e-6, "{pose}");
+    assert!((values[1].as_f64().unwrap_or(f64::NAN) - 4.0).abs() < 1e-6, "{pose}");
+}
+
+/// A study keys only the thread's turn, and the nut's travel follows it through the screw link: two
+/// turns rise two pitches, 4 mm. (A screw link sets the travel whatever the solve holds; holding only
+/// the keyed values shows in a closed loop, which
+/// [`a_study_holds_only_the_values_it_keys_and_a_closed_loop_moves_the_rest`] covers.)
+#[test]
+fn a_study_step_holds_only_the_values_the_study_keys() {
+    let (mut s, view) = screw_nut();
+    // The plate's 2 mm and the nut's 5 above it.
+    assert!((height(&mut s, view) - 7.0).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"pose": {"study": "Turn", "step": 10}}));
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert!((height(&mut s, view) - 11.0).abs() < 1e-6, "{pose}");
+    let slide = pose["drawn"][0]["values"][1].as_f64().unwrap_or(f64::NAN);
+    assert!((slide - 4.0).abs() < 1e-6, "{pose}");
+}
+
+/// A study holds only the values it keys, as `motion.play` does, and a closed loop moves the rest. In
+/// [`slotted_arm`](crate::cmd::joints::tests::slotted_arm), study Swing keys only the slot's angle; the
+/// loop slides the pin out along the slot as it turns. A view at the study's last step draws the slot
+/// at the angle and slide play gives there. Holding the slide too, the loop couldn't close.
+#[test]
+fn a_study_holds_only_the_values_it_keys_and_a_closed_loop_moves_the_rest() {
+    let mut s = crate::cmd::joints::tests::slotted_arm(false, 0.0);
+    let keys = json!([{"joint": "Slot", "index": 0, "points": [[0, 0], [10, 20]]}]);
+    run(&mut s, "motion.study", json!({"name": "Swing", "steps": 10, "keys": keys}));
+    // Played on a copy: the view draws from the design's placement, where the slide is 26 mm.
+    let mut played = s.scratch();
+    run(&mut played, "motion.play", json!({"study": "Swing", "step": 10}));
+    let id = |name: &str| played.doc.assembly.joints.iter().find(|j| j.name == name).map(|j| j.id).unwrap();
+    let values = solidcraft_doc::joints::joint_values(&played.doc.assembly);
+    let (want, yaw) = (values.get(&id("Slot")).cloned().unwrap(), values.get(&id("Yaw")).and_then(|v| v.first().copied()).unwrap());
+    // Play moved the loop: the slot turned to 20° and the pin slid out to the fixture's closed form for the
+    // clamp's turn, √(26² + 52² − 2·26·52 cos θ), 26.80 mm here, off the 26 mm it starts at.
+    let slid = (26.0f64.powi(2) + 52.0f64.powi(2) - 2.0 * 26.0 * 52.0 * yaw.cos()).sqrt();
+    assert!(
+        (want[0].to_degrees().abs() - 20.0).abs() < 1e-6 && (want[1].abs() - slid).abs() < 1e-6 && (want[1].abs() - 26.0).abs() > 0.5,
+        "play moved the loop: {want:?}, the clamp turned {yaw} rad"
+    );
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 150]});
+    let view = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    edit_view(&mut s, view, json!({"pose": {"study": "Swing", "step": 10}}));
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    let drawn = &pose["drawn"][0]["values"];
+    let (angle, slide) = (drawn[0].as_f64().unwrap_or(f64::NAN), drawn[1].as_f64().unwrap_or(f64::NAN));
+    assert!((angle - want[0].to_degrees()).abs() < 1e-6 && (slide - want[1]).abs() < 1e-6, "drawn {angle}°, {slide} mm; play {want:?}: {pose}");
+}
+
+/// Dimensions on a posed view would measure the design's placement: they are refused there, by the
+/// rule an exploded view follows, and an edit that would pose a view holding one is refused.
+#[test]
+fn a_posed_view_refuses_what_would_measure_it_in_the_designs_place() {
+    let (mut s, view, _) = hinge_pair();
+    let (_, other) = {
+        let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+        create(&mut s, BASE, json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 250]}))
+    };
+    // The plate's top front edge.
+    let edge = |view: u64| json!({"view": ids::encode(view), "kind": {"length": {"edge": {"point": [20, 0, 2], "path": []}}}});
+    run(&mut s, "drawing.dimension.add", edge(other));
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let e = edit_refused(&mut s, other, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    assert!(e.contains("dimensions, balloons or notes on its model"), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    let e = s.execute("drawing.dimension.add", &edge(view)).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("not supported yet") && e.contains("a position of its own"), "{e}");
+}
+
+/// A view exploded from a position: the leaf turned up, then moved out 30 mm along Y. Exploded alone,
+/// the flat leaf moves out to 70 mm; posed alone, the view is 20 mm.
+#[test]
+fn an_exploded_view_of_a_position_explodes_from_it() {
+    let (mut s, view, _) = hinge_pair();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    add_a_pin(&mut s);
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": leaf, "translate": [0, 30, 0]}]}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    edit_view(&mut s, view, json!({"exploded": "Apart"}));
+    assert!((height(&mut s, view) - 70.0).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    // The turned leaf spans y 18..20, moved out to 48..50.
+    assert!((height(&mut s, view) - 50.0).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"exploded": "assembled"}));
+    assert!((height(&mut s, view) - 20.0).abs() < 1e-6);
+}
+
+/// Making or editing a view refuses a position that isn't one, with its reason, and leaves the
+/// drawing and the undo steps as they were.
+#[test]
+fn hostile_poses_are_refused() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let many: Vec<Value> = (0..65).map(|_| json!({"joint": "Hinge", "values": [1]})).collect();
+    let cases = [
+        (json!([{"joint": "Nowhere", "values": [1]}]), "no joint"),
+        (json!([{"joint": 999_999, "values": [1]}]), "no joint"),
+        (json!([{"joint": "Hinge", "values": [1, 2]}]), "1 value"),
+        (json!([{"joint": "Hinge", "values": []}]), "1 value"),
+        // Main's joint check names the range a value must keep to before the pose's own check.
+        (json!([{"joint": "Hinge", "values": [1e300]}]), "between -1e9 and 1e9"),
+        (json!([{"joint": "Hinge", "values": ["1/0"]}]), "Hinge"),
+        (json!([{"joint": "Hinge", "values": [1]}, {"joint": "Hinge", "values": [2]}]), "each joint once"),
+        (json!(many), "at most 64 joints"),
+        (json!([]), "at least one joint"),
+        (json!("posed"), "pose"),
+        (json!({"joint": "Hinge"}), "pose"),
+        (json!([{"joint": "Hinge", "values": [1], "extra": 1}]), "pose"),
+        (json!("x".repeat(100_000)), "pose"),
+    ];
+    for (pose, says) in cases {
+        let shown = pose.to_string().chars().take(60).collect::<String>();
+        let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "pose": pose}));
+        assert!(e.contains(says), "{shown}: {e}");
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, view, json!({"pose": pose}));
+        assert!(e.contains(says), "{shown}: {e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{shown}");
+    }
 }
 
 /// Making or editing a view refuses what the snapshot refuses, with its reason, and leaves the

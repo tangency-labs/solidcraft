@@ -28,7 +28,10 @@ use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
 
 use super::{Drawing, add_by_id, in_id_order, require};
-use crate::drawing_view::{MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, TangentEdges, ViewDirection, ViewOverrides, ViewSettings};
+use crate::drawing_view::{
+    Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewDirection,
+    ViewOverrides, ViewSettings,
+};
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 
 /// The most views a drawing may have.
@@ -129,6 +132,10 @@ pub struct ResolvedView {
     /// The line group its lines are drawn in: the chain's, else its sheet's, else the drawing's.
     pub line_group: Setting<LineGroup>,
     pub reference_shown_percent: f64,
+    /// The state of its assembly it draws: assembled, or an exploded view of the design.
+    pub exploded: Setting<Exploded>,
+    /// The position of its assembly it draws: the design's, or its joints at values of its own.
+    pub pose: Setting<Pose>,
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -147,6 +154,24 @@ pub fn check_occurrence_paths(occurrences: &[Vec<u64>], hide: &[Vec<u64>]) -> Re
         format!("an occurrence path is 1..{MAX_PLACEMENT_DEPTH} ids")
     })?;
     require(hide.iter().all(|path| !path.is_empty()), || "hide [] would leave out the design's own bodies: give source instead".into())
+}
+
+/// What a view's position may hold, saved or asked for: 1 to [`MAX_POSE_JOINTS`] joints, each once,
+/// each with 1 to [`MAX_JOINT_VALUES`] values, finite and at most [`MAX_POSE_VALUE`] either way; or
+/// any study step, which its types bound. It isn't checked against the design: a joint or study the
+/// design no longer has is skipped where it draws.
+pub fn check_pose(pose: &Pose) -> Result<()> {
+    let Pose::Joints(joints) = pose else { return Ok(()) };
+    require(!joints.is_empty(), || "a position sets at least one joint: give \"designed\" instead".into())?;
+    require(joints.len() <= MAX_POSE_JOINTS, || format!("a position sets at most {MAX_POSE_JOINTS} joints"))?;
+    require(joints.iter().all(|j| (1..=MAX_JOINT_VALUES).contains(&j.values.len())), || {
+        format!("a joint in a position has 1..{MAX_JOINT_VALUES} values")
+    })?;
+    require(joints.iter().flat_map(|j| &j.values).all(|v| v.is_finite() && v.abs() <= MAX_POSE_VALUE), || {
+        format!("a position's values are at most {MAX_POSE_VALUE} either way")
+    })?;
+    let listed: BTreeSet<u64> = joints.iter().map(|j| j.joint).collect();
+    require(listed.len() == joints.len(), || "a position lists each joint once".into())
 }
 
 /// The views from `id` up to its base view, nearest first, each found by `find`: refused when a
@@ -249,6 +274,7 @@ impl Drawing {
         };
         require(place, || format!("its place is at most {MAX_SIDE_MM} mm from the sheet's origin"))?;
         check_occurrence_paths(view.settings.occurrences.as_deref().unwrap_or_default(), view.settings.hide.as_deref().unwrap_or_default())?;
+        view.settings.pose.as_ref().map_or(Ok(()), check_pose)?;
         match view.kind {
             ViewKind::Base { source, view: direction } => {
                 let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
@@ -299,6 +325,8 @@ impl Drawing {
             hide: or_default(&chain, |s| s.hide.clone().map(Some), None),
             line_group,
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
+            exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),
+            pose: or_default(&chain, |s| s.pose.clone(), Pose::Designed),
         })
     }
 

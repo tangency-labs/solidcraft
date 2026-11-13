@@ -9,8 +9,9 @@
 //!   under the model's, which leaves them out: so they never cover it.
 //!
 //! A view's group holds its pictures under its lines ([`picture_items`]), and [`ViewPictures`] has
-//! their pixels for a writer: placed by the [`solidcraft_geom::drawing_view::ViewFrame`] that placed
-//! the lines. Nothing is kept between exports yet: each renders again.
+//! their pixels for a writer: of the parts the view shows, placed by the
+//! [`solidcraft_geom::drawing_view::ViewFrame`] that placed the lines. Nothing is kept between exports
+//! yet: each renders again.
 
 use std::cell::{Cell, OnceCell};
 use std::collections::BTreeMap;
@@ -86,6 +87,17 @@ pub fn picture_items(view: u64, parts: &[Vec<Part>], rect: Aabb2) -> Vec<Item> {
     (0..parts.len()).map(|i| Item::Picture(Picture { source: source(view, i, parts.len()), rect, opacity: 1.0 })).collect()
 }
 
+/// The bodies one picture draws, of those `chosen` holds with their `parts`: each by its place among
+/// the bodies the design places ([`crate::drawing_view::Shown::index`]), with its role.
+fn drawn_bodies(chosen: &ShownSet, parts: Vec<Part>) -> Vec<(usize, BodyRole)> {
+    let role = |part| match part {
+        Part::Painted => Some(BodyRole::Painted),
+        Part::DepthOnly => Some(BodyRole::DepthOnly),
+        Part::Left => None,
+    };
+    chosen.bodies.iter().zip(parts).filter_map(|(body, part)| Some((body.index, role(part)?))).collect()
+}
+
 /// What placed a view's lines, as the renderer takes it.
 fn ortho(frame: &ViewFrame) -> OrthoFrame {
     let basis = frame.basis();
@@ -95,7 +107,8 @@ fn ortho(frame: &ViewFrame) -> OrthoFrame {
 struct ViewPicture {
     view: u64,
     frame: OrthoFrame,
-    parts: Vec<Part>,
+    /// The bodies it draws ([`drawn_bodies`]).
+    bodies: Vec<(usize, BodyRole)>,
 }
 
 /// The pixels of the shaded views' pictures on one sheet, for the writers.
@@ -116,15 +129,21 @@ impl<'a> ViewPictures<'a> {
     /// to show, a view is a placeholder and has none.
     pub fn new(s: &'a Session, d: &Drawing, sheet: u64) -> Result<ViewPictures<'a>> {
         let (mut pictures, mut spent) = (BTreeMap::new(), BTreeMap::new());
-        if let Ok(set) = crate::drawing_view::shown(s) {
+        let shown = crate::drawing_view::shown(s);
+        if shown.is_ok() {
             for (id, view, centre) in crate::drawing_scene::views_on(d, sheet)? {
-                let parts = view_parts(&set, Styles::from(&view));
-                let Ok(extents) = crate::drawing_view::measure(&set, &view.basis) else { continue };
+                // Its lines say why it isn't drawn ([`crate::drawing_view::not_drawable_apart`]).
+                if crate::drawing_view::not_drawable_apart(&view).is_some() {
+                    continue;
+                }
+                // What the view chooses to show, as its lines do ([`crate::drawing_view::measured`]).
+                let Ok((chosen, extents)) = crate::drawing_view::measured(&shown, &view) else { continue };
+                let parts = view_parts(&chosen, Styles::from(&view));
                 let frame = ortho(&crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, centre, CMD)?);
                 let count = parts.len();
                 for (i, parts) in parts.into_iter().enumerate() {
                     spent.entry(id).or_default();
-                    let picture = ViewPicture { view: id, frame, parts };
+                    let picture = ViewPicture { view: id, frame, bodies: drawn_bodies(&chosen, parts) };
                     if pictures.insert(source(id, i, count), picture).is_some() {
                         return Err(bad(CMD, format!("view {}: its picture's number is another's", ids::encode(id))));
                     }
@@ -152,13 +171,11 @@ impl Pictures for ViewPictures<'_> {
         let named = |why: String| format!("view {}: {why}", ids::encode(picture.view));
         let extract = || crate::product_scene::extract_where(self.session, |_| true).map_err(|e| e.to_string());
         let whole = self.scene.get_or_init(extract).as_ref().map_err(|why| named(why.clone()))?;
-        if whole.meshes.len() != picture.parts.len() {
-            return Err(named("the model changed while it was drawn".into()));
-        }
-        // A body left out of a picture isn't in its scene.
-        let kept = || whole.meshes.iter().zip(&picture.parts).filter(|(_, part)| **part != Part::Left);
-        let meshes = kept().map(|(mesh, _)| mesh.clone()).collect();
-        let roles = kept().map(|(_, part)| if *part == Part::DepthOnly { BodyRole::DepthOnly } else { BodyRole::Painted }).collect();
+        // Each body's mesh by its place: `drawing_view::shown` and `extract_where` walk the world
+        // state's bodies in the same order.
+        let meshes = picture.bodies.iter().map(|(index, _)| whole.meshes.get(*index).cloned()).collect::<Option<Vec<_>>>();
+        let meshes = meshes.ok_or_else(|| named("the model changed while it was drawn".into()))?;
+        let roles = picture.bodies.iter().map(|(_, role)| *role).collect();
         let request = PictureRequest {
             projection: Projection::Ortho { frame: picture.frame, grid: *grid },
             tiles: tiles(window),
