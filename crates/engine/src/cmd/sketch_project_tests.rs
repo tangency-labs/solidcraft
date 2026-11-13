@@ -2136,3 +2136,98 @@ fn a_component_origin_axis_projects_where_the_component_stands() {
     let err = s.execute("sketch.project", &json!({"refs": [{"axis": "o:9999/origin/Z"}]})).unwrap_err().to_string();
     assert!(err.contains("unknown axis"), "{err}");
 }
+
+/// The active sketch holds at least two linked arcs or circles, each of `radius` about `center`
+/// (sketch coordinates): the projected rim of a round hole.
+fn assert_rim(s: &mut Session, radius: f64, center: [f64; 2]) {
+    let si = inspect(s);
+    let arcs: Vec<Value> = linked_curves(&si).into_iter().filter(|c| c["type"] == "arc" || c["type"] == "circle").collect();
+    assert!(arcs.len() >= 2, "the opening is a full circle, got {si}");
+    for c in &arcs {
+        let r = c["radius"].as_f64().unwrap_or(f64::NAN);
+        assert!((r - radius).abs() < 1e-4, "{c}");
+        let at = &c["center_at"];
+        assert!((at[0].as_f64().unwrap_or(f64::NAN) - center[0]).abs() < 1e-4, "{c}");
+        assert!((at[1].as_f64().unwrap_or(f64::NAN) - center[1]).abs() < 1e-4, "{c}");
+        assert!(c["link"].as_str().is_some(), "{c}");
+    }
+}
+
+/// A click in a hole hits no face. The ray through the opening still names the rim, and
+/// projecting those edges draws the circle. A large hole is too far from every face for a
+/// point dropped in the opening to resolve, which is why the rim has to be found as a loop.
+#[test]
+fn a_ray_through_a_hole_opening_projects_its_rim() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 10, "depth": 20}));
+    let st = s.model.state();
+    let down = solidcore_record::Vec3::new(0.0, 0.0, -1.0);
+    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(20.0, 15.0, 80.0), down, |_| true)
+        .expect("the ray through the opening names the rim");
+    // SMLib holds a full round rim as one edge; a kernel that splits it holds two halves.
+    assert!(matches!(rim.edges.len(), 1 | 2), "{rim:?}");
+    assert!(rim.at.dist(solidcore_record::Vec3::new(20.0, 15.0, 20.0)) < 1e-4, "{rim:?}");
+    let angled = solidcore_record::Vec3::new(0.0, 45.0, -30.0);
+    let from_side = solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(20.0, -30.0, 50.0), angled, |_| true);
+    assert!(from_side.as_ref().is_some_and(|r| matches!(r.edges.len(), 1 | 2)), "{from_side:?}");
+    assert!(solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(5.0, 5.0, 80.0), down, |_| true).is_none());
+    assert!(
+        solidcraft_doc::project::hole_rim_along_ray(
+            &st,
+            solidcore_record::Vec3::new(20.0, 15.0, 80.0),
+            solidcore_record::Vec3::new(0.0, 0.0, 1.0),
+            |_| true
+        )
+        .is_none()
+    );
+    assert!(solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(20.0, 15.0, 80.0), down, |_| false).is_none());
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30}));
+    let refs: Vec<Value> = rim.edges.iter().map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+    let projected = run(&mut s, "sketch.project", json!({"refs": refs}));
+    assert_eq!(projected["links"].as_array().map(|a| a.len()), Some(rim.edges.len()), "{projected}");
+    assert_rim(&mut s, 5.0, [20.0, 15.0]);
+
+    // Diameter 80 in a 100 plate: the opening's centre is farther from every face than
+    // sketch.project will travel to find one, so a point dropped there is not a face.
+    let mut wide = Session::default();
+    run(&mut wide, "solid.box", json!({"length": 100, "width": 100, "height": 10}));
+    run(&mut wide, "solid.hole", json!({"position": [50, 50, 10], "diameter": 80, "depth": 10}));
+    let st = wide.model.state();
+    run(&mut wide, "sketch.create", json!({"plane": "XY", "offset": 20}));
+    let err = wide.execute("sketch.project", &json!({"refs": [{"face": [50.0, 50.0, 10.0]}]})).expect_err("a point in a large opening is not a face");
+    let msg = err.to_string();
+    assert!(msg.contains("the face no longer exists"), "{msg}");
+    assert!(!msg.contains("no sketch is being edited"), "{msg}");
+    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(50.0, 50.0, 40.0), down, |_| true).expect("large opening");
+    // SMLib holds a full round rim as one edge; a kernel that splits it holds two halves.
+    assert!(matches!(rim.edges.len(), 1 | 2), "{rim:?}");
+    let refs: Vec<Value> = rim.edges.iter().map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+    run(&mut wide, "sketch.project", json!({"refs": refs}));
+    assert_rim(&mut wide, 40.0, [50.0, 50.0]);
+
+    // A displayed occurrence can share its definition's mesh. The exact B-rep it places is the
+    // one the ray meets, in the displayed body's world position, not back at the definition.
+    let mut placed = Session::default();
+    run(&mut placed, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut placed, "solid.hole", json!({"position": [20, 15, 20], "diameter": 10, "depth": 20}));
+    let part = run(&mut placed, "component.create", json!({"name": "Part", "parent": 0, "grounded": false}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    assert_eq!(placed.world_state().unwrap().bodies.len(), 1);
+    // Put all features in the part before placing it, retaining its geometry in world coordinates.
+    let features: Vec<u64> = placed.doc.features.iter().map(|f| f.id).collect();
+    run(&mut placed, "component.move_features", json!({"features": features, "component": part["component"]}));
+    assert_eq!(placed.world_state().unwrap().bodies.len(), 1);
+    run(
+        &mut placed,
+        "occurrence.move",
+        json!({"occurrence": occurrence, "translate": [100, 250, 40], "axis": [0, 0, 1], "angle": "90 deg", "space": "world"}),
+    );
+    let st = placed.world_state().unwrap();
+    let body = st.bodies.first().expect("the placed part");
+    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(85.0, 270.0, 180.0), down, |_| true);
+    let rim = rim.expect("a ray through the moved opening names its rim");
+    assert_eq!(rim.body, body.name);
+    assert!(rim.at.dist(solidcore_record::Vec3::new(85.0, 270.0, 60.0)) < 1e-4, "{rim:?}");
+    assert!(rim.edges.iter().all(|p| (p.z - 60.0).abs() < 1e-4 && (p.z - 60.0).abs() + rim.at.dist(*p) > 0.0), "{rim:?}");
+}
