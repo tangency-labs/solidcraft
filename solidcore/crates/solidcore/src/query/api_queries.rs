@@ -1354,9 +1354,50 @@ pub fn edge_crossing_on_face(
     interval: &Extent1d,
     near: f64,
 ) -> Result<f64> {
-    // the tests-first stub: the parameter it is given, today's answer
-    let _ = (k, brep, edge, face, curve, interval);
-    Ok(near)
+    const OP_CROSSING: &str = "query::api_queries::edge_crossing_on_face";
+    if !near.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP_CROSSING,
+            "the curve's parameter must be finite",
+        ));
+    }
+    // An edge made without a tolerance is held to the kernel's zero, as in the plane crossing.
+    let tol = brep.edge(edge)?.tolerance.max(EFF_ZERO);
+    let surface = face::surface(brep, face)?
+        .ok_or_else(|| SolidError::query_missing(OP_CROSSING, "the face's surface"))?
+        .clone_for_evaluation()?;
+    let domain = face::uv_domain(brep, face)?;
+    // The solve's start on the surface: the point nearest the curve's point at `near`, in the
+    // face's own parameters (a seam's point has two; the one its domain moves least).
+    let nearest = surface_closest_point(k, &surface, curve.evaluate_point(k, near)?)?;
+    let mut start: Option<(f64, Point2)> = None;
+    for &uv in &nearest.uvs {
+        let inside = domain.clamp_point(uv);
+        let moved = uv.distance(inside);
+        if start.is_none_or(|(least, _)| moved < least) {
+            start = Some((moved, inside));
+        }
+    }
+    let (_, uv) = start.ok_or_else(|| {
+        SolidError::query_failed(OP_CROSSING, "the point does not drop onto the surface")
+    })?;
+    let hit = surface
+        .local_curve_intersect(k, &domain, curve, interval, tol, uv, near)?
+        .ok_or(SolidError::NotConverged {
+            operation: OP_CROSSING,
+            iterations: crate::surface::surface::p6::LOCAL_CURVE_INTERSECT_STEPS,
+        })?;
+    // The tube that holds the exact edge: a point outside it is another crossing, not this edge's.
+    // Written to accept, so a distance that isn't a number refuses.
+    let on_edge = edge_closest_point(k, brep, edge, curve.evaluate_point(k, hit.t)?)?;
+    if on_edge.closest.distance <= tol {
+        Ok(hit.t)
+    } else {
+        Err(SolidError::query_failed(
+            OP_CROSSING,
+            "the crossing on the face's surface is off the edge",
+        ))
+    }
 }
 
 /// Parameter interval (`SmApiEdgeParameterRange`); dangling ids are errors.
