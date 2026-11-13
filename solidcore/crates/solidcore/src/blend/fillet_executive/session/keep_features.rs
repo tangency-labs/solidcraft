@@ -74,7 +74,7 @@ use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::knots::Side;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
-use crate::query::face::p2::curve_on_classify;
+use crate::query::face::p2::{curve_on_classify_cached, CurveOnClassifyCache};
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p3::{
@@ -205,7 +205,16 @@ fn creases(
 
 /// `kf_PiecesInFace`: the pieces of `curve` that lie inside the face (its runs classified in
 /// the face), as trimmed copies. Runs along the face's boundary, or outside it, are left out.
-fn pieces_in_face(k: &Kernel, b: &Brep, f: FaceId, curve: &Curve, tol: f64) -> Result<Vec<Curve>> {
+/// The classification runs on `cache`'s copy of `b`, made on first use: callers whose `b` does
+/// not change between calls share one, so the body is copied once, not once per curve.
+fn pieces_in_face(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    curve: &Curve,
+    tol: f64,
+    cache: &mut CurveOnClassifyCache,
+) -> Result<Vec<Curve>> {
     let natural = curve.natural_interval();
     let curves = [curve.copy(k)?];
     let objects = IntersectObjects {
@@ -226,7 +235,9 @@ fn pieces_in_face(k: &Kernel, b: &Brep, f: FaceId, curve: &Curve, tol: f64) -> R
             ..ResetOptions::default()
         },
     )?;
-    curve_on_classify(k, b, f, &objects, true, &mut class, true, false, true)?;
+    curve_on_classify_cached(
+        k, b, f, &objects, true, &mut class, true, false, true, cache,
+    )?;
     let closed = curve.is_closed(k, &natural, tol)?;
     let mut out = Vec::new();
     for (j, interval) in class.intervals().iter().enumerate() {
@@ -731,8 +742,13 @@ impl FilletSession<'_> {
         // per continued wall of a boss, the round's surface its creases lie on (when one)
         let mut wall_round: BTreeMap<FaceId, Option<FaceId>> = BTreeMap::new();
         // the walls are read from one copy of each body they lie in, made at its first wall and
-        // dropped after this loop, which changes only the sheet's own faces (`creases`)
+        // dropped after this loop, which changes only the sheet's own faces (`creases`); the
+        // copies do not change, so each one's pieces are classified on one snapshot of it
         let (mut sheet_copy, mut target_copy): (Option<Brep>, Option<Brep>) = (None, None);
+        let (mut sheet_copy_cache, mut target_copy_cache) = (
+            CurveOnClassifyCache::default(),
+            CurveOnClassifyCache::default(),
+        );
         for feature in &mut features {
             if feature.boss && feature.walls.is_empty() {
                 // a boss whose walls aren't upright: reached when its footprint's rim crosses a
@@ -759,10 +775,14 @@ impl FilletSession<'_> {
                 continue;
             }
             for wall in feature.walls.clone() {
-                let (copy, body) = if feature.boss {
-                    (&mut sheet_copy, &*sheet)
+                let (copy, body, wall_cache) = if feature.boss {
+                    (&mut sheet_copy, &*sheet, &mut sheet_copy_cache)
                 } else {
-                    (&mut target_copy, &*self.objects.target)
+                    (
+                        &mut target_copy,
+                        &*self.objects.target,
+                        &mut target_copy_cache,
+                    )
                 };
                 let wall_body: &Brep = if let Some(copy) = copy {
                     copy
@@ -779,10 +799,12 @@ impl FilletSession<'_> {
                     let found = creases(k, sheet, sheet_face, wall_body, wall, crease_tol)?;
                     let mut on_wall = Vec::new();
                     for curve in &found {
-                        on_wall.extend(pieces_in_face(k, wall_body, wall, curve, tol)?);
+                        on_wall.extend(pieces_in_face(k, wall_body, wall, curve, tol, wall_cache)?);
                     }
                     for curve in &on_wall {
-                        for piece in pieces_in_face(k, sheet, sheet_face, curve, tol)? {
+                        // the sheet changes in this loop (`creases`): a fresh copy each time
+                        let mut fresh = CurveOnClassifyCache::default();
+                        for piece in pieces_in_face(k, sheet, sheet_face, curve, tol, &mut fresh)? {
                             sheet_creases
                                 .entry(sheet_face)
                                 .or_default()
@@ -805,7 +827,7 @@ impl FilletSession<'_> {
                 }
             }
         }
-        drop((sheet_copy, target_copy));
+        drop((sheet_copy, target_copy, sheet_copy_cache, target_copy_cache));
         // the continued walls of the bosses no band reaches leave the sheet
         for feature in &mut features {
             if !feature.boss || !feature.creases.is_empty() {

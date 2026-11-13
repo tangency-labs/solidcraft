@@ -428,7 +428,8 @@ mod tests {
         assert!(deps.contains_key("serde") && !deps.contains_key("solidcraft-engine"));
         assert_eq!(path_of(&deps["solidcraft-ui-registry"]), Some("ui-registry"));
         let tess = path_of(&deps["solidcore-tess"]).unwrap();
-        assert!(Path::new(tess).is_absolute() && tess.ends_with("solidcore/crates/solidcore-tess"), "{tess}");
+        // By components: on Windows the path reads `\?\C:\...\solidcore\crates\solidcore-tess`.
+        assert!(Path::new(tess).is_absolute() && Path::new(tess).ends_with("solidcore/crates/solidcore-tess"), "{tess}");
         assert!(ws.contains_key("package") && ws.contains_key("lints") && m.contains_key("profile"));
         let winit = path_of(&m["patch"]["crates-io"]["winit"]).unwrap();
         assert!(Path::new(winit).is_absolute() && winit.ends_with("vendor/winit"));
