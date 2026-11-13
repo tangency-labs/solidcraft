@@ -528,7 +528,10 @@ pub fn stretch_cvs(
     .map_err(|_| Error::Argument)?;
     let mut out = curve.clone();
     for &i in picked {
-        let to = stretched.get(i).map(|p| [p.x, p.y, p.z]).ok_or(Error::Argument)?;
+        let to = stretched
+            .get(i)
+            .map(|p| [p.x, p.y, p.z])
+            .ok_or(Error::Argument)?;
         if !coord_ok(&to) {
             return Err(Error::Argument);
         }

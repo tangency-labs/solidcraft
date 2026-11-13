@@ -36,8 +36,16 @@ fn near(a: [f64; 3], b: [f64; 3]) -> bool {
 
 #[test]
 fn the_pivot_stays_the_handle_moves_whole_and_halfway_moves_half() {
-    let out = stretch_cvs(&row(), &[0, 1, 2, 3, 4], 0, 4, [0.0, 4.0, 0.0], Stretch::Linear, None)
-        .unwrap();
+    let out = stretch_cvs(
+        &row(),
+        &[0, 1, 2, 3, 4],
+        0,
+        4,
+        [0.0, 4.0, 0.0],
+        Stretch::Linear,
+        None,
+    )
+    .unwrap();
     let p = cvs(&out);
     assert!(near(p[0], [0.0, 0.0, 5.0]), "pivot: {p:?}");
     assert!(near(p[4], [8.0, 4.0, 5.0]), "handle: {p:?}");
@@ -46,12 +54,24 @@ fn the_pivot_stays_the_handle_moves_whole_and_halfway_moves_half() {
 
 #[test]
 fn without_falloff_every_picked_cv_moves_whole() {
-    let out = stretch_cvs(&row(), &[1, 2, 3], 0, 4, [1.0, 1.0, 1.0], Stretch::None, None).unwrap();
+    let out = stretch_cvs(
+        &row(),
+        &[1, 2, 3],
+        0,
+        4,
+        [1.0, 1.0, 1.0],
+        Stretch::None,
+        None,
+    )
+    .unwrap();
     let p = cvs(&out);
     for i in 1..=3 {
         assert!(near(p[i], [2.0 * i as f64 + 1.0, 1.0, 6.0]), "{i}: {p:?}");
     }
-    assert!(near(p[0], [0.0, 0.0, 5.0]) && near(p[4], [8.0, 0.0, 5.0]), "{p:?}");
+    assert!(
+        near(p[0], [0.0, 0.0, 5.0]) && near(p[4], [8.0, 0.0, 5.0]),
+        "{p:?}"
+    );
 }
 
 #[test]
@@ -67,10 +87,21 @@ fn kept_in_its_plane_a_planar_curve_stays_planar() {
         ],
     };
     let plane = plane_of(std::slice::from_ref(&wave)).unwrap().unwrap();
-    let out = stretch_cvs(&wave, &[1, 2, 3, 4], 0, 4, [0.0, 2.0, 7.0], Stretch::Linear, Some(plane))
-        .unwrap();
+    let out = stretch_cvs(
+        &wave,
+        &[1, 2, 3, 4],
+        0,
+        4,
+        [0.0, 2.0, 7.0],
+        Stretch::Linear,
+        Some(plane),
+    )
+    .unwrap();
     assert!(plane_of(&[out.clone()]).unwrap().is_some(), "{out:?}");
-    assert!(cvs(&out).iter().all(|p| (p[2] - 5.0).abs() < 1e-9), "{out:?}");
+    assert!(
+        cvs(&out).iter().all(|p| (p[2] - 5.0).abs() < 1e-9),
+        "{out:?}"
+    );
 }
 
 #[test]

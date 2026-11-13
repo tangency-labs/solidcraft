@@ -38,12 +38,14 @@ fn finite(v: Vec3) -> bool {
 /// The control polygon's length from point `from` to point `to` (the legs between them).
 fn polygon_length(points: &[Point3], from: usize, to: usize) -> f64 {
     let (lo, hi) = if from <= to { (from, to) } else { (to, from) };
-    points
-        .get(lo..=hi)
-        .map_or(0.0, |run| run.windows(2).map(|w| match w {
-            [a, b] => a.distance(*b),
-            _ => 0.0,
-        }).sum())
+    points.get(lo..=hi).map_or(0.0, |run| {
+        run.windows(2)
+            .map(|w| match w {
+                [a, b] => a.distance(*b),
+                _ => 0.0,
+            })
+            .sum()
+    })
 }
 
 /// `points` with those `picked` moved: each by `delta` (taken into the plane of unit `normal`
