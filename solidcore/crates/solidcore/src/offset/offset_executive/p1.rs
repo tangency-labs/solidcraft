@@ -232,6 +232,18 @@ pub struct OffsetExecutive {
     /// edge uses ([`Self::keep_unmoved_edges`]).
     pub(super) kept_edges: BTreeSet<EdgeId>,
     pub(super) kept_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream (issue #13622's hook): the original edges the crossed-boundary
+    /// reconstruction owns, supplied by the caller that consumes the vanish obligations
+    /// ([`Self::set_reconstruction_eligibility`],
+    /// `crate::topology::brep::local_operation`). `None` — an offset or a shell, no
+    /// eligibility provider — owns no vanish: one is refused as it always was.
+    pub(super) reconstruction_eligible: Option<BTreeSet<EdgeId>>,
+    /// Not upstream (issue #13622's hook): the vanish obligations the gap pass deferred
+    /// (`offset::offset_executive::step_gaps`, `close_loop_gap`), one per original edge
+    /// (id order, deduped). The reconstruction discharges each one or refuses typed; the
+    /// caller collects them before the executive goes
+    /// (`crate::topology::brep::local_operation`).
+    pub(super) pending_vanishes: BTreeSet<EdgeId>,
     /// Not upstream: the uses of the original edges of a local operation where the two new
     /// surfaces cross ([`super::reach::LocalReach::crossing`]), tangent in the input or not.
     crossing_edgeuses: BTreeSet<EdgeuseId>,
@@ -300,6 +312,8 @@ impl OffsetExecutive {
             moved_faces: Vec::new(),
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
+            reconstruction_eligible: None,
+            pending_vanishes: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
@@ -467,6 +481,57 @@ impl OffsetExecutive {
     /// original edge use `edgeuse` ([`super::reach::LocalReach::crossing`]).
     pub(super) fn crosses_at_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
         self.crossing_edgeuses.contains(&edgeuse)
+    }
+
+    /// Not upstream: the edges [`Self::keep_unmoved_edges`] kept, each with its id and
+    /// its curve over its interval with the tolerance each must stay clear within (its
+    /// own, at least the body's), for the local operation's check that the faces it moved
+    /// stay clear of them ([`super::clearance::all_clear`]) and for the crossed-boundary
+    /// reconstruction's event classification (`topology::brep::local_operation`,
+    /// issue #13622), which names the events by the original edge's id.
+    /// `original` is the B-rep the executive ran on.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for a dangling id; `the edge's curve` is missing for a kept
+    /// edge without one.
+    pub(crate) fn kept_edge_curves(
+        &self,
+        original: &Brep,
+    ) -> Result<Vec<(EdgeId, super::clearance::KeptEdge)>> {
+        let mut kept = Vec::new();
+        for &e in &self.kept_edges {
+            let curve = edge::curve(original, e)?
+                .ok_or_else(|| SolidError::offset_missing(OP, "the edge's curve"))?;
+            kept.push((
+                e,
+                super::clearance::KeptEdge {
+                    curve: curve.clone(),
+                    interval: edge::interval(original, e)?,
+                    tolerance: edge::tolerance(original, e)?.max(original.tolerance()),
+                },
+            ));
+        }
+        Ok(kept)
+    }
+
+    /// Not upstream (issue #13622's hook): the eligibility provider's set of original
+    /// edges the crossed-boundary reconstruction owns
+    /// (`crate::topology::brep::local_operation`'s `crossable`). The gap pass defers the
+    /// vanish of an edge whose original is in it — where its correspondence is complete
+    /// and unambiguous ([`Self::owned_vanishing_edge`]) — instead of refusing it,
+    /// recording the obligation in [`Self::pending_vanishes`]. A caller that provides no
+    /// set (an offset or a shell) defers nothing.
+    pub(crate) fn set_reconstruction_eligibility(&mut self, eligible: BTreeSet<EdgeId>) {
+        self.reconstruction_eligible = Some(eligible);
+    }
+
+    /// Not upstream (issue #13622's hook): the vanish obligations the gap pass deferred
+    /// ([`Self::pending_vanishes`]), for the caller to collect before this executive
+    /// goes and hand to the crossed-boundary reconstruction.
+    #[must_use]
+    pub(crate) fn pending_vanishes(&self) -> &BTreeSet<EdgeId> {
+        &self.pending_vanishes
     }
 
     /// Sets `m_eOffsetOperation`.
@@ -3414,6 +3479,69 @@ mod tests {
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::surface::plane::Plane;
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
+
+    /// (issue #13622's hook) A vanish is the crossed-boundary reconstruction's only
+    /// where an eligibility provider says so and the correspondence through the offset
+    /// uses is complete and unambiguous: without a provider nothing is owned, a missing
+    /// mapping and an offset use mapping to two original uses own nothing, the two sides
+    /// resolving to different original edges own nothing, and an edge outside the
+    /// eligibility set is not owned — in every such case the vanish stays the gap pass's
+    /// refusal.
+    #[test]
+    fn a_vanish_is_owned_only_with_eligibility_and_unambiguous_provenance() {
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::edge;
+        use crate::topology::edgeuse::p1 as eu;
+        let mut k = Kernel::default();
+        let original = create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let offset = create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let orig_edges: Vec<EdgeId> = original.edges().iter().map(|(e, _)| e).collect();
+        let off_edges: Vec<EdgeId> = offset.edges().iter().map(|(e, _)| e).collect();
+        let ou = edge::edgeuses(&original, orig_edges[0], None, None).unwrap()[0];
+        let other_ou = edge::edgeuses(&original, orig_edges[1], None, None).unwrap()[0];
+        let u = edge::edgeuses(&offset, off_edges[0], None, None).unwrap()[0];
+        let mate = eu::mate(&offset, u).unwrap().unwrap();
+        let owned_edge = eu::edge(&original, ou).unwrap().unwrap();
+        let other_edge = eu::edge(&original, other_ou).unwrap().unwrap();
+        let owns = |executive: &OffsetExecutive| {
+            executive
+                .owned_vanishing_edge(&original, &offset, u)
+                .unwrap()
+        };
+        // complete unambiguous provenance, but no eligibility provider (an offset or a
+        // shell): nothing is owned
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        executive.relate_edgeuses(ou, u);
+        assert_eq!(owns(&executive), None);
+        // the provider holds the edge: owned
+        executive.set_reconstruction_eligibility(BTreeSet::from([owned_edge]));
+        assert_eq!(owns(&executive), Some(owned_edge));
+        // the provider holds another edge only: not owned
+        executive.set_reconstruction_eligibility(BTreeSet::from([other_edge]));
+        assert_eq!(owns(&executive), None);
+        // missing provenance: no correspondence through the offset uses
+        let executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        assert_eq!(owns(&executive), None);
+        // ambiguous provenance: the offset use maps to two original uses
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        executive.set_reconstruction_eligibility(BTreeSet::from([owned_edge]));
+        executive.relate_edgeuses(ou, u);
+        executive.relate_edgeuses(other_ou, u);
+        assert_eq!(owns(&executive), None);
+        // the edge's two sides resolve to different original edges: ambiguous
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        executive.set_reconstruction_eligibility(BTreeSet::from([owned_edge, other_edge]));
+        executive.relate_edgeuses(ou, u);
+        executive.relate_edgeuses(other_ou, mate);
+        assert_eq!(owns(&executive), None);
+        // one side recorded is enough (the relation restores both from either), and the
+        // mate's record alone resolves just as well
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        executive.set_reconstruction_eligibility(BTreeSet::from([owned_edge]));
+        executive.relate_edgeuses(ou, mate);
+        assert_eq!(owns(&executive), Some(owned_edge));
+    }
 
     /// The fork's tangency-labs/smlib@9d8ace9 (tangency-labs/solidcore#1795, WR-344):
     /// under `offset_extended_edges_mated` an edge whose mate failed is left out of the

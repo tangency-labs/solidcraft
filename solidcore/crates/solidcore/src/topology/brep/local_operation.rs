@@ -39,17 +39,21 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::offset::OffsetFailure;
+use crate::curve::curve::Curve;
+use crate::error::offset::{BoundaryFault, OffsetFailure, ReconstructionRefusal};
 use crate::error::{EntityRef, Failure, Result, SolidError};
-use crate::geom::attribute::ObjectKey;
+use crate::geom::attribute::{Attribute, Behavior, ObjectKey};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::expansion as exact;
+use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::mass::enclosure::VolumeSign;
-use crate::math::Vec3;
+use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, NOW};
+use crate::offset::offset_executive::clearance::{self, KeptEdge, MovedFace};
+use crate::offset::offset_executive::deferred_edge_vanish;
 use crate::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
 use crate::offset::offset_executive::p2::OffsetNotifications;
 use crate::query::brep::{calculate_bounding_box, BoundingBoxOptions};
@@ -145,7 +149,8 @@ pub fn local_operation(
     }
 }
 
-/// [`local_operation`] on the copy of `b` it edits.
+/// [`local_operation`] on the copy of `b` it edits; [`local_operation_recorded`] for
+/// the reconstruction's records.
 fn local_operation_on(
     k: &mut Kernel,
     b: &mut Brep,
@@ -153,6 +158,19 @@ fn local_operation_on(
     surfaces: Vec<Surface>,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<()> {
+    local_operation_recorded(k, b, faces, surfaces, notifications).map(|_| ())
+}
+
+/// [`local_operation_on`] with the crossed-boundary reconstruction's records (issue
+/// #13622) returned: the events it fired, the correspondence map and the
+/// endpoint-contact proofs the kept-edge gate takes.
+fn local_operation_recorded(
+    k: &mut Kernel,
+    b: &mut Brep,
+    faces: &[FaceId],
+    surfaces: Vec<Surface>,
+    notifications: &mut OffsetNotifications<'_>,
+) -> Result<Reconstruction> {
     // (not upstream) the input's standing, measured once before anything changes: the
     // final gate (`refuse_unsound`) holds the operation to what it adds
     let input = validation::standing(k, &mut b.clone_standing_for_self()?)?;
@@ -293,13 +311,46 @@ fn local_operation_on(
     // A face's surface is extended as far as its neighbours' new surfaces meet it, and as
     // far again as they moved beside it (not upstream, whose margin is five half-radii of
     // the sphere bounding the box: `local_extension_reach`). The edges whose faces and
-    // vertices' faces all keep their surfaces are kept as they are, not intersected again
-    // (`OffsetExecutive::keeps_edge`).
+    // vertices' faces all keep their surfaces, and whose whole curve is certified clear of
+    // every moved surface (a ball enclosure of each curve cell against the surface's
+    // certified distance bound, rounding counted: `clearance::separated`, #2971), are
+    // kept as they are, not intersected again (`OffsetExecutive::keeps_edge`).
     executive.set_local_surfaces(&all_faces, new_list, &moved);
     // the shell faces get copied without being offset: none
     executive.set_shell_faces(&[]);
     // extend/intersect to fill new convex edge gaps rather than adding a fillet
     executive.set_extend_convex_edges(true);
+
+    // (not upstream) each moved face carries a private mark through the operation, as a
+    // caller's mark does (`Behavior::Copy`, found on the result's faces below): the
+    // faces of the result that lie where the operation moved, with their trimmed regions,
+    // are what the kept edges must stay clear of (`refuse_kept_edges_not_clear`), and
+    // each original edge carries its arena index the same way (issue #13622's
+    // correspondence map, [`mark_original_edges`])
+    for &face in &moved {
+        b.add_attribute(
+            EntityRef::Face(face),
+            Attribute::long(MOVED_FACE_MARK, 1, Behavior::Copy),
+        )?;
+    }
+    mark_original_edges(b)?;
+    // (issue #13622) the edges whose faces all keep their surfaces: the ones a moved
+    // face can cross (the defect), whose events the reconstruction classifies. An edge
+    // beside a moved face is rebuilt by the executive and reaches the repair only
+    // through the cut corner's gaps.
+    let mut crossable: BTreeSet<crate::topology::EdgeId> = BTreeSet::new();
+    for e in bp1::edges(b, None)? {
+        let faces = crate::topology::edge::faces(b, e, None)?;
+        if faces.iter().all(|f| !moved.contains(f)) {
+            crossable.insert(e);
+        }
+    }
+    // (issue #13622's hook) the eligibility provider: the gap pass defers the vanish of
+    // an edge the reconstruction owns (its original in `crossable`, its correspondence
+    // complete and unambiguous) instead of refusing it, and this operation consumes the
+    // obligations below. A caller that provides no eligibility — an offset or a shell —
+    // defers nothing.
+    executive.set_reconstruction_eligibility(crossable.clone());
 
     // (not upstream) `b`'s own attributes go to the offset under the original
     // identities, as upstream's live on the faces it copies (`SM_NO_COPY` of each
@@ -319,6 +370,18 @@ fn local_operation_on(
     // whose status is then `SM_ERR`) the offset's error is the operation's, with its own
     // status and reason, as the reach's and the final gate's refusals are
     let offset = executive.do_extended_offset(k, Some(&mut *b), notifications);
+    // the edges it kept, as they were on `b` (the faces of `b` go with `move_faces`)
+    let kept = match &offset {
+        Ok(_) => executive.kept_edge_curves(b),
+        Err(_) => Ok(Vec::new()),
+    };
+    // (issue #13622's hook) the gap pass's vanish obligations, collected with the kept
+    // edges before the executive goes: the reconstruction discharges each one (its
+    // removal certified, every corresponding result edge severed) or refuses typed
+    let vanished = match &offset {
+        Ok(_) => executive.pending_vanishes().clone(),
+        Err(_) => BTreeSet::new(),
+    };
     drop(executive);
     let new_brep = offset.and_then(|mut new_brep| {
         // the offset B-rep's objects carry what the offset gave them
@@ -335,6 +398,7 @@ fn local_operation_on(
             .retain_rekeyed(&|key| (!seeded.contains(&key)).then_some(key))?;
     }
     let mut new_brep = new_brep?;
+    let kept = kept?;
 
     // remove all faces from this Brep, then move all faces of the new Brep into it
     // (`CopyFaces` with a merge, which also grows this Brep's tolerance to the new one's);
@@ -347,7 +411,139 @@ fn local_operation_on(
     // (not upstream: the port's cached topology fields, true again for the caller)
     b.refresh_cached_topology();
     moved?;
-    refuse_unsound(k, b, &input)
+    // (issue #13622) the crossed-boundary reconstruction: the correspondence map from
+    // the marks the copy carried, then the repair of every boundary a moved face
+    // crossed (before the kept-edge gate, whose kept list it shrinks to the edges it
+    // left as they were)
+    let map = capture_edge_correspondence(b)?;
+    let reconstruction =
+        reconstruct_crossed_boundaries(k, b, &map, &kept, &crossable, &vanished, notifications)?;
+    refuse_kept_edges_not_clear(k, b, &kept, &reconstruction)?;
+    refuse_unsound(k, b, &input)?;
+    Ok(reconstruction)
+}
+
+/// The id of the private mark the moved faces carry through a local operation (below the
+/// application range, which starts above 10000).
+const MOVED_FACE_MARK: u64 = 9_999;
+
+/// (not upstream) The kept edges are proved clear of the faces the operation moved, or the
+/// operation is refused ([`Unsoundness::KeptEdgeNotClear`](crate::error::offset::Unsoundness)),
+/// the input as it came in.
+///
+/// The body's check has no face-face intersection test, so a face that crosses an edge
+/// the operation kept (an edge whose faces and vertices' faces all keep their surfaces: the
+/// executive does not intersect it again) leaves a self-intersecting body it cannot see. The
+/// certified bound (issue #2971): over the whole curve of each kept edge, a ball enclosure
+/// of each cell, rounding counted, and a surface distance lower bound to the part of each
+/// moved face's surface over the box of its trim curves in its parameters
+/// ([`clearance::all_clear`], `surface_distance_lower_bound`), must exceed the sum of the
+/// edge's and the face's tolerances. A moved face is found by its mark on the result; its
+/// trimmed region is the surface's part over its loops' boxes (the whole surface when a
+/// loop has none), not the surface's extension, which a plane's net makes wider than any
+/// part. No edge is intersected again: an edge not proved clear refuses the operation.
+///
+/// A kept edge the crossed-boundary reconstruction rebuilt (issue #13622) is not kept
+/// as it was: its crossing became a certified clip at its end
+/// ([`Reconstruction::proofs`], the records the kept-edge gate is wired to next), so it
+/// drops out of this list and only the edges left untouched are held clear.
+fn refuse_kept_edges_not_clear(
+    k: &mut Kernel,
+    b: &mut Brep,
+    kept: &[(crate::topology::EdgeId, KeptEdge)],
+    reconstruction: &Reconstruction,
+) -> Result<()> {
+    use crate::error::offset::Unsoundness;
+    use crate::topology::loopuse;
+    // the marks come off the result whatever follows
+    let mut moved_faces = Vec::new();
+    for face in bp1::faces(b, None)? {
+        let handles: Vec<_> = b
+            .entity_attributes(EntityRef::Face(face))
+            .into_iter()
+            .filter(|(_, a)| a.attribute_id() == MOVED_FACE_MARK)
+            .map(|(h, _)| h)
+            .collect();
+        for h in &handles {
+            b.remove_attribute(EntityRef::Face(face), *h)?;
+        }
+        if !handles.is_empty() {
+            moved_faces.push(face);
+        }
+    }
+    let kept: Vec<KeptEdge> = kept
+        .iter()
+        .filter(|(e, _)| !reconstruction.reconstructed_kept().contains(e))
+        .map(|(_, edge)| edge.clone())
+        .collect();
+    // a reconstructed kept edge's crossing is certified by its recorded endpoint
+    // contacts (`Reconstruction::proofs`, the records the gate is wired to): every
+    // SURVIVING rebuilt result edge of the group carries its OWN
+    // `ContactProof::Proved` (lamina twins map one original to several result edges,
+    // and one twin's proof never certifies another), while a severed or removed edge
+    // needs no proof (it is not in the result). A group where one twin has a proof and
+    // another surviving rebuilt twin does not refuses.
+    for original in reconstruction.reconstructed_kept() {
+        for result_edge in reconstruction
+            .map()
+            .get(original)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+        {
+            if !b.edges().iter().any(|(x, _)| x == *result_edge) {
+                // severed or removed: gone from the result, no proof to carry
+                continue;
+            }
+            let proved = reconstruction.proofs().iter().any(|(e, proof)| {
+                e == result_edge
+                    && matches!(proof, clearance::endpoint_contact::ContactProof::Proved(_))
+            });
+            if !proved {
+                return Err(Failure::new(
+                    OP,
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::ClipUncertified { edge: *original },
+                    },
+                )
+                .into_error());
+            }
+        }
+    }
+    if kept.is_empty() || moved_faces.is_empty() {
+        return Ok(());
+    }
+    // (the trim curves a face lacks are made on a private copy)
+    let mut copy = b.clone_standing_for_self()?;
+    let mut faces = Vec::new();
+    for face in moved_faces {
+        let surface = face_ops::surface(&copy, face)?
+            .ok_or_else(|| null("the face's surface"))?
+            .clone();
+        let mut uv_box: Option<Extent2d> = None;
+        for l in face_ops::loops(&copy, face, false, None)? {
+            let Some(span) = loopuse::loop_uv_span(k, &mut copy, l)? else {
+                uv_box = None;
+                break;
+            };
+            uv_box = Some(uv_box.map_or(span, |u| u.union(&span)));
+        }
+        faces.push(MovedFace {
+            surface,
+            uv_box,
+            tolerance: copy.face(face)?.tolerance.max(copy.tolerance()),
+        });
+    }
+    if clearance::all_clear(k, &kept, &faces)? {
+        Ok(())
+    } else {
+        Err(Failure::new(
+            OP,
+            OffsetFailure::Unsound {
+                what: Unsoundness::KeptEdgeNotClear,
+            },
+        )
+        .into_error())
+    }
 }
 
 /// (not upstream) The local operation's final gate: the body it built is refused when it
@@ -548,7 +744,7 @@ fn coordinate(p: crate::geom::vector2d::Point2, in_u: bool) -> f64 {
 /// # Errors
 ///
 /// Those of the line's NURB and of the end evaluations.
-fn uv_line(k: &Kernel, curve: &crate::curve::curve::Curve) -> Result<Option<UvLine>> {
+fn uv_line(k: &Kernel, curve: &Curve) -> Result<Option<UvLine>> {
     use crate::curve::curve::CurveKind;
     use crate::geom::vector2d::Point2;
     use crate::nurbs::math::NOW;
@@ -639,7 +835,7 @@ fn seam_gap(
     k: &Kernel,
     surface: &Surface,
     in_u: bool,
-    domain: &crate::geom::extent2d::Extent2d,
+    domain: &Extent2d,
 ) -> Result<Option<crate::geom::certified::Bounded>> {
     use crate::geom::certified::{distance, gamma, Bounded};
     use crate::geom::vector3d::Point3;
@@ -751,7 +947,7 @@ fn cone_seam_gap(
     surface: &Surface,
     cone: &crate::surface::cone::Cone,
     in_u: bool,
-    domain: &crate::geom::extent2d::Extent2d,
+    domain: &Extent2d,
 ) -> Result<Option<crate::geom::certified::Bounded>> {
     use crate::geom::certified::{distance, gamma, Bounded};
     use crate::geom::vector2d::Point2;
@@ -1298,6 +1494,2002 @@ fn move_faces(k: &mut Kernel, b: &mut Brep, new_brep: &mut Brep) -> Result<()> {
     )
 }
 
+// ---- The crossed-boundary reconstruction (issue #13622) --------------------------
+//
+// A local operation whose moved face crosses an edge that keeps its surfaces is not
+// refused and not returned with the crossing kept: the boundary around the crossing is
+// reconstructed after `move_faces` (`reconstruct_crossed_boundaries`), from certified
+// clips and completed trims only:
+//
+// 1. every edge whose faces all keep their surfaces (the issue's "an edge that keeps
+//    its surfaces") is classified against every moved face (`classify_edge_crossing`):
+//    clear, trimmed at a certified clip point on the solid's side of the cut, or
+//    removed where the cut leaves nothing;
+// 2. the removed edges' lamina twins resolve (`merge_lamina_twins`) and sever
+//    (`sever_edge`), the cut corner's diverging ends are split, re-trimmed to their
+//    intended points and glued there (`split_vertex`, `retrim_edge`,
+//    `p5::glue_vertices`), and a bridge edge closes each corner gap (`insert_bridge`);
+// 3. the region pair `move_faces` dropped is restored (`restore_region_pair`), the
+//    affected tolerances are re-measured, never grown
+//    (`tighten_reconstruction_tolerances`), and the completed boundary is validated
+//    (`validate_completed_boundary`) before anything is returned.
+//
+// The pass records, per rebuilt edge, its endpoint-contact proof
+// (`clearance::endpoint_contact::separated_ending_on_face`) for the kept-edge gate. The
+// correspondence map names the result edges of each original (the private
+// [`CORRESPONDENCE_MARK`] marks, removed before the operation returns). Anything the
+// pattern cannot certify refuses typed (`OffsetFailure::Reconstruction`): nothing
+// uncertain is ever built. The cut is certified on a plane only (the endpoint
+// certificate's documented scope): where a non-planar moved face leaves a cut
+// undecided, the reconstruction refuses `SurfaceUncertified` when it engages, and does
+// not engage otherwise (the gates decide, as before).
+
+/// The id of the private mark naming the original edge a result edge was rebuilt from
+/// (below the application range, which starts above 10000). It is carried through the
+/// operation as a caller's mark is ([`Behavior::Copy`], the [`MOVED_FACE_MARK`] pattern
+/// on edges): added to every original edge before the offset, copied onto the offset
+/// edges at the executive's edge match (`notify_edge_and_vertices`'s `Copy`), and copied
+/// again by `move_faces`' merge onto the result's edges. Read and removed by
+/// [`capture_edge_correspondence`].
+const CORRESPONDENCE_MARK: u64 = 9_998;
+
+/// The original-edge correspondence of one local operation (issue #13622): each
+/// original edge to the result edges carrying its mark. One original may
+/// map to several result edges (the lamina twins of a rebuilt edge); a result edge
+/// names at most one original (one mark id per object).
+pub(crate) type EdgeMap = BTreeMap<crate::topology::EdgeId, Vec<crate::topology::EdgeId>>;
+
+/// Marks every original edge of `b` with its arena index ([`CORRESPONDENCE_MARK`]),
+/// beside the moved faces' [`MOVED_FACE_MARK`]s.
+fn mark_original_edges(b: &mut Brep) -> Result<()> {
+    let edges: Vec<_> = b.edges().iter().map(|(e, _)| e).collect();
+    for e in edges {
+        b.add_attribute(
+            EntityRef::Edge(e),
+            Attribute::long(CORRESPONDENCE_MARK, i64::from(e.index()), Behavior::Copy),
+        )?;
+    }
+    Ok(())
+}
+
+/// The correspondence map of the result's edges, read from their marks; the marks are
+/// removed on the way (they are private to the operation and no mark outlives it: a
+/// refusal rolls the body back with them, a success strips them here).
+fn capture_edge_correspondence(b: &mut Brep) -> Result<EdgeMap> {
+    let mut out: EdgeMap = BTreeMap::new();
+    for e in b.edges().iter().map(|(e, _)| e).collect::<Vec<_>>() {
+        let handles: Vec<_> = b
+            .entity_attributes(EntityRef::Edge(e))
+            .into_iter()
+            .filter(|(_, a)| a.attribute_id() == CORRESPONDENCE_MARK)
+            .map(|(h, a)| (h, a.long_value()))
+            .collect();
+        for (h, value) in handles {
+            if let Some(index) = value.and_then(|i| u32::try_from(i).ok()) {
+                out.entry(crate::topology::EdgeId::from_index(index))
+                    .or_default()
+                    .push(e);
+            }
+            b.remove_attribute(EntityRef::Edge(e), h)?;
+        }
+    }
+    for es in out.values_mut() {
+        es.sort_unstable();
+        es.dedup();
+    }
+    Ok(out)
+}
+
+/// A moved result face and everything the reconstruction needs about it (issue #13622):
+/// the surface over the box of its trim curves (the [`MOVED_FACE_MARK`] as
+/// [`refuse_kept_edges_not_clear`] reads it), its trimmed region as the loops' UV trim
+/// curves (the clip's region membership), and its cut: the plane's origin and OUTWARD
+/// normal (the solid stays where `n · (p - origin) <= 0`), `None` for a face that is not
+/// planar (the endpoint certificate's documented scope).
+struct MovedFaceCut {
+    face: FaceId,
+    moved: MovedFace,
+    region: clearance::endpoint_contact::TrimRegion,
+    plane: Option<PlaneCut>,
+}
+
+/// A planar moved face's cut.
+#[derive(Debug, Clone, Copy)]
+struct PlaneCut {
+    origin: Point3,
+    normal: Vec3,
+}
+
+impl PlaneCut {
+    /// The moved face's plane, oriented outward (the face's surface normal, turned as
+    /// its primary face use is); `None` for a face that is not planar.
+    fn of(surface: &Surface, outward_same: bool) -> Option<Self> {
+        let SurfaceKind::Plane(p) = surface.kind() else {
+            return None;
+        };
+        let normal = p.evaluate_normal();
+        Some(Self {
+            origin: p.position().origin(),
+            normal: if outward_same { normal } else { normal * -1.0 },
+        })
+    }
+
+    /// The signed side of `p` (`> 0` outside the solid: the moved face's outward side).
+    fn side(&self, p: Point3) -> f64 {
+        self.normal.dot(p - self.origin)
+    }
+}
+
+/// The moved faces of the result (the [`MOVED_FACE_MARK`]s), with their regions and
+/// cuts. The marks stay on the body: [`refuse_kept_edges_not_clear`] removes them after
+/// the reconstruction. The UV trim curves a face lacks are made on it (the pass edits
+/// the body anyway, and the region cannot be read without them).
+fn moved_result_faces(k: &mut Kernel, b: &mut Brep) -> Result<Vec<MovedFaceCut>> {
+    use crate::offset::offset_executive::clearance::endpoint_contact::{
+        TrimLoop, TrimRegion, TrimSegment,
+    };
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::edgeuse::p3 as eu3;
+    let mut out = Vec::new();
+    for face in bp1::faces(b, None)? {
+        let has_mark = b
+            .entity_attributes(EntityRef::Face(face))
+            .into_iter()
+            .any(|(_, a)| a.attribute_id() == MOVED_FACE_MARK);
+        if !has_mark {
+            continue;
+        }
+        let surface = face_ops::surface(b, face)?
+            .ok_or_else(|| null("the face's surface"))?
+            .clone();
+        let mut uv_box: Option<Extent2d> = None;
+        for l in face_ops::loops(b, face, false, None)? {
+            let Some(span) = crate::topology::loopuse::loop_uv_span(k, b, l)? else {
+                uv_box = None;
+                break;
+            };
+            uv_box = Some(uv_box.map_or(span, |u| u.union(&span)));
+        }
+        // the trimmed region: the primary face use's loops, each its edge uses' UV trim
+        // curves (the other face use's loops are the same region read the other way, and
+        // parity over both would count every crossing twice)
+        let mut region = TrimRegion { loops: Vec::new() };
+        let primary = b.face(face)?.faceuse;
+        let (fu_a, fu_z) = face_ops::faceuses(b, face)?;
+        for fu in [fu_a, fu_z].into_iter().flatten() {
+            if Some(fu) != primary {
+                continue;
+            }
+            for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
+                let mut segments = Vec::new();
+                for eu in eu1::loopuse_edgeuses(b, lu)? {
+                    if eu1::uv_trim_curve(b, eu)?.0.is_none() {
+                        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+                    }
+                    let Some(curve) = eu1::uv_trim_curve(b, eu)?.0 else {
+                        continue;
+                    };
+                    // the segment covers the trim curve's own parameter range (the UV
+                    // trim is built over the edge use's span)
+                    segments.push(TrimSegment {
+                        interval: curve.natural_interval(),
+                        curve: curve.clone(),
+                    });
+                }
+                region.loops.push(TrimLoop { segments });
+            }
+        }
+        let primary = primary.ok_or_else(|| null("the face's face use"))?;
+        let outward_same = eu1::faceuse_orientation(b, primary)?
+            == crate::nurbs::b_spline_surface_n_lib::OrientType::Same;
+        let plane = PlaneCut::of(&surface, outward_same);
+        out.push(MovedFaceCut {
+            face,
+            moved: MovedFace {
+                surface,
+                uv_box,
+                tolerance: b.face(face)?.tolerance.max(b.tolerance()),
+            },
+            region,
+            plane,
+        });
+    }
+    Ok(out)
+}
+
+/// What a moved face does to one edge (issue #13622's events).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CrossEvent {
+    /// The edge is untouched: proved clear of the face, or the face's surface meets its
+    /// curve only off the face's trimmed region (the surface's extension).
+    Clear,
+    /// The face's cut trims the edge: `clip` (at `clip_t` of the edge's interval) is the
+    /// cut's certified point on the face, and the retained interval keeps the far side
+    /// (`removes_low`: the interval's low end goes).
+    Trimmed {
+        /// The clip point, on the face's trimmed region.
+        clip: Point3,
+        /// The clip's parameter on the edge's interval.
+        clip_t: f64,
+        /// The retained interval drops the low end of the edge's interval.
+        removes_low: bool,
+    },
+    /// The cut leaves nothing of the edge: its whole interval is on the moved face's
+    /// outward side (`clip` is where its curve meets the face).
+    Removed {
+        /// The clip point, on the face's trimmed region.
+        clip: Point3,
+    },
+}
+
+/// The event of one edge against one moved face, with the endpoint-contact proof of the
+/// retained part where the event rebuilt it ([`CrossEvent::Trimmed`]).
+#[derive(Debug)]
+struct EdgeCrossing {
+    event: CrossEvent,
+    proof: Option<clearance::endpoint_contact::ContactProof>,
+}
+
+/// The cut of `face` on the edge `curve` over `interval` (issue #13622's event):
+///
+/// - [`CrossEvent::Clear`] where [`clearance::all_clear`] proves the edge clear of the
+///   face by their summed `tolerance`, or where the cut's point certifies off the
+///   face's trimmed region (`ContactProof::Outside`), or where the edge bounds the
+///   face itself (its curve lies in the face's surface) AND the certified strict
+///   predicate confirms it clear of the trimmed region (`clearance::separated` over
+///   the trim curves' UV box). A sampled tolerance band only suggests that class: it
+///   is never accepted on its own, and where neither certificate holds and no
+///   endpoint contact certifies below, the edge is not clear (the event logic takes
+///   the clip/rebuild path or refuses);
+/// - [`CrossEvent::Trimmed`] or [`CrossEvent::Removed`] where the cut certifies: the
+///   clip is the line's meeting with the face's plane (the sides at the interval's end
+///   vertices, exact data), the retained interval is the part on the solid's side of the
+///   cut (`PlaneCut::side` at most 0), and the clip's only-contact certificate
+///   (`separated_ending_on_face`, also the record the gate takes) proves the clip
+///   in-or-on the face's trimmed region and the retained part free of further contact.
+///
+/// Nothing uncertain is decided: a moved face that is not planar refuses
+/// `SurfaceUncertified`, and an uncertifiable clip refuses `ClipUncertified`
+/// ([`OffsetFailure::Reconstruction`], issue #13622).
+fn classify_edge_crossing(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+    face: &MovedFaceCut,
+    tolerance: f64,
+    edge: crate::topology::EdgeId,
+) -> Result<EdgeCrossing> {
+    use crate::geom::extent1d::Extent1d;
+    let clear = EdgeCrossing {
+        event: CrossEvent::Clear,
+        proof: None,
+    };
+    let (t0, t1) = (interval.min(), interval.max());
+    if !(t0.is_finite() && t1.is_finite() && t0 < t1) {
+        return Err(null("the edge curve's interval of distinct ends"));
+    }
+    // 1. proved clear of the face: no decision to make
+    let kept = KeptEdge {
+        curve: curve.clone(),
+        interval: *interval,
+        tolerance,
+    };
+    if clearance::all_clear(k, &[kept], std::slice::from_ref(&face.moved))? {
+        return Ok(clear);
+    }
+    // 2. the cut is certified on a plane only (the endpoint certificate's scope)
+    let Some(plane) = face.plane else {
+        return Err(refusal(ReconstructionRefusal::SurfaceUncertified {
+            face: face.face,
+        }));
+    };
+    // 3. the clip: the line's meeting with the plane, its sides read at the interval's
+    // ends
+    let end_side = |t: f64| -> Result<f64> {
+        let p = curve.evaluate_point(k, t)?;
+        Ok(plane.side(p))
+    };
+    let (g0, g1) = (end_side(t0)?, end_side(t1)?);
+    // the edge bounds the face itself when its whole curve lies in the face's surface:
+    // the side stays within the tolerance band over the interval (its max for a line is
+    // at an end; sampled at the ends and the thirds otherwise, as production's gap
+    // measurements are, `docs/validity-and-tolerances.md` §5.2). The sampled band only
+    // SUGGESTS the class: before it classifies the edge `Clear`, the certified strict
+    // predicate must confirm it — `clearance::separated` against the moved face's
+    // trimmed region (the kept-edge test over the trim curves' UV box), never the
+    // samples alone. Without that certificate and without an endpoint contact to
+    // certify below, the edge is not clear: the event logic decides (the clip/rebuild
+    // path or a typed refusal). Anything past the band is a cut below.
+    let mut band = g0.abs().max(g1.abs());
+    for f in [0.25, 0.5, 0.75] {
+        let t = t0 + (t1 - t0) * f;
+        band = band.max(end_side(t)?.abs());
+    }
+    let bounds_face = band <= tolerance;
+    if bounds_face
+        && clearance::separated(
+            k,
+            curve,
+            interval,
+            &face.moved.surface,
+            face.moved.uv_box.as_ref(),
+            tolerance,
+        )?
+    {
+        return Ok(clear);
+    }
+    // lambda: the fraction of the interval where the side is zero
+    let lambda = if g0 == g1 {
+        if g0 <= 0.0 {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        g0 / (g0 - g1)
+    };
+    let (lo, hi) = if g1 > g0 {
+        // the side grows: the solid side is the interval's low part [0, lambda]
+        (0.0_f64, lambda)
+    } else {
+        // the side falls: the solid side is the high part [lambda, 1]
+        (lambda, 1.0_f64)
+    };
+    let width = unit_clamp(hi) - unit_clamp(lo);
+    // the cut's effect on the edge, by the lengths it removes and keeps (a cut exactly
+    // at an end rounds a hair inside the interval: the length model, not the sign of
+    // one rounding, decides). A suggested bounds-the-face edge is not accepted here
+    // either: the length model reads the same ends the band sampled.
+    let chord = end_side_chord(k, curve, t0, t1)?;
+    if !bounds_face && (1.0 - width) * chord <= tolerance {
+        // the cut trims off no part of the edge the model resolves (the clip is at its
+        // very end, or the whole edge is clear of it): the edge is untouched
+        return Ok(clear);
+    }
+    // a clip is needed: its point is the curve's meeting with the plane, proposed by
+    // the ends' affine model (exact for a line, and a bent curve's proposal fails the
+    // certificate below: nothing uncertain is built)
+    if width * chord <= tolerance {
+        // the retained part is within the tolerance of the cut: nothing of the edge
+        // stays. The clip is where the curve meets the plane; it certifies at the
+        // interval's end
+        if !(0.0..=1.0).contains(&lambda) {
+            return Err(refusal(ReconstructionRefusal::ClipUncertified { edge }));
+        }
+        let clip_t = t0 + lambda * (t1 - t0);
+        let clip = clip_point(k, curve, t0, t1, clip_t)?;
+        let proof = contact_proof(
+            k,
+            &ContactProofRequest {
+                curve,
+                retained: interval,
+                clip_t,
+                clip,
+                face,
+                tolerance,
+                edge,
+            },
+        )?;
+        return Ok(EdgeCrossing {
+            event: CrossEvent::Removed { clip },
+            proof: Some(proof),
+        });
+    }
+    // the trimmed case: the retained interval keeps one side of the clip
+    let removes_low = unit_clamp(lo) > 0.0;
+    let clip_fraction = if removes_low {
+        unit_clamp(lo)
+    } else {
+        unit_clamp(hi)
+    };
+    let clip_t = t0 + clip_fraction * (t1 - t0);
+    let clip = clip_point(k, curve, t0, t1, clip_t)?;
+    let retained = if removes_low {
+        Extent1d::from_min_max(clip_t, t1)
+    } else {
+        Extent1d::from_min_max(t0, clip_t)
+    };
+    let proof = contact_proof(
+        k,
+        &ContactProofRequest {
+            curve,
+            retained: &retained,
+            clip_t,
+            clip,
+            face,
+            tolerance,
+            edge,
+        },
+    )?;
+    Ok(EdgeCrossing {
+        event: CrossEvent::Trimmed {
+            clip,
+            clip_t,
+            removes_low,
+        },
+        proof: Some(proof),
+    })
+}
+
+/// The refusal of an uncertifiable clip.
+fn refusal(why: ReconstructionRefusal) -> SolidError {
+    Failure::new(OP, OffsetFailure::Reconstruction { why }).into_error()
+}
+
+/// `x` clamped to `[0, 1]`.
+fn unit_clamp(x: f64) -> f64 {
+    x.clamp(0.0, 1.0)
+}
+
+/// The chord of `curve` over `[t0, t1]`: the distance between its evaluated ends, the
+/// scale a fraction of the interval is measured at.
+fn end_side_chord(k: &Kernel, curve: &Curve, t0: f64, t1: f64) -> Result<f64> {
+    let p0 = curve.evaluate_point(k, t0)?;
+    let p1 = curve.evaluate_point(k, t1)?;
+    Ok(p0.distance(p1))
+}
+
+/// The clip point at `clip_t`, by the interval ends' affine interpolation: a line is
+/// affine in its parameter, and the fractions this pass computes are ratios of its
+/// ends' sides, so the clips are exact where the ends and sides are (the named case's
+/// A = (0, 1, 0) and B = (1, 0, 0) among them).
+fn clip_point(k: &Kernel, curve: &Curve, t0: f64, t1: f64, clip_t: f64) -> Result<Point3> {
+    let p0 = curve.evaluate_point(k, t0)?;
+    let p1 = curve.evaluate_point(k, t1)?;
+    Ok(p0 + (p1 - p0) * ((clip_t - t0) / (t1 - t0)))
+}
+
+/// The request of one endpoint-contact certificate for a rebuilt edge (issue #13622's
+/// `contact_proof` parameter clump): the edge's curve over its retained interval, the
+/// clip the retained part ends at (its parameter and intended point), the moved face
+/// that cut it, and the summed tolerance bound. `edge` names the result edge for the
+/// typed refusal where nothing certifies.
+struct ContactProofRequest<'a> {
+    /// The edge's curve over `retained`.
+    curve: &'a Curve,
+    /// The retained part of the edge's interval.
+    retained: &'a crate::geom::extent1d::Extent1d,
+    /// The clip's parameter on the edge's interval.
+    clip_t: f64,
+    /// The clip point (the intended end point).
+    clip: Point3,
+    /// The moved face that cut the edge.
+    face: &'a MovedFaceCut,
+    /// The summed tolerance bound (the edge's and the face's), as
+    /// [`clearance::all_clear`] computes it.
+    tolerance: f64,
+    /// The result edge, named in the refusal where nothing certifies.
+    edge: crate::topology::EdgeId,
+}
+
+/// The endpoint-contact certificate of the retained part at its clip (issue #13622's
+/// record): `Proved` (the clip is the edge's only contact, in-or-on the face's trimmed
+/// region) keeps the event; `Unproved` refuses (nothing uncertain is built).
+fn contact_proof(
+    k: &Kernel,
+    request: &ContactProofRequest<'_>,
+) -> Result<clearance::endpoint_contact::ContactProof> {
+    use crate::error::offset::ReconstructionRefusal;
+    use crate::offset::offset_executive::clearance::endpoint_contact::{
+        separated_ending_on_face, ContactProof, ContactRequest,
+    };
+    let window = (request.retained.max() - request.retained.min()).max(f64::MIN_POSITIVE);
+    let proof = separated_ending_on_face(
+        k,
+        ContactRequest {
+            curve: request.curve,
+            interval: request.retained,
+            contact_t: request.clip_t,
+            contact_point: request.clip,
+            face: &request.face.moved,
+            region: &request.face.region,
+            tolerance: request.tolerance,
+        },
+        window,
+        usize::MAX,
+    )?;
+    if matches!(proof, ContactProof::Unproved(..)) {
+        return Err(refusal(ReconstructionRefusal::ClipUncertified {
+            edge: request.edge,
+        }));
+    }
+    Ok(proof)
+}
+
+/// One original edge's event in one reconstruction (issue #13622), named by the
+/// original edge (the correspondence mark's id).
+#[derive(Debug)]
+pub struct EdgeEventRecord {
+    /// The original edge (the correspondence mark's id).
+    original: crate::topology::EdgeId,
+    /// What the moved faces' cuts do to its result edges.
+    event: CrossEvent,
+}
+
+/// A cut corner's edge and the clip point its curve takes (issue #13622).
+#[derive(Debug)]
+struct CornerEdge {
+    /// The result edge.
+    edge: crate::topology::EdgeId,
+    /// The clip point (the intended end point).
+    clip: Point3,
+    /// The clip's parameter on the edge's interval.
+    clip_t: f64,
+    /// The retained interval drops the low end of the edge's interval.
+    drop_min: bool,
+}
+
+/// A clip the reconstruction re-trimmed a result edge to (issue #13622), with the
+/// endpoint-contact proof of the re-trimmed edge where the clip is its crossing with a
+/// moved face (`None` for a clip the cut corner's gap gave an edge that runs along the
+/// face's surface: the face is one of its own faces there, so no endpoint-contact
+/// certificate applies to it).
+#[derive(Debug)]
+struct ClipRecord {
+    /// The result edge.
+    edge: crate::topology::EdgeId,
+    /// The moved face whose cut gives the clip.
+    face: FaceId,
+    /// The clip point (the intended end point).
+    clip: Point3,
+    /// The clip's parameter on the edge's interval.
+    clip_t: f64,
+    /// The retained interval drops the low end of the edge's interval.
+    removes_low: bool,
+    /// The endpoint-contact proof where the clip is the edge's crossing.
+    proof: Option<clearance::endpoint_contact::ContactProof>,
+}
+
+/// One tolerance the crossed-boundary reconstruction re-measured (issue #13622,
+/// `docs/validity-and-tolerances.md` §5.2): the entity it was measured on, and the
+/// tolerance before and after (a re-measured value never grows one).
+#[derive(Debug)]
+pub struct ToleranceChange {
+    /// The entity, labelled as in the tolerance report (`E3`, `V7`).
+    pub entity: String,
+    /// The tolerance before the re-measurement.
+    pub before: f64,
+    /// The tolerance after it (never above `before`).
+    pub after: f64,
+}
+
+/// What one crossed-boundary reconstruction did and proved (issue #13622): the events
+/// it fired per original edge, the correspondence map of the result's edges, the
+/// endpoint-contact proof per rebuilt edge (the kept-edge gate's records), the bridge
+/// edges it inserted and the tolerances it re-measured. Returned by
+/// [`reconstruct_crossed_boundaries`] (through [`local_operation_recorded`]); the gate
+/// takes [`Self::reconstructed_kept`] and [`Self::proofs`] from it.
+#[derive(Debug)]
+pub struct Reconstruction {
+    /// The events that fired (the originals a moved face crossed), in map order.
+    events: Vec<EdgeEventRecord>,
+    /// The endpoint-contact proof of each rebuilt edge.
+    proofs: Vec<(
+        crate::topology::EdgeId,
+        clearance::endpoint_contact::ContactProof,
+    )>,
+    /// The correspondence map as captured after `move_faces`.
+    map: EdgeMap,
+    /// The kept edges (the original edges) the reconstruction rebuilt: no longer
+    /// kept as they were, their crossing certified by [`Self::proofs`] instead.
+    reconstructed_kept: BTreeSet<crate::topology::EdgeId>,
+    /// The bridge edges inserted.
+    bridges: Vec<crate::topology::EdgeId>,
+    /// The tolerances re-measured.
+    tolerances: Vec<ToleranceChange>,
+    /// The vanish obligations the gap pass deferred and this pass discharged (issue
+    /// #13622's hook): one per original edge (id order); an undischarged one refuses
+    /// typed ([`ReconstructionRefusal::VanishUnresolved`]), so a returned record's set
+    /// is exhausted.
+    discharged_vanishes: BTreeSet<crate::topology::EdgeId>,
+}
+
+impl Reconstruction {
+    /// The events that fired (an edge a moved face crossed: trimmed or removed).
+    #[must_use]
+    pub fn events(&self) -> &[EdgeEventRecord] {
+        &self.events
+    }
+
+    /// The endpoint-contact proof of each rebuilt edge.
+    #[must_use]
+    pub(crate) fn proofs(
+        &self,
+    ) -> &[(
+        crate::topology::EdgeId,
+        clearance::endpoint_contact::ContactProof,
+    )] {
+        &self.proofs
+    }
+
+    /// The correspondence map as captured after `move_faces`: each original edge's
+    /// arena index to the result edges that carried its mark then.
+    #[must_use]
+    pub fn map(&self) -> &EdgeMap {
+        &self.map
+    }
+
+    /// The kept edges (the original edges) the reconstruction rebuilt.
+    #[must_use]
+    pub fn reconstructed_kept(&self) -> &BTreeSet<crate::topology::EdgeId> {
+        &self.reconstructed_kept
+    }
+
+    /// The bridge edges inserted.
+    #[must_use]
+    pub fn bridges(&self) -> &[crate::topology::EdgeId] {
+        &self.bridges
+    }
+
+    /// The tolerances re-measured.
+    #[must_use]
+    pub fn tolerances(&self) -> &[ToleranceChange] {
+        &self.tolerances
+    }
+
+    /// The vanish obligations the gap pass deferred and this pass discharged (issue
+    /// #13622's hook): every one is gone from the result (its removal certified, every
+    /// corresponding result edge severed), or the pass refused instead of returning.
+    #[must_use]
+    pub fn discharged_vanishes(&self) -> &BTreeSet<crate::topology::EdgeId> {
+        &self.discharged_vanishes
+    }
+
+    /// An empty record (a pass that found no crossing).
+    fn empty(map: EdgeMap) -> Self {
+        Self {
+            events: Vec::new(),
+            proofs: Vec::new(),
+            map,
+            reconstructed_kept: BTreeSet::new(),
+            bridges: Vec::new(),
+            tolerances: Vec::new(),
+            discharged_vanishes: BTreeSet::new(),
+        }
+    }
+}
+
+/// The edge's use starts and its far ends (`(start vertex, other vertex)` per use), the
+/// [`topology::edge::other_vertex`] read the loop walks use.
+fn use_ends(
+    b: &Brep,
+    eu: crate::topology::EdgeuseId,
+) -> Result<(
+    Option<crate::topology::VertexId>,
+    Option<crate::topology::VertexId>,
+)> {
+    use crate::topology::edge;
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::vertexuse as vu1;
+    let e = eu1::edge(b, eu)?.ok_or_else(|| null("the edge use's edge"))?;
+    let v = eu1::vertexuse(b, eu)?.and_then(|vu| vu1::vertex(b, vu).ok().flatten());
+    Ok((v, edge::other_vertex(b, e, v)?))
+}
+
+/// Every corner gap of every face's loop-use chains: consecutive uses (walking the
+/// chain) whose end and start vertices differ. Returns (loop use, use before the gap,
+/// use after it), in body order.
+fn loop_gaps(
+    b: &Brep,
+) -> Result<
+    Vec<(
+        crate::topology::LoopuseId,
+        crate::topology::EdgeuseId,
+        crate::topology::EdgeuseId,
+    )>,
+> {
+    use crate::topology::edgeuse::p1 as eu1;
+    let mut out = Vec::new();
+    for (lu, _) in b.loopuses().iter() {
+        let chain = eu1::loopuse_edgeuses(b, lu)?;
+        let n = chain.len();
+        for (prev, next) in chain
+            .iter()
+            .copied()
+            .zip(chain.iter().copied().cycle().skip(1))
+            .take(n)
+        {
+            let prev_end = use_ends(b, prev)?.1;
+            let next_start = use_ends(b, next)?.0;
+            if prev_end.is_none() || next_start.is_none() || prev_end != next_start {
+                out.push((lu, prev, next));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// One loop-use chain's walk verdict (issue #13622's stage-2 check): closed (walking
+/// CW returns to the start in exactly the chain's length) and shared (consecutive uses
+/// meet at exactly one vertex).
+fn walk_chain(b: &Brep, lu: crate::topology::LoopuseId) -> Result<(bool, bool, usize)> {
+    use crate::topology::edgeuse::p1 as eu1;
+    let chain = eu1::loopuse_edgeuses(b, lu)?;
+    let n = chain.len();
+    if n == 0 {
+        return Ok((false, false, 0));
+    }
+    let Some(&first) = chain.first() else {
+        return Ok((false, false, 0));
+    };
+    let mut eu = first;
+    let mut steps = 0_usize;
+    loop {
+        eu = match eu1::cw_edgeuse(b, eu)? {
+            Some(next) => next,
+            None => return Ok((false, false, n)),
+        };
+        steps = steps.saturating_add(1);
+        if eu == first {
+            break;
+        }
+        if steps > n {
+            return Ok((false, false, n));
+        }
+    }
+    if steps != n {
+        return Ok((false, false, n));
+    }
+    for (cur, next) in chain
+        .iter()
+        .copied()
+        .zip(chain.iter().copied().cycle().skip(1))
+        .take(n)
+    {
+        let (s, e) = use_ends(b, cur)?;
+        let (s2, e2) = use_ends(b, next)?;
+        let shared = [s, e]
+            .into_iter()
+            .flatten()
+            .filter(|v| [s2, e2].contains(&Some(*v)))
+            .count();
+        if shared != 1 {
+            return Ok((true, false, n));
+        }
+    }
+    Ok((true, true, n))
+}
+
+/// SEVER (issue #13622): removes edge `e` from the body, its uses leaving their loop
+/// chains (the `p3::squeeze_loops` unlink core) and their records going with the edge's
+/// (`PreEdit` / `RmFromBrep` / `Destruction` and the faces' `PreEdit`, the events
+/// `squeeze_edge_in` sends) — without `squeeze_edge`'s vertex merge: the two end
+/// vertices keep their other uses.
+fn sever_edge(
+    k: &mut Kernel,
+    b: &mut Brep,
+    e: crate::topology::EdgeId,
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+) -> Result<()> {
+    use crate::error::EntityRef;
+    use crate::geom::object::NotifyOperation;
+    use crate::topology::edge;
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::loopuse;
+    use crate::topology::vertexuse as vu1;
+    k.check_cancelled(OP)?;
+    let uses = edge::edgeuses(b, e, None, None)?;
+    let key_of = loopuse::notify_ref;
+    let eref = key_of(EntityRef::Edge(e));
+    edge::notify(
+        b,
+        e,
+        env,
+        NotifyOperation::PreEdit,
+        [Some(eref), None, None],
+    )?;
+    edge::notify(
+        b,
+        e,
+        env,
+        NotifyOperation::RmFromBrep,
+        [Some(eref), None, None],
+    )?;
+    for &eu in &uses {
+        if let Some(f) = eu1::face(b, eu)? {
+            let fref = key_of(EntityRef::Face(f));
+            crate::topology::face::p3::notify(
+                b,
+                f,
+                env,
+                None,
+                NotifyOperation::PreEdit,
+                [Some(fref), None, None],
+            )?;
+        }
+    }
+    // the `squeeze_loops` unlink core: each use leaves its loop chain
+    for &eu in &uses {
+        b.edgeuse_mut(eu)?.uv_trim_curve = None;
+        let eu_cw = eu1::cw_edgeuse(b, eu)?
+            .ok_or_else(|| null("the edge use's clockwise loop neighbour"))?;
+        let eu_ccw = eu1::ccw_edgeuse(b, eu)?
+            .ok_or_else(|| null("the edge use's counter-clockwise loop neighbour"))?;
+        let lu = eu1::loopuse(b, eu)?.ok_or_else(|| null("the edge use's loop use"))?;
+        if b.loopuse(lu)?.start == crate::topology::LoopuseStart::Edgeuse(Some(eu)) {
+            b.loopuse_mut(lu)?.start = crate::topology::LoopuseStart::Edgeuse(Some(eu_cw));
+        }
+        b.edgeuse_mut(eu_cw)?.ccw = Some(eu_ccw);
+        b.edgeuse_mut(eu_ccw)?.cw = Some(eu_cw);
+    }
+    // delete the uses and their vertex uses (p3.rs:3959-3969)
+    for &eu in &uses {
+        let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| null("the edge use's vertex use"))?;
+        let v = vu1::vertex(b, vu)?.ok_or_else(|| null("the vertex use's vertex"))?;
+        b.edge_mut(e)?.edgeuses.retain(|&x| x != eu);
+        b.vertex_mut(v)?.vertexuses.retain(|&x| x != vu);
+        b.remove_edgeuse_record(eu)?;
+        b.remove_vertexuse_record(vu)?;
+    }
+    edge::notify(
+        b,
+        e,
+        env,
+        NotifyOperation::Destruction,
+        [Some(eref), None, None],
+    )?;
+    b.remove_edge_record(e)?;
+    Ok(())
+}
+
+/// MERGE LAMINA TWINS (issue #13622): two lamina edges of one original (`keep` and its
+/// `twin`, two uses each) become the one manifold edge they stand for: the twin's uses
+/// are re-pointed onto `keep` (the `squeeze_edge` use re-pointing, one level up), the
+/// merged radial list in a manifold order ([face1 up, face1 down, face2 down, face2 up]
+/// shape: mates adjacent, orientations alternating) and the twin record goes. A pair
+/// whose uses admit no alternating radial order refuses: nothing uncertain is built.
+fn merge_lamina_twins(
+    b: &mut Brep,
+    keep: crate::topology::EdgeId,
+    twin: crate::topology::EdgeId,
+) -> Result<()> {
+    use crate::topology::edge;
+    use crate::topology::edgeuse::p1 as eu1;
+    // (use, its face, on the face's upward face use)
+    let slot = |b: &Brep,
+                eu: crate::topology::EdgeuseId|
+     -> Result<(crate::topology::EdgeuseId, FaceId, bool)> {
+        let f = eu1::face(b, eu)?.ok_or_else(|| null("the edge use's face"))?;
+        let lu = eu1::loopuse(b, eu)?.ok_or_else(|| null("the edge use's loop use"))?;
+        Ok((eu, f, b.loopuse(lu)?.faceuse == b.face(f)?.faceuse))
+    };
+    let keeps: Vec<_> = edge::edgeuses(b, keep, None, None)?
+        .into_iter()
+        .map(|eu| slot(b, eu))
+        .collect::<Result<_>>()?;
+    let twins: Vec<_> = edge::edgeuses(b, twin, None, None)?
+        .into_iter()
+        .map(|eu| slot(b, eu))
+        .collect::<Result<_>>()?;
+    if keeps.len() != 2 || twins.len() != 2 {
+        return Err(refusal(ReconstructionRefusal::ClipUncertified {
+            edge: keep,
+        }));
+    }
+    let find = |list: &[(crate::topology::EdgeuseId, FaceId, bool)], up: bool| {
+        list.iter().find(|(_, _, u)| *u == up).map(|(eu, _, _)| *eu)
+    };
+    let mut order: Option<[crate::topology::EdgeuseId; 4]> = None;
+    for first_twins_first in [false, true] {
+        for up_a in [true, false] {
+            for up_c in [true, false] {
+                let (a, c) = if first_twins_first {
+                    (twins.as_slice(), keeps.as_slice())
+                } else {
+                    (keeps.as_slice(), twins.as_slice())
+                };
+                if let (Some(a1), Some(a2), Some(c1), Some(c2)) =
+                    (find(a, up_a), find(a, !up_a), find(c, up_c), find(c, !up_c))
+                {
+                    let candidate = [a1, a2, c2, c1];
+                    let orientations: Vec<_> = candidate
+                        .iter()
+                        .map(|eu| eu1::orientation(b, *eu))
+                        .collect::<Result<_>>()?;
+                    let alternating = orientations
+                        .iter()
+                        .zip(orientations.iter().skip(1))
+                        .all(|(x, y)| x != y);
+                    if alternating {
+                        order = Some(candidate);
+                        break;
+                    }
+                }
+            }
+            if order.is_some() {
+                break;
+            }
+        }
+        if order.is_some() {
+            break;
+        }
+    }
+    let Some(order) = order else {
+        return Err(refusal(ReconstructionRefusal::ClipUncertified {
+            edge: keep,
+        }));
+    };
+    for &eu in order.iter().skip(2) {
+        b.edgeuse_mut(eu)?.edge = Some(keep);
+    }
+    b.edge_mut(keep)?.edgeuses = order.to_vec();
+    b.edge_mut(twin)?.edgeuses.clear();
+    b.remove_edge_record(twin)?;
+    Ok(())
+}
+
+/// VERTEX SPLIT (issue #13622): duplicates vertex `v` (same point and tolerance) and
+/// moves the vertex uses of the edges `moved` onto the copy — the mirror of
+/// `squeeze_edge`'s use re-pointing, to a new vertex instead of a survivor. Returns the
+/// copy.
+fn split_vertex(
+    b: &mut Brep,
+    v: crate::topology::VertexId,
+    moved: &[crate::topology::EdgeId],
+) -> Result<crate::topology::VertexId> {
+    use crate::topology::edge;
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::vertex;
+    use crate::topology::vertexuse as vu1;
+    use crate::topology::Vertex;
+    let point = vertex::point(b, v)?;
+    let tolerance = vertex::tolerance(b, v)?;
+    let copy = b.add_vertex_record(Vertex {
+        point,
+        tolerance,
+        vertexuses: Vec::new(),
+        poly_vertex: None,
+    })?;
+    for &e in moved {
+        for eu in edge::edgeuses(b, e, None, None)? {
+            let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| null("the edge use's vertex use"))?;
+            if vu1::vertex(b, vu)? == Some(v) {
+                b.vertex_mut(v)?.vertexuses.retain(|&x| x != vu);
+                b.vertex_mut(copy)?.vertexuses.push(vu);
+                b.vertexuse_mut(vu)?.vertex = Some(copy);
+            }
+        }
+    }
+    Ok(copy)
+}
+
+/// The parameter on curve `c`'s `ivl` where `point` lies (the projection between the
+/// interval's ends; exact for the lines this pass clips, whose curves are affine in
+/// their parameters). A projection whose residual exceeds the caller's tolerance is
+/// caught by the tolerance pass (`GapBeyondConstruction`), never built on.
+fn clip_param(
+    k: &Kernel,
+    c: &Curve,
+    ivl: crate::geom::extent1d::Extent1d,
+    point: Point3,
+) -> Result<f64> {
+    let a = c.evaluate_point(k, ivl.min())?;
+    let z = c.evaluate_point(k, ivl.max())?;
+    let d = z - a;
+    let dd = d.dot(d);
+    if dd.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return Err(null("the curve's span between distinct ends"));
+    }
+    Ok(ivl.min() + (point - a).dot(d) / dd * (ivl.max() - ivl.min()))
+}
+
+/// RETRIM (issue #13622): edge `e` keeps the interval end away from its clip and takes
+/// `clip_t` as the cut end (`drop_min` selects the end), its vertex uses' UV trim
+/// curves rebuilt over the new interval (`rebuild_uv_trim_curve`: the face regions they
+/// bound are what the volume integrates).
+fn retrim_edge(
+    k: &mut Kernel,
+    b: &mut Brep,
+    e: crate::topology::EdgeId,
+    clip_t: f64,
+    drop_min: bool,
+) -> Result<()> {
+    use crate::topology::edge;
+    use crate::topology::edgeuse::p2 as eu2;
+    let ivl = edge::interval(b, e)?;
+    let next = if drop_min {
+        crate::geom::extent1d::Extent1d::from_min_max(clip_t, ivl.max())
+    } else {
+        crate::geom::extent1d::Extent1d::from_min_max(ivl.min(), clip_t)
+    };
+    edge::set_interval(b, e, &next)?;
+    for eu in edge::edgeuses(b, e, None, None)? {
+        eu2::rebuild_uv_trim_curve(k, b, eu)?;
+    }
+    Ok(())
+}
+
+/// BRIDGE (issue #13622): one new edge between the existing vertices `a` and `by`
+/// closing the corner gaps listed in `slots` (a mated pair in each face's two loop-use
+/// chains): a vertex use at each end (the end wiring of `topology::edge`), the uses
+/// spliced into their chains' gaps (the `squeeze_loops` unlink in reverse), a UV trim
+/// curve on each use, the manifold radial list [face1 up, face1 down, face2 down, face2
+/// up] (orientations alternating, or refused), and an `AddToBrep` notification.
+fn insert_bridge(
+    k: &mut Kernel,
+    b: &mut Brep,
+    a: crate::topology::VertexId,
+    by: crate::topology::VertexId,
+    slots: &[(
+        crate::topology::LoopuseId,
+        crate::topology::EdgeuseId,
+        crate::topology::EdgeuseId,
+    )],
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+) -> Result<crate::topology::EdgeId> {
+    use crate::error::EntityRef;
+    use crate::geom::extent1d::Extent1d;
+    use crate::geom::object::NotifyOperation;
+    use crate::nurbs::b_spline_surface_n_lib::OrientType;
+    use crate::topology::brep::p2 as brep_p2;
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::edgeuse::p3 as eu3;
+    use crate::topology::{Edge, Edgeuse, EdgeuseOwner, Vertexuse, VertexuseOwner};
+    k.check_cancelled(OP)?;
+    if slots.len() != 4 {
+        let loopuse = match slots.first() {
+            Some((lu, _, _)) => *lu,
+            None => crate::topology::LoopuseId::from_index(0),
+        };
+        return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+            fault: BoundaryFault::LoopDiverges { loopuse },
+        }));
+    }
+    // the curve carries the intended geometry: `a` to `by`
+    let p_a = crate::topology::vertex::point(b, a)?;
+    let p_b = crate::topology::vertex::point(b, by)?;
+    let curve = Curve::from(crate::curve::line::Line::from_points(p_a, p_b, 3));
+    let tolerance = b.tolerance();
+    let e = b.add_edge_record(Edge::new([a, by]))?;
+    let owner = b.owner_identity(EntityRef::Edge(e));
+    {
+        let record = b.edge_mut(e)?;
+        let mut owned = curve.clone();
+        owned.set_owner(Some(owner), None);
+        record.curve = Some(owned);
+        record.interval = Extent1d::from_min_max(0.0, 1.0);
+        record.tolerance = tolerance;
+        b.set_geometry_owner_key(EntityRef::Edge(e), Some(owner));
+    }
+    // the radial list: [face1 up, face1 down, face2 down, face2 up]
+    let up = |b: &Brep, lu: crate::topology::LoopuseId, f: FaceId| -> Result<bool> {
+        Ok(b.loopuse(lu)?.faceuse == b.face(f)?.faceuse)
+    };
+    let lu_face = |b: &Brep, lu: crate::topology::LoopuseId| -> Result<FaceId> {
+        let fu = b
+            .loopuse(lu)?
+            .faceuse
+            .ok_or_else(|| null("the loop use's face use"))?;
+        eu1::faceuse_face(b, fu)?.ok_or_else(|| null("the face use's face"))
+    };
+    let mut slots_by_side: Vec<(
+        FaceId,
+        bool,
+        (
+            crate::topology::LoopuseId,
+            crate::topology::EdgeuseId,
+            crate::topology::EdgeuseId,
+        ),
+    )> = Vec::new();
+    for &g in slots {
+        let f = lu_face(b, g.0)?;
+        slots_by_side.push((f, up(b, g.0, f)?, g));
+    }
+    let mut chain_slots = Vec::new();
+    let mut faces: Vec<FaceId> = slots_by_side.iter().map(|(f, _, _)| *f).collect();
+    faces.sort_unstable();
+    faces.dedup();
+    let gap_loopuse = || -> Result<crate::topology::LoopuseId> {
+        match slots.first() {
+            Some((lu, _, _)) => Ok(*lu),
+            None => Err(null("the gap's loop use")),
+        }
+    };
+    let [face1, face2] = faces.as_slice() else {
+        return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+            fault: BoundaryFault::LoopDiverges {
+                loopuse: gap_loopuse()?,
+            },
+        }));
+    };
+    let pick = |want: (FaceId, bool)| -> Result<(
+        crate::topology::LoopuseId,
+        crate::topology::EdgeuseId,
+        crate::topology::EdgeuseId,
+    )> {
+        slots_by_side
+            .iter()
+            .find(|(f, u, _)| (*f, *u) == want)
+            .map(|(_, _, g)| *g)
+            .ok_or_else(|| null("the gap's edge use on one side"))
+    };
+    chain_slots.push(pick((*face1, true))?);
+    chain_slots.push(pick((*face1, false))?);
+    chain_slots.push(pick((*face2, false))?);
+    chain_slots.push(pick((*face2, true))?);
+    let mut uses = Vec::new();
+    for (lu, prev, next) in chain_slots {
+        let start = use_ends(b, prev)?.1;
+        let start = start.ok_or_else(|| null("the edge use's end"))?;
+        if start != a && start != by {
+            return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+                fault: BoundaryFault::LoopDiverges { loopuse: lu },
+            }));
+        }
+        let orientation = if start == a {
+            OrientType::Same
+        } else {
+            OrientType::Opposite
+        };
+        let eu = b.add_edgeuse_record(Edgeuse::default())?;
+        let vu = b.add_vertexuse_record(Vertexuse::default())?;
+        b.edge_mut(e)?.edgeuses.push(eu);
+        let record = b.edgeuse_mut(eu)?;
+        record.edge = Some(e);
+        record.owner = EdgeuseOwner::Loopuse(Some(lu));
+        record.vertexuse = Some(vu);
+        record.orientation = orientation;
+        b.vertexuse_mut(vu)?.owner = VertexuseOwner::Edgeuse(Some(eu));
+        b.vertexuse_mut(vu)?.vertex = Some(start);
+        b.vertex_mut(start)?.vertexuses.push(vu);
+        // splice into the chain's gap (the `squeeze_loops` unlink in reverse)
+        b.edgeuse_mut(prev)?.ccw = Some(eu);
+        b.edgeuse_mut(next)?.cw = Some(eu);
+        b.edgeuse_mut(eu)?.cw = Some(prev);
+        b.edgeuse_mut(eu)?.ccw = Some(next);
+        uses.push((eu, start));
+    }
+    let orientations: Vec<_> = uses
+        .iter()
+        .map(|(eu, _)| eu1::orientation(b, *eu))
+        .collect::<Result<_>>()?;
+    let alternating = orientations
+        .iter()
+        .zip(orientations.iter().skip(1))
+        .all(|(x, y)| x != y);
+    if !alternating {
+        return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+            fault: BoundaryFault::LoopDiverges {
+                loopuse: gap_loopuse()?,
+            },
+        }));
+    }
+    for &(eu, _) in &uses {
+        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+    }
+    brep_p2::notify(
+        b,
+        env,
+        None,
+        NotifyOperation::AddToBrep,
+        [
+            Some(brep_p2::NotifyArg::Entity(EntityRef::Edge(e))),
+            None,
+            None,
+        ],
+    )?;
+    Ok(e)
+}
+
+/// The region pair `move_faces` dropped (issue #13622): the merge leaves the body a
+/// sheet model (one region record holding both face uses of every face), so
+/// `is_manifold_solid`'s two-regions clause fails however sound the boundary is.
+/// [`p6::test_closure_split_region`](crate::topology::brep::p6) (upstream
+/// `SmBrep::TestClosureSplitRegion`, the boolean merge's own primitive) splits the
+/// region at a seed face use: the Opposite face uses' closed set moves to a new solid
+/// region and `do_infinite_region_testing` finds the infinite region again.
+fn restore_region_pair(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+) -> Result<()> {
+    use crate::nurbs::b_spline_surface_n_lib::OrientType;
+    use crate::topology::edgeuse::p1 as eu1;
+    if bp1::regions(b, None)?.len() >= 2 {
+        return Ok(());
+    }
+    k.check_cancelled(OP)?;
+    // the seed: any face's Opposite (down) face use
+    let mut seed = None;
+    for (f, _) in b.faces().iter() {
+        let (fu_a, fu_z) = face_ops::faceuses(b, f)?;
+        for fu in [fu_a, fu_z].into_iter().flatten() {
+            if eu1::faceuse_orientation(b, fu)? == OrientType::Opposite {
+                seed = Some(fu);
+            }
+        }
+    }
+    let seed = seed.ok_or_else(|| null("a down face use"))?;
+    let mut marks = crate::topology::topology_traverser::Marks::default();
+    crate::topology::brep::p6::test_closure_split_region(k, b, &mut marks, env, true, seed)?;
+    Ok(())
+}
+
+/// The gaps measured on one edge by the tolerance formula (issue #13622,
+/// `docs/validity-and-tolerances.md` §5.2): the edge use's end to its loop neighbour's
+/// start (`g_ee`), the whole-edge edge/face gap (`g_ef`), and the largest face
+/// tolerance at the edge (the zone formula's floor).
+struct EdgeGaps {
+    /// The edge measured.
+    edge: crate::topology::EdgeId,
+    /// The largest `g_ee` over the edge's uses.
+    g_ee: f64,
+    /// The largest `g_ef` over the edge's uses.
+    g_ef: f64,
+    /// The largest face tolerance at the edge.
+    max_face: f64,
+}
+
+/// The tolerance pass of the reconstruction (issue #13622, `docs/validity-and-tolerances.md`
+/// §5.2, §7.2 steps 4-5, §8 and invariant 9): the gaps the production formula names are
+/// measured on the affected entities (an edge's `g_ee` between an edge use's end and its
+/// loop neighbour's start and its whole-edge `g_ef`; a vertex's `vertex/edge` and
+/// `vertex/face` gaps, calculated separately) and the tolerances are set to the formula's
+/// value without the only-grow guard: a stored tolerance larger than its gaps need
+/// shrinks (the named case's corner vertices, 1.00001 -> 1e-5). An edge's tolerance is
+/// left unchanged unless its whole-edge gaps justify changing it. A measured gap past
+/// the construction bound (the body's zone tolerance: the model's resolution, below
+/// which an exact construction leaves no gap) refuses
+/// [`GapBeyondConstruction`](crate::error::offset::ReconstructionRefusal): the tolerance
+/// is never grown to cover it (§8: "the construction is wrong: refuse").
+fn tighten_reconstruction_tolerances(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[crate::topology::EdgeId],
+    vertices: &[crate::topology::VertexId],
+) -> Result<Vec<ToleranceChange>> {
+    use crate::geom::tol::{calc_edge_zone_tol_3d, calc_vertex_zone_tol_3d};
+    use crate::topology::edge;
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::vertex;
+    use crate::topology::vertexuse::{calc_vertex_edge_gap, calc_vertex_face_gap};
+    let bound = b.tolerance();
+    let refuse_gap = |gap: f64| {
+        Err(refusal(ReconstructionRefusal::GapBeyondConstruction {
+            gap,
+            bound,
+        }))
+    };
+    let mut out = Vec::new();
+    // the edge gaps the formula names: g_ee (an edge use's end to its loop neighbour's
+    // start) and g_ef (the whole-edge edge/face gap, `calc_max_edge_face_gap` over the
+    // edge's uses)
+    let mut measured: Vec<EdgeGaps> = Vec::new();
+    for &e in edges {
+        k.check_cancelled(OP)?;
+        let mut g_ee = 0.0_f64;
+        let mut g_ef = 0.0_f64;
+        for eu in edge::edgeuses(b, e, None, None)? {
+            if let Some(g) = eu1::calc_edge_ccw_edge_gap(k, b, eu, true, true)? {
+                if g.gap_3d.is_finite() && g.gap_3d > 0.0 {
+                    g_ee = g_ee.max(g.gap_3d);
+                }
+            }
+            let g = eu1::calc_max_edge_face_gap(k, b, eu, true)?;
+            if g.gap_3d.is_finite() && g.gap_3d > 0.0 {
+                g_ef = g_ef.max(g.gap_3d);
+            }
+        }
+        if g_ee > bound || g_ef > bound {
+            return refuse_gap(g_ee.max(g_ef));
+        }
+        let max_face = edge::faces(b, e, None)?
+            .iter()
+            .filter_map(|&f| b.face(f).ok().map(|r| r.tolerance))
+            .fold(0.0_f64, f64::max);
+        measured.push(EdgeGaps {
+            edge: e,
+            g_ee,
+            g_ef,
+            max_face,
+        });
+    }
+    for gaps in measured {
+        let e = gaps.edge;
+        let old = edge::tolerance(b, e)?;
+        let new = calc_edge_zone_tol_3d(k, gaps.g_ee, gaps.g_ef, Some(gaps.max_face), None);
+        // §7.2 step 4, "set without the only-grow guard": a stored tolerance larger
+        // than its gaps need shrinks; a larger one is never set (§8, invariant 9)
+        if new < old {
+            edge::set_tolerance(b, e, new, false, false)?;
+            out.push(ToleranceChange {
+                entity: format!("E{}", e.index()),
+                before: old,
+                after: new,
+            });
+        }
+    }
+    // the vertex bounds, calculated separately (§5.2): the vertex/edge and vertex/face
+    // gaps and the largest edge tolerance at the vertex as the floor (§7.2 step 5)
+    for &v in vertices {
+        k.check_cancelled(OP)?;
+        let mut g_ve = 0.0_f64;
+        let mut g_vf = 0.0_f64;
+        for vu in vertex::vertexuses(b, v)? {
+            if let Some(g) = calc_vertex_edge_gap(k, b, vu, true, true)? {
+                if g.gap_3d.is_finite() && g.gap_3d > 0.0 {
+                    g_ve = g_ve.max(g.gap_3d);
+                }
+            }
+            if let Some(g) = calc_vertex_face_gap(k, b, vu, true, true)? {
+                if g.gap_3d.is_finite() && g.gap_3d > 0.0 {
+                    g_vf = g_vf.max(g.gap_3d);
+                }
+            }
+        }
+        if g_ve > bound || g_vf > bound {
+            return refuse_gap(g_ve.max(g_vf));
+        }
+        let max_edge = vertex::edges(b, v, None)?
+            .iter()
+            .filter_map(|&e| edge::tolerance(b, e).ok())
+            .fold(0.0_f64, f64::max);
+        let old = vertex::tolerance(b, v)?;
+        let new = calc_vertex_zone_tol_3d(k, g_ve, g_vf, Some(max_edge), None);
+        if new < old {
+            vertex::set_tolerance(b, v, new, false, false)?;
+            out.push(ToleranceChange {
+                entity: format!("V{}", v.index()),
+                before: old,
+                after: new,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// The stage-2 validation of the completed boundary (issue #13622): every loop of every
+/// affected face walks closed with consecutive uses meeting at one vertex, every bridge
+/// the pass inserted is still a four-use manifold edge between its end vertices, and
+/// every clip point still certifies in-or-on its moved face's COMPLETED trims (the
+/// region the trims make after the re-trim, re-read here). Anything else refuses typed
+/// ([`BoundaryFault`]): nothing uncertain is ever returned.
+fn validate_completed_boundary(
+    k: &mut Kernel,
+    b: &mut Brep,
+    clips: &[ClipRecord],
+    bridges: &[crate::topology::EdgeId],
+    affected_faces: &[FaceId],
+) -> Result<()> {
+    use crate::error::offset::{BoundaryFault, ReconstructionRefusal};
+    use crate::topology::edge;
+    use crate::topology::edgeuse::p1 as eu1;
+    for &f in affected_faces {
+        let (fu_a, fu_z) = face_ops::faceuses(b, f)?;
+        for fu in [fu_a, fu_z].into_iter().flatten() {
+            for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
+                k.check_cancelled(OP)?;
+                let (closed, shared, _) = walk_chain(b, lu)?;
+                if !closed {
+                    return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+                        fault: BoundaryFault::LoopNotClosed { loopuse: lu },
+                    }));
+                }
+                if !shared {
+                    return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+                        fault: BoundaryFault::LoopDiverges { loopuse: lu },
+                    }));
+                }
+            }
+        }
+    }
+    for &e in bridges {
+        let alive = b.edges().iter().any(|(x, _)| x == e);
+        let manifold = alive && edge::is_manifold(b, e)? && edge::edgeuse_count(b, e)? == 4;
+        if !manifold {
+            return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+                fault: BoundaryFault::BridgeMissing { edge: e },
+            }));
+        }
+    }
+    // the clip points against the completed trims: each certified clip must still be
+    // proved in-or-on its moved face's region as the re-trimmed loops make it now
+    if !clips.is_empty() {
+        let cuts = moved_result_faces(k, b)?;
+        for clip in clips {
+            k.check_cancelled(OP)?;
+            if clip.proof.is_none() {
+                continue;
+            }
+            let e = clip.edge;
+            let curve = edge::curve(b, e)?
+                .ok_or_else(|| null("the edge's curve"))?
+                .clone();
+            let interval = edge::interval(b, e)?;
+            let tolerance = edge::tolerance(b, e)?.max(b.tolerance());
+            let Some(face) = cuts.iter().find(|f| f.face == clip.face) else {
+                return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+                    fault: BoundaryFault::ClipOutsideRegion { edge: e },
+                }));
+            };
+            let Ok(clearance::endpoint_contact::ContactProof::Proved(_)) = contact_proof(
+                k,
+                &ContactProofRequest {
+                    curve: &curve,
+                    retained: &interval,
+                    clip_t: clip.clip_t,
+                    clip: clip.clip,
+                    face,
+                    tolerance,
+                    edge: e,
+                },
+            ) else {
+                return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+                    fault: BoundaryFault::ClipOutsideRegion { edge: e },
+                }));
+            };
+        }
+    }
+    Ok(())
+}
+
+/// The crossed-boundary reconstruction (issue #13622): run after `move_faces` on the
+/// result body, before the kept-edge gate. The correspondence `map` (the result edges
+/// each original edge's mark reached) groups the result edges; every group whose
+/// original's faces all keep their surfaces (`crossable`) is classified against every
+/// moved face ([`classify_edge_crossing`]); the events fire for the originals a moved
+/// face crosses and the cut corner's neighbourhood around them: [`sever_edge`] for the
+/// removed ones (lamina twins resolved with [`merge_lamina_twins`] first where a twin
+/// pair must resolve), the cut corner's diverging ends split, re-trimmed to their
+/// intended points and glued there, a bridge edge per corner gap ([`insert_bridge`]),
+/// the region pair restored ([`restore_region_pair`]), the affected tolerances
+/// re-measured, never grown ([`tighten_reconstruction_tolerances`]) and the completed
+/// boundary validated ([`validate_completed_boundary`]). A no-crossing pass is a no-op
+/// (zero events).
+///
+/// `vanished` is the gap pass's vanish obligations (issue #13622's hook,
+/// [`OffsetExecutive::pending_vanishes`](crate::offset::offset_executive::p1::OffsetExecutive::pending_vanishes),
+/// one per original edge): each must discharge here — its classification certifies its
+/// removal, its correspondence is complete and unambiguous, and every corresponding
+/// result edge is severed — before the repair builds anything. Where the reconstruction
+/// does not take the event (a `Clear` or `Trimmed` classification, a missing or
+/// ambiguous correspondence, or a no-engagement return) ownership is unestablished and
+/// the gap pass's refusal stands again ([`deferred_edge_vanish`]); a certified removal
+/// whose descendants do not all go refuses
+/// [`ReconstructionRefusal::VanishUnresolved`], and no no-engagement return suppresses
+/// an obligation (a cut the endpoint certificate's scope cannot decide on a pending
+/// obligation refuses its own typed refusal). The returned record carries the
+/// discharged set ([`Reconstruction::discharged_vanishes`]).
+fn reconstruct_crossed_boundaries(
+    k: &mut Kernel,
+    b: &mut Brep,
+    map: &EdgeMap,
+    kept: &[(crate::topology::EdgeId, KeptEdge)],
+    crossable: &BTreeSet<crate::topology::EdgeId>,
+    vanished: &BTreeSet<crate::topology::EdgeId>,
+    notifications: &mut OffsetNotifications<'_>,
+) -> Result<Reconstruction> {
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::geom::context::Context;
+    use crate::topology::edge;
+    use crate::topology::edge::NotifyEnv;
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::vertexuse as vu1;
+    let cuts = moved_result_faces(k, &mut b.clone_standing_for_self()?)?;
+    if cuts.is_empty() {
+        // (issue #13622's hook) a no-engagement return discharges nothing: where the gap
+        // pass deferred a vanish, the reconstruction does not take the event and the gap
+        // pass's refusal stands again ([`deferred_edge_vanish`])
+        if let Some(&edge) = vanished.iter().next() {
+            return Err(deferred_edge_vanish(edge));
+        }
+        return Ok(Reconstruction::empty(map.clone()));
+    }
+    // 1. the events per original edge (map order is deterministic) and the clips with
+    //    their endpoint-contact proofs
+    let mut events: Vec<EdgeEventRecord> = Vec::new();
+    let mut clips: Vec<ClipRecord> = Vec::new();
+    let mut reconstructed_kept: BTreeSet<crate::topology::EdgeId> = BTreeSet::new();
+    // a cut the endpoint certificate's scope cannot decide (a non-planar moved face):
+    // the reconstruction engages only with the events that fire, and refuses then
+    let mut undecided: Option<SolidError> = None;
+    // (issue #13622's hook) DISCHARGE the gap pass's vanish obligations first, before
+    // any other cut gets in the way: per pending original, complete unambiguous
+    // correspondence (its group is there, and no result edge is shared with another
+    // original) and a classification certifying its REMOVAL (the only cut whose edge is
+    // gone). A `Clear` or `Trimmed` cut, a missing or ambiguous correspondence, or a cut
+    // that cannot be certified (an uncertifiable clip) leaves ownership unestablished —
+    // the reconstruction does not take the vanish — and the gap pass's refusal stands
+    // again ([`deferred_edge_vanish`]). A cut the endpoint certificate's scope cannot
+    // decide (a non-planar moved surface) refuses its own typed refusal: obligations are
+    // never suppressible.
+    for &pending in vanished {
+        let group = map.get(&pending).map(Vec::as_slice).unwrap_or_default();
+        let unambiguous = !group.is_empty()
+            && group
+                .iter()
+                .all(|e| map.values().filter(|other| other.contains(e)).count() == 1);
+        if !unambiguous {
+            return Err(deferred_edge_vanish(pending));
+        }
+        let mut removal = false;
+        for &e in group {
+            let Some(record) = b.edges().iter().find(|(x, _)| *x == e).map(|(_, r)| r) else {
+                // a descendant the body does not have: nothing certifies its removal
+                return Err(deferred_edge_vanish(pending));
+            };
+            let Some(curve) = record.curve.clone() else {
+                return Err(null("the edge's curve"));
+            };
+            let interval = record.interval;
+            for face in &cuts {
+                let tolerance = (Ivl::from(record.tolerance) + Ivl::from(face.moved.tolerance)).hi;
+                let crossing =
+                    match classify_edge_crossing(k, &curve, &interval, face, tolerance, e) {
+                        Ok(crossing) => crossing,
+                        Err(err) => {
+                            let undecided = matches!(
+                                err.failure().map(|f| &f.reason),
+                                Some(crate::error::Reason::Offset(
+                                    OffsetFailure::Reconstruction {
+                                        why: ReconstructionRefusal::SurfaceUncertified { .. }
+                                    }
+                                ))
+                            );
+                            if undecided {
+                                return Err(err);
+                            }
+                            return Err(deferred_edge_vanish(pending));
+                        }
+                    };
+                match crossing.event {
+                    CrossEvent::Clear => {}
+                    CrossEvent::Removed { .. } => removal = true,
+                    CrossEvent::Trimmed { .. } => return Err(deferred_edge_vanish(pending)),
+                }
+            }
+        }
+        if !removal {
+            return Err(deferred_edge_vanish(pending));
+        }
+    }
+    for (&original, result_edges) in map {
+        k.check_cancelled(OP)?;
+        if !crossable.contains(&original) {
+            // an edge beside a moved face is rebuilt around it: no cut of its own
+            continue;
+        }
+        let mut group: Option<CrossEvent> = None;
+        for &e in result_edges {
+            let Some(record) = b.edges().iter().find(|(x, _)| *x == e).map(|(_, r)| r) else {
+                continue;
+            };
+            let Some(curve) = record.curve.clone() else {
+                return Err(null("the edge's curve"));
+            };
+            let interval = record.interval;
+            let edge_tolerance = record.tolerance;
+            let mut event: Option<(
+                CrossEvent,
+                Option<clearance::endpoint_contact::ContactProof>,
+                FaceId,
+            )> = None;
+            for face in &cuts {
+                let tolerance = (Ivl::from(edge_tolerance) + Ivl::from(face.moved.tolerance)).hi;
+                let crossing =
+                    match classify_edge_crossing(k, &curve, &interval, face, tolerance, e) {
+                        Ok(crossing) => crossing,
+                        Err(e) => {
+                            let uncertified = matches!(
+                                e.failure().map(|f| &f.reason),
+                                Some(crate::error::Reason::Offset(
+                                    OffsetFailure::Reconstruction {
+                                        why: ReconstructionRefusal::SurfaceUncertified { .. }
+                                    }
+                                ))
+                            );
+                            if uncertified {
+                                undecided = Some(e);
+                                continue;
+                            }
+                            return Err(e);
+                        }
+                    };
+                if crossing.event != CrossEvent::Clear {
+                    // one cut per edge is the reconstruction's pattern: two moved faces
+                    // cutting one edge is not certified here
+                    if event.is_some() {
+                        return Err(refusal(ReconstructionRefusal::ClipUncertified { edge: e }));
+                    }
+                    event = Some((crossing.event, crossing.proof, face.face));
+                }
+            }
+            if let Some((ev, proof, clip_face)) = event {
+                if let CrossEvent::Trimmed {
+                    clip,
+                    clip_t,
+                    removes_low,
+                } = ev
+                {
+                    clips.push(ClipRecord {
+                        edge: e,
+                        face: clip_face,
+                        clip,
+                        clip_t,
+                        removes_low,
+                        proof,
+                    });
+                }
+                match &group {
+                    None | Some(CrossEvent::Clear) => group = Some(ev),
+                    Some(prev) if ev == CrossEvent::Clear => {
+                        let _ = prev;
+                    }
+                    Some(prev) => {
+                        if *prev != ev {
+                            return Err(refusal(ReconstructionRefusal::ClipUncertified {
+                                edge: e,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+        let Some(event) = group else {
+            continue;
+        };
+        if event != CrossEvent::Clear {
+            if kept.iter().any(|(id, _)| *id == original) {
+                reconstructed_kept.insert(original);
+            }
+            events.push(EdgeEventRecord { original, event });
+        }
+    }
+    if events.is_empty() {
+        // (issue #13622's hook) obligations are not suppressible: where a cut the
+        // endpoint certificate's scope cannot decide left one undecided, its typed
+        // refusal stands ([`ReconstructionRefusal::SurfaceUncertified`]); a
+        // no-engagement return discharges nothing, and where no cut was undecided the
+        // deferred vanish's refusal stands again ([`deferred_edge_vanish`])
+        if let Some(&edge) = vanished.iter().next() {
+            if let Some(e) = undecided {
+                return Err(e);
+            }
+            return Err(deferred_edge_vanish(edge));
+        }
+        // no reconstruction is engaged: the operation behaves as it always did (the
+        // gates decide), even where a non-planar cut left a group undecided
+        return Ok(Reconstruction::empty(map.clone()));
+    }
+    if let Some(e) = undecided {
+        // the reconstruction engaged, but a cut is outside the endpoint certificate's
+        // scope (ARC 1's documented planar scope): nothing uncertain is built
+        return Err(e);
+    }
+    // the cut corner's vertices: the ends of the removed edges' uses
+    let mut corner_vertices: Vec<crate::topology::VertexId> = Vec::new();
+    for record in &events {
+        if let CrossEvent::Removed { .. } = record.event {
+            for &e in map
+                .get(&record.original)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+            {
+                for eu in edge::edgeuses(b, e, None, None)? {
+                    if let Some(v) =
+                        eu1::vertexuse(b, eu)?.and_then(|vu| vu1::vertex(b, vu).ok().flatten())
+                    {
+                        corner_vertices.push(v);
+                    }
+                }
+            }
+        }
+    }
+    corner_vertices.sort_unstable();
+    corner_vertices.dedup();
+    // the repair's bookkeeping
+    let mut bridges: Vec<crate::topology::EdgeId> = Vec::new();
+    let mut touched_edges: Vec<crate::topology::EdgeId> = Vec::new();
+    let mut touched_vertices: Vec<crate::topology::VertexId> = Vec::new();
+    let mut affected_faces: Vec<FaceId> = Vec::new();
+    let naming = b.naming();
+    let key_of = move |e: EntityRef| crate::topology::scheme_owner_identity(naming, e);
+    // 2. SEVER the removed edges and MERGE the lamina twins a surviving group carries,
+    //    under the caller's notification identities
+    Context::with_notification_context(k, |k, context| -> Result<()> {
+        let mut env = NotifyEnv {
+            records: notifications.records,
+            attributes: notifications.attributes,
+            context: Some(context),
+            key_of: &key_of,
+        };
+        crate::topology::brep::p3::seed_records(env.records, b, &key_of);
+        for record in &events {
+            if let CrossEvent::Removed { .. } = record.event {
+                for &e in map
+                    .get(&record.original)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default()
+                {
+                    sever_edge(k, b, e, &mut env)?;
+                }
+            }
+        }
+        for (&original, result_edges) in map {
+            if result_edges.len() != 2 {
+                continue;
+            }
+            let alive: Vec<_> = result_edges
+                .iter()
+                .copied()
+                .filter(|e| b.edges().iter().any(|(x, _)| x == *e))
+                .collect();
+            if alive.len() != 2 {
+                // a severed group's twins go with their edges
+                continue;
+            }
+            let lamina = alive
+                .iter()
+                .map(|&e| Ok(eu1::edge_is_lamina(b, e)? && edge::edgeuse_count(b, e)? == 2))
+                .collect::<Result<Vec<_>>>()?;
+            if !lamina.iter().all(|x| *x) {
+                continue;
+            }
+            let has_event = events.iter().any(|record| record.original == original);
+            // the cut corner's neighbourhood: a lamina twin pair one of whose edges sits
+            // at a cut corner vertex resolves the same way (the spike's measured extra
+            // repair)
+            let at_corner = alive.iter().any(|&e| {
+                edge::edgeuses(b, e, None, None).is_ok_and(|uses| {
+                    uses.iter().any(|&eu| {
+                        eu1::vertexuse(b, eu).is_ok_and(|vu| {
+                            vu.and_then(|vu| vu1::vertex(b, vu).ok().flatten())
+                                .is_some_and(|v| corner_vertices.contains(&v))
+                        })
+                    })
+                })
+            });
+            if has_event || at_corner {
+                if let [first, second] = alive.as_slice() {
+                    merge_lamina_twins(b, *first, *second)?;
+                }
+            }
+        }
+        Ok(())
+    })??;
+    // (issue #13622's hook) every corresponding descendant of a pending original is
+    // severed: a surviving one cannot discharge the obligation
+    for &pending in vanished {
+        let survivors = map.get(&pending).map(Vec::as_slice).unwrap_or_default();
+        if survivors
+            .iter()
+            .any(|e| b.edges().iter().any(|(x, _)| x == *e))
+        {
+            return Err(refusal(ReconstructionRefusal::VanishUnresolved {
+                edge: pending,
+            }));
+        }
+    }
+    // 3. the cut corner: every edge incident to a corner vertex takes the clip point on
+    //    its curve (its own certified clip, else the intended point its curve passes
+    //    through: the projection of the clip onto the curve, exact for the affine
+    //    curves this pass clips)
+    let mut corner_edges: Vec<CornerEdge> = Vec::new();
+    let mut clip_points: Vec<Point3> = clips.iter().map(|c| c.clip).collect();
+    clip_points.sort_by(|p, q| {
+        (p.x, p.y, p.z)
+            .partial_cmp(&(q.x, q.y, q.z))
+            .unwrap_or(core::cmp::Ordering::Equal)
+    });
+    clip_points.dedup();
+    let corner_points: Vec<Point3> = corner_vertices
+        .iter()
+        .map(|&cv| b.vertex(cv).map(|r| r.point))
+        .collect::<Result<_>>()?;
+    for &v in &corner_vertices {
+        for e in crate::topology::vertex::edges(b, v, None)? {
+            if corner_edges.iter().any(|c| c.edge == e) {
+                continue;
+            }
+            let record = b.edge(e)?;
+            let Some(curve) = record.curve.clone() else {
+                return Err(null("the edge's curve"));
+            };
+            let interval = record.interval;
+            let tolerance = record.tolerance.max(b.tolerance());
+            let (clip, clip_t, drop_min) = if let Some(own) = clips.iter().find(|c| c.edge == e) {
+                (own.clip, own.clip_t, own.removes_low)
+            } else {
+                let mut found: Option<(Point3, f64)> = None;
+                for p in &clip_points {
+                    let t = clip_param(k, &curve, interval, *p)?;
+                    if t < interval.min() || t > interval.max() {
+                        continue;
+                    }
+                    let at = curve.evaluate_point(k, t)?;
+                    if at.distance(*p) <= tolerance {
+                        if found.is_some() {
+                            return Err(refusal(ReconstructionRefusal::ClipUncertified {
+                                edge: e,
+                            }));
+                        }
+                        found = Some((*p, t));
+                    }
+                }
+                let Some((p, t)) = found else {
+                    return Err(refusal(ReconstructionRefusal::ClipUncertified { edge: e }));
+                };
+                // the end that goes is the one at the cut corner
+                let (p_min, p_max) = (
+                    curve.evaluate_point(k, interval.min())?,
+                    curve.evaluate_point(k, interval.max())?,
+                );
+                let drop_min = corner_points
+                    .iter()
+                    .any(|old| p_min.distance(*old) < p_max.distance(*old));
+                (p, t, drop_min)
+            };
+            corner_edges.push(CornerEdge {
+                edge: e,
+                clip,
+                clip_t,
+                drop_min,
+            });
+            touched_edges.push(e);
+            affected_faces.extend(edge::faces(b, e, None)?);
+        }
+    }
+    if let Some(first_clip) = clips.first() {
+        if corner_edges.is_empty() {
+            return Err(refusal(ReconstructionRefusal::ClipUncertified {
+                edge: first_clip.edge,
+            }));
+        }
+    }
+    // 4. VERTEX SPLIT at the diverging ends: one copy per distinct clip point beyond
+    //    the first (deterministic: the clip points' order), then RETRIM every corner
+    //    edge to its clip and move each clip vertex's point to its intended point
+    let mut clip_vertices: Vec<(Point3, Vec<crate::topology::VertexId>)> = Vec::new();
+    for p in &clip_points {
+        clip_vertices.push((*p, Vec::new()));
+    }
+    for &v in &corner_vertices {
+        k.check_cancelled(OP)?;
+        let incident = crate::topology::vertex::edges(b, v, None)?;
+        let mut groups: Vec<(Point3, Vec<crate::topology::EdgeId>)> = Vec::new();
+        for ce in &corner_edges {
+            if !incident.contains(&ce.edge) {
+                continue;
+            }
+            match groups.iter_mut().find(|(p, _)| *p == ce.clip) {
+                Some((_, es)) => es.push(ce.edge),
+                None => groups.push((ce.clip, vec![ce.edge])),
+            }
+        }
+        groups.sort_by(|(p, _), (q, _)| {
+            (p.x, p.y, p.z)
+                .partial_cmp(&(q.x, q.y, q.z))
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
+        for (index, (p, es)) in groups.iter().enumerate() {
+            let holder = if index == 0 {
+                v
+            } else {
+                split_vertex(b, v, es)?
+            };
+            if let Some(slot) = clip_vertices.iter_mut().find(|(q, _)| q == p) {
+                slot.1.push(holder);
+            }
+            if index > 0 {
+                touched_vertices.push(holder);
+            }
+        }
+    }
+    for ce in &corner_edges {
+        retrim_edge(k, b, ce.edge, ce.clip_t, ce.drop_min)?;
+    }
+    for (p, holders) in &clip_vertices {
+        for &v in holders {
+            b.vertex_mut(v)?.point = *p;
+            touched_vertices.push(v);
+        }
+    }
+    // 5. MERGE the coincident intended points (`p5::glue_vertices`): the clip point's
+    //    vertices become one
+    for (_, holders) in &mut clip_vertices {
+        holders.sort_unstable();
+        holders.dedup();
+        if let Some(&survivor) = holders.first() {
+            let doomed: Vec<_> = holders.iter().skip(1).copied().collect();
+            for &gone in &doomed {
+                if gone != survivor {
+                    p5::glue_vertices(k, b, Some(survivor), Some(gone), None)?;
+                    touched_vertices.retain(|&x| x != gone);
+                }
+            }
+            holders.clear();
+            holders.push(survivor);
+            touched_vertices.push(survivor);
+        }
+    }
+    b.refresh_cached_topology();
+    // 6. BRIDGE: the corner gaps left (the cut the clip removed from the faces that
+    //    bounded it) close with one four-use edge per gap pair
+    let mut gap_slots: BTreeMap<
+        [u32; 2],
+        Vec<(
+            crate::topology::LoopuseId,
+            crate::topology::EdgeuseId,
+            crate::topology::EdgeuseId,
+        )>,
+    > = BTreeMap::new();
+    for (lu, prev, next) in loop_gaps(b)? {
+        let (prev_end, next_start) = (use_ends(b, prev)?.1, use_ends(b, next)?.0);
+        let (Some(u), Some(w)) = (prev_end, next_start) else {
+            return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+                fault: BoundaryFault::LoopDiverges { loopuse: lu },
+            }));
+        };
+        if u == w {
+            continue;
+        }
+        let pair = [u.index(), w.index()];
+        let pair = [pair[0].min(pair[1]), pair[0].max(pair[1])];
+        gap_slots.entry(pair).or_default().push((lu, prev, next));
+    }
+    Context::with_notification_context(k, |k, context| -> Result<()> {
+        let mut env = NotifyEnv {
+            records: notifications.records,
+            attributes: notifications.attributes,
+            context: Some(context),
+            key_of: &key_of,
+        };
+        for (pair, slots) in &gap_slots {
+            let [low, high] = *pair;
+            let (a, by) = (
+                crate::topology::VertexId::from_index(low),
+                crate::topology::VertexId::from_index(high),
+            );
+            let e = insert_bridge(k, b, a, by, slots, &mut env)?;
+            bridges.push(e);
+            touched_edges.push(e);
+            for &(lu, _, _) in slots {
+                let fu = b
+                    .loopuse(lu)?
+                    .faceuse
+                    .ok_or_else(|| null("the loop use's face use"))?;
+                if let Some(f) = eu1::faceuse_face(b, fu)? {
+                    affected_faces.push(f);
+                }
+            }
+        }
+        Ok(())
+    })??;
+    // 7. the region pair `move_faces` dropped, the affected tolerances re-measured
+    //    (never grown), and the completed boundary validated
+    Context::with_notification_context(k, |k, context| -> Result<()> {
+        let mut env = NotifyEnv {
+            records: notifications.records,
+            attributes: notifications.attributes,
+            context: Some(context),
+            key_of: &key_of,
+        };
+        restore_region_pair(k, b, &mut env)
+    })??;
+    b.refresh_cached_topology();
+    touched_edges.sort_unstable();
+    touched_edges.dedup();
+    touched_vertices.sort_unstable();
+    touched_vertices.dedup();
+    affected_faces.sort_unstable();
+    affected_faces.dedup();
+    let tolerances = tighten_reconstruction_tolerances(k, b, &touched_edges, &touched_vertices)?;
+    validate_completed_boundary(k, b, &clips, &bridges, &affected_faces)?;
+    let proofs = clips
+        .into_iter()
+        .filter_map(|c| c.proof.map(|p| (c.edge, p)))
+        .collect();
+    Ok(Reconstruction {
+        events,
+        proofs,
+        map: map.clone(),
+        reconstructed_kept,
+        bridges,
+        tolerances,
+        discharged_vanishes: vanished.clone(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1552,6 +3744,92 @@ mod tests {
         assert!(lines.is_empty(), "{lines:?}");
         let (v, manifold) = volume_and_manifold(&k, &mut b);
         assert!(manifold && (v - 10000.0).abs() <= 1e-9 * 10000.0, "{v}");
+    }
+
+    // Issue 2976's named case (the top of a 2 x 2 x 2 box becomes the plane z = x + y -
+    // 1) is now `a_tilted_top_that_crosses_unmoved_edges_reconstructs_the_boundary_around_the_crossings`
+    // in the reconstruction section below: the boundary around the crossings is
+    // reconstructed, not refused.
+
+    /// The check of the kept edges against the faces moved (issue #2976, certified bound
+    /// #2971), on the result of raising a 2-cube's top to the plane z = 3 given as
+    /// `Plane::from_normal`, whose net is about 1.2e6 wide while the face on it is 2 x 2.
+    /// The moved face carries the mark. A vertical edge through the face's region at
+    /// (1, 1) refuses the operation (`KeptEdgeNotClear`); one through the plane's net far
+    /// outside the face, at (50, 50), is clear of the face (tested against the whole
+    /// surface instead of the face's trimmed box, it would be called crossed). The marks
+    /// are off the body after either.
+    #[test]
+    fn a_kept_edge_through_a_moved_face_refuses_and_one_through_its_plane_beside_it_does_not() {
+        use crate::curve::curve::Curve;
+        use crate::curve::line::Line;
+        use crate::error::offset::Unsoundness;
+        use crate::geom::extent1d::Extent1d;
+        let kept_through = |x: f64, y: f64| KeptEdge {
+            curve: Curve::from(Line::from_points(
+                Point3::new(x, y, 2.5),
+                Point3::new(x, y, 3.5),
+                3,
+            )),
+            interval: Extent1d::from_min_max(0.0, 1.0),
+            tolerance: 1e-5,
+        };
+        for (x, y, refused) in [(1.0, 1.0, true), (50.0, 50.0, false)] {
+            let mut k = Kernel::default();
+            let mut b = create_box(&mut k, Point3::ZERO, 2.0, 2.0, 2.0).unwrap();
+            let top = bp1::faces(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| {
+                    let s = face_ops::surface(&b, f).unwrap().unwrap();
+                    let uv = s
+                        .natural_uv_domain_with_nurb(&k)
+                        .unwrap()
+                        .evaluate(0.5, 0.5);
+                    (s.evaluate_point(&k, uv).unwrap().z - 2.0).abs() < 1e-9
+                })
+                .unwrap();
+            let raised = Surface::from(Plane::from_normal(Point3::new(0.0, 0.0, 3.0), Vec3::Z));
+            with_notifications(&mut b, |b, notes| {
+                local_operation(&mut k, b, &[top], vec![raised], notes)
+            })
+            .unwrap();
+            let moved = bp1::faces(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| {
+                    let s = face_ops::surface(&b, f).unwrap().unwrap();
+                    let uv = b.face(f).unwrap().uv_domain.evaluate(0.5, 0.5);
+                    (s.evaluate_point(&k, uv).unwrap().z - 3.0).abs() < 1e-9
+                })
+                .unwrap();
+            b.add_attribute(
+                EntityRef::Face(moved),
+                Attribute::long(MOVED_FACE_MARK, 1, Behavior::Copy),
+            )
+            .unwrap();
+            let r = refuse_kept_edges_not_clear(
+                &mut k,
+                &mut b,
+                &[(crate::topology::EdgeId::from_index(0), kept_through(x, y))],
+                &Reconstruction::empty(BTreeMap::new()),
+            );
+            if refused {
+                let e = r.unwrap_err();
+                assert!(
+                    matches!(
+                        e.failure().map(|f| &f.reason),
+                        Some(crate::error::Reason::Offset(OffsetFailure::Unsound {
+                            what: Unsoundness::KeptEdgeNotClear
+                        }))
+                    ),
+                    "{e}"
+                );
+            } else {
+                r.unwrap();
+            }
+            assert!(b.entity_attributes(EntityRef::Face(moved)).is_empty());
+        }
     }
 
     #[test]
@@ -3175,5 +5453,983 @@ mod tests {
             matches!(why, Some(OffsetFailure::Unsound { .. })),
             "{why:?}"
         );
+    }
+
+    // ---- the crossed-boundary reconstruction (issue #13622) -------------------------
+
+    /// The named case of issue #13622: a 2 x 2 x 2 box at the origin, its top face, and
+    /// the plane `z = x + y - 1` to move the top to (`Plane::from_normal((0, 0, -1),
+    /// (-1, -1, 1))`).
+    fn named_case(k: &mut Kernel) -> (Brep, FaceId, Surface) {
+        let b = create_box(k, Point3::ZERO, 2.0, 2.0, 2.0).unwrap();
+        let top = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let s = face_ops::surface(&b, f).unwrap().unwrap();
+                let uv = s.natural_uv_domain_with_nurb(k).unwrap().evaluate(0.5, 0.5);
+                (s.evaluate_point(k, uv).unwrap().z - 2.0).abs() < 1e-9
+            })
+            .unwrap();
+        let tilted = Surface::from(Plane::from_normal(
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
+        ));
+        (b, top, tilted)
+    }
+
+    /// The vertex at exactly `want`.
+    fn vertex_at(b: &Brep, want: Point3) -> Option<crate::topology::VertexId> {
+        b.vertices()
+            .iter()
+            .map(|(v, _)| v)
+            .find(|&v| b.vertex(v).unwrap().point == want)
+    }
+
+    /// The edge whose curve covers exactly `p` to `q` (the rebuilt curves evaluate
+    /// their exact geometry to a rounding, ~1e-16 at this part's scale).
+    fn edge_between(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> Option<crate::topology::EdgeId> {
+        use crate::topology::edge;
+        b.edges().iter().map(|(e, _)| e).find(|&e| {
+            let c = edge::curve(b, e).unwrap().unwrap();
+            let i = edge::interval(b, e).unwrap();
+            let a = c.evaluate_point(k, i.min()).unwrap();
+            let z = c.evaluate_point(k, i.max()).unwrap();
+            let near = |x: Point3, y: Point3| x.distance(y) <= 1.0e-9;
+            (near(a, p) && near(z, q)) || (near(a, q) && near(z, p))
+        })
+    }
+
+    /// A moved face of `surface` over `uv_box` for [`classify_edge_crossing`]'s refusal
+    /// tests: `plane` is the cut of a planar face, `None` for any other.
+    fn cut_face(face: FaceId, surface: Surface, uv_box: Extent2d) -> MovedFaceCut {
+        use crate::offset::offset_executive::clearance::endpoint_contact::TrimRegion;
+        let plane = PlaneCut::of(&surface, true);
+        MovedFaceCut {
+            face,
+            moved: MovedFace {
+                surface,
+                uv_box: Some(uv_box),
+                tolerance: 1e-5,
+            },
+            region: TrimRegion { loops: Vec::new() },
+            plane,
+        }
+    }
+
+    /// Issue #13622: the top of a 2 x 2 x 2 box becomes the plane z = x + y - 1. It
+    /// cuts the bottom edges y = 0 and x = 0 at (1, 0, 0) and (0, 1, 0), away from
+    /// their vertices, and leaves nothing of the vertical edge above the corner
+    /// (0, 0, 0): the plane meets its line at (0, 0, -1), outside the edge. The
+    /// boundary around the crossings is reconstructed
+    /// (`reconstruct_crossed_boundaries`): the vertical vanishes (its lamina twins
+    /// sever), the four boundary edges of the corner re-trim to the two clip points
+    /// A = (0, 1, 0) and B = (1, 0, 0) (the diverging ends split and glue), and one
+    /// bridge edge closes the cut between them. The body is a closed manifold solid of
+    /// the closed-form volume 25/6 (the part of the box below the plane), its check
+    /// reports nothing and nothing beyond the input's, and the crossed edges are not
+    /// returned with the crossing kept.
+    #[test]
+    fn a_tilted_top_that_crosses_unmoved_edges_reconstructs_the_boundary_around_the_crossings() {
+        use crate::topology::edge;
+        use crate::topology::edgeuse::p1 as eu1;
+        let mut k = Kernel::default();
+        let (mut b, top, tilted) = named_case(&mut k);
+        let input =
+            validation::standing(&mut k, &mut b.clone_standing_for_self().unwrap()).unwrap();
+        with_notifications(&mut b, |b, notes| {
+            local_operation(&mut k, b, &[top], vec![tilted], notes)
+        })
+        .unwrap();
+        // the sound body: the closed-form volume 25/6, a manifold solid in two regions
+        let (volume, manifold) = volume_and_manifold(&k, &mut b);
+        assert!(manifold, "{volume}");
+        assert!((volume - 25.0 / 6.0).abs() <= 1e-6, "{volume}");
+        assert_eq!(bp1::regions(&b, None).unwrap().len(), 2);
+        // the check reports nothing (the #82 tolerance findings and the input's #61
+        // among what the repair removed) and adds none the input did not have
+        let found =
+            validation::standing(&mut k, &mut b.clone_standing_for_self().unwrap()).unwrap();
+        let lines = found.check.lines();
+        assert!(lines.is_empty(), "{lines:?}");
+        let added = found.check.failures_beyond(&input.check);
+        assert!(added.is_empty(), "{added:?}");
+        // the intended corner points A = (0, 1, 0) and B = (1, 0, 0), exactly
+        let a = vertex_at(&b, Point3::new(0.0, 1.0, 0.0)).expect("A = (0, 1, 0)");
+        let by = vertex_at(&b, Point3::new(1.0, 0.0, 0.0)).expect("B = (1, 0, 0)");
+        assert_ne!(a, by);
+        // the (0, 0) verticals and their corner vertices are gone (the other uses of
+        // the corner's edges intact: the four boundary edges end at the clip points)
+        let verticals = b
+            .edges()
+            .iter()
+            .map(|(e, _)| e)
+            .filter(|&e| {
+                let c = edge::curve(&b, e).unwrap().unwrap();
+                let i = edge::interval(&b, e).unwrap();
+                [i.min(), i.max()]
+                    .into_iter()
+                    .map(|t| c.evaluate_point(&k, t).unwrap())
+                    .all(|p| p.x.abs() < 1e-6 && p.y.abs() < 1e-6)
+            })
+            .count();
+        assert_eq!(verticals, 0, "the (0, 0) verticals survived");
+        for gone in [Point3::ZERO, Point3::new(0.0, 0.0, -1.0)] {
+            assert!(vertex_at(&b, gone).is_none(), "{gone:?}");
+        }
+        for (p, q) in [
+            (Point3::new(0.0, 1.0, 0.0), Point3::new(0.0, 2.0, 0.0)),
+            (Point3::new(1.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0)),
+            (Point3::new(0.0, 1.0, 0.0), Point3::new(0.0, 2.0, 1.0)),
+            (Point3::new(1.0, 0.0, 0.0), Point3::new(2.0, 0.0, 1.0)),
+        ] {
+            assert!(edge_between(&k, &b, p, q).is_some(), "{p:?}..{q:?}");
+        }
+        // the (2, 2) vertical is extended to z = 3 (the moved top raised that corner)
+        assert!(edge_between(
+            &k,
+            &b,
+            Point3::new(2.0, 2.0, 0.0),
+            Point3::new(2.0, 2.0, 3.0)
+        )
+        .is_some());
+        // the bridge: one four-use manifold edge between A and B, a mated pair in each
+        // face's two loop-use chains
+        let bridge = edge_between(
+            &k,
+            &b,
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+        )
+        .expect("the bridge edge A..B");
+        assert_eq!(edge::edgeuse_count(&b, bridge).unwrap(), 4);
+        assert!(edge::is_manifold(&b, bridge).unwrap());
+        assert!(!eu1::edge_is_lamina(&b, bridge).unwrap());
+        for f in edge::faces(&b, bridge, None).unwrap() {
+            let on_face = edge::edgeuses(&b, bridge, None, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&eu| eu1::face(&b, eu).unwrap() == Some(f))
+                .count();
+            assert_eq!(on_face, 2, "F{}: {on_face} uses of the bridge", f.index());
+        }
+        // the body a public operation leaves: its counts and its loop walks closed
+        assert_eq!(
+            (
+                b.faces().len(),
+                b.edges().len(),
+                b.edgeuses().len(),
+                b.vertices().len(),
+                b.vertexuses().len()
+            ),
+            (6, 12, 48, 8, 48)
+        );
+        for (lu, _) in b.loopuses().iter() {
+            let (closed, shared, _) = walk_chain(&b, lu).unwrap();
+            assert!(closed && shared, "LU{}", lu.index());
+        }
+    }
+
+    /// A moved face that crosses no edge is a no-op for the reconstruction (issue
+    /// #13622): the pass records zero events and touches nothing — the body is exactly
+    /// what `moves_the_top_of_a_box_and_keeps_it_a_solid` and
+    /// `a_raised_top_keeps_the_bottom_edges_as_they_were` measure without it.
+    #[test]
+    fn a_raised_top_that_crosses_no_edge_records_no_reconstruction_events() {
+        let mut k = Kernel::default();
+        let (mut b, top, _tilted) = named_case(&mut k);
+        let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 3.0), Vec3::Z));
+        let reconstruction = with_notifications(&mut b, |b, notes| {
+            local_operation_recorded(&mut k, b, &[top], vec![raised], notes)
+        })
+        .unwrap();
+        assert!(
+            reconstruction.events().is_empty(),
+            "{:?}",
+            reconstruction.events()
+        );
+        assert!(reconstruction.bridges().is_empty());
+        assert!(reconstruction.tolerances().is_empty());
+        assert!(reconstruction.proofs().is_empty());
+        // the correspondence was captured all the same (the marks flowed)
+        assert_eq!(reconstruction.map().len(), 12);
+    }
+
+    /// The correspondence map of one reconstruction (issue #13622): each original
+    /// edge's mark reaches the result edges rebuilt from it (one original to many for
+    /// the lamina twins), the marks are private to the operation and none outlives a
+    /// success, a refusal rolls them back with the body, the caller's notification
+    /// callbacks stay installed throughout (the bridge's `AddToBrep` reaches them), and
+    /// the map still names the same result edges after the welds.
+    #[test]
+    fn the_reconstruction_keeps_the_original_edge_correspondence() {
+        use crate::geom::object::NotifyOperation;
+        use crate::topology::edge;
+        let mut k = Kernel::default();
+        let events = edge::notification_test_support::install(&mut k.context);
+        let (mut b, top, tilted) = named_case(&mut k);
+        let originals: Vec<(crate::topology::EdgeId, Point3, Point3)> = b
+            .edges()
+            .iter()
+            .map(|(e, _)| {
+                let c = edge::curve(&b, e).unwrap().unwrap().clone();
+                let i = edge::interval(&b, e).unwrap();
+                (
+                    e,
+                    c.evaluate_point(&k, i.min()).unwrap(),
+                    c.evaluate_point(&k, i.max()).unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(originals.len(), 12);
+        let reconstruction = with_notifications(&mut b, |b, notes| {
+            local_operation_recorded(&mut k, b, &[top], vec![tilted], notes)
+        })
+        .unwrap();
+        let map = reconstruction.map();
+        assert_eq!(map.len(), 12);
+        assert_eq!(
+            map.keys().copied().collect::<Vec<_>>(),
+            originals.iter().map(|o| o.0).collect::<Vec<_>>()
+        );
+        // every result edge carried exactly one original's mark at capture: 14 result
+        // edges for 12 originals (two originals map to their lamina twins)
+        let marked: usize = map.values().map(Vec::len).sum();
+        assert_eq!(marked, 14, "{map:?}");
+        let find_original = |pred: &dyn Fn(Point3, Point3) -> bool| {
+            originals.iter().find(|(_, p, q)| pred(*p, *q)).unwrap().0
+        };
+        // the severed corner: the vertical (0, 0) original maps to its two lamina
+        // twins (one original, two result edges) and to nothing alive after
+        let vertical = find_original(&|p, q| {
+            [p, q]
+                .into_iter()
+                .all(|r| r.x.abs() < 1e-6 && r.y.abs() < 1e-6)
+        });
+        assert_eq!(map[&vertical].len(), 2, "{:?}", map[&vertical]);
+        assert!(
+            map[&vertical]
+                .iter()
+                .all(|e| !b.edges().iter().any(|(x, _)| x == *e)),
+            "{:?}",
+            map[&vertical]
+        );
+        // the top y = 0 twins map together and resolve to the one survivor
+        let top_y0 = find_original(&|p, q| {
+            [p, q]
+                .into_iter()
+                .all(|r| r.y.abs() < 1e-6 && (r.z - 2.0).abs() < 1e-6)
+        });
+        assert_eq!(map[&top_y0].len(), 2, "{:?}", map[&top_y0]);
+        let alive: Vec<_> = map[&top_y0]
+            .iter()
+            .filter(|e| b.edges().iter().any(|(x, _)| x == **e))
+            .copied()
+            .collect();
+        assert_eq!(alive.len(), 1, "{:?}", map[&top_y0]);
+        // the marks are private to the operation: none outlives a success
+        for (e, _) in b.edges().iter() {
+            assert!(b
+                .entity_attributes(EntityRef::Edge(e))
+                .iter()
+                .all(|(_, a)| a.attribute_id() != CORRESPONDENCE_MARK));
+        }
+        for (f, _) in b.faces().iter() {
+            assert!(b
+                .entity_attributes(EntityRef::Face(f))
+                .iter()
+                .all(|(_, a)| a.attribute_id() != MOVED_FACE_MARK));
+        }
+        // the callback the caller installed saw the pass's own notifications: the
+        // bridge's `AddToBrep` proves the operation never replaced it
+        let captured = events.lock().unwrap().clone();
+        assert!(
+            captured
+                .iter()
+                .any(|ev| ev.operation == NotifyOperation::AddToBrep),
+            "{:?}",
+            captured.iter().map(|ev| ev.operation).collect::<Vec<_>>()
+        );
+        // the map survives the welds: the same result edges for the same originals
+        p5::stitch_and_orient(&mut k, &mut b, &p5::StitchAndOrientOptions::default()).unwrap();
+        b.refresh_cached_topology();
+        crate::heal::stitch::p2::stitch_into_solid(&mut k, &mut b).unwrap();
+        b.refresh_cached_topology();
+        for (original, result_edges) in map {
+            for e in result_edges {
+                if alive.contains(e) {
+                    assert!(
+                        b.edges().iter().any(|(x, _)| x == *e),
+                        "original E{}: E{} died in the weld",
+                        original.index(),
+                        e.index()
+                    );
+                }
+            }
+        }
+        assert_eq!(edge::edgeuse_count(&b, alive[0]).unwrap(), 4);
+    }
+
+    /// A refusal rolls the correspondence marks back with the body (issue #13622): the
+    /// operation's private marks outlive nothing, not even a failed run.
+    #[test]
+    fn a_refusal_rolls_the_correspondence_marks_back_with_the_body() {
+        let mut k = Kernel::default();
+        k.fixes.local_operation_box_holds_new_surfaces = true;
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
+        let top = box_top(&k, &b);
+        let raised = Surface::from(Plane::new(
+            Vec3::new(0.0, 0.0, 80.0),
+            Vec3::X,
+            Vec3::Y,
+            crate::math::Vec2::new(20.0, 20.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        let why = refused_unchanged_or_returned(&mut k, &mut b, &[top], vec![raised]);
+        assert!(
+            matches!(why, Some(OffsetFailure::Unsound { .. })),
+            "{why:?}"
+        );
+        for (e, _) in b.edges().iter() {
+            assert!(b
+                .entity_attributes(EntityRef::Edge(e))
+                .iter()
+                .all(|(_, a)| a.attribute_id() != CORRESPONDENCE_MARK));
+        }
+        for (f, _) in b.faces().iter() {
+            assert!(b
+                .entity_attributes(EntityRef::Face(f))
+                .iter()
+                .all(|(_, a)| a.attribute_id() != MOVED_FACE_MARK));
+        }
+    }
+
+    /// The reconstruction's tolerance pass (issue #13622; `docs/validity-and-tolerances.md`
+    /// §5.2's formula, §7.2 `Fix_TolSizes` steps 4-5, §8 and invariant 9): the two
+    /// corner vertices shrink to what their measured gaps need (1.00001 -> 1e-5, the
+    /// #82 findings gone), no edge tolerance changes where the whole-edge gaps do not
+    /// justify it, and a measured gap past the construction bound refuses
+    /// `GapBeyondConstruction`: the tolerance is never grown to cover it.
+    #[test]
+    fn the_reconstruction_tightens_the_corner_tolerances_and_never_grows_one() {
+        use crate::topology::edge;
+        let mut k = Kernel::default();
+        let (mut b, top, tilted) = named_case(&mut k);
+        let reconstruction = with_notifications(&mut b, |b, notes| {
+            local_operation_recorded(&mut k, b, &[top], vec![tilted], notes)
+        })
+        .unwrap();
+        // the rule shrinks what its gaps do not need and never grows
+        let tolerances = reconstruction.tolerances();
+        assert!(
+            tolerances.iter().all(|t| t.after < t.before),
+            "{tolerances:?}"
+        );
+        // only the two corner vertices move (1.00001 -> 1e-5): the edge tolerances are
+        // left unchanged, their whole-edge bounds do not justify changing them
+        assert!(
+            tolerances.iter().all(|t| t.entity.starts_with('V')),
+            "{tolerances:?}"
+        );
+        assert_eq!(tolerances.len(), 2, "{tolerances:?}");
+        for t in tolerances {
+            assert!(
+                (t.before - 1.00001).abs() < 1.0e-5,
+                "{} {}",
+                t.entity,
+                t.before
+            );
+            assert!(
+                (t.after - 1.0e-5).abs() < 1.0e-12,
+                "{} {}",
+                t.entity,
+                t.after
+            );
+        }
+        // the corner edges keep the zone tolerance (re-measured: unchanged)
+        for v in [
+            vertex_at(&b, Point3::new(0.0, 1.0, 0.0)).unwrap(),
+            vertex_at(&b, Point3::new(1.0, 0.0, 0.0)).unwrap(),
+        ] {
+            for e in crate::topology::vertex::edges(&b, v, None).unwrap() {
+                assert_eq!(
+                    edge::tolerance(&b, e).unwrap(),
+                    b.tolerance(),
+                    "E{}",
+                    e.index()
+                );
+            }
+            assert_eq!(crate::topology::vertex::tolerance(&b, v).unwrap(), 1e-5);
+        }
+        // the #82 tolerance findings are gone
+        let found =
+            validation::standing(&mut k, &mut b.clone_standing_for_self().unwrap()).unwrap();
+        assert!(
+            found.check.lines().iter().all(|l| !l.contains("#82")),
+            "{:?}",
+            found.check.lines()
+        );
+        // a gap past the construction bound (the body's zone tolerance: below it an
+        // exact construction leaves no gap) refuses; the tolerance is never grown to    // cover it
+        let a = vertex_at(&b, Point3::new(0.0, 1.0, 0.0)).unwrap();
+        b.vertex_mut(a).unwrap().point = Point3::new(0.0, 1.0, 0.5);
+        let edges_of_a = crate::topology::vertex::edges(&b, a, None).unwrap();
+        let r = tighten_reconstruction_tolerances(&mut k, &mut b, &edges_of_a, &[a]);
+        assert!(
+            matches!(
+                r.unwrap_err().failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::GapBeyondConstruction { .. }
+                    }
+                ))
+            ),
+            "the gap past the construction bound was not refused"
+        );
+    }
+
+    /// Stage-2 of the reconstruction (issue #13622): a bridge the pass inserted that is
+    /// gone refuses the completed boundary typed (`BoundaryFault::BridgeMissing`) — the
+    /// boundary is never returned half closed.
+    #[test]
+    fn the_completed_boundary_check_refuses_a_bridge_that_is_gone() {
+        use crate::error::offset::BoundaryFault;
+        let mut k = Kernel::default();
+        let (mut b, top, tilted) = named_case(&mut k);
+        let reconstruction = with_notifications(&mut b, |b, notes| {
+            local_operation_recorded(&mut k, b, &[top], vec![tilted], notes)
+        })
+        .unwrap();
+        assert_eq!(reconstruction.bridges().len(), 1);
+        let bridge = reconstruction.bridges()[0];
+        let faces = bp1::faces(&b, None).unwrap();
+        // the recorded bridge passes the check
+        validate_completed_boundary(&mut k, &mut b, &[], &[bridge], &faces).unwrap();
+        // the same check with the bridge gone (a record for an edge the body does not
+        // have): a typed refusal, never a half-closed boundary
+        let gone = crate::topology::EdgeId::from_index(u32::MAX);
+        let r = validate_completed_boundary(&mut k, &mut b, &[], &[gone], &faces);
+        assert!(
+            matches!(
+                r.unwrap_err().failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::BoundaryInvalid {
+                            fault: BoundaryFault::BridgeMissing { .. }
+                        }
+                    }
+                ))
+            ),
+            "a gone bridge was not refused"
+        );
+    }
+
+    /// An uncertifiable clip refuses the reconstruction typed
+    /// (`ReconstructionRefusal::ClipUncertified`): a curve whose kind has no exact clip
+    /// on the plane is never guessed at (issue #13622).
+    #[test]
+    fn an_uncertifiable_clip_refuses_the_reconstruction() {
+        use crate::geom::extent1d::Extent1d;
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let k = Kernel::default();
+        let surface = Surface::from(Plane::from_normal(
+            Point3::new(0.0, 0.0, -1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
+        ));
+        let face = cut_face(
+            FaceId::from_index(0),
+            surface,
+            Extent2d::from_bounds(-2.0, -2.0, 2.0, 2.0),
+        );
+        // a bent (B-spline) curve touching the face's surface: no exact clip on a plane
+        let bent = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 2,
+                control_points: &[
+                    Point3::new(0.0, 1.0, 0.0),
+                    Point3::new(0.0, 1.5, 0.0),
+                    Point3::new(0.0, 2.0, 2.0),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[3, 3],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        let r = classify_edge_crossing(
+            &k,
+            &bent,
+            &Extent1d::from_min_max(0.0, 1.0),
+            &face,
+            2.0e-5,
+            crate::topology::EdgeId::from_index(0),
+        );
+        assert!(
+            matches!(
+                r.unwrap_err().failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::ClipUncertified { .. }
+                    }
+                ))
+            ),
+            "the uncertifiable clip was not refused"
+        );
+    }
+
+    /// A moved face whose surface is not planar refuses the cut typed
+    /// (`ReconstructionRefusal::SurfaceUncertified`): the cut of the body, the clip    /// point and the endpoint contact are certified on a plane only (issue #13622, the
+    /// endpoint certificate's documented scope).
+    #[test]
+    fn a_non_planar_moved_face_refuses_the_cut_as_uncertified() {
+        use crate::geom::extent1d::Extent1d;
+        let mut k = Kernel::default();
+        let body =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 1.0, 2.0)
+                .unwrap();
+        let side = curved_face(&body);
+        let surface = face_ops::surface(&body, side).unwrap().unwrap().clone();
+        let face = cut_face(side, surface, Extent2d::from_bounds(-1.0, -0.1, 1.0, 2.1));
+        assert!(face.plane.is_none());
+        // a line through the face's region: not proved clear, and no plane to cut on
+        let through = Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(0.0, 0.0, 1.0),
+            Point3::new(2.0, 0.0, 1.0),
+            3,
+        ));
+        let r = classify_edge_crossing(
+            &k,
+            &through,
+            &Extent1d::from_min_max(0.0, 1.0),
+            &face,
+            2.0e-5,
+            crate::topology::EdgeId::from_index(0),
+        );
+        assert!(
+            matches!(
+                r.unwrap_err().failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::SurfaceUncertified { .. }
+                    }
+                ))
+            ),
+            "the non-planar moved face was not refused"
+        );
+    }
+
+    /// The kept-edge gate certifies the rebuilt group per result edge (issue #13622's
+    /// review, S1): lamina twins map one original to several result edges, and every
+    /// SURVIVING rebuilt result edge must carry its own `ContactProof::Proved` — a
+    /// group where one twin has a proof and another rebuilt twin does not refuses typed
+    /// (`ClipUncertified`), where one proof for the whole group used to pass. A severed
+    /// edge needs no proof (it is not in the result).
+    #[test]
+    fn a_twin_group_with_one_proof_missing_refuses_the_gate() {
+        use crate::error::offset::ReconstructionRefusal;
+        use crate::offset::offset_executive::clearance::endpoint_contact::{
+            ContactProof, ContactReport,
+        };
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 2.0, 2.0, 2.0).unwrap();
+        let mut ids = b.edges().iter().map(|(e, _)| e).collect::<Vec<_>>();
+        ids.sort_unstable();
+        let (twin_a, twin_b) = (ids[0], ids[1]);
+        // the group of one original: the two live twins and a severed result edge
+        let original = crate::topology::EdgeId::from_index(u32::MAX);
+        let severed = crate::topology::EdgeId::from_index(u32::MAX - 1);
+        let proved = || {
+            ContactProof::Proved(ContactReport {
+                incidence: 0.0,
+                isolation_boxes: 0,
+                remainder_boxes: 0,
+                region_boxes: 0,
+                root_t: None,
+            })
+        };
+        let mut map = BTreeMap::new();
+        map.insert(original, vec![twin_a, twin_b, severed]);
+        let mut reconstructed_kept = BTreeSet::new();
+        reconstructed_kept.insert(original);
+        // one twin's proof alone: the other rebuilt twin carries none, refused typed
+        let reconstruction = Reconstruction {
+            events: Vec::new(),
+            proofs: vec![(twin_a, proved())],
+            map: map.clone(),
+            reconstructed_kept: reconstructed_kept.clone(),
+            bridges: Vec::new(),
+            tolerances: Vec::new(),
+            discharged_vanishes: BTreeSet::new(),
+        };
+        let r = refuse_kept_edges_not_clear(&mut k, &mut b, &[], &reconstruction);
+        assert!(
+            matches!(
+                r.unwrap_err().failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::ClipUncertified { .. }
+                    }
+                ))
+            ),
+            "a rebuilt twin without its own proof was not refused"
+        );
+        // each surviving twin its own proof: accepted (the severed edge needs none)
+        let reconstruction = Reconstruction {
+            events: Vec::new(),
+            proofs: vec![(twin_a, proved()), (twin_b, proved())],
+            map,
+            reconstructed_kept,
+            bridges: Vec::new(),
+            tolerances: Vec::new(),
+            discharged_vanishes: BTreeSet::new(),
+        };
+        refuse_kept_edges_not_clear(&mut k, &mut b, &[], &reconstruction).unwrap();
+    }
+
+    /// The "bounds the face" class (issue #13622's review, S2): an edge whose sampled
+    /// tolerance band lies in the moved face's surface is never classified `Clear` on
+    /// the samples alone. The certified strict predicate must confirm it
+    /// (`clearance::separated` over the trimmed region); where that certificate fails
+    /// and no endpoint contact certifies, the event logic refuses the uncertifiable
+    /// clip typed (`ClipUncertified`) — where the sampled band used to return `Clear`.
+    #[test]
+    fn an_edge_that_bounds_the_moved_face_is_not_clear_on_the_sampled_band() {
+        use crate::error::offset::ReconstructionRefusal;
+        use crate::geom::extent1d::Extent1d;
+        let k = Kernel::default();
+        let surface = Surface::from(Plane::from_normal(
+            Point3::new(0.0, 0.0, -1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
+        ));
+        let face = cut_face(
+            FaceId::from_index(0),
+            surface,
+            Extent2d::from_bounds(-10.0, -10.0, 10.0, 10.0),
+        );
+        // the line z = x + y - 1 from (0, 1, 0) to (2, 0, 1): its whole curve lies in
+        // the face's plane (the sampled band is 0) within the face's trimmed region
+        let in_plane = Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(2.0, 0.0, 1.0),
+            3,
+        ));
+        let r = classify_edge_crossing(
+            &k,
+            &in_plane,
+            &Extent1d::from_min_max(0.0, 1.0),
+            &face,
+            2.0e-5,
+            crate::topology::EdgeId::from_index(0),
+        );
+        assert!(
+            matches!(
+                r.unwrap_err().failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::ClipUncertified { .. }
+                    }
+                ))
+            ),
+            "the sampled band was accepted without a certificate"
+        );
+    }
+
+    /// The (0,0) vertical of the named case's box (both ends on x = y = 0).
+    fn corner_vertical(k: &Kernel, b: &Brep) -> crate::topology::EdgeId {
+        use crate::topology::edge;
+        b.edges()
+            .iter()
+            .map(|(e, _)| e)
+            .find(|&e| {
+                let c = edge::curve(b, e).unwrap().unwrap();
+                let i = edge::interval(b, e).unwrap();
+                [i.min(), i.max()]
+                    .into_iter()
+                    .map(|t| c.evaluate_point(k, t).unwrap())
+                    .all(|p| p.x.abs() < 1e-9 && p.y.abs() < 1e-9)
+            })
+            .expect("the (0,0) vertical")
+    }
+
+    /// The named case's deferred vanish is the reconstruction's event, not a failure
+    /// (issue #13622's hook): the gap pass records one obligation per original edge (the
+    /// (0,0) vertical), the reconstruction certifies its REMOVE and severs every lamina
+    /// twin — the obligations are exhausted.
+    #[test]
+    fn the_named_case_defers_the_vanish_as_an_obligation_and_the_reconstruction_discharges_it() {
+        let mut k = Kernel::default();
+        let (mut b, top, tilted) = named_case(&mut k);
+        let vertical = corner_vertical(&k, &b);
+        let reconstruction = with_notifications(&mut b, |b, notes| {
+            local_operation_recorded(&mut k, b, &[top], vec![tilted], notes)
+        })
+        .unwrap();
+        // the pending vanish is recorded (one obligation per original edge) and the
+        // obligations are exhausted
+        assert_eq!(
+            reconstruction
+                .discharged_vanishes()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![vertical],
+            "{:?}",
+            reconstruction.discharged_vanishes()
+        );
+        // its REMOVE is certified
+        assert!(
+            reconstruction.events().iter().any(|r| {
+                r.original == vertical && matches!(r.event, CrossEvent::Removed { .. })
+            }),
+            "{:?}",
+            reconstruction.events()
+        );
+        // all twins disappear
+        let twins = &reconstruction.map()[&vertical];
+        assert_eq!(twins.len(), 2, "{twins:?}");
+        assert!(
+            twins
+                .iter()
+                .all(|e| !b.edges().iter().any(|(x, _)| x == *e)),
+            "{twins:?}"
+        );
+    }
+
+    /// A deferred gap alongside a repairable one on the same face (issue #13622's hook):
+    /// a 2 x 2 x 0.5 box with its top moved to the named case's plane z = x + y - 1 —
+    /// the (0,0) vertical vanishes (its gap deferred) while the (0,2) corner rises to
+    /// z = 1 and its gap closes by the extension, both on the face x = 0's offset loop.
+    /// Processing completes without exhausting the gap pass's guard (`MAX_GAP_PASSES`,
+    /// which refuses `SM_ERR`) and without skipping the repair: the deferred gap
+    /// resolves as the recorded obligation, the extension is in the result (the (0,2)
+    /// vertical runs 0 to 1), and the body is the closed-form volume 25/6, the part of
+    /// the box's planes below the plane.
+    #[test]
+    fn a_deferred_gap_alongside_a_repairable_one_on_one_face_completes_without_the_gap_guard() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 2.0, 2.0, 0.5).unwrap();
+        let top = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let s = face_ops::surface(&b, f).unwrap().unwrap();
+                let p = s
+                    .evaluate_point(
+                        &k,
+                        s.natural_uv_domain_with_nurb(&k)
+                            .unwrap()
+                            .evaluate(0.5, 0.5),
+                    )
+                    .unwrap();
+                (p.z - 0.5).abs() < 1e-9
+            })
+            .expect("the top");
+        let vertical = corner_vertical(&k, &b);
+        let tilted = Surface::from(Plane::from_normal(
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
+        ));
+        let reconstruction = with_notifications(&mut b, |b, notes| {
+            local_operation_recorded(&mut k, b, &[top], vec![tilted], notes)
+        })
+        .unwrap();
+        // the deferred gap resolved as the recorded obligation; the run completed — the
+        // gap pass's MAX_GAP_PASSES guard refuses `SM_ERR`, so a scan that restarted on
+        // the deferral or exhausted its passes could not have finished
+        assert_eq!(
+            reconstruction
+                .discharged_vanishes()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![vertical]
+        );
+        // the repairable gap on the same face was not skipped: the (0,2) vertical is
+        // extended to where the moved top meets its line, z = 1
+        assert!(edge_between(
+            &k,
+            &b,
+            Point3::new(0.0, 2.0, 0.0),
+            Point3::new(0.0, 2.0, 1.0)
+        )
+        .is_some());
+        // the closed-form volume 25/6 (the part of the box's planes below the plane)
+        let (volume, manifold) = volume_and_manifold(&k, &mut b);
+        assert!(manifold, "{volume}");
+        assert!((volume - 25.0 / 6.0).abs() <= 1e-6, "{volume}");
+    }
+
+    /// A pending vanish with a non-planar moved surface refuses typed, even where no
+    /// other reconstruction event fires (issue #13622's hook's fail-closed rule and the
+    /// no-engagement path): the cut the endpoint certificate's scope cannot decide
+    /// refuses its own typed refusal (`SurfaceUncertified`) — a deferred obligation is
+    /// never suppressible. (The uncertifiable-clip flavour of the same rule is
+    /// `wr_566_local_operation_closes_a_wall`'s
+    /// `wr_566_without_the_opt_in_the_closed_wall_is_refused`: its deferred wall edges'
+    /// clips do not certify, and the gap pass's own `EdgeVanishes` stands again.)
+    #[test]
+    fn a_pending_vanish_with_a_non_planar_moved_face_refuses_typed_without_other_events() {
+        use crate::geom::attribute::{Attribute, Behavior};
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 1.0, 2.0)
+                .unwrap();
+        let side = curved_face(&b);
+        b.add_attribute(
+            EntityRef::Face(side),
+            Attribute::long(MOVED_FACE_MARK, 1, Behavior::Copy),
+        )
+        .unwrap();
+        // a boundary edge of the curved face: the obligation's original and its result
+        let e = face4::edges(&b, side, None, false, None).unwrap()[0];
+        let map = BTreeMap::from([(e, vec![e])]);
+        let crossable = BTreeSet::from([e]);
+        let vanished = BTreeSet::from([e]);
+        let r = with_notifications(&mut b, |b, notes| {
+            reconstruct_crossed_boundaries(&mut k, b, &map, &[], &crossable, &vanished, notes)
+        });
+        assert!(
+            matches!(
+                r.unwrap_err().failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::SurfaceUncertified { .. }
+                    }
+                ))
+            ),
+            "the undecided cut was suppressed with an obligation pending"
+        );
+    }
+
+    /// A deferred obligation the reconstruction does not take cannot discharge (issue
+    /// #13622's hook): a `Clear` or `Trimmed` classification, a missing correspondence or
+    /// an ambiguous one leaves ownership unestablished, and the gap pass's own
+    /// `EdgeVanishes` refusal stands again — typed, never a silent success.
+    #[test]
+    fn a_pending_vanish_the_reconstruction_does_not_take_is_refused_again() {
+        use crate::geom::attribute::{Attribute, Behavior};
+        let tilted = |k: &mut Kernel| -> (Brep, FaceId) {
+            let mut b = create_box(k, Point3::ZERO, 2.0, 2.0, 2.0).unwrap();
+            let top = bp1::faces(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| {
+                    let s = face_ops::surface(&b, f).unwrap().unwrap();
+                    let p = s
+                        .evaluate_point(
+                            k,
+                            s.natural_uv_domain_with_nurb(k).unwrap().evaluate(0.5, 0.5),
+                        )
+                        .unwrap();
+                    (p.z - 2.0).abs() < 1e-9
+                })
+                .expect("the top");
+            b.face_mut(top).unwrap().surface = Some(Surface::from(Plane::from_normal(
+                Vec3::new(0.0, 0.0, -1.0),
+                Vec3::new(-1.0, -1.0, 1.0),
+            )));
+            b.add_attribute(
+                EntityRef::Face(top),
+                Attribute::long(MOVED_FACE_MARK, 1, Behavior::Copy),
+            )
+            .unwrap();
+            (b, top)
+        };
+        // (i) the (2,2) vertical is clear of the tilted top's cut, (ii) the bottom y = 0
+        // edge is trimmed by it at (1, 0, 0), (iii) an obligation with no correspondence
+        // entry, (iv) an obligation whose result edge another original also claims
+        let mut k = Kernel::default();
+        let (mut b, _top) = tilted(&mut k);
+        let clear = edge_between(
+            &k,
+            &b,
+            Point3::new(2.0, 2.0, 0.0),
+            Point3::new(2.0, 2.0, 2.0),
+        )
+        .expect("the (2,2) vertical");
+        let trimmed = edge_between(&k, &b, Point3::ZERO, Point3::new(2.0, 0.0, 0.0))
+            .expect("the bottom y = 0 edge");
+        let cases = [
+            (
+                "clear",
+                BTreeMap::from([(clear, vec![clear])]),
+                BTreeSet::from([clear]),
+            ),
+            (
+                "trimmed",
+                BTreeMap::from([(trimmed, vec![trimmed])]),
+                BTreeSet::from([trimmed]),
+            ),
+            ("missing", BTreeMap::new(), BTreeSet::from([clear])),
+            (
+                "ambiguous",
+                BTreeMap::from([(clear, vec![clear]), (trimmed, vec![clear])]),
+                BTreeSet::from([clear]),
+            ),
+        ];
+        for (name, map, vanished) in cases {
+            let crossable = vanished.clone();
+            let r = with_notifications(&mut b, |b, notes| {
+                reconstruct_crossed_boundaries(&mut k, b, &map, &[], &crossable, &vanished, notes)
+            });
+            let e = r.expect_err(name);
+            assert!(
+                matches!(
+                    e.failure().map(|f| &f.reason),
+                    Some(crate::error::Reason::Offset(OffsetFailure::EdgeVanishes {
+                        edge: Some(_),
+                        face: None
+                    }))
+                ),
+                "{name}: {e}"
+            );
+        }
+    }
+
+    /// A refused run restores body, attributes and notification records (issue #13622's
+    /// hook): a second correspondence mark on the (0,0) vertical leaves the
+    /// correspondence ambiguous, so the deferred vanish's ownership is never established
+    /// and the run refuses the gap pass's own `EdgeVanishes` — with the input body, its
+    /// attributes and the caller's notification records and attributes exactly as they
+    /// were (the obligations roll back with them).
+    #[test]
+    fn a_refused_run_with_obligations_pending_restores_the_body_attributes_and_stores() {
+        use crate::geom::attribute::{Attribute, Behavior};
+        let mut k = Kernel::default();
+        let (mut b, top, tilted) = named_case(&mut k);
+        let vertical = corner_vertical(&k, &b);
+        // a second correspondence mark on the vertical: its result edges carry two
+        // originals' marks at capture, so the correspondence is ambiguous
+        b.add_attribute(
+            EntityRef::Edge(vertical),
+            Attribute::long(CORRESPONDENCE_MARK, 999, Behavior::Copy),
+        )
+        .unwrap();
+        let before = format!("{b:?}");
+        let (r, stores) = with_notifications(&mut b, |b, notes| {
+            let stores = (format!("{:?}", notes.records), notes.attributes.clone());
+            let r = local_operation(&mut k, b, &[top], vec![tilted], notes);
+            let after = (format!("{:?}", notes.records), notes.attributes.clone());
+            (r, (stores, after))
+        });
+        let e = r.expect_err("the ambiguous correspondence discharges nothing");
+        assert!(
+            matches!(
+                e.failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(OffsetFailure::EdgeVanishes {
+                    edge: Some(_),
+                    face: None
+                }))
+            ),
+            "{e}"
+        );
+        assert!(format!("{b:?}") == before, "the input changed");
+        assert!(stores.0 .0 == stores.1 .0, "the records changed");
+        assert!(stores.0 .1 == stores.1 .1, "the attributes changed");
     }
 }
