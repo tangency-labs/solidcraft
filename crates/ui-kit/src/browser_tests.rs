@@ -689,12 +689,13 @@ fn an_inactive_presentation_draws_and_emits_nothing_and_ends_its_gestures() {
 }
 
 #[test]
-fn a_rows_own_drop_rule_decides_and_a_refused_zone_falls_back_to_the_other() {
+fn a_rows_own_drop_rule_decides_and_its_top_part_falls_back_to_inside() {
     let rig = Rig::new();
     let (c, g) = (rig.at("row:C"), rig.rect(GROUP));
-    // G takes drops only before it: over its middle, where a drop would go inside, it goes before.
+    // G takes drops only before it: over its middle a drop never lands before it.
     rig.host.borrow_mut().g_takes = Some(Zone::Before);
-    let events = rig.drag(c, g.center());
+    assert_eq!(rig.drag(c, g.center()), Vec::new());
+    let events = rig.drag(c, pos2(g.center().x, g.top() + 3.0));
     assert!(matches!(events.as_slice(), [Event::Move { target: GROUP, zone: Zone::Before, .. }]), "{events:?}");
     // Its own rule overrides the panel's: inside only, even in its top part.
     rig.host.borrow_mut().g_takes = Some(Zone::Into);

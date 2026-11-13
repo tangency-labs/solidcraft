@@ -1063,17 +1063,23 @@ impl Rows<'_> {
         }
         let r = response.rect;
         let at = self.ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()));
-        // The zone under the pointer first (a row taking both takes a drop before it in its top
-        // part); when the rules refuse it, the row's other zone.
         let pointer = if at.is_some_and(|p| p.y < r.top() + r.height() * BEFORE_ZONE) { Zone::Before } else { Zone::Into };
-        let other = if pointer == Zone::Before { Zone::Into } else { Zone::Before };
-        let offered = |zone: Zone| if zone == Zone::Before { drops.before } else { drops.into };
+        // The zones the drop may take, first choice first: a row taking one takes it anywhere; a
+        // row taking both takes a drop before it in its top part, or inside it there when the
+        // rules refuse before, and inside it below that. A drop over the row's middle never lands
+        // before it.
+        let zones: &[Zone] = match (drops.before, drops.into, pointer) {
+            (true, true, Zone::Before) => &[Zone::Before, Zone::Into],
+            (true, true, Zone::Into) | (false, true, _) => &[Zone::Into],
+            (true, false, _) => &[Zone::Before],
+            (false, false, _) => &[],
+        };
         let accepts = |zone: Zone| match (own, self.accept) {
             (Some(rule), _) => rule(&dragged, zone),
             (None, Some(rule)) => rule(&dragged, id, zone),
             (None, None) => dragged.source.scope == self.source.scope,
         };
-        let zone = [pointer, other].into_iter().find(|zone| offered(*zone) && accepts(*zone))?;
+        let zone = zones.iter().copied().find(|zone| accepts(*zone))?;
         let t = Tokens::get();
         match zone {
             Zone::Before => {
