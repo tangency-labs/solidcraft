@@ -3340,3 +3340,139 @@ fn a_curve_style_beside_a_surface_style_does_not_colour_the_solid() {
     t += TAIL;
     assert_eq!(step_import(&t).unwrap().bodies[0].color, None);
 }
+
+/// Entities written one by one, numbered as they come.
+#[derive(Default)]
+struct Entities(Vec<String>);
+
+impl Entities {
+    fn add(&mut self, e: impl Into<String>) -> usize {
+        self.0.push(e.into());
+        self.0.len()
+    }
+    fn axis(&mut self, o: [f64; 3], z: [f64; 3], x: [f64; 3]) -> usize {
+        let v = |p: [f64; 3]| format!("({:?},{:?},{:?})", p[0], p[1], p[2]);
+        let o = self.add(format!("CARTESIAN_POINT('',{})", v(o)));
+        let z = self.add(format!("DIRECTION('',{})", v(z)));
+        let x = self.add(format!("DIRECTION('',{})", v(x)));
+        self.add(format!("AXIS2_PLACEMENT_3D('',#{o},#{z},#{x})"))
+    }
+    fn vertex(&mut self, p: [f64; 3]) -> usize {
+        let p = self.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2]));
+        self.add(format!("VERTEX_POINT('',#{p})"))
+    }
+    /// A face of one outer bound of `(edge, orientation)` uses.
+    fn face(&mut self, uses: &[(usize, bool)], surface: usize) -> usize {
+        let oes: Vec<String> =
+            uses.iter().map(|&(e, o)| format!("#{}", self.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" })))).collect();
+        let l = self.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+        let b = self.add(format!("FACE_OUTER_BOUND('',#{l},.T.)"));
+        self.add(format!("ADVANCED_FACE('',(#{b}),#{surface},.T.)"))
+    }
+    /// The file of one closed solid of `faces`, in millimetres.
+    fn solid(mut self, faces: &[usize]) -> String {
+        let list: Vec<String> = faces.iter().map(|f| format!("#{f}")).collect();
+        let shell = self.add(format!("CLOSED_SHELL('',({}))", list.join(",")));
+        let brep = self.add(format!("MANIFOLD_SOLID_BREP('part',#{shell})"));
+        let n = self.0.len();
+        self.add(format!(
+            "(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{},#{}))REPRESENTATION_CONTEXT('',''))",
+            n + 2,
+            n + 3,
+            n + 4
+        ));
+        self.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-3),#{},'','')", n + 3));
+        self.add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        self.add("(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))");
+        self.add(format!("ADVANCED_BREP_SHAPE_REPRESENTATION('',(#{brep}),#{})", n + 1));
+        let body: String = self.0.iter().enumerate().map(|(i, e)| format!("#{}={e};\n", i + 1)).collect();
+        format!("{HEAD}{body}{TAIL}")
+    }
+}
+
+fn assert_closed_solid(text: &str, faces: usize, volume: f64) {
+    let imp = step_import(text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0];
+    assert!(body.closed && body.refused.is_none(), "{:?}", imp.warnings);
+    assert_eq!(body.face_origin.len(), faces, "{:?}", imp.warnings);
+    let m = measure(&body.body).unwrap();
+    assert!(rel(m.volume, volume) < 1e-4, "volume {} vs {volume}: {:?}", m.volume, imp.warnings);
+}
+
+/// A ball end cut by a plane, its sphere split in two along a meridian plane through its pole,
+/// each half a loop from the rim down to the pole and back up the meridian half a turn round,
+/// with the meridian circles placed from the rim (as files write them): at the pole the
+/// parameter round the axis is anything, so the loop's turns are counted from the points either
+/// side of it. Both halves read and the solid is closed.
+#[test]
+fn a_ball_end_split_through_its_pole_imports_closed() {
+    let (r, h) = (1.5_f64, 0.7_f64);
+    let rim = (r * r - h * h).sqrt();
+    let mut w = Entities::default();
+    let (east, west, pole) = (w.vertex([rim, 0.0, h]), w.vertex([-rim, 0.0, h]), w.vertex([0.0, 0.0, -r]));
+    let circle = |w: &mut Entities, o: [f64; 3], z: [f64; 3], x: [f64; 3], radius: f64| {
+        let a = w.axis(o, z, x);
+        w.add(format!("CIRCLE('',#{a},{radius:?})"))
+    };
+    let rim_c = circle(&mut w, [0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], rim);
+    let rim_n = w.add(format!("EDGE_CURVE('',#{east},#{west},#{rim_c},.T.)"));
+    let rim_s = w.add(format!("EDGE_CURVE('',#{west},#{east},#{rim_c},.T.)"));
+    let east_c = circle(&mut w, [0.0; 3], [0.0, -1.0, 0.0], [rim / r, 0.0, h / r], r);
+    let west_c = circle(&mut w, [0.0; 3], [0.0, 1.0, 0.0], [-rim / r, 0.0, h / r], r);
+    let up_east = w.add(format!("EDGE_CURVE('',#{pole},#{east},#{east_c},.T.)"));
+    let up_west = w.add(format!("EDGE_CURVE('',#{pole},#{west},#{west_c},.T.)"));
+    let sphere = |w: &mut Entities| {
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("SPHERICAL_SURFACE('',#{a},{r:?})"))
+    };
+    let (s1, s2) = (sphere(&mut w), sphere(&mut w));
+    let north = w.face(&[(up_west, true), (rim_n, false), (up_east, false)], s1);
+    let south = w.face(&[(up_east, true), (rim_s, false), (up_west, false)], s2);
+    let top = w.axis([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let plane = w.add(format!("PLANE('',#{top})"));
+    let disk = w.face(&[(rim_n, true), (rim_s, true)], plane);
+    // The cap below z = h: π H² (3R − H) / 3 with H = R + h.
+    let cap = r + h;
+    assert_closed_solid(&w.solid(&[north, south, disk]), 3, std::f64::consts::PI * cap * cap * (3.0 * r - cap) / 3.0);
+}
+
+/// An elliptic cylinder written as a SURFACE_OF_LINEAR_EXTRUSION of an ellipse, its side a band
+/// between two closed ellipse edges, each loop going once round the profile: the profile is
+/// built over its whole turn (not over the samples' angles, which leave gaps of an eighth of a
+/// turn between them), the band gets its seam, and the solid is closed.
+#[test]
+fn a_band_round_an_extruded_ellipse_imports_closed() {
+    let (a, b, height) = (1.4_f64, 0.5_f64, 1.4_f64);
+    let mut w = Entities::default();
+    let ellipse = |w: &mut Entities, z: f64, axis: f64| {
+        let p = w.axis([a, b, z], [0.0, 0.0, axis], [1.0, 0.0, 0.0]);
+        w.add(format!("ELLIPSE('',#{p},{a:?},{b:?})"))
+    };
+    let profile = ellipse(&mut w, 0.0, 1.0);
+    let up = w.add("DIRECTION('',(0.,0.,1.))");
+    let vector = w.add(format!("VECTOR('',#{up},1.)"));
+    let side = w.add(format!("SURFACE_OF_LINEAR_EXTRUSION('',#{profile},#{vector})"));
+    let (v0, v1) = (w.vertex([2.0 * a, b, 0.0]), w.vertex([2.0 * a, b, height]));
+    let bottom_c = ellipse(&mut w, 0.0, 1.0);
+    // The top edge's ellipse is written about −z, as some files do.
+    let top_c = ellipse(&mut w, height, -1.0);
+    let bottom = w.add(format!("EDGE_CURVE('',#{v0},#{v0},#{bottom_c},.T.)"));
+    let top = w.add(format!("EDGE_CURVE('',#{v1},#{v1},#{top_c},.T.)"));
+    let bands = {
+        let o = w.add(format!("ORIENTED_EDGE('',*,*,#{bottom},.T.)"));
+        let l0 = w.add(format!("EDGE_LOOP('',(#{o}))"));
+        let o = w.add(format!("ORIENTED_EDGE('',*,*,#{top},.T.)"));
+        let l1 = w.add(format!("EDGE_LOOP('',(#{o}))"));
+        let (b0, b1) = (w.add(format!("FACE_BOUND('',#{l0},.T.)")), w.add(format!("FACE_BOUND('',#{l1},.T.)")));
+        w.add(format!("ADVANCED_FACE('',(#{b0},#{b1}),#{side},.T.)"))
+    };
+    let plane = |w: &mut Entities, z: f64, normal: f64| {
+        let p = w.axis([a, b, z], [0.0, 0.0, normal], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{p})"))
+    };
+    let (p0, p1) = (plane(&mut w, 0.0, -1.0), plane(&mut w, height, 1.0));
+    let floor = w.face(&[(bottom, false)], p0);
+    let roof = w.face(&[(top, false)], p1);
+    assert_closed_solid(&w.solid(&[bands, floor, roof]), 3, std::f64::consts::PI * a * b * height);
+}

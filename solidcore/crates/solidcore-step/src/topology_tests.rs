@@ -1423,7 +1423,7 @@ fn same_surface(data: &str, us: (f64, f64), vs: (f64, f64)) -> BSurface {
     let grid: Vec<(f64, f64)> = (0..=n)
         .flat_map(|i| (0..=n).map(move |j| (us.0 + (us.1 - us.0) * i as f64 / n as f64, vs.0 + (vs.1 - vs.0) * j as f64 / n as f64)))
         .collect();
-    let ext = swept::Extent { points: grid.iter().map(|&(u, v)| v3(s.point(u, v).unwrap())).collect(), seam: Vec::new() };
+    let ext = swept::Extent { points: grid.iter().map(|&(u, v)| v3(s.point(u, v).unwrap())).collect(), seam: Vec::new(), walks: Vec::new() };
     let (record, reversed) = swept::map_surface(&s, &ext, DEFAULT_TOLERANCE).unwrap();
     let _ = solidcore_ops::label::surface_natural(&record);
     let eval = SurfaceEval::new(&record).unwrap();
@@ -1506,7 +1506,7 @@ fn swept_and_offset_surfaces_are_the_files_own() {
         same_surface(&two, (0.1, 2.0), (0.1, 1.2));
     }
     // Refused: offsets that collapse or of other kinds, an extrusion in its profile's plane.
-    let ext = swept::Extent { points: vec![Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 1.0)], seam: Vec::new() };
+    let ext = swept::Extent { points: vec![Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 1.0)], seam: Vec::new(), walks: Vec::new() };
     for (data, why) in [
         ("#11=CYLINDRICAL_SURFACE('',#4,5.);#10=OFFSET_SURFACE('',#11,-5.,.F.);", "collapses"),
         ("#11=TOROIDAL_SURFACE('',#4,10.,2.);#10=OFFSET_SURFACE('',#11,9.,.F.);", "meets its axis"),
@@ -2019,4 +2019,163 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     }
     solidcore_ops::record_check::validate(b).unwrap();
     solidcore_ops::record_check::agreement(b).unwrap();
+}
+
+/// A closed spline edge whose end vertex sits a few µm off the curve's seam (its start and end
+/// point) projects a hair past the start: it is at the seam, and the edge runs to the curve's
+/// end, not refused as crossing the seam.
+#[test]
+fn an_edge_to_a_vertex_a_hair_off_a_closed_splines_seam_ends_at_the_seam() {
+    // A closed square of side 10 as a degree-1 spline, seam at the origin.
+    let square = || BCurve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0],
+        points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]],
+    };
+    let mid = [10.0, 5.0, 0.0];
+    // 5 µm along the first side from the seam: within the 1e-3 mm tolerance of it.
+    let off = [5e-6, 0.0, 0.0];
+    let tol = 1e-3;
+    let m = open_or_closed(square(), mid, off, true, false, tol).unwrap();
+    assert!(m.with_step);
+    assert!((m.interval[0] - 1.5).abs() < 1e-9 && m.interval[1] == 4.0, "{:?}", m.interval);
+    // Starting there, against the curve's sense: from the seam's end round to the middle.
+    let m = open_or_closed(square(), off, mid, false, false, tol).unwrap();
+    assert!((m.interval[0] - 1.5).abs() < 1e-9 && m.interval[1] == 4.0, "{:?}", m.interval);
+    // Farther off than the tolerance it is a vertex of the curve like any other: the edge from
+    // the middle to it, the curve's way, crosses the seam.
+    assert!(open_or_closed(square(), mid, [5e-3, 0.0, 0.0], true, false, tol).is_err());
+}
+
+/// A spline surface whose first and last control columns lie within the tolerance of each other
+/// is made closed (both become their mean, the surface moving by half the gap at most), so it is
+/// periodic; one closed exactly, one whose ends are farther apart, or one with a weight that
+/// differs at its ends is left as it is.
+#[test]
+fn a_spline_surface_whose_ends_meet_within_the_tolerance_is_closed() {
+    // A square tube of side 10 and height 5: degree 1 round it (u) and along it (v).
+    let tube = |gap: f64| BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [gap, 0.0]].iter().map(|&[x, y]| vec![[x, y, 0.0], [x, y, 5.0]]).collect(),
+    };
+    let tol = 1e-3;
+    let periodic = |s: &BSurface| SurfaceEval::new(s).unwrap().domain().period;
+    assert_eq!(periodic(&tube(1e-5)), [None, None]);
+    let closed = closed_within(&tube(1e-5), tol).expect("closed within the tolerance");
+    assert_eq!(periodic(&closed), [Some(4.0), None]);
+    let BSurface::Spline { points, .. } = &closed else { panic!("a spline") };
+    assert_eq!(points[0], points[4]);
+    assert!((points[0][0][0] - 5e-6).abs() < 1e-15, "the mean of the two columns");
+    assert!(closed_within(&tube(0.0), tol).is_none(), "already closed");
+    assert!(closed_within(&tube(1e-2), tol).is_none(), "farther apart than the tolerance");
+    let BSurface::Spline { u_knots, v_knots, points } = tube(1e-5) else { panic!("a spline") };
+    let mut homogeneous: Vec<Vec<[f64; 4]>> = points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect();
+    homogeneous[4] = homogeneous[4].iter().map(|h| [h[0] * 2.0, h[1] * 2.0, h[2] * 2.0, 2.0]).collect();
+    assert!(closed_within(&BSurface::RationalSpline { u_knots, v_knots, homogeneous }, tol).is_none(), "weights differ at the ends");
+}
+
+/// The range a closed profile is built over for a face whose loops are walked: a loop round the
+/// whole profile (a band round an extruded ellipse, its samples an eighth of a turn apart) takes
+/// the whole turn from its first point; one along part of it the part it sweeps, however coarse
+/// its samples.
+#[test]
+fn a_loop_round_a_closed_profile_takes_the_whole_turn() {
+    let eighths: Vec<f64> = (0..=8).map(|k| f64::from(k) * TAU / 8.0).collect();
+    match swept::span_for_tests(&eighths, &[], std::slice::from_ref(&eighths)) {
+        swept::SpanForTests::Turn(start) => assert!(start.abs() < 1e-12, "{start}"),
+        other => panic!("{other:?}"),
+    }
+    // Half a turn and back at another height (a half band): the half it sweeps.
+    let half: Vec<f64> = (0..=4).map(|k| f64::from(k) * TAU / 8.0).chain((0..=4).rev().map(|k| f64::from(k) * TAU / 8.0)).collect();
+    match swept::span_for_tests(&half, &[], std::slice::from_ref(&half)) {
+        // From where the gap it leaves ends, a whole number of turns on.
+        swept::SpanForTests::Open(inner) => {
+            assert!(inner.0.rem_euclid(TAU) < 1e-12 && (inner.1 - inner.0 - 0.5 * TAU).abs() < 1e-12, "{inner:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Only end control lines that are the surface's ends are made one: on knots not clamped at its
+/// ends the first and last control columns are not the surface's edges, and the surface stays
+/// as it is however close they are.
+#[test]
+fn a_spline_surface_on_unclamped_knots_is_not_closed() {
+    let points: Vec<Vec<V>> =
+        [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [1e-5, 0.0]].iter().map(|&[x, y]| vec![[x, y, 0.0], [x, y, 5.0]]).collect();
+    let unclamped = BSurface::Spline { u_knots: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0], v_knots: vec![0.0, 0.0, 1.0, 1.0], points };
+    assert!(closed_within(&unclamped, 1e-3).is_none());
+}
+
+/// A rational surface's end lines are made one only while the surface moves by at most the
+/// tolerance: half the gap, and half the weights' difference times the control net's size over
+/// its least weight. Far from the origin (1e6 mm) as near it: a weight difference just inside
+/// that bound is closed, and the surface then lies within the tolerance of where it was; one just
+/// outside is left as it is.
+#[test]
+fn a_rational_surface_is_closed_only_while_its_weights_move_it_within_the_tolerance() {
+    let (tol, gap, far) = (1e-3, 1e-5, 1e6);
+    let corners = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [gap, 0.0]];
+    let size = (10.0_f64 * 10.0 + 10.0 * 10.0 + 5.0 * 5.0).sqrt();
+    // 0.5 gap + 0.5 δ size = tol.
+    let bound = (2.0 * tol - gap) / size;
+    let tube = |delta: f64| {
+        let homogeneous = corners
+            .iter()
+            .enumerate()
+            .map(|(i, &[x, y])| {
+                let w = if i == 4 { 1.0 + delta } else { 1.0 };
+                vec![[(far + x) * w, (far + y) * w, 0.0, w], [(far + x) * w, (far + y) * w, 5.0 * w, w]]
+            })
+            .collect();
+        BSurface::RationalSpline { u_knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0], v_knots: vec![0.0, 0.0, 1.0, 1.0], homogeneous }
+    };
+    let inside = tube(0.99 * bound);
+    let closed = closed_within(&inside, tol).expect("inside the bound");
+    let (before, after) = (SurfaceEval::new(&inside).unwrap(), SurfaceEval::new(&closed).unwrap());
+    let mut moved = 0.0_f64;
+    for i in 0..=40 {
+        for j in 0..=4 {
+            let uv = [4.0 * f64::from(i) / 40.0, f64::from(j) / 4.0];
+            moved = moved.max(before.point(uv).unwrap().dist(after.point(uv).unwrap()));
+        }
+    }
+    assert!(moved <= tol, "moved {moved}");
+    assert!(closed_within(&tube(1.01 * bound), tol).is_none(), "outside the bound");
+}
+
+/// An edge a few µm long across a closed spline's seam, both its vertices within the tolerance of
+/// the seam, is refused: taking both its ends to the seam would make it the whole curve.
+#[test]
+fn a_short_edge_across_a_closed_splines_seam_is_refused_not_made_the_whole_curve() {
+    // A closed square of side 10, its last side split 1 µm before the seam (a short last knot
+    // span, so a point there projects onto it rather than onto the seam's start).
+    let square = || BCurve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 3.9999, 4.0, 4.0],
+        points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 1e-3, 0.0], [0.0, 0.0, 0.0]],
+    };
+    // From 0.5 µm before the seam to 0.5 µm after it, the curve's way: across the seam.
+    match open_or_closed(square(), [0.0, 5e-4, 0.0], [5e-4, 0.0, 0.0], true, false, 1e-3) {
+        Ok(m) => panic!("{:?}", m.interval),
+        Err(e) => assert!(e.contains("short edge across a closed spline's seam"), "{e}"),
+    }
+}
+
+/// Arcs whose last one reaches past a turn from the first start cover the start of the sweep:
+/// a gap the sweep found there before is covered (a near-full band's coarse samples, one walk
+/// round most of the profile and past its start, another just after the start).
+#[test]
+fn a_walk_past_the_start_covers_the_gap_found_before_it() {
+    let short = vec![0.0, 0.5, 1.0, 0.5, 0.0];
+    // From 1.5 round to a turn and 1.2 and back, in steps under half a turn.
+    let n = 8;
+    let out: Vec<f64> = (0..=n).map(|k| 1.5 + (TAU - 0.3) * f64::from(k) / f64::from(n)).collect();
+    let long: Vec<f64> = out.iter().chain(out.iter().rev()).copied().collect();
+    match swept::span_for_tests(&[], &[], &[short, long]) {
+        // The only gap is (1.2, 1.5).
+        swept::SpanForTests::Open(inner) => {
+            assert!((inner.0.rem_euclid(TAU) - 1.5).abs() < 1e-12 && (inner.1 - inner.0 - (TAU - 0.3)).abs() < 1e-12, "{inner:?}");
+        }
+        other => panic!("{other:?}"),
+    }
 }
