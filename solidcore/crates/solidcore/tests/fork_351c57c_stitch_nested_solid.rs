@@ -3,8 +3,7 @@
 //! the gluing put it in and the region inside it stays material.
 //!
 //! The case: twelve separate square faces, the six of the cube -5..5 and the six of the
-//! cube -2..2, stitched into a solid. With `Kernel::fixes.stitch_solid_nests_cavities`
-//! the regions are set as a nested solid model: the small cube is the cavity, and the
+//! cube -2..2, stitched into a solid. solidcore sets the regions as a nested solid model: the small cube is the cavity, and the
 //! volume is 10^3 - 4^3 = 936.
 #![allow(
     clippy::unwrap_used,
@@ -68,9 +67,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 }
 
 /// Stitches the hollow cube; the kernel, the stitched B-rep and the stitch's solid flag.
-fn stitched(fix: bool) -> (Kernel, Brep, bool) {
+fn stitched() -> (Kernel, Brep, bool) {
     let mut k = Kernel::default();
-    k.fixes.stitch_solid_nests_cavities = fix;
     let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
     add_cube_faces(&mut k, &mut b, 5.0);
     add_cube_faces(&mut k, &mut b, 2.0);
@@ -89,22 +87,8 @@ fn void_flags(b: &Brep) -> Vec<bool> {
 }
 
 #[test]
-fn upstream_keeps_the_cavity_material() {
-    let (k, mut b, solid) = stitched(false);
-    assert!(solid);
-    let flags = void_flags(&b);
-    assert_eq!(flags.len(), 3);
-    assert!(flags[0]);
-    // the cavity's region stays material: both cubes count as solid
-    assert_eq!(flags.iter().filter(|&&v| v).count(), 1);
-    let v = volume(&k, &mut b);
-    // the cavity counts as material: the whole cube -5..5
-    assert!((v - 1000.0).abs() <= 1e-6 * 1000.0, "volume {v}");
-}
-
-#[test]
 fn nested_solid_makes_the_cavity_void() {
-    let (k, mut b, solid) = stitched(true);
+    let (k, mut b, solid) = stitched();
     assert!(solid);
     let flags = void_flags(&b);
     // the infinite region and the cavity are void, the material between them is not
