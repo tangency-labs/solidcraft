@@ -384,6 +384,11 @@ fn hostile_parameters_are_refused_and_change_nothing() {
         json!({"edges": CORNERS, "diameter": 3, "style": "t_bone", "side": "left"}),
         json!({"edges": CORNERS, "diameter": 3, "max_angle": "0 deg"}),
         json!({"edges": CORNERS, "diameter": 3, "max_angle": "270 deg"}),
+        // Given, but not an expression: refused, never read as left out.
+        json!({"edges": CORNERS, "diameter": 3, "style": "minimal", "gap": true}),
+        json!({"edges": CORNERS, "diameter": 3, "style": "minimal", "gap": [0.2]}),
+        json!({"edges": CORNERS, "diameter": 3, "max_angle": true}),
+        json!({"edges": CORNERS, "diameter": 3, "max_angle": {"deg": 90}}),
         json!({"edges": CORNERS, "diameter": 3, "along": [0, 0, 0]}),
         json!({"edges": CORNERS, "diameter": 3, "along": "W"}),
         json!({"edges": CORNERS, "diameter": 3, "body": "Nope"}),

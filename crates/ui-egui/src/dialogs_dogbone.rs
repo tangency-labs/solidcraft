@@ -87,8 +87,12 @@ pub fn commands(app: &SolveApp, c: &Dogbone, inputs: &[SelInput], extra: &Map<St
         return Err(app.tr("error.dogbone_corners").into());
     }
     let style = STYLES.get(c.style).copied().unwrap_or_default();
-    let mut args = json!({"diameter": c.diameter, "max_angle": c.max_angle});
+    let mut args = json!({"diameter": c.diameter});
     if let Value::Object(args) = &mut args {
+        // An angle not typed stands for the command's default (90 deg).
+        if !c.max_angle.trim().is_empty() {
+            args.insert("max_angle".into(), json!(c.max_angle));
+        }
         if !edges.is_empty() {
             args.insert("edges".into(), Value::Array(edges));
         }

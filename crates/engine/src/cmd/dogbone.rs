@@ -6,7 +6,7 @@ use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{BodyName, Dir, FacePick, FeatureKind, Position};
 
 use super::CommandSpec;
-use crate::params::{bad, expr, req_expr, str_};
+use crate::params::{bad, req_expr, str_};
 use crate::schema::dogbone::{DogboneParams, DogboneResult, DogboneSkip};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -48,7 +48,8 @@ fn dogbone(s: &mut Session, p: &Value) -> Result<Value> {
             DogboneStyle::parse(&x).ok_or_else(|| bad(cmd, format!("unknown style `{x}` (normal, minimal or t_bone)")))?
         }
     };
-    let gap = expr(p, "gap");
+    // A key given but not an expression is refused, not read as left out (the default).
+    let gap = if given("gap") { Some(req_expr(cmd, p, "gap")?) } else { None };
     if let Some(g) = &gap {
         if style != DogboneStyle::Minimal {
             return Err(bad(cmd, "`gap` is for the minimal style"));
@@ -67,7 +68,7 @@ fn dogbone(s: &mut Session, p: &Value) -> Result<Value> {
             DogboneSide::parse(&x).ok_or_else(|| bad(cmd, format!("unknown side `{x}` (longer or shorter)")))?
         }
     };
-    let max_angle = expr(p, "max_angle");
+    let max_angle = if given("max_angle") { Some(req_expr(cmd, p, "max_angle")?) } else { None };
     if let Some(a) = &max_angle {
         super::features::check_expr(s, a, Kind::Angle, cmd, "max_angle")?;
         let v = s.doc.eval(a, Kind::Angle).map_err(|e| bad(cmd, format!("max_angle: {e}")))?;
