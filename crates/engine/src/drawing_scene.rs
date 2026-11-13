@@ -1225,7 +1225,10 @@ impl Looks {
     fn of(state: &ModelState, scene: Option<&ProductScene>) -> Looks {
         let Some(scene) = scene.filter(|scene| scene.meshes.len() == state.bodies.len()) else { return Looks(None) };
         let look = |(body, mesh): (&solidcraft_doc::ModelBody, &solidcraft_render::ProductMesh)| {
-            Some((body.geometry_key()?, (mesh.color, mesh.opacity, mesh.surface, mesh.transmission, mesh.faces.clone())))
+            // Every field named, so a field the renderer gains stops the build here, to be decided: the
+            // name never changes pixels, and the geometry key stands for the mesh.
+            let solidcraft_render::ProductMesh { name: _, mesh: _, color, opacity, surface, transmission, faces } = mesh;
+            Some((body.geometry_key()?, (*color, *opacity, *surface, *transmission, faces.clone())))
         };
         Looks(state.bodies.iter().zip(&scene.meshes).map(look).collect())
     }
