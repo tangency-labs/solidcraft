@@ -612,10 +612,20 @@ impl Body {
     /// that is one line of the plane keeps only the crossings on that line, and two edges meeting
     /// at a vertex on it cut it once.
     ///
+    /// A crossing inside an edge is cut where the outline meets the surface of the face across the
+    /// edge (`edge_crossing_on_face`): the edge's curve holds the rim only to its tolerance (a
+    /// traced curve's), the face's surface exactly. So the cut is exact when the outline lies on
+    /// the set's own surface, as a contour lies on a sphere and a silhouette on a cone. A crossing
+    /// at a vertex is the vertex's, and a stretch's ends are where the edge leaves the plane within
+    /// its tolerance.
+    ///
     /// # Errors
     /// [`Error::Argument`] for an index past the faces, a face with no side that faces out, a
-    /// coordinate that is not finite or an outline the kernel can't hold; the kernel's refusal of
-    /// a normal of no direction or an interval that doesn't increase; any other kernel error.
+    /// coordinate that is not finite or an outline the kernel can't hold; [`Error::Unsupported`]
+    /// for a rim edge without exactly one face across it (a sheet's free edge, an edge of three
+    /// faces); the kernel's refusal of a normal of no direction or an interval that doesn't
+    /// increase, and of a cut its solve doesn't reach within the edge's tolerance
+    /// ([`Error::Status`]); any other kernel error.
     pub fn outline_cuts(
         &self,
         order: &Order,
@@ -641,26 +651,50 @@ impl Body {
             for e in rims {
                 let tolerance = b.edge(e)?.tolerance;
                 for crossing in q::edge_plane_crossings(k, b, e, on, normal)? {
-                    let ends = match crossing {
-                        q::PlaneCrossing::Point(p) => vec![p],
-                        q::PlaneCrossing::Along { start, end } => vec![start, end],
+                    let (ends, stretch) = match crossing {
+                        q::PlaneCrossing::Point(p) => (vec![p], false),
+                        q::PlaneCrossing::Along { start, end } => (vec![start, end], true),
                     };
                     for end in ends {
                         if end.vertex.is_some_and(|v| cut_vertices.contains(&v)) {
                             continue;
                         }
+                        // a cut only within the edge's tolerance of the outline (written to
+                        // accept: a distance that isn't a number is no cut)
                         let near = q::curve_closest_point(k, &made.curve, end.point)?;
+                        let within = near.closest.distance <= tolerance;
+                        if !within {
+                            continue;
+                        }
+                        // Inside the edge, its curve holds the rim only to its tolerance: the cut
+                        // is where the outline meets the face across the edge. A vertex is its own
+                        // point, and a stretch ends where the edge leaves the plane's tolerance.
+                        let at = if stretch || end.vertex.is_some() {
+                            near.parameter
+                        } else {
+                            let face = match across(b, e, &set)? {
+                                Ok(face) => face,
+                                Err(refusal) => return Ok(Err(refusal)),
+                            };
+                            q::edge_crossing_on_face(
+                                k,
+                                b,
+                                e,
+                                face,
+                                &made.curve,
+                                &made.interval,
+                                near.parameter,
+                            )?
+                        };
                         let t = from_parameters::record_parameter(
                             &record,
                             interval,
-                            near.parameter,
-                            near.closest.point,
+                            at,
+                            made.curve.evaluate_point(k, at)?,
                         );
-                        // within the edge's tolerance of the outline, and on its interval as the
-                        // kernel classifies it: a cut a solve rounds just past an end is on that end
-                        let on = from_parameters::on_interval(interval, t)
-                            .filter(|_| near.closest.distance <= tolerance);
-                        if let Some(t) = on {
+                        // on its interval as the kernel classifies it: a cut a solve rounds just
+                        // past an end is on that end
+                        if let Some(t) = from_parameters::on_interval(interval, t) {
                             cuts.push(t);
                             cut_vertices.extend(end.vertex);
                         }
@@ -909,6 +943,31 @@ pub(crate) fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Result<Fac
         (false, _) => Ok(x),
         (true, true) => Err(Error::Unsupported(
             "a face with material on both sides has no side that faces out",
+        )),
+    })
+}
+
+/// The face across rim edge `e` from the faces `set` ([`Body::outline_cuts`]): the one face of
+/// the edge's uses that is not in the set.
+///
+/// # Errors
+/// [`Error::Unsupported`] (inner) for an edge with no face across it (a sheet's free edge) or
+/// more than one (an edge of three faces or more); the kernel's errors (outer).
+fn across(b: &Brep, e: EdgeId, set: &[FaceId]) -> solidcore::Result<Result<FaceId>> {
+    let mut faces = Vec::new();
+    for u in edge::edgeuses(b, e, None, None)? {
+        let face = match eu1::faceuse(b, u)? {
+            Some(fu) => b.faceuse(fu)?.face,
+            None => None,
+        };
+        if let Some(f) = face.filter(|f| !set.contains(f) && !faces.contains(f)) {
+            faces.push(f);
+        }
+    }
+    Ok(match faces.as_slice() {
+        [f] => Ok(*f),
+        _ => Err(Error::Unsupported(
+            "a rim edge without exactly one face across it",
         )),
     })
 }
