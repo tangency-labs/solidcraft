@@ -2399,7 +2399,8 @@ mod tests {
         let c = s
             .create_iso_parametric_curve(&k, SurfParamType::V, 0.5, opts)
             .expect("iso v");
-        assert!(c.uv_iso_curve.is_none());
+        // constant v has its UV line too (WR-30)
+        assert!(c.uv_iso_curve.is_some());
         assert!(matches!(
             BSplineSurface::new().create_iso_parametric_curve(
                 &k,
