@@ -298,39 +298,63 @@ fn cylinder_of(faces: &Faces, face: usize) -> Option<(UnitVec3, Vec3, f64, bool)
 }
 
 pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
-    let size = b.size();
-    let tol = (size * 1e-3).max(1e-3);
-    let mesh = b.mesh(&crate::MeshTolerance::chord(tol)).ok()?;
-    // Each face's distance from the point (its nearest triangle).
-    let mut near: HashMap<u32, f64> = HashMap::new();
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        let Some([a, bb, c]) = mesh.tri(t) else { continue };
-        let d = solidcraft_geom::compare::closest_on_triangle(p, a, bb, c).dist(p);
-        near.entry(*f).and_modify(|x| *x = x.min(d)).or_insert(d);
-    }
-    let nearest = near.values().copied().fold(f64::INFINITY, f64::min);
-    if nearest > size * 0.05 {
+    if b.is_mesh() {
         return None;
     }
-    let faces = Faces::new(b.record(), (size * 1e-4).max(1e-6) * 10.0);
-    // The facets of a curved face lie off it by up to the mesh's tolerance, so the triangle
-    // nearest a point on a hole's wall can be one of the face round its rim (they share the
-    // rim's points; in a thin plate the wall is a few long facets). Of the faces within that
-    // tolerance of the nearest, the point lies on the one whose own surface it is nearest (a
-    // cylinder: within its extent).
-    let mut candidates: Vec<(u32, f64)> = near.into_iter().filter(|(_, d)| *d <= nearest + tol).collect();
-    candidates.sort_by_key(|(f, _)| *f);
+    let size = b.size();
+    if !size.is_finite() {
+        return None;
+    }
+    let tol = (size * 1e-3).max(1e-3);
+    let rec = b.record();
+    if rec.faces.is_empty() {
+        return None;
+    }
+    let faces = Faces::new(rec, (size * 1e-4).max(1e-6) * 10.0);
+
     let mut best: Option<(f64, Option<CylinderFace>)> = None;
-    for (face, d) in candidates {
-        let (off, cyl) = match (faces.surf(face as usize), cylinder_of(&faces, face as usize)) {
+
+    for face in 0..rec.faces.len() {
+        let (off, cyl) = match (faces.surf(face), cylinder_of(&faces, face)) {
             (_, Some((axis, o, r, internal))) => {
-                let c = CylinderFace { internal, ..cylinder_extent(&mesh, face, axis, o, r) };
-                (d.min(c.off(p)), Some(c))
+                let c = cylinder_extent(rec, face, axis, o, r, internal);
+                if c.start.is_finite() && c.end.is_finite() { (c.off(p), Some(c)) } else { (f64::INFINITY, None) }
             }
-            (Some(Surf::Plane { n, d: k }), None) => (d.min((n.dot(p) - k).abs()), None),
-            _ => (d, None),
+            (Some(Surf::Plane { n, d: k }), None) => {
+                let d_plane = (n.dot(p) - k).abs();
+                let mut bmin = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+                let mut bmax = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+                let mut min_edge_d = f64::INFINITY;
+                if let Some(f) = rec.faces.get(face) {
+                    for lp in &f.loops {
+                        let Loop::Edges { edges } = lp else { continue };
+                        for u in edges {
+                            let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                            let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()) else { continue };
+                            let [t0, t1] = edge.interval;
+                            for k in [0.0, 0.5, 1.0] {
+                                let t = t0 + (t1 - t0) * k;
+                                if let Some(pt) = eval.point(t) {
+                                    bmin = bmin.min(pt);
+                                    bmax = bmax.max(pt);
+                                    min_edge_d = min_edge_d.min(pt.dist(p));
+                                }
+                            }
+                        }
+                    }
+                }
+                let in_bbox = p.x >= bmin.x - tol
+                    && p.x <= bmax.x + tol
+                    && p.y >= bmin.y - tol
+                    && p.y <= bmax.y + tol
+                    && p.z >= bmin.z - tol
+                    && p.z <= bmax.z + tol;
+                let d = if in_bbox { d_plane } else { d_plane.max(min_edge_d) };
+                (d, None)
+            }
+            _ => (f64::INFINITY, None),
         };
-        if best.as_ref().is_none_or(|(bo, _)| off < *bo) {
+        if off <= size * 0.05 && best.as_ref().is_none_or(|(bo, _)| off < *bo) {
             best = Some((off, cyl));
         }
     }
@@ -338,11 +362,12 @@ pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
 }
 
 /// Face `face` of a body as a cylinder: the axis and radius of its own surface, and its extent
-/// along the axis and side read from `mesh` (the body's tessellation, whose faces are the
-/// body's). `None` when the face is not part of a cylinder, or has no triangles.
-pub fn cylinder_face(b: &Body, mesh: &Mesh, face: usize) -> Option<CylinderFace> {
+/// along the axis and side. `None` when the face is not part of a cylinder, or has no finite extent.
+pub fn cylinder_face(b: &Body, _mesh: &Mesh, face: usize) -> Option<CylinderFace> {
     let crate::FaceSurface::Cylinder { origin, axis, radius } = crate::face_surface(b, face)? else { return None };
-    let c = cylinder_extent(mesh, u32::try_from(face).ok()?, axis, origin, radius);
+    let faces = Faces::new(b.record(), (b.size() * 1e-4).max(1e-6) * 10.0);
+    let internal = cylinder_of(&faces, face).map(|(_, _, _, int)| int).unwrap_or(false);
+    let c = cylinder_extent(b.record(), face, axis, origin, radius, internal);
     (c.start.is_finite() && c.end.is_finite()).then_some(c)
 }
 
@@ -379,42 +404,57 @@ pub fn material_in_ring(b: &Body, c: &CylinderFace, r_in: f64, r_out: f64, along
 /// The cylindrical face one of whose end circles is centred at `p` (a circle given by its
 /// centre, where no face lies), the nearest when several are.
 pub fn cylinder_end_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
+    if b.is_mesh() {
+        return None;
+    }
     let size = b.size();
+    if !size.is_finite() {
+        return None;
+    }
     let tol = (size * 1e-3).max(1e-3);
-    let mesh = b.mesh(&crate::MeshTolerance::chord(tol)).ok()?;
     let faces = Faces::new(b.record(), (size * 1e-4).max(1e-6) * 10.0);
     let mut best: Option<(f64, CylinderFace)> = None;
     for face in 0..b.record().faces.len() {
         let Some((axis, o, r, internal)) = cylinder_of(&faces, face) else { continue };
-        let c = CylinderFace { internal, ..cylinder_extent(&mesh, u32::try_from(face).ok()?, axis, o, r) };
+        let c = cylinder_extent(b.record(), face, axis, o, r, internal);
+        if !(c.start.is_finite() && c.end.is_finite()) {
+            continue;
+        }
         let v = p - c.axis_point;
         let along = v.dot(c.axis);
         let off = (v - c.axis * along).len() + (along - c.start).abs().min((c.end - along).abs());
-        if off <= tol && best.is_none_or(|(bo, _)| off < bo) {
+        if off <= tol && best.as_ref().is_none_or(|(bo, _)| off < *bo) {
             best = Some((off, c));
         }
     }
     best.map(|(_, c)| c)
 }
 
-/// The extent along its axis of a cylindrical face of a tessellated body, and its side as the
-/// mesh's normals have it.
-fn cylinder_extent(mesh: &Mesh, face: u32, axis: UnitVec3, ap: Vec3, r: f64) -> CylinderFace {
+/// The extent along its axis of a cylindrical face of a body, and its side (internal/hole vs external).
+fn cylinder_extent(rec: &Brep, face: usize, axis: UnitVec3, ap: Vec3, r: f64, internal: bool) -> CylinderFace {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
-    let mut inward = 0.0;
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        if *f != face {
-            continue;
-        }
-        for k in t {
-            let (Some(q), Some(n)) = (mesh.positions.get(*k as usize), mesh.normals.get(*k as usize)) else { continue };
-            let s = (*q - ap).dot(axis);
-            lo = lo.min(s);
-            hi = hi.max(s);
-            let radial = *q - ap - axis * s;
-            inward += n.dot(radial);
+    if let Some(f) = rec.faces.get(face) {
+        for lp in &f.loops {
+            let Loop::Edges { edges } = lp else { continue };
+            for u in edges {
+                let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()) else { continue };
+                let [t0, t1] = edge.interval;
+                let n = match &eval {
+                    solidcraft_geom::brep::eval::CurveEval::Line { .. } => 1,
+                    _ => 16,
+                };
+                for k in 0..=n {
+                    let t = t0 + (t1 - t0) * (k as f64 / n as f64);
+                    if let Some(pt) = eval.point(t) {
+                        let s = (pt - ap).dot(axis);
+                        lo = lo.min(s);
+                        hi = hi.max(s);
+                    }
+                }
+            }
         }
     }
-    CylinderFace { axis_point: ap, axis, radius: r, start: lo, end: hi, internal: inward < 0.0 }
+    CylinderFace { axis_point: ap, axis, radius: r, start: lo, end: hi, internal }
 }
