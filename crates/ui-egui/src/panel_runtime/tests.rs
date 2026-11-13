@@ -278,6 +278,27 @@ fn built_in_themes_keep_their_own_panel_colours_and_lift_only_failing_inks() {
         }
         if inks(&authored) != inks(palette) {
             lifted.push(id.clone());
+            // The paint path scopes the lifted inks for the panel body; a
+            // checked palette alone would leave the faint ink on screen.
+            assert_eq!(style.paint_palette(appearance), Some(palette), "{id}");
+            let bounds = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(200.0, 120.0));
+            let mut painted = None;
+            crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                crate::ui_kit::panel_host_surface(
+                    ui,
+                    egui::Id::unique(id),
+                    bounds,
+                    false,
+                    appearance.fill,
+                    style.paint_palette(appearance),
+                    |_, _| {
+                        painted = Some(solidcraft_theme::Tokens::get());
+                    },
+                );
+            });
+            assert_eq!(painted.as_ref().map(inks), Some(inks(palette)), "{id}: the panel body paints the lifted inks");
+        } else {
+            assert_eq!(style.paint_palette(appearance), None, "{id}: an unchanged theme keeps the window's own tokens");
         }
         if id == "amber-phosphor" {
             let dim = palette.text_dim;

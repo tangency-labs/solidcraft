@@ -2390,7 +2390,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
             paint_bounds,
             section.peek || section.zone == Zone::Floating,
             appearance.fill,
-            matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { .. })).then(|| style.palette(appearance)),
+            style.paint_palette(appearance),
             |ui, content_clip| {
                 if (section.peek || section.zone == Zone::Floating) && (!ui.is_visible() || ui.is_sizing_pass()) {
                     self.unpainted.push((ui.layer_id(), section.outer, ui.is_sizing_pass()));

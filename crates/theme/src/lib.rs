@@ -588,7 +588,7 @@ pub fn panel_fallback_tokens(mut authored: Tokens) -> Tokens {
 /// Keep a theme's panel colours and lift only the canonical panel inks that miss
 /// 4.5:1 on any of the given opaque `fills`. A failing ink moves toward the
 /// theme's own primary text first, so it keeps the theme's hue, and toward
-/// white or black only when the primary text is not readable either. Inks
+/// white or black (trying both) only when the primary text is not readable either. Inks
 /// that already pass, and translucent inks, stay as authored; a pair that
 /// still fails is left for [`panel_fallback_tokens`].
 pub fn panel_readable_inks(mut tokens: Tokens, fills: &[Color32]) -> Tokens {
@@ -597,15 +597,16 @@ pub fn panel_readable_inks(mut tokens: Tokens, fills: &[Color32]) -> Tokens {
         return tokens;
     };
     let passes = |ink: Color32| fills.iter().all(|fill| contrast_ratio(ink, *fill) >= 4.5);
-    let pole = if panel_luminance(first) < 0.18 { Color32::WHITE } else { Color32::BLACK };
+    // The nearer pole first; fills of different lightness may need the other one.
+    let (pole, other) = if panel_luminance(first) < 0.18 { (Color32::WHITE, Color32::BLACK) } else { (Color32::BLACK, Color32::WHITE) };
     let primary = if tokens.text.a() == 255 && passes(tokens.text) { tokens.text } else { pole };
     let lift = |ink: Color32| -> Color32 {
         if ink.a() != 255 || passes(ink) {
             return ink;
         }
-        // Walk toward the primary ink, then on toward the pole, in small steps,
+        // Walk toward the primary ink, then toward each pole, in small steps,
         // and keep the first colour that reads on every fill.
-        for target in [primary, pole] {
+        for target in [primary, pole, other] {
             for step in 1..=64_u16 {
                 let mix = |a: u8, b: u8| ((u16::from(a) * (64 - step) + u16::from(b) * step + 32) / 64) as u8;
                 let candidate = Color32::from_rgb(mix(ink.r(), target.r()), mix(ink.g(), target.g()), mix(ink.b(), target.b()));
@@ -1687,6 +1688,26 @@ mod tests {
                 assert!(ratio >= 1.5, "isoparm {ratio:.2} on the viewport background {background:?}");
             }
         }
+    }
+
+    #[test]
+    fn panel_readable_inks_try_the_other_pole_when_the_nearer_one_cannot_pass_every_fill() {
+        let mut tokens = Tokens::dark();
+        let grey = Color32::from_gray(128);
+        tokens.text = grey;
+        tokens.text_dim = grey;
+        tokens.form_ink = grey;
+        tokens.form_dim = grey;
+        tokens.dialog_label = grey;
+        let fills = [Color32::from_gray(117), Color32::from_gray(120)];
+        let lifted = panel_readable_inks(tokens, &fills);
+        for ink in [lifted.text, lifted.text_dim, lifted.form_ink, lifted.form_dim, lifted.dialog_label] {
+            for fill in fills {
+                assert!(contrast_ratio(ink, fill) >= 4.5, "{ink:?} on {fill:?}");
+            }
+        }
+        let passing = panel_readable_inks(Tokens::dark(), &[Tokens::dark().panel]);
+        assert_eq!(passing.text, Tokens::dark().text, "a readable ink stays as authored");
     }
 
     #[test]

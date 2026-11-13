@@ -92,6 +92,18 @@ impl HostSurfaceStyle {
     pub fn palette(&self, appearance: &HostSurfaceAppearance) -> &Tokens {
         if matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { .. })) { &self.fallback } else { &self.readable }
     }
+
+    /// The tokens a panel body must be painted with, or None to keep the
+    /// window's own: the fallback, or the lifted inks once readability was
+    /// checked and an ink actually moved. A translucent surface whose
+    /// readability is not checked keeps the authored inks.
+    pub fn paint_palette(&self, appearance: &HostSurfaceAppearance) -> Option<&Tokens> {
+        match appearance.contrast {
+            Some(ContrastOutcome::RetainReadableFallback { .. }) => Some(&self.fallback),
+            Some(ContrastOutcome::Readable { .. }) if self.readable != self.authored => Some(&self.readable),
+            _ => None,
+        }
+    }
 }
 
 fn fallback_appearance(tokens: &Tokens, reason: ContrastFailure) -> HostSurfaceAppearance {
