@@ -217,3 +217,20 @@ fn a_neighbour_along_the_picked_edge_s_line_is_refused() {
         Err(Error::Unsupported(_))
     ));
 }
+
+/// On a plane every continuation is the plane itself: Tangent and Curvature give Natural's sheet.
+#[test]
+fn every_continuation_of_a_plane_is_the_same() {
+    let (body, order) = trapezoid();
+    let edge = edge_through(&body, &order, [4.5, 6.0, 0.0]);
+    let record = |how| {
+        extend_sheet(&body, &order, edge, 5.0, how)
+            .unwrap()
+            .to_record()
+            .unwrap()
+            .0
+    };
+    let natural = record(Continuation::Natural);
+    assert_eq!(record(Continuation::Tangent), natural);
+    assert_eq!(record(Continuation::Curvature), natural);
+}
