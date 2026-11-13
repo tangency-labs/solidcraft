@@ -146,12 +146,13 @@ fn a_plane_offset_from_a_face_is_drawn_over_the_face() {
             .fold(Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |a, p| Vec3::new(a.x.max(p.x), a.y.max(p.y), a.z.max(p.z)));
         (lo, hi)
     };
+    let fitted = h.app.cam.distance;
     for (len, x1) in [(None, 60.0), (Some("40 mm"), 80.0)] {
         if let Some(len) = len {
             h.app.run("parameters.change", json!({"name":"len","expression":len})).unwrap();
             h.settle();
         }
-        for distance in [h.app.cam.distance, 25.0] {
+        for distance in [fitted, 25.0] {
             h.app.cam.distance = distance;
             h.settle();
             let quads = crate::viewport::construction_quads(&h.app);
