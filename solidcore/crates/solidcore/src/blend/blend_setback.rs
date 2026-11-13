@@ -123,6 +123,7 @@ use crate::surface::surface::{Surface, SurfaceKind};
 mod certify;
 mod convexity;
 mod curved;
+mod face_plane;
 mod graph;
 mod qp;
 mod saddle;
@@ -130,6 +131,7 @@ mod scale;
 mod spring;
 
 pub use curved::{no_more_concave, round_end_curvature};
+pub(crate) use face_plane::{FacePlane, Hom2};
 pub use spring::{spring_curve, SpringCurve, SpringHalf};
 
 pub(crate) use scale::bisect_thousandths;
