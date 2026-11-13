@@ -33,6 +33,7 @@
 pub mod affine;
 pub mod blend;
 pub mod blend_definition;
+pub mod blend_surface;
 pub mod body;
 pub mod boolean;
 pub mod cancel;
@@ -73,7 +74,7 @@ pub use blend::{
     fillet_variable_ordered, tangent_chain, BandRoom, Blend, BlendOptions, Blended, CarriedFace,
     ChamferCorner, ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
 };
-pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body};
+pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, TurnedOver};
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
