@@ -37,7 +37,7 @@ use solidcraft_engine::geom::{Aabb2, Region2Geom, Seg2Geom};
 use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
-use crate::ui_kit::{self, Container, Surface};
+use crate::ui_kit;
 use solidcraft_theme::Tokens;
 
 /// The least and most the page zooms, as a share of true size.
@@ -180,8 +180,6 @@ pub struct Page {
     sheet: Option<u64>,
     drawing: Option<(u64, u64)>,
     marks: Option<Marks>,
-    /// The zoom card, so the canvas under it takes no camera input.
-    pub(crate) card: Option<Rect>,
     /// What the last frame showed, for `ui.inspect`.
     shown: Option<Value>,
 }
@@ -189,7 +187,7 @@ pub struct Page {
 impl Default for Page {
     fn default() -> Self {
         let cam = Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, fov: 0.0, distance: 1000.0, ..Camera::default() };
-        Page { cam, scale: true_size(1.0, 1.0), fitted: None, fitted_on: None, sheet: None, drawing: None, marks: None, card: None, shown: None }
+        Page { cam, scale: true_size(1.0, 1.0), fitted: None, fitted_on: None, sheet: None, drawing: None, marks: None, shown: None }
     }
 }
 
@@ -236,6 +234,11 @@ pub fn set_zoom(app: &mut SolveApp, ctx: &egui::Context, zoom: f64) {
         app.drawing_workspace.page.fitted_on = None;
         app.drawing_workspace.page.scale = true_size_now(app, ctx) * zoom.clamp(*ZOOM.start(), *ZOOM.end());
     }
+}
+
+/// The current zoom readout, measured against the calibrated paper scale.
+pub(crate) fn zoom_percent(app: &SolveApp, ctx: &egui::Context) -> f32 {
+    shown_percent(app.drawing_workspace.page.scale / true_size_now(app, ctx))
 }
 
 /// What the page showed on its last frame (`ui.inspect`'s `sheet_page`): null while no sheet is shown.
@@ -340,14 +343,12 @@ fn distance_for(scale: f64, height: f32) -> f64 {
 /// Draws the sheet of the drawing open, and says whether there was one to draw: without a drawing
 /// open the workspace shows its own message.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
-    // The zoom card stays covered from last frame while the camera reads this frame's input.
     app.drawing_workspace.page.shown = None;
     let Ok(drawing) = app.session.drawing(drawing_scene::CMD).cloned() else {
         app.drawing_workspace.page = Page::default();
         return false;
     };
     let Some(sheet) = active_sheet(app) else {
-        app.drawing_workspace.page.card = None;
         return false;
     };
     select_sheet(app, sheet);
@@ -361,7 +362,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let view = match drawing_scene::extract(&mut app.session, sheet) {
         Ok(view) => view,
         Err(e) => {
-            app.drawing_workspace.page.card = None;
             message(ui, canvas, &e.to_string(), t.error);
             return true;
         }
@@ -436,7 +436,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         let text = solidcraft_ui_text::format("ui.sheet_page.working", &[("count", &waiting.max(1).to_string())]);
         hint(&painter, free_area(app, canvas), &text);
     }
-    zoom_card(app, ui, canvas, at.scale / base);
     crate::navigation_bar_view::show(app, ui, canvas);
     let encode = solidcraft_engine::doc::ids::encode;
     let paper_mm = at.visible(canvas);
@@ -571,49 +570,7 @@ fn hint(painter: &egui::Painter, area: Rect, text: &str) {
     crate::scenario::publish_rect("sheet:working", chip);
 }
 
-/// The zoom readout, typed or dragged, with Actual size and Fit sheet, at the free canvas's lower right.
-fn zoom_card(app: &mut SolveApp, ui: &mut egui::Ui, canvas: Rect, zoom: f64) {
-    let t = Tokens::get();
-    let area = free_area(app, canvas);
-    let container = Container::new(ui.ctx(), Surface::Panel);
-    let frame = container.frame(ui.ctx(), t.panel, crate::frame::Side::Right).inner_margin(4);
-    let size = app.drawing_workspace.page.card.map_or(vec2(t.space_24 * 10.0, t.space_24 + 10.0), |r| r.size());
-    // The free area already stops above the navigation bar.
-    let position = pos2(area.right() - size.x - t.space_8, area.bottom() - size.y - t.space_8).max(area.min);
-    let mut percent = shown_percent(zoom);
-    let mut chosen = None;
-    let card = container.area(ui.make_persistent_id("sc_sheet_zoom")).fixed_pos(position).show(ui.ctx(), |ui| {
-        container.show_frame(ui, frame, area, |ui| {
-            ui.horizontal(|ui| {
-                let field = ui_kit::number_field(ui, &mut percent, 5.0..=3200.0, 1.0, " %").on_hover_text(app.tr("ui.sheet_page.zoom"));
-                crate::scenario::publish_target("sheet:zoom", field.rect);
-                if field.changed() {
-                    chosen = Some("zoom");
-                }
-                let actual = ui_kit::button(ui, app.tr("ui.sheet_page.actual_size"), ui_kit::Button::Normal);
-                crate::scenario::publish_target("sheet:actual_size", actual.rect);
-                if actual.clicked() {
-                    chosen = Some("actual");
-                }
-                let fit = ui_kit::button(ui, app.tr("ui.sheet_page.fit"), ui_kit::Button::Normal);
-                crate::scenario::publish_target("sheet:fit", fit.rect);
-                if fit.clicked() {
-                    chosen = Some("fit");
-                }
-            });
-        });
-    });
-    app.drawing_workspace.page.card = Some(card.response.rect);
-    crate::scenario::publish_rect("sheet:zoom_card", card.response.rect);
-    match chosen {
-        Some("zoom") => set_zoom(app, ui.ctx(), f64::from(percent) / 100.0),
-        Some("actual") => actual_size(app, ui.ctx()),
-        Some("fit") => fit(app),
-        _ => {}
-    }
-}
-
-/// The zoom as the card shows it, in percent: whole above 10 %, to a tenth below.
+/// The zoom as the navigation bar shows it, in percent: whole above 10 %, to a tenth below.
 pub(crate) fn shown_percent(zoom: f64) -> f32 {
     let percent = zoom * 100.0;
     let shown = if percent < 10.0 { (percent * 10.0).round() / 10.0 } else { percent.round() };
