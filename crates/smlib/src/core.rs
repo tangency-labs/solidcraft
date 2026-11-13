@@ -239,8 +239,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.surface_parallel_to_vector_checks = true;
     f.fillet_round_ends_at_tangent_continuation = true;
     f.geometric_g2_continuity = true;
-    f.bend_volume_bbox_contains_wide_angle_and_inf_u = true;
-    f.bend_volume_trim_param_box_across_period = true;
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.curve_sweep_closed_path_joins_ends = true;
