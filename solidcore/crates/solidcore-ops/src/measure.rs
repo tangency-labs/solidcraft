@@ -1675,6 +1675,49 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn outline_cuts_of_a_hole_seen_off_axis_are_exact_inside_its_rims() {
+        // the sphere with the hole above, seen along (7, -24, 0) / 25: its contour is the circle of
+        // radius 5 in the plane of the z axis and d = (24, 7, 0) / 25, at angle t from d towards
+        // +z. A point s along d is on the hole where s^2 - 6 s (24 / 25) + 8 = 0, so at
+        // s = (72 -+ sqrt 184) / 25, and the hole's rims cut the contour at acos(s / 5) and at
+        // their mirrors. They cross the contour's plane at the hole's angles 73.4 and 139.1
+        // degrees, away from its seam and the sphere's (in y = 0): inside the rim edges, whose
+        // curves the boolean traced
+        all_fixes();
+        let sphere = crate::make_sphere([0.0, 0.0, 0.0], 5.0).unwrap();
+        let hole = crate::make_cylinder([3.0, 0.0, -10.0], 1.0, 20.0).unwrap();
+        let b = crate::boolean::boolean(sphere, hole, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let o = kernel_order(&b);
+        let contour = solidcore_record::brep::Curve::Circle {
+            frame: solidcore_record::brep::Frame {
+                origin: [0.0, 0.0, 0.0],
+                x_axis: [0.96, 0.28, 0.0],
+                y_axis: [0.0, 0.0, 1.0],
+            },
+            radius: 5.0,
+        };
+        let turn = std::f64::consts::TAU;
+        let cuts = b
+            .outline_cuts(
+                &o,
+                &faces_on(&b, &o, |s| matches!(s, SurfaceKind::Sphere(_))),
+                &contour,
+                [0.0, turn],
+                [0.0, 0.0, 0.0],
+                [0.28, -0.96, 0.0],
+            )
+            .unwrap();
+        // acos((72 + sqrt 184) / 125) and acos((72 - sqrt 184) / 125)
+        let (near, far) = (0.816_855_004_760_949_2, 1.084_355_294_332_124_4);
+        assert!(
+            close(&cuts, &[near, far, turn - far, turn - near]),
+            "{cuts:?}"
+        );
+    }
+
+    #[test]
     fn outline_cuts_of_a_cut_cone_keep_only_its_own_silhouette() {
         // a frustum of base radius 4 and top radius 1, 6 high: its apex would be at z = 8, and its
         // right silhouette seen along y runs from the apex to (4, 0, 0), x = 4 - z / 2. Less the
