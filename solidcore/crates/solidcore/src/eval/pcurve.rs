@@ -24,9 +24,8 @@
 //! the structural checks of a record (counts, budgets, a use's interval in its curve's natural
 //! range) are the caller's, before it converts the record (`solidcore-ops`' `pcurve`).
 //!
-//! Deviations: the pole test is the evaluator's speed test this routine has always used
-//! ([`pole_by_speed`]), not [`super::collapse`]'s exact one; the B-spline cut and the knot span
-//! search are kept here ([`segment`], [`find_span`]) as the routine had them.
+//! Deviations: the B-spline cut and the knot span search are kept here ([`segment`],
+//! [`find_span`]) as the routine had them.
 use super::spline::EvalSurface;
 use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
@@ -56,9 +55,10 @@ impl From<EvalError> for Error {
         match e {
             EvalError::Invalid(_) => Error::Invalid(e.to_string()),
             EvalError::TooLarge(_) => Error::TooLarge(e.to_string()),
-            EvalError::Unsupported(_) | EvalError::Unevaluable(_) | EvalError::Degenerate(_) => {
-                Error::Failed(e.to_string())
-            }
+            EvalError::Unsupported(_)
+            | EvalError::Unevaluable(_)
+            | EvalError::Degenerate(_)
+            | EvalError::OffRange(_) => Error::Failed(e.to_string()),
         }
     }
 }
@@ -697,11 +697,10 @@ impl On {
         Some(q)
     }
 
-    /// Whether `uv` is at a pole along each direction, or within `reach` of one: moving that
-    /// parameter by half its period (or across its range) moves the point by no more than `reach`
-    /// at its speed there. There the parameter is as free as at the pole itself.
-    fn pole(&self, uv: [f64; 2], reach: f64) -> [bool; 2] {
-        pole_by_speed(&self.surface, &self.dom, uv, reach)
+    /// Whether `uv` is at a pole along each direction, or within `reach` mm of one
+    /// ([`SurfaceEval::pole_within`]): there the parameter is as free as at the pole itself.
+    fn pole(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2]> {
+        Ok(self.surface.pole_within(uv, reach)?)
     }
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
@@ -737,8 +736,8 @@ impl On {
             // offsets up to the next pole.
             let at_pole: Vec<bool> = ends
                 .iter()
-                .map(|(s, _)| self.pole(*s, tol).get(d).copied().unwrap_or(false))
-                .collect();
+                .map(|(s, _)| Ok(self.pole(*s, tol)?.get(d).copied().unwrap_or(false)))
+                .collect::<Result<_>>()?;
             let first = at_pole.iter().position(|&p| p).unwrap_or(0);
             let order: Vec<usize> = (first..n).chain(0..first).collect();
             let mut shift = vec![0.0; n];
@@ -957,31 +956,6 @@ fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
         *n.get_mut(j)? = saved;
     }
     Some(n)
-}
-
-/// Whether `uv` is at a pole along each direction, or within `reach` of one, by the surface's
-/// speeds there: a speed below 10⁻⁹ of the other's, or one that moves the point no more than
-/// `reach` over half the period (or the whole range) of its parameter.
-pub fn pole_by_speed(s: &SurfaceEval, dom: &Domain, uv: [f64; 2], reach: f64) -> [bool; 2] {
-    let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else {
-        return [false; 2];
-    };
-    let speed = [su.len(), sv.len()];
-    let [a, b] = speed;
-    let mut out = [a <= 1e-9 * b.max(1e-12), b <= 1e-9 * a.max(1e-12)];
-    for ((flag, sp), (period, range)) in out
-        .iter_mut()
-        .zip(speed)
-        .zip(dom.period.iter().zip(dom.range.iter()))
-    {
-        let span = match (period, range) {
-            (Some(period), _) => 0.5 * period,
-            (None, Some((lo, hi))) => (hi - lo).abs(),
-            (None, None) => continue,
-        };
-        *flag |= sp * span <= reach;
-    }
-    out
 }
 
 /// Rounding allowed at the ends of a knot domain, in units of `f64::EPSILON` times its size.

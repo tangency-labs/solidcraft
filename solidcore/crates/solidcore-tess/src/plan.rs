@@ -59,7 +59,71 @@ pub struct TessPlan {
     pub edge_faces: Vec<Vec<u32>>,
 }
 
+/// One face's nodes as the mesh has them ([`TessPlan::nodes`]).
+pub(crate) struct FaceNodes {
+    /// Each node's position.
+    pub(crate) positions: Vec<Vec3>,
+    /// Each node's normal (turned with the face).
+    pub(crate) normals: Vec<Vec3>,
+    /// The kernel's form of the face's surface, where a node needed it.
+    pub(crate) kernel: Option<solidcore::eval::EvalSurface>,
+    /// The first node the kernel's evaluator refuses, and why.
+    pub(crate) failure: Option<String>,
+}
+
 impl TessPlan {
+    /// Face `f`'s node positions and normals as [`TessPlan::evaluate`] gives them, before its
+    /// pole rules: each node evaluated on the face's surface (a shared edge node's own point
+    /// kept), the kernel's form of the surface where a node needed it, and the first node the
+    /// kernel's evaluator refuses, if one does (the face is then left out of the mesh).
+    pub(crate) fn nodes(&self, f: &FacePlan) -> FaceNodes {
+        let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
+        // At a degenerate point (a cone's apex, a sphere's pole) the kernel's exact limit
+        // normal, from the second partials; the kernel's form of the face is made only when a
+        // vertex of it needs one.
+        let mut kernel: Option<solidcore::eval::EvalSurface> = None;
+        let (mut positions, mut normals) = (
+            Vec::with_capacity(f.uv.len()),
+            Vec::with_capacity(f.uv.len()),
+        );
+        // The first node the kernel's evaluator refuses, with its reason: the face is refused
+        // there, not meshed with a normal made up for it. Its pole nodes have their own rule
+        // in [`TessPlan::evaluate`] ([`crate::pole::apply`]).
+        let mut failure: Option<String> = None;
+        for (k, uv) in f.uv.iter().enumerate() {
+            let (p, n) = match surface {
+                Some(s) => {
+                    solidcore_convert::record_pair(if let Some(pn) = s.regular(uv[0], uv[1]) {
+                        pn
+                    } else {
+                        let ks = kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
+                        ks.eval(uv[0], uv[1]).unwrap_or_else(|e| {
+                            if failure.is_none() && !f.poles.iter().any(|p| p.node as usize == k) {
+                                failure = Some(format!(
+                                    "node {k} at ({}, {}): {}",
+                                    uv[0],
+                                    uv[1],
+                                    crate::eval_message(e)
+                                ));
+                            }
+                            s.eval(uv[0], uv[1])
+                        })
+                    })
+                }
+                None => (Vec3::ZERO, f.normals.get(k).copied().unwrap_or(Vec3::Z)),
+            };
+            let p = f.fixed.get(k).copied().unwrap_or(p);
+            positions.push(p);
+            normals.push(if f.flip { -n } else { n });
+        }
+        FaceNodes {
+            positions,
+            normals,
+            kernel,
+            failure,
+        }
+    }
+
     /// Evaluate on the CPU into an indexed mesh (vertices are shared within a face, not
     /// across faces, so creases keep their own normals), with the faces left out of it.
     #[must_use]
@@ -69,47 +133,12 @@ impl TessPlan {
         for f in &self.faces {
             let base = out.positions.len();
             let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
-            // At a degenerate point (a cone's apex, a sphere's pole) the kernel's exact limit
-            // normal, from the second partials; the kernel's form of the face is made only when a
-            // vertex of it needs one.
-            let mut kernel: Option<solidcore::eval::EvalSurface> = None;
-            let (mut positions, mut normals) = (
-                Vec::with_capacity(f.uv.len()),
-                Vec::with_capacity(f.uv.len()),
-            );
-            // The first node the kernel's evaluator refuses, with its reason: the face is refused
-            // there, not meshed with a normal made up for it. Its pole nodes have their own rule
-            // below ([`crate::pole::apply`]).
-            let mut failure: Option<String> = None;
-            for (k, uv) in f.uv.iter().enumerate() {
-                let (p, n) = match surface {
-                    Some(s) => {
-                        solidcore_convert::record_pair(if let Some(pn) = s.regular(uv[0], uv[1]) {
-                            pn
-                        } else {
-                            let ks =
-                                kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
-                            ks.eval(uv[0], uv[1]).unwrap_or_else(|e| {
-                                if failure.is_none()
-                                    && !f.poles.iter().any(|p| p.node as usize == k)
-                                {
-                                    failure = Some(format!(
-                                        "node {k} at ({}, {}): {}",
-                                        uv[0],
-                                        uv[1],
-                                        crate::eval_message(e)
-                                    ));
-                                }
-                                s.eval(uv[0], uv[1])
-                            })
-                        })
-                    }
-                    None => (Vec3::ZERO, f.normals.get(k).copied().unwrap_or(Vec3::Z)),
-                };
-                let p = f.fixed.get(k).copied().unwrap_or(p);
-                positions.push(p);
-                normals.push(if f.flip { -n } else { n });
-            }
+            let FaceNodes {
+                mut positions,
+                mut normals,
+                mut kernel,
+                failure,
+            } = self.nodes(f);
             if let Some(reason) = failure {
                 refused.push(crate::RefusedFace {
                     face: f.face as usize,

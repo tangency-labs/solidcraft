@@ -48,9 +48,13 @@ pub fn curve_interval(
 /// Whether the face's NURBS form turns its natural normal against its surface's
 /// ([`solidcore::eval::label::form_turns`]). A shell's `forward` is about [`Face::parameters`],
 /// so the side the surface is used on is `forward != form_turns(face)`. `Some(false)` without a
-/// form; `None` where the form does not evaluate.
+/// form, and for a blend, whose form is its geometry; `None` where the form does not evaluate.
 #[must_use]
 pub fn form_turns(face: &Face) -> Option<bool> {
+    // A blend's label has no normal of its own: its form is the face's geometry.
+    if matches!(face.surface, Surface::Blend { .. }) {
+        return Some(false);
+    }
     let surface = solidcore_convert::surface(&face.surface).ok()?;
     let nurbs = face
         .nurbs

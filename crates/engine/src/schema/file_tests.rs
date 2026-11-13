@@ -3,9 +3,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::{
-    Export3mfParams, ExportMeshParams, ExportParams, ExportStepParams, ExportUrdfParams, FileExportResult, NewerFileReport, OpenElsewhere,
-    OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
-    RecoveryListResult,
+    Export3mfParams, ExportMeshParams, ExportParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult, NewerFileReport,
+    OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
+    RecoveryListParams, RecoveryListResult,
 };
 use crate::Session;
 use crate::recovery::Autosaver;
@@ -16,10 +16,17 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "path"]);
     assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
-    assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "objects", "path", "quality"]);
+    assert_keys(input_schema_for::<ExportStlParams>(), &["bodies", "lay_on_print_faces", "path", "quality"]);
+    assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
     assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "mesh_prefix", "path", "velocity"]);
-    assert_keys(input_schema_for::<ExportParams>(), &["bodies", "effort", "format", "mesh_prefix", "objects", "path", "quality", "velocity"]);
-    assert_keys(input_schema_for::<OpenParams>(), &["folder", "max_points", "names", "origin", "path", "read_only", "units", "up"]);
+    assert_keys(
+        input_schema_for::<ExportParams>(),
+        &["bodies", "effort", "format", "lay_on_print_faces", "mesh_prefix", "objects", "path", "quality", "velocity"],
+    );
+    assert_keys(
+        input_schema_for::<OpenParams>(),
+        &["folder", "history", "max_points", "names", "origin", "path", "read_only", "reuse_import", "units", "up"],
+    );
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);
@@ -244,6 +251,17 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
 }
 
+/// Mark a print face on the first body of `s`, a box: its side at the lowest X.
+fn mark_a_print_face(s: &mut Session) {
+    let (name, bbox) = {
+        let world = s.world_state().unwrap_or_else(|e| panic!("{e}"));
+        let body = world.bodies.first().expect("a body");
+        (body.name.clone(), solidcraft_kernel::measure_mass(&body.body).expect("measure").bbox)
+    };
+    let point = [bbox.min.x, (bbox.min.y + bbox.max.y) / 2.0, (bbox.min.z + bbox.max.z) / 2.0];
+    run(s, "body.print_face", json!({"body": name, "point": point}));
+}
+
 /// 10 mm cubes in components A (grounded) and B, so a URDF and a 3MF with parts can be written.
 fn two_cubes() -> Session {
     let mut s = Session::default();
@@ -284,6 +302,12 @@ fn strict_keeps_todays_errors() {
         ("file.export", json!({"path": at("a.urdf"), "effort": 0})),
         ("file.export", json!({"path": at("a.urdf"), "velocity": "fast"})),
         ("file.export", json!({"path": at("a"), "format": "urdf", "velocity": 1e9})),
+        ("file.export", json!({"path": at("a.step"), "lay_on_print_faces": true})),
+        ("file.export", json!({"path": at("a.obj"), "lay_on_print_faces": true})),
+        ("file.export", json!({"path": at("a.stl"), "lay_on_print_faces": "yes"})),
+        ("file.export", json!({"path": at("a.3mf"), "lay_on_print_faces": 1})),
+        ("file.export_stl", json!({"path": at("a.stl"), "lay_on_print_faces": "yes"})),
+        ("file.export_3mf", json!({"path": at("a.3mf"), "lay_on_print_faces": [true]})),
         ("doc.open", json!({"path": ""})),
         ("doc.open", json!({"path": "  "})),
         ("doc.open", json!({"path": 5})),
@@ -321,6 +345,19 @@ fn the_export_type_reads_each_key_only_for_its_format() {
     assert!(ok(json!({"path": "a.xyz", "quality": "rough", "effort": -1})).quality.is_none());
     assert!(ok(json!({"quality": "rough"})).path.is_none());
     assert!(ok(json!({"path": "a.stl", "bodies": null, "format": null, "quality": null, "objects": null})).bodies.is_none());
+    // `lay_on_print_faces`: true for STL and 3MF only, false for any format, not read for URDF.
+    for path in ["a.stl", "a.3mf"] {
+        assert_eq!(ok(json!({"path": path, "lay_on_print_faces": true})).lay_on_print_faces, Some(true), "{path}");
+    }
+    assert_eq!(ok(json!({"path": "a", "format": "stla", "lay_on_print_faces": true})).lay_on_print_faces, Some(true));
+    assert_eq!(ok(json!({"path": "a.step", "lay_on_print_faces": false})).lay_on_print_faces, Some(false));
+    assert!(ok(json!({"path": "a.urdf", "lay_on_print_faces": "yes"})).lay_on_print_faces.is_none());
+    for path in ["a.step", "a.obj", "a.glb", "a.json"] {
+        let e = read(json!({"path": path, "lay_on_print_faces": true})).expect_err(path);
+        assert!(e.contains("STL and 3MF"), "{path}: {e}");
+    }
+    let e = read(json!({"path": "a.stl", "lay_on_print_faces": "yes"})).expect_err("a string");
+    assert!(e.contains("must be true or false"), "{e}");
 }
 
 /// (`conforms` does not read `oneOf`, so `quality` and `objects` values are checked by the type,
@@ -334,7 +371,9 @@ fn the_export_schema_takes_what_the_handler_reads() {
         (json!({"path": "a.3mf", "format": "3mf-tagged", "bodies": ["A", "B"], "quality": "fine", "objects": "component"}), true),
         (json!({"path": "robot.urdf", "mesh_prefix": "package://robot/meshes/", "effort": 50, "velocity": 2.5}), true),
         (json!({"path": "a.step", "bodies": "Body1"}), true),
+        (json!({"path": "a.stl", "lay_on_print_faces": true}), true),
         (json!({}), false),
+        (json!({"path": "a.stl", "lay_on_print_faces": "yes"}), false),
         (json!({"path": "a.stl", "bodies": [1]}), false),
         (json!({"path": "a.stl", "colour": true}), false),
     ] {
@@ -359,10 +398,15 @@ fn export_replies_match_the_output_schema() {
         json!({"path": at("f.bin"), "format": "3mf-tagged"}),
         json!({"path": at("g.json")}),
         json!({"path": at("h.urdf"), "mesh_prefix": "package://robot/meshes/", "effort": 50, "velocity": 2}),
+        // With a print face marked: `print_faces` in the first, and in the second a warning (the
+        // body is a part of a component's object, so it stays as it lies).
+        json!({"path": at("i.stl"), "lay_on_print_faces": true}),
+        json!({"path": at("j.3mf"), "objects": "component", "lay_on_print_faces": true}),
     ];
     for level in [ParamCheck::Warn, ParamCheck::Strict] {
         let mut s = two_cubes();
         s.param_check = level;
+        mark_a_print_face(&mut s);
         for p in &calls {
             let reply = run(&mut s, "file.export", p.clone());
             assert!(reply.get("param_warnings").is_none(), "{p}: {reply}");

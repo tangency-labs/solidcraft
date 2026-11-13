@@ -78,11 +78,16 @@ impl W {
     }
     /// The file: millimetres, radians, an uncertainty of 1e-7 mm, every item in one
     /// representation.
-    fn file(mut self, items: &[u64]) -> p21::Exchange {
+    fn file(self, items: &[u64]) -> p21::Exchange {
+        self.file_with_uncertainty(items, 1e-7)
+    }
+
+    /// [`W::file`] with the file's uncertainty `uncertainty` (mm).
+    fn file_with_uncertainty(mut self, items: &[u64], uncertainty: f64) -> p21::Exchange {
         let l = self.add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
         let a = self.add("(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))");
         let s = self.add("(NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT())");
-        let u = self.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#{l},'distance_accuracy_value','')"));
+        let u = self.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({}),#{l},'distance_accuracy_value','')", real(uncertainty)));
         let c = self.add(format!(
             "(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{u}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{l},#{a},#{s}))REPRESENTATION_CONTEXT('',''))"
         ));
@@ -351,6 +356,40 @@ fn side(w: &mut W, c: &Cyl, outward: bool) -> u64 {
     w.face(&[bound], c.surface, outward)
 }
 
+/// A quarter round of radius 0.05 mm, 1 mm long, in a file of 0.1 mm uncertainty (a
+/// connector's pin edges): the cylinder is thinner than the tolerance, but it has no pole. Read
+/// as collapsed within the tolerance everywhere, every point of its boundary was on a pole, its
+/// box bounded nothing, and the face was refused as "a face whose boundary does not lie on its
+/// surface".
+#[test]
+fn a_round_thinner_than_the_tolerance_reads() {
+    let r = 0.05;
+    let mut w = W::default();
+    let (p0, p1, p2, p3) = ([r, 0.0, 0.0], [r, 1.0, 0.0], [0.0, 1.0, r], [0.0, 0.0, r]);
+    let (v0, v1, v2, v3) = (w.vertex(p0), w.vertex(p1), w.vertex(p2), w.vertex(p3));
+    // The cylinder's frame: axis -y, angle 0 on +x, a quarter turn on +z.
+    let (axis, x) = ([0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+    let along = w.line_edge((v0, p0), (v1, p1), true, 1.0);
+    let k1 = w.circle([0.0, 1.0, 0.0], axis, x, r);
+    let far = w.add(format!("EDGE_CURVE('',#{v1},#{v2},#{k1},.T.)"));
+    let back = w.line_edge((v2, p2), (v3, p3), true, 1.0);
+    let k0 = w.circle([0.0; 3], axis, x, r);
+    let near = w.add(format!("EDGE_CURVE('',#{v0},#{v3},#{k0},.T.)"));
+    let a = w.axis([0.0; 3], axis, x);
+    let cylinder = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    let uses = [w.oe(along, true), w.oe(far, true), w.oe(back, true), w.oe(near, false)];
+    let bound = w.bound(&uses, true, true);
+    let face = w.face(&[bound], cylinder, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('pin round',(#{open}))"));
+    let s = one_solid(&w.file_with_uncertainty(&[model], 0.1));
+    assert!(s.sheet);
+    assert_eq!(counts(&s.brep), [1, 1, 1, 4, 4]);
+    // The face's box: a quarter turn by the 1 mm length.
+    let d = s.brep.faces[0].domain;
+    assert!((d[1][1] - d[1][0] - 1.0).abs() < 1e-9 || (d[0][1] - d[0][0] - 1.0).abs() < 1e-9, "{d:?}");
+}
+
 #[test]
 fn a_cylinder_has_a_seam_used_twice_by_its_side() {
     let mut w = W::default();
@@ -536,6 +575,169 @@ fn bands_and_caps_without_seams_get_one() {
     let pole = s.brep.vertices.iter().find(|v| (v.point[2] - 5.0).abs() < 1e-9);
     assert!(pole.is_some(), "{:?}", s.brep.vertices);
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
+}
+
+/// An edge from vertex `va` counterclockwise about +z to vertex `vb` on the circle of radius `r`
+/// round the z axis at height `z`.
+fn arc_about_z(w: &mut W, (va, vb): (u64, u64), r: f64, z: f64) -> u64 {
+    let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+    w.add(format!("EDGE_CURVE('',#{va},#{vb},#{k},.T.)"))
+}
+
+/// A countersink's cone between a full circle at its rim and a loop that comes up to within
+/// 0.05 mm of it below its only vertex and drops 0.5 mm elsewhere (a chamfer's edge broken across
+/// it), in a file of 0.1 mm uncertainty. The seam from the rim's vertex straight down to the loop
+/// would be 0.07 mm long, shorter than its own tolerance (an edge smaller than its tube): the face
+/// was left out of the part with "a seam of no length". The seam goes where the band is wider.
+#[test]
+fn a_band_narrower_than_its_tolerance_at_a_vertex_gets_its_seam_where_it_is_wider() {
+    for same_sense in [false, true] {
+        let mut w = W::default();
+        // A 45 degree cone opening up +z, radius 1 at z = 0: radius 1 + z at height z.
+        let r = |z: f64| 1.0 + z;
+        let at = |z: f64, angle: f64| [r(z) * angle.cos(), r(z) * angle.sin(), z];
+        let (lo, hi, rim) = (0.5, 0.95, 1.0);
+        let t = PI / 3.0;
+        let v_rim = w.vertex(at(rim, 0.0));
+        let rim_edge = arc_about_z(&mut w, (v_rim, v_rim), r(rim), rim);
+        // The loop below: high from -60 to 60 degrees, low the rest of the way round.
+        let (p_hi0, p_hi1, p_lo1, p_lo0) = (at(hi, -t), at(hi, t), at(lo, t), at(lo, -t));
+        let (h0, h1, l1, l0) = (w.vertex(p_hi0), w.vertex(p_hi1), w.vertex(p_lo1), w.vertex(p_lo0));
+        let high = arc_about_z(&mut w, (h0, h1), r(hi), hi);
+        let down = w.line_edge((h1, p_hi1), (l1, p_lo1), true, len3(sub3(p_lo1, p_hi1)));
+        let low = arc_about_z(&mut w, (l1, l0), r(lo), lo);
+        let up = w.line_edge((l0, p_lo0), (h0, p_hi0), true, len3(sub3(p_hi0, p_lo0)));
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let cone = w.add(format!("CONICAL_SURFACE('',#{a},1.,{})", real(PI / 4.0)));
+        // The face on the material's side of the cone: towards the axis for a countersink.
+        let below: Vec<u64> = [(high, true), (down, true), (low, true), (up, true)].iter().map(|&(e, o)| w.oe(e, o == same_sense)).collect();
+        let below = if same_sense { below } else { below.into_iter().rev().collect() };
+        let ob = w.bound(&below, true, true);
+        let o = w.oe(rim_edge, !same_sense);
+        let rb = w.bound(&[o], false, true);
+        let face = w.face(&[ob, rb], cone, same_sense);
+        let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+        let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('countersink',(#{open}))"));
+        let s = one_solid(&w.file_with_uncertainty(&[model], 0.1));
+        assert!(s.sheet);
+        assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+        // Every edge is longer than its tolerance. The loop's vertices at ±60 degrees end its
+        // rulings, where a seam would run along an edge: the seam goes in the middle of the low
+        // stretch, at 180 degrees where the band is 0.45 mm high, the low arc and the rim split
+        // there.
+        for e in &s.brep.edges {
+            let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+            assert!(a == b || len3(sub3(a, b)) > e.tolerance, "an edge {:?} shorter than its tolerance {}", [a, b], e.tolerance);
+        }
+        assert_eq!(counts(&s.brep), [1, 1, 1, 5 + 2 + 1, 5 + 2], "same_sense {same_sense}");
+        let seam = s.brep.edges.iter().find(|e| {
+            let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+            (a[2] - b[2]).abs() > 0.475
+        });
+        let [a, b] = seam.unwrap().vertices.map(|v| s.brep.vertices[v as usize].point);
+        assert!(a[1].atan2(a[0]).abs() > 2.0 * t && b[1].atan2(b[0]).abs() > 2.0 * t, "seam at {a:?} {b:?}");
+    }
+}
+
+/// A spherical band (a dome with a ring of holes round a centre one) between a circle at its foot
+/// and one round its top, both with their vertex at angle 0, and a hole straddling that angle
+/// between them. The meridian through both vertices crosses the hole, so a seam there cut it in
+/// two and the face was lost ("an edge lies 5.9 mm off the face's surface"). The seam goes where
+/// no other loop of the face reaches: both rims split there.
+#[test]
+fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
+    let radius = 5.0;
+    let ring = |w: &mut W, z: f64| {
+        let r = (radius * radius - z * z).sqrt();
+        let v = w.vertex([r, 0.0, z]);
+        let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let mut w = W::default();
+    let (foot, top) = (ring(&mut w, 0.0), ring(&mut w, 4.0));
+    // The hole: a window from 10 degrees west of +x to 10 east, between latitudes 20 and 40,
+    // bounded by two parallels and two meridians.
+    let (west, east, south, north) = (-PI / 18.0, PI / 18.0, PI / 9.0, 2.0 * PI / 9.0);
+    let on = |lat: f64, lon: f64| [radius * lat.cos() * lon.cos(), radius * lat.cos() * lon.sin(), radius * lat.sin()];
+    let (sw, se, ne, nw) = (w.vertex(on(south, west)), w.vertex(on(south, east)), w.vertex(on(north, east)), w.vertex(on(north, west)));
+    let s_edge = arc_about_z(&mut w, (sw, se), radius * south.cos(), radius * south.sin());
+    let n_edge = arc_about_z(&mut w, (nw, ne), radius * north.cos(), radius * north.sin());
+    // A meridian with its angle the latitude.
+    let meridian = |w: &mut W, lon: f64, (a, b): (u64, u64)| {
+        let k = w.circle([0.0; 3], [lon.sin(), -lon.cos(), 0.0], [lon.cos(), lon.sin(), 0.0], radius);
+        w.add(format!("EDGE_CURVE('',#{a},#{b},#{k},.T.)"))
+    };
+    let (w_edge, e_edge) = (meridian(&mut w, west, (sw, nw)), meridian(&mut w, east, (se, ne)));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},{})", real(radius)));
+    // Outward: the foot runs +u, the top -u, the hole clockwise seen from outside (north up its
+    // west side, east along its north side, back south and west).
+    let (f, t) = (w.oe(foot, true), w.oe(top, false));
+    let hole = [(w_edge, true), (n_edge, true), (e_edge, false), (s_edge, false)].map(|(e, o)| w.oe(e, o));
+    let bounds = [w.bound(&[f], true, true), w.bound(&[t], false, true), w.bound(&hole, false, true)];
+    let face = w.face(&bounds, sphere, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('dome',(#{open}))"));
+    let s = one_solid(&w.file(&[model]));
+    assert!(s.sheet);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // The foot and the top split in two at the seam's angle, the hole whole: two loops, the
+    // merged band and the hole.
+    assert_eq!(counts(&s.brep), [1, 1, 1, 2 + 2 + 1 + 4, 2 + 2 + 4]);
+    assert_eq!(s.brep.faces[0].loops.len(), 2);
+    // The seam: the one edge from the foot to the top, clear of the hole's angles.
+    let seam = s.brep.edges.iter().find(|e| {
+        let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+        (a[2].abs() < 1e-9 && (b[2] - 4.0).abs() < 1e-9) || (b[2].abs() < 1e-9 && (a[2] - 4.0).abs() < 1e-9)
+    });
+    let seam = seam.unwrap_or_else(|| panic!("no seam from the foot to the top: {:?}", s.brep.vertices));
+    let foot_end = seam.vertices.map(|v| s.brep.vertices[v as usize].point).into_iter().find(|p| p[2].abs() < 1e-9).unwrap();
+    let angle = foot_end[1].atan2(foot_end[0]);
+    assert!(angle.abs() > east, "the seam at {angle} rad crosses the hole");
+}
+
+/// A seam's angle test (`seams::angular_sign`): a ruling's angular speed is 0, and rounding
+/// leaves its one coefficient a few 1e-17 either way; that is not one way. An arc's is.
+#[test]
+fn a_ruling_is_not_certified_one_way_by_its_rounding() {
+    let ruling = [[0.1, 0.7], [0.3, 2.1]];
+    let raw = ruling[0][0] * (ruling[1][1] - ruling[0][1]) - ruling[0][1] * (ruling[1][0] - ruling[0][0]);
+    assert_ne!(raw, 0.0, "the case needs a rounded coefficient");
+    assert_eq!(seams::angular_sign(&ruling), None);
+    // A quarter circle's rational quadratic, homogeneous: counterclockwise.
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    assert_eq!(seams::angular_sign(&[[1.0, 0.0], [w, w], [0.0, 1.0]]), Some(1));
+    assert_eq!(seams::angular_sign(&[[0.0, 1.0], [w, w], [1.0, 0.0]]), Some(-1));
+}
+
+/// The arcs a seam must keep clear of are widened by their rounding and by the tolerance at their
+/// radius: a vertex a rounding past a ruling's angle, or a loop within the tolerance of the seam,
+/// is not clear.
+#[test]
+fn blocked_arcs_keep_a_seam_off_by_the_tolerance() {
+    let frame = seams::Perpendicular::about(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    let tol = 1e-3;
+    // A ruling at angle 0, radius 1.
+    let ruling = BCurve::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[1.0, 0.0, 0.0], [1.0, 0.0, 1.0]] };
+    let blocked = seams::Blocked { arcs: frame.pieces(&ruling, [0.0, 1.0], tol).iter().map(seams::Piece::blocked).collect() };
+    assert!(!blocked.clear(1e-12), "a rounding off the ruling");
+    assert!(!blocked.clear(0.5 * tol), "within the tolerance of the ruling");
+    assert!(blocked.clear(2.0 * tol));
+    // A hole's arc of radius 2 from 0.1 to 0.3 rad round the axis: clear only beyond tol / 2.
+    let arc = BCurve::Circle { frame: Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 2.0 };
+    let blocked = seams::Blocked { arcs: frame.pieces(&arc, [0.1, 0.3], tol).iter().map(seams::Piece::blocked).collect() };
+    assert!(!blocked.clear(0.3 + 0.25 * tol));
+    assert!(blocked.clear(0.3 + 0.75 * tol / 2.0 + 0.5 * tol));
+}
+
+/// A control point that is not a number gives no arc (the whole turn is blocked), never one
+/// that leaves it out.
+#[test]
+fn an_arc_of_points_not_finite_is_none() {
+    let frame = seams::Perpendicular::about(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    let points = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(f64::NAN, 1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
+    assert!(frame.span(&points, 0.0).is_none());
+    assert!(frame.span(&[Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)], 0.0).is_some());
 }
 
 /// A half torus between its rims (a fillet round a bore, `torus_ring` of the step-conformance
@@ -749,6 +951,29 @@ fn a_plate_with_a_through_hole() {
             }
         });
     }
+}
+
+#[test]
+fn a_closed_shell_beside_open_shells_reads_each_open_shell_as_a_sheet() {
+    // A closed shell beside two open ones: the closed shell is a solid body and each open shell a
+    // surface body of its own.
+    let mut w = W::default();
+    let faces = box_faces(&mut w, [0.0; 3], [1.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let closed = closed_shell(&mut w, &faces);
+    let mut faces = box_faces(&mut w, [2.0; 3], [3.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    faces.pop();
+    let open = w.add(format!("OPEN_SHELL('',({}))", list(&faces)));
+    let single = box_faces(&mut w, [5.0; 3], [6.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let one = w.add(format!("OPEN_SHELL('',(#{}))", single[0]));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('sheet',(#{closed},#{open},#{one}))"));
+    let r = read_solids(&w.file(&[model]));
+    assert!(r.failures.is_empty(), "{:?}", r.failures);
+    assert_eq!(r.solids.len(), 3);
+    assert!(!r.solids[0].sheet);
+    assert_eq!(counts(&r.solids[0].brep), [2, 1, 6, 12, 8]);
+    assert!(r.solids[1].sheet && r.solids[2].sheet);
+    assert_eq!(counts(&r.solids[1].brep), [1, 1, 5, 12, 8]);
+    assert_eq!(counts(&r.solids[2].brep), [1, 1, 1, 4, 4]);
 }
 
 #[test]
@@ -1612,4 +1837,158 @@ fn a_spline_cone_closed_in_v_gets_a_seam_to_its_apex() {
         "no vertex at the apex"
     );
     faces_away(&s.brep, 0, |_| [0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn pcurves_past_a_quarter_line_the_form_ends_on_are_put_on_the_form() {
+    // A cylinder face from 2e-5 rad before the frame's x axis to 0.5 rad (its straight edge 0.2 um
+    // off the quarter line, under the 1e-3 mm tolerance): the form starts on the quarter line,
+    // and the edge's pcurve, on the angle the edge has, lies past the form's range.
+    let r = 10.0;
+    let label = BSurface::Cylinder { frame: Frame { origin: [1.0, 2.0, 3.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: r };
+    let (eps, tol) = (2e-5, 1e-3);
+    let domain = [[-eps, 0.5], [0.0, 5.0]];
+    let (f, d) = crate::kernel::form::surface_within(&label, domain, tol).unwrap();
+    assert_eq!(d[0][0], 0.0, "the form starts on the quarter line: {d:?}");
+    let past = crate::kernel::form::param(-eps);
+    assert!(past < 0.0 && past > -eps, "{past}");
+    let line = |u: f64| Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[u, 0.0], [u, 5.0]] };
+    // An arc along the bottom from the edge's end, as a rational segment (weights 1, 0.9, 1).
+    let w = 0.9;
+    let arc =
+        Curve2::RationalSpline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], homogeneous: vec![[past, 0.0, 1.0], [0.1 * w, 0.0, w], [0.3, 0.0, 1.0]] };
+    let far = crate::kernel::form::param(-0.01);
+    let mut pcs = vec![vec![line(past), arc], vec![line(far)]];
+    assert_eq!(onto_form(&f, &label, domain, tol, &mut pcs), 3, "the line's two ends and the arc's start");
+    assert_eq!(pcs[0][0], line(0.0));
+    match &pcs[0][1] {
+        Curve2::RationalSpline { homogeneous, .. } => assert_eq!(homogeneous[0], [0.0, 0.0, 1.0]),
+        c => panic!("{c:?}"),
+    }
+    // A point further out than the tolerance's angle is left for the check to refuse.
+    assert_eq!(pcs[1][0], line(far));
+    // The moved pcurve is on the form within the tolerance of where the edge is.
+    let (on_form, on_label) = (SurfaceEval::new(&f).unwrap(), SurfaceEval::new(&label).unwrap());
+    for v in [0.0, 2.5, 5.0] {
+        let gap = on_form.point([0.0, v]).unwrap().dist(on_label.point([-eps, v]).unwrap());
+        assert!(gap <= tol && (gap - r * eps).abs() < 1e-9, "{v}: {gap}");
+    }
+}
+
+/// A kernel making the missing pcurves as SMLib makes some: each a straight line in (u, v)
+/// between the true parameters of its edge's ends on the face's NURBS form, with no regard for
+/// the form's range (a cylinder face; the angle unwrapped to the turn the face's domain is on).
+struct Projected(std::sync::atomic::AtomicUsize);
+
+impl Trims for Projected {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        let BSurface::Cylinder { frame, .. } = face.surface else { return Err("not a cylinder".into()) };
+        let (o, x, y) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let z = x.cross(y);
+        let centre = 0.5 * (face.domain[0][0] + face.domain[0][1]);
+        let at = |p: Vec3| -> [f64; 2] {
+            let d = p - o;
+            // A turn is four quarters of form parameter.
+            let mut a = d.dot(y).atan2(d.dot(x));
+            while crate::kernel::form::param(a) < centre - 2.0 {
+                a += TAU;
+            }
+            while crate::kernel::form::param(a) > centre + 2.0 {
+                a -= TAU;
+            }
+            [crate::kernel::form::param(a), d.dot(z)]
+        };
+        let mut out = Vec::new();
+        for l in &face.loops {
+            let mut pcs = Vec::new();
+            for u in l {
+                if let Some(pc) = &u.pcurve {
+                    pcs.push(pc.clone());
+                    continue;
+                }
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let e = face.edges.get(u.edge as usize).ok_or("edge")?;
+                let eval = CurveEval::new(e.nurbs.unwrap_or(e.curve)).map_err(|m| m.to_string())?;
+                let [t0, t1] = e.interval;
+                let (a, b) = (eval.point(t0).ok_or("start")?, eval.point(t1).ok_or("end")?);
+                pcs.push(Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(a), at(b)] });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+}
+
+/// A quarter-cylinder wedge (radius 0.2 mm, height 5 mm, 0 to 100 degrees about +z) whose straight
+/// edge runs from 1.9 um before the x axis to 1.9 um past it, 0.6 um outside the cylinder, in a
+/// file of uncertainty 2e-3 mm: the face's extent ends within that of the x axis, so its form
+/// starts there, while the pcurve its kernel projects for the skewed edge starts before it.
+/// Every pcurve of the record lies in its face's domain, as SMLib's check asks
+/// (`SmBrep::ValidatePointers` tests 70 and 71, "Edge endpoints within face domain").
+#[test]
+fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_face_domain() {
+    let (r, h, q): (f64, f64, f64) = (0.2, 5.0, 100f64.to_radians());
+    // The edge 1.9 um either side of the x axis at the rim, and 0.6 um outside the cylinder: more
+    // than half the tolerance off any line on the form, so its pcurve is the kernel's.
+    let (eps, rl) = (1.9e-3 / r, r + 0.6e-3);
+    let mut w = W::default();
+    let v = |w: &mut W, p: V| (w.vertex(p), p);
+    let (p0, p1) = ([rl * eps.cos(), -rl * eps.sin(), 0.0], [rl * eps.cos(), rl * eps.sin(), h]);
+    let nq = [-q.sin(), q.cos(), 0.0];
+    // The axis edge: where the planes through the axis' foot, (p0, p1) and the 100 degree side
+    // meet, up to the top.
+    let np = Vec3::from(p0).cross(Vec3::from(p1));
+    let line = np.cross(Vec3::from(nq));
+    let a1 = [line.x * h / line.z, line.y * h / line.z, h];
+    let (qb, qt) = ([r * q.cos(), r * q.sin(), 0.0], [r * q.cos(), r * q.sin(), h]);
+    let (a0, a1, p0, p1, q0, q1) = (v(&mut w, [0.0; 3]), v(&mut w, a1), v(&mut w, p0), v(&mut w, p1), v(&mut w, qb), v(&mut w, qt));
+    let edge = |w: &mut W, a: (u64, V), b: (u64, V)| w.line_edge(a, b, true, len3(sub3(b.1, a.1)));
+    let (axis, e_p, e_q) = (edge(&mut w, a0, a1), edge(&mut w, p0, p1), edge(&mut w, q0, q1));
+    let (r_pb, r_qb, r_pt, r_qt) = (edge(&mut w, a0, p0), edge(&mut w, a0, q0), edge(&mut w, a1, p1), edge(&mut w, a1, q1));
+    let arc = |w: &mut W, a: (u64, V), b: (u64, V), z: f64| {
+        let c = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", a.0, b.0))
+    };
+    let (arc_b, arc_t) = (arc(&mut w, p0, q0, 0.0), arc(&mut w, p1, q1, h));
+    let ax = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cyl = w.add(format!("CYLINDRICAL_SURFACE('',#{ax},{})", real(r)));
+    let face = |w: &mut W, uses: &[(u64, bool)], surface: u64, same_sense: bool| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, f)| w.oe(e, f)).collect();
+        let b = w.bound(&oes, true, true);
+        w.face(&[b], surface, same_sense)
+    };
+    let (bottom, top) = (w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), w.plane([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]));
+    let side_q = w.plane([0.0; 3], nq, [q.cos(), q.sin(), 0.0]);
+    let side_p = w.plane([0.0; 3], [np.x, np.y, np.z], p0.1);
+    let faces = [
+        face(&mut w, &[(e_q, true), (arc_t, false), (e_p, false), (arc_b, true)], cyl, true),
+        face(&mut w, &[(r_qb, true), (arc_b, false), (r_pb, false)], bottom, false),
+        face(&mut w, &[(r_pt, true), (arc_t, true), (r_qt, false)], top, true),
+        face(&mut w, &[(axis, true), (r_qt, true), (e_q, false), (r_qb, false)], side_q, true),
+        face(&mut w, &[(r_pb, true), (e_p, true), (r_pt, false), (axis, false)], side_p, true),
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('wedge',#{shell})"));
+    let kernel = Projected(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&w.file_with_uncertainty(&[solid], 2e-3), &kernel);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert!(kernel.0.load(std::sync::atomic::Ordering::Relaxed) > 0, "the skewed edge's pcurve is the kernel's");
+    let b = &read.solids[0].brep;
+    assert_eq!(counts(b), [2, 1, 5, 9, 6]);
+    for (i, f) in b.faces.iter().enumerate() {
+        let d = f.domain;
+        for l in &f.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let [t0, t1] = u.pcurve.interval().unwrap();
+                for t in [t0, t1] {
+                    let p = solidcore_ops::pcurve::eval(&u.pcurve, t).unwrap();
+                    let out = (d[0][0] - p[0]).max(p[0] - d[0][1]).max(d[1][0] - p[1]).max(p[1] - d[1][1]);
+                    assert!(out <= 1e-9, "face {i}, edge {}: {p:?} lies {out:e} outside the domain {d:?}", u.edge);
+                }
+            }
+        }
+    }
+    solidcore_ops::record_check::validate(b).unwrap();
+    solidcore_ops::record_check::agreement(b).unwrap();
 }

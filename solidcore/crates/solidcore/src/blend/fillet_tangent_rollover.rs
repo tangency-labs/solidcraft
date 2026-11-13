@@ -20,6 +20,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`tangent_rollover_supports`] | none (solidcore-native) |
+//! | [`rolled_edge_point`] | none (solidcore-native) |
 //!
 //! Deviations: none of upstream's; there is no recursion.
 //!
@@ -27,8 +28,9 @@
 
 use crate::blend::fillet_solver::p1::test_manifold_tangent_rollover;
 use crate::error::{Result, SolidError};
+use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3};
+use crate::math::{Point3, Vec3, BIG_DOUBLE};
 use crate::nurbs::knots::Side as KnotSide;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -101,7 +103,7 @@ pub fn tangent_rollover_supports(
     let mut normals = [Vec3::UNDEF; 2];
     for (normal, &face) in normals.iter_mut().zip(&faces) {
         let surface = crate::topology::face::p2::surface(target, face)?
-            .ok_or_else(|| SolidError::sm_err(OP))?
+            .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
             .clone_for_evaluation()?;
         if !surface.is_planar(k, tol)?.is_planar {
             return Ok(none);
@@ -201,6 +203,59 @@ pub fn tangent_rollover_supports(
     Ok(out)
 }
 
+/// The nearest point to `point` on the smooth edge a rail rolled over: where a ball of radius 0
+/// rolling on the face beyond touches it, so the section of the rolled ball is searched from
+/// there (the filleted edge's point lies off the face beyond, and a drop onto that face's
+/// surface may land on another sheet of it, the far side of a cylinder). The edges are those
+/// `from` (the face the rail rolled off) and `onto` (the face beyond) share that meet tangentially
+/// within `tangency_tol_rad`; of these, the one whose nearest point is nearest `point` (two
+/// half cylinders share two seams), the first of equally near ones in `onto`'s edge order.
+/// `None` where they share no such edge, or the point drops onto none of them.
+///
+/// # Errors
+///
+/// Those of the topology queries, the tangency test and the drops.
+pub fn rolled_edge_point(
+    k: &Kernel,
+    target: &mut Brep,
+    from: FaceId,
+    onto: FaceId,
+    point: Point3,
+    tangency_tol_rad: f64,
+) -> Result<Option<Point3>> {
+    let mut best: Option<(Point3, f64)> = None;
+    for e in face_p4::edges(target, onto, None, false, None)? {
+        if !edge::faces(target, e, None)?.contains(&from) {
+            continue;
+        }
+        if !test_manifold_tangent_rollover(k, target, e, tangency_tol_rad)?.0 {
+            continue;
+        }
+        let Some(curve) = edge::curve(target, e)?.cloned() else {
+            continue;
+        };
+        let ivl = edge::interval(target, e)?;
+        let dropped = curve.drop_point(
+            k,
+            &ivl,
+            point,
+            None,
+            BIG_DOUBLE,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if !dropped.success {
+            continue;
+        }
+        let on = curve.evaluate_point(k, dropped.parameter)?;
+        let distance = (on - point).length();
+        if best.is_none_or(|(_, d)| distance < d) {
+            best = Some((on, distance));
+        }
+    }
+    Ok(best.map(|(p, _)| p))
+}
+
 /// Whether the offset of `face`'s surface by `offset` (along its surface normal) folds across the
 /// direction square to `along` at the point of the face nearest `at`: `1 - kappa offset <= 0`, with
 /// `kappa` the surface's normal curvature in that direction (`II(t, t) / I(t, t)`). A ball of that
@@ -215,7 +270,7 @@ fn offset_folds(
     offset: f64,
 ) -> Result<bool> {
     let surface = crate::topology::face::p2::surface(target, face)?
-        .ok_or_else(|| SolidError::sm_err(OP))?
+        .ok_or_else(|| SolidError::blend_failed(OP, "the face has no surface"))?
         .clone_for_evaluation()?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let dropped = surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;

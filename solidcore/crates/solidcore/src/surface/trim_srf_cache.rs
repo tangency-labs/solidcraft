@@ -1760,10 +1760,12 @@ mod tests {
         );
         c.base_mut().point_test_enabled = true;
         // no face to classify against (SM_ERR_NULL_POINTER)
-        assert!(matches!(
-            c.point_test(&k, Point2::new(5.0, 5.0), None),
-            Err(SolidError::Upstream { code: 1006, .. })
-        ));
+        assert_eq!(
+            c.point_test(&k, Point2::new(5.0, 5.0), None)
+                .unwrap_err()
+                .upstream_status(),
+            Some(1006)
+        );
     }
 
     #[test]

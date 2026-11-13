@@ -119,7 +119,7 @@ pub struct EndRefusal {
 }
 
 fn nul() -> SolidError {
-    SolidError::null_pointer(OP)
+    SolidError::blend_missing(OP, "topology, a solver or geometry the End reads")
 }
 
 fn face_of(target: &Brep, eu: EdgeuseId) -> Result<FaceId> {
@@ -440,7 +440,10 @@ fn ball_touching_at(
         }
     }
     if f_index > 1 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "no fillet surface lies on the side face",
+        ));
     }
     let offset_f = &fs.surface(f_index)?.ok_or_else(nul)?.surface;
     let f = offset_f.base_surface();
@@ -458,7 +461,10 @@ fn ball_touching_at(
         &DropPointOptions::default(),
     )?;
     if !dropped.success {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the point does not drop onto the fillet's base surface",
+        ));
     }
     let normal = f.evaluate_normal(k, dropped.result_uv, Side::Left, Side::Left)?;
     let g_domain = g.natural_uv_domain_with_nurb(k)?;
@@ -466,7 +472,10 @@ fn ball_touching_at(
         let centre = p + normal * (sign * rho);
         let at = g.drop_point::<NoObject>(k, centre, &g_domain, &DropPointOptions::default())?;
         if !at.success {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "a centre does not drop onto the other face",
+            ));
         }
         Ok(at.gap - rho)
     };
@@ -856,12 +865,18 @@ pub fn side_edge_chain_to(
             }
         }
         let Some(prev) = prev else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the side edge chain has no continuation",
+            ));
         };
         back.push(prev);
         curr = prev;
     }
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::blend_failed(
+        OP,
+        "the side edge chain does not reach the vertex within its step bound",
+    ))
 }
 
 /// The fork's comment of a concave round's mixed End whose rail passes over the side
@@ -958,7 +973,10 @@ fn refuse_end_past_side_edge(
     let (past, fit) =
         radius_reaching_side_edge_end(k, target, corner, solvers, fil_eu, side_eu, other_face)?;
     if !past {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the rail does not run past the side edge's end",
+        ));
     }
     Ok(EndRefusal {
         comment: describe_end_past_side_edge(fit),
@@ -1139,7 +1157,10 @@ fn calc_end_cap_edges(
         if !pseudo.fillet_vertex(start)?.is_processed()
             || !pseudo.fillet_vertex(end)?.is_processed()
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "a vertex of the cap edge is not processed",
+            ));
         }
         // The rail's end must lie on the side face (a side face ending tangentially at the
         // vertex, as a round at its contact line, can have the rail roll over onto the face
@@ -1769,7 +1790,10 @@ pub fn calc_end_edge_geom(
             first
         };
         if fil_faces.contains(&end_face) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the rail ends on one of the fillet's own faces",
+            ));
         }
         solvers.solver_of_edgeuse(fil_eu)?;
         let vertex = corner.vertex.ok_or_else(nul)?;

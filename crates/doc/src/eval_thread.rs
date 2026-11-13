@@ -960,7 +960,7 @@ fn cut_with_flanks(
     let nb = Traced { body: nb, lineage, recipe: None };
     let nb = if continuous_flanks { nb } else { chamfer(nb)? };
     if let Some(slot) = st.bodies.get_mut(i) {
-        *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+        *slot = mb.remade(nb);
     }
     Ok(note)
 }

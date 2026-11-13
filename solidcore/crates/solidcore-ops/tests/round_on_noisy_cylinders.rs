@@ -49,7 +49,9 @@ fn pick(b: &Body, p: [f64; 3]) -> usize {
 fn round(b: &Body, points: &[[f64; 3]], r: f64, chain: bool) {
     let seeds: Vec<usize> = points.iter().map(|&p| pick(b, p)).collect();
     let edges = if chain {
-        tangent_chain(b, &seeds, TANGENT).unwrap()
+        let chain = tangent_chain(b, None, &seeds, &[], TANGENT).unwrap();
+        assert!(chain.undecided.is_empty(), "{chain:?}");
+        chain.members
     } else {
         seeds
     };

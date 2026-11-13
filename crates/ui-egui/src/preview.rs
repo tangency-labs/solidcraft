@@ -101,6 +101,9 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
+    /// how free the part is with the constraint it shows.
+    pub placed: Option<serde_json::Value>,
 }
 
 type Job = Result<Built, String>;
@@ -153,6 +156,8 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (see [`Built::placed`]).
+    pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     straight: crate::extrude_preview::StraightPreview,
@@ -187,6 +192,7 @@ impl PreviewState {
         self.error = None;
         self.applied = None;
         self.stopped = None;
+        self.placed = None;
         self.tapered.clear();
         self.sketches.clear();
         self.busy = false;
@@ -223,6 +229,7 @@ impl PreviewState {
                 self.error = b.error;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.set_scene(b.scene);
             }
@@ -234,6 +241,7 @@ impl PreviewState {
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
+                self.placed = None;
                 self.tapered.clear();
             }
         }
@@ -249,6 +257,9 @@ impl PreviewState {
         if self.shown_key != Some(key) {
             self.sketches.clear();
             self.error = None;
+            // A constraint's reply says how free its part is with the inputs it was for: with other
+            // picks it would describe the wrong rule, so the dialog falls back to the saved design.
+            self.placed = None;
         }
         if let Some((k, rx)) = &self.running {
             let k = *k;
@@ -323,6 +334,8 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.rack_pinion"
                     | "joint.screw"
                     | "joint.cam"
+                    | "assembly.constraint.create"
+                    | "assembly.constraint.edit"
             )
         })
     {
@@ -647,6 +660,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        placed: None,
     }
 }
 
@@ -795,7 +809,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
     }
     let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None, placed: None }
 }
 
 /// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
@@ -1111,6 +1125,7 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            placed: None,
         }
     }
 
@@ -1141,6 +1156,17 @@ mod tests {
         pv.poll(4, Some(42));
         assert_eq!(pv.shown_key, Some(4), "release catches up to the exact final pose");
         assert!(pv.running.is_none());
+    }
+
+    /// A constraint's reply belongs to the inputs it was computed for: when they change (other picks
+    /// in the Constrain dialog), it goes with the old error, and is kept while they stand.
+    #[test]
+    fn a_constraint_reply_goes_when_the_inputs_change() {
+        let mut pv = PreviewState { shown_key: Some(1), placed: Some(serde_json::json!({"dof": []})), ..PreviewState::default() };
+        pv.poll_at(1, None, 0.0);
+        assert!(pv.placed.is_some(), "the same inputs keep their reply");
+        pv.poll_at(2, None, 0.0);
+        assert!(pv.placed.is_none(), "other inputs drop the old reply");
     }
 
     /// A pose for a value the slider has left gets 500 ms (#14264): before that it keeps running

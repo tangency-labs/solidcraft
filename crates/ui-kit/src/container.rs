@@ -163,6 +163,9 @@ pub trait BackingTooltipExt: Sized {
     fn backing_on_hover_text(self, text: impl Into<WidgetText>) -> Self;
     fn backing_on_disabled_hover_text(self, text: impl Into<WidgetText>) -> Self;
     fn backing_on_hover_text_at_pointer(self, text: impl Into<WidgetText>) -> Self;
+    /// The tooltip opens beside `beside` (left of it, else right), not over the widget: for a row of
+    /// a list that must stay readable while one of its rows is hovered.
+    fn backing_on_hover_text_beside(self, beside: egui::Rect, text: impl Into<WidgetText>) -> Self;
     fn backing_show_tooltip_ui(&self, body: impl FnOnce(&mut egui::Ui));
     fn backing_show_tooltip_text(&self, text: impl Into<WidgetText>);
 }
@@ -232,6 +235,21 @@ impl BackingTooltipExt for egui::Response {
             ui.set_max_width(ui.spacing().tooltip_width);
             ui.label(text);
         })
+    }
+    fn backing_on_hover_text_beside(self, beside: egui::Rect, text: impl Into<WidgetText>) -> Self {
+        let text = text.into();
+        describe_for_accessibility(&self, text.text());
+        let mut tip = egui::Tooltip::for_enabled(&self).gap(6.0);
+        tip.popup = tip.popup.anchor(beside).align(egui::RectAlign::LEFT_END).align_alternatives(&[
+            egui::RectAlign::LEFT_START,
+            egui::RectAlign::RIGHT_END,
+            egui::RectAlign::RIGHT_START,
+        ]);
+        show_backing_tooltip(self.id, tip, |ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(text);
+        });
+        self
     }
     fn backing_show_tooltip_ui(&self, body: impl FnOnce(&mut egui::Ui)) {
         let popup = egui::Popup::from_response(self).kind(egui::PopupKind::Tooltip);

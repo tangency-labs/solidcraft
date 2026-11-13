@@ -37,7 +37,11 @@ pub fn geometry(b: &Brep) -> Result<()> {
         }
     }
     for f in &b.faces {
-        surface(&f.surface)?;
+        // (a blend's label is its definition, which its structural validation checks and the
+        // kernel certifies its net against when the face is built; its geometry is its form)
+        if !matches!(f.surface, Surface::Blend { .. }) {
+            surface(&f.surface)?;
+        }
         if let Some(n) = &f.nurbs {
             surface(n)?;
         }

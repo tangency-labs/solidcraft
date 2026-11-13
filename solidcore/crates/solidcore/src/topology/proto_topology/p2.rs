@@ -97,16 +97,17 @@
 //!   ([`ProtoBrep::face_coincident_edge`], `SmTools::FindCoincidentEdge`) as the
 //!   definition's edge there instead of making a second one (the SMLib fork's
 //!   tangency-labs/smlib@81cd61a).
-//! - **Opt-in fix (WR-619, #1794; own design).** With `Kernel::fixes.imprint_skips_collapsed_definition`,
+//! - **Not upstream (WR-619, #1794; own design).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] makes no edge for a definition whose ends
 //!   are one proto vertex and one vertex in each B-rep, along a speck within that vertex's
 //!   tolerance and the definition's own, when another definition of its proto edge is
 //!   imprinted between two distinct vertices in each B-rep (`collapsed_beside_sibling`);
 //!   upstream makes a closed edge on that vertex.
-//! - **Opt-in fixes (WR-452, WR-453, #435, #410).** With `Kernel::fixes.imprint_trims_edge_to_proto_vertex` and
-//!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`, [`ProtoTopologyManager::imprint_edge_definition`]
-//!   first fits each end of the definition's interval to its proto vertex (`imprint_ends`: the SMLib
-//!   fork's thread-groove fixes, tangency-labs/smlib b43876f, a8caccd).
+//! - **Not upstream: ends fitted to proto vertices (WR-452, WR-453, #435, #410).**
+//!   [`ProtoTopologyManager::imprint_edge_definition`] first fits each end of the definition's
+//!   interval to its proto vertex where `imprint_ends`'s checks pass (the SMLib fork's
+//!   thread-groove fixes, tangency-labs/smlib b43876f; the continuation a8caccd is opt-in,
+//!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`).
 //! - **Not upstream: one trim interval** (WR-767, tangency-labs/solidcore#3214).
 //!   [`ProtoTopologyManager::create_proto_edge`] trims the 3D curve and its uv curves to the
 //!   one interval none of their trims snaps (`exact_pieces::common_trim_interval`); upstream
@@ -127,7 +128,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::error::EntityRef;
-use crate::error::{passed_on, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -850,7 +851,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let vertex = v.brep_point_classif(which).vertex_object();
                 v.set_final_vertex(which, vertex);
             } else {
-                return Err(SolidError::sm_err(OP_IMPRINT_VD));
+                return Err(SolidError::topology_failed(
+                    OP_IMPRINT_VD,
+                    "merging the point gave no single new vertex and it is not on a vertex",
+                ));
             }
 
             if which == 1 {
@@ -916,7 +920,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         (result, edited)
     }
 
-    /// Not upstream (WR-619, opt-in `fixes.imprint_skips_collapsed_definition`): when the
+    /// Not upstream (WR-619): when the
     /// definition `ed`, with proto vertices `pvs` and final vertices `vertices` (start, end in
     /// B-reps 1 and 2), is a collapsed speck, returns each B-rep vertex's maximum sampled
     /// distance to the speck and the speck's start and end points. All must hold, else `None`:
@@ -1002,7 +1006,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let start_pv = self.pv_live(start_pv)?;
         let end_pv = self.pv_live(end_pv)?;
 
-        let null = || SolidError::null_pointer(OP_IMPRINT_ED);
+        let null =
+            || SolidError::topology_missing(OP_IMPRINT_ED, "the proto vertex's final vertex");
         let start_vtx1 = self
             .proto_vertex_final_vertex(k, brep, start_pv, 1, ed, true)?
             .ok_or_else(null)?;
@@ -1018,37 +1023,31 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let brep1 = self.which_brep(1);
         let brep2 = self.which_brep(2);
 
-        // Not upstream (WR-619, #1794; opt-in, own design): a definition that would be a closed
+        // Not upstream (WR-619, #1794; own design): a definition that would be a closed
         // edge on one vertex in each B-rep along a speck within that vertex's tolerance and its
         // own, beside a sibling definition imprinted between distinct vertices, makes no edge;
         // each vertex's tolerance covers the skipped speck's span in `ImprintIntersections`.
-        if k.fixes.imprint_skips_collapsed_definition {
-            if let Some(([gap1, gap2], p0, p1)) = self.collapsed_beside_sibling(
-                k,
-                &*brep,
-                ed,
-                (start_pv, end_pv),
-                [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
-            )? {
-                self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
-                self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
-                return Ok(());
-            }
+        if let Some(([gap1, gap2], p0, p1)) = self.collapsed_beside_sibling(
+            k,
+            &*brep,
+            ed,
+            (start_pv, end_pv),
+            [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
+        )? {
+            self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
+            self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
+            return Ok(());
         }
 
-        // not upstream (WR-452, WR-453, #435, #410; opt-in): fit the ends to the proto vertices
-        if k.fixes.imprint_trims_edge_to_proto_vertex
-            || k.fixes.imprint_extends_edge_to_proto_vertex
-        {
-            self.fit_edge_def_ends_to_proto_vertices(
-                k,
-                brep,
-                ed,
-                start_pv,
-                end_pv,
-                [(start_vtx1, start_vtx2), (end_vtx1, end_vtx2)],
-            )?;
-        }
+        // not upstream (WR-452, WR-453, #435, #410): fit the ends to the proto vertices
+        self.fit_edge_def_ends_to_proto_vertices(
+            k,
+            brep,
+            ed,
+            start_pv,
+            end_pv,
+            [(start_vtx1, start_vtx2), (end_vtx1, end_vtx2)],
+        )?;
 
         let d = self.ed_ref(ed)?;
         let type1 = d.src_topo_type(1);
@@ -1355,8 +1354,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         pc1: &mut PointClassification<O>,
         pc2: &mut PointClassification<O>,
     ) -> Result<(VertexDefId, bool)> {
-        let topo1 = as_topology(pc1.object()).ok_or(SolidError::null_pointer(OP_ADD_VD))?;
-        let topo2 = as_topology(pc2.object()).ok_or(SolidError::null_pointer(OP_ADD_VD))?;
+        let topo1 = as_topology(pc1.object()).ok_or_else(|| {
+            SolidError::topology_missing(OP_ADD_VD, "the first classification's topology")
+        })?;
+        let topo2 = as_topology(pc2.object()).ok_or_else(|| {
+            SolidError::topology_missing(OP_ADD_VD, "the second classification's topology")
+        })?;
 
         // no work - VertexDefintion with input Tgt SrcTopos already exists
         if let Some(vd) = self.find_matching_vertex_definition(pv, Some(topo1), Some(topo2))? {
@@ -2274,8 +2277,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // Make an EdgeDefinition for the new ProtoEdge.
-        let topo1 = as_topology(ci1.mid.object()).ok_or(SolidError::null_pointer(OP_CREATE_PE))?;
-        let topo2 = as_topology(ci2.mid.object()).ok_or(SolidError::null_pointer(OP_CREATE_PE))?;
+        let topo1 = as_topology(ci1.mid.object()).ok_or_else(|| {
+            SolidError::topology_missing(OP_CREATE_PE, "the first intersection's topology")
+        })?;
+        let topo2 = as_topology(ci2.mid.object()).ok_or_else(|| {
+            SolidError::topology_missing(OP_CREATE_PE, "the second intersection's topology")
+        })?;
         let start_pv = self.pv_live(start)?;
         let end_pv = self.pv_live(end)?;
 
@@ -2388,11 +2395,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else if e1 == old_edge {
             e0
         } else {
-            return Err(SolidError::Upstream {
-                operation: OP_UPDATE_EDGES,
-                code: SM_ERR_NULL_POINTER,
-                entity: None,
-            });
+            return Err(SolidError::topology_missing(
+                OP_UPDATE_EDGES,
+                "the old edge among the two new edges",
+            ));
         };
         let unknown = || dangling("edge handle is unknown");
         let old_ivl = brep.edge_interval(old_edge).ok_or_else(unknown)?;
@@ -2958,7 +2964,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ) -> Result<u64> {
         let v1 = self.vd_ref(vd1)?;
         let v2 = self.vd_ref(vd2)?;
-        let null = || SolidError::null_pointer(OP_COMBINE_VD);
+        let null = || {
+            SolidError::topology_missing(OP_COMBINE_VD, "the vertex definition's source topology")
+        };
         let t11 = v1.src_topo(1).ok_or_else(null)?;
         let t12 = v1.src_topo(2).ok_or_else(null)?;
         let t21 = v2.src_topo(1).ok_or_else(null)?;
@@ -3782,13 +3790,16 @@ mod tests {
         // nothing to do without a split
         m.update_edges(&k, &mut geo, 1, Some(e_old), &[e_old], Some(calling))
             .unwrap();
-        assert!(matches!(
-            m.update_edges(&k, &mut geo, 1, Some(e_old), &[e_new, e_new], Some(calling)),
-            Err(SolidError::Upstream {
-                code: SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = m
+            .update_edges(&k, &mut geo, 1, Some(e_old), &[e_new, e_new], Some(calling))
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Missing(
+                "the old edge among the two new edges"
+            ))
+        );
         m.update_edges(&k, &mut geo, 1, Some(e_old), &[e_old, e_new], Some(calling))
             .unwrap();
         assert_eq!(m.vertex_def(moved).unwrap().src_topo(1), Some(e_new));

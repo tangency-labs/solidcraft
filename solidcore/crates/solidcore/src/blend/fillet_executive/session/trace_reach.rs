@@ -98,10 +98,11 @@ pub(crate) fn extend_trace_to_its_rails(
     let bases: [&Surface; 2] = [offsets[0].base_surface(), offsets[1].base_surface()];
     let edgeuse = base
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let edge_id = eu::edge(target, edgeuse)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let curve = edge::curve(target, edge_id)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
         .clone();
     let interval = edge::interval(target, edge_id)?;
 

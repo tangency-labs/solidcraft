@@ -24,6 +24,7 @@ use solidcore_record::Vec2;
 use super::check::{located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::{AngleExpr, LengthExpr, Point2, Point3, SketchRef, not_blank_pattern, present};
 use crate::params;
 
@@ -86,6 +87,9 @@ pub struct ConstructionLineResult {
     pub curves: Vec<String>,
     pub constraints: Vec<String>,
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
@@ -156,6 +160,61 @@ fn spline_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error>
         Value::String(s) => Ok(s),
         _ => Err(serde::de::Error::custom("must be a spline id")),
     }
+}
+
+/// Give a fit point spline a tangent handle at each fit point, where the curve already runs.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SplineHandlesParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.spline.handles` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineHandlesResult {
+    /// The spline's curve id (unchanged).
+    pub curve: String,
+    /// The handle point ids, in fit point order.
+    pub handles: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Remove a fit point spline's tangent handles: the curve runs through its fit points as if the
+/// handles had never been moved.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SplineResetHandlesParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.spline.reset_handles` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineResetHandlesResult {
+    /// The spline's curve id (unchanged).
+    pub curve: String,
+    /// The removed handle point ids, in fit point order.
+    pub removed: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `sketch.spline.reverse` returns.

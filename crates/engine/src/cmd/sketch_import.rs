@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
         .icon("svg")
-        .noundo()
+        .noundo().read_only()
         .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height of the drawn geometry in the file's own size, and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
         .icon("sketch_dxf")
@@ -132,13 +132,28 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
             Geom2::Ellipse { c, major, minor } => Some(CurveKind::Ellipse { c: pt(sk, *c)?, m: pt(sk, *major)?, r: minor * k }),
             Geom2::Spline { pts, control, degree } => {
                 let mut idx = Vec::new();
-                for p in pts.iter().take(solidcraft_sketch::MAX_SPLINE_POINTS) {
+                // A spline past the cap keeps every n-th point and always its last, so a loop stays
+                // closed (taking the first ones only cut its tail off, #11119).
+                let cap = solidcraft_sketch::MAX_SPLINE_POINTS;
+                let keep: Vec<&Vec2> = if pts.len() > cap {
+                    (0..cap).map(|k| &pts[(k * (pts.len() - 1) + (cap - 1) / 2) / (cap - 1)]).collect()
+                } else {
+                    pts.iter().collect()
+                };
+                for p in keep {
                     let i = pt(sk, *p)?;
                     if idx.last() != Some(&i) {
                         idx.push(i);
                     }
                 }
-                (idx.len() >= 2).then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false, nurbs: None })
+                (idx.len() >= 2).then_some(CurveKind::Spline {
+                    pts: idx,
+                    control: *control,
+                    degree: *degree,
+                    periodic: false,
+                    nurbs: None,
+                    handles: Vec::new(),
+                })
             }
             Geom2::Conic { a, apex, b, rho } => {
                 let (a, x, b) = (pt(sk, *a)?, pt(sk, *apex)?, pt(sk, *b)?);
@@ -343,6 +358,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             texts: n_text,
             fixed: fixed.then_some(n_fixed),
             info,
+            created: None,
             param_warnings: Vec::new(),
         },
     )
@@ -651,6 +667,50 @@ mod tests {
             assert_eq!(r["curves"], 1, "{n} points: {r}");
             s.execute("sketch.finish", &json!({})).unwrap();
         }
+    }
+
+    /// #11119: a closed SPLINE with more control points than a sketch spline holds keeps its
+    /// whole loop, ends and all, so it still makes a profile; the tail was cut off before, which
+    /// left an outline of open splines that cannot be extruded.
+    #[test]
+    fn a_closed_spline_with_too_many_control_points_still_closes() {
+        let n = solidcraft_sketch::MAX_SPLINE_POINTS * 3;
+        let mut points = String::new();
+        for i in 0..=n {
+            let a = std::f64::consts::TAU * (i % n) as f64 / n as f64;
+            points.push_str(&format!(
+                "10
+{}
+20
+{}
+",
+                30.0 * a.cos(),
+                30.0 * a.sin()
+            ));
+        }
+        let dxf = format!(
+            "0
+SECTION
+2
+ENTITIES
+0
+SPLINE
+70
+11
+71
+3
+{points}0
+ENDSEC
+0
+EOF
+"
+        );
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        let sk = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        assert_eq!(sk.profiles.len(), 1, "the loop closes into one profile: {r}");
+        let want = std::f64::consts::PI * 900.0;
+        assert!((sk.profiles[0].area - want).abs() < want * 0.01, "{} vs {want}", sk.profiles[0].area);
     }
 
     /// The sketch limit is process-wide: the tests that depend on it take turns.

@@ -235,6 +235,38 @@ fn cut_to_the_far_side_of_a_curved_wall() {
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
 
+/// #12617: a To Object offset past a curved face used to change nothing: the tool is cut back to
+/// the face, which removes the very part the offset added, so the Cut took nothing off. It is
+/// refused with a reason instead. An offset of 0 or short of the face is not refused.
+#[test]
+fn a_to_offset_past_a_curved_face_is_refused_not_ignored() {
+    let window = |s: &mut Session, to_offset: f64| {
+        run(s, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+        run(s, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+        run(s, "sketch.finish", json!({}));
+        s.execute("solid.extrude", &json!({"to": [0, -18, 10], "to_offset": to_offset, "operation": "cut"}))
+    };
+    let tube = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 20, "body_name": "Tube"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bore"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 18}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": 20, "operation": "cut"}));
+        s
+    };
+    let mut s = tube();
+    let whole = body(&mut s, "Tube")["volume_mm3"].as_f64().unwrap();
+    let err = window(&mut s, 2.0).expect_err("an offset past the curved wall is refused");
+    assert!(err.to_string().contains("curved") && err.to_string().contains("offset"), "{err}");
+    assert_eq!(body(&mut s, "Tube")["volume_mm3"].as_f64().unwrap(), whole, "a refused cut changes nothing");
+    // No offset, and an offset short of the wall, are not refused.
+    for to_offset in [0.0, -1.0] {
+        let mut s = tube();
+        window(&mut s, to_offset).unwrap_or_else(|e| panic!("offset {to_offset}: {e}"));
+    }
+}
+
 /// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
 #[test]
 fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {

@@ -691,6 +691,44 @@ fn a_control_import_passes_up_and_names_on() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The normal off-thread opening path uses the original file digest and the same remembered
+/// answer as synchronous opening, without adding a second offer.
+#[test]
+fn stand_up_memory_applies_after_an_off_thread_open() {
+    let dir = scratch("stand-up-memory");
+    let path = dir.join("plate.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 40, "height": 5})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap().replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'");
+    std::fs::write(&path, text).unwrap();
+    let mut w = Win::new();
+    w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Ask;
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx);
+    let open = |w: &mut Win| {
+        let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command":"doc.open", "params":{"path":path}}));
+        tx.send(req).unwrap();
+        for _ in 0..100_000 {
+            w.frame(vec![]);
+            if let Ok(reply) = reply.try_recv() {
+                assert_eq!(reply["ok"], true, "{reply}");
+                assert!(reply["result"]["content_sha256"].is_string());
+                return;
+            }
+        }
+        panic!("the import was not answered");
+    };
+    open(&mut w);
+    assert!(w.app.stand_up.is_some());
+    crate::prefs::control(&mut w.app, &json!({"stand_up":true})).unwrap();
+    let stood = solidcraft_engine::view::bounds(&w.app.session).unwrap();
+    open(&mut w);
+    assert!(w.app.stand_up.is_none());
+    assert_eq!(solidcraft_engine::view::bounds(&w.app.session).unwrap(), stood);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// #4676: a control-channel import's `matrix` and `name` reach the command, as they do when it
 /// runs in a session: the part lands where the matrix puts it, under the name given.
 #[test]
@@ -1204,6 +1242,39 @@ fn an_insert_runs_again_for_a_design_edited_meanwhile_and_lands_after_the_edit()
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A result waiting to land does not hold the file worker: another open runs meanwhile. Closing
+/// the tab the waiting design belongs to answers its request instead of leaving it waiting.
+#[test]
+fn a_waiting_result_does_not_hold_the_queue_and_a_closed_tab_releases_it() {
+    let dir = scratch("waiting-queue");
+    let step = step_box(&dir);
+    let other = large_design(&dir, 2);
+    let mut w = Win::new();
+    w.app.home.open = false;
+    w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    // An insert for the design in tab 0, with another tab shown when its result comes in.
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &step, true);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    crate::documents::open_tab(&mut w.app, Session::default()).unwrap();
+    release.send(()).unwrap();
+    frames_until(&mut w, "the insert is ready", |app| crate::operations::current(app).iter().any(|r| r.waiting));
+    // An open runs while that result waits: the waiting one is out of the worker's way.
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &other, false);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    release.send(()).unwrap();
+    frames_until(&mut w, "the open runs while the insert waits", |app| {
+        app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, &other))
+            && crate::operations::current(app).iter().any(|r| r.waiting)
+    });
+    // Closing the waiting design's tab answers its request: nothing waits for it any more.
+    crate::documents::close(&mut w.app, 0, true);
+    frames_until(&mut w, "the waiting result is answered", |app| !crate::operations::current(app).iter().any(|r| r.waiting) && app.file_load.idle());
+    assert_eq!(w.app.docs.count(), 1, "the closed tab released its request");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An insert for a design whose tab is no longer shown waits, ready, for it: the design shown
 /// gets nothing; showing the tab again lands it there.
 #[test]
@@ -1229,5 +1300,84 @@ fn an_insert_waits_for_its_designs_tab() {
     assert_eq!(bodies(&w.app), 2, "{:?}", w.app.status);
     crate::documents::switch(&mut w.app, 1);
     assert_eq!(bodies(&w.app), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The offer to stand a just-opened part up weighs how its bodies rest, which meshes them. While
+/// an open meshes the bodies beside the window, meshing them for the offer waited for that work:
+/// the window stood still for over a second on a large assembly. The offer is now worked out
+/// beside the window and made on a later frame, and a design changed meanwhile gets none.
+#[test]
+fn the_stand_up_offer_waits_beside_the_window_for_the_bodies_meshed_on_open() {
+    let dir = scratch("stand-up-later");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    // Tall in Z, thin in Y: it rests on faces across Y, a Y-up part lying on its back here.
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let opened = |w: &mut Win| {
+        let result = w.app.session.execute("file.insert_step", &json!({"path": path})).unwrap();
+        crate::open_meshing::start(&mut w.app, None);
+        assert!(crate::open_meshing::active(&w.app), "the bodies are being meshed");
+        crate::stand_up::offer(&mut w.app, &path, &[], Some(&result));
+        assert!(w.app.stand_up.is_none() && w.app.stand_up_later.is_some(), "not made on the window thread while the bodies are meshed");
+    };
+    let mut w = Win::new();
+    assert_eq!(w.app.preferences.stand_up_unknown, crate::prefs::StandUpUnknown::Note);
+    opened(&mut w);
+    for _ in 0..10_000 {
+        w.frame(vec![]);
+        if w.app.stand_up.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(w.app.stand_up.is_some() && w.app.stand_up_note, "the note is offered once the estimate is made");
+    assert!(w.app.stand_up_later.is_none());
+    // Changed before the estimate is made: no offer.
+    let mut w = Win::new();
+    opened(&mut w);
+    w.app.session.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [40, 0, 0]})).unwrap();
+    w.frame(vec![]);
+    assert!(w.app.stand_up.is_none() && w.app.stand_up_later.is_none(), "a changed design is not offered");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An offer waiting for its estimate is not made when the offer was turned off meanwhile, and a
+/// file from another program gets no estimate at all when such files get no offer.
+#[test]
+fn a_waiting_stand_up_offer_follows_the_preferences_when_it_is_made() {
+    let dir = scratch("stand-up-later-prefs");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let opened = |w: &mut Win| {
+        let result = w.app.session.execute("file.insert_step", &json!({"path": path})).unwrap();
+        crate::open_meshing::start(&mut w.app, None);
+        crate::stand_up::offer(&mut w.app, &path, &[], Some(&result));
+    };
+    // Turned off while the estimate is made: no offer.
+    let mut w = Win::new();
+    opened(&mut w);
+    assert!(w.app.stand_up_later.is_some());
+    w.app.preferences.offer_stand_up = false;
+    for _ in 0..10_000 {
+        w.frame(vec![]);
+        if w.app.stand_up_later.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "an offer turned off meanwhile is not made");
+    // Another program's files get no offer: nothing waits for an estimate.
+    let mut w = Win::new();
+    w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Off;
+    opened(&mut w);
+    assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "no estimate for an offer that won't be made");
     let _ = std::fs::remove_dir_all(&dir);
 }

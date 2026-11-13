@@ -290,52 +290,14 @@ mod tests {
     /// whose conversion waits on other open work.
     #[test]
     fn the_curve_routines_build_no_bare_statuses() {
-        const WAITING: [(&str, usize); 3] = [
-            ("curve/curve/p3.rs", 10),
-            ("curve/curve/p7.rs", 3),
-            ("curve/ellipse/p1.rs", 6),
-        ];
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![root.join("curve.rs")];
-        let mut dirs = vec![root.join("curve")];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(dir).expect("read dir") {
-                let path = entry.expect("entry").path();
-                if path.is_dir() {
-                    dirs.push(path);
-                } else if path.extension().is_some_and(|x| x == "rs") {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
-        assert!(files.len() > 30, "{files:?}");
-        for path in files {
-            let text = std::fs::read_to_string(&path)
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("\n#[cfg(test)]\nmod ")
-                .map_or(text.as_str(), |at| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-                "SolidError::nl_ser(",
-            ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            let relative = path
-                .strip_prefix(&root)
-                .expect("under src")
-                .to_string_lossy()
-                .replace('\\', "/");
-            let allowed = WAITING
-                .iter()
-                .find(|(file, _)| *file == relative)
-                .map_or(0, |(_, n)| *n);
-            assert_eq!(bare, allowed, "bare statuses in {relative}");
-        }
+        super::super::bare_scan::assert_waiting(
+            "curve",
+            31,
+            &[
+                ("curve/curve/p3.rs", 9),
+                ("curve/curve/p7.rs", 3),
+                ("curve/ellipse/p1.rs", 6),
+            ],
+        );
     }
 }
