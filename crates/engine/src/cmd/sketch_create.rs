@@ -13,7 +13,7 @@ macro_rules! text_style_doc {
     };
 }
 
-use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, slot_parts};
+use super::sketch::{add_c, circumcircle, corner_arg, edit, ids_of, length_expr, mark_construction, place_point, req_parg, slot_parts};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ELLIPSE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!(
-        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius. Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
+        "center, major: end of the major axis [x,y] (a coordinate of either may be an expression over the design's parameters: the point follows them), minor: a point the ellipse passes through on the minor side [x,y] | minor_radius: number or expression (an expression naming a parameter is a dimension driven by it). Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", crate::checked!("sketch.spline.fit_point", spline_fit))
@@ -723,10 +723,14 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.ellipse";
-    let (c, m) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "major")?);
+    // The centre and the major end follow the parameters a coordinate typed as an expression
+    // names, and a minor radius typed as one is a dimension driven by them, as for a circle.
+    let ((c, ec), (m, em)) = (corner_arg(&s.doc, p, "center", cmd)?, corner_arg(&s.doc, p, "major", cmd)?);
     let u = (m - c).normalized().ok_or_else(|| bad(cmd, "the major axis end must differ from the centre"))?;
     let a = c.dist(m);
-    let r = match (num(p, "minor_radius"), p.get("minor").and_then(crate::params::vec2)) {
+    let typed = if p.get("minor_radius").is_some_and(Value::is_string) { Some(length_expr(s, p, "minor_radius", cmd)?) } else { None };
+    let size = typed.as_ref().and_then(|(_, e)| e.clone());
+    let r = match (typed.map(|(r, _)| r).or_else(|| num(p, "minor_radius")), p.get("minor").and_then(crate::params::vec2)) {
         (Some(r), _) => r,
         (None, Some(q)) => {
             // Minor radius so the ellipse passes through q.
@@ -748,13 +752,21 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Bool(b)) => *b,
         Some(_) => return Err(bad(cmd, "`axes` must be true or false")),
     };
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = sk.add_point(c, None)?;
         let mi = sk.add_point(m, None)?;
+        place_point(sk, Some(&ci), ec);
+        place_point(sk, Some(&mi), em);
         let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
         mark_construction(sk, &[e], p);
+        let mut cons = Vec::new();
+        if let Some(expr) = &size {
+            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+            let pname = doc.new_model_param(expr, &unit);
+            cons.push(sk.add_constraint(ConstraintKind::Radius { c: e, value: r }, Some(pname))?);
+        }
         if !axes {
-            return Ok((ids_of(sk, &[e]), Vec::new()));
+            return Ok((ids_of(sk, &[e]), cons));
         }
         // Its major and minor axes, construction lines through the centre that bisects both:
         // the major one ends at the major end, the minor one is perpendicular to it and ends
@@ -768,12 +780,12 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
                 cu.construction = true;
             }
         }
-        let cons = vec![
+        cons.extend([
             add_c(sk, ConstraintKind::Midpoint { p: ci, l: major })?,
             add_c(sk, ConstraintKind::Midpoint { p: ci, l: minor })?,
             add_c(sk, ConstraintKind::Perpendicular { a: minor, b: major })?,
             add_c(sk, ConstraintKind::PointOnCurve { p: n1, c: e })?,
-        ];
+        ]);
         Ok((ids_of(sk, &[e]), cons))
     })?;
     drawn(out, info)
