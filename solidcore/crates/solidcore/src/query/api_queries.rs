@@ -18,6 +18,7 @@
 //! | [`edge_bounding_box`], [`edge_closest_point`], [`edge_parameter_range`], [`edge_classify_parameter`], [`edge_tangent`] | `SmApiEdgeBoundingBox`, `SmApiEdgeClosestPoint`, `SmApiEdgeParameterRange`, `SmApiEdgeClassifyParameter`, `SmApiEdgeTangent` |
 //! | [`vertex_get_point`] | `SmApiVertexGetPoint` |
 //! | [`edge_plane_crossings`] | not upstream: where an edge, over its own interval, meets a plane |
+//! | [`edge_crossing_on_face`] | not upstream: where a curve meets an edge, solved on one of the edge's faces |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
@@ -1321,6 +1322,42 @@ fn first_parameter(crossing: &PlaneCrossing) -> f64 {
     }
 }
 
+/// Where `curve`, over `interval`, meets the surface of face `face` near the curve's parameter
+/// `near`, as a point of edge `edge` (not upstream): the curve's parameter there. The face is one
+/// of the edge's faces. Its surface holds the exact edge, where the edge's curve holds it only to
+/// the edge's tolerance (a traced intersection's curve is an approximation of it). So a curve
+/// that lies on the edge's other face, as a contour lies on a sphere or a silhouette on a cone,
+/// meets the exact edge where it meets this surface.
+///
+/// The solve is the kernel's local curve/surface intersection (`Surface::local_curve_intersect`):
+/// Newton on the gap from `near` and the face's point nearest the curve's point there, at most
+/// [`LOCAL_CURVE_INTERSECT_STEPS`](crate::surface::surface::p6::LOCAL_CURVE_INTERSECT_STEPS)
+/// steps, to `EFF_ZERO / 10`, or a closest-point solve where the curve lies within 5 degrees of
+/// the surface's tangent plane. The edge's tolerance only accepts the answer: the curve's point
+/// and the surface's must be within it of each other, and the point within it of the edge's curve
+/// (the tube that holds the exact edge). It moves no answer.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `near` that isn't finite; [`SolidError::NotFound`] for a
+/// dangling edge or face; a query failure for a face without a surface, and for a point the solve
+/// finds farther than the edge's tolerance from the edge (another crossing, not this edge's);
+/// [`SolidError::NotConverged`] when the solve finds no point within the edge's tolerance of the
+/// surface; those of the drop onto the surface and of the solves.
+pub fn edge_crossing_on_face(
+    k: &Kernel,
+    brep: &Brep,
+    edge: EdgeId,
+    face: FaceId,
+    curve: &Curve,
+    interval: &Extent1d,
+    near: f64,
+) -> Result<f64> {
+    // the tests-first stub: the parameter it is given, today's answer
+    let _ = (k, brep, edge, face, curve, interval);
+    Ok(near)
+}
+
 /// Parameter interval (`SmApiEdgeParameterRange`); dangling ids are errors.
 pub fn edge_parameter_range(brep: &Brep, id: EdgeId) -> Result<Extent1d> {
     Ok(brep.edge(id)?.interval)
@@ -2556,5 +2593,61 @@ mod tests {
             }
         }
         assert_eq!((lying, ends), (4, 4));
+    }
+
+    #[test]
+    fn edge_crossing_on_face_solves_on_the_face_and_refuses_what_it_cannot() {
+        // the box [0,1]x[0,2]x[0,3]: its upright edge at x = 1, y = 0 and its face x = 1. The line
+        // from (0, 0, 1.5) to (2, 0, 1.5), on the face y = 0, guessed at 0.49, meets x = 1 at 0.5
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let at =
+            |lo: f64, hi: f64, want: f64| (lo - want).abs() < 1e-12 && (hi - want).abs() < 1e-12;
+        let upright = get_edges(&b)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                let x = edge_bounding_box(&k, &b, e, true).unwrap();
+                at(x.min().x, x.max().x, 1.0) && at(x.min().y, x.max().y, 0.0)
+            })
+            .unwrap();
+        let side = get_faces(&b)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let x = face_bounding_box(&k, &b, f, true).unwrap();
+                at(x.min().x, x.max().x, 1.0)
+            })
+            .unwrap();
+        let line = |a: Point3, c: Point3| {
+            Curve::from(crate::primitive::api_curves::create_line_segment(a, c).unwrap())
+        };
+        let front = line(Point3::new(0.0, 0.0, 1.5), Point3::new(2.0, 0.0, 1.5));
+        let ivl = front.natural_interval();
+        let t = edge_crossing_on_face(&k, &b, upright, side, &front, &ivl, 0.49).unwrap();
+        assert!((t - 0.5).abs() <= 1e-12, "{t}");
+        // at y = 1 the line meets x = 1 a whole unit off the edge
+        let off = line(Point3::new(0.0, 1.0, 1.5), Point3::new(2.0, 1.0, 1.5));
+        let refused = edge_crossing_on_face(&k, &b, upright, side, &off, &ivl, 0.49);
+        assert!(matches!(refused, Err(SolidError::Failed(_))), "{refused:?}");
+        // in x = 0.5, along z, the line never meets x = 1
+        let apart = line(Point3::new(0.5, 0.0, 0.0), Point3::new(0.5, 0.0, 3.0));
+        let refused = edge_crossing_on_face(&k, &b, upright, side, &apart, &ivl, 0.5);
+        assert!(
+            matches!(refused, Err(SolidError::NotConverged { .. })),
+            "{refused:?}"
+        );
+        let refused = edge_crossing_on_face(&k, &b, upright, side, &front, &ivl, f64::NAN);
+        assert!(
+            matches!(refused, Err(SolidError::InvalidInput { .. })),
+            "{refused:?}"
+        );
+        let dangling = FaceId::from_index(999);
+        let refused = edge_crossing_on_face(&k, &b, upright, dangling, &front, &ivl, 0.49);
+        assert!(
+            matches!(refused, Err(SolidError::NotFound { .. })),
+            "{refused:?}"
+        );
     }
 }
