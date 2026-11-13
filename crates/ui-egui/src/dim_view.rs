@@ -75,6 +75,9 @@ struct Edit {
     /// once no second click came, at the caret the click found. A second click opens that
     /// dimension for editing instead.
     pending: Option<Pending>,
+    /// The caret and selection as they were before the pointer went down: a press on a dimension
+    /// takes the keyboard from the field, and the field takes it back with everything selected.
+    caret: Option<egui::text::CCursorRange>,
     /// A shown dimension of a finished sketch, edited from the model view without editing the
     /// sketch (its id). None: a dimension of the sketch being edited.
     sketch: Option<u64>,
@@ -262,6 +265,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             typed: false,
             shown: None,
             pending: None,
+            caret: None,
             sketch: None,
             driven: None,
         })
@@ -302,6 +306,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             typed: false,
             shown: None,
             pending: None,
+            caret: None,
             sketch: None,
             driven: None,
         })
@@ -560,6 +565,7 @@ fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
             typed: false,
             shown: None,
             pending: None,
+            caret: None,
             sketch: Some(d.sketch),
             driven: None,
         })
@@ -662,6 +668,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             typed: false,
             shown: None,
             pending: None,
+            caret: None,
             sketch: None,
             driven,
         })
@@ -1034,6 +1041,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             typed: false,
             shown: None,
             pending: None,
+            caret: None,
             sketch: None,
             driven: None,
         })
@@ -1147,8 +1155,10 @@ pub fn pick_reference(app: &mut SolveApp, ctx: &egui::Context, pos: Pos2, double
         let Some(edit) = editor.as_mut() else { return };
         // Driven dimensions have no parameter to name.
         if let Some(name) = param {
-            let selection =
-                edit.selection.or_else(|| egui::TextEdit::load_state(ctx, egui::Id::unique("sc_dim_edit")).and_then(|s| s.cursor.char_range()));
+            let selection = edit
+                .caret
+                .or(edit.selection)
+                .or_else(|| egui::TextEdit::load_state(ctx, egui::Id::unique("sc_dim_edit")).and_then(|s| s.cursor.char_range()));
             edit.pending = Some(Pending { name, at: ctx.input(|i| i.time), selection });
         }
         edit.fresh = FRESH - 1;
@@ -1223,6 +1233,9 @@ fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, size: egui::V
 
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut e) = EDIT.with(|x| x.borrow_mut().take()) else { return };
+    if !ctx.input(|i| i.pointer.any_down()) {
+        e.caret = egui::TextEdit::load_state(ctx, egui::Id::unique("sc_dim_edit")).and_then(|s| s.cursor.char_range()).or(e.selection);
+    }
     flush_pending(app, ctx, &mut e);
     if e.at.is_none() {
         e.at = DRAWN.with(|d| d.borrow().iter().find(|x| x.param.as_deref() == Some(e.param.as_str())).map(|x| x.text.center()));
