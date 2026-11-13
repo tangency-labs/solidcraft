@@ -1298,9 +1298,11 @@ fn dogbone_editor_drops_a_kept_pick_on_request() {
     for key in ["kept_edges", "kept_faces", "kept_body"] {
         assert!(!d.extra.contains_key(key), "{key} must be dropped: {:?}", d.extra);
     }
+    // An edit is applied as a redefine of the feature, with the command's parameters inside.
     let commands = apply_commands(&h.app, d).unwrap();
-    let [(command, params)] = commands.as_slice() else { panic!("{commands:?}") };
-    assert_eq!(command, "solid.dogbone");
+    let [(command, redefine)] = commands.as_slice() else { panic!("{commands:?}") };
+    assert_eq!(command, "timeline.redefine", "{redefine}");
+    let params = &redefine["params"];
     assert!(params.get("faces").is_none(), "the kept face must not reach the command: {params}");
     assert_eq!(params["edges"].as_array().map(Vec::len), Some(1), "{params}");
 }
