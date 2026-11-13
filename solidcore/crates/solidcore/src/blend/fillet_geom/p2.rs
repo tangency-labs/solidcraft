@@ -30,6 +30,17 @@
 //!   `fixes.fillet_rail_end_on_continued_surface`, `CalcRailIntEdgeuse` evaluates the
 //!   rail's end on its base surface with out-of-bounds evaluation on (the fork's
 //!   tangency-labs/smlib@3f22e97).
+//! - **A closed curve between two points (not upstream).** `SrfSrfIntersection` trims a
+//!   closed candidate curve between the parameters its end points drop to, so the curve could
+//!   run from the start the other way round: a point at the curve's closure has two parameters
+//!   (the interval's ends) and the drop gives either, and the curve between the points may run
+//!   through the closure. With `SrfSrfOptions::closed_by_start_direction` (off by default,
+//!   set for the cap edge of a rail ending inside the face it rolled onto, whose start
+//!   direction is the edge's own tangent there), the curve that leaves the start along the
+//!   start direction is taken (`closure_ends`, `through_closure`); one run through the closure
+//!   has no UV curve on a surface whose seam it crosses. A curve that leaves the start
+//!   against it, traced or a candidate, is passed over (`leaves_along`), and with none left
+//!   the intersection fails (`BlendFailure::StageFailed`).
 //! - **A rail's end at a side edge starts from the round's corner section (#13538).**
 //!   `CalcRailIntEdgeuse`'s first guess on the side edge is where the ball's section through
 //!   the filleted edge's end there touches it ([`edge_section`]), not upstream's fraction of
@@ -1009,9 +1020,10 @@ fn corner_section_on_side_edge(
 pub struct SrfSrfCurves {
     /// `rp3DCurve`.
     pub curve_3d: Option<Curve>,
-    /// `rpUVCurve1`: its UV curve on the first surface.
+    /// `rpUVCurve1`: its UV curve on the first surface (`None` also where a curve run through
+    /// a closed candidate's closure crosses that surface's seam, not upstream).
     pub uv_curve1: Option<Curve>,
-    /// `rpUVCurve2`: its UV curve on the second surface.
+    /// `rpUVCurve2`: its UV curve on the second surface (as `uv_curve1`).
     pub uv_curve2: Option<Curve>,
 }
 
@@ -1023,6 +1035,18 @@ pub struct SrfSrfOptions {
     pub skip_two_pnts_intersection: bool,
     /// `pOptRefPoint`: with neither end point, the curve nearest to this point wins.
     pub ref_point: Option<Point3>,
+    /// Not upstream (solidcore-native, off by default): the start direction is the wanted
+    /// curve's own heading at the start (its tangent there, not the chord), and only a curve
+    /// that leaves the start along it, within the angle tolerance, is taken. A closed
+    /// candidate curve between the two points is taken the way round that does
+    /// (`closure_ends`), not as the span between the parameters the points drop to; a
+    /// candidate with no way between the points that does is passed over, as is a curve the
+    /// surface/plane and two-point tracers give that does not, and with no candidate left the
+    /// intersection fails ([`BlendFailure::StageFailed`]) rather than build another curve.
+    /// Only for a caller that has that heading: most pass
+    /// the chord `end - start`, which heads along a circle's arc only where it is shorter than
+    /// a half turn, and upstream's span is then the right curve, also a longer arc.
+    pub closed_by_start_direction: bool,
 }
 
 /// One candidate curve of the selection loop.
@@ -1030,6 +1054,8 @@ struct Candidate {
     curve_3d: Curve,
     uv_curve1: Option<Curve>,
     uv_curve2: Option<Curve>,
+    /// Not upstream: the curve runs through a closed candidate's closure (`through_closure`).
+    through: bool,
 }
 
 /// `sm_SrfSrfIntersection`: the intersection curve of two surfaces through `start`
@@ -1076,6 +1102,175 @@ pub fn srf_srf_intersection(
     )
 }
 
+/// Not upstream (solidcore-native): how a candidate curve of `sm_SrfSrfIntersection` that is
+/// closed runs between the given start and end points ([`closure_ends`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ClosureEnds {
+    /// Over the span between these parameters of the start and the end, as upstream trims.
+    Span(f64, f64),
+    /// From the start's parameter to the end's the other way round, through the curve's
+    /// closure ([`through_closure`]).
+    Through(f64, f64),
+}
+
+/// Not upstream (solidcore-native, `SrfSrfOptions::closed_by_start_direction`): the wanted
+/// curve's own heading at its start, `dir`, and the cosine of the intersection's angle
+/// tolerance, `cos_tol`.
+#[derive(Debug, Clone, Copy)]
+struct Heading {
+    dir: Vec3,
+    cos_tol: f64,
+}
+
+impl Heading {
+    /// Whether a curve whose tangent at the start is `tangent` leaves the start along the
+    /// heading: within the angle tolerance of it, and at a positive dot product whatever the
+    /// tolerance. A zero vector, and NaN, do not: every comparison with NaN fails.
+    fn along(self, tangent: Vec3) -> bool {
+        let d = tangent.dot(self.dir);
+        d > 0.0 && d >= self.cos_tol * tangent.length() * self.dir.length()
+    }
+}
+
+/// Not upstream (solidcore-native, with `SrfSrfOptions::closed_by_start_direction`): how the
+/// candidate `curve`, closed over `ivl`, runs between the given start and end `points`
+/// (dropped to `params`) when it leaves the start along `heading`, the curve's own tangent
+/// there ([`Heading::along`]), not the chord. `sm_SrfSrfIntersection` trims between the two
+/// parameters as they came, which can take the curve the other way round, through its far
+/// side (a cap edge along a boss's foot circle from inside the boss face to the vertex at the
+/// boss's seam: the circle's parameter starts at the seam). Two cases:
+/// - a point at the curve's closure has two parameters, the ends of `ivl`, and the drop gives
+///   either: of the parameters each point has, the pair whose span leaves the start along
+///   the heading is taken ([`ClosureEnds::Span`]);
+/// - with neither point at the closure, the curve that leaves the start along the heading may
+///   run through the closure: the span's tangent at the start points against it
+///   ([`ClosureEnds::Through`]).
+///
+/// The span as dropped is kept when it leaves along the heading and when the two points
+/// coincide (a whole closed curve or a point, which the closure cannot tell apart). `None`
+/// when no way between the points leaves along it: the span of a curve that is not closed
+/// does not, or no alternative of a closed one does; the candidate is then not the curve the
+/// heading belongs to. The two ways round a closed curve leave the start in opposite
+/// directions, so where the heading is the curve's own tangent exactly one of them leaves
+/// along it, whatever the angle between the points.
+///
+/// # Errors
+/// Those of the closure test and the evaluations; [`BlendFailure::StageFailed`] for an
+/// evaluation without the tangent.
+fn closure_ends(
+    k: &Kernel,
+    curve: &Curve,
+    ivl: &Extent1d,
+    points: [Point3; 2],
+    params: [f64; 2],
+    heading: Heading,
+    tol: f64,
+) -> Result<Option<ClosureEnds>> {
+    let [start, end] = points;
+    let dropped = ClosureEnds::Span(params[0], params[1]);
+    if start.distance(end) <= tol {
+        return Ok(Some(dropped));
+    }
+    let closed = curve.is_closed(k, ivl, tol)?;
+    let closure = curve.evaluate_point(k, ivl.min())?;
+    let at_closure = [start, end].map(|p| p.distance(closure) <= tol);
+    let choices = |at: bool, param: f64| {
+        if at {
+            [
+                param,
+                if param - ivl.min() <= ivl.max() - param {
+                    ivl.max()
+                } else {
+                    ivl.min()
+                },
+            ]
+        } else {
+            [param, param]
+        }
+    };
+    // the tangent at `from` towards `to` (`None` for an empty span)
+    let towards = |from: f64, to: f64| -> Result<Option<Vec3>> {
+        if from == to {
+            return Ok(None);
+        }
+        let pv = curve.evaluate(k, from, 1, to < from, true)?;
+        // (an evaluation with one derivative gives it: a defect otherwise)
+        let tangent = pv
+            .get(1)
+            .copied()
+            .ok_or_else(|| SolidError::blend(OP_SRF_SRF, BlendFailure::StageFailed))?;
+        Ok(Some(if to > from { tangent } else { -tangent }))
+    };
+    let as_dropped = towards(params[0], params[1])?;
+    if as_dropped.is_some_and(|t| heading.along(t)) {
+        return Ok(Some(dropped));
+    }
+    if !closed {
+        return Ok(None);
+    }
+    let [start_at, end_at] = at_closure;
+    if start_at || end_at {
+        for from in choices(start_at, params[0]) {
+            for to in choices(end_at, params[1]) {
+                if towards(from, to)?.is_some_and(|t| heading.along(t)) {
+                    return Ok(Some(ClosureEnds::Span(from, to)));
+                }
+            }
+        }
+        return Ok(None);
+    }
+    // the way through the closure leaves the start against the span's tangent
+    if as_dropped.is_some_and(|t| heading.along(-t)) {
+        return Ok(Some(ClosureEnds::Through(params[0], params[1])));
+    }
+    Ok(None)
+}
+
+/// Not upstream (solidcore-native, with `SrfSrfOptions::closed_by_start_direction`): whether
+/// `curve` leaves its natural start along `heading` ([`Heading::along`]).
+///
+/// # Errors
+/// Those of the evaluation; [`BlendFailure::StageFailed`] for one without the tangent.
+fn leaves_along(k: &Kernel, curve: &Curve, heading: Heading) -> Result<bool> {
+    let ivl = curve.natural_interval();
+    let pv = curve.evaluate(k, ivl.min(), 1, false, true)?;
+    // (an evaluation with one derivative gives it: a defect otherwise)
+    let tangent = pv
+        .get(1)
+        .copied()
+        .ok_or_else(|| SolidError::blend(OP_SRF_SRF, BlendFailure::StageFailed))?;
+    Ok(heading.along(tangent))
+}
+
+/// Not upstream (solidcore-native): the curve from parameter `from` to `to` of `curve`, closed
+/// over `ivl` (neither at its closure), the way round through the closure: the pieces from the
+/// greater of the two to the interval's end and from its start to the lesser, joined as one
+/// B-spline curve, and reversed when it runs from the lesser. Its UV curves are made by
+/// `DropCurve` as missing ones are; on a surface whose seam it crosses there is none.
+///
+/// # Errors
+/// [`BlendFailure::StageFailed`] for a curve of a kind not derived from `SmBSplineCurve`;
+/// those of the trims, the join and the reversal.
+fn through_closure(k: &Kernel, curve: &Curve, ivl: &Extent1d, from: f64, to: f64) -> Result<Curve> {
+    let (high, low) = if from > to { (from, to) } else { (to, from) };
+    let piece = |min: f64, max: f64| -> Result<BSplineCurve> {
+        let mut part = curve.clone();
+        let mut span = Extent1d::from_min_max(min, max);
+        part.trim(k, &mut span, TrimMode::Notify)?;
+        // (a trimmed piece keeps the candidate's kind, a B-spline curve's: a defect otherwise)
+        b_spline_base(&part)
+            .cloned()
+            .ok_or_else(|| SolidError::blend(OP_SRF_SRF, BlendFailure::StageFailed))
+    };
+    let mut pieces = [piece(high, ivl.max())?, piece(ivl.min(), low)?];
+    let mut joined = Curve::from(BSplineCurve::create_by_joining(&mut pieces, None)?);
+    if from < to {
+        let span = joined.natural_interval();
+        let _ = joined.reverse_parameterization(k, &span)?;
+    }
+    Ok(joined)
+}
+
 /// The face-aware surface cache context of a [`srf_srf_intersection_with_context`]: the
 /// caller's context and the two surfaces' handles in it (a face's surface is named
 /// by its face, so its trimmed surface cache is made with the face's boundary, as
@@ -1110,6 +1305,17 @@ pub fn srf_srf_intersection_with_context(
     // the intersection is to `approx_tol`: a blend by its definition whose net's bound is
     // within it evaluates as its net (#2510)
     let _scope = NetScope::within(k, approx_tol);
+    // the direction the curve leaves its start in, as given (the two-point intersector
+    // below unitises it in place)
+    let start_dir = opt_dir.as_deref().copied();
+    // Not upstream: the wanted curve's own heading at the start, with
+    // `closed_by_start_direction`
+    let wanted_heading = start_dir
+        .filter(|_| opts.closed_by_start_direction)
+        .map(|dir| Heading {
+            dir,
+            cos_tol: angle_tol.cos(),
+        });
 
     // surface and surf/surf intersection locals
     let mut curves_3d: Vec<Curve> = Vec::new();
@@ -1226,16 +1432,24 @@ pub fn srf_srf_intersection_with_context(
                     approx_tol,
                     angle_tol,
                 )?;
-                let (uv1, uv2) = if plane_first {
-                    (c.uv_plane, c.uv_surface)
-                } else {
-                    (c.uv_surface, c.uv_plane)
+                // Not upstream: with `closed_by_start_direction`, a curve that does not leave
+                // the start along its heading is passed over (the intersectors below go on)
+                let headed = match wanted_heading {
+                    Some(h) => leaves_along(k, &c.curve_3d, h)?,
+                    None => true,
                 };
-                return Ok(SrfSrfCurves {
-                    curve_3d: Some(c.curve_3d),
-                    uv_curve1: Some(uv1),
-                    uv_curve2: Some(uv2),
-                });
+                if headed {
+                    let (uv1, uv2) = if plane_first {
+                        (c.uv_plane, c.uv_surface)
+                    } else {
+                        (c.uv_surface, c.uv_plane)
+                    };
+                    return Ok(SrfSrfCurves {
+                        curve_3d: Some(c.curve_3d),
+                        uv_curve1: Some(uv1),
+                        uv_curve2: Some(uv2),
+                    });
+                }
             }
         }
     }
@@ -1255,7 +1469,15 @@ pub fn srf_srf_intersection_with_context(
                 ssi_tol,
             ))?;
             if let Some(pi) = r {
-                if let Some(curve_3d) = pi.curve_3d {
+                // Not upstream: with `closed_by_start_direction`, a curve that does not leave
+                // the start along its heading is passed over
+                let mut traced = pi.curve_3d;
+                if let (Some(c), Some(h)) = (traced.as_ref(), wanted_heading) {
+                    if !leaves_along(k, c, h)? {
+                        traced = None;
+                    }
+                }
+                if let Some(curve_3d) = traced {
                     let uv1 = pi.surface1_uv_curve;
                     let uv2 = pi.surface2_uv_curve;
 
@@ -1327,6 +1549,8 @@ pub fn srf_srf_intersection_with_context(
     let mut min_dist = BIG_DOUBLE;
     let mut max_len = 0.0;
     let mut candidates: Vec<Candidate> = Vec::new();
+    // Not upstream: a candidate through the points was passed over for its heading
+    let mut headed_away = false;
     let mut uv1_iter = surface1_uv_curves.into_iter();
     let mut uv2_iter = surface2_uv_curves.into_iter();
     for (crv_index, mut new_3d_curve) in curves_3d.into_iter().enumerate() {
@@ -1376,12 +1600,49 @@ pub fn srf_srf_intersection_with_context(
                 curve_3d: new_3d_curve,
                 uv_curve1: new_uv_curve1,
                 uv_curve2: new_uv_curve2,
+                through: false,
             });
             continue;
         }
 
+        // Not upstream: on a closed curve, the curve between the points that leaves the start
+        // in the start direction, when the caller asks for it (`closure_ends`); a candidate
+        // with no way between them that does is passed over as one off the points is
+        let mut through = false;
+        if let (Some(start_pnt), Some(end_pnt), Some(heading)) = (start, end, wanted_heading) {
+            match closure_ends(
+                k,
+                &new_3d_curve,
+                &trim_ivl,
+                [start_pnt, end_pnt],
+                [param1, param2],
+                heading,
+                approx_tol,
+            )? {
+                None => {
+                    headed_away = true;
+                    candidates.push(Candidate {
+                        curve_3d: new_3d_curve,
+                        uv_curve1: new_uv_curve1,
+                        uv_curve2: new_uv_curve2,
+                        through: false,
+                    });
+                    continue;
+                }
+                Some(ClosureEnds::Span(from, to)) => (param1, param2) = (from, to),
+                Some(ClosureEnds::Through(from, to)) => {
+                    // its UV curves are made by `DropCurve` below, as missing ones are
+                    new_3d_curve = through_closure(k, &new_3d_curve, &trim_ivl, from, to)?;
+                    new_uv_curve1 = None;
+                    new_uv_curve2 = None;
+                    trim_ivl = new_3d_curve.natural_interval();
+                    through = true;
+                }
+            }
+        }
+
         // when given an endPoint - trim intersection curves to endPoints
-        if end.is_some() {
+        if end.is_some() && !through {
             // see if intersection curve needs to be reversed
             if param1 > param2 {
                 reverse_curves = true;
@@ -1443,11 +1704,17 @@ pub fn srf_srf_intersection_with_context(
             curve_3d: new_3d_curve,
             uv_curve1: new_uv_curve1,
             uv_curve2: new_uv_curve2,
+            through,
         });
     }
 
     // error: didn't find a curve within tol of endPoints
     if best_dist == NO_CURVE && best_len == NO_CURVE {
+        // Not upstream: a curve through the points that heads away from the wanted heading is
+        // not the curve the caller asked for, and no other is built in its place
+        if headed_away {
+            return Err(SolidError::blend(OP_SRF_SRF, BlendFailure::StageFailed));
+        }
         return Err(SolidError::blend_failed(
             OP_SRF_SRF,
             "no intersection curve lies within tolerance of the end points",
@@ -1477,29 +1744,35 @@ pub fn srf_srf_intersection_with_context(
     let mut uv_curve1 = best.uv_curve1.filter(is_b_spline_kind);
     let mut uv_curve2 = best.uv_curve2.filter(is_b_spline_kind);
     let trim_ivl = curve_3d.natural_interval();
+    // Not upstream: a curve through a closed candidate's closure crosses the seam of a closed
+    // surface it lies on (the closure of a plane/cylinder circle is the cylinder's seam), where
+    // its UV image is no one curve on the surface's domain: on that surface it has none
+    let through = best.through;
 
     // generate surf1 UVTrimCurve if it's missing (some intersectors don't make them)
     if uv_curve1.is_none() {
         let uv_curves = surface_drop_curve(k, surf1, &domain1, &curve_3d, &trim_ivl, approx_tol)?;
-        let first = uv_curves.into_iter().next().ok_or_else(|| {
-            SolidError::blend_failed(
+        let first = uv_curves.into_iter().next();
+        if first.is_none() && !through {
+            return Err(SolidError::blend_failed(
                 OP_SRF_SRF,
                 "the curve drops onto the first surface as no UV curve",
-            )
-        })?;
-        uv_curve1 = Some(first);
+            ));
+        }
+        uv_curve1 = first;
     }
 
     // generate surf2 UVTrimCurve if it's missing
     if uv_curve2.is_none() {
         let uv_curves = surface_drop_curve(k, surf2, &domain2, &curve_3d, &trim_ivl, approx_tol)?;
-        let first = uv_curves.into_iter().next().ok_or_else(|| {
-            SolidError::blend_failed(
+        let first = uv_curves.into_iter().next();
+        if first.is_none() && !through {
+            return Err(SolidError::blend_failed(
                 OP_SRF_SRF,
                 "the curve drops onto the second surface as no UV curve",
-            )
-        })?;
-        uv_curve2 = Some(first);
+            ));
+        }
+        uv_curve2 = first;
     }
 
     // all done
