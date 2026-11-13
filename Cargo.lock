@@ -6014,6 +6014,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-smlib",
  "spade",
+ "sysinfo",
  "thiserror 2.0.21",
  "web-time",
 ]
