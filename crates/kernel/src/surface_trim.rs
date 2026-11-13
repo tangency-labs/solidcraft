@@ -4,6 +4,7 @@
 //! when one stops short of the other.
 
 use solidcore_record::Vec3;
+use solidcore_record::brep::Loop;
 use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::prelude::*;
 
@@ -116,20 +117,102 @@ fn face_sides(body: &Body, side: &ToolSide) -> Result<Vec<f64>> {
     Ok(sides)
 }
 
-/// For each point, the face of `body` nearest it (over one tessellation).
+/// For each point, the face of `body` nearest it (evaluated on exact B-rep geometry).
 fn nearest_faces(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
-    let m = body.mesh(&crate::MeshTolerance::chord(body.size() * 2e-3))?;
-    at.iter()
-        .map(|p| {
-            let mut best: Option<(f64, u32)> = None;
-            for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-                let Some([a, b, c]) = m.tri(t) else { continue };
-                let d = ((a + b + c) / 3.0).dist(*p).min(a.dist(*p)).min(b.dist(*p)).min(c.dist(*p));
-                if best.is_none_or(|(x, _)| d < x) {
-                    best = Some((d, *f));
+    if at.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some((ops, order)) = body.ops_body() {
+        let pts: Vec<[f64; 3]> = at.iter().map(|p| [p.x, p.y, p.z]).collect();
+        let reach = (body.size() * 2.0).max(1e-3);
+        if let Ok(rows) = ops.face_distances_within(order, &pts, reach) {
+            let mut result = Vec::with_capacity(at.len());
+            for p_idx in 0..at.len() {
+                let mut best_f = None;
+                let mut best_d = f64::INFINITY;
+                for (f, row) in rows.iter().enumerate() {
+                    if let Some(Some(d)) = row.get(p_idx) {
+                        if *d < best_d {
+                            best_d = *d;
+                            best_f = Some(f);
+                        }
+                    }
+                }
+                if let Some(f) = best_f {
+                    result.push(f);
+                } else {
+                    return Err(KernelError::Invalid("no face there".into()));
                 }
             }
-            best.map(|(_, f)| f as usize).ok_or_else(|| KernelError::Invalid("no face there".into()))
+            return Ok(result);
+        }
+    }
+    let rec = body.record();
+    if rec.faces.is_empty() {
+        return Err(KernelError::Invalid("no face there".into()));
+    }
+    at.iter()
+        .map(|p| {
+            let mut best: Option<(f64, usize)> = None;
+            for (f, face) in rec.faces.iter().enumerate() {
+                let mut d_face = f64::INFINITY;
+                for lp in &face.loops {
+                    let Loop::Edges { edges } = lp else { continue };
+                    for u in edges {
+                        let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                        let Ok(eval) = CurveEval::new(edge.parameters()) else { continue };
+                        let [t0, t1] = edge.interval;
+                        for k in 0..=8 {
+                            let t = t0 + (t1 - t0) * (k as f64 / 8.0);
+                            if let Some(pt) = eval.point(t) {
+                                d_face = d_face.min(pt.dist(*p));
+                            }
+                        }
+                    }
+                }
+                if let Some(plane) = body.planar_face(f).or_else(|| body.face_plane(f)) {
+                    let d_plane = (*p - plane.origin).dot(plane.normal()).abs();
+                    let q = *p - plane.normal() * (*p - plane.origin).dot(plane.normal());
+                    let mut inside = false;
+                    for lp in &face.loops {
+                        let Loop::Edges { edges } = lp else { continue };
+                        let mut pts = Vec::new();
+                        for u in edges {
+                            let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                            let Ok(eval) = CurveEval::new(edge.parameters()) else { continue };
+                            let [t0, t1] = if u.forward { edge.interval } else { [edge.interval[1], edge.interval[0]] };
+                            for k in 0..8 {
+                                let t = t0 + (t1 - t0) * (k as f64 / 8.0);
+                                if let Some(pt) = eval.point(t) {
+                                    pts.push(plane.to_local(pt));
+                                }
+                            }
+                        }
+                        if pts.len() >= 3 {
+                            let ring = solidcraft_geom::Ring::new(pts);
+                            if ring.contains(plane.to_local(q)) {
+                                inside = !inside;
+                            }
+                        }
+                    }
+                    if inside {
+                        d_face = d_face.min(d_plane);
+                    }
+                } else if let Ok(eval) = solidcraft_geom::brep::eval::SurfaceEval::new(face.parameters()) {
+                    let [[u0, u1], [v0, v1]] = face.domain;
+                    if let Some([u, v]) = eval.project(*p, Some([(u0 + u1) * 0.5, (v0 + v1) * 0.5]), f64::INFINITY) {
+                        let cu = u.clamp(u0.min(u1), u0.max(u1));
+                        let cv = v.clamp(v0.min(v1), v0.max(v1));
+                        if let Some(pt) = eval.point([cu, cv]) {
+                            d_face = d_face.min(pt.dist(*p));
+                        }
+                    }
+                }
+                if best.is_none_or(|(d, _)| d_face < d) {
+                    best = Some((d_face, f));
+                }
+            }
+            best.map(|(_, f)| f).ok_or_else(|| KernelError::Invalid("no face there".into()))
         })
         .collect()
 }
@@ -166,16 +249,43 @@ fn cut_by(x: &Body, tool: &SplitTool, keep: TrimKeep, extend: bool, name: &str) 
     let side = ToolSide::of(tool, x)?;
     let size = x.size();
     let touch = size * 1e-6 + 1e-9;
-    let m = x.mesh(&crate::MeshTolerance::chord(size * 2e-3))?;
-    let (mut lo, mut hi, mut near) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY);
-    for p in &m.positions {
-        let v = side.at(*p);
+    let rec = x.record();
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    let mut near = f64::INFINITY;
+    let mut check_point = |p: Vec3| -> Result<()> {
+        let v = side.at(p);
         if !v.is_finite() {
             return Err(KernelError::Failed("the other surface cannot be evaluated over this one".into()));
         }
         lo = lo.min(v);
         hi = hi.max(v);
         near = near.min(v.abs());
+        Ok(())
+    };
+    for e in &rec.edges {
+        let curve = CurveEval::new(e.parameters()).map_err(|err| KernelError::Failed(format!("trim: an edge's curve: {err}")))?;
+        let [t0, t1] = e.interval;
+        for i in 0..=8 {
+            let t = t0 + (t1 - t0) * (i as f64 / 8.0);
+            if let Some(p) = curve.point(t) {
+                check_point(p)?;
+            }
+        }
+    }
+    for f in &rec.faces {
+        if let Ok(eval) = solidcraft_geom::brep::eval::SurfaceEval::new(f.parameters()) {
+            let [[u0, u1], [v0, v1]] = f.domain;
+            for i in 0..=8 {
+                for j in 0..=8 {
+                    let u = u0 + (u1 - u0) * (i as f64 / 8.0);
+                    let v = v0 + (v1 - v0) * (j as f64 / 8.0);
+                    if let Some(p) = eval.point([u, v]) {
+                        check_point(p)?;
+                    }
+                }
+            }
+        }
     }
     if lo < -touch && hi > touch {
         return trim_keep(x, tool, keep);
