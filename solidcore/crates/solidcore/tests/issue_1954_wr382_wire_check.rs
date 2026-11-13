@@ -2,7 +2,7 @@
 //!
 //! The audit pinned only the curve helper. Here the body checker must reject a
 //! regular wire whose minimum curvature radius is below tolerance, while accepting
-//! a healthy wire. Only `bspline_check_min_radius` differs between the two kernels.
+//! a healthy wire (upstream's check never compares the radius and accepts both).
 #![allow(clippy::unwrap_used)]
 
 use solidcore::curve::curve::Curve;
@@ -49,14 +49,7 @@ fn wire(k: &mut Kernel, width: f64) -> Brep {
 fn whole_body_check_rejects_only_the_under_radius_wire_with_wr382() {
     for width in [0.001, 0.02] {
         let mut k = Kernel::default();
-        let mut upstream_body = wire(&mut k, width);
-        let upstream = check_brep(&mut k, &mut upstream_body, CheckLevel::Level2).unwrap();
-        assert!(upstream.is_valid(), "{upstream:?}");
-        assert_eq!(upstream.assert_valid, Some(true));
-        assert_eq!(upstream.failure_count(), 0);
-
         let mut fixed_body = wire(&mut k, width);
-        k.fixes.bspline_check_min_radius = true;
         let fixed = check_brep(&mut k, &mut fixed_body, CheckLevel::Level2).unwrap();
         assert!(fixed.pointer_reports.is_empty(), "{fixed:?}");
         if width == 0.001 {

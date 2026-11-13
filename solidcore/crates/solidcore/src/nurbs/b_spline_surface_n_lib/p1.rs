@@ -134,7 +134,7 @@ use crate::nurbs::srf_adv::p3::{
 };
 use crate::nurbs::srf_adv::p4::create_coons_srf as bilinear_coons_srf;
 use crate::nurbs::srf_adv::p6::{
-    create_sweep_scale_traced, fill_n_sided_hole_with, SweepScaleOptions, SweepTrace,
+    create_sweep_scale_traced, fill_n_sided_hole, SweepScaleOptions, SweepTrace,
 };
 use crate::nurbs::srf_basic::{size_arrays, Direction, Surface, SurfaceIndices};
 use crate::nurbs::srf_common::ruled_srf;
@@ -1338,7 +1338,9 @@ impl BSplineSurface {
     /// derivatives approximate them within `ang_tol_deg` degrees. With
     /// `opt_center` (point and normal of the tangent plane at the patch center) the
     /// center is given, else computed; the normal is unitized in place. The input
-    /// curves are changed in place as `N_FillNSidedHole` changes them.
+    /// curves are changed in place as `N_FillNSidedHole` changes them. The cross-boundary
+    /// derivatives across the inner curves are shortened where their blend would leave the
+    /// neighbour's tangent plane (WR-461, #1170).
     ///
     /// # Errors
     ///
@@ -1350,24 +1352,6 @@ impl BSplineSurface {
         deriv_crvs: &mut [Option<BSplineCurve>],
         ang_tol_deg: f64,
         opt_center: Option<(Point3, &mut Vec3)>,
-    ) -> Result<Vec<BSplineSurface>> {
-        Self::create_n_sided_patch_with(bdry_crvs, deriv_crvs, ang_tol_deg, opt_center, false)
-    }
-
-    /// [`BSplineSurface::create_n_sided_patch`] with the opt-in fix of WR-461 (#1170)
-    /// when `stay_inside`: the cross-boundary derivatives across the inner curves are
-    /// shortened where their blend would leave the neighbour's tangent plane
-    /// (`Kernel::fixes.corner_blend_stays_inside_neighbours`).
-    ///
-    /// # Errors
-    ///
-    /// As [`BSplineSurface::create_n_sided_patch`].
-    pub fn create_n_sided_patch_with(
-        bdry_crvs: &mut [BSplineCurve],
-        deriv_crvs: &mut [Option<BSplineCurve>],
-        ang_tol_deg: f64,
-        opt_center: Option<(Point3, &mut Vec3)>,
-        stay_inside: bool,
     ) -> Result<Vec<BSplineSurface>> {
         const OP: &str = OP_NSIDED;
         if deriv_crvs.len() < bdry_crvs.len() {
@@ -1392,13 +1376,7 @@ impl BSplineSurface {
         });
 
         // pass the call along to NLib
-        let res = fill_n_sided_hole_with(
-            &mut cur,
-            Some(der.as_mut_slice()),
-            ang_tol_deg,
-            center,
-            stay_inside,
-        );
+        let res = fill_n_sided_hole(&mut cur, Some(der.as_mut_slice()), ang_tol_deg, center);
         for (b, c) in bdry_crvs.iter_mut().zip(cur) {
             b.nurb = Some(c);
         }

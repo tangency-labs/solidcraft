@@ -142,31 +142,41 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 sheet_face = Some((solidcraft_doc::sheet::sheet_face_name(&body.name, &face), plane));
                 continue;
             }
-            let faces = body.body.faces(tolerance)?;
-            let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance))?;
+            // The model's own mesh of the body, which picks name their face from: made once and
+            // kept, so a face is captured without meshing the body again. A large body with many
+            // B-spline faces took tens of seconds to mesh here twice, at a tenth of its chord.
+            let mesh = body.mesh();
+            let count = body.body.face_count();
             // The triangles are grouped by face once, and a face's test reads only its own: the
             // work is the mesh plus one plane test per face, not the mesh once per face (a
             // modelled thread leaves thousands of faces, #6720).
-            work = work.saturating_add(mesh.triangles.len()).saturating_add(faces.len());
+            work = work.saturating_add(mesh.triangles.len()).saturating_add(count);
             if work > 2_000_000 {
                 return Err(bad(cmd, "face capture work limit exceeded; use an exact body and face index"));
             }
-            let by_face = super::face_triangles(&mesh, faces.iter().map(|face| face.index.saturating_add(1)).max().unwrap_or(0));
-            for face in faces {
-                if requested_index.is_some_and(|index| index != face.index) {
+            let by_face = super::face_triangles(&mesh, count);
+            for (index, tris) in by_face.iter().enumerate() {
+                if requested_index.is_some_and(|requested| requested != index) {
+                    continue;
+                }
+                // Whether the point is on the face is read from the mesh before the exact plane is
+                // asked for: a B-spline face's flatness is a kernel check, too slow for every face
+                // of a large body when the point names one.
+                if !super::face_contains(&mesh, tris, local_point, tolerance * 10.0) {
                     continue;
                 }
                 let Some(exact_plane) = (if fixed {
-                    body.body.planar_face(face.index).or_else(|| body.body.face_plane(face.index))
+                    body.body.planar_face(index).or_else(|| body.body.face_plane(index))
                 } else {
-                    body.body.face_plane(face.index).or_else(|| body.body.planar_face(face.index))
+                    body.body.face_plane(index).or_else(|| body.body.planar_face(index))
                 }) else {
                     continue;
                 };
+                // The exact plane's own origin lies on the face's plane: the distance test and the
+                // picked plane's offset read it, not a centre worked out from the mesh.
                 let normal = exact_plane.normal();
-                if (local_point - face.centroid).dot(normal).abs() > tolerance * 10.0
-                    || !super::face_contains(&mesh, by_face.get(face.index).map_or(&[][..], Vec::as_slice), local_point, tolerance * 10.0)
-                {
+                let on_plane = exact_plane.origin;
+                if (local_point - on_plane).dot(normal).abs() > tolerance * 10.0 {
                     continue;
                 }
                 if chosen.is_some() {
@@ -174,9 +184,9 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 }
                 let relative = mat_mul(&author_inverse, &frame);
                 let normal = apply_vector(&relative, normal).normalized().ok_or_else(|| bad(cmd, "invalid planar face normal"))?;
-                let centroid = apply_point(&relative, face.centroid);
-                let picked = Plane::from_normal(normal * centroid.dot(normal), normal).ok_or_else(|| bad(cmd, "invalid selected planar face"))?;
-                chosen = Some((body, face.index, path.clone(), picked));
+                let on_plane = apply_point(&relative, on_plane);
+                let picked = Plane::from_normal(normal * on_plane.dot(normal), normal).ok_or_else(|| bad(cmd, "invalid selected planar face"))?;
+                chosen = Some((body, index, path.clone(), picked));
             }
         }
     }
