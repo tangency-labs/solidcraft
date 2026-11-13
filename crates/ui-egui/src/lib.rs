@@ -838,6 +838,9 @@ pub struct SolveApp {
     pub synthetic_mods: egui::Modifiers,
     /// A click that came in the same frame as typing before it, held for the next frame.
     held_click: Vec<egui::Event>,
+    /// Pen-tip release positions from the platform, for this frame and for a held click.
+    pen_release: Option<egui::Pos2>,
+    held_pen_release: Option<egui::Pos2>,
     /// A synthetic press is held: its drag never moves the real cursor (`navigation::wrap_cursor`).
     pub(crate) synthetic_press: bool,
     control_rx: Option<Receiver<ControlRequest>>,
@@ -1060,6 +1063,8 @@ impl SolveApp {
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             held_click: Vec::new(),
+            pen_release: None,
+            held_pen_release: None,
             synthetic_press: false,
             control_rx: None,
             control_switch: Default::default(),
@@ -3619,6 +3624,12 @@ impl SolveApp {
     /// The frame's input before the app reads it: synthetic events, then what is typed while a
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
+        self.raw_input_hook_with_pen(raw, None);
+    }
+
+    /// Process a frame with a platform-identified pen-tip release in egui coordinates.
+    pub fn raw_input_hook_with_pen(&mut self, raw: &mut egui::RawInput, pen_release: Option<egui::Pos2>) {
+        self.pen_release = pen_release;
         self.synthetic_input(raw);
         finite_input(raw);
         self.hold_click_after_typing(raw);
@@ -3633,12 +3644,14 @@ impl SolveApp {
             let mut events = std::mem::take(&mut self.held_click);
             events.append(&mut raw.events);
             raw.events = events;
+            self.pen_release = self.pen_release.or(self.held_pen_release.take());
         }
         let button = raw.events.iter().position(|e| matches!(e, egui::Event::PointerButton { .. }));
         if let Some(i) = button
             && raw.events[..i].iter().any(issue_report::typing)
         {
             self.held_click = raw.events.split_off(i);
+            self.held_pen_release = self.pen_release.take();
         }
     }
 

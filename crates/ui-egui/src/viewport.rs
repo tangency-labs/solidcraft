@@ -5982,6 +5982,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::tools::on_click(app, &proj, p, mods.shift);
     }
     if let Some(p) = hover.filter(|_| inside) {
+        let pen_select = app.preferences.pen_tap_toggles_selection && resp.clicked_by(egui::PointerButton::Primary) && app.pen_release == Some(p);
         if app.tool.is_some() {
             crate::tools::on_hover(app, &proj, p, mods.shift);
         }
@@ -6086,14 +6087,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     // A text's resize or rotation handle: the text stays selected.
                 } else if !crate::sketch3d::click(app, &proj, p) {
                     match annotation {
-                        Some(sel) => select(app, Some(sel), add, allow_toggle),
+                        Some(sel) => select(app, Some(sel), add || pen_select, allow_toggle || pen_select),
                         // Clicking again on the same spot selects the next thing under it (not
                         // the second click of a double-click, which has its own actions).
-                        None if !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
+                        None if !pen_select && !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
                         None => {
                             let sel = cand.and_then(|c| c.1);
+                            // A pen tap on geometry toggles it. A tap on empty space clears.
+                            let (add, allow_toggle) = if pen_select { (sel.is_some(), true) } else { (add, allow_toggle) };
                             select(app, sel.clone(), add, allow_toggle);
-                            crate::select_other::note_click(app, p, if add { None } else { sel });
+                            crate::select_other::note_click(app, p, if add || pen_select { None } else { sel });
                         }
                     }
                 }
@@ -6121,6 +6124,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Double-click a sketch curve: select the chain joined to it end to end.
         if resp.double_clicked()
+            && !pen_select
             && !held
             && !dim_edit
             && app.tool.is_none()
@@ -6145,6 +6149,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Double-click an edge: select the edges that continue it smoothly (the loop).
         if resp.double_clicked()
+            && !pen_select
             && !held
             && !dim_edit
             && app.tool.is_none()
@@ -6163,6 +6168,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Double-click a face: edit a linked component in place, activate another component, or
         // else open the editor of the feature that made the face (as the Browser's row does).
         if resp.double_clicked()
+            && !pen_select
             && !held
             && !dim_edit
             && mods.is_none()
@@ -8165,6 +8171,53 @@ pub fn look_at_selection(app: &mut SolveApp) {
 mod tests {
     use super::*;
     use crate::navigation::*;
+
+    /// A pen tap reuses the viewport's ordinary picking and can clear without a keyboard.
+    #[test]
+    fn pen_taps_toggle_sketch_picks_when_enabled() {
+        use egui::{Event, Modifiers, PointerButton};
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,10],[20,10]],"infer":false})).unwrap();
+        h.app.cam.distance = 80.0;
+        h.frames(4);
+        let point = |h: &mut crate::scenario::Harness, world| {
+            let [x, y] = h.at(&json!({"world": world})).unwrap();
+            pos2(x as f32, y as f32)
+        };
+        let a = point(&mut h, [10, 0, 0]);
+        let b = point(&mut h, [10, 10, 0]);
+        let empty = point(&mut h, [-15, -10, 0]);
+        let tap = |h: &mut crate::scenario::Harness, pos, pen: bool, modifiers| {
+            let button = |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers };
+            h.frame_with(vec![Event::ModifiersChanged(modifiers), Event::PointerMoved(pos), button(true)]);
+            h.frame_with_pen(vec![button(false)], pen.then_some(pos));
+        };
+
+        tap(&mut h, a, true, Modifiers::NONE);
+        tap(&mut h, b, true, Modifiers::NONE);
+        assert_eq!(h.app.session.selection.len(), 1, "pen replaces the selection by default");
+        let only_b = h.app.session.selection.clone();
+
+        h.app.preferences.pen_tap_toggles_selection = true;
+        tap(&mut h, a, true, Modifiers::NONE);
+        assert_eq!(h.app.session.selection.len(), 2);
+        tap(&mut h, a, true, Modifiers::NONE);
+        assert_eq!(h.app.session.selection, only_b, "a repeated tap removes only the tapped line");
+        tap(&mut h, a, true, Modifiers::NONE);
+        assert_eq!(h.app.session.selection.len(), 2);
+        tap(&mut h, empty, true, Modifiers::NONE);
+        assert!(h.app.session.selection.is_empty());
+
+        tap(&mut h, a, true, Modifiers::NONE);
+        tap(&mut h, b, false, Modifiers::NONE);
+        assert_eq!(h.app.session.selection, only_b, "the following mouse click replaces the selection");
+        tap(&mut h, a, false, Modifiers::SHIFT);
+        assert_eq!(h.app.session.selection.len(), 2, "Shift-click still adds a pick");
+    }
 
     /// A component dragged with its Move triad is drawn as a layer: its bodies' scene is built
     /// once, where the drag found them, and drawn moved by the drag's motion, the rest of the

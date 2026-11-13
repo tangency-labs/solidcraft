@@ -202,6 +202,11 @@ impl Harness {
     /// One frame that receives all these events at once (a quick tap, or input queued during a
     /// slow frame), before any queued ones.
     pub fn frame_with(&mut self, events: Vec<egui::Event>) {
+        self.frame_with_pen(events, None);
+    }
+
+    /// One frame with a release identified as a pen tip by the platform.
+    pub fn frame_with_pen(&mut self, events: Vec<egui::Event>, pen_release: Option<egui::Pos2>) {
         self.tick();
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
@@ -210,7 +215,7 @@ impl Harness {
             events,
             ..Default::default()
         };
-        self.app.raw_input_hook(&mut raw);
+        self.app.raw_input_hook_with_pen(&mut raw, pen_release);
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             app.logic(ui.ctx());
