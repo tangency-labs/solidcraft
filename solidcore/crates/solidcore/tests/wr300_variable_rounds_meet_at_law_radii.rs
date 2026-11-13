@@ -441,3 +441,101 @@ fn retry_rail_search_holds_the_radius_as_the_first_does() {
         );
     }
 }
+
+/// The 10 box with its side faces `x = 10` and `y = 10` leaning in by `alpha` degrees from
+/// the top edges (`x <= 10 - tan(alpha) (10 - z)`, and the same in `y`), and its top edges
+/// along them rounded 0.5 -> 2 towards their common vertex (10, 10, 10), whose third edge
+/// (the side faces' meeting line) is not rounded.
+fn slanted_corner(k: &mut Kernel, alpha: f64) -> solidcore::Result<Brep> {
+    use solidcore::boolean::api_brep::boolean_intersection;
+    use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
+    let cube = create_box(k, Vec3::ZERO, 10.0, 10.0, 10.0).unwrap();
+    let mut x_side =
+        create_box(k, Point3::new(-100.0, -100.0, -100.0), 110.0, 200.0, 200.0).unwrap();
+    api_rotate(
+        k,
+        Some(TransformObject::Brep(&mut x_side)),
+        Point3::new(10.0, 0.0, 10.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        alpha,
+    )
+    .unwrap();
+    let mut y_side =
+        create_box(k, Point3::new(-100.0, -100.0, -100.0), 200.0, 110.0, 200.0).unwrap();
+    api_rotate(
+        k,
+        Some(TransformObject::Brep(&mut y_side)),
+        Point3::new(0.0, 10.0, 10.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        -alpha,
+    )
+    .unwrap();
+    let half = boolean_intersection(k, cube, x_side).unwrap();
+    let mut b = boolean_intersection(k, half, y_side).unwrap();
+    let corner = Point3::new(10.0, 10.0, 10.0);
+    let edges = [
+        edge_from_to(k, &b, Point3::new(10.0, 0.0, 10.0), corner),
+        edge_from_to(k, &b, Point3::new(0.0, 10.0, 10.0), corner),
+    ];
+    variable_radius_fillet(k, &mut b, &edges, 0.5, 2.0, 1, 1)?;
+    Ok(b)
+}
+
+/// `CalcRailIntEdgeuse`'s search for the adjacent round (the second rail ending on the side
+/// edge) holds its radius only at a corner calculated as constant radius, as the first
+/// round's search does. Where the side edge is square to the round's edge (a box) the ball
+/// whose foot is on the side edge is the end's, so the hold changed nothing. Here the side
+/// faces lean in 15 degrees, so the side edge is not square to the top edges.
+///
+/// Closed form, for the round along `y = 10`: its ball at `x = t` has radius
+/// `r(t) = 0.5 + 0.15 t`, centre `r` below the top and `r` inside the side face
+/// (outward normal `(0, cos a, -sin a)`). Its foot on that face is
+/// `(t, 10 - r (1 + sin a) / cos a + r cos a, 10 - r (1 + sin a))`, which is on the side edge
+/// (the plane `x <= 10 - tan(a) (10 - z)`) where `t = 10 - tan(a) (1 + sin a) r(t)`. That
+/// foot, and its mirror in `x = y` for the other round, are vertices of the result to 1e-9.
+/// The end-radius hold put the foot at `r = 2`, `t = 10 - 2 tan(a) (1 + sin a)`; there it
+/// failed with 1001 (the faces the rails enclose reach past the rails).
+#[test]
+fn a_round_meets_a_slanted_side_edge_on_its_law_ball() {
+    let alpha: f64 = 15.0;
+    let (sa, ca, ta) = (
+        alpha.to_radians().sin(),
+        alpha.to_radians().cos(),
+        alpha.to_radians().tan(),
+    );
+    let c = ta * (1.0 + sa);
+    let foot = |t: f64| {
+        let r = 0.5 + 0.15 * t;
+        Point3::new(
+            t,
+            10.0 - r * (1.0 + sa) / ca + r * ca,
+            10.0 - r * (1.0 + sa),
+        )
+    };
+    let law = foot((10.0 - 0.5 * c) / (1.0 + 0.15 * c));
+    let held = {
+        let t = 10.0 - 2.0 * c;
+        Point3::new(
+            t,
+            10.0 - 2.0 * (1.0 + sa) / ca + 2.0 * ca,
+            10.0 - 2.0 * (1.0 + sa),
+        )
+    };
+    for mut k in kernels() {
+        let b = slanted_corner(&mut k, alpha).unwrap();
+        let nearest = |p: Point3| {
+            b.vertices()
+                .ids()
+                .map(|v| vertex::point(&b, v).unwrap().distance(p))
+                .fold(f64::INFINITY, f64::min)
+        };
+        for p in [law, Point3::new(law.y, law.x, law.z)] {
+            assert!(
+                nearest(p) < 1e-9,
+                "no vertex at the law foot {p:?}: {}",
+                nearest(p)
+            );
+        }
+        assert!(nearest(held) > 0.1, "a vertex at the held foot {held:?}");
+    }
+}

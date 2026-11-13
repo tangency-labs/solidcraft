@@ -2306,13 +2306,23 @@ impl FilletBrep {
                 // Temporarily change this to a constant-radius function.
                 let si = RailSolvers::geom_solver(self, g2)?;
                 let _ = solvers.solver(si)?;
+                // WR-300 (#1023): upstream holds the adjacent round's radius here at every
+                // corner; this holds it only at a corner calculated as constant radius, as
+                // the first round's search and retry do. Where the side edge is not square
+                // to the round's edge, the ball meeting it is not the end's, and the end
+                // radius put the rail's end off the round.
+                let temp_si = if corners.corner(corner)?.is_calc_as_const_rad() {
+                    Some(si)
+                } else {
+                    None
+                };
                 let r = rail_edgeuse_intersect(
                     self,
                     k,
                     g2,
                     solvers,
                     target,
-                    Some(si),
+                    temp_si,
                     other_rail_index,
                     side_eu2,
                     guess,
