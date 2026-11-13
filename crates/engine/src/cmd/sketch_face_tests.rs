@@ -1006,5 +1006,5 @@ fn top_of_a_block_with_a_modeled_thread_and_rounded_corners_keeps_its_attachment
     run(&mut s, "parameters.change", json!({"name":radius,"expression":"3 mm"}));
     assert!(s.model.result(id).unwrap().error.is_none(), "{:?}", s.model.result(id).unwrap().error);
     let plane = s.model.state().sketch(id).unwrap().plane;
-    assert!((plane.origin.z - 20.).abs() < 1e-6 && plane.normal().dot(Vec3::Z) > 1. - 1e-9);
+    assert!((plane.origin.z - 20.).abs() < 1e-6 && plane.normal().z > 1. - 1e-9, "{plane:?}");
 }
