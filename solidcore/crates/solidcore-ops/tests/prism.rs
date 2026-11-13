@@ -381,7 +381,6 @@ fn sliver_bound(exact: &[Vec2], corner: Vec2, foot: Vec2, head: Vec2, tx: f64) -
 /// between the taper's crossing and the corner, and its area that of the triangle with that
 /// apex.
 #[test]
-#[ignore = "fails on main: un-ignored with the exact combine radius"]
 fn a_taper_passing_a_hair_off_a_corner_intersects_to_one_triangle() {
     session::set_thread_fixes(Vec::<&str>::new()).unwrap();
     let ([right_top, _, left_bottom, _], corner) = flange_outline();

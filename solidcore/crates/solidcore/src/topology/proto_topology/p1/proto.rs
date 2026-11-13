@@ -31,6 +31,10 @@ use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, VertexId};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 
 const OP: &str = "topology::proto_topology::p1";
+
+/// The factor of `CanCombineEdgeDefinitions`: the distance allowed between the curves of
+/// two combinable edge definitions, in units of their summed tolerances (upstream's).
+pub const ED_TOL_FACTOR: f64 = 5.0;
 const OP_POSITION: &str = "topology::proto_topology::p1::find_position_from_pcs";
 const OP_EVALUATE: &str = "topology::proto_topology::p1::ProtoTopologyManager::proto_edge_evaluate";
 const OP_SRC_TOPO: &str = "topology::proto_topology::p1::VertexDefinition::set_src_topo";
@@ -3533,6 +3537,25 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         ed1: EdgeDefId,
         ed2: EdgeDefId,
     ) -> Result<u64> {
+        self.can_combine_edge_definitions_within(k, geometry, ed1, ed2, ED_TOL_FACTOR)
+    }
+
+    /// [`ProtoTopologyManager::can_combine_edge_definitions`] with the distance allowed
+    /// between the two curves `factor` times the definitions' summed tolerances
+    /// (upstream's [`ED_TOL_FACTOR`], or 1 for exactly placed definitions; see
+    /// `proto_topology::p2`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`ProtoTopologyManager::can_combine_edge_definitions`].
+    pub fn can_combine_edge_definitions_within(
+        &self,
+        k: &Kernel,
+        geometry: &(impl ClassGeometry<O> + ProtoTopology<O>),
+        ed1: EdgeDefId,
+        ed2: EdgeDefId,
+        factor: f64,
+    ) -> Result<u64> {
         let d1 = self.ed(ed1)?;
         let d2 = self.ed(ed2)?;
         let null =
@@ -3557,7 +3580,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // Check distance: if they're too far apart, we can't combine them. (Upstream
         // compares the second curve over the first definition's interval.)
         let domain1 = d1.xsect_interval;
-        let tol = (d1.tolerance(k) + d2.tolerance(k)) * 5.0;
+        let tol = (d1.tolerance(k) + d2.tolerance(k)) * factor;
         if !are_same_curve(
             k,
             geometry,
