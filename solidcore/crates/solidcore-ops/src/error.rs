@@ -460,7 +460,7 @@ impl std::fmt::Display for OffsetRefusal {
             }
             OffsetRefusal::EdgeVanishes => write!(
                 f,
-                "an edge of its offset closes to nothing: the wall is as thick as the part is there; use a thinner or thicker wall"
+                "an edge of its offset closes to nothing: a vertex moves onto or past the edge's other end"
             ),
             OffsetRefusal::Unsound { what } => write!(f, "{what}"),
             OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
