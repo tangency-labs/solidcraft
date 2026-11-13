@@ -1526,44 +1526,35 @@ pub fn host_drop_targets(service: &LayoutService, layout: &HostLayout, instance:
             None,
             format!("tab:{}:end", card.section.0),
         );
-        for tab in &card.tabs {
-            // Only the leading half selects insertion before this measured tab.
-            // Keep the dragged tab's own slot, indexing after its removal; a
-            // trailing half on every tab would steal the natural edge regions.
-            let index = target.tabs.iter().take_while(|id| **id != tab.instance).filter(|id| *id != instance).count();
-            let before = tabs.get(index).map(|id| (*id).clone());
-            let bounds = rect(
-                tab.bounds.origin.x + if layout.direction == Direction::Rtl { tab.bounds.size.width / 2.0 } else { 0.0 },
-                tab.bounds.origin.y + 9.0,
-                tab.bounds.size.width / 2.0,
-                (tab.bounds.size.height - 18.0).max(1.0),
-            );
-            add(
-                HostDropTargetId::Tab { section: card.section.clone(), before },
-                bounds,
-                Destination::JoinTab { section: card.section.clone(), index },
-                // A measured own-group slot stays reorderable even when a
-                // short Bottom header lies wholly inside the docking band.
-                if card.zone == Zone::Bottom && source.id == target.id { 0 } else { 2 },
-                None,
-                format!("tab:{}:{index}", card.section.0),
-            );
-        }
-        if let Some(last) = card.tabs.last() {
-            let bounds = rect(
-                last.bounds.origin.x + if layout.direction == Direction::Ltr { last.bounds.size.width / 2.0 } else { 0.0 },
-                last.bounds.origin.y + 9.0,
-                last.bounds.size.width / 2.0,
-                (last.bounds.size.height - 18.0).max(1.0),
-            );
-            add(
-                HostDropTargetId::Tab { section: card.section.clone(), before: None },
-                bounds,
-                Destination::JoinTab { section: card.section.clone(), index: tabs.len() },
-                if card.zone == Zone::Bottom && source.id == target.id { 0 } else { 2 },
-                None,
-                format!("tab:{}:{}:end", card.section.0, tabs.len()),
-            );
+        let tab_priority = if card.zone == Zone::Bottom && source.id == target.id { 0 } else { 2 };
+        for (visible_index, tab) in card.tabs.iter().enumerate() {
+            for leading in [true, false] {
+                let next = card.tabs.get(visible_index + usize::from(!leading));
+                if !leading && next.is_some() && source.id != target.id {
+                    // Cross-group drops keep the natural docking edge here.
+                    continue;
+                }
+                // The two halves adjacent to a slot resolve to the same
+                // insertion identity, with the dragged tab already removed.
+                let index =
+                    next.map_or(tabs.len(), |next| target.tabs.iter().take_while(|id| **id != next.instance).filter(|id| *id != instance).count());
+                let before = tabs.get(index).map(|id| (*id).clone());
+                let half_width = tab.bounds.size.width / 2.0;
+                let right_half = leading == (layout.direction == Direction::Rtl);
+                add(
+                    HostDropTargetId::Tab { section: card.section.clone(), before },
+                    rect(
+                        tab.bounds.origin.x + if right_half { half_width } else { 0.0 },
+                        tab.bounds.origin.y + 9.0,
+                        half_width,
+                        (tab.bounds.size.height - 18.0).max(1.0),
+                    ),
+                    Destination::JoinTab { section: card.section.clone(), index },
+                    tab_priority,
+                    None,
+                    if leading { format!("tab:{}:{index}", card.section.0) } else { format!("tab:{}:{index}:after", card.section.0) },
+                );
+            }
         }
     }
     // Capacity excludes shell insets and reserved bottom chrome. Perimeter

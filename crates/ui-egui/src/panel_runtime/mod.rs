@@ -5,6 +5,10 @@ mod fixtures;
 mod host;
 mod interaction;
 mod layout;
+#[cfg(not(target_arch = "wasm32"))]
+mod native;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_ui;
 mod preferences;
 mod production;
 mod runtime;
@@ -17,6 +21,8 @@ pub use fixtures::*;
 pub use host::*;
 pub use interaction::*;
 pub use layout::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use native::NativeMonitor;
 pub use preferences::*;
 pub(crate) use preferences::{PanelLayoutSnapshot, panel_layout_matches, panel_layout_snapshot};
 pub(crate) use production::{
