@@ -56,7 +56,8 @@
 //!   to be relative to the iso circle's center, not the torus origin (#774).
 //!   Extraction, periodic wrapping and interval-length policy remain unchanged.
 //! - **Inside out (WR-500, #1490).** The constructor sets [`Torus::inside_out`] from
-//!   its `bInsideOut`, and `Clone` (and [`Torus::copy`]) copies it, so the surface and
+//!   its generator's bit (`bInsideOut` for the circle it makes, the given curve's own
+//!   for `pOptCircleNurb`), and `Clone` (and [`Torus::copy`]) copies it, so the surface and
 //!   its generating circle always agree (`SmSurfOfRevolution` Test #11 compares them).
 //!   Upstream's constructor only orients the minor circle with `bInsideOut`, leaving
 //!   `m_bInsideOut` `FALSE`, and its copy constructor resets it; a torus that forgot it
@@ -230,8 +231,9 @@ impl Torus {
     /// minor circle at `origin + major_radius x_axis` in the plane of `x_axis` and
     /// `x_axis x y_axis` over the domain's V interval, inside out with
     /// `opts.inside_out` (`SmCircle::CreateCanonical`); the generator is then not
-    /// tested for planarity (it is marked planar). The surface's own inside-out flag
-    /// is `opts.inside_out` (WR-500; upstream leaves it `false`).
+    /// tested for planarity (it is marked planar). The surface's own inside-out flag is
+    /// its generator's (WR-500; upstream leaves it `false`): `opts.inside_out` for the
+    /// circle made here, the given curve's own for `opts.circle_nurb`.
     ///
     /// # Errors
     ///
@@ -285,12 +287,17 @@ impl Torus {
 
         // (the self-intersection test of a major radius below the minor radius only
         // warns upstream); not upstream (WR-500): the surface is inside out with its
-        // generator
+        // generator, the circle made inside out with `opts.inside_out` or the one given
+        let inside_out = match base.gen_curve.as_ref().map(Curve::kind) {
+            Some(CurveKind::Ellipse(e)) => e.inside_out(),
+            Some(CurveKind::Line(l)) => l.inside_out(),
+            _ => false,
+        };
         Ok(Self {
             base,
             major_radius,
             minor_radius,
-            inside_out: opts.inside_out,
+            inside_out,
         })
     }
 
