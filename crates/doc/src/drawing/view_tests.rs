@@ -11,7 +11,7 @@ use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
 use crate::drawing::{Excluded, Sheet, Source};
-use crate::drawing_view::{Exploded, JointPose, OccurrencePaths, Pose, StudyStep};
+use crate::drawing_view::{Exploded, JointPose, OccurrencePaths, Pose, StudyStep, ViewConfiguration};
 use crate::format::DRAWING;
 use crate::ids::IdSource;
 
@@ -373,6 +373,67 @@ fn a_pose_keeps_its_limits_on_reading() {
     }
 }
 
+/// A view's configuration saves as the row's id, as an exploded view's choice saves its view, and
+/// follows down its chain until a view sets its own. "active" is a setting of its own: a child can
+/// draw the active configuration under a parent that draws another. A view that sets none saves
+/// nothing and draws the active one.
+#[test]
+fn a_configuration_follows_its_parent_and_saves_by_its_row_id() {
+    let (mut d, _, [front, right, top]) = three();
+    let resolved = |d: &Drawing, id: u64| d.resolve_view(id).unwrap().configuration;
+    assert_eq!(resolved(&d, top), Setting { value: ViewConfiguration::Active, set_by: SetBy::Default });
+    view_mut(&mut d, front).settings.configuration = Some(ViewConfiguration::Row(17));
+    d.validate().unwrap();
+    assert_eq!(resolved(&d, right), Setting { value: ViewConfiguration::Row(17), set_by: SetBy::Parent(front) });
+    assert_eq!(resolved(&d, top), Setting { value: ViewConfiguration::Row(17), set_by: SetBy::Parent(front) });
+    view_mut(&mut d, right).settings.configuration = Some(ViewConfiguration::Active);
+    assert_eq!(resolved(&d, top), Setting { value: ViewConfiguration::Active, set_by: SetBy::Parent(right) });
+    assert_eq!(resolved(&d, front), Setting { value: ViewConfiguration::Row(17), set_by: SetBy::This });
+    let v = file(&d);
+    let saved = |id: u64| v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(id))).cloned().unwrap();
+    assert_eq!(saved(front)["settings"], json!({"scale": "1:2", "configuration": {"row": 17}}));
+    assert_eq!(saved(right)["settings"]["configuration"], json!("active"));
+    assert_eq!(saved(top)["settings"].get("configuration"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+}
+
+/// A saved configuration reads as "active" or a row's id, whatever the id: a row the design no
+/// longer has reads (the view says why where it draws, never refuses the file). Anything else is
+/// refused, a row's name included: the file names rows by id.
+#[test]
+fn a_configuration_reads_as_active_or_a_row_id() {
+    let (d, _, _) = three();
+    let at = d.views.iter().position(|view| matches!(view.kind, ViewKind::Base { .. })).unwrap();
+    let with = |configuration: Value| {
+        refused(&d, |v| {
+            v["views"][at]["settings"]["configuration"] = configuration;
+        })
+    };
+    // What each reads as: "read", or a part of why it is refused ("" for refused, whatever the words).
+    let cases = [
+        (json!("active"), "read"),
+        (json!(null), "read"),
+        (json!({"row": 0}), "read"),
+        (json!({"row": 999_999}), "read"),
+        (json!({"row": u64::MAX}), "read"),
+        (json!({"row": -1}), "invalid value"),
+        (json!({"row": 1.5}), "invalid type"),
+        (json!({"row": "Tall"}), "invalid type"),
+        (json!("Tall"), "unknown variant"),
+        (json!("Active"), "unknown variant"),
+        (json!({"row": 3, "view": 4}), ""),
+        (json!({"rows": [3]}), "unknown variant"),
+        (json!(3), ""),
+        (json!([]), ""),
+    ];
+    for (configuration, says) in cases {
+        let e = with(configuration.clone());
+        assert!(if says.is_empty() { e != "read" } else { e.contains(says) }, "{configuration}: {e}");
+    }
+}
+
 /// Seeded changes to a view's saved choice: each reads or is refused, never panics, and what reads
 /// saves as the same bytes and resolves.
 #[test]
@@ -405,6 +466,7 @@ fn seeded_changes_to_what_a_view_shows_read_or_are_refused() {
         let mut v = file(&d);
         v["views"][at]["settings"]["occurrences"] = list(100);
         v["views"][at]["settings"]["hide"] = list(200);
+        v["views"][at]["settings"]["configuration"] = json!({"row": id(seed, 300)});
         let Ok(read) = Drawing::from_json(&v.to_string()) else { continue };
         let again = read.to_json().unwrap();
         assert_eq!(Drawing::from_json(&again).unwrap().to_json().unwrap(), again, "seed {seed}");

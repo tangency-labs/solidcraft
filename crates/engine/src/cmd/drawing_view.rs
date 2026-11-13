@@ -4,7 +4,8 @@
 //! `drawing.view.inspect` and `drawing.view.edit` (W17c, #4816) read and change a saved view of a
 //! drawing: each setting with where its value comes from ([`solidcraft_doc::drawing::Drawing::resolve_view`])
 //! and where the view sits on its sheet ([`crate::drawing_view::on_sheet`]), and a change as one
-//! undo step that evaluates no model.
+//! undo step. Drawing or measuring a view of another configuration evaluates a copy of the design
+//! ([`crate::drawing_view::copy_for`]); the design is unchanged.
 //!
 //! `drawing.view.move_to_sheet` and `drawing.view.copy_to_sheet` (#4816) put a saved view on a
 //! sheet: the views lined up with it go with it, and keep their places beside it. A copy is
@@ -31,6 +32,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use solidcore_record::Plane;
 use solidcore_record::Vec2;
+use solidcraft_doc::config::RowKey;
 use solidcraft_doc::display_units::unit_scale;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
@@ -38,7 +40,7 @@ use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, rea
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace, check_occurrence_paths, check_pose};
 use solidcraft_doc::drawing_view::{
-    Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewDirection, ViewOverrides,
+    Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
@@ -58,11 +60,11 @@ use crate::drawing_view::{
 };
 use crate::params::bad;
 use crate::schema::drawing_view::{
-    AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, DrawnJointResult,
-    EditParams, EditResult, ExplodedParam, ExtentsResult, FromResult, InspectParams, InspectResult, LineResult, LinesStatusResult, MeasureParam,
-    MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams,
-    ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam, StudyStepResult,
-    ToSheetResult, ViewLineParam, ViewResult, ViewSet,
+    AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, ConfigurationResult, CopyParams,
+    CreateResult, DPI_RANGE, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FromResult, InspectParams,
+    InspectResult, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult,
+    PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams,
+    SnapshotResult, SourceResult, StudyPoseParam, StudyStepResult, ToSheetResult, ViewLineParam, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -99,14 +101,14 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
-        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies or nothing_chosen)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {visual_style, scale}}. Read-only; no model is evaluated."),
+        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration or not_configured)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {visual_style, scale}}. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged."),
     CommandSpec::new(EDIT, "Edit Drawing View", crate::checked!("drawing.view.edit", edit))
         .icon("edit")
         .in_drawing()
         .doc_only()
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditResult>)
-        .params("view: a saved view's id; set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, line_group?: an ISO 128 line group by its wide line (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), source?: {occurrences: [[ids…]]}, hide?: [[ids…]] as drawing.view.snapshot's, exploded?, pose?: as drawing.view.base's: each a value, or null to follow the parent (a base view keeps a scale; a base view's line group follows its sheet's, then its drawing's); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it]}. One undo step; no model is evaluated."),
+        .params("view: a saved view's id; set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, line_group?: an ISO 128 line group by its wide line (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), source?: {occurrences: [[ids…]]}, hide?: [[ids…]] as drawing.view.snapshot's, exploded?, pose?, configuration?: as drawing.view.base's: each a value, or null to follow the parent (a base view keeps a scale; a base view's line group follows its sheet's, then its drawing's); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it]}. One undo step; no model is evaluated, but to check a new source or hide, a view of another configuration evaluates a copy of the design; the design is unchanged."),
     CommandSpec::new(MOVE, "Move View to Sheet", crate::checked!("drawing.view.move_to_sheet", move_to_sheet))
         .icon("move")
         .in_drawing()
@@ -127,14 +129,14 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&BASE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); visual_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?, source?: {occurrences: [[ids…]]}, hide?: [[ids…]] (as drawing.view.snapshot's), exploded?: \"assembled\" (default) or an exploded view of the design by its name or id, pose?: \"designed\" (default), [{joint: id or name, values: [as joint.drive takes them]}] or {study: id or name, step: a whole step of its timeline}: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space or lies over its title block]}. A view of the drawing's design. One undo step; no model is evaluated."),
+        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); visual_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?, source?: {occurrences: [[ids…]]}, hide?: [[ids…]] (as drawing.view.snapshot's), exploded?: \"assembled\" (default) or an exploded view of the design by its name or id, pose?: \"designed\" (default), [{joint: id or name, values: [as joint.drive takes them]}] or {study: id or name, step: a whole step of its timeline}, configuration?: \"active\" (default) or a row of the design's configuration table by its name or id: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space or lies over its title block]}. A view of the drawing's design. One undo step; a view of another configuration evaluates a copy of the design; the design is unchanged."),
     CommandSpec::new(PROJECTED, "Projected View", crate::checked!("drawing.view.projected", projected))
         .icon("new")
         .in_drawing()
         .doc_only()
         .contract(&PROJECTED_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("parent: a saved view's id; side: left, right, above or below, where it sits (the drawing's projection says which side of the model it shows); place?: {at: [x, y]} or {aligned: n} (default: lined up with its parent, its boundary 20 mm past the parent's) → {view, sheet: its parent's, scale: its parent's, boundary_mm, outside?}. Its scale and display settings follow its parent; drawing.view.edit sets its own. One undo step; no model is evaluated."),
+        .params("parent: a saved view's id; side: left, right, above or below, where it sits (the drawing's projection says which side of the model it shows); place?: {at: [x, y]} or {aligned: n} (default: lined up with its parent, its boundary 20 mm past the parent's) → {view, sheet: its parent's, scale: its parent's, boundary_mm, outside?}. Its scale and display settings follow its parent; drawing.view.edit sets its own. One undo step; a view of another configuration evaluates a copy of the design; the design is unchanged."),
 ];
 
 fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
@@ -434,6 +436,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let mut sessions = ViewSessions::new(s);
     let placed = crate::drawing_view::on_sheet_from(&mut sessions, d, view.id, INSPECT)?;
     let pose = pose_result(s, &mut sessions, &resolved, view.settings.pose.clone());
+    let configuration = configuration_result(&mut sessions, &resolved, view.settings.configuration);
     let (parent, side) = match view.kind {
         ViewKind::Base { .. } => (None, None),
         ViewKind::Projected { parent, side } => (Some(ids::encode(parent)), Some(snake_name(side))),
@@ -462,6 +465,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             hide: setting(resolved.hide, own.hide.clone().map(Some), path_lists),
             exploded: setting(resolved.exploded, own.exploded, exploded_value),
             pose,
+            configuration,
         },
         reference_shown_percent: view.reference_shown_percent,
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
@@ -497,9 +501,14 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let found = Found {
         exploded: set.exploded.as_ref().map(|chosen| chosen.as_ref().map(|chosen| exploded_of(s, chosen, EDIT)).transpose()).transpose()?,
         pose: set.pose.as_ref().map(|chosen| chosen.as_ref().map(|chosen| pose_of(s, chosen, EDIT)).transpose()).transpose()?,
+        configuration: set
+            .configuration
+            .as_ref()
+            .map(|chosen| chosen.as_ref().map(|chosen| configuration_of(s, chosen, EDIT)).transpose())
+            .transpose()?,
     };
     let descendants = descendants(s.drawing(EDIT)?, id, |_| true);
-    let apart = found.exploded.is_some() || found.pose.is_some();
+    let apart = found.exploded.is_some() || found.pose.is_some() || found.configuration.is_some();
     if apart || set.visual_style.is_some() || set.reference_style.is_some() || set.linked.is_some() {
         let mut staged = Drawing::clone(s.drawing(EDIT)?);
         change(&mut staged, id, set, &found)?;
@@ -559,11 +568,13 @@ fn descendants(d: &Drawing, id: u64, follows: impl Fn(&View) -> bool) -> Vec<u64
 }
 
 /// What an edit's choices name in the design, found there before it changes anything: its exploded
-/// view ([`exploded_of`]) and its position ([`pose_of`]), each `None` when the edit leaves it.
+/// view ([`exploded_of`]), its position ([`pose_of`]) and its configuration ([`configuration_of`]),
+/// each `None` when the edit leaves it.
 #[derive(Default)]
 struct Found {
     exploded: Option<Option<Exploded>>,
     pose: Option<Option<Pose>>,
+    configuration: Option<Option<ViewConfiguration>>,
 }
 
 /// `set` made on view `id` of `d`, with what it names in the design as `found`: the fields it changes,
@@ -619,6 +630,9 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
     if let Some(pose) = &found.pose {
         own.pose = pose.clone();
     }
+    if let Some(configuration) = found.configuration {
+        own.configuration = configuration;
+    }
     if let Some(percent) = set.reference_shown_percent {
         view.reference_shown_percent = percent;
     }
@@ -651,6 +665,7 @@ fn changed_fields(a: &View, b: &View) -> Vec<String> {
         ("hide", x.hide != y.hide),
         ("exploded", x.exploded != y.exploded),
         ("pose", x.pose != y.pose),
+        ("configuration", x.configuration != y.configuration),
         ("reference_shown_percent", a.reference_shown_percent != b.reference_shown_percent),
         ("view", a.kind != b.kind),
         ("place", a.place != b.place),
@@ -682,6 +697,45 @@ fn extents_result(extents: &Extents, unmeasured: Option<Unmeasured>) -> ExtentsR
 /// An exploded choice as inspect shows it and a view saves it: `"assembled"`, or `{"view": id}`.
 fn exploded_value(exploded: Exploded) -> Value {
     serde_json::to_value(exploded).unwrap_or(Value::Null)
+}
+
+/// A configuration as inspect shows it and a view saves it: `"active"`, or `{"row": id}`.
+fn configuration_value(configuration: ViewConfiguration) -> Value {
+    serde_json::to_value(configuration).unwrap_or(Value::Null)
+}
+
+/// Saved view `view`'s configuration as inspect shows it, where `own` is what the view sets itself, and
+/// what it draws from `sessions`: the row its copy is put in, or else the design's active row while the
+/// design is still in it, and the features the row fails to build that the design builds
+/// ([`crate::drawing_view::ViewCopy`]).
+fn configuration_result(sessions: &mut ViewSessions, view: &ResolvedView, own: Option<ViewConfiguration>) -> ConfigurationResult {
+    let setting = setting(view.configuration, own, configuration_value);
+    let choice = sessions.choice(view);
+    // The answer the key already holds for a view of the active row: the design isn't compared again.
+    let in_active = choice.row().is_none() && sessions.matches();
+    let (drawn, errors) = match sessions.drawing(&choice) {
+        Ok((from, failing)) => {
+            let row = match choice.row() {
+                Some(row) => from.doc.configs.row(RowKey::Id(row)),
+                None => from.doc.configs.active_row().filter(|_| in_active),
+            };
+            (row.map(|row| DrawnRowResult { id: row.id, name: row.name.clone() }), failing.to_vec())
+        }
+        Err(_) => (None, Vec::new()),
+    };
+    ConfigurationResult { setting, drawn, errors }
+}
+
+/// `chosen` as a view saves it, for `cmd`: active, or a row of the design's configuration table found
+/// by its id or its name, as `config.activate` finds one, saved by its id.
+fn configuration_of(s: &Session, chosen: &ConfigurationParam, cmd: &str) -> Result<ViewConfiguration> {
+    let key = match chosen {
+        ConfigurationParam::Active => return Ok(ViewConfiguration::Active),
+        ConfigurationParam::Id(id) => RowKey::Id(*id),
+        ConfigurationParam::Name(name) => RowKey::Name(name),
+    };
+    let row = s.doc.configs.row(key).ok_or_else(|| bad(cmd, format!("no configuration `{key}` in the design")))?;
+    Ok(ViewConfiguration::Row(row.id))
 }
 
 /// `chosen` as a view saves it, for `cmd`: assembled, or an exploded view of the design found by its
@@ -924,6 +978,7 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                         line_group: matches!(resolved.line_group.set_by, SetBy::This | SetBy::Parent(_)).then_some(resolved.line_group.value),
                         exploded: Some(resolved.exploded.value).filter(|exploded| *exploded != Exploded::Assembled),
                         pose: Some(resolved.pose.value.clone()).filter(|pose| *pose != Pose::Designed),
+                        configuration: Some(resolved.configuration.value).filter(|row| *row != ViewConfiguration::Active),
                     };
                     view.place = ViewPlace::At([to.x, to.y]);
                 }
@@ -989,6 +1044,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         line_group: None,
         exploded: request.exploded.as_ref().map(|chosen| exploded_of(s, chosen, BASE)).transpose()?,
         pose: request.pose.as_ref().map(|chosen| pose_of(s, chosen, BASE)).transpose()?,
+        configuration: request.configuration.as_ref().map(|chosen| configuration_of(s, chosen, BASE)).transpose()?,
     };
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };

@@ -2,8 +2,9 @@
 //! and change the open drawing's own settings. A drawing lives in its design's file
 //! ([`solidcraft_doc::Document::drawings`]); while one is open, the drawing commands change it and
 //! the model's wait ([`super::Part`]). Each change of a drawing is one undo step of that drawing,
-//! and evaluates nothing; making and deleting one are steps of the model, whose list of drawings
-//! they change.
+//! and evaluates no model, but a view of another configuration it measures evaluates a copy of the
+//! design; the design is unchanged. Making and deleting one are steps of the model, whose list of
+//! drawings they change.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
