@@ -711,7 +711,11 @@ const OP_SHEET_OF: &str = "topology::brep::sheet::sheet_of";
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::curve::curve::Curve;
     use crate::nurbs::math::NOW;
+    use crate::primitive::api_curves::{create_arc, create_line_segment};
+    use crate::sweep::api_surfaces::create_skin_primitive;
+    use crate::topology::EdgeId;
 
     /// A row of the crease's net at `x`, `z`: y from 0 to 4.
     fn row(x: f64, z: f64) -> Vec<CPoint> {
@@ -799,15 +803,6 @@ mod tests {
         let b = sheet(&mut k, &lifted);
         assert!(one_surface(&k, &b).unwrap().is_none());
     }
-}
-
-#[cfg(test)]
-mod merged_tests {
-    use super::*;
-    use crate::curve::curve::Curve;
-    use crate::primitive::api_curves::{create_arc, create_line_segment};
-    use crate::sweep::api_surfaces::create_skin_primitive;
-    use crate::topology::EdgeId;
 
     /// The flat arch: the line from (10, 0) to (0, 0) and the half circle about (5, 5) of
     /// radius 5 from (10, 5) over (5, 10) to (0, 5) (two quadratic spans at a double knot),
