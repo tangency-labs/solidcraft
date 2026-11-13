@@ -1,15 +1,15 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
-//! blend from one curve's end to another's, and circles and arcs. The curve is the record's
-//! ([`Curve`]); the knots, the map's carrying of the control points, the views' meeting, the
-//! curvature, the blend and the circles are the kernel's
-//! ([`solidcore::nurbs::knots::clamped_uniform`],
+//! blend from one curve's end to another's, circles and arcs, and a curve extended at an end.
+//! The curve is the record's ([`Curve`]); the knots, the map's carrying of the control points,
+//! the views' meeting, the curvature, the blend, the circles and the extension are the
+//! kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
 //! [`solidcore::nurbs::crv_basic::Curve::transform`],
 //! [`solidcore::intersect::views::curves_from_views`],
 //! [`solidcore::query::continuity::curve_comb`], [`solidcore::curve::blend::blend_curve`],
 //! [`solidcore::curve::ellipse::Ellipse::arc`],
-//! [`solidcore::curve::ellipse::Ellipse::circle_from_3_points`]). Ops checks the inputs and
-//! converts.
+//! [`solidcore::curve::ellipse::Ellipse::circle_from_3_points`],
+//! [`solidcore::nurbs::crv_basic::Curve::extend_by_dist`]). Ops checks the inputs and converts.
 
 use solidcore::curve::arc::ArcDefinition;
 use solidcore::curve::blend::{self as kblend, BlendEnd};
@@ -17,6 +17,8 @@ use solidcore::curve::curve::Curve as KCurve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::from_parameters::{from_parameters, EdgeCurve};
 use solidcore::error::geom::GeomFailure;
+use solidcore::nurbs::crv_adv::p1::{Continuity, CurveEnd};
+use solidcore::nurbs::crv_geom::ToleranceKind;
 use solidcore::geom::certified::Verdict;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
@@ -29,7 +31,7 @@ use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural};
 
 use crate::body::REGULAR_RATIO;
 use crate::continuity::{tooth, CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH};
-use crate::curve_knots::{net_of, record_of};
+use crate::curve_knots::{net_of, nurb_of, record_of};
 use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
@@ -417,6 +419,74 @@ fn on_unit(curve: &Curve) -> Result<Curve> {
     run("curve::on_unit", |_| {
         nurb.reparam_to_interval(Interval { ul: 0.0, ur: 1.0 })?;
         Ok(record_of(&nurb))
+    })?
+}
+
+/// Which end of a curve [`extend_curve`] grows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurveEndAt {
+    /// Back from its start.
+    Start,
+    /// On from its end.
+    End,
+    /// Both: the start first, then the end, each by the length.
+    Both,
+}
+
+/// How [`extend_curve`] continues a curve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CurveExtension {
+    /// The end span's own polynomial (or rational) continued, with no knot left at the old
+    /// end: the curve's derivatives of every order carry on across it (the kernel's
+    /// [`Continuity::Cmax`]).
+    Natural,
+    /// A straight piece along the end tangent, joined to the curve as one spline of its
+    /// degree (G1; the kernel's [`Continuity::G1`]).
+    Linear,
+}
+
+/// `curve` made longer by `length` (mm, of arc length) at `at`, continued as `how` says
+/// ([`solidcore::nurbs::crv_basic::Curve::extend_by_dist`]): the curve over its old domain is
+/// the curve as it was, the extension runs on past it (below its start, above its end). A
+/// linear extension is `length` long to the rounding; a natural one to the kernel's stop
+/// (its secant steps end within 3 % of `length`, or after five). A clamped spline or rational
+/// spline, open.
+///
+/// # Errors
+/// [`Error::Argument`] for a `length` not finite and above 0, a curve that is not a valid
+/// clamped spline or rational spline, a closed one (a periodic curve, or one whose ends meet
+/// to the kernel's model tolerance), or an extension the record cannot hold; the kernel's
+/// status otherwise (a natural extension of a rational curve whose weights leave the
+/// kernel's range).
+pub fn extend_curve(
+    curve: &Curve,
+    at: CurveEndAt,
+    length: f64,
+    how: CurveExtension,
+) -> Result<Curve> {
+    if !(length.is_finite() && length > 0.0) {
+        return Err(Error::Argument);
+    }
+    let nurb = nurb_of(curve)?;
+    if nurb.is_closed() {
+        return Err(Error::Argument);
+    }
+    let continuity = match how {
+        CurveExtension::Natural => Continuity::Cmax,
+        CurveExtension::Linear => Continuity::G1,
+    };
+    let ends: &[CurveEnd] = match at {
+        CurveEndAt::Start => &[CurveEnd::Start],
+        CurveEndAt::End => &[CurveEnd::End],
+        CurveEndAt::Both => &[CurveEnd::Start, CurveEnd::End],
+    };
+    run("curve::extend_curve", |_| {
+        let mut extended = nurb;
+        for &end in ends {
+            extended = extended.extend_by_dist(length, ToleranceKind::Absolute, end, continuity)?;
+        }
+        Ok(record_of(&extended))
     })?
 }
 
@@ -1070,5 +1140,156 @@ mod tests {
         assert_eq!(arc_through(twice), Err(Error::Argument));
         let nan = [[f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
         assert_eq!(circle_through(nan), Err(Error::Argument));
+    }
+
+    /// A cubic of six control points, two interior knots, bending both ways.
+    const WAVE: [[f64; 3]; 6] = [
+        [0.0, 0.0, 0.0],
+        [1.0, 2.0, 0.0],
+        [2.0, -1.0, 0.0],
+        [3.0, 3.0, 0.0],
+        [4.0, 0.0, 1.0],
+        [5.0, 1.0, 0.0],
+    ];
+
+    /// The domain of a clamped spline: its first and last knot.
+    fn domain(c: &Curve) -> [f64; 2] {
+        let (Curve::Spline { knots, .. } | Curve::RationalSpline { knots, .. }) = c else {
+            panic!("a spline: {c:?}")
+        };
+        [knots[0], knots[knots.len() - 1]]
+    }
+
+    /// The arc length of `c` from `a` to `b`, by the kernel.
+    fn length(c: &Curve, a: f64, b: f64) -> f64 {
+        net_of(c)
+            .unwrap()
+            .arc_length(a, b, 1e-12, ToleranceKind::Relative)
+            .unwrap()
+    }
+
+    /// The point, first and second derivative of `c` at `t`, from the side `side`.
+    fn jet(c: &Curve, t: f64, side: solidcore::nurbs::knots::Side) -> Vec<Vec3> {
+        net_of(c).unwrap().derivs(t, side, 2).unwrap()
+    }
+
+    /// `a` and `b` are the same curve over `[0, 1]`: the same point at 201 parameters.
+    fn same_on_unit(a: &Curve, b: &Curve, tol: f64) {
+        for i in 0..=200 {
+            let t = f64::from(i) / 200.0;
+            let (p, q) = (at(a, t), at(b, t));
+            assert!(dist(p, q) <= tol, "at {t}: {p:?} and {q:?}");
+        }
+    }
+
+    #[test]
+    fn a_linear_extension_is_straight_along_the_end_tangent_and_as_long_as_asked() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let old = length(&c, 0.0, 1.0);
+        let longer = extend_curve(&c, CurveEndAt::End, 2.0, CurveExtension::Linear).unwrap();
+        same_on_unit(&c, &longer, 1e-12);
+        let [lo, hi] = domain(&longer);
+        assert_eq!(lo, 0.0);
+        assert!(hi > 1.0, "{hi}");
+        assert!((length(&longer, 1.0, hi) - 2.0).abs() < 1e-9);
+        assert!((length(&longer, lo, hi) - old - 2.0).abs() < 1e-9);
+        // Straight on from the end along P5 - P4 = (1, 1, -1) / sqrt 3, the clamped end's tangent.
+        let end = WAVE[5];
+        let s = 1.0 / 3f64.sqrt();
+        for i in 1..=20 {
+            let t = 1.0 + (hi - 1.0) * f64::from(i) / 20.0;
+            let p = at(&longer, t);
+            let d = [p[0] - end[0], p[1] - end[1], p[2] - end[2]];
+            let along = (d[0] + d[1] - d[2]) * s;
+            let off = dist(d, [along * s, along * s, -along * s]);
+            assert!(along > 0.0 && off < 1e-12, "at {t}: {p:?}");
+        }
+        let far = at(&longer, hi);
+        assert!((dist(far, end) - 2.0).abs() < 1e-12, "{far:?}");
+    }
+
+    #[test]
+    fn a_natural_extension_keeps_the_ends_curvature() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let old = length(&c, 0.0, 1.0);
+        let longer = extend_curve(&c, CurveEndAt::Start, 1.5, CurveExtension::Natural).unwrap();
+        same_on_unit(&c, &longer, 1e-12);
+        let [lo, hi] = domain(&longer);
+        assert!(lo < 0.0 && hi == 1.0, "{lo} {hi}");
+        // the kernel's stop: within 3 % of the length asked
+        let grown = length(&longer, lo, 0.0);
+        assert!((grown - 1.5).abs() <= 0.03 * 1.5, "{grown}");
+        assert!((length(&longer, lo, hi) - old - grown).abs() < 1e-9);
+        // The start span's polynomial carries on: the point and its first two derivatives at
+        // the old start are the same from the extension's side as on the curve.
+        use solidcore::nurbs::knots::Side;
+        let (was, now) = (jet(&c, 0.0, Side::Right), jet(&longer, 0.0, Side::Left));
+        for (a, b) in was.iter().zip(&now) {
+            let gap = dist([a.x, a.y, a.z], [b.x, b.y, b.z]);
+            assert!(gap < 1e-9 * (1.0 + a.length()), "{a:?} and {b:?}");
+        }
+    }
+
+    #[test]
+    fn both_ends_grow_and_the_curve_between_stays() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let old = length(&c, 0.0, 1.0);
+        let longer = extend_curve(&c, CurveEndAt::Both, 1.0, CurveExtension::Linear).unwrap();
+        same_on_unit(&c, &longer, 1e-12);
+        let [lo, hi] = domain(&longer);
+        assert!(lo < 0.0 && hi > 1.0, "{lo} {hi}");
+        assert!((length(&longer, lo, 0.0) - 1.0).abs() < 1e-9);
+        assert!((length(&longer, 1.0, hi) - 1.0).abs() < 1e-9);
+        assert!((length(&longer, lo, hi) - old - 2.0).abs() < 1e-9);
+        // a rational arc keeps its circle under the extension
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = Curve::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: vec![
+                [10.0, 0.0, 0.0, 1.0],
+                [10.0 * w, 10.0 * w, 0.0, w],
+                [0.0, 10.0, 0.0, 1.0],
+            ],
+        };
+        let more = extend_curve(&arc, CurveEndAt::End, 3.0, CurveExtension::Natural).unwrap();
+        assert!(matches!(more, Curve::RationalSpline { .. }));
+        same_on_unit(&arc, &more, 1e-12);
+        let [_, hi] = domain(&more);
+        for i in 0..=20 {
+            let p = at(&more, 1.0 + (hi - 1.0) * f64::from(i) / 20.0);
+            assert!((dist(p, [0.0; 3]) - 10.0).abs() < 1e-9, "{p:?} off the circle");
+        }
+    }
+
+    #[test]
+    fn a_closed_curve_or_a_bad_length_is_not_extended() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        for l in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                extend_curve(&c, CurveEndAt::End, l, CurveExtension::Linear),
+                Err(Error::Argument),
+                "{l}"
+            );
+        }
+        let periodic = crate::curve_fit::closed_cv_curve(&SQUARE, 3).unwrap();
+        assert_eq!(
+            extend_curve(&periodic, CurveEndAt::End, 1.0, CurveExtension::Natural),
+            Err(Error::Argument)
+        );
+        let mut ring = SQUARE.to_vec();
+        ring.push(SQUARE[0]);
+        let clamped_ring = cv_curve(&ring, 3).unwrap();
+        assert_eq!(
+            extend_curve(&clamped_ring, CurveEndAt::Start, 1.0, CurveExtension::Linear),
+            Err(Error::Argument)
+        );
+        let line = Curve::Line {
+            start: [0.0; 3],
+            end: [1.0; 3],
+        };
+        assert_eq!(
+            extend_curve(&line, CurveEndAt::End, 1.0, CurveExtension::Linear),
+            Err(Error::Argument)
+        );
     }
 }
