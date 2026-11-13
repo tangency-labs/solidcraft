@@ -1210,7 +1210,10 @@ mod tests {
         assert_eq!(lo, 0.0);
         assert!(hi > 1.0, "{hi}");
         let grown = length(&longer, 1.0, hi);
-        assert!(matches!(grown, Ok(l) if (l - 2.0).abs() < 1e-9), "{grown:?}");
+        assert!(
+            matches!(grown, Ok(l) if (l - 2.0).abs() < 1e-9),
+            "{grown:?}"
+        );
         // Straight on from the end along P5 - P4 = (1, 1, -1) / sqrt 3, the clamped end's tangent.
         let end = WAVE[5];
         let s = 1.0 / 3f64.sqrt();
@@ -1259,7 +1262,10 @@ mod tests {
         assert!(lo < 0.0 && hi > 1.0, "{lo} {hi}");
         for (a, b) in [(lo, 0.0), (1.0, hi)] {
             let grown = length(&longer, a, b);
-            assert!(matches!(grown, Ok(l) if (l - 1.0).abs() < 1e-9), "{grown:?}");
+            assert!(
+                matches!(grown, Ok(l) if (l - 1.0).abs() < 1e-9),
+                "{grown:?}"
+            );
         }
         // a rational arc keeps its circle under the extension
         let w = std::f64::consts::FRAC_1_SQRT_2;
