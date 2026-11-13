@@ -92,6 +92,10 @@ pub enum Error {
     /// The kernel reported success but the operation did nothing: a blend that made no face, a
     /// face move or draft that moved no face, an extension shorter than the side can carry.
     NoEffect,
+    /// Curves on a face that do not divide it into regions ([`crate::trim`]): an open curve
+    /// whose ends reach neither the face's boundary nor another curve leaves a slit, and curves
+    /// off the face cut nothing.
+    CurveDoesNotCut,
     /// The answer is not exact in the input's geometry.
     NotExact,
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
@@ -599,6 +603,7 @@ impl std::fmt::Display for Error {
                 "the room runs out at {at} along the edge (largest radius there {largest})"
             ),
             Error::NoEffect => write!(f, "the operation did nothing"),
+            Error::CurveDoesNotCut => write!(f, "the curves do not divide the face into regions"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
             Error::Profile(r) => write!(
                 f,

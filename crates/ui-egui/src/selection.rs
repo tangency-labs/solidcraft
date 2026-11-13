@@ -112,11 +112,15 @@ pub struct SelInput {
     /// nothing leaves under the form (#10428). Without one the tooltip names what it takes.
     pub tip: Option<&'static str>,
     pub items: Vec<Sel>,
+    /// Where the points picked into this input came from when a hovered flat face offered them
+    /// (#11476): a corner, an edge's middle or a hole's centre of that face, with the face, its
+    /// outward normal and the edge. A joint origin there lies on the face and follows it by name.
+    pub from_face: Vec<(Sel, solidcraft_engine::snap::SnapKind, solidcraft_engine::snap::SnapSource)>,
 }
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new() }
+        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new(), from_face: Vec::new() }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).

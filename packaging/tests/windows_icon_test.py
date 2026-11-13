@@ -5,6 +5,7 @@ import struct
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "windows/check-icon.ps1"
 
@@ -76,6 +77,35 @@ class IconGuard(unittest.TestCase):
 
     def test_truncated_executable_is_rejected(self):
         self.assertNotEqual(self.run_guard(b"MZ").returncode, 0)
+
+
+
+class InstallerShortcutIcons(unittest.TestCase):
+    def check_shortcuts(self, change=None):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        document = ET.parse(root / "assets/platforms/windows/solidcraft.wxs")
+        if change:
+            shortcut = document.find(".//{http://wixtoolset.org/schemas/v4/wxs}Shortcut")
+            change(shortcut)
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "installer.wxs"
+            document.write(path, encoding="utf-8", xml_declaration=True)
+            return subprocess.run([shutil.which("pwsh") or "powershell", "-NoProfile", "-File",
+                str(root / "packaging/windows/check-shortcuts.ps1"), "-Path", str(path)], capture_output=True, text=True)
+
+    def test_installed_shortcuts_use_the_target_executable_icon(self):
+        result = self.check_shortcuts()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_product_code_scoped_icon_is_rejected(self):
+        result = self.check_shortcuts(lambda shortcut: shortcut.set("Icon", "SolidcraftIcon.exe"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("MSI-cached Icon", result.stderr)
+
+    def test_an_advertised_shortcut_is_rejected(self):
+        result = self.check_shortcuts(lambda shortcut: shortcut.set("Advertise", "yes"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("changes identity", result.stderr)
 
 
 if __name__ == "__main__":

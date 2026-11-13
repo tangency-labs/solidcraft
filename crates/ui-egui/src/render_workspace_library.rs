@@ -333,11 +333,7 @@ pub(super) fn open_category(app: &mut SolveApp, kind: &str) {
         "scenes" | "selene_shots" | "lighting" => 3,
         _ => 0,
     };
-    if !crate::panel_runtime::reveal_render_library(app) {
-        app.ui.show_browser = true;
-        let _ = app.run("view.render_browser", json!({"open":true}));
-        app.preferences.browser_collapsed = false;
-    }
+    app.render_workspace.view.library_focus_pending = true;
 }
 pub(super) fn choose(app: &mut SolveApp, view: &mut View, kind: &str, id: &str) -> Result<(), String> {
     switch_kind(view, kind);
@@ -484,66 +480,6 @@ fn matches_entry(entry: &Value, query: &str, category: &str, availability: &str)
             .iter()
             .filter_map(|field| source.get(*field))
             .any(|field| field.to_string().to_lowercase().contains(&query))
-}
-
-pub(super) fn card(app: &mut SolveApp, ui: &mut egui::Ui, bounds: egui::Rect) {
-    let mut side = app.preferences.render_browser_side.clone();
-    let mut width = app.preferences.render_browser_width;
-    let stage = app.render_workspace.view.stage;
-    prepare_look(app);
-    let title = library_title(app);
-    let mut mode = library_mode(app).unwrap_or_default();
-    let mut actions = |ui: &mut egui::Ui| {
-        ui_kit::catalog_scope(ui, |ui| {
-            ui_kit::segmented_icons(
-                ui,
-                &mut mode,
-                &[
-                    ui_kit::IconSegment { key: "render:library-grid", icon: "grid", tip: solidcraft_ui_text::tr("render.library_grid").into() },
-                    ui_kit::IconSegment { key: "render:library-list", icon: "list", tip: solidcraft_ui_text::tr("render.library_list").into() },
-                    ui_kit::IconSegment {
-                        key: "render:library-panel",
-                        icon: "library",
-                        tip: solidcraft_ui_text::tr("render.stage_panels.surfaces_references").into(),
-                    },
-                ],
-                &[],
-            )
-        });
-    };
-    let response = ui_kit::Panel::workspace(
-        ui,
-        ui_kit::WorkspaceOptions {
-            id: "render:appearances",
-            title: &title,
-            icon: "",
-            bounds,
-            fill_height: true,
-            compact: crate::render_ui::compact(app, bounds.width()),
-            editor: false,
-            enabled: true,
-            header_actions: (stage == super::Stage::Look).then_some(&mut actions as &mut dyn FnMut(&mut egui::Ui)),
-            move_command: "view.render_dock",
-        },
-        &mut side,
-        &mut width,
-        |ui| stage_contents(app, ui, stage),
-    );
-    if stage == super::Stage::Look {
-        set_library_mode(app, mode);
-    }
-    app.preferences.render_browser_width = width;
-    let requested =
-        response.as_ref().and_then(|r| r.inner.1).map(str::to_string).or_else(|| (app.preferences.render_browser_side != side).then(|| side.clone()));
-    if let Some(side) = requested {
-        let _ = app.run("view.render_dock", json!({"panel":"browser","side":side}));
-    }
-    crate::shell::register_panel(
-        app,
-        "render:appearances",
-        response.map(|r| r.response.rect),
-        if bounds.width() < 800.0 { None } else { Some(if side == "left" { ui_kit::Edge::Left } else { ui_kit::Edge::Right }) },
-    );
 }
 
 pub(crate) fn library_title(app: &SolveApp) -> String {
@@ -1802,13 +1738,11 @@ fn availability_label<'a>(app: &'a SolveApp, status: Option<&str>) -> &'a str {
 
 /// Focus the existing library card from the viewport Appearance menu.
 pub(super) fn focus_library(app: &mut SolveApp) {
-    if crate::panel_runtime::reveal_render_library(app) {
-        let _ = app.run("view.render_stage", json!({"stage":"look"}));
-        let view = &mut app.render_workspace.view.library;
-        view.look_tab = 0;
-    }
+    app.render_workspace.view.library_focus_pending = true;
+    let _ = app.run("view.render_stage", json!({"stage":"look"}));
     let view = &mut app.render_workspace.view.library;
     view.collection = 0;
+    view.look_tab = 0;
     switch_kind(view, "appearances");
 }
 
@@ -1864,6 +1798,13 @@ mod studio_browser_tests {
             method: h.app.render_workspace.view.method,
             snapshot: patch(&h.app).unwrap(),
         }
+    }
+
+    fn click_mode(h: &mut crate::scenario::Harness, action: &str) {
+        let panel = super::super::test_panel(&h.app, "render-library").unwrap();
+        let rect = panel.actions.iter().find(|(id, _)| id.0 == action).unwrap().1;
+        let at = crate::panel_runtime::egui_rect(rect).center();
+        h.step(&json!({"click":[at.x, at.y]})).unwrap();
     }
 
     #[test]
@@ -1994,7 +1935,7 @@ mod studio_browser_tests {
         // catalog mode; merely changing a captured resource does not navigate UI.
         h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
         h.frames(3);
-        h.step(&json!({"click":{"handle":"render:library-panel"}})).unwrap();
+        click_mode(&mut h, "references");
         h.frames(3);
         assert_eq!(h.app.render_workspace.view.library.look_tab, 1);
         let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
@@ -2117,7 +2058,7 @@ mod studio_browser_tests {
         if kind == "surfaces" {
             h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
             h.frames(3);
-            h.step(&json!({"click":{"handle":"render:library-panel"}})).unwrap();
+            click_mode(&mut h, "references");
             let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
             choose(&mut h.app, &mut view, kind, id).unwrap();
             refresh_targets(&mut h.app, &mut view).unwrap();
@@ -2238,7 +2179,7 @@ mod studio_browser_tests {
         // catalog mode; merely changing a captured resource does not navigate UI.
         h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
         h.frames(3);
-        h.step(&json!({"click":{"handle":"render:library-panel"}})).unwrap();
+        click_mode(&mut h, "references");
         h.frames(3);
         assert_eq!(h.app.render_workspace.view.library.look_tab, 1);
         let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
@@ -2524,10 +2465,10 @@ mod studio_browser_tests {
         let look = h.app.session.doc.appearances.bodies.get("Sample").unwrap().clone();
         h.app.run("appearance.favorite", json!({"look":look,"favorite":true})).unwrap();
         assert!(h.app.preferences.render_library_favorites.contains(&("appearances".into(), id.clone())));
-        h.step(&json!({"click":{"handle":"render:library-list"}})).unwrap();
+        click_mode(&mut h, "list");
         h.frames(3);
         assert_eq!(h.app.render_workspace.view.library.layout, 1);
-        h.step(&json!({"click":{"handle":"render:library-grid"}})).unwrap();
+        click_mode(&mut h, "grid");
         h.frames(3);
         assert_eq!(h.app.render_workspace.view.library.layout, 0);
         assert_eq!(h.app.session.doc.to_json(), before);
@@ -2585,8 +2526,8 @@ mod studio_browser_tests {
                 let output = final_frame.unwrap();
                 let image = ui_kit::raster_ui(&ctx, output.shapes, output.pixels_per_point, ctx.content_rect(), &textures);
                 image.save(std::path::Path::new(&dir).join(if dark { "appearances-dark.png" } else { "appearances-light.png" })).unwrap();
-                let card = h.app.shell.workspace_panels["render:appearances"].0;
-                assert_eq!(card.width(), 266.0);
+                let section = super::super::test_panel(&h.app, "render-library").unwrap();
+                let card = crate::panel_runtime::egui_rect(section.outer);
                 let card_image = image::imageops::crop_imm(
                     &image,
                     card.left().round() as u32,
@@ -2599,9 +2540,9 @@ mod studio_browser_tests {
                 if let Some(reference) = std::env::var_os("SOLIDCRAFT_LIBRARY_REFERENCE") {
                     let reference = image::open(reference).unwrap().to_rgba8();
                     let reference = image::imageops::crop_imm(&reference, 8, 487, 266, 356).to_image();
-                    let mut pair = image::RgbaImage::new(532, card_image.height().max(reference.height()));
+                    let mut pair = image::RgbaImage::new(reference.width() + card_image.width(), card_image.height().max(reference.height()));
                     image::imageops::overlay(&mut pair, &reference, 0, 0);
-                    image::imageops::overlay(&mut pair, &card_image, 266, 0);
+                    image::imageops::overlay(&mut pair, &card_image, i64::from(reference.width()), 0);
                     pair.save(std::path::Path::new(&dir).join(if dark {
                         "reference-left-current-right-dark.png"
                     } else {
@@ -2626,11 +2567,24 @@ mod studio_browser_tests {
             h.app.run("view.render_stage", json!({"stage":stage})).unwrap();
             h.frames(3);
             assert_eq!(stage_title(h.app.render_workspace.view.stage), key);
-            let browser = h.app.shell.workspace_panels["render:browser"].0;
-            let panel = h.app.shell.workspace_panels["render:appearances"].0;
-            let strip = h.app.shell.workspace_panels["render:shots_strip"].0;
-            assert_eq!(panel.top() - browser.bottom(), Tokens::get().space_8, "{stage}: {browser:?} {panel:?} {strip:?}");
-            assert_eq!(strip.top() - panel.bottom(), Tokens::get().space_8, "{stage}: {browser:?} {panel:?} {strip:?}");
+            use crate::panel_runtime::{HostControlTarget, HostPointerTarget, egui_rect};
+            let browser = super::super::test_panel(&h.app, "render-browser").unwrap();
+            let library = super::super::test_panel(&h.app, "render-library").unwrap();
+            let shots = super::super::test_panel(&h.app, "render-shots").unwrap();
+            assert_eq!(browser.zone, library.zone);
+            assert!(shots.inline && shots.zone == solidcraft_engine::panels::Zone::Bottom);
+            let browser = egui_rect(browser.outer);
+            let panel = egui_rect(library.outer);
+            let strip = egui_rect(shots.outer);
+            assert!(browser.bottom() <= panel.top() && panel.bottom() <= strip.top(), "{stage}: {browser:?} {panel:?} {strip:?}");
+            let controls = &h.app.universal_panel_frame().unwrap().controls;
+            assert!(
+                controls.iter().any(|control| {
+                    matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Header { instance }) if *instance == library.instance)
+                        && control.accessible_name == h.app.tr(key)
+                }),
+                "missing library title for {stage}"
+            );
         }
         assert_eq!(h.app.session.doc.to_json(), before);
     }

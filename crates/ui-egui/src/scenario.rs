@@ -855,7 +855,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                         .collect()
                 });
                 // Workspace panels (docks and strips) are laid out against the viewport, not sized like dialogs.
-                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().map(|(rect, _)| *rect).collect();
+                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().copied().collect();
                 for (id, r) in rects {
                     if panels.iter().any(|p| (p.min - r.min).abs().max_elem() < 1.0 && (p.max - r.max).abs().max_elem() < 1.0) {
                         continue;

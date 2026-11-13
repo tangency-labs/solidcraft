@@ -1,14 +1,17 @@
-//! A one-face sheet on a surface's whole natural box ([`sheet_on`]), and the kernel's one
+//! A one-face sheet on a surface's whole natural box ([`sheet_on`]), the kernel's one
 //! arena-notify `CreateFaceFromSurface` wrapper, a face on a box of a surface's parameters
-//! ([`face_on`]).
+//! ([`face_on`]), and a sheet turned over ([`turn_over_shell`], [`turn_over_sheet`]).
 //!
 //! Not upstream: the composition an operation that rebuilds a face on a new surface (a sheet
 //! extended past a side) makes of `new_brep` and `SmBrep::CreateFaceFromSurface`, kept in the
-//! kernel so the modelling layer holds no notification plumbing.
+//! kernel so the modelling layer holds no notification plumbing; and the turn-over of every
+//! face of an open shell ([`crate::topology::face::p1::turn_over`]).
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
-use crate::error::Result;
+use std::collections::BTreeSet;
+
+use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::USE_DEFAULT;
 use crate::kernel::Kernel;
@@ -16,8 +19,9 @@ use crate::surface::surface::Surface;
 use crate::topology::brep::p2::ArenaNotifyState;
 use crate::topology::brep::p3::new_brep;
 use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+use crate::topology::face::p1::turn_over;
 use crate::topology::topology_traverser::Marks;
-use crate::topology::{Brep, FaceId};
+use crate::topology::{Brep, FaceId, ShellId};
 use crate::EntityRef;
 
 /// A new body of one face on `surface` over its whole natural box, at `tolerance`, and that
@@ -56,4 +60,73 @@ pub fn face_on(k: &mut Kernel, b: &mut Brep, surface: Surface, bx: &Extent2d) ->
         this_face: &this_face,
     };
     create_face_from_surface(k, b, Some(surface), bx, &mut fenv)
+}
+
+const OP_TURN: &str = "topology::brep::sheet::turn_over_shell";
+
+/// Turns the open shell `s` over: each of its faces ([`turn_over`], `SmFace::SwapUV`), so each
+/// face's side is the other one, its edges as they were; the body stays valid. Turning a shell
+/// over twice gives it back.
+///
+/// A loop of [`turn_over`], not `SmBrep::SwapUV` or `OrientSheetSurfaces(same = false)`: those
+/// ignore a face's failed swap (upstream's `sm_SwapFaceUV` is void), and a turn-over that stops
+/// part way must say so and leave the shell as it was to the caller's rollback.
+///
+/// # Errors
+///
+/// [`SolidError::Unsupported`] for a closed shell (one whose faces' other uses lie in another
+/// shell: turned over, the body would be inside out), before anything changes;
+/// [`SolidError::InvalidInput`] for a shell of no faces; those of [`turn_over`].
+pub fn turn_over_shell(k: &Kernel, b: &mut Brep, s: ShellId) -> Result<()> {
+    let faces = open_shell_faces(b, s)?;
+    for f in faces {
+        turn_over(k, b, f)?;
+    }
+    b.refresh_cached_topology();
+    Ok(())
+}
+
+/// Turns every shell of faces of `b` over ([`turn_over_shell`]): a sheet turned over.
+///
+/// # Errors
+///
+/// [`SolidError::Unsupported`] for a body with a closed shell (a solid), before anything
+/// changes; those of [`turn_over`].
+pub fn turn_over_sheet(k: &Kernel, b: &mut Brep) -> Result<()> {
+    let mut faces = Vec::new();
+    let shells: Vec<ShellId> = b.shells().ids().collect();
+    for s in shells {
+        if b.shell(s)?.is_faceuse_shell() {
+            faces.extend(open_shell_faces(b, s)?);
+        }
+    }
+    for f in faces {
+        turn_over(k, b, f)?;
+    }
+    b.refresh_cached_topology();
+    Ok(())
+}
+
+/// The faces of the open shell `s`, each once, in the order of their uses.
+fn open_shell_faces(b: &Brep, s: ShellId) -> Result<Vec<FaceId>> {
+    let shell = b.shell(s)?;
+    if !shell.is_faceuse_shell() {
+        return Err(SolidError::invalid_input(OP_TURN, "a shell of no faces"));
+    }
+    if shell.is_closed(b, s)? {
+        return Err(SolidError::Unsupported {
+            operation: OP_TURN,
+            reason: "a closed shell: turned over, the body would be inside out",
+        });
+    }
+    let mut seen = BTreeSet::new();
+    let mut faces = Vec::new();
+    for fu in shell.get_faceuses()? {
+        if let Some(f) = b.faceuse(fu)?.face {
+            if seen.insert(f) {
+                faces.push(f);
+            }
+        }
+    }
+    Ok(faces)
 }

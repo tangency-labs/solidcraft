@@ -39,7 +39,6 @@ fn fixed_kernel() -> Kernel {
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.torus_signed_gen_curve_interval = true;
     k.fixes.torus_check_spindle_apex = true;
-    k.fixes.torus_check_reads_v_interval = true;
     k
 }
 

@@ -98,6 +98,9 @@ pub struct ViewportState {
     /// The sketches' box in the world of one world state (held, as `pick_bounds` is). Every
     /// `projection` reads it, several times a frame, and each sketch's box samples its curves.
     sketch_bounds: std::sync::Mutex<Option<(std::sync::Arc<solidcraft_engine::doc::ModelState>, solidcraft_engine::geom::Aabb3)>>,
+    /// Where each construction plane made from a face is drawn, for one world state (held, as
+    /// `pick_bounds` is): [`plane_face_covers`].
+    plane_faces: std::sync::Mutex<Option<PlaneFaces>>,
     /// Membership of the active assembly placement, shared by model and feedback rendering.
     active_bodies: std::sync::Mutex<Option<ActiveBodies>>,
     /// The model scene's blocks of bodies by key, from the last scene built.
@@ -2593,7 +2596,10 @@ pub fn construction_points(app: &SolveApp) -> Vec<(String, Vec3)> {
 
 /// Construction planes as drawn and picked: (name, normal, quad). A plane is a square of a fixed
 /// share of the view round its origin, grown past the edges of every body it passes through:
-/// zoomed in, the square alone fits inside the part and the body hides it (#13318). A component's
+/// zoomed in, the square alone fits inside the part and the body hides it (#13318). A plane made
+/// from a face is drawn over that face instead, at least a quarter of the square round the face's
+/// middle: its origin, the plane's point nearest the world origin, can be far from the part
+/// (#4345). A component's
 /// origin plane drawn like the design Origin's instead: a quarter of the square, from its origin
 /// along its own axes ([`origin_quads`]), so a placement's origin reads like the design's.
 pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
@@ -2601,11 +2607,19 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
     let h = size * 1.2;
     let st = crate::open_meshing::shown_world(app);
     let bodies = body_bounds(app, &st);
+    let faces = plane_face_covers(app, &st);
     solidcraft_engine::view::construction_planes(&app.session)
         .into_iter()
         .filter(|(_, n, _)| app.session.construction_visible(n))
         .map(|(_, name, pl)| {
-            let mut r = solidcraft_engine::geom::Aabb2 { min: Vec2::new(-h, -h), max: Vec2::new(h, h) };
+            let mut r = match faces.get(&name) {
+                // The face's size, and never smaller than a quarter of the square (zoomed out).
+                Some(face) => {
+                    let (c, m) = (face.center(), Vec2::new(0.25 * h, 0.25 * h));
+                    solidcraft_engine::geom::Aabb2 { min: c - m, max: c + m }.union(face)
+                }
+                None => solidcraft_engine::geom::Aabb2 { min: Vec2::new(-h, -h), max: Vec2::new(h, h) },
+            };
             for (_, b) in bodies.iter() {
                 r = r.union(&plane_cover(&pl, b));
             }
@@ -2625,6 +2639,51 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
             _ => None,
         }))
         .collect()
+}
+
+type PlaneFaces =
+    (std::sync::Arc<solidcraft_engine::doc::ModelState>, std::sync::Arc<std::collections::HashMap<String, solidcraft_engine::geom::Aabb2>>);
+
+/// For each construction plane made from a face
+/// ([`solidcraft_engine::view::construction_plane_faces`]), the rectangle in the plane's own
+/// coordinates that covers the face's display triangles seen along the plane's normal, with a
+/// tenth of its size to spare round it (cached until the model changes).
+fn plane_face_covers(
+    app: &SolveApp,
+    st: &std::sync::Arc<solidcraft_engine::doc::ModelState>,
+) -> std::sync::Arc<std::collections::HashMap<String, solidcraft_engine::geom::Aabb2>> {
+    if let Ok(g) = app.viewport.plane_faces.lock()
+        && let Some((k, covers)) = g.as_ref()
+        && std::sync::Arc::ptr_eq(k, st)
+    {
+        return covers.clone();
+    }
+    let planes: std::collections::HashMap<String, Plane> =
+        solidcraft_engine::view::construction_planes(&app.session).into_iter().map(|(_, name, pl)| (name, pl)).collect();
+    let mut covers = std::collections::HashMap::new();
+    for (name, body, faces) in solidcraft_engine::view::construction_plane_faces(&app.session) {
+        let (Some(pl), Some(b)) = (planes.get(&name), st.body(&body)) else { continue };
+        let mesh = b.mesh();
+        let mut r = solidcraft_engine::geom::Aabb2::EMPTY;
+        for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            if faces.contains(&(*f as usize))
+                && let Some(tri) = mesh.tri(t)
+            {
+                for p in tri {
+                    r.add(pl.to_local(p));
+                }
+            }
+        }
+        if !r.is_empty() {
+            let size = r.size();
+            covers.insert(name, r.inflated(size.x.max(size.y) * 0.1));
+        }
+    }
+    let covers = std::sync::Arc::new(covers);
+    if let Ok(mut g) = app.viewport.plane_faces.lock() {
+        *g = Some((st.clone(), covers.clone()));
+    }
+    covers
 }
 
 /// The rectangle in `pl` that covers box `b` seen along the plane's normal, with a tenth of its
@@ -3933,13 +3992,10 @@ pub(crate) fn sketch_constraint_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>)
 pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         let snap = d.face_snap(&app.session, hits);
+        let snaps = crate::dialogs_assembly::takes_snaps(d);
         return hits.iter().find_map(|h| {
-            d.candidate_on(&app.session, h, snap.as_ref()).map(|s| {
-                (
-                    h.clone(),
-                    crate::dialogs_assembly::woken_pick(app, crate::dialogs_assembly::takes_snaps(d), crate::dialogs_move::component_pick(app, h, s)),
-                )
-            })
+            d.candidate_on(&app.session, h, snap.as_ref())
+                .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
         });
     }
     hits.iter().filter(|h| pick_allowed(app, h)).find_map(|h| hit_candidate(app, h))
@@ -3951,19 +4007,12 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
         // The face under the cursor is looked up once for every sketch point a face place may
         // snap to, before Select Other caps its rows.
         let snap = d.face_snap(&app.session, hits);
+        let snaps = crate::dialogs_assembly::takes_snaps(d);
         return hits
             .iter()
             .filter_map(|h| {
-                d.candidate_on(&app.session, h, snap.as_ref()).map(|s| {
-                    (
-                        h.clone(),
-                        crate::dialogs_assembly::woken_pick(
-                            app,
-                            crate::dialogs_assembly::takes_snaps(d),
-                            crate::dialogs_move::component_pick(app, h, s),
-                        ),
-                    )
-                })
+                d.candidate_on(&app.session, h, snap.as_ref())
+                    .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
             })
             .collect();
     }
@@ -4046,7 +4095,11 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         return;
     }
     let sel = crate::dialogs_move::from_shown(app, sel);
+    // A joint origin picked among a hovered face's points remembers the face (#11476).
+    let snaps = app.dialog.as_ref().is_some_and(crate::dialogs_assembly::takes_snaps);
+    let from_face = crate::dialogs_assembly::face_point_source(app, snaps, &sel);
     let Some(mut d) = app.dialog.take() else { return };
+    let target = d.active;
     // With several holes on a face (Preferences), a Single hole's pick adds a hole or takes one
     // out; with holes moving by clicking, a Single hole picked again on its face moves there.
     // With Placement handles on, a Cylinder held by one reference edge moves along it on a pick.
@@ -4063,10 +4116,10 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
             // window stays on the input it was on (#11700).
             let on = d.active;
             d.active = 0;
-            d.pick(&app.session, sel);
+            d.pick(&app.session, sel.clone());
             d.active = on;
         }
-        crate::hole_place::PickMove::No => d.pick(&app.session, sel),
+        crate::hole_place::PickMove::No => d.pick(&app.session, sel.clone()),
         crate::hole_place::PickMove::Moved | crate::hole_place::PickMove::Spent => {
             d.focus = true;
             d.awaiting_pick = false;
@@ -4078,6 +4131,12 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
             d.awaiting_pick = false;
             d.pick_refused = None;
             d.refuse(app, why.to_string());
+        }
+    }
+    if let Some(input) = d.inputs.get_mut(target) {
+        input.from_face.retain(|(x, ..)| x != &sel && input.items.contains(x));
+        if let Some((kind, from)) = from_face.filter(|_| input.items.contains(&sel)) {
+            input.from_face.push((sel, kind, from));
         }
     }
     if let crate::dialogs::Kind::PathPlane { sketch, .. } = &mut d.kind {
@@ -4303,6 +4362,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     serde_json::to_string(&selected).unwrap_or_default().hash(&mut h);
     hover_drawn(&app.viewport.hover).hash(&mut h);
+    hover_drawn(&crate::snap_wake::lit_face(app)).hash(&mut h);
     hovered_body(app).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
@@ -5041,8 +5101,10 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             }
         }
     }
-    // Hover (pre-highlight).
-    match hover {
+    // Hover (pre-highlight). In a joint origin input, the face whose point or edge is under the
+    // pointer is lit: the face a pick there lies on (#11476).
+    let lit = crate::snap_wake::lit_face(app);
+    match lit.as_ref().or(hover) {
         Some(Hit::Face { body, index, .. })
             if body_hover.as_ref() != Some(body)
                 && !replaced(body)
@@ -5380,7 +5442,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     wake_centre(app, &hits);
 
-    crate::snap_wake::update(app, &hits);
+    let keep = crate::tool_modifiers::keep_snap_points(crate::tool_modifiers::Held::new(
+        ui.input(|i| i.modifiers),
+        crate::tool_modifiers::Platform::of(ui.ctx()),
+    ));
+    crate::snap_wake::update(app, &hits, keep, hover.filter(|_| inside).map(|p| (&proj, p)));
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up. A mode lit in the navigation bar or a
     // held Space owns drags, not a still press, so only a navigation that has started cancels
@@ -5496,7 +5562,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else if app.viewport.gpu_unavailable {
         unavailable_note(app, &painter, rect);
     }
-    let overlay_rect = crate::shell::bottom_overlay_rect(app, rect);
+    let overlay_rect = crate::shell::bottom_readout_rect(app, rect);
     crate::viewport_details::legacy_legends(app, ui, overlay_rect);
     placement_note(app, &painter, overlay_rect);
     crate::frame_rate::paint(app, ui, &painter, overlay_rect);
@@ -6148,18 +6214,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::design_properties::overlay(app, &painter, &proj);
     crate::sketch_dims::show(app, ui, &proj);
     crate::select_other::show(app, ui.ctx());
-    if !app.universal_panel_host_enabled() {
-        axis_view(app, ui, rect);
-        crate::view_angles::show(app, ui, rect);
-        crate::navigation_bar_view::show(app, ui, rect);
-    }
     crate::viewport_status::show(app, ui.ctx(), rect);
     crate::viewport_status_fixture::show(app, ui.ctx(), rect);
     // The operations under way first, then the selection's measurement in the corner (clear of
     // them), then the notices and the agent chip above both, so the 3D mouse picture can keep
     // clear of them all.
-    crate::operations::show(app, ui, crate::shell::bottom_overlay_rect(app, rect));
-    let readout = quick_measure_readout(app, ui, rect);
+    crate::operations::show(app, ui, overlay_rect);
+    let readout = quick_measure_readout(app, ui, overlay_rect);
     let mut toasts = transient_messages(app, ui, rect, readout);
     toasts.extend(app.operations.rect);
     if app.preferences.space_mouse_in_view
@@ -6174,7 +6235,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // The Viewport positions sit in the content area (right of the browser), Left Window in the
         // corner of the whole window; both stay above the floating History card, like the legend.
         let area = if position == SpaceMouseGhost::LeftWindow { rect } else { crate::shell::content_rect(app, rect) };
-        let area = crate::shell::bottom_overlay_rect(app, area);
         let picture = crate::space_mouse_model::corner_rect(area, position, &obstacles);
         crate::space_mouse_model::corner(
             ui,
@@ -7556,53 +7616,16 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             });
             return;
         }
-        let docks = crate::shell::fit_rects(app);
-        let mut content = crate::shell::content_rect(app, rect);
-        if crate::render_ui::focused(app) {
-            // Focus releases dock reservations while keeping controls below the stage bar.
-            content = rect;
-            for card in &app.shell.cards {
-                content.min.y = crate::ui_kit::within(card.bottom() + Tokens::get().space_8, content.top(), content.bottom());
-            }
-        }
-        // The full-height Assistant reserves control space, while rendering and picking
-        // keep the original viewport projection. Ordinary feature dialogs do not move controls.
-        if app.ui.layout == crate::ui_kit::LayoutMode::Floating
-            && crate::agent_chat::shown(app)
-            && app.agent_chat.open
-            && !app.preferences.agent_chat_popped
-            && !app.preferences.agent_chat_minimized
-            && let Some(chat) = app.agent_chat.panel_rect.filter(|r| r.is_finite() && r.is_positive())
-        {
-            if app.preferences.agent_chat_side == "left" {
-                content.min.x = crate::ui_kit::within(chat.right() + crate::ui_kit::SHELL_GAP, content.left(), content.right());
-            } else {
-                content.max.x = crate::ui_kit::within(chat.left() - crate::ui_kit::SHELL_GAP, content.left(), content.right());
-            }
-        }
-        // OK and Cancel in the view's corner (#6709) take the top right; the axis view goes below.
-        let corner = crate::view_confirm::size(app);
-        let style = app.preferences.navigator_style;
-        let layout = if crate::render_workspace::active(app) {
-            let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, content).rect } else { Rect::NOTHING };
-            if app.preferences.render_inspector_side == "left" {
-                crate::viewport_layout::Layout::product_left(rect, content, &docks, ctx.pixels_per_point(), style, corner, navigation)
-            } else {
-                crate::viewport_layout::Layout::product(rect, content, &docks, ctx.pixels_per_point(), style, corner, navigation)
-            }
-        } else {
-            let content = if app.ui.layout == crate::ui_kit::LayoutMode::Docked { rect } else { content };
-            let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, content).rect } else { Rect::NOTHING };
-            crate::viewport_layout::Layout::with_content(rect, content, &docks, ctx.pixels_per_point(), style, corner, navigation)
-        };
-        // Cache the exact product camera projection as well as its Fit room.
-        // Controls retain their outer content/axis/navigation rectangles.
-        let layout = if crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults {
-            crate::render_workspace::picture_layout(app, &layout)
-        } else {
-            layout
-        };
-        app.viewport.layout = Some(layout);
+        let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, rect).rect } else { Rect::NOTHING };
+        app.viewport.layout = Some(crate::viewport_layout::Layout::with_content(
+            rect,
+            rect,
+            &[],
+            ctx.pixels_per_point(),
+            app.preferences.navigator_style,
+            crate::view_confirm::size(app),
+            navigation,
+        ));
     }
 }
 
@@ -7631,10 +7654,15 @@ fn axis_center(app: &SolveApp, rect: Rect) -> Pos2 {
 pub(crate) const AXIS_CENTER_LIFT: f32 = 4.0;
 
 pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
-    app.viewport.layout.as_ref().filter(|l| l.viewport == crate::render_workspace::camera_rect(app, rect)).map(|l| l.axis_view).unwrap_or_else(|| {
-        let size = axis_view_size(app.preferences.navigator_style);
-        Rect::from_min_size(pos2(rect.right() - size, rect.top()), vec2(size, size))
-    })
+    app.viewport
+        .layout
+        .as_ref()
+        .filter(|layout| layout.viewport == rect || layout.viewport == crate::render_workspace::camera_rect(app, rect))
+        .map(|layout| layout.axis_view)
+        .unwrap_or_else(|| {
+            let size = axis_view_size(app.preferences.navigator_style);
+            Rect::from_min_size(pos2(rect.right() - size, rect.top()), vec2(size, size))
+        })
 }
 
 /// The camera's view axes, as the view compass takes them.
@@ -13149,16 +13177,10 @@ mod tests {
             h.call("ui.move", field.clone());
             h.call("ui.click", field);
             assert!(handle_at(&item).is_none(), "the list must close");
-            // Floating cards sit inside the full viewport. Probe their actual edges; the
-            // content anchor also reserves gaps and space below the short browser card.
-            // Docked panels end at the viewport boundary instead.
-            let (browser_edge, mid, history_edge) = if layout == crate::ui_kit::LayoutMode::Floating {
-                let browser = h.app.shell.browser.expect("the floating browser card");
-                let history = h.app.shell.history.expect("the floating history card");
-                (browser.right(), browser.center().y, history.top())
-            } else {
-                (vp.left(), vp.center().y, vp.bottom())
-            };
+            // The shared host leaves the viewport domain intact in both shell layouts.
+            let browser = h.app.shell.browser.expect("the browser panel");
+            let history = h.app.shell.history.expect("the history panel");
+            let (browser_edge, mid, history_edge) = (browser.right(), browser.center().y, history.top());
             let x = vp.center().x;
             for p in [
                 pos2(dialog.left() + 2.0, dialog.center().y),
@@ -13264,8 +13286,13 @@ mod tests {
         h.call("ui.click", json!({"x":p.x,"y":p.y}));
         h.frames(2);
         assert!(h.app.cam.back().dist(-Vec3::Y) < 1e-6);
-        assert!(h.app.cam.target.dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "looks at the middle of the model, {:?}", h.app.cam.target);
+        let layout = h.app.viewport.layout.as_ref().unwrap();
+        let bounds = crate::viewport::view_bounds(&h.app);
+        let expected = crate::viewport_layout::framing_centre(h.app.cam, &bounds, layout).unwrap();
+        let projected = crate::viewport::projection(&h.app, layout.viewport).to_screen(bounds.center()).unwrap();
+        assert!(projected.distance(expected) < 1.5, "frames the model at {expected:?}, got {projected:?}");
         assert!(h.app.cam.distance < from.distance / 2.0, "{} vs {}", h.app.cam.distance, from.distance);
+        h.call("ui.prefs", json!({"navigator_fit":false}));
         // Home, then an axis: the zoom and the centre stay.
         let home = crate::scenario::rect_of("axis_view:home").unwrap().center();
         h.call("ui.click", json!({"x":home.x,"y":home.y}));
@@ -13278,6 +13305,7 @@ mod tests {
             assert!((h.app.cam.distance - framed.distance).abs() < 1e-6, "{axis}: {} vs Home's {}", h.app.cam.distance, framed.distance);
             assert!(h.app.cam.target.dist(framed.target) < 1e-6, "{axis}: {:?} vs Home's {:?}", h.app.cam.target, framed.target);
         }
+        h.call("ui.prefs", json!({"navigator_fit":true}));
         h.call("ui.prefs", json!({"open":"Navigation"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
         assert!(!h.app.preferences.navigator_fit, "Navigation defaults restore the in-place turn");
@@ -14181,7 +14209,7 @@ mod tests {
         let across = line(&mut h, [30.0, 75.0], [75.0, 30.0]);
         let far = line(&mut h, [120.0, 25.0], [120.0, 75.0]);
         h.call("ui.view", json!({"view": "top"}));
-        h.call("ui.view", json!({"view": "fit"}));
+        h.call("ui.camera", json!({"target":[70,50,0],"distance":230}));
         let r = h.call("ui.set", json!({"lassoSelect": true}));
         assert_eq!(r["ok"], true, "{r}");
         let loop_at = |pts: &[[f64; 2]]| pts.iter().map(|p| json!({"world": [p[0], p[1], 0.0]})).collect::<Vec<_>>();
@@ -14916,7 +14944,7 @@ mod grid_plane_tests {
         assert!(app.picking_sketch_plane());
         assert_eq!(origin_planes(&app).len(), 3, "every origin plane is offered");
         let sc = build_highlight(&app);
-        assert_eq!(sc.xray.len(), 3 * 6 * (6 * 4 + 4), "each plane's two triangles are drawn through the model");
+        assert_eq!(sc.xray.len(), 3 * 6 * crate::gpu::TRI_SIZE, "each plane's two triangles are drawn through the model");
         assert!(sc.guide_trans.is_empty());
         app.dialog = None;
         assert!(origin_planes(&app).is_empty());

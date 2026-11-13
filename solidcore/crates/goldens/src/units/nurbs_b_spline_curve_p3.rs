@@ -1100,10 +1100,9 @@ mod tests {
 
     /// WR-668 (tangency-labs/smlib#76 6ca3405) takes a zero-speed end only at a vertex
     /// of the curve's edge, so the free curves of `zero_speed_end.json` report as
-    /// upstream, with and without the minimum radius read (`bspline_check_min_radius`,
-    /// WR-382). Coincident first control points fail test 3. Coincident last ones pass
-    /// test 4, which reports the first pair's values, so the backwards curve fails only
-    /// once the minimum radius is read (tests 13/14).
+    /// upstream, the minimum radius read (WR-382). Coincident first control points fail
+    /// test 3. Coincident last ones pass test 4, which reports the first pair's values, so
+    /// the backwards curve fails on the minimum radius (tests 13/14).
     #[test]
     fn zero_speed_end_fixtures_on_no_edge_report_as_upstream() {
         let fixtures: Value = serde_json::from_str(include_str!(
@@ -1112,21 +1111,14 @@ mod tests {
         .unwrap();
         let cases = fixtures["cases"].as_array().unwrap();
         assert!(cases.len() >= 8);
-        for min_radius in [false, true] {
-            let mut fixes = UpstreamFixes::default();
-            fixes.bspline_check_min_radius = min_radius;
-            for case in cases {
-                let name = case["name"].as_str().unwrap();
-                let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
-                assert!(matches!(i.op, OpIn::Assert { .. }), "{name}");
-                let a = rust_with_fixes(&i, &fixes).unwrap();
-                let valid = name.starts_with("zero_speed_end") && !min_radius;
-                assert_eq!(
-                    a.values["flag"],
-                    [f64::from(u8::from(valid))],
-                    "{name}: {a:?}"
-                );
-            }
+        let fixes = UpstreamFixes::default();
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            assert!(matches!(i.op, OpIn::Assert { .. }), "{name}");
+            let a = rust_with_fixes(&i, &fixes).unwrap();
+            // every one fails a test: 3 (first points coincide) or 13/14 (the minimum radius)
+            assert_eq!(a.values["flag"], [0.0], "{name}: {a:?}");
         }
     }
 }
