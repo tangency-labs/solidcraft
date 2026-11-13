@@ -429,7 +429,7 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     // A frame starts from a sketch of its lines; its profile sizes are often parameters.
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 2, ids: &["frame.member", "frame.end_cap"] },
+    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 3, ids: &["frame.member", "frame.end_cap", "route.create"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
 
@@ -1191,14 +1191,14 @@ mod tests {
         let specs = solidcraft_engine::command_specs();
         assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "CONFIGURE"]);
         let (create, n) = layout("WELDMENTS", "CREATE", &specs).unwrap();
-        assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap"]);
+        assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap", "route.create"]);
         assert!(!panel_ids("MODEL", &specs).contains(&"frame.member"), "Frame Member's home is Weldments");
 
         let mut h = crate::scenario::Harness::new();
         h.step(&json!({"click":{"handle":"tab:WELDMENTS"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.ui.tab, "WELDMENTS");
-        for id in ["sketch.create", "frame.member", "frame.end_cap", "parameters.change"] {
+        for id in ["sketch.create", "frame.member", "frame.end_cap", "route.create", "parameters.change"] {
             assert!(crate::scenario::handle_at(&format!("button:{id}")).is_some(), "{id} is a button on the Weldments tab");
         }
         h.step(&json!({"click":{"handle":"button:frame.member"}})).unwrap();

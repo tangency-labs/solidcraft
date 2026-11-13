@@ -254,6 +254,7 @@ mod revolve_manipulator_tests;
 pub use solidcraft_ui_kit::ribbon;
 #[cfg(test)]
 mod round_pick_tests;
+pub mod route_ui;
 mod rule_editor;
 #[cfg(test)]
 mod rule_editor_tests;
@@ -649,6 +650,8 @@ pub struct SolveApp {
     pub sketch_report: Option<sketch_report::SketchReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    /// The Pipe Routes window, when open.
+    pub routes: Option<route_ui::RoutePanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -960,6 +963,7 @@ impl SolveApp {
             design_properties: None,
             sketch_report: None,
             bom: None,
+            routes: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -2259,6 +2263,11 @@ impl SolveApp {
             } else {
                 bom_panel::open(self);
             }
+            return;
+        }
+        // Any pipe route command from the toolbar or the command search: the Pipe Routes window.
+        if id.starts_with("route.") {
+            route_ui::open(self);
             return;
         }
         // Inspect → Measure → Properties: the window, not a reply nobody sees (#8095).
@@ -3695,6 +3704,7 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
+        route_ui::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());
