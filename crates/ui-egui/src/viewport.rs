@@ -5573,6 +5573,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
+    crate::ui_kit::set_viewport_half_height(ui.ctx(), app.cam.half_height());
     // A component dragged as a layer is drawn from the meshes where its drag began.
     let layered = drag_layer::follow(app);
     refresh_layout(app, ui.ctx());
@@ -5609,7 +5610,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             false
         };
         crate::tool_modifiers::set_target_midpoint(mid);
-        app.preview.rolled_back = preview_should_roll_back(app, held, manipulator_dragging);
+        let busy_dragging = manipulator_dragging || crate::ui_kit::is_scrubbing(ui.ctx());
+        app.preview.rolled_back = preview_should_roll_back(app, held, busy_dragging);
     }
     let proj = projection(app, rect);
     if let Ok(mut cache) = app.viewport.display.lock() {
@@ -15662,6 +15664,13 @@ mod grid_plane_tests {
         let primary = crate::tool_modifiers::Held { primary: true, ..Default::default() };
         assert!(preview_should_roll_back(&app, primary, false), "Primary alone rolls the preview back when a preview dialog is open");
         assert!(!preview_should_roll_back(&app, primary, true), "Primary must not roll the preview back while a manipulator arrow is dragged");
+        let ctx = crate::fonts::test_context();
+        let scrub_id = egui::Id::unique("test_scrub");
+        crate::ui_kit::set_scrubbing(&ctx, scrub_id, true);
+        assert!(
+            !preview_should_roll_back(&app, primary, crate::ui_kit::is_scrubbing(&ctx)),
+            "Primary must not roll the preview back while scrubbing a value label"
+        );
     }
 }
 
