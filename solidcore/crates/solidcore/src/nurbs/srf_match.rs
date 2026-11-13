@@ -224,7 +224,7 @@ pub fn match_boundary(
             lift.push(Vec3::new((want - suu.dot(st.normal)) / c2, 0.0, 0.0));
         }
         let lift = interp(&lift, &params, &v, q)?;
-        let behind = row_of(&new, 2)?.to_vec();
+        let behind = row_of(&new, 2)?.clone();
         let mut row2 = Vec::with_capacity(behind.len());
         for (j, b) in behind.iter().enumerate() {
             let (Some(st), Some(l)) = (stations.get(j), lift.get(j)) else {
@@ -530,7 +530,7 @@ fn refine(
     }
     // across: the first span halved until the rows that move leave the far side's two
     for _ in 0..MAX_HALVINGS {
-        if s.n() >= rows + 1 {
+        if s.n() > rows {
             break;
         }
         let (p, _) = s.degrees();
@@ -592,7 +592,7 @@ fn measure(s: &Surface, stations: &[Station]) -> Result<SeamBounds> {
             return Err(invalid("the surface has no tangent plane at a station"));
         };
         if n.dot(st.normal) < 0.0 {
-            n = n * -1.0;
+            n *= -1.0;
         }
         // atan2 of the cross and the dot: exact near 0, where acos of a dot loses half the digits
         let angle = n.cross(st.normal).length().atan2(n.dot(st.normal));
