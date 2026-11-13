@@ -201,7 +201,11 @@ fn offset(k: &Kernel, c: &Curve, normal: Vec3, distance: f64, tol: f64) -> Resul
         }
         _ => return Err(unsupported("an edge curve the kernel cannot offset")),
     };
-    if !(gap <= tol) {
+    // (a NaN gap is not within it either)
+    if !matches!(
+        gap.partial_cmp(&tol),
+        Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+    ) {
         // the offset of the edge is not within a tenth of the tolerance
         return Err(SolidError::NotConverged {
             operation: OP,
