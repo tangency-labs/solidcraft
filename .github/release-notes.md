@@ -6,7 +6,7 @@ parameter to watch the timeline rebuild. [Documentation](https://docs.solidcraft
 `solidcraft-cli mcp` ([how](https://docs.solidcraft.io/guide/mcp.html)).
 
 **What's new** in SolidCraft {version} is listed below, and the
-[ROADMAP](https://github.com/bherbruck/solidcraft/blob/main/ROADMAP.md#known-limitations) lists
+[roadmap detail](https://github.com/bherbruck/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) lists
 the known limitations. Designs from every earlier version open in this one.
 
 **New app ID.** The app ID is now `io.tangencylabs.solidcraft` (it was `ai.storyteller.solidcraft`,

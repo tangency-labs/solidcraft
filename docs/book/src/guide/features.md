@@ -229,7 +229,7 @@ a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "lef
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
-ball). See the roadmap's known limitations for the rest.
+ball). See the roadmap's [known limitations](https://github.com/tangency-labs/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) for the rest.
 
 **Curvature continuous** (G2) in the Fillet dialog's **Type** blends straight edges between two
 planar faces with an exact quintic section. The tangent plane and curvature match each side
