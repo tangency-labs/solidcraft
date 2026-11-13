@@ -83,7 +83,7 @@ fn a_broken_native_cad_file_is_refused_cleanly() {
         ("bad-fc", "broken.FCStd", cut.as_slice()),
         ("bad-rh", "broken.3dm", &BLOCK_3DM[..200]),
         ("acis", "cube.sat", b"700 0 1 0\n"),
-        ("nx", "broken.prt", b"SPLMSSTR"),
+        ("bad-nx", "broken.prt", b"SPLMSSTR"),
     ] {
         let (dir, path) = file(tag, name, bytes);
         let mut s = Session::default();

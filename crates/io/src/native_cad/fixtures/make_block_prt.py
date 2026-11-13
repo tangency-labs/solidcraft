@@ -14,7 +14,6 @@ Run with Python's standard library; output is next to this script.
 """
 
 from pathlib import Path
-import math
 import struct
 import zlib
 
@@ -93,9 +92,9 @@ for edge_index, (start, end) in enumerate(edges):
     line = record(30, LINE + edge_index, 67)
     line[18] = ord("+")
     vector(line, 19, points[start])
-    delta = [b - a for a, b in zip(points[start], points[end])]
-    length = math.sqrt(sum(value * value for value in delta))
-    vector(line, 43, [value / length for value in delta])
+    # Vertex-index changes identify the box's known positive X, Y and Z edges.
+    direction = {1: (1.0, 0.0, 0.0), 2: (0.0, 1.0, 0.0), 4: (0.0, 0.0, 1.0)}[end - start]
+    vector(line, 43, direction)
     stream += line
 for i, position in enumerate(points):
     vertex = record(18, VERTEX + i, 28, [(16, POINT + i)])

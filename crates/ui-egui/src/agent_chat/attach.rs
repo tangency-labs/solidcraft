@@ -289,10 +289,18 @@ pub fn read(path: &Path) -> Result<Attachment, String> {
         Kind::Other if matches!(path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("heic" | "heif")) => {
             Err(refused("ui.agent_chat_file_heic", &name, &[]))
         }
-        Kind::Other => {
-            Ok(Attachment { id: 0, name, content: Content::Reference { path: absolute(path), size: meta.len(), mime: mime_of(path) }, thumb: None })
-        }
+        Kind::Other => reference(path),
     }
+}
+
+/// Keep a file by reference, including a `.prt` whose experimental geometry import failed.
+pub(super) fn reference(path: &Path) -> Result<Attachment, String> {
+    let name = name_of(path);
+    let meta = std::fs::metadata(path).map_err(|e| failed(&name, e))?;
+    if !meta.is_file() {
+        return Err(refused("ui.agent_chat_file_not_a_file", &name, &[]));
+    }
+    Ok(Attachment { id: 0, name, content: Content::Reference { path: absolute(path), size: meta.len(), mime: mime_of(path) }, thumb: None })
 }
 
 /// The path as an absolute one, so the agent (working in another folder) finds the file.

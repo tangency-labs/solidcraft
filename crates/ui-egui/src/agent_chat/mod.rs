@@ -376,13 +376,13 @@ enum Reading {
     /// A picture decoding, or a pasted one encoding: the file, or why not.
     File(Receiver<std::result::Result<attach::Attachment, String>>),
     /// A CAD file's import into the design: its answer, as a control reply.
-    Import(Receiver<crate::control::ControlResponse>),
+    Import { reply: Receiver<crate::control::ControlResponse>, reference: Option<std::path::PathBuf> },
 }
 
 impl Loading {
     /// A CAD file being imported (its part lands in the design whatever the message does).
     pub fn importing(&self) -> bool {
-        matches!(self.what, Reading::Import(_))
+        matches!(self.what, Reading::Import { .. })
     }
 }
 
@@ -722,9 +722,9 @@ impl AgentChat {
         Ok(name)
     }
     /// A CAD file whose import was asked for: it joins the message once the import is in.
-    fn importing(&mut self, name: String, rx: Receiver<crate::control::ControlResponse>) -> String {
+    fn importing(&mut self, name: String, rx: Receiver<crate::control::ControlResponse>, reference: Option<std::path::PathBuf>) -> String {
         let id = self.next_file_id();
-        self.loading.push(Loading { id, name: name.clone(), what: Reading::Import(rx) });
+        self.loading.push(Loading { id, name: name.clone(), what: Reading::Import { reply: rx, reference } });
         name
     }
 
@@ -1950,7 +1950,10 @@ pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String
         let mut request = crate::file_load::Request::new(path, crate::file_load::Kind::Insert);
         request.reply = Some(tx);
         crate::file_load::begin_request(app, request).map_err(|e| trf("ui.agent_chat_import_failed", &[("name", &name), ("error", &e)]))?;
-        return Ok(app.agent_chat.importing(name, rx));
+        // `.prt` also names formats other than NX; an unsupported part remains useful to
+        // the agent by reference. A successful NX import keeps the normal Imported chip.
+        let reference = p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("prt")).then(|| p.to_path_buf());
+        return Ok(app.agent_chat.importing(name, rx, reference));
     } else {
         // A picture is decoded and a PDF read off the window thread: a large one takes long enough
         // to stop it.
@@ -2324,22 +2327,32 @@ pub(crate) fn take_loaded(app: &mut SolveApp, ctx: &egui::Context) {
     let mut i = 0;
     while i < chat.loading.len() {
         let name = chat.loading[i].name.clone();
+        let mut import_failure = None;
         let done = match &chat.loading[i].what {
             Reading::File(rx) => match rx.try_recv() {
                 Ok(read) => Some(read),
                 Err(TryRecvError::Empty) => None,
                 Err(TryRecvError::Disconnected) => Some(Err(trf("ui.agent_chat_file_error", &[("name", &name), ("error", "stopped")]))),
             },
-            Reading::Import(rx) => match rx.try_recv() {
+            Reading::Import { reply, reference } => match reply.try_recv() {
                 Ok(answer) if answer["ok"].as_bool() == Some(true) => Some(Ok(attach::Attachment::imported(name))),
                 Ok(answer) => {
                     let why = answer["error"].as_str().unwrap_or_default().to_string();
-                    Some(Err(trf("ui.agent_chat_import_failed", &[("name", &name), ("error", &why)])))
+                    let error = trf("ui.agent_chat_import_failed", &[("name", &name), ("error", &why)]);
+                    if let Some(path) = reference {
+                        import_failure = Some(error);
+                        Some(attach::reference(path))
+                    } else {
+                        Some(Err(error))
+                    }
                 }
                 Err(TryRecvError::Empty) => None,
                 Err(TryRecvError::Disconnected) => Some(Err(trf("ui.agent_chat_import_failed", &[("name", &name), ("error", "stopped")]))),
             },
         };
+        if let Some(error) = import_failure {
+            chat.notice(error, true);
+        }
         match done {
             None => i += 1,
             Some(read) => {

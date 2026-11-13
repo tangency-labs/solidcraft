@@ -525,13 +525,13 @@ fn run(s: &mut Session, id: &str, p: Value) -> Result<Value> {
 }
 
 /// A hex prism (across flats `af`) from z0 to z1, joined or cut.
-fn hex(s: &mut Session, af: f64, z0: f64, z1: f64, op: &str) -> Result<()> {
+fn hex(s: &mut Session, af: f64, z0: f64, z1: f64, op: &str, body_name: Option<&str>) -> Result<()> {
     run(s, "sketch.create", json!({"plane": "XY", "offset": format!("{z0} mm")}))?;
     run(s, "sketch.polygon.circumscribed", json!({"center": [0, 0], "radius": af / 2.0, "sides": 6}))?;
     fix_all(s)?;
     run(s, "sketch.finish", json!({}))?;
     let (dist, dir) = if z1 >= z0 { (z1 - z0, "positive") } else { (z0 - z1, "negative") };
-    run(s, "solid.extrude", json!({"distance": format!("{dist} mm"), "direction": dir, "operation": op}))?;
+    run(s, "solid.extrude", json!({"distance": format!("{dist} mm"), "direction": dir, "operation": op, "body_name": body_name}))?;
     Ok(())
 }
 
@@ -545,17 +545,17 @@ fn cyl(s: &mut Session, d: f64, z0: f64, z1: f64, op: &str) -> Result<()> {
 }
 
 /// A solid of revolution about z from a closed (r, z) outline, as one body or joined.
-fn revolve(s: &mut Session, pts: &[(f64, f64)], op: &str) -> Result<()> {
-    revolve_outline(s, pts, None, op)
+fn revolve(s: &mut Session, pts: &[(f64, f64)], op: &str, body_name: Option<&str>) -> Result<()> {
+    revolve_outline(s, pts, None, op, body_name)
 }
 
 /// The same, with the outline closed from its last point back to its first by an arc through
 /// `through`: a button head's domed crown.
-fn revolve_domed(s: &mut Session, pts: &[(f64, f64)], through: (f64, f64), op: &str) -> Result<()> {
-    revolve_outline(s, pts, Some(through), op)
+fn revolve_domed(s: &mut Session, pts: &[(f64, f64)], through: (f64, f64), op: &str, body_name: Option<&str>) -> Result<()> {
+    revolve_outline(s, pts, Some(through), op, body_name)
 }
 
-fn revolve_outline(s: &mut Session, pts: &[(f64, f64)], arc: Option<(f64, f64)>, op: &str) -> Result<()> {
+fn revolve_outline(s: &mut Session, pts: &[(f64, f64)], arc: Option<(f64, f64)>, op: &str, body_name: Option<&str>) -> Result<()> {
     run(s, "sketch.create", json!({"plane": "XZ"}))?;
     let xz = |(r, z): &(f64, f64)| [*r, -*z];
     let points: Vec<[f64; 2]> = pts.iter().map(xz).collect();
@@ -565,7 +565,7 @@ fn revolve_outline(s: &mut Session, pts: &[(f64, f64)], arc: Option<(f64, f64)>,
     }
     fix_all(s)?;
     run(s, "sketch.finish", json!({}))?;
-    run(s, "solid.revolve", json!({"axis": "y", "operation": op}))?;
+    run(s, "solid.revolve", json!({"axis": "y", "operation": op, "body_name": body_name}))?;
     Ok(())
 }
 
@@ -599,14 +599,14 @@ fn thread(s: &mut Session, d: f64, pitch: f64, at: Vec3) {
 }
 
 /// Build a part in the active component.
-fn build(s: &mut Session, sh: &Shape) -> Result<()> {
+fn build(s: &mut Session, sh: &Shape, body_name: Option<&str>) -> Result<()> {
     let _frame = crate::frames::local_geometry();
     match *sh {
         Shape::Screw { d, pitch, len, head, socket } => {
             let k = match head {
                 // One revolved outline: shank and round head.
                 Head::Round { dk, k } => {
-                    revolve(s, &[(0.0, -len), (d / 2.0, -len), (d / 2.0, 0.0), (dk / 2.0, 0.0), (dk / 2.0, k), (0.0, k)], "new")?;
+                    revolve(s, &[(0.0, -len), (d / 2.0, -len), (d / 2.0, 0.0), (dk / 2.0, 0.0), (dk / 2.0, k), (0.0, k)], "new", body_name)?;
                     k
                 }
                 // The same outline up to the head's rim, then a short flank, and the arc of the
@@ -614,24 +614,24 @@ fn build(s: &mut Session, sh: &Shape) -> Result<()> {
                 Head::Dome { dk, k, flat } => {
                     let (a, c) = (dk / 2.0, BUTTON_FLANK * k);
                     let outline = [(flat, k), (0.0, k), (0.0, -len), (d / 2.0, -len), (d / 2.0, 0.0), (a, 0.0), (a, c)];
-                    revolve_domed(s, &outline, crown(a, c, flat, k), "new")?;
+                    revolve_domed(s, &outline, crown(a, c, flat, k), "new", body_name)?;
                     k
                 }
                 // One revolved outline again, but the head hangs below z = 0: the shank, the cone
                 // opening up to dk at the top, and the top's flat, which the socket is cut into.
                 Head::Countersunk { dk, k } => {
-                    revolve(s, &[(0.0, -len), (d / 2.0, -len), (d / 2.0, -k), (dk / 2.0, 0.0), (0.0, 0.0)], "new")?;
+                    revolve(s, &[(0.0, -len), (d / 2.0, -len), (d / 2.0, -k), (dk / 2.0, 0.0), (0.0, 0.0)], "new", body_name)?;
                     0.0
                 }
                 // A hex head joined over a shank that runs up into it.
                 Head::Hex { s: af, k } => {
-                    hex(s, af, 0.0, k, "new")?;
-                    revolve(s, &[(0.0, -len), (d / 2.0, -len), (d / 2.0, k / 2.0), (0.0, k / 2.0)], "join")?;
+                    hex(s, af, 0.0, k, "new", body_name)?;
+                    revolve(s, &[(0.0, -len), (d / 2.0, -len), (d / 2.0, k / 2.0), (0.0, k / 2.0)], "join", None)?;
                     k
                 }
             };
             if let Some((af, t)) = socket {
-                hex(s, af, k, k - t, "cut")?;
+                hex(s, af, k, k - t, "cut", None)?;
             }
             if let Some(p) = pitch {
                 // Halfway down the shank, which a countersunk head leaves shorter than the length.
@@ -643,19 +643,19 @@ fn build(s: &mut Session, sh: &Shape) -> Result<()> {
             }
         }
         Shape::Nut { d, pitch, s: af, m } => {
-            hex(s, af, 0.0, m, "new")?;
+            hex(s, af, 0.0, m, "new", body_name)?;
             cyl(s, d, -1.0, m + 1.0, "cut")?;
             if let Some(p) = pitch {
                 thread(s, d, p, Vec3::new(d / 2.0, 0.0, m / 2.0));
             }
         }
         Shape::Ring { d_in, d_out, h } => {
-            revolve(s, &[(d_in / 2.0, 0.0), (d_out / 2.0, 0.0), (d_out / 2.0, h), (d_in / 2.0, h)], "new")?;
+            revolve(s, &[(d_in / 2.0, 0.0), (d_out / 2.0, 0.0), (d_out / 2.0, h), (d_in / 2.0, h)], "new", body_name)?;
         }
         Shape::Rod { d, pitch, len, socket } => {
-            revolve(s, &[(0.0, -len), (d / 2.0, -len), (d / 2.0, 0.0), (0.0, 0.0)], "new")?;
+            revolve(s, &[(0.0, -len), (d / 2.0, -len), (d / 2.0, 0.0), (0.0, 0.0)], "new", body_name)?;
             if let Some((af, t)) = socket {
-                hex(s, af, 0.0, -t, "cut")?;
+                hex(s, af, 0.0, -t, "cut", None)?;
             }
             if let Some(p) = pitch {
                 thread(s, d, p, Vec3::new(d / 2.0, 0.0, -len / 2.0));
@@ -873,7 +873,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     // Hardware is fitted to other parts: it starts free even as the design's first part (#2804).
     let c = run(s, "component.create", json!({"name": name, "grounded": false}))?;
     let (comp, occ) = (c["component"].as_u64().unwrap_or(0), c["occurrence"].as_u64().unwrap_or(0));
-    build(s, &sh)?;
+    build(s, &sh, None)?;
     s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh) });
     set_identity(s, comp, identity(&family, &size, &sh), None);
     run(s, "component.activate", json!({"component": active}))?;
@@ -1113,14 +1113,30 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     let size = str_(p, "size").map(str::to_string).unwrap_or(part.size.clone());
     let length = length_param(p, cmd)?.or(if size == part.size { part.length } else { None });
     let sh = shape(&part.family, &size, length).map_err(|e| bad(cmd, e))?;
-    // Rebuild: the component's features go, the new shape is built in their place.
-    let ids: Vec<u64> = s.doc.features.iter().filter(|f| f.component == comp).map(|f| f.id).collect();
-    for id in ids.iter().rev() {
-        let _ = s.doc_mut().delete_feature(*id);
+    // Later features can use the body by name. Build its replacement at the original slot
+    // and give the new producer that name before evaluating the rest of the timeline.
+    let features: Vec<_> = s.doc.features.iter().enumerate().filter(|(_, f)| f.component == comp).collect();
+    let position = features.first().map(|(index, _)| *index);
+    let body_name = features.iter().flat_map(|(_, f)| &f.body_names).find(|name| !name.trim().is_empty()).cloned();
+    let count = features.len();
+    let before_marker = s.doc.marker.map_or(0, |marker| features.partition_point(|(index, _)| *index < marker));
+    let ids: Vec<_> = features.into_iter().map(|(_, f)| f.id).collect();
+    for id in ids.into_iter().rev() {
+        let _ = s.doc_mut().delete_feature(id);
     }
+    let marker = s.doc.marker;
+    let position = position.or(marker).unwrap_or(s.doc.features.len());
+    s.doc_mut().marker = Some(position);
     let active = s.active_component;
     run(s, "component.activate", json!({"component": comp}))?;
-    build(s, &sh)?;
+    build(s, &sh, body_name.as_deref())?;
+    let added = s.doc.marker.unwrap_or(position).saturating_sub(position);
+    // Keep the rollback boundary among the surviving features. If it was inside the
+    // part's feature block, leave the same number of replacement features active.
+    s.doc_mut().marker = marker.map(|marker| {
+        let active = if marker > position || before_marker == count { added } else { before_marker.min(added) };
+        marker.saturating_add(active)
+    });
     let name = part_name(&part.family, &size, &sh);
     let was = shape(&part.family, &part.size, part.length).ok().map(|old| identity(&part.family, &part.size, &old));
     set_identity(s, comp, identity(&part.family, &size, &sh), was);
@@ -1789,6 +1805,29 @@ mod tests {
             }
             assert!(bounds[0].0.dist(bounds[1].0) < 1e-6 && bounds[0].1.dist(bounds[1].1) < 1e-6, "{family}: {bounds:?}");
         }
+    }
+
+    #[test]
+    fn resizing_a_screw_keeps_its_body_and_timeline_position_for_combine() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"corner":[-10,-10,0]}));
+        let part = run(&mut s, "parts.insert", json!({"family":"socket_head_cap_screw","size":"M8","length":20,"point":[0,0,10]}));
+        let component = part["component"].as_u64().unwrap();
+        let combine = run(&mut s, "solid.combine", json!({"target":"Body1","tools":["Body2"],"operation":"cut","keep_tools":true}));
+        let combine = combine["feature"].as_u64().unwrap();
+        let combine_position = s.doc.feature_index(combine);
+        let part_position = |s: &Session| s.doc.features.iter().position(|f| f.component == component);
+        let original_position = part_position(&s);
+
+        run(&mut s, "parts.resize", json!({"component":component,"size":"M8","length":35}));
+
+        assert_eq!(part_position(&s), original_position);
+        assert_eq!(s.doc.feature_index(combine), combine_position);
+        let cut = s.model.result(combine).unwrap();
+        assert!(!cut.skipped && cut.error.is_none(), "{:?}", cut.error);
+        let measured = run(&mut s, "inspect.measure", json!({"bodies":["Body2"]}));
+        let tip_z = measured["bodies"][0]["bbox"]["min"][2].as_f64().unwrap();
+        assert!((tip_z + 25.0).abs() < 1e-6, "{measured}");
     }
 
     #[test]

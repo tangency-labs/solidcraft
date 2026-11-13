@@ -643,8 +643,8 @@ crates/solidcore/src/nurbs/b_spline_surface/p2.rs	BSplineSurface::create_sphere_
 crates/solidcore/src/nurbs/b_spline_surface/p2.rs	BSplineSurface::create_sphere_from_arcs	int-rem	2	proven	((gen_curve_index + total_curves) - 1) % total_curves	returns Err unless total_curves == 3
 crates/solidcore/src/nurbs/b_spline_surface/p2.rs	transpose	int-div	1	proven	a.len() / num_rows	returns before division when num_rows < 1
 crates/solidcore/src/nurbs/b_spline_surface_n_lib/approx.rs	BSplineSurface::approximate_points	chunks	1	proven	chunks(cols.max(1))	cols.max(1) is nonzero
-crates/solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs	BSplineSurface::create_n_sided_patch_with	with_capacity	1	open	Vec::with_capacity(bdry_crvs.len())	
-crates/solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs	BSplineSurface::create_n_sided_patch_with	with_capacity	2	open	Vec::with_capacity(bdry_crvs.len())	
+crates/solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs	BSplineSurface::create_n_sided_patch	with_capacity	1	open	Vec::with_capacity(bdry_crvs.len())	
+crates/solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs	BSplineSurface::create_n_sided_patch	with_capacity	2	open	Vec::with_capacity(bdry_crvs.len())	
 crates/solidcore/src/nurbs/b_spline_surface_n_lib/p2.rs	BSplineSurface::evaluate_impl	int-div	1	proven	k / nv1	highest_v_deriv <= MAX_DERIVATIVE (4) is checked; nv1 = highest_v_deriv + 1
 crates/solidcore/src/nurbs/b_spline_surface_n_lib/p2.rs	BSplineSurface::evaluate_impl	int-div	2	proven	k / nv1	highest_v_deriv <= MAX_DERIVATIVE (4) is checked; nv1 = highest_v_deriv + 1
 crates/solidcore/src/nurbs/b_spline_surface_n_lib/p2.rs	BSplineSurface::evaluate_impl	int-rem	1	proven	k % nv1	highest_v_deriv <= MAX_DERIVATIVE (4) is checked; nv1 = highest_v_deriv + 1
@@ -744,19 +744,19 @@ crates/solidcore/src/nurbs/srf_adv/p4.rs	combine_coons	with_capacity	1	proven	Ve
 crates/solidcore/src/nurbs/srf_adv/p4.rs	combine_coons	with_capacity	2	proven	Vec::with_capacity(idx.m + 1)	m + 1 <= stored row.len(), the same CPoint element type
 crates/solidcore/src/nurbs/srf_adv/p4.rs	create_skin_srf_boundary_derivs	swap	1	proven	swap(0, 1)	returns Err when net.len() < 2
 crates/solidcore/src/nurbs/srf_adv/p4.rs	create_skin_srf_boundary_derivs	swap	2	proven	swap(0, 1)	returns Err when row.len() < 2
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	copy_from_slice	1	open	copy_from_slice(kv)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	copy_from_slice	2	open	copy_from_slice(ku)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	1	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	2	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	3	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	4	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	5	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	6	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	7	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	8	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	9	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	10	open	Vec::with_capacity(k + 1)	
-crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole_with	with_capacity	11	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	copy_from_slice	1	open	copy_from_slice(kv)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	copy_from_slice	2	open	copy_from_slice(ku)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	1	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	2	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	3	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	4	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	5	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	6	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	7	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	8	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	9	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	10	open	Vec::with_capacity(k + 1)	
+crates/solidcore/src/nurbs/srf_adv/p6.rs	fill_n_sided_hole	with_capacity	11	open	Vec::with_capacity(k + 1)	
 crates/solidcore/src/nurbs/srf_adv/p6.rs	frame_subsampling	int-div	1	proven	MAXPTS / 2	constant non-zero divisor
 crates/solidcore/src/nurbs/srf_adv/p6.rs	frame_subsampling	int-div	2	proven	MAXPTS / 5	constant non-zero divisor
 crates/solidcore/src/nurbs/srf_adv/p6.rs	frame_subsampling	int-div	3	proven	MAXPTS / 10	constant non-zero divisor
