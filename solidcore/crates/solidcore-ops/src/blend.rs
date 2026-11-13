@@ -262,7 +262,10 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
     use RoomReason as R;
     Some(match r {
         NoRoomReason::BallDoesNotFit => R::BallDoesNotFit,
+        // the crease trim's refusal: the blend runs off its face across a tangent edge onto
+        // the face beyond, which would need a crease
         NoRoomReason::RailLeavesFace
+        | NoRoomReason::CreaseAcrossTangentEdge
         | NoRoomReason::ConcaveOverflow
         | NoRoomReason::OverflowWithConcaveBlend
         | NoRoomReason::OverflowWithRollover
