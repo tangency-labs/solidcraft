@@ -30,10 +30,12 @@ use solidcore::topology::brep::sheet::editable_sheet;
 
 use crate::body::Body;
 use crate::error::status;
+use crate::session::with_body;
 use crate::session::{read_body, run};
-use crate::surface::{record, sheet as sheet_of};
+use crate::surface::{record, sheet_starting};
 use crate::sweep::coord_ok;
 use crate::{Error, Result};
+use solidcore::surface::side::BoxSide;
 
 /// The most sample points a rebuild fits (rows times columns).
 pub const REBUILD_MAX_SAMPLES: usize = 1 << 20;
@@ -91,6 +93,25 @@ pub(crate) fn editable(sheet: &Brep) -> Result<Cow<'_, Brep>> {
     }
 }
 
+/// The side of `sheet`'s box its one face's loop starts on (the kernel's `first_side`), so an
+/// edit makes its sheet again listing the edges in its order: an edit changes no topology, and a
+/// client names an edge by its index in the record. `None` for a record of other than one face.
+///
+/// # Errors
+/// [`Error::Record`] for a record the kernel refuses; the kernel's error.
+fn first_side(sheet: &Brep) -> Result<Option<BoxSide>> {
+    if sheet.faces.len() != 1 {
+        return Ok(None);
+    }
+    let (body, _) = Body::from_record(sheet, true)?;
+    with_body("surface_cvs::first_side", &body, |k, b| {
+        let Some(&f) = b.face_list().first() else {
+            return Ok(None);
+        };
+        solidcore::topology::brep::sheet::first_side(k, b, f)
+    })
+}
+
 /// The control net of `sheet`'s surface (a planar or analytic sheet's after [`editable`]): its
 /// Euclidean points, their weights and the points tied together.
 ///
@@ -140,6 +161,7 @@ fn tied(ties: &[Vec<(usize, usize)>], p: (usize, usize)) -> Vec<(usize, usize)> 
 /// past the coordinate bound; the kernel's status otherwise.
 pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Brep> {
     let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
     let ((u, v), net) = untrimmed(&sheet)?;
     let mut surface = kernel_surface(u, v, net)?;
     let ties = net_of(&surface, sheet.tolerance)?.ties;
@@ -153,7 +175,7 @@ pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Br
         }
     }
     record(run("surface_cvs::move_cvs", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&surface), first)
     }))
 }
 
@@ -275,6 +297,7 @@ pub fn move_net(
         return Err(Error::Argument);
     }
     let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
     let ((u, v), record_net) = untrimmed(&sheet)?;
     let mut surface = kernel_surface(u, v, record_net)?;
     let net = net_of(&surface, sheet.tolerance)?;
@@ -299,7 +322,7 @@ pub fn move_net(
         .collect();
     let moved = record(run("surface_cvs::move_net", |k| {
         surface.displace_cpts(&moves, Vec3::new(delta[0], delta[1], delta[2]))?;
-        sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&surface), first)
     }))?;
     if !control_net(&moved)?
         .points
@@ -337,6 +360,7 @@ pub fn rebuild(
     tol: f64,
 ) -> Result<(Brep, f64)> {
     let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
     let ((u, v), points) = untrimmed(&sheet)?;
     if points.is_rational() {
         return Err(Error::Unsupported(
@@ -422,7 +446,7 @@ pub fn rebuild(
         return Err(Error::PastTolerance { bound });
     }
     let made = record(run("surface_cvs::rebuild", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&fit))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&fit), first)
     }))?;
     Ok((made, bound))
 }
@@ -460,6 +484,7 @@ pub fn match_edge(
     }
     let side = side_of(sheet, edge)?;
     let target_side = side_of(other, target)?;
+    let first = first_side(sheet)?;
     let ((u, v), points) = untrimmed(sheet)?;
     let ((tu, tv), tpoints) = untrimmed(other)?;
     // spline sheets on polynomial surfaces only, as before rational nets were read
@@ -489,7 +514,7 @@ pub fn match_edge(
         ));
     }
     let made = record(run("surface_cvs::match_edge", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&matched.surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&matched.surface), first)
     }))?;
     Ok((made, after))
 }
