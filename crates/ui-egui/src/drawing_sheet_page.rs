@@ -355,6 +355,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let canvas = ui.max_rect();
     let (stage, paper, ink) = sheet_colours(app);
     ui.painter().rect_filled(canvas, 0.0, stage);
+    let backdrop = SheetBackdrop::parse(&app.preferences.drawing_sheet_backdrop).unwrap_or_default();
     app.viewport.rect = Some(canvas);
     crate::viewport::refresh_layout(app, ui.ctx());
     let response = ui.allocate_rect(canvas, Sense::click_and_drag());
@@ -412,6 +413,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     }
     let painter = ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect()));
     let sheet_rect = at.rect(&Aabb2 { min: Vec2::ZERO, max: size });
+    backdrop.paint(&painter, canvas, sheet_rect.center(), &t);
     // A very slight rounded corner, on screen only (D29): an export stays square.
     painter.add(t.shell_shadow().as_shape(sheet_rect, PAPER_CORNER));
     painter.rect_filled(sheet_rect, PAPER_CORNER, paper);
@@ -618,6 +620,75 @@ pub(crate) fn shown_percent(zoom: f64) -> f32 {
     let percent = zoom * 100.0;
     let shown = if percent < 10.0 { (percent * 10.0).round() / 10.0 } else { percent.round() };
     shown as f32
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SheetBackdrop {
+    #[default]
+    DatumCloud,
+    Grid,
+    None,
+}
+
+impl SheetBackdrop {
+    const ALL: [(Self, &str, &str); 3] = [
+        (Self::DatumCloud, "datum_cloud", "ui.drawing_backdrop.datum_cloud"),
+        (Self::Grid, "grid", "ui.drawing_backdrop.grid"),
+        (Self::None, "none", "ui.drawing_backdrop.none"),
+    ];
+
+    pub(crate) fn parse(id: &str) -> Option<Self> {
+        Self::ALL.iter().find_map(|(pattern, value, _)| (*value == id).then_some(*pattern))
+    }
+
+    fn paint(self, painter: &egui::Painter, canvas: Rect, sheet_centre: Pos2, t: &Tokens) {
+        if self == Self::None || !canvas.is_finite() || !canvas.is_positive() {
+            return;
+        }
+
+        // Keep spacing readable while the datum cloud follows the sheet's position.
+        // Bound the number of marks even on very wide or tall displays.
+        let step = t.space_24.max(canvas.width().max(canvas.height()) / 96.0);
+        let columns = (canvas.width() / step).floor() as usize;
+        let rows = (canvas.height() / step).floor() as usize;
+        let origin = canvas.min + egui::vec2((sheet_centre.x - canvas.left()).rem_euclid(step), (sheet_centre.y - canvas.top()).rem_euclid(step));
+        let x = |column| origin.x + column as f32 * step;
+        let y = |row| origin.y + row as f32 * step;
+        match self {
+            Self::DatumCloud => {
+                let ink = t.text.gamma_multiply(0.16);
+                for row in 0..=rows {
+                    for column in 0..=columns {
+                        painter.circle_filled(egui::pos2(x(column), y(row)), t.space_2 * 0.5, ink);
+                    }
+                }
+            }
+            Self::Grid => {
+                let stroke = egui::Stroke::new(t.space_2 * 0.5, t.text.gamma_multiply(0.09));
+                for column in 0..=columns {
+                    painter.vline(x(column), canvas.y_range(), stroke);
+                }
+                for row in 0..=rows {
+                    painter.hline(canvas.x_range(), y(row), stroke);
+                }
+            }
+            Self::None => {}
+        }
+    }
+}
+
+pub(crate) fn backdrop_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let labels = SheetBackdrop::ALL.map(|(_, _, label)| app.tr(label));
+    let current = SheetBackdrop::parse(&app.preferences.drawing_sheet_backdrop).unwrap_or_default();
+    let initial = SheetBackdrop::ALL.iter().position(|(pattern, _, _)| *pattern == current).unwrap_or_default();
+    let mut selected = initial;
+    let response = ui_kit::dropdown(ui, "pref_drawing_sheet_backdrop", &mut selected, &labels);
+    crate::scenario::publish_target("prefs:drawing_sheet_backdrop", response.rect);
+    if selected != initial
+        && let Some((_, id, _)) = SheetBackdrop::ALL.get(selected)
+    {
+        app.preferences.drawing_sheet_backdrop = (*id).into();
+    }
 }
 
 /// Preferences' Sheet colour choice.
