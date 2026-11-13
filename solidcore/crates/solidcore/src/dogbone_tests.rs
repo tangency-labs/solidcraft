@@ -801,7 +801,7 @@ fn a_relief_stops_short_of_a_tilted_blind_floor() {
         edge_relief(&up, &walls, [steep, top], &o).unwrap(),
         EdgeRelief::Skipped(Skip::Overhang)
     );
-    // A floor that leaves `left` of the relief's 6 + R: 2R·tan β = 6 + R − left. A millimetre
+    // A floor that leaves `left` of the relief's 6 + R: 2R·tan β = 6 + R − left. 10⁻³ mm
     // left is cut; 10⁻⁷ mm, within the zone tolerance, is a sliver: skipped as an overhang.
     let leaving = |left: f64| {
         let n = Vec3::Z + lean * ((6.0 + R - left) / (2.0 * R));
