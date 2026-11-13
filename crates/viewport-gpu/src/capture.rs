@@ -449,7 +449,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         eye: [eye[0], eye[1], eye[2], if cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: crate::view::AO_SAMPLES,
-        sky: [0.0; 4],
+        sky: crate::view::sky_uniform(scene.dark_parts_shading, cam.up),
         ssaa: 1.0,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
@@ -655,6 +655,55 @@ mod tests {
     fn color(scene: &GpuScene, bytes: &[u8]) -> Option<[u8; 4]> {
         let index = bytes.get(TRI_COLOR_AT..TRI_COLOR_AT + 4)?.try_into().ok().map(u32::from_le_bytes)?;
         scene.palette.get(crate::view::PaletteIndex(index))
+    }
+
+    /// The shading lives twice: `sky_lit` in the viewport shader, and `shade_prepared` in the CPU
+    /// rasterizer (`crates/viewport/src/raster.rs`). A picture taken without a window must look
+    /// the same whichever one draws it, so the two formulas are compared here rather than left to
+    /// drift apart (#7974).
+    ///
+    /// One large triangle with a single normal: every pixel inside it carries the same colour, so
+    /// the middle of the picture compares the two formulas and nothing else. Pictures are drawn
+    /// in [`FORMAT`], which is not an sRGB format, so neither renderer encodes again on the way
+    /// out and the bytes can be compared as they are.
+    #[test]
+    fn the_gpu_and_the_rasterizer_shade_a_face_alike() {
+        let Ok(capturer) = Capturer::headless(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        const SIZE: u32 = 64;
+        let mesh = Arc::new(Mesh {
+            positions: vec![Vec3::new(-80.0, 0.0, -80.0), Vec3::new(80.0, 0.0, -80.0), Vec3::new(0.0, 0.0, 80.0)],
+            normals: vec![Vec3::new(0.0, -1.0, 0.0); 3],
+            triangles: vec![[0, 1, 2]],
+            tri_face: vec![0],
+            ..Default::default()
+        });
+        let cam = Camera::default();
+        let middle = |p: &[u8]| p.get((32 * 64 + 32) * 4..(32 * 64 + 32) * 4 + 3).map(<[u8]>::to_vec).unwrap_or_default();
+        // A near-black colour is the one this issue is about; the others keep the rest honest.
+        for colour in [Rgb(20, 20, 24), Rgb(128, 128, 128), Rgb(230, 70, 40)] {
+            for dark_parts_shading in [false, true] {
+                let scene = Scene {
+                    meshes: vec![SceneMesh::solid(mesh.clone(), colour)],
+                    background: Some((Rgb(255, 255, 255), Rgb(255, 255, 255))),
+                    radius: 200.0,
+                    dark_parts_shading,
+                    ..Default::default()
+                };
+                let gpu = capturer.rgba(&scene, &cam, SIZE, SIZE).expect("the capturer draws the picture");
+                let cpu = solidcraft_viewport::render(&scene, &cam, SIZE as usize, SIZE as usize).rgba;
+                let (g, c) = (middle(&gpu), middle(&cpu));
+                assert_ne!(c, vec![255, 255, 255], "the triangle covers the middle of the picture");
+                for (channel, (a, b)) in g.iter().zip(&c).enumerate() {
+                    assert!(
+                        a.abs_diff(*b) <= 2,
+                        "channel {channel} of {colour:?} is {a} on the GPU and {b} on the rasterizer                          (sky fill {dark_parts_shading}): the two shading formulas have drifted apart"
+                    );
+                }
+            }
+        }
     }
 
     /// A body the design draws see-through goes into the scene's glass, at its own alpha, and

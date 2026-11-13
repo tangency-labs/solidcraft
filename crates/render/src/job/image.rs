@@ -1301,7 +1301,8 @@ fn raster_pixel(
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        solidcraft_viewport::shade(n, back, t.colour)
+        // The Render workspace has its own lighting; the viewport's sky fill is not part of it.
+        solidcraft_viewport::shade(n, back, t.colour, None)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));

@@ -99,6 +99,11 @@ pub struct Scene {
     pub part_hatch: Option<[Rgb; HATCH_COLOURS]>,
     /// A surface analysis shading the meshes (zebra, draft, curvature map, ...).
     pub analysis: Option<SceneAnalysis>,
+    /// Shade the meshes as the viewport does under Preferences > Graphics > Keep the shape of
+    /// dark parts (#7974): sum the light over a sky fill and encode once, rather than scaling
+    /// the sRGB colour by a lighting factor. Off, as the preference is, so a picture taken
+    /// without a window matches a window nobody has changed.
+    pub dark_parts_shading: bool,
 }
 
 /// The section cap's default tint, as in the viewport.
