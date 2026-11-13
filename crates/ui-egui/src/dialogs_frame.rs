@@ -389,7 +389,24 @@ pub(crate) fn pick(app: &SolveApp, d: &mut Dialog, sel: Sel) {
 
 /// [`pick_hit`], a new point taking `given` as its lasting reference when there is one.
 fn pick_as(app: &SolveApp, d: &mut Dialog, sel: Sel, given: Option<Value>) {
-    let before = (matches!(d.kind, Kind::Frame(_)) && d.active == 0).then(|| crate::selection::items(&d.inputs, 0).to_vec());
+    let mut before = (matches!(d.kind, Kind::Frame(_)) && d.active == 0).then(|| crate::selection::items(&d.inputs, 0).to_vec());
+    let original = before.clone();
+    // A point waiting for its partner: clicked again it is taken out, and a line clicked instead
+    // takes its place.
+    if let Some(at) = before.as_deref().and_then(|b| pair_indices(b).ok()).and_then(|(_, _, waiting)| waiting) {
+        let again = is_point(&sel) && before.as_ref().and_then(|b| b.get(at)) == Some(&sel);
+        if again || line_id(Some(&sel)).is_some() {
+            if let (Some(path), Kind::Frame(m)) = (d.inputs.first_mut(), &mut d.kind) {
+                m.remove_at(&mut path.items, at);
+            }
+            d.error = None;
+            prompt(d);
+            if again {
+                return;
+            }
+            before = Some(crate::selection::items(&d.inputs, 0).to_vec());
+        }
+    }
     let picks = match before.as_deref().and_then(|b| other_sketch_ends(app, b, &sel)) {
         Some(ends) => ends.map(|(end, r)| (end, Some(r))).to_vec(),
         None => vec![(sel, given)],
@@ -402,8 +419,8 @@ fn pick_as(app: &SolveApp, d: &mut Dialog, sel: Sel, given: Option<Value>) {
     let mut given = given.into_iter().flatten();
     let Some(before) = before else { return };
     if let Some(why) = refusal(app, d, &before) {
-        if let Some(path) = d.inputs.first_mut() {
-            path.items = before;
+        if let Some((path, original)) = d.inputs.first_mut().zip(original) {
+            path.items = original;
         }
         d.error = Some(solidcraft_ui_text::format("frame.pick_refused", &[("reason", tr(&why))]));
         return;
