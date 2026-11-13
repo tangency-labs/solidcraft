@@ -37,6 +37,7 @@ pub use face_anchor::{FaceAnchor, FaceAttachmentStatus};
 pub mod format;
 mod format_offsets;
 pub mod frame;
+mod frame_plate;
 pub mod gpu_plan;
 mod history_names;
 pub mod hole_reference;
