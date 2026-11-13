@@ -1367,8 +1367,8 @@ preference_settings! {
     /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
     /// instead of a list of small icons with names (#4739).
     ribbon_icon_grid: bool = false, PAGE_LAYOUT;
-    /// Opt in to entity headings in Construct menus; off keeps the original command order.
-    construct_menu_groups: bool = false, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
+    /// Group Construct menus under Planes, Axes and Points headings; off keeps the original command order.
+    construct_menu_groups: bool = true, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
     /// After a ribbon panel menu is open, hover another panel to switch to its menu.
     ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
@@ -6732,7 +6732,7 @@ mod tests {
             ("operations_panel", json!(false), PAGE_LAYOUT),
             ("file_operations_wait", json!(true), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
-            ("construct_menu_groups", json!(true), PAGE_LAYOUT),
+            ("construct_menu_groups", json!(false), PAGE_LAYOUT),
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
@@ -10843,27 +10843,27 @@ mod tests {
         assert_eq!(app.session.undo.len(), undo);
     }
 
-    /// Construct grouping is opt-in, survives Apply, and follows Layout Cancel and Defaults.
+    /// Construct grouping is on by default, survives Apply, and follows Layout Cancel and Defaults.
     #[test]
     fn construct_menu_groups_preference_persists_cancels_and_resets() {
-        assert!(!Prefs::default().construct_menu_groups);
-        assert!(!lenient(&json!({"theme":"light"})).construct_menu_groups);
+        assert!(Prefs::default().construct_menu_groups);
+        assert!(lenient(&json!({"theme":"light"})).construct_menu_groups);
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Layout"}));
         super::reveal_preference(&mut h, "prefs:construct_menu_groups");
         let checkbox = crate::scenario::handle_at("prefs:construct_menu_groups").unwrap();
         h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
-        assert!(h.app.preferences.construct_menu_groups);
-        h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.construct_menu_groups);
-        h.call("ui.prefs", json!({"open":"Layout","construct_menu_groups":true,"button":"apply"}));
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.construct_menu_groups);
+        h.call("ui.prefs", json!({"open":"Layout","construct_menu_groups":false,"button":"apply"}));
         let mut restored = SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(restored.preferences.construct_menu_groups);
+        assert!(!restored.preferences.construct_menu_groups);
         h.call("ui.prefs", json!({"button":"defaults"}));
-        assert!(!h.app.preferences.construct_menu_groups);
-        h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(h.app.preferences.construct_menu_groups);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.construct_menu_groups);
     }
 
     #[test]
