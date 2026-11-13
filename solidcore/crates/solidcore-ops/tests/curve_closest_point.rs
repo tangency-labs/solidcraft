@@ -1,5 +1,6 @@
 //! The point of a free curve nearest a given point, through ops on record curves: on a circle,
-//! a line, past a line's end and on a spline; a point that is not finite refused.
+//! a line, past a line's end and on a spline, as splines and as Line and Circle records; a point
+//! that is not finite refused.
 
 #![allow(
     clippy::unwrap_used,
@@ -12,6 +13,7 @@
 use solidcore_ops::curve::{circle, closest_point, curve_comb, cv_curve};
 use solidcore_ops::measure::point_distance;
 use solidcore_ops::Error;
+use solidcore_record::brep::{Curve, Frame};
 
 const TOL: f64 = 1e-6;
 
@@ -46,6 +48,54 @@ fn a_line_is_nearest_at_the_foot_of_the_perpendicular_or_its_end() {
     assert!((past.parameter - 1.0).abs() < 1e-8, "{past:?}");
     let to_end = point_distance([15.0, 3.0, 0.0], [10.0, 0.0, 0.0]).unwrap();
     assert!((past.distance - to_end.value).abs() < 1e-9, "{past:?}");
+}
+
+/// A Line record from the origin to (10, 0, 0): from (4, 3, 0) the foot (4, 0, 0) at 0.4, 3
+/// away; past its end, the end at 1.
+#[test]
+fn a_line_record_is_nearest_at_the_foot_or_its_end() {
+    let line = Curve::Line {
+        start: [0.0; 3],
+        end: [10.0, 0.0, 0.0],
+    };
+    let r = closest_point(&line, [4.0, 3.0, 0.0], TOL).unwrap().unwrap();
+    assert!(near(r.point, [4.0, 0.0, 0.0]), "{r:?}");
+    assert!((r.parameter - 0.4).abs() < 1e-8, "{r:?}");
+    assert!((r.distance - 3.0).abs() < 1e-9, "{r:?}");
+
+    let past = closest_point(&line, [15.0, 3.0, 0.0], TOL)
+        .unwrap()
+        .unwrap();
+    assert!(near(past.point, [10.0, 0.0, 0.0]), "{past:?}");
+    assert!((past.parameter - 1.0).abs() < 1e-8, "{past:?}");
+}
+
+/// A Circle record of radius 10 about the origin: from (12, 16, 0) nearest at (6, 8, 0), 10
+/// away, its parameter the record's radians from the frame's x axis (atan2(8, 6)).
+#[test]
+fn a_circle_record_is_nearest_along_the_radius_in_radians() {
+    let c = Curve::Circle {
+        frame: Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        },
+        radius: 10.0,
+    };
+    let r = closest_point(&c, [12.0, 16.0, 0.0], TOL).unwrap().unwrap();
+    assert!(near(r.point, [6.0, 8.0, 0.0]), "{r:?}");
+    assert!((r.distance - 10.0).abs() < 1e-9, "{r:?}");
+    assert!(
+        (r.parameter - 0.927_295_218_001_612_2).abs() < 1e-8,
+        "{r:?}"
+    );
+
+    let below = closest_point(&c, [0.0, -20.0, 3.0], TOL).unwrap().unwrap();
+    assert!(near(below.point, [0.0, -10.0, 0.0]), "{below:?}");
+    assert!(
+        (below.parameter - 3.0 * std::f64::consts::FRAC_PI_2).abs() < 1e-8,
+        "{below:?}"
+    );
 }
 
 /// On a wavy cubic no point the kernel samples along it is nearer than the point found, and

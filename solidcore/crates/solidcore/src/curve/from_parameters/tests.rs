@@ -99,6 +99,28 @@ fn an_arc_past_a_turn_moves_back_by_whole_turns() {
     near(at(&k, &e.curve, -90.0), [0.0, -1.0, 0.0], 1e-15 * 8.0);
 }
 
+/// The record's parameter comes back from the kernel's: radians from degrees on a conic, moved
+/// back by the turns the interval was moved, unchanged elsewhere.
+#[test]
+fn the_record_parameter_inverts_the_kernel_parameter() {
+    let close = |a: f64, b: f64| assert!((a - b).abs() <= 1e-15 * 8.0, "{a} != {b}");
+    let circle = Record::Circle {
+        frame: frame([0.0; 3]),
+        radius: 1.0,
+    };
+    close(record_parameter(&circle, [0.0, TAU], 90.0), FRAC_PI_2);
+    close(record_parameter(&circle, [0.0, TAU], 360.0), TAU);
+    close(
+        record_parameter(&circle, [TAU, TAU + FRAC_PI_2], 90.0),
+        TAU + FRAC_PI_2,
+    );
+    let line = Record::Line {
+        start: [0.0; 3],
+        end: [1.0, 0.0, 0.0],
+    };
+    assert_eq!(record_parameter(&line, [0.0, 1.0], 0.25), 0.25);
+}
+
 /// A frame not orthonormal is refused (the kernel would silently rebuild it), as is a radius
 /// of no length.
 #[test]

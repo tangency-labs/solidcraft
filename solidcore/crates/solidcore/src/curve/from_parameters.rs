@@ -140,6 +140,22 @@ pub fn from_parameters(k: &Kernel, record: &Record, interval: [f64; 2]) -> Resul
     }
 }
 
+/// The record's parameter of the kernel's parameter `t` on the curve [`from_parameters`] makes
+/// of `record` over `interval`: the inverse of its map. On a circle or ellipse, `t` in degrees
+/// to radians, moved back by the whole turns [`from_parameters`] moved the interval by; on the
+/// other kinds `t` itself.
+#[must_use]
+pub fn record_parameter(record: &Record, interval: [f64; 2], t: f64) -> f64 {
+    match record {
+        Record::Circle { .. } | Record::Ellipse { .. } => {
+            let [lo, _] = interval;
+            let [moved, _] = turned(interval);
+            t.to_radians() + (lo - moved)
+        }
+        _ => t,
+    }
+}
+
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
 /// parameter the edge's interval and trims are in): the conic of the record's numbers
 /// (`conic`), keeping `form` as its NURBS, over the form's interval. The form must lie on the
