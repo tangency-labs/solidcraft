@@ -189,6 +189,7 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     home_rect: &["titlebar:home", "appbar:home"],
     file: &["appbar:file", "appbar:folder"],
     file_rect: &["appbar:file"],
+    plugins: "appbar:plugins",
     button: &["appbar:", "titlebar:"],
     separator: "titlebar:separator:",
     search: "titlebar:search",
@@ -234,6 +235,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
+                // The web build runs no plugins: no Plugins menu there. Its accessible name says
+                // "menu", so it is not taken for Preferences' Plugins page.
+                plugins: (!cfg!(target_arch = "wasm32")).then(|| (app.tr("ui.plugins"), app.plugin_menu.open, app.tr("ui.plugin_menu_name"))),
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
@@ -254,12 +258,21 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
+            app.plugin_menu.in_file_menu = out.plugins_in_file;
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
+                    app_bar::BarAction::Plugins { rect } => {
+                        app.ui.palette_open = false;
+                        crate::plugin_menu::toggle(app, &ui.ctx().clone(), *rect);
+                    }
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
+                        app.plugin_menu.open = false;
+                        if app.plugin_menu.in_file_menu {
+                            crate::plugin_menu::refresh(app);
+                        }
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -313,6 +326,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     file_menu(app, ui.ctx());
+    crate::plugin_menu::menu(app, &ui.ctx().clone());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::unique("sc_help_anchor")).unwrap_or(300.0));
     crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
 }
@@ -490,6 +504,11 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
+    // A narrow app bar has no room for the Plugins button: its menu is here instead.
+    if app.plugin_menu.in_file_menu {
+        rows.push(crate::plugin_menu::file_submenu(app));
+        rows.push(FileRow::Separator);
+    }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
     if crate::install::offered(app).is_some() {
         rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
@@ -502,6 +521,10 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
 
 /// Runs the File menu's row `id` ([`file_rows`]).
 fn run_file_row(app: &mut SolveApp, id: &str) {
+    if let Some(id) = id.strip_prefix("plugins:") {
+        crate::plugin_menu::choose(app, id);
+        return;
+    }
     if let Some(i) = id.strip_prefix("recent:").and_then(|i| i.parse::<usize>().ok()) {
         if let Some(path) = app.home.recent.get(i).cloned() {
             FileAction::OpenRecent(path).run(app);
@@ -1796,17 +1819,19 @@ struct RowData {
     hint: bool,
 }
 
+fn dropdown_checkable(app: &SolveApp, id: &str) -> bool {
+    id == "view.shots_strip" || (persistent_available(app, id) && app.preferences.persistent_ribbon_pressed)
+}
+
 impl RowData {
     fn new(app: &SolveApp, c: &'static solidcraft_engine::CommandSpec) -> Self {
         let info = crate::render_workspace::interactive_command_info(app, c);
         let label = app.tr_label(info.label).to_string();
-        let mut checked = None;
-        if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
-            checked = Some(persistent_pressed(app, c.id));
-        }
-        if c.id == "view.shots_strip" {
-            checked = Some(app.preferences.render_shots_strip);
-        }
+        let checked = if c.id == "view.shots_strip" {
+            Some(app.preferences.render_shots_strip)
+        } else {
+            dropdown_checkable(app, c.id).then(|| persistent_pressed(app, c.id))
+        };
         let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
         // A disabled row says why; a documented command also shows its help (#2758).
         let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason));
@@ -1866,11 +1891,19 @@ fn dropdown_keys(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engi
 
 /// How wide a panel drop-down's rows are: the widest label and shortcut, at least 200.
 fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engine::CommandSpec]) -> f32 {
-    let rows: Vec<(String, String)> = cmds
+    let rows: Vec<_> = cmds
         .iter()
-        .map(|c| (app.tr_label(c.info(&app.session).label).to_string(), crate::keymap::display_for(app, c.id).unwrap_or_default()))
+        .map(|c| {
+            let info = c.info(&app.session);
+            (
+                app.tr_label(info.label).to_string(),
+                crate::keymap::display_for(app, c.id).unwrap_or_default(),
+                info.icon,
+                dropdown_checkable(app, c.id),
+            )
+        })
         .collect();
-    ribbon::menu_width(ui, rows.iter().map(|(label, key)| (label.as_str(), key.as_str())))
+    ribbon::menu_width(ui, rows.iter().map(|(label, key, icon, checkable)| (label.as_str(), key.as_str(), *icon, *checkable)))
 }
 
 /// A panel drop-down drawn as a grid of large icons (the `ribbon_icon_grid` preference, #4739):

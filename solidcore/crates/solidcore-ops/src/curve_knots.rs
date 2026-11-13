@@ -1,12 +1,15 @@
-//! Knots and degree of a free curve: a knot inserted or removed, the degree raised or lowered.
-//! The curve is the record's ([`Curve`], a clamped spline or rational spline); every step is the
-//! kernel's ([`NurbCurve::insert_knot`], [`NurbCurve::remove_knot`],
-//! [`NurbCurve::elevate_degree`], [`NurbCurve::reduce_degree_once`]: The NURBS Book's algorithms
-//! A5.1, A5.8, A5.9 and A5.11), and a change that is not exact is kept only within a tolerance
-//! of the kernel's certified bound ([`certified_distance`]). Ops checks the inputs and converts.
+//! Knots and degree of a free curve: a knot inserted or removed, the degree raised or lowered,
+//! the curve split in two at a parameter. The curve is the record's ([`Curve`], a clamped
+//! spline or rational spline); every step is the kernel's ([`NurbCurve::insert_knot`],
+//! [`NurbCurve::remove_knot`], [`NurbCurve::elevate_degree`], [`NurbCurve::reduce_degree_once`],
+//! [`NurbCurve::split`]: The NURBS Book's algorithms A5.1, A5.8, A5.9 and A5.11, and knot
+//! insertion to full multiplicity), and a change that is not exact is kept only within a
+//! tolerance of the kernel's certified bound ([`certified_distance`]). Ops checks the inputs
+//! and converts.
 //! A closed periodic curve (unclamped knots, as `curve_fit::closed_cv_curve` makes) is refused
 //! for now: the kernel's knot routines take clamped knots.
 
+use solidcore::error::nurbs::NurbsFailure;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::crv_deviation::certified_distance;
 use solidcore::nurbs::math::{CPoint, NOW};
@@ -107,6 +110,33 @@ pub fn set_degree(curve: &Curve, degree: usize, tol: f64) -> Result<(Curve, Opti
             }
         }
         Ok(within(&nurb, &lowered, tol)?.map(|(c, bound)| (c, Some(bound))))
+    })?
+}
+
+/// `curve` cut at `t`, strictly inside its domain: the piece before (over `[start, t]`) and
+/// the piece after (over `[t, end]`), each a clamped curve of `curve`'s degree, rational where
+/// `curve` is, together the same shape ([`NurbCurve::split`]: `t` inserted to full
+/// multiplicity and the control points shared out). A `t` within `1e-6` of the domain's length
+/// of a knot is moved onto that knot (the kernel's snap), so the pieces meet on it.
+///
+/// # Errors
+/// [`Error::Argument`] for a curve that is not a valid clamped spline or rational spline (a
+/// closed periodic one is refused: cut it open at its seam first), or a `t` not strictly inside
+/// its domain or within the kernel's snap of an end; the kernel's status otherwise.
+pub fn split_at(curve: &Curve, t: f64) -> Result<(Curve, Curve)> {
+    let nurb = nurb_of(curve)?;
+    if !interior(curve, t) {
+        return Err(Error::Argument);
+    }
+    run("curve_knots::split_at", |_| {
+        let (before, after) = match nurb.split(t) {
+            Ok(pieces) => pieces,
+            Err(e) if e.nurbs_failure() == Some(&NurbsFailure::Parameter) => {
+                return Ok(Err(Error::Argument))
+            }
+            Err(e) => return Err(e),
+        };
+        Ok(record_of(&before).and_then(|b| record_of(&after).map(|a| (b, a))))
     })?
 }
 
@@ -418,5 +448,98 @@ mod tests {
         };
         assert_eq!(nurb_of(&floating).err(), Some(Error::Argument));
         assert_eq!(insert_knot(&floating, 4.5), Err(Error::Argument));
+    }
+
+    /// The degree and domain of a clamped spline.
+    fn degree_and_domain(c: &Curve) -> (usize, [f64; 2]) {
+        let (knots, count) = parts(c);
+        (knots.len() - count - 1, [knots[0], knots[knots.len() - 1]])
+    }
+
+    /// `piece` is `whole` over the piece's domain: the same point at 101 parameters.
+    fn same_over(piece: &Curve, whole: &Curve, tol: f64) {
+        let (_, [a, b]) = degree_and_domain(piece);
+        for i in 0..=100 {
+            let t = a + (b - a) * f64::from(i) / 100.0;
+            let (p, q) = (at(piece, t), at(whole, t));
+            assert!(
+                p.iter().zip(q).all(|(x, y)| (x - y).abs() <= tol),
+                "at {t}: {p:?} and {q:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_pieces_of_a_split_are_the_curve_on_each_side() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let (before, after) = split_at(&c, 0.4).unwrap();
+        assert_eq!(degree_and_domain(&before), (3, [0.0, 0.4]));
+        assert_eq!(degree_and_domain(&after), (3, [0.4, 1.0]));
+        same_over(&before, &c, 1e-12);
+        same_over(&after, &c, 1e-12);
+        // clamped: the pieces start and end on their end points, and meet
+        let (Curve::Spline { points: p0, .. }, Curve::Spline { points: p1, .. }) =
+            (&before, &after)
+        else {
+            panic!("splines: {before:?} {after:?}")
+        };
+        assert_eq!(p0[0], WAVE[0]);
+        assert_eq!(p1[p1.len() - 1], WAVE[5]);
+        let (m0, m1) = (p0[p0.len() - 1], p1[0]);
+        assert!(m0.iter().zip(m1).all(|(a, b)| (a - b).abs() < 1e-12));
+        assert!(m0
+            .iter()
+            .zip(at(&c, 0.4))
+            .all(|(a, b)| (a - b).abs() < 1e-12));
+
+        // at an interior knot (1/3 for six points' cubic)
+        let knot = parts(&c).0[4];
+        let (before, after) = split_at(&c, knot).unwrap();
+        assert_eq!(degree_and_domain(&before).1, [0.0, knot]);
+        same_over(&before, &c, 1e-12);
+        same_over(&after, &c, 1e-12);
+    }
+
+    #[test]
+    fn a_split_arc_stays_rational_on_its_circle() {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = Curve::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: vec![
+                [10.0, 0.0, 0.0, 1.0],
+                [10.0 * w, 10.0 * w, 0.0, w],
+                [0.0, 10.0, 0.0, 1.0],
+            ],
+        };
+        let (before, after) = split_at(&arc, 0.5).unwrap();
+        for piece in [&before, &after] {
+            assert!(matches!(piece, Curve::RationalSpline { .. }), "{piece:?}");
+            assert_eq!(degree_and_domain(piece).0, 2);
+            same_over(piece, &arc, 1e-12);
+            let (_, [a, b]) = degree_and_domain(piece);
+            for i in 0..=20 {
+                let p = at(piece, a + (b - a) * f64::from(i) / 20.0);
+                let r2 = p[0] * p[0] + p[1] * p[1];
+                assert!((r2 - 100.0).abs() < 1e-9, "r² = {r2}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_split_at_an_end_outside_or_of_a_closed_curve_is_refused() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        for t in [0.0, 1.0, -0.5, 1.5, f64::NAN, f64::INFINITY] {
+            assert_eq!(split_at(&c, t), Err(Error::Argument), "{t}");
+        }
+        // within the kernel's snap of an end: moved onto it, so no piece is left
+        assert_eq!(split_at(&c, 1e-8), Err(Error::Argument));
+        assert_eq!(split_at(&c, 1.0 - 1e-8), Err(Error::Argument));
+        let closed = crate::curve_fit::closed_cv_curve(&WAVE, 3).unwrap();
+        assert_eq!(split_at(&closed, 0.5), Err(Error::Argument));
+        let line = Curve::Line {
+            start: [0.0; 3],
+            end: [1.0; 3],
+        };
+        assert_eq!(split_at(&line, 0.5), Err(Error::Argument));
     }
 }

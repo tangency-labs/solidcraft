@@ -224,6 +224,7 @@ pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
 pub mod plugin_install;
+pub(crate) mod plugin_menu;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
@@ -772,6 +773,8 @@ pub struct SolveApp {
     pub(crate) quick_measure: quick_measure::QuickMeasure,
     /// An STL or OBJ file waiting for the unit its coordinates are in (`mesh_units`).
     pub mesh_units: Option<mesh_units::Ask>,
+    /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
+    pub(crate) plugin_menu: plugin_menu::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
     pub stand_up: Option<Vec<String>>,
     /// The placement of the component that file came in as: the offer turns it.
@@ -1020,6 +1023,7 @@ impl SolveApp {
             recovery_discard_all: false,
             quick_measure: Default::default(),
             mesh_units: None,
+            plugin_menu: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
             stand_up_digest: None,
@@ -3598,6 +3602,8 @@ impl SolveApp {
         semantic_content::begin(self, ui.ctx());
         self.cad_ui(ui, &mut report_input);
         semantic_content::finalize(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        panel_runtime::show_desktop_windows(self, ui.ctx());
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).
@@ -3698,6 +3704,7 @@ impl SolveApp {
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());
+        plugin_menu::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());
         context_menu::show(self, ui.ctx());
@@ -3761,6 +3768,11 @@ impl SolveApp {
             let held = if waits || shot_waits { None } else { self.control_held.pop_front() };
             let Some(mut req) = held.or_else(|| rx.as_ref().and_then(|rx| rx.try_recv().ok())) else { break };
             if req.refuse_cancelled_chat() {
+                continue;
+            }
+            // A Plugins-menu run is for the design its dialog was opened on (`plugin_menu`).
+            if let Err(error) = plugin_menu::check_dispatch(self, &req) {
+                let _ = req.reply.send(json!({"ok":false,"error":error}));
                 continue;
             }
             if let Err(error) = plugins::normalize_request(&self.session, &req.method, &mut req.params) {

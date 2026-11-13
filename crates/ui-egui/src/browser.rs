@@ -395,7 +395,7 @@ pub struct OccMove {
     /// Distances along X, Y, Z (mm) and turns about X, Y, Z (degrees) from where it was.
     pub translate: [f64; 3],
     pub angles: [f64; 3],
-    /// The occurrence's origin when the move began: what it turns about.
+    /// The occurrence's centre when the move began: what it turns about.
     pub pivot: Option<solidcore_record::Vec3>,
     /// The order the angles apply in (`gizmo::turn_of`), so each stays what was dragged.
     order: [usize; 3],
@@ -3543,8 +3543,21 @@ pub(crate) fn revert_occurrence_dialog(app: &mut SolveApp, m: &OccMove) {
     }
 }
 
+/// The middle of what a moved occurrence places, in the world, where its triad sits and it turns.
+/// Its component's origin can be anywhere, far from the part. `None` when it places nothing.
+pub(crate) fn occurrence_centre(app: &SolveApp, m: &OccMove) -> Option<solidcore_record::Vec3> {
+    let bounds = if m.path.is_empty() {
+        crate::dialogs_assembly::occurrence_bounds(&app.session, &[m.occurrence])
+    } else {
+        let names = app.session.occurrence_bodies_shared(&m.path, true).ok()?;
+        let world = crate::open_meshing::session_world(&app.session);
+        names.iter().filter_map(|n| world.body(n)).fold(solidcraft_engine::geom::Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds()))
+    };
+    (!bounds.is_empty()).then(|| bounds.center())
+}
+
 /// The pending move: turned by the angles in the order they were dragged (about X, then Y, then
-/// Z at first) through the starting origin, then moved.
+/// Z at first) through the occurrence's centre, then moved.
 pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
     use crate::gizmo;
     use solidcore_record::Vec3;
@@ -3561,7 +3574,7 @@ pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
     );
 }
 
-/// The shared move triad at the occurrence's origin: arrows and squares move it, rings turn it.
+/// The shared move triad at the occurrence's centre: arrows and squares move it, rings turn it.
 pub(crate) fn occurrence_triad_model(app: &SolveApp) -> Option<crate::gizmo::Triad> {
     let movement = app.tree.occurrence_move.as_ref()?;
     let center = movement.pivot? + solidcore_record::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);

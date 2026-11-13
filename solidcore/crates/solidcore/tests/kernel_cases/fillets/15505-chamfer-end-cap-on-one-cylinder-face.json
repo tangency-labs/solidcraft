@@ -1,0 +1,152 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b2"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  14.42497833623499,
+                  14.424978336234988,
+                  1.5
+                ],
+                [
+                  13.364318164455169,
+                  13.364318164455165,
+                  3.0000000000000004
+                ]
+              ],
+              "index": 25
+            }
+          ],
+          "points": [
+            [
+              13.894648250345078,
+              13.894648250345076,
+              2.25
+            ]
+          ],
+          "tolerance": 3.0359135078343575
+        },
+        "kind": "chamfer",
+        "sizes": [
+          1.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "15505-chamfer-end-cap-on-one-cylinder-face",
+  "expected": {
+    "body_count": 1,
+    "faces": 15,
+    "method": "the operand has 14 faces. The chamfer adds its one face and ends on the cylinder face it meets: 14 + 1 = 15 faces, one closed solid",
+    "outcome": "solid",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#15505",
+      "tangency-labs/solidcraft#14558"
+    ],
+    "what": "the same 1 mm chamfer where the wall at its outer end is a single face of the cylinder r 20.4 about Z: the chamfer must end on that face"
+  },
+  "expressible": true,
+  "gallery_note": "the chamfer's outer end (highlighted) on the one cylinder face of the wall",
+  "operation_expressible": true,
+  "params": {
+    "edges": {
+      "kind": "edge",
+      "picked": [
+        {
+          "at": [
+            [
+              14.42497833623499,
+              14.424978336234988,
+              1.5
+            ],
+            [
+              13.364318164455169,
+              13.364318164455165,
+              3.0000000000000004
+            ]
+          ],
+          "index": 25
+        }
+      ],
+      "points": [
+        [
+          13.894648250345078,
+          13.894648250345076,
+          2.25
+        ]
+      ],
+      "tolerance": 3.0359135078343575
+    },
+    "kind": "chamfer",
+    "sizes": [
+      1.0
+    ],
+    "turn": "mitre"
+  },
+  "records": "15505-chamfer-end-cap-on-one-cylinder-face.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#15505",
+    "tangency-labs/solidcraft#14558"
+  ],
+  "ungraded": [],
+  "what": "the same 1 mm chamfer where the wall at its outer end is a single face of the cylinder r 20.4 about Z: the chamfer must end on that face",
+  "why_not": []
+}

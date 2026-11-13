@@ -35,7 +35,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.temporary_radius_setup_errors = true;
     k.fixes.fillet_trim_status = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.fillet_retry_radius_as_first = true;
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
@@ -70,9 +69,7 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.refine_cc_range_ends = true;
     k.fixes.flat_corners_test_bits = true;
     k.fixes.good_drop_result_distances_in_order = true;
-    k.fixes.torus_check_reads_v_interval = true;
     k.fixes.torus_check_spindle_apex = true;
-    k.fixes.perspective_sphere_offsets = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.revolve_analytic_profile_faces = true;
@@ -95,12 +92,10 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_nx1_end_rib_global_merge = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.cylinder_plane_tangent_within_tolerance = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.iso_curve_sliver_domain_is_degenerate = true;
-    k.fixes.heal_stage3_failures_propagate = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.boolean2d_plane_covers_far_faces = true;
@@ -126,7 +121,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.precise_properties_body_length_scale = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.corner_blend_stays_inside_neighbours = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
@@ -142,20 +136,16 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.boolean_lists_virtual_surface_copies = true;
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.ssi_singular_start_inside_direction = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.curve_tight_box_interval_knots = true;
     k.fixes.boolean_skips_faces_apart = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
-    k.fixes.stitch_solid_nests_cavities = true;
     k.fixes.glue_vertices_joins_every_region = true;
     k.fixes.box_face_failures_propagate = true;
-    k.fixes.ellipse_adjust_step_interval_keeps_turns = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
 }
 

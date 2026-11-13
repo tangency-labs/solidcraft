@@ -71,6 +71,21 @@ pub fn count_of(name: &str) -> Option<f64> {
     COUNTS.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
 }
 
+/// Publish and query another viewport's widgets without exposing their local
+/// coordinates to the root viewport's scenario and control-channel lookups.
+pub fn isolated<R>(paint: impl FnOnce() -> R) -> R {
+    struct Restore<T: 'static>(&'static std::thread::LocalKey<RefCell<Vec<T>>>, Vec<T>);
+    impl<T> Drop for Restore<T> {
+        fn drop(&mut self) {
+            self.0.with(|items| items.replace(std::mem::take(&mut self.1)));
+        }
+    }
+    let _handles = Restore(&HANDLES, HANDLES.with(RefCell::take));
+    let _rects = Restore(&RECTS, RECTS.with(RefCell::take));
+    let _counts = Restore(&COUNTS, COUNTS.with(RefCell::take));
+    paint()
+}
+
 /// Forget last frame's handles, rects and counts (called as a frame starts).
 pub fn clear_handles() {
     HANDLES.with(|h| h.borrow_mut().clear());

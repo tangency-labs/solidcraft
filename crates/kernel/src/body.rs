@@ -1090,28 +1090,20 @@ impl Body {
         Ok(b)
     }
 
-    /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
-    /// a body share the measurement. `None` when the body cannot be meshed, or a face of it was
-    /// left out of the mesh (an open mesh has no volume).
-    pub fn volume_at(&self, tol: f64) -> Option<f64> {
-        let key = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
-        let key = key.to_bits();
+    /// The body's volume: measured with exact mass properties via SMLib for B-rep bodies,
+    /// or from mesh triangles for mesh bodies.
+    pub fn volume_at(&self, _tol: f64) -> Option<f64> {
         if let Some(cell) = &self.volume
             && let Ok(cached) = cell.lock()
-            && let Some((cached_tol, volume)) = *cached
-            && cached_tol == key
+            && let Some((_, volume)) = *cached
         {
             return Some(volume);
         }
-        let mesh = self.mesh(&MeshTolerance::chord(f64::from_bits(key))).ok()?;
-        if self.faces_without_triangles(&mesh) > 0 {
-            return None;
-        }
-        let volume = mesh.measure().volume;
+        let volume = crate::measure(self).ok()?.volume;
         if let Some(cell) = &self.volume
             && let Ok(mut slot) = cell.lock()
         {
-            *slot = Some((key, volume));
+            *slot = Some((0, volume));
         }
         Some(volume)
     }
@@ -1284,20 +1276,6 @@ impl Body {
         }
         let Ok(plan) = self.mesh_plan(&MeshTolerance::chord(coarse_tolerance(self.size()))) else { return self.face_count() };
         plan.faces_with_triangles(self.face_count()).iter().filter(|h| !**h).count()
-    }
-
-    /// Faces of the body with no triangles in its mesh `m` (left out by the mesher).
-    fn faces_without_triangles(&self, m: &Mesh) -> usize {
-        if self.is_mesh() {
-            return 0;
-        }
-        let mut has = vec![false; self.face_count()];
-        for f in &m.tri_face {
-            if let Some(h) = has.get_mut(*f as usize) {
-                *h = true;
-            }
-        }
-        has.iter().filter(|h| !**h).count()
     }
 
     /// A mesh with its edges flagged for display (seams, tangent joins, protected creases).

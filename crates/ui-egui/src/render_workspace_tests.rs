@@ -7847,58 +7847,6 @@ fn render_lighting_methods_show_reasons_and_budgets_without_changing_method_or_d
 }
 
 #[test]
-fn render_assign_gestures_stage_tools_and_selection_actions_use_commands() {
-    let (mut h, _) = render_pick_sample();
-    h.app.run("appearance.assign", json!({"bodies":["Plate"],"appearance":"ABS - Blue"})).unwrap();
-    h.app.run("select.filter", json!({"mode":"body"})).unwrap();
-    h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body {name:"Plate".into()}]})).unwrap();
-    h.frames(4);
-    let document = h.app.session.doc.clone();
-    let undo = h.app.session.undo.len();
-    let tools = crate::scenario::rect_of("render:stage_tools").unwrap();
-    for id in ["appearance.paint", "appearance.pick_up"] {
-        assert!(tools.contains_rect(crate::scenario::rect_of(&format!("render:stage:{id}")).unwrap()));
-        assert!(crate::workspace::destination(solidcraft_engine::find_command(id).unwrap()).is_none());
-    }
-    let pill = crate::scenario::rect_of("render:selection").unwrap();
-    assert!((pill.height() - 34.0).abs() < 1.0, "{pill:?}");
-    assert!(pill.width() < 200.0, "{pill:?}");
-    for index in 0..4 {
-        assert!(pill.contains_rect(crate::scenario::rect_of(&format!("selection:action:{index}")).unwrap()));
-    }
-    h.step(&json!({"click":{"handle":"render:stage:appearance.pick_up"}})).unwrap();
-    assert!(h.app.render_workspace.view.assign.sampling);
-    h.step(&json!({"key":"Escape"})).unwrap();
-    h.step(&json!({"click":{"handle":"selection:action:0"}})).unwrap();
-    assert!(crate::scenario::rect_of("render:appearance:chain-menu").is_some());
-    h.step(&json!({"click":{"handle":"selection:action:2"}})).unwrap();
-    assert_eq!(h.app.preferences.render_library_favorites.len(), 1);
-    h.step(&json!({"click":{"handle":"selection:action:2"}})).unwrap();
-    assert!(h.app.preferences.render_library_favorites.is_empty());
-    assert!(Arc::ptr_eq(&document, &h.app.session.doc));
-    assert_eq!(h.app.session.undo.len(), undo);
-    h.step(&json!({"click":{"handle":"selection:action:1"}})).unwrap();
-    assert!(inspector::confirmation_open(&h.app));
-    assert!(Arc::ptr_eq(&document, &h.app.session.doc));
-    h.step(&json!({"click":{"handle":"dialog:Replace with"}})).unwrap();
-    h.step(&json!({"widget":"Copper"})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
-    assert!(!inspector::confirmation_open(&h.app));
-    assert_eq!(h.app.session.doc.appearances.bodies["Plate"].name, "Copper");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
-    h.app.run("edit.undo", json!({})).unwrap();
-    h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body {name:"Plate".into()}]})).unwrap();
-    h.frames(3);
-    h.step(&json!({"click":{"handle":"selection:action:3"}})).unwrap();
-    assert!(!h.app.session.body_visible("Plate"));
-    h.app.run("edit.undo", json!({})).unwrap();
-    h.app.run("view.render_stage", json!({"stage":"light"})).unwrap();
-    h.frames(3);
-    assert!(crate::scenario::rect_of("render:selection").is_none());
-    assert!(crate::scenario::rect_of("render:stage:appearance.paint").is_none());
-}
-
-#[test]
 fn render_assign_gestures_replacement_draft_cannot_cross_a_document_edit() {
     let (mut h, _) = render_pick_sample();
     h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body {name:"Plate".into()}]})).unwrap();

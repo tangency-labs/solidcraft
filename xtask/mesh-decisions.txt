@@ -140,7 +140,6 @@ crates/kernel/src/body.rs:Body::edges gives edge points and lengths from a mesh
 crates/kernel/src/body.rs:Body::faces gives face areas and centroids from a mesh
 crates/kernel/src/body.rs:Body::meets decides whether bodies meet by meshes
 crates/kernel/src/body.rs:Body::meets_each decides whether tools meet a body by meshes
-crates/kernel/src/body.rs:Body::volume_at measures a B-rep body's volume from a mesh
 crates/kernel/src/distance.rs:DistanceShape::on_face decides whether a point lies on a face by its mesh
 crates/kernel/src/helix.rs:sweep_helix_mesh models a thread as a triangle mesh for faceted booleans
 crates/kernel/src/intersection.rs:meeting_edges samples meeting edges from a mesh

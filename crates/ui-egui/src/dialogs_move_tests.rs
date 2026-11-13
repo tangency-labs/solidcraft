@@ -79,6 +79,7 @@ fn editing_a_move_in_a_turned_component_keeps_world_distances() {
     if let Kind::Move { y, .. } = &mut d.kind {
         *y = "-12 mm".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -606,6 +607,7 @@ fn changing_the_move_type_keeps_the_move_made_so_far() {
     if let Kind::Move { angle, .. } = &mut d.kind {
         *angle = "90 deg".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -638,6 +640,7 @@ fn changing_move_types_keeps_an_off_origin_rotation() {
     if let Kind::Move { z, .. } = &mut d.kind {
         *z = "7 mm".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -750,6 +753,7 @@ fn editing_a_free_move_shows_the_values_it_was_made_with() {
         *ry = "0 deg".into();
         *rz = "0 deg".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -1023,7 +1027,7 @@ fn a_second_crossed_face_replaces_the_firsts_points() {
     };
     for (face, gone) in [(top, None), (side, Some(top.centroid))] {
         h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: "Body1".into(), index: face.index, point: face.centroid });
-        crate::snap_wake::update(&mut h.app, &[]);
+        crate::snap_wake::update(&mut h.app, &[], false, None);
         assert!(has(&h, rim_centre), "the rim's centre stays: {:?}", h.app.viewport.woken);
         assert!(has_centre(&h, face.centroid), "the face's centre wakes: {:?}", h.app.viewport.woken);
         if let Some(at) = gone {
@@ -1079,7 +1083,7 @@ fn an_edit_sleeps_the_woken_points() {
     h.app.run("solid.box", json!({"corner": [200, 200, 0], "length": 5, "width": 5, "height": 5})).unwrap();
     // Nothing under the pointer now: the points woken before the edit sleep all the same.
     h.app.viewport.hover = None;
-    crate::snap_wake::update(&mut h.app, &[]);
+    crate::snap_wake::update(&mut h.app, &[], false, None);
     assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
 }
 
@@ -1162,7 +1166,8 @@ fn a_moved_bodys_woken_points_show_where_it_is_drawn() {
     assert!(matches!(from.as_slice(), [Sel::Vertex { body, point }] if body == "Body1" && point.dist(drawn) < 1e-6), "{from:?}");
 }
 /// A vertex of another body nearer the pointer than a woken point is the one hovered and picked,
-/// even within the few pixels where a woken point wins over the edge it lies on.
+/// and puts the woken points to sleep, even within the few pixels where a woken point wins over
+/// the edge it lies on.
 #[test]
 fn another_bodys_vertex_nearer_than_a_woken_point_wins() {
     let mut h = holed_plate_picking_from();
@@ -1182,6 +1187,7 @@ fn another_bodys_vertex_nearer_than_a_woken_point_wins() {
         "{:?}",
         h.app.viewport.hover
     );
+    assert!(h.app.viewport.woken.points.is_empty(), "the other body's vertex puts them to sleep: {:?}", h.app.viewport.woken);
     h.step(&json!({ "click": { "world": [corner.x, corner.y, corner.z] } })).unwrap();
     let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
     assert!(matches!(from.as_slice(), [Sel::Vertex { body, point }] if body == "Body2" && point.dist(corner) < 1e-6), "{from:?}");
@@ -1268,9 +1274,76 @@ fn offset_plane_through_a_snapped_middle_keeps_it_when_edited() {
     assert!(commands[0].1["params"]["through"].is_null(), "{:?}", commands);
 }
 
+/// A pointer hover of the plate's face at `p`, as the viewport finds it.
+fn face_hit(h: &crate::scenario::Harness, p: Vec3) -> crate::viewport::Hit {
+    let Some(Sel::Face { body, index, point }) = crate::dialogs::face_sel(&h.app.session, p) else { panic!("no face at {p:?}") };
+    crate::viewport::Hit::Face { body, index, point }
+}
+
 /// Whether a point is among the woken ones.
 fn woken_has(h: &crate::scenario::Harness, p: Vec3) -> bool {
     h.app.viewport.woken.points.iter().any(|w| w.at.dist(p) < 1e-6)
+}
+
+/// An item that offers nothing the woken points lack keeps them: a hole's rim, hovered after the
+/// hole's wall, keeps the wall's two centres, and a centre picked there is still recorded as the
+/// wall's (#11233's record of the item that woke each point).
+#[test]
+fn an_item_that_offers_nothing_new_keeps_the_points() {
+    let mut h = holed_plate_picking_from();
+    h.app.viewport.hover = Some(face_hit(&h, Vec3::new(41.0, 20.0, 5.0)));
+    crate::snap_wake::update(&mut h.app, &[], false, None);
+    let (top, bottom) = (Vec3::new(45.0, 20.0, 10.0), Vec3::new(45.0, 20.0, 0.0));
+    assert!(woken_has(&h, top) && woken_has(&h, bottom), "{:?}", h.app.viewport.woken);
+    let Some(Sel::Edge { body, index, point }) = crate::dialogs::edge_sel(&h.app.session, Vec3::new(49.0, 20.0, 10.0)) else { panic!("the rim") };
+    h.app.viewport.hover = Some(crate::viewport::Hit::Edge { body, index, mid: point, point });
+    crate::snap_wake::update(&mut h.app, &[], false, None);
+    assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })) && woken_has(&h, bottom), "{:?}", h.app.viewport.woken);
+    let at = h.app.viewport.woken.points.iter().find(|w| w.at.dist(top) < 1e-6).map(|w| w.at).unwrap();
+    assert!(matches!(crate::snap_wake::snapped(&h.app, at), Some((Sel::Face { .. }, _))), "{:?}", h.app.viewport.snapped);
+}
+
+/// On the way to a woken point (within reach of it, or inside a woken rim's circle), another edge
+/// under the pointer doesn't take over: a rim seen through a hole doesn't replace the rim being
+/// travelled across.
+#[test]
+fn another_edge_within_reach_of_a_woken_point_keeps_them() {
+    let mut h = holed_plate_picking_from();
+    let rim = crate::dialogs::edge_sel(&h.app.session, Vec3::new(49.0, 20.0, 10.0)).unwrap();
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let screen = |p: Vec3| proj.to_screen(p).unwrap();
+    let Some(Sel::Edge { body, index, point }) = crate::dialogs::edge_sel(&h.app.session, Vec3::new(49.0, 20.0, 0.0)) else { panic!("the far rim") };
+    h.app.viewport.hover = Some(crate::viewport::Hit::Edge { body, index, mid: point, point });
+    let points = solidcraft_engine::snap::snap_points(&h.app.session, &rim);
+    h.app.viewport.woken = crate::snap_wake::Woken { item: Some(rim), points, revision: h.app.session.revision, ..Default::default() };
+    crate::snap_wake::update(&mut h.app, &[], false, Some((&proj, screen(centre))));
+    assert!(woken_has(&h, centre), "at the centre: {:?}", h.app.viewport.woken);
+    crate::snap_wake::update(&mut h.app, &[], false, Some((&proj, screen(Vec3::new(10.0, 10.0, 10.0)))));
+    assert!(!woken_has(&h, centre), "far from it the far rim takes over: {:?}", h.app.viewport.woken);
+}
+
+/// Held Shift (Keep Snap Points) keeps the woken points over another body's face; let go, that
+/// face wakes its own. A vertex of another body puts woken points to sleep.
+#[test]
+fn shift_keeps_the_points_and_another_bodys_vertex_puts_them_to_sleep() {
+    let mut h = holed_plate_picking_from();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "operation": "new"})).unwrap();
+    h.app.viewport.hover = Some(face_hit(&h, Vec3::new(20.0, 10.0, 10.0)));
+    crate::snap_wake::update(&mut h.app, &[], false, None);
+    let plate = h.app.viewport.woken.clone();
+    assert!(plate.points.iter().any(|p| p.body == "Body1"), "{plate:?}");
+
+    h.app.viewport.hover = Some(face_hit(&h, Vec3::new(85.0, 5.0, 10.0)));
+    crate::snap_wake::update(&mut h.app, &[], true, None);
+    assert_eq!(h.app.viewport.woken, plate, "Shift held");
+    crate::snap_wake::update(&mut h.app, &[], false, None);
+    assert!(h.app.viewport.woken.points.iter().all(|p| p.body != "Body1") && woken_has(&h, Vec3::new(85.0, 5.0, 10.0)), "{:?}", h.app.viewport.woken);
+
+    h.app.viewport.woken = plate;
+    h.app.viewport.hover = Some(crate::viewport::Hit::Vertex { body: "Body2".into(), point: Vec3::new(80.0, 0.0, 10.0) });
+    crate::snap_wake::update(&mut h.app, &[], false, None);
+    assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
 }
 
 /// The Move dialog on the 20 × 30 × 10 box with the triad drawn, and the screen point of a handle.
@@ -1445,8 +1518,50 @@ fn shown_angles(h: &crate::scenario::Harness) -> [String; 3] {
 
 /// The whole move the dialog makes, in the world.
 fn whole_move(h: &crate::scenario::Harness) -> Mat {
-    let p = params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let p = params(&h.app, d).unwrap();
     transform(&h.app, &p).unwrap()
+}
+
+/// What Move shows is what OK makes: the commands the dialog previews, drawn by the fast move
+/// preview and run as OK runs them, put the picked bodies in the same place, and the dialog's own
+/// reading of its move (`transform`, which places the triad) takes them there too. A dialog that
+/// sends a value one of them reads differently draws the body somewhere it doesn't land. An edit
+/// is checked as the app opens it, rolled back to before the move.
+fn assert_shown_where_ok_puts_it(app: &mut SolveApp, d: &Dialog) {
+    use solidcraft_engine::geom::Aabb3;
+    let mut ok = app.session.scratch();
+    let back = app.session.doc.marker;
+    if let Some((id, _)) = d.editing {
+        let at = app.session.doc.feature_index(id).unwrap();
+        crate::dialogs::roll_marker(app, Some(at)).unwrap();
+    }
+    let cmds = crate::dialogs::preview_commands(app, d).unwrap();
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+    let drawn = crate::move_preview::MovePreview::default().compute(app, &cmds, colors).expect("the fast preview takes it").expect("drawn").bounds;
+    let m = transform(app, &params(app, d).unwrap()).unwrap();
+    let names = bodies_of(app, d);
+    let before = app.session.world_state().unwrap();
+    let mut read = Aabb3::EMPTY;
+    for name in &names {
+        for p in &before.body(name).unwrap().mesh().positions {
+            read.add(apply_point(&m, *p));
+        }
+    }
+    if d.editing.is_some() {
+        crate::dialogs::roll_marker(app, back).unwrap();
+    }
+    for (command, params) in &cmds {
+        ok.execute(command, params).unwrap();
+    }
+    let after = ok.world_state().unwrap();
+    let mut made = Aabb3::EMPTY;
+    for name in &names {
+        made = made.union(&after.body(name).unwrap().mesh().bounds());
+    }
+    let near = |a: &Aabb3, b: &Aabb3| a.min.dist(b.min) < 1e-4 && a.max.dist(b.max) < 1e-4;
+    assert!(near(&drawn, &made), "{cmds:?}: drawn at {drawn:?}, OK puts it at {made:?}");
+    assert!(near(&read, &made), "{cmds:?}: the dialog reads its move to {read:?}, OK puts it at {made:?}");
 }
 
 /// Assert that `m` turns as `want` does (its rotation part only).
@@ -1547,4 +1662,150 @@ fn a_ring_dragged_back_to_its_start_is_back_at_its_angle() {
     }
     ring(&mut d, 0.0, true, true);
     assert_eq!(rx_of(&d), "12.50 deg", "a click leaves the typed angle as it is");
+}
+
+/// Move works in the world, so the triad of a body in a placed component sits on the body where
+/// it is placed, not where it was modelled, and a turn leaves the body's centre there.
+#[test]
+fn the_triad_sits_on_a_body_where_its_component_places_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "translate": [50, 10, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.start("solid.move");
+    let mut d = h.app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    let world = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - world).len() < 1e-6, "triad at {at:?}, body at {world:?}");
+    if let Kind::Move { rz, .. } = &mut d.kind {
+        *rz = "90 deg".into();
+    }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let turned = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    assert!((turned - world).len() < 1e-6, "turned from {world:?} to {turned:?}");
+    // Editing a later move finds the body the same way, where it stands before that move.
+    let moved = h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": ["5 mm", "0 mm", "0 mm"]})).unwrap()["feature"].as_u64().unwrap();
+    let d = crate::dialogs::for_feature(&h.app, moved, None).unwrap();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - turned - Vec3::X * 5.0).len() < 1e-6, "triad at {at:?}, body was at {turned:?}");
+}
+
+/// Rotate holds the picked axis still, and a move's type can change on the way, in a placed
+/// component too: the dialog names the world point it turns about, which a turn with no origin
+/// would take as the component's origin.
+#[test]
+fn a_placed_body_turns_about_the_picked_axis_through_a_type_change() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 10, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let world = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    h.app.start("solid.move");
+    let mut d = h.app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    if let Kind::Move { rz, .. } = &mut d.kind {
+        *rz = "90 deg".into();
+    }
+    switch_type(&h.app, &mut d, ROTATE);
+    d.inputs[1].items = vec![Sel::Axis { name: "Z".into() }];
+    if let Kind::Move { angle, .. } = &mut d.kind {
+        *angle = "90 deg".into();
+    }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    // A quarter turn on the spot, then a quarter turn about the world's Z through the origin.
+    let want = gizmo::apply(&gizmo::rotation(Vec3::Z, std::f64::consts::FRAC_PI_2), world);
+    let got = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    assert!((got - want).len() < 1e-5, "{got:?} != {want:?}");
+}
+
+/// In a turned component the stored axis is the component's, like the distances: read as the
+/// world's, the reopened move drew the body elsewhere, and OK would have moved it there.
+#[test]
+fn reopening_a_move_in_a_turned_component_changes_nothing() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "30 deg", "translate": [130, 20, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let id = h
+        .app
+        .run("solid.move", json!({"bodies": ["Body1"], "translate": ["10 mm", "-5 mm", "0 mm"], "axis": [1.0, 0.0, 0.0], "angle": "25 deg"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let bounds = |h: &crate::scenario::Harness| h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds();
+    let before = bounds(&h);
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - before.center()).len() < 1e-4, "triad at {at:?}, body at {:?}", before.center());
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let after = bounds(&h);
+    assert!((after.min - before.min).len() < 1e-3 && (after.max - before.max).len() < 1e-3, "{before:?} -> {after:?}");
+}
+
+/// A stored turn is about the origin, but its triad sits on the body where the move leaves it,
+/// not at the origin plus the stored distance. The stored values stay until a ring is dragged,
+/// which then turns the body on the spot.
+#[test]
+fn a_reopened_turned_move_has_its_triad_on_the_body() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let id = h
+        .app
+        .run("solid.move", json!({"bodies": ["Body1"], "translate": ["30 mm", "0 mm", "0 mm"], "axis": [0.0, 0.0, 1.0], "angle": "90 deg"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let body = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - body).len() < 1e-6, "triad at {at:?}, body at {body:?}");
+    let p = params(&h.app, &d).unwrap();
+    assert_eq!((&p["translate"][0], &p["angle"]), (&json!("30 mm"), &json!("90 deg")), "the stored values stay: {p}");
+
+    let change = Change::Rotate { axis: 2, angle: 10_f64.to_radians() };
+    drag(&h.app, &mut d, crate::gizmo::Drag { handle: crate::gizmo::Handle::Ring(2), change, started: true, done: true });
+    let Kind::Move { rz, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!(rz, "100 deg");
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - body).len() < 1e-4, "a ring turns the body on the spot: {at:?}, body at {body:?}");
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+    let p = params(&h.app, &d).unwrap();
+    let m = transform(&h.app, &p).unwrap();
+    assert!((apply_point(&m, Vec3::new(10.0, 10.0, 10.0)) - body).len() < 1e-4, "{p}");
+}
+
+/// A component copied with Create Copy turns about the world origin (`occurrence.move`), not about
+/// its frame's like a body of it: the copy of a placed part turned a quarter on its centre stays on
+/// the part, where it landed 100 mm off when the move was given for the frame's origin.
+#[test]
+fn a_turned_copy_of_a_placed_component_turns_on_its_centre() {
+    let (mut h, occurrence) = part_harness();
+    h.app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [100, 0, 0]})).unwrap();
+    h.app.start("solid.move");
+    h.settle();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Occurrence { path: vec![occurrence] }];
+    d.extra.insert("copy".into(), json!(true));
+    set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
+    let p = params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(p["occurrences"] == json!([[occurrence]]) && p.get("angle").is_some(), "{p}");
+    let copy = h.app.session.execute("solid.move", &p).unwrap()["occurrences"][0].as_u64().unwrap();
+    let mut landed = solidcraft_engine::geom::Aabb3::EMPTY;
+    for name in h.app.session.occurrence_bodies(&[copy], true).unwrap() {
+        landed = landed.union(&h.app.session.world_state().unwrap().body(&name).unwrap().mesh().bounds());
+    }
+    assert!(landed.center().dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "{landed:?}");
 }

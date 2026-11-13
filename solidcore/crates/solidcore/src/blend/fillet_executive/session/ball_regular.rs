@@ -659,6 +659,13 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
 /// `sm_BallSectionAt`: the solver's section in the plane square to its filleted edge at
 /// the edge's `t`, on the faces' surfaces extended as the trace extends them; its guess
 /// is the edge point dropped on each face, or where that finds none, `guess`'s contacts.
+/// Not the fork's: for a rail rolled over a smooth far edge of its face, the whole length
+/// (`fillet_tangent_rollover`), the point dropped is that edge's point nearest the edge
+/// point ([`rolled_edge_point`]), on the face beyond: the edge point lies off that face, and
+/// dropped on its surface extended it may land on another sheet of it (the far side of a
+/// boss), where the solve finds the ball rolling there (#15767).
+///
+/// [`rolled_edge_point`]: crate::blend::fillet_tangent_rollover::rolled_edge_point
 pub(crate) fn ball_section_at(
     k: &Kernel,
     target: &mut Brep,
@@ -698,13 +705,39 @@ pub(crate) fn ball_section_at(
         return Ok(None);
     }
     let normal = tangent.unitize()?;
+    // where a ball of radius 0 touches each face: the edge's point, or for a rail rolled over a
+    // smooth far edge of its face (`fillet_tangent_rollover`) that edge's point nearest it, on
+    // the face beyond
+    let mut seeds = [point; 2];
+    let tangency = ops.solver().tangency_tolerance;
+    for (rail, seed) in seeds.iter_mut().enumerate() {
+        let Some(onto) = ops.solver().rolled_faces.get(rail).copied().flatten() else {
+            continue;
+        };
+        let Some(own) = ops.solver().edgeuse(rail)? else {
+            continue;
+        };
+        let Some(from) = eu::face(target, own)? else {
+            continue;
+        };
+        if let Some(p) = crate::blend::fillet_tangent_rollover::rolled_edge_point(
+            k, target, from, onto, point, tangency,
+        )? {
+            *seed = p;
+        }
+    }
     let mut guesses = [Point2::UNDEF; 2];
     let mut dropped = true;
-    for ((base, domain), g) in bases.iter().zip(&domains).zip(guesses.iter_mut()) {
+    for (((base, domain), g), seed) in bases
+        .iter()
+        .zip(&domains)
+        .zip(guesses.iter_mut())
+        .zip(seeds)
+    {
         if !dropped {
             break;
         }
-        let drop = base.drop_point::<NoObject>(k, point, domain, &DropPointOptions::default())?;
+        let drop = base.drop_point::<NoObject>(k, seed, domain, &DropPointOptions::default())?;
         dropped = drop.success;
         *g = drop.result_uv;
     }

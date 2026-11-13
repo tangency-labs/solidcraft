@@ -1417,6 +1417,49 @@ pub fn construction_planes(s: &Session) -> Vec<(u64, String, Plane)> {
         .collect()
 }
 
+/// The planar body face each construction plane was made from, as it is now: (plane name, body
+/// name, the face's indices on that body), for a plane of the design (not a component's) whose
+/// definition reaches an attached face: an Offset Plane on a face, and planes offset, turned,
+/// flipped or moved through a point from it. The viewport draws such a plane over its face, which
+/// its origin, the plane's point nearest the world origin, can be far from (#4345). A plane on a
+/// face found again only by its picked point or name, or whose face is gone, has none.
+pub fn construction_plane_faces(s: &Session) -> Vec<(String, String, Vec<usize>)> {
+    let st = s.model.state();
+    s.doc
+        .features
+        .iter()
+        .filter(|f| !f.suppressed && f.component == 0)
+        .filter_map(|f| {
+            let solidcraft_doc::FeatureKind::ConstructionPlane { plane } = &f.kind else { return None };
+            let anchor = plane_face_anchor(&s.doc, plane, 0).filter(|a| a.path.is_empty())?;
+            let body = st.body(&anchor.target.body)?;
+            let (faces, _) = s.doc.anchored_face_indices(&st, body, &anchor.target).ok()?;
+            (!faces.is_empty()).then(|| (f.name.clone(), anchor.target.body.clone(), faces))
+        })
+        .collect()
+}
+
+/// The face anchor a plane's definition reaches: its own, its base's (offset, turned, flipped,
+/// moved through a point) or, through a construction plane it is built on, that plane's.
+fn plane_face_anchor<'a>(
+    doc: &'a solidcraft_doc::Document,
+    plane: &'a solidcraft_doc::PlaneRef,
+    depth: usize,
+) -> Option<&'a solidcraft_doc::FaceAnchor> {
+    use solidcraft_doc::PlaneRef;
+    match plane {
+        PlaneRef::Face { anchor, .. } => anchor.as_deref(),
+        PlaneRef::Offset { base, .. } | PlaneRef::ThroughPoint { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => {
+            plane_face_anchor(doc, base, depth + 1)
+        }
+        PlaneRef::Construction { feature } if depth < 32 => match &doc.feature(feature.0)?.kind {
+            solidcraft_doc::FeatureKind::ConstructionPlane { plane } => plane_face_anchor(doc, plane, depth + 1),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Construction axes, as evaluated: (feature id, name, origin, unit direction).
 pub fn construction_axes(s: &Session) -> Vec<(u64, String, Vec3, Vec3)> {
     constructs(s)

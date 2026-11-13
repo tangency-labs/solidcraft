@@ -2769,7 +2769,11 @@ enum Turn {
 }
 
 fn turn(before: &ArcSense, after: &ArcSense) -> Turn {
-    let jump = (after.sweep - before.sweep).abs() > std::f64::consts::PI;
+    let turned = (after.sweep - before.sweep).abs();
+    let jump = turned > std::f64::consts::PI;
+    // A sweep that changed by half a turn is the same arc stored the other way round: its ends
+    // swapped. Comparing with `>` alone misses it, as the difference rounds just under pi.
+    let flip = (turned - std::f64::consts::PI).abs() <= 1e-9;
     // A line whose sense was clear and no longer is collapsed onto the arc: turned too.
     let lines: Vec<(&(usize, usize, usize, Option<f64>), bool)> = before
         .lines
@@ -2782,6 +2786,7 @@ fn turn(before: &ArcSense, after: &ArcSense) -> Turn {
         .collect();
     let (all, any) = (lines.iter().all(|(_, f)| *f), lines.iter().any(|(_, f)| *f));
     match (jump, any, all) {
+        (false, false, _) if flip => Turn::Swap,
         (false, false, _) => Turn::Kept,
         (true, _, true) => Turn::Swap,
         (false, true, false) if lines.len() == 2 => {
@@ -2834,7 +2839,9 @@ pub fn fillets_kept(before: &Sketch, after: &Sketch) -> bool {
 }
 
 /// The turns of every filleted arc from `before` to where `sk` is now, applying the swaps.
-fn settle(sk: &mut Sketch, before: &[ArcSense]) -> Vec<(usize, Turn)> {
+/// `restore` swaps even an arc whose lines all leave it: after a mirror, the ends the mirror
+/// swapped are put back however the solve left them.
+fn settle(sk: &mut Sketch, before: &[ArcSense], restore: bool) -> Vec<(usize, Turn)> {
     let after = arc_senses(sk, &|i| sk.points.get(i).map(|p| p.pos).unwrap_or_default());
     // A swap gives the corner its arc back when its lines cut back through it. An arc whose lines
     // all leave it already rounds its corner, whatever the reference it is judged against (a
@@ -2849,7 +2856,7 @@ fn settle(sk: &mut Sketch, before: &[ArcSense]) -> Vec<(usize, Turn)> {
         })
         .filter_map(|(arc, t, leave)| match t {
             Turn::Kept => None,
-            Turn::Swap if leave => None,
+            Turn::Swap if leave && !restore => None,
             t => Some((arc, t)),
         })
         .collect();
@@ -2887,7 +2894,7 @@ fn solve_sensed(
     if !report.ok() {
         return report;
     }
-    let mut turns = settle(sk, &before);
+    let mut turns = settle(sk, &before, false);
     let mirrors: Vec<(usize, usize, usize)> =
         turns.iter().filter_map(|(arc, t)| if let Turn::Mirror { p, across } = t { Some((*arc, *p, *across)) } else { None }).collect();
     if !mirrors.is_empty() {
@@ -2896,8 +2903,8 @@ fn solve_sensed(
             mirror_arc(sk, *arc, *p, *across);
         }
         let again = solve_inner(sk, hold, reference, analysis, old_values, budget);
-        let again_turns = if again.ok() { settle(sk, &before) } else { Vec::new() };
-        if again.ok() && again_turns.is_empty() {
+        let again_turns = if again.ok() { settle(sk, &before, true) } else { Vec::new() };
+        if again.ok() && again_turns.iter().all(|(_, t)| matches!(t, Turn::Swap)) {
             return again;
         }
         *sk = solved;

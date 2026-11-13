@@ -387,7 +387,15 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     let placement = if app.panel_layout_preferences.record.is_none() { &app.preferences } else { &defaults };
     let layout = default_layout(app, placement, workspace.clone(), &registry)?;
     let mut runtime = PanelRuntime::new(
-        LayoutService::new(registry, layout, HostCapabilities { persistence: true, ..Default::default() })?,
+        LayoutService::new(
+            registry,
+            layout,
+            HostCapabilities {
+                persistence: true,
+                native_windows: cfg!(not(target_arch = "wasm32")),
+                max_native_hosts: if cfg!(target_arch = "wasm32") { 0 } else { MAX_SECTIONS },
+            },
+        )?,
         RuntimeEnvironment {
             workspace: workspace.clone(),
             document: Some(DocumentId::new(app.session.document_id.clone())?),
@@ -410,7 +418,12 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     let services = ProductionServices {
         models: ProductionModels,
         commands: ProductionCommands,
-        local: ProductionLocal { workspace, document: DocumentId::new(app.session.document_id.clone())?, keyboard: None },
+        local: ProductionLocal {
+            workspace,
+            document: DocumentId::new(app.session.document_id.clone())?,
+            viewport: ViewportId(VIEWPORT.into()),
+            keyboard: None,
+        },
     };
     let mut integration = AppPanelRuntime::new(runtime, Box::new(services))?;
     integration.production = Some(state);
@@ -893,6 +906,7 @@ fn registry() -> PanelResult<PanelRegistry> {
         if history || shots {
             allowed_zones.insert(Zone::Bottom);
         }
+        allowed_zones.insert(Zone::Window);
         registry.register(PanelSpec {
             kind: PanelKind::new(product.kind())?,
             title_key: product.title_key().into(),
@@ -919,7 +933,7 @@ fn registry() -> PanelResult<PanelRegistry> {
             max_size: Size { width: MAX_LOGICAL, height: MAX_LOGICAL },
             edge_rule: if assistant { EdgeRule::PinOuter } else { EdgeRule::None },
             surface: PanelSurface::FollowZone,
-            features: PanelFeatures { popout: false, hot_closable: assistant || bom, closable: !sketch, ..Default::default() },
+            features: PanelFeatures { popout: true, hot_closable: assistant || bom, closable: !sketch, ..Default::default() },
             side_height_policy: if assistant { SideHeightPolicy::Fill } else { SideHeightPolicy::Content },
             fixed_bottom_height: (history || shots).then_some(bottom_height),
             header_actions: product.header_actions(),
@@ -1182,6 +1196,10 @@ impl AppPanelServices for ProductionServices {
         self.local.document = DocumentId::new(session.document_id.clone())?;
         Ok(())
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_presentation_viewport(&mut self, native: Option<&HostId>) {
+        self.local.viewport = ViewportId(native.map_or(VIEWPORT, |host| host.0.as_str()).into());
+    }
     fn services(&mut self) -> ContentServices<'_> {
         ContentServices { models: &self.models, commands: &mut self.commands, local: &mut self.local }
     }
@@ -1189,13 +1207,14 @@ impl AppPanelServices for ProductionServices {
 struct ProductionLocal {
     workspace: WorkspaceId,
     document: DocumentId,
+    viewport: ViewportId,
     keyboard: Option<(LocalScope, InstanceId)>,
 }
 impl ProductionLocal {
     fn validate(&self, scope: &LocalScope, instance: &InstanceId) -> PanelResult<()> {
         scope.validate()?;
         Product::from_instance(instance)?;
-        if scope.workspace != self.workspace || scope.document.as_ref() != Some(&self.document) || scope.viewport.0 != VIEWPORT {
+        if scope.workspace != self.workspace || scope.document.as_ref() != Some(&self.document) || scope.viewport != self.viewport {
             return Err(error(Rule::Placement, "application panel service has a different owner scope"));
         }
         Ok(())
@@ -1332,7 +1351,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             return Err(error(Rule::Availability, "application panel content owner changed"));
         }
         match product {
-            Product::RenderLibrary | Product::RenderInspector | Product::RenderShots => {
+            Product::RenderLibrary | Product::RenderInspector | Product::RenderShots if !context.preview_geometry => {
                 let rect = super::workspace::egui_rect(context.outer);
                 let id = match product {
                     Product::RenderLibrary => "render:appearances",
@@ -1381,7 +1400,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             return Err(error(Rule::Availability, "application panel document changed while painting"));
         }
         let scope = LocalScope { workspace: context.workspace.clone(), document: context.document.clone(), viewport: context.viewport.clone() };
-        if let Some(capture) = capture {
+        if let Some(capture) = capture.filter(|_| !context.preview_geometry) {
             if let Some(mut extent) = capture.extent {
                 extent.width = context.outer.size.width;
                 extent.flow = context.flow;
