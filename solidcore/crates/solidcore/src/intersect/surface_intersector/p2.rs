@@ -65,6 +65,12 @@
 //!   point, and their trims end on the degenerate boundary, before
 //!   `StepBackFromSingularity` places the singular parameter along the curve's tangent
 //!   (part 1).
+//! - **A point near a pole but off it is not stepped back from (not upstream).**
+//!   A point `IsSingularity` calls singular because it is near a pole (a collapsed side
+//!   of the domain), off the degenerate boundary, keeps its own surface derivatives and UV
+//!   tangent ([`SurfaceIntersector::near_a_pole_off_it`]); upstream replaced them with
+//!   those of a point stepped back along the span. Interior singularities keep the
+//!   step-back.
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps) and the
 //!   `SM_ASSERT`s (no-ops in release builds).
 
@@ -91,6 +97,7 @@ use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::{drop_vectors, TsectCurveType, B_SPLINE_SURFACE_TYPE};
+use crate::surface::surface::p5::{SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::PatchBoundaryBoundingPlanes;
 
@@ -692,7 +699,9 @@ impl SurfaceIntersector<'_> {
                         uv_values[1]
                     };
                     let (sing, sing_dir) = is_singularity(k, self.surface(s), uv)?;
-                    if sing {
+                    // Not upstream: a point near a pole but off it keeps its own
+                    // derivatives (`near_a_pole_off_it`)
+                    if sing && !self.near_a_pole_off_it(k, s, sing_dir, uv)? {
                         // Not upstream: a point on the degenerate boundary is the pole
                         if self.place_at_pole(k, s, sing_dir, point)? {
                             return Ok(());
@@ -773,6 +782,86 @@ impl SurfaceIntersector<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Not upstream: whether `uv`, a point `IsSingularity` calls singular on surface `s`
+    /// (collapsing along `sing_dir`), lies near a pole but not on it: off the degenerate
+    /// boundary (by more than the UV tolerance `TestPoint` reads "on a boundary" with,
+    /// `100 SM_EFF_ZERO` scaled by the domain, as [`Self::place_at_pole`] reads it), on
+    /// the side of the natural domain nearer it across `sing_dir`, where that side is a
+    /// pole (`GetSingularities`: its samples within `SM_EFF_ZERO` of one another).
+    ///
+    /// Such a point is not stepped back from (`StepBackFromSingularity`). `IsSingularity`
+    /// calls a point singular when `|S_u|` is below `ZONE_TOL_3D` times `|S_v|` (both
+    /// scaled by the domain): within about 1e-4 of the pole of a sphere of radius 6.
+    /// Upstream stepped back from such a point and replaced its singular parameter and
+    /// its surface derivatives with those of a point stepped back along the span. Its UV
+    /// tangent then no longer mapped onto its own 3D tangent: 0.04 to 0.66 rad off at the
+    /// knots of a sphere/cylinder trace passing a pole 1e-5 to 2e-5 away, and a span test
+    /// reading the images' directions never passed however short the step. Near a pole
+    /// and off it the surface is regular (a pole is a collapsed side, so `S_u x S_v`
+    /// vanishes there only), the chain rule holds at the point itself
+    /// (`S_u u' + S_v v' = T` has its exact solution), and the point keeps its own
+    /// derivatives.
+    ///
+    /// A point singular in the domain's interior (a fold or a crease of a B-spline,
+    /// where the derivative vanishes along a whole iso line) is not near a pole: there the
+    /// normal has no limit and the step-back stays, as upstream. So does a point when
+    /// `GetSingularities` fails (`false`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] and [`SolidError::Cancelled`] from `GetSingularities`.
+    pub(super) fn near_a_pole_off_it(
+        &self,
+        k: &Kernel,
+        s: SrfIndex,
+        sing_dir: SurfParamType,
+        uv: Point2,
+    ) -> Result<bool> {
+        let Some(dom) = self.uv_domains.get(s.index()).copied() else {
+            return Ok(false);
+        };
+        let on_tol = EFF_ZERO * (1.0 + dom.max_dimension()) * 100.0;
+        let (across, lo, hi) = match sing_dir {
+            SurfParamType::U => (uv.y, dom.min().y, dom.max().y),
+            SurfParamType::V => (uv.x, dom.min().x, dom.max().x),
+            _ => return Ok(false),
+        };
+        // (written to accept: a NaN parameter is not near a pole)
+        let off_boundary = (across - lo).abs() > on_tol && (across - hi).abs() > on_tol;
+        if !off_boundary {
+            return Ok(false);
+        }
+        let surface = self.surface(s);
+        let natural = match surface.natural_uv_domain_with_nurb(k) {
+            Ok(d) => d,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        };
+        let sides = match surface.get_singularities(k, false, false) {
+            Ok(r) => u64::from(r.singular),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        };
+        // the nearer side across the collapsing direction, as a `SM_SS_*` bit
+        let side = match sing_dir {
+            SurfParamType::U => {
+                if (uv.y - natural.min().y).abs() <= (natural.max().y - uv.y).abs() {
+                    SS_VMIN
+                } else {
+                    SS_VMAX
+                }
+            }
+            _ => {
+                if (uv.x - natural.min().x).abs() <= (natural.max().x - uv.x).abs() {
+                    SS_UMIN
+                } else {
+                    SS_UMAX
+                }
+            }
+        };
+        Ok(sides & side != 0)
     }
 
     /// Not upstream: places `point`, singular on surface `s` (collapsing along
@@ -2028,5 +2117,121 @@ mod tests {
         // (the bounding planes of a plane go through `SmPlane::CreateIsoParametricCurve`,
         // surface.plane_p1, ported): no pair of boundary planes has opposite normals
         assert_eq!(r.unwrap(), BoundaryPlaneTestResult::Unknown);
+    }
+
+    /// The r 6 ball about (0, 50 + `delta`, 20), its poles on z and its seam turned `turn`
+    /// from +x, and the r 50 cylinder about z: the line where they meet passes each pole
+    /// `delta` from it. Returns the largest angle, over the traced curve's knots off the
+    /// ball's poles, between the image of the UV curve's tangent on the ball
+    /// (`S_u u' + S_v v'`, the chain rule at the knot's own UV point) and the 3D curve's
+    /// tangent there, from either side of the knot, with how many knots lie within 1e-3
+    /// of a pole.
+    fn knot_image_turn(delta: f64, turn: f64) -> (f64, usize) {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::cone::Cone;
+        use crate::surface::sphere::Sphere;
+        let k = &Kernel::default();
+        let (sn, cs) = turn.sin_cos();
+        let ball = Surface::from(
+            Sphere::create_canonical(
+                k,
+                &Axis2Placement::new(
+                    Vec3::new(0.0, 50.0 + delta, 20.0),
+                    Vec3::new(cs, sn, 0.0),
+                    Vec3::new(-sn, cs, 0.0),
+                ),
+                6.0,
+            )
+            .unwrap(),
+        );
+        let wall = Surface::from(
+            Cone::create_canonical_cylinder(
+                k,
+                &Axis2Placement::new(
+                    Vec3::ZERO,
+                    Vec3::new(1.0, 0.0, 0.0),
+                    Vec3::new(0.0, 1.0, 0.0),
+                ),
+                50.0,
+            )
+            .unwrap(),
+        );
+        let ball_domain = ball.natural_uv_domain_with_nurb(k).unwrap();
+        let wall_domain = wall.natural_uv_domain_with_nurb(k).unwrap();
+        let (out, status) = ball.global_surface_intersect_with_partial(
+            k,
+            &ball_domain,
+            &wall,
+            &wall_domain,
+            [true, true],
+            None,
+            None,
+        );
+        status.unwrap();
+        let poles = [
+            Vec3::new(0.0, 50.0 + delta, 14.0),
+            Vec3::new(0.0, 50.0 + delta, 26.0),
+        ];
+        let (mut worst, mut near): (f64, usize) = (0.0, 0);
+        for (c3, uv) in out.curves_3d.iter().zip(&out.surface1_uv_curves) {
+            let uv = uv.as_ref().unwrap();
+            let (knots, _) = c3.knots(k, None).unwrap();
+            for &t in &knots {
+                for from_left in [true, false] {
+                    let d3 = c3.evaluate(k, t, 1, from_left, false).unwrap();
+                    let d2 = uv.evaluate(k, t, 1, from_left, false).unwrap();
+                    let at = Point2::new(d2[0].x, d2[0].y);
+                    let on_pole = [ball_domain.min().y, ball_domain.max().y]
+                        .iter()
+                        .any(|&b| (at.y - b).abs() <= 1e-9 * (1.0 + b.abs()));
+                    if on_pole {
+                        continue;
+                    }
+                    if poles.iter().any(|p| p.distance(d3[0]) <= 1e-3) {
+                        near += 1;
+                    }
+                    let (_, su, sv) = ball.evaluate_1st_derivatives(k, at, true, true).unwrap();
+                    let image = su * d2[1].x + sv * d2[1].y;
+                    if image.length() == 0.0 || d3[1].length() == 0.0 {
+                        continue;
+                    }
+                    worst = worst.max(image.angle_between(d3[1]).unwrap());
+                }
+            }
+        }
+        (worst, near)
+    }
+
+    /// A trace point near a pole but off it keeps the UV tangent of its own UV point. A point
+    /// within about 1e-4 of a sphere's pole passes `IsSingularity`'s ratio test (`|S_u|` far below
+    /// `|S_v|`), and the step-back from a singularity replaced its singular parameter and its
+    /// surface derivatives with those of a point stepped back along the span, so its UV
+    /// tangent no longer mapped onto its 3D tangent (0.04 to 0.66 rad off before this
+    /// change, in each case below). There the chain rule holds at the point itself, so the
+    /// image of the UV tangent is the 3D tangent up to rounding; the bound 1e-5 rad is a
+    /// margin over the worst measured with the change (2.3e-6, where `|S_u|` is 1e-4 of
+    /// `|S_v|`), far below the turn before it.
+    #[test]
+    fn a_trace_point_near_a_pole_keeps_its_own_uv_tangent() {
+        let mut failed = Vec::new();
+        let cases = [
+            (2e-5, 0.0),
+            (-2e-5, 0.0),
+            (-2e-5, PI / 2.0),
+            (-1.2e-5, 0.0),
+            (-1.2e-5, PI / 2.0),
+            (-1e-5, 0.0),
+            (-1e-5, PI / 2.0),
+        ];
+        for (delta, turn) in cases {
+            let (worst, near) = knot_image_turn(delta, turn);
+            // (written to accept: a NaN fails)
+            if !(worst <= 1e-5 && near > 0) {
+                failed.push(format!(
+                    "delta {delta:e} turn {turn:.3}: {worst:e} rad, {near} near"
+                ));
+            }
+        }
+        assert!(failed.is_empty(), "{failed:#?}");
     }
 }
