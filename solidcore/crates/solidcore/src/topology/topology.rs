@@ -68,8 +68,8 @@
 //!   installs a callback object holding pointers to them; `IsTracking` compares the
 //!   context's system callback with the address of that object. Here the tracker
 //!   owns a [`TopologyChangeLists`] and installs a boxed [`TopologyChangeCallback`]
-//!   tagged with a caller-chosen tracker key; `IsTracking` recognises it by that
-//!   key. "Was a callback already installed" (`m_pLastNotifyCallback` non-null) is
+//!   tagged with a caller-chosen tracker key; `IsTracking` recognises it by the
+//!   lists it shares with the tracker, not by the key. "Was a callback already installed" (`m_pLastNotifyCallback` non-null) is
 //!   kept as a flag. The tracker's B-rep only supplies its context, so the tracker
 //!   keeps the [`BrepId`] and takes the context as an argument; the destructor is
 //!   the explicit [`TrackTopologyChanges::finish`].
@@ -1195,9 +1195,10 @@ impl NotifyCallback for TopologyChangeCallback {
 pub struct TrackTopologyChanges {
     /// `m_pBrep`: the tracked B-rep (`None` for null).
     brep: Option<BrepId>,
-    /// Identifies this tracker's callback in a context (upstream: its address).
+    /// Tags this tracker's callback ([`TopologyChangeCallback::tracker`]).
     key: u64,
-    /// The accumulated lists.
+    /// The accumulated lists, shared with the callback this tracker installs; that
+    /// sharing identifies the callback in a context (upstream: its address).
     state: Arc<Mutex<ChangeState>>,
     /// `m_pLastNotifyCallback != NULL`: a system callback was already installed when
     /// tracking last started.
@@ -1272,8 +1273,9 @@ impl TrackTopologyChanges {
         }
     }
 
-    /// Whether the context's system notify callback is this tracker's
-    /// (`IsTracking`).
+    /// Whether the context's system notify callback is the one this tracker
+    /// installed (`IsTracking`): it shares this tracker's lists, so a separately
+    /// created callback with the same key is not.
     #[must_use]
     pub fn is_tracking(&self, context: Option<&Context>) -> bool {
         let Some(context) = context.filter(|_| self.brep.is_some()) else {
@@ -1283,7 +1285,7 @@ impl TrackTopologyChanges {
             .sys_notify_callback()
             .and_then(NotifyCallback::as_any)
             .and_then(|a| a.downcast_ref::<TopologyChangeCallback>())
-            .is_some_and(|c| c.tracker == self.key)
+            .is_some_and(|c| Arc::ptr_eq(&c.state, &self.state))
     }
 
     /// When [`TrackTopologyChanges::is_tracking`] holds, clears the context's system
@@ -2152,6 +2154,39 @@ mod tests {
         assert_eq!(installed.tracker(), 99);
         assert!(a_tracker.rm_list().is_empty());
         assert_eq!(a_tracker.add_list(), vec![v_key]);
+
+        // The same when replaced by a fresh callback under this tracker's key: the key
+        // alone does not make it this tracker's.
+        let mut ctx_same_key = Context::default();
+        let mut a_same_key = TrackTopologyChanges::new(
+            Some(BrepId::from_index(0)),
+            12,
+            true,
+            Some(&mut ctx_same_key),
+        );
+        ctx_same_key.set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(12))));
+        ctx_same_key
+            .sys_notify_callback_mut()
+            .unwrap()
+            .execute(
+                NotifyOperation::AddToBrep,
+                topo(16001, 1),
+                Some(v_ref),
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(!a_same_key.is_tracking(Some(&ctx_same_key)));
+        a_same_key
+            .stop_tracking_with_brep(Some(&mut ctx_same_key), &brep, &dep_entity, &dep_key)
+            .unwrap();
+        let installed = ctx_same_key
+            .sys_notify_callback()
+            .and_then(NotifyCallback::as_any)
+            .and_then(|any| any.downcast_ref::<TopologyChangeCallback>())
+            .unwrap();
+        assert_eq!(installed.lists().add_list, vec![v_key]);
+        assert!(a_same_key.add_list().is_empty());
     }
 
     /// WR-17: a tracker started a second time finds its own callback in the slot
