@@ -305,8 +305,14 @@ fn a_round_of_radius_5_between_sheets_at_a_right_angle_touches_each_5_from_the_c
     let (a, b) = corner();
     let f = fillet_sheets(&a, &b, &fillet_how(Section::Radius(5.0), false)).unwrap();
     assert_eq!(f.fillet.counts().unwrap()[0], 1);
-    assert!(has_edge_through(&f.fillet, [5.0, 5.0, 0.0]), "contact on the first");
-    assert!(has_edge_through(&f.fillet, [0.0, 5.0, 5.0]), "contact on the second");
+    assert!(
+        has_edge_through(&f.fillet, [5.0, 5.0, 0.0]),
+        "contact on the first"
+    );
+    assert!(
+        has_edge_through(&f.fillet, [0.0, 5.0, 5.0]),
+        "contact on the second"
+    );
     let area = f.fillet.area(1e-10).unwrap();
     assert!((area - quarter_cylinder()).abs() <= 1e-6, "{area}");
     assert!(f.trimmed.is_none());
@@ -314,7 +320,10 @@ fn a_round_of_radius_5_between_sheets_at_a_right_angle_touches_each_5_from_the_c
     for seam in &f.seams {
         holds(seam, 1);
     }
-    assert!((a.area(1e-10).unwrap() - 100.0).abs() <= 1e-9, "the first sheet unchanged");
+    assert!(
+        (a.area(1e-10).unwrap() - 100.0).abs() <= 1e-9,
+        "the first sheet unchanged"
+    );
 }
 
 /// A chordal round whose chord is 5 sqrt 2 across the right angle is the radius 5 round.
@@ -352,8 +361,14 @@ fn trimmed_the_sheets_are_cut_back_to_the_contact_lines() {
         assert!((area - 50.0).abs() <= 1e-6, "{area}");
         assert!(has_edge_through(t, contact));
     }
-    assert!(has_edge_through(&ta, [10.0, 5.0, 0.0]), "the first keeps its far edge");
-    assert!(has_edge_through(&tb, [0.0, 5.0, 10.0]), "the second keeps its far edge");
+    assert!(
+        has_edge_through(&ta, [10.0, 5.0, 0.0]),
+        "the first keeps its far edge"
+    );
+    assert!(
+        has_edge_through(&tb, [0.0, 5.0, 10.0]),
+        "the second keeps its far edge"
+    );
 }
 
 /// The refusals: a radius the sheets have no room for, sizes and tolerances out of range, one

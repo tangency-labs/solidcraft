@@ -421,8 +421,8 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
     let sizes = vec![size; shared.len()];
     crate::blend::blend(&sewn, kind, &shared, &sizes, &[], crate::Corners::Filled)?;
     let rounded = native_order(&sewn);
-    let (made, kept): (Vec<usize>, Vec<usize>) =
-        (0..rounded.faces.len()).partition(|&i| rounded.faces.get(i).is_some_and(|f| !before.contains(f)));
+    let (made, kept): (Vec<usize>, Vec<usize>) = (0..rounded.faces.len())
+        .partition(|&i| rounded.faces.get(i).is_some_and(|f| !before.contains(f)));
     if made.is_empty() {
         return Err(Error::NoEffect);
     }
@@ -445,7 +445,9 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
         }
         let of_b: Vec<usize> = kept.iter().copied().filter(|i| !of_a.contains(i)).collect();
         let without = |sheet: &[usize]| -> Vec<usize> {
-            (0..rounded.faces.len()).filter(|i| !sheet.contains(i)).collect()
+            (0..rounded.faces.len())
+                .filter(|i| !sheet.contains(i))
+                .collect()
         };
         Some((
             crate::trim::remove_faces(&sewn, &rounded, &without(&of_a))?,
