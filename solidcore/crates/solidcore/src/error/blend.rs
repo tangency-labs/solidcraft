@@ -994,7 +994,10 @@ mod tests {
             | BlendFailure::StationDidNotConverge { .. }
             | BlendFailure::TrimLoopOpen
             | BlendFailure::TrimLoopDoesNotSeparate
-            | BlendFailure::StageFailed => None,
+            | BlendFailure::StageFailed
+            | BlendFailure::SkinPastStationCap { .. }
+            | BlendFailure::SkinMeasureNotFinite { .. }
+            | BlendFailure::BallsNest { .. } => None,
             BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
             BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
             BlendFailure::InvalidValue(_) => Some("BlendFailure::InvalidValue("),
@@ -1020,10 +1023,22 @@ mod tests {
             BlendFailure::NoRoom(R::BallDoesNotFit),
             BlendFailure::StationDidNotConverge {
                 s: 0.0,
-                residual: 0.0,
+                residual: Some(0.0),
                 tolerance: 0.0,
-                step: 0.0,
-                iterations: 0,
+                step: Some(0.0),
+                iterations: Some(0),
+            },
+            BlendFailure::SkinPastStationCap {
+                asked: 0.0,
+                reached: 0.0,
+                stations: 0,
+                rounds: 0,
+            },
+            BlendFailure::SkinMeasureNotFinite { s: 0.0 },
+            BlendFailure::BallsNest {
+                s: 0.0,
+                rate: 0.0,
+                speed: 0.0,
             },
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
