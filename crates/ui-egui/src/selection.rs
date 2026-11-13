@@ -111,6 +111,10 @@ pub struct SelInput {
     /// What the input is for, as a message id: its tooltip, and the note a click that picks
     /// nothing leaves under the form (#10428). Without one the tooltip names what it takes.
     pub tip: Option<&'static str>,
+    /// Points are picked in order and may repeat: a point pick always appends (a shared corner
+    /// picked twice joins two members), Ctrl+click takes out its last occurrence
+    /// ([`SelInput::remove_last`]). Other picks toggle as usual. Frame Member's path.
+    pub ordered_points: bool,
     pub items: Vec<Sel>,
     /// Where the points picked into this input came from when a hovered flat face offered them
     /// (#11476): a corner, an edge's middle or a hole's centre of that face, with the face, its
@@ -120,7 +124,7 @@ pub struct SelInput {
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new(), from_face: Vec::new() }
+        SelInput { label, accept, multi, places: false, tip: None, ordered_points: false, items: Vec::new(), from_face: Vec::new() }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).
@@ -133,6 +137,19 @@ impl SelInput {
     pub fn tip(mut self, id: &'static str) -> SelInput {
         self.tip = Some(id);
         self
+    }
+
+    /// This input with points picked in order, repeats allowed (see [`SelInput::ordered_points`]).
+    pub fn ordered_points(mut self) -> SelInput {
+        self.ordered_points = true;
+        self
+    }
+
+    /// Take out the last occurrence of `sel`; false when it isn't in.
+    pub fn remove_last(&mut self, sel: &Sel) -> bool {
+        let Some(i) = self.items.iter().rposition(|x| same_item(x, sel)) else { return false };
+        self.items.remove(i);
+        true
     }
 
     /// Joint-origin inputs (`SNAPS`) have no snap for a sketch curve: `fits`/`accepts` let
@@ -176,8 +193,14 @@ impl SelInput {
         }
     }
 
-    /// Add or remove items: in a multi input a pick toggles, otherwise it replaces.
-    pub fn toggle(&mut self, picked: Vec<Sel>) {
+    /// Add or remove items: in a multi input a pick toggles, otherwise it replaces. With
+    /// [`SelInput::ordered_points`], points append instead.
+    pub fn toggle(&mut self, mut picked: Vec<Sel>) {
+        if self.multi && self.ordered_points {
+            let (points, rest): (Vec<Sel>, Vec<Sel>) = picked.into_iter().partition(is_point);
+            self.items.extend(points);
+            picked = rest;
+        }
         if picked.is_empty() {
             return;
         }
@@ -202,6 +225,12 @@ impl SelInput {
             }
         }
     }
+}
+
+/// A pick that stands for one point: a vertex (or the origin, or a woken snap point), a sketch
+/// point or a construction point.
+pub(crate) fn is_point(sel: &Sel) -> bool {
+    matches!(sel, Sel::Vertex { .. } | Sel::SketchPoint { .. } | Sel::ConstructionPoint { .. })
 }
 
 /// A sketch curve as a dialog's pick. A curve of another sketch than the `active` one names its

@@ -1716,7 +1716,7 @@ impl Dialog {
         }
         // Only construction tools resolve wire-node references. In particular, Hole must
         // not silently freeze a wire node into a face position or accept an unresolved ID.
-        if matches!(h, Hit::SketchPoint3d { .. }) && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) {
+        if matches!(h, Hit::SketchPoint3d { .. }) && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. } | Kind::Frame(_)) {
             return None;
         }
         // Features are also picked on the canvas: a face stands for the feature that made it.
@@ -3506,9 +3506,10 @@ fn missing_pick(error: &str) -> bool {
 }
 
 /// A refusal that is guidance, not a failure of the design, so the dialog offers nothing to
-/// report (#10181): the command is not available here, or the pick is in the sketch already.
+/// report (#10181): the command is not available here, the pick is in the sketch already, or
+/// Frame Member took back a pick that would make it fail.
 fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
-    already_linked(error) || command_disabled(app, d, error)
+    already_linked(error) || command_disabled(app, d, error) || crate::dialogs_frame::refused_pick(error)
 }
 
 /// Project's or Intersect's refusal of a pick the sketch already holds ("already intersected into
@@ -4668,7 +4669,13 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         (Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook, .. }), Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook: fresh, .. })) => {
             *hook = *fresh;
         }
-        (Kind::Frame(previous), Kind::Frame(fresh)) => previous.whole = fresh.whole,
+        // The points an edit loaded belonged to that edit.
+        (Kind::Frame(previous), Kind::Frame(fresh)) => {
+            previous.whole = fresh.whole;
+            previous.path.clone_from(&fresh.path);
+            previous.refs.clone_from(&fresh.refs);
+            previous.pair_ids.clone_from(&fresh.pair_ids);
+        }
         _ => {}
     }
     let fresh_mode = mode_inputs_key(&dialog.kind);
@@ -7119,7 +7126,7 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
 
 /// A dialog pick as a construction reference (`construct.*`'s `{face|edge|vertex: [x,y,z]}`,
 /// `{plane}`, `{axis}` or `{sketch, point|curve}`).
-fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
+pub(crate) fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
     Ok(match sel {
         Sel::Face { point, .. } => json!({"face": pt(*point)}),
         Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
@@ -7266,6 +7273,13 @@ fn saved_pick(s: &Session, reference: &solidcraft_engine::doc::construct::GeoRef
         GeoRef::Plane { plane } => plane_sel(s, plane)?,
         other => model_axis_sel(s, other)?,
     })
+}
+
+/// A stored point reference as the pick it stands for, the vertex on its body where it can be
+/// found. Never none: a dialog that keeps the reference itself shows something for each one.
+pub(crate) fn point_pick(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Sel {
+    // ponytail: a component O (`Datum`) shows at the origin; its reference is kept as saved.
+    point_sel(s, g).or_else(|| saved_pick(s, g)).unwrap_or(Sel::Vertex { body: String::new(), point: Vec3::ZERO })
 }
 
 /// A stored construction reference back into a dialog pick.

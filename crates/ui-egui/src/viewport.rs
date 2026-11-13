@@ -4276,7 +4276,7 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
             d.pick(&app.session, sel.clone());
             d.active = on;
         }
-        crate::hole_place::PickMove::No => d.pick(&app.session, sel.clone()),
+        crate::hole_place::PickMove::No => crate::dialogs_frame::pick(app, &mut d, sel.clone()),
         crate::hole_place::PickMove::Moved | crate::hole_place::PickMove::Spent => {
             d.focus = true;
             d.awaiting_pick = false;
@@ -6029,7 +6029,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if add && crate::dialogs_move::add_body_click(app, &hits, allow_toggle) {
                     // Ctrl/Shift+click: one more body for Move, which stays on From, Point or Axis.
                 } else if let Some((hit, Some(sel))) = cand {
-                    dialog_pick(app, &hit, sel);
+                    // Ctrl+click on a point of Frame Member's path takes out its last occurrence.
+                    if !(held_mods.primary && crate::dialogs_frame::take_out(app, &sel)) {
+                        dialog_pick(app, &hit, sel);
+                    }
                 } else if let Some(mut dialog) = app.dialog.take() {
                     // A pick field clicked into says what it is for when the click is not one (#10428).
                     if dialog.awaiting_pick {

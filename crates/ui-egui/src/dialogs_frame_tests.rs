@@ -1,5 +1,6 @@
 use crate::test_support::run_all;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::geom::prelude::*;
 
@@ -216,6 +217,225 @@ fn picked_lines_stay_in_the_sketch_they_were_picked_in() {
     // Lines picked in two sketches are refused.
     d.inputs[0].items.push(Sel::ExternalSketchCurve { sketch: rails, id: ids[0].clone() });
     assert!(apply_commands(&app, &d).unwrap_err().contains("one sketch"));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Members between pairs of points (#15705)
+
+/// A 600 × 400 × 400 box `Box` extruded from the rectangle `Base` on XY: its corners are points to
+/// pick, and `Base` keeps its lines.
+fn box_app() -> SolveApp {
+    app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 400, "name": "Box", "body_name": "Box"})),
+    ])
+}
+
+fn corner(x: f64, y: f64, z: f64) -> Sel {
+    Sel::Vertex { body: "Box".into(), point: Vec3::new(x, y, z) }
+}
+
+/// A body vertex as the command takes it from a pick.
+fn vertex(x: f64, y: f64, z: f64) -> Value {
+    json!({"vertex": [x, y, z]})
+}
+
+/// The bodies Frame Member made (all but the box).
+fn members(app: &SolveApp) -> Vec<String> {
+    body_names(app).into_iter().filter(|n| n != "Box").collect()
+}
+
+/// Each pick goes through the path's picking as a click in the view does.
+fn pick_all(app: &SolveApp, d: &mut Dialog, picks: &[Sel]) {
+    for p in picks {
+        pick(app, d, p.clone());
+    }
+}
+
+fn path(d: &Dialog) -> &[Sel] {
+    &d.inputs[0].items
+}
+
+#[test]
+fn four_points_make_two_separate_members() {
+    let mut app = box_app();
+    let mut d = dialog_on(&mut app, &[]);
+    assert_eq!(d.inputs[0].label, "Path");
+    pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 0.), corner(600., 0., 400.)]);
+    assert_eq!(path(&d).len(), 4);
+    assert_eq!(d.error, None);
+    let c = apply_commands(&app, &d).unwrap();
+    let p = &c[0].1;
+    assert!(p.get("sketch").is_none() && p.get("lines").is_none(), "{p}");
+    assert_eq!(p["pairs"], json!([{"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)}, {"a": vertex(600., 0., 0.), "b": vertex(600., 0., 400.)}]));
+    run_all(&mut app, c);
+    assert_eq!(members(&app).len(), 2);
+}
+
+/// p0, p1, p1, p2: the corner picked twice is where two members meet.
+#[test]
+fn a_shared_point_picked_twice_joins_two_members() {
+    let mut app = box_app();
+    let mut d = dialog_on(&mut app, &[]);
+    pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 400.), corner(0., 0., 400.), corner(600., 0., 400.)]);
+    assert_eq!(path(&d).len(), 4, "a point picked again goes in again");
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(
+        c[0].1["pairs"],
+        json!([{"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)}, {"a": vertex(0., 0., 400.), "b": vertex(600., 0., 400.)}])
+    );
+    run_all(&mut app, c);
+    assert_eq!(members(&app).len(), 2);
+}
+
+#[test]
+fn a_lone_last_point_waits_with_pick_another_point() {
+    let mut app = box_app();
+    let mut d = dialog_on(&mut app, &[]);
+    pick(&app, &mut d, corner(0., 0., 0.));
+    assert_eq!(d.error.as_deref(), Some("Pick another point"));
+    pick_all(&app, &mut d, &[corner(0., 0., 400.), corner(600., 0., 0.)]);
+    assert_eq!(d.error.as_deref(), Some("Pick another point"));
+    // OK makes the members already paired; the lone point waits.
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["pairs"], json!([{"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)}]));
+    pick(&app, &mut d, corner(600., 0., 400.));
+    assert_eq!(d.error, None, "paired: nothing waits");
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    assert_eq!(members(&app).len(), 2);
+}
+
+#[test]
+fn a_lone_point_before_a_line_is_refused() {
+    let mut app = box_app();
+    let base = sketch_id(&app, "Base");
+    let line = Sel::ExternalSketchCurve { sketch: base, id: app.session.doc.sketch(base).unwrap().curves[0].id.clone() };
+    let mut d = dialog_on(&mut app, &[]);
+    pick(&app, &mut d, corner(0., 0., 0.));
+    pick(&app, &mut d, line.clone());
+    assert_eq!(path(&d), [corner(0., 0., 0.)], "the line is taken back");
+    let e = d.error.clone().unwrap();
+    assert!(e.starts_with("Can't add that pick:") && e.contains("A point needs another point after it"), "{e}");
+    // Lines first, or after a whole pair, are fine.
+    d.inputs[0].items = vec![corner(0., 0., 0.), line.clone()];
+    assert_eq!(apply_commands(&app, &d).unwrap_err(), "A point needs another point after it");
+    d.inputs[0].items = vec![line.clone(), corner(0., 0., 0.), corner(0., 0., 400.)];
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((&c[0].1["sketch"], c[0].1["pairs"].as_array().map(Vec::len)), (&json!(base), Some(1)));
+}
+
+#[test]
+fn the_same_point_twice_in_a_row_is_refused() {
+    let mut app = box_app();
+    let mut d = dialog_on(&mut app, &[]);
+    pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 0.)]);
+    assert_eq!(path(&d), [corner(0., 0., 0.)], "the pick is undone");
+    let e = d.error.clone().unwrap();
+    assert!(e.starts_with("Can't add that pick:"), "{e}");
+    assert!(crate::dialogs_frame::refused_pick(&e), "shown as guidance, with no Create Issue");
+    // The next good pick pairs with the waiting point.
+    pick(&app, &mut d, corner(0., 0., 400.));
+    assert_eq!((path(&d).len(), d.error.as_deref()), (2, None));
+}
+
+#[test]
+fn a_point_can_be_picked_again_and_ctrl_click_takes_out_its_last_occurrence() {
+    let mut app = box_app();
+    let mut d = dialog_on(&mut app, &[]);
+    let (p0, p1, p2) = (corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 400.));
+    pick_all(&app, &mut d, &[p0.clone(), p1.clone(), p1.clone(), p2.clone()]);
+    app.dialog = Some(d);
+    assert!(take_out(&mut app, &p1));
+    let d = app.dialog.clone().unwrap();
+    assert_eq!(path(&d), [p0.clone(), p1.clone(), p2.clone()], "the later p1 goes");
+    assert_eq!(d.error.as_deref(), Some("Pick another point"), "p2 now waits");
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["pairs"], json!([{"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)}]));
+    // A point not in the path, or a line, is no Ctrl+click take-out: it goes to the input as usual.
+    assert!(!take_out(&mut app, &corner(600., 400., 0.)));
+    let line = Sel::ExternalSketchCurve { sketch: sketch_id(&app, "Base"), id: "l1".into() };
+    assert!(!take_out(&mut app, &line));
+}
+
+#[test]
+fn vertex_construction_point_sketch_point_and_midpoint_picks_all_make_pairs() {
+    use solidcraft_engine::snap::{SnapKind, SnapPoint};
+    let mut app = box_app();
+    app.run("construct.point.vertex", json!({"point": {"point": [600, 400, 600]}, "name": "Apex"})).unwrap();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Marks"})),
+        ("sketch.point", json!({"point": [0, -100], "id": "m1"})),
+        ("sketch.finish", json!({})),
+    ] {
+        app.run(id, p).unwrap();
+    }
+    let marks = sketch_id(&app, "Marks");
+    // The middle of the box's top front edge, woken by hovering the edge.
+    let middle = Vec3::new(300.0, 0.0, 400.0);
+    let edge = Sel::Edge { body: "Box".into(), index: 0, point: Vec3::new(100.0, 0.0, 400.0) };
+    app.viewport.snapped = vec![(edge, SnapPoint { at: middle, kind: SnapKind::Middle, body: "Box".into() })];
+    let mut d = dialog_on(&mut app, &[]);
+    pick_all(
+        &app,
+        &mut d,
+        &[
+            corner(0., 0., 0.),
+            Sel::ConstructionPoint { name: "Apex".into() },
+            Sel::SketchPoint { id: format!("{marks}:m1") },
+            Sel::Vertex { body: "Box".into(), point: middle },
+        ],
+    );
+    assert_eq!((path(&d).len(), d.error.as_deref()), (4, None));
+    let c = apply_commands(&app, &d).unwrap();
+    let pairs = &c[0].1["pairs"];
+    assert_eq!(pairs[0], json!({"a": vertex(0., 0., 0.), "b": {"construct_point": "Apex"}}));
+    assert_eq!(pairs[1]["a"], json!({"sketch": marks, "point": "m1"}));
+    assert_eq!((&pairs[1]["b"]["type"], &pairs[1]["b"]["kind"]), (&json!("snap"), &json!("middle")), "{pairs}");
+    run_all(&mut app, c);
+    assert_eq!(members(&app).len(), 2);
+}
+
+/// Edit Feature refills the path with the lines, then each pair's points in order, keeping the
+/// references they were saved as: OK unchanged gives the pairs back exactly, ids and all.
+#[test]
+fn edit_feature_refills_lines_and_pair_points_in_order_and_keeps_their_refs() {
+    let mut app = box_app();
+    let base = sketch_id(&app, "Base");
+    let l0 = app.session.doc.sketch(base).unwrap().curves[0].id.clone();
+    let upright = json!({"a": vertex(600., 0., 0.), "b": vertex(600., 0., 400.)});
+    let rail = json!({"a": vertex(0., 0., 400.), "b": vertex(600., 0., 400.)});
+    app.run(
+        "frame.member",
+        json!({"sketch": "Base", "lines": [l0], "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}, "pairs": [upright, rail]}),
+    )
+    .unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let stored = |app: &SolveApp| match &app.session.doc.feature(f).unwrap().kind {
+        FeatureKind::FrameMember { pairs, next_pair, .. } => (serde_json::to_value(pairs).unwrap(), *next_pair),
+        _ => panic!(),
+    };
+    let (before, next) = stored(&app);
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(
+        path(&e),
+        [
+            Sel::ExternalSketchCurve { sketch: base, id: l0.clone() },
+            corner(600., 0., 0.),
+            corner(600., 0., 400.),
+            corner(0., 0., 400.),
+            corner(600., 0., 400.),
+        ]
+    );
+    let refs: Vec<Option<Value>> =
+        std::iter::once(None).chain(before.as_array().unwrap().iter().flat_map(|p| [Some(p["a"].clone()), Some(p["b"].clone())])).collect();
+    assert_eq!(member(&mut e).refs, refs);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    assert_eq!(c[0].1["params"]["pairs"], before, "each pair goes back with its id and its references verbatim");
+    run_all(&mut app, c);
+    assert_eq!(stored(&app), (before, next));
 }
 
 /// Editing an end cap shows a face for each saved end. When one cannot be found, the faces start
