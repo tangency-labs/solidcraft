@@ -14,7 +14,6 @@
 
 use solidcore_ops::face_surface::FaceSurface;
 use solidcore_ops::surface::ruled;
-use solidcore_ops::sweep::{extrude, Curve as SweepCurve, DraftCorner};
 use solidcore_ops::{make_box, Body, Error, TurnedOver};
 use solidcore_record::brep::{Brep, Curve, Edge, Loop, OrientedEdge, Shell, Surface};
 
@@ -27,27 +26,28 @@ fn sheet() -> Brep {
     ruled(&row(0.0, 2.0), &row(8.0, 1.0), false).unwrap()
 }
 
-/// A quarter cylinder sheet: the arc of radius 10 about the z axis from x to y, extruded 20
-/// along z, open.
+/// A quarter cylinder sheet labelled a cylinder: the kernel rig's
+/// `surfaces/cov-extend-quarter-cylinder-along-its-axis` body `b2` (radius 10 about the z axis,
+/// 20 high), from its corpus record, as the converter writes it back. (An extruded arc records
+/// as its rational spline form, not a cylinder.)
 fn quarter_cylinder() -> Brep {
-    let arc = SweepCurve::Arc {
-        center: [0.0; 3],
-        axis: [0.0, 0.0, 1.0],
-        reference: [1.0, 0.0, 0.0],
-        radius: 10.0,
-        start: 0.0,
-        end: std::f64::consts::FRAC_PI_2,
-    };
-    let body = extrude(
-        &[arc],
-        [0.0, 0.0, 1.0],
-        20.0,
-        0.0,
-        DraftCorner::default(),
-        false,
+    let gz = std::fs::File::open(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../solidcore/tests/kernel_cases/surfaces/cov-extend-quarter-cylinder-along-its-axis.bodies.json.gz",
+        ),
     )
     .unwrap();
-    body.to_record().unwrap().0
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut flate2::read::GzDecoder::new(gz), &mut text).unwrap();
+    let bodies: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let corpus: Brep = serde_json::from_value(bodies["b2"].clone()).unwrap();
+    // as the converter writes it, so the turned record is compared with its own kind of record
+    Body::from_record(&corpus, true)
+        .unwrap()
+        .0
+        .to_record()
+        .unwrap()
+        .0
 }
 
 /// Each face's side in its shell: `(face, forward)`, in shell order.
@@ -220,14 +220,14 @@ fn turned_over_twice_a_sheet_is_itself() {
 }
 
 /// An analytic sheet keeps its label turned over (the kernel's cylinder with its u and v
-/// swapped): if this fails on the label, the converter does not read the swap, and the record
-/// carries the cylinder as its NURBS form.
+/// swapped): if this fails on the second label, the converter does not read the swap, and the
+/// record carries the cylinder as its NURBS form.
 #[test]
 fn a_turned_cylinder_sheet_keeps_its_label() {
     let before = quarter_cylinder();
     assert!(
         matches!(before.faces[0].surface, Surface::Cylinder { .. }),
-        "the extruded arc is a cylinder sheet: {:?}",
+        "the corpus sheet is labelled a cylinder: {:?}",
         before.faces[0].surface
     );
     let t = turned(&before);
