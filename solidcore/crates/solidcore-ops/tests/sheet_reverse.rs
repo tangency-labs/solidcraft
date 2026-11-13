@@ -62,7 +62,11 @@ fn turned_over_each_face_s_normal_is_the_other_way_at_the_same_point() {
     // reverse order (as a cycle, from wherever it starts), each used the other way.
     assert_eq!(after.faces.len(), before.faces.len());
     for (fb, fa) in before.faces.iter().zip(&after.faces) {
-        assert_eq!((&fa.surface, &fa.nurbs, fa.domain), (&fb.surface, &fb.nurbs, fb.domain), "the surface and domain are kept");
+        assert_eq!(
+            (&fa.surface, &fa.nurbs, fa.domain),
+            (&fb.surface, &fb.nurbs, fb.domain),
+            "the surface and domain are kept"
+        );
         assert_eq!(fa.loops.len(), fb.loops.len());
         for (lb, la) in fb.loops.iter().zip(&fa.loops) {
             let (Loop::Edges { edges: eb }, Loop::Edges { edges: ea }) = (lb, la) else {
@@ -76,7 +80,10 @@ fn turned_over_each_face_s_normal_is_the_other_way_at_the_same_point() {
                 turned.rotate_left(k.min(turned.len()));
                 turned == was
             });
-            assert!(same_cycle, "the loop runs the other way: {was:?} then {back:?}");
+            assert!(
+                same_cycle,
+                "the loop runs the other way: {was:?} then {back:?}"
+            );
         }
     }
     assert_eq!(after.edges.len(), before.edges.len(), "the edges are kept");
