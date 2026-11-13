@@ -9120,21 +9120,31 @@ mod swap_definition_tests {
         .unwrap();
     }
 
-    /// WR-701: a swap keeps the surface as it was made, swapped: a torus marked inside out
-    /// is still inside out after the swap, as it was before the swap was made on a copy.
+    /// WR-701: a swap keeps the surface as it was made, swapped: a torus made inside out
+    /// (its generating circle inside out) is still inside out after the swap, which is made
+    /// on a copy and taken back, and its generator still agrees with it (`SmSurfOfRevolution`
+    /// Test #11).
     #[test]
     fn a_swap_keeps_an_inside_out_torus_inside_out() {
         let k = Kernel::default();
         let frame = Axis2Placement::default();
-        let mut torus =
-            Torus::create_canonical(&k, &frame, 4.0, 1.5, TorusOptions::default(), None).unwrap();
-        torus.inside_out = true;
+        let opts = TorusOptions {
+            inside_out: true,
+            ..TorusOptions::default()
+        };
+        let torus = Torus::create_canonical(&k, &frame, 4.0, 1.5, opts, None).unwrap();
+        assert!(torus.inside_out, "made inside out");
         let mut s = Surface::from(torus);
         s.swap_uv(&k).unwrap();
         let SurfaceKind::Torus(t) = s.kind() else {
             panic!("a torus");
         };
         assert!(t.inside_out, "the swap dropped the torus's inside-out mark");
+        let generator = t.base().gen_curve().unwrap();
+        assert!(
+            generator.inside_out_bit(),
+            "the swap turned the generator over"
+        );
         assert!(t.base().swap_uv());
     }
 

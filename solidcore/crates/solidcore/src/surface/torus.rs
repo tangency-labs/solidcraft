@@ -288,11 +288,7 @@ impl Torus {
         // (the self-intersection test of a major radius below the minor radius only
         // warns upstream); not upstream (WR-500): the surface is inside out with its
         // generator, the circle made inside out with `opts.inside_out` or the one given
-        let inside_out = match base.gen_curve.as_ref().map(Curve::kind) {
-            Some(CurveKind::Ellipse(e)) => e.inside_out(),
-            Some(CurveKind::Line(l)) => l.inside_out(),
-            _ => false,
-        };
+        let inside_out = base.gen_curve.as_ref().is_some_and(Curve::inside_out_bit);
         Ok(Self {
             base,
             major_radius,

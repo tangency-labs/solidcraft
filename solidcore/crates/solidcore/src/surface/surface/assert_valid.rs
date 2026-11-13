@@ -1639,14 +1639,9 @@ fn torus_of(s: &Surface) -> Result<&Torus> {
     }
 }
 
-/// `GetInsideOut` of a curve derived from `SmBSplineCurve` (only lines and conics
-/// have the bit).
+/// `GetInsideOut` of a curve derived from `SmBSplineCurve` ([`Curve::inside_out_bit`]).
 fn curve_inside_out(c: &Curve) -> bool {
-    match c.kind() {
-        CurveKind::Line(l) => l.inside_out(),
-        CurveKind::Ellipse(e) => e.inside_out(),
-        _ => false,
-    }
+    c.inside_out_bit()
 }
 
 /// `GetInsideOut` of the surface (cone, sphere and torus have the bit).
