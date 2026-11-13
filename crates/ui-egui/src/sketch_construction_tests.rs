@@ -382,6 +382,48 @@ fn a_segment_start_takes_typed_coordinates() {
     assert!(a.dist(solidcore_record::Vec2::new(3., 7.)) < 1e-6 && (b.y - 7.).abs() < 1e-6 && (b.x - 13.).abs() < 1e-6, "{a:?} {b:?}");
 }
 
+/// A horizontal or vertical line's X and Y are coordinates, so zero and negative values place it;
+/// a parallel line's distance must still be positive (#15618).
+#[test]
+fn typed_coordinates_take_zero_and_negative_values() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let pointer = (solidcore_record::Vec2::new(20., 3.), None);
+    let typed = |cmd: &str, line_type: u8, values: &[(&str, &str)]| {
+        let mut tool = crate::sketch_tools::tool_for(cmd).unwrap();
+        tool.line_type = line_type;
+        tool.dims = crate::sketch_dims::boxes_for(cmd, 0);
+        for (label, value) in values {
+            let b = tool.dims.iter_mut().find(|b| b.label == *label).unwrap();
+            b.locked = true;
+            b.value = (*value).into();
+        }
+        tool
+    };
+    // An infinite horizontal line below the axis, and one on it.
+    for (y, expected) in [("-5", -5.0), ("0", 0.0)] {
+        let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+        let mut tool = typed("sketch.construction_line.horizontal", 3, &[("Offset", y)]);
+        assert_eq!(crate::sketch_dims::validate(&h.app, &tool), Ok(()), "Y = {y}");
+        super::place_point(&mut h.app, &mut tool, pointer.clone());
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        assert_eq!(sk.curves.len(), before + 1, "Y = {y}: {:?}", h.app.status);
+        let CurveKind::Line { a, .. } = sk.curves.last().unwrap().kind else { panic!("a line") };
+        assert!((sk.point(a).unwrap().y - expected).abs() < 1e-6, "Y = {y}");
+    }
+    // A segment starting at X = 0, Y = -4.
+    let mut tool = typed("sketch.construction_line.horizontal", 0, &[("Along", "0"), ("Offset", "-4")]);
+    super::place_point(&mut h.app, &mut tool, pointer.clone());
+    let start = tool.pts.first().map(|p| p.0).expect("the start");
+    assert!(start.dist(solidcore_record::Vec2::new(0., -4.)) < 1e-9, "{start:?} {:?}", h.app.status);
+    // A vertical line left of the axis.
+    let tool = typed("sketch.construction_line.vertical", 3, &[("Offset", "-6")]);
+    assert_eq!(crate::sketch_dims::validate(&h.app, &tool), Ok(()));
+    // A parallel line's distance is no coordinate.
+    let tool = typed("sketch.construction_line.parallel", 3, &[("Offset", "-6")]);
+    assert!(crate::sketch_dims::validate(&h.app, &tool).is_err());
+}
+
 /// Switching between the construction line methods keeps the line type chosen in the palette
 /// (#15618).
 #[test]

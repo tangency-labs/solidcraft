@@ -595,6 +595,9 @@ pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
         }
         match dimension.label {
             "Angle" => {}
+            // A horizontal or vertical construction line's X and Y are coordinates: zero is on the
+            // axis, a negative value on its other side (#15618).
+            "Along" | "Offset" if matches!(t.cmd, "sketch.construction_line.horizontal" | "sketch.construction_line.vertical") => {}
             "Sweep" if t.cmd == "sketch.slot.arc_center" && value <= 0.0 => {
                 return Err("Arc slot Sweep must be greater than zero and less than 360 degrees".into());
             }
