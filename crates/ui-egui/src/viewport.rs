@@ -5391,7 +5391,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             if let Some(b) = st.body(body) {
                 // Lit over the drawn edges (finer away from Normal display quality).
                 let m = drawn(b);
-                for i in m.circular_rim(*index) {
+                for i in edge_pieces(b, &m, *index) {
                     let selected = sel.iter().any(|x| matches!(x, Sel::Edge { body: b, index: j, .. } if b == body && *j == i));
                     if let Some(e) = if i == *index { edge_of(&m, i, *mid) } else { m.edges.get(i) } {
                         // A hovered edge that is picked keeps its selection highlight and only
@@ -7007,6 +7007,21 @@ pub(crate) fn picked_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Vec
     grouped_selection(s, sel)
 }
 
+/// The edges of body `b` that are one edge to the user with its edge `edge`, sorted, `edge` among
+/// them: the pieces of a whole circle ([`MeshGeom::circular_rim`]) and those a curved surface's
+/// seam ending on an edge splits it into, as a ball's seam splits a slot's arc
+/// ([`solidcraft_engine::doc::ModelBody::whole_edge`], from the exact record). Only those `m`,
+/// a mesh of `b` (whose edges are the record's), has. Hover, click and box select all take an
+/// edge's pieces from here, so they agree.
+fn edge_pieces(b: &solidcraft_engine::doc::ModelBody, m: &solidcraft_engine::geom::Mesh, edge: usize) -> Vec<usize> {
+    let mut pieces = m.circular_rim(edge);
+    pieces.extend(b.whole_edge(edge));
+    pieces.sort_unstable();
+    pieces.dedup();
+    pieces.retain(|&i| m.edges.get(i).is_some());
+    pieces
+}
+
 /// Expand a visible rim or surface into the kernel pieces a command needs. The original
 /// face pick keeps its point (used by tools such as Hole and construction geometry).
 pub(crate) fn grouped_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Vec<Sel> {
@@ -7015,8 +7030,7 @@ pub(crate) fn grouped_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Ve
         Sel::Edge { body, index, .. } => {
             if let Some(b) = st.body(body) {
                 let m = b.mesh();
-                return m
-                    .circular_rim(*index)
+                return edge_pieces(b, &m, *index)
                     .into_iter()
                     .filter_map(|i| m.edges.get(i).map(|e| Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) }))
                     .collect();
@@ -7050,17 +7064,19 @@ pub(crate) fn grouped_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Ve
 }
 
 /// Measure keeps one entry per visible item, rather than using its two slots for kernel halves.
+/// A whole circle's pieces are one entry; a piece of an open edge a seam splits stays itself, as
+/// Measure measures that piece (the dialog keeps one piece of such an edge selected whole).
 pub(crate) fn measurement_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Sel {
-    let pieces = grouped_selection(s, sel);
     let mut representative = sel.clone();
     match &mut representative {
-        Sel::Edge { index, .. } => {
-            if let Some(Sel::Edge { index: i, .. }) = pieces.first() {
-                *index = *i;
+        Sel::Edge { body, index, .. } => {
+            let st = crate::open_meshing::session_world(s);
+            if let Some(i) = st.body(body).and_then(|b| b.mesh().circular_rim(*index).first().copied()) {
+                *index = i;
             }
         }
         Sel::Face { index, .. } => {
-            if let Some(i) = pieces
+            if let Some(i) = grouped_selection(s, sel)
                 .iter()
                 .filter_map(|p| match p {
                     Sel::Face { index, .. } => Some(*index),
@@ -7157,9 +7173,13 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             let m = b.mesh();
             if accept & EDGES != 0 {
                 for (ei, e) in m.edges.iter().enumerate() {
-                    let rim = m.circular_rim(ei);
-                    let takes = if bx.crossing { bx.takes(&to2(e)) } else { rim.iter().all(|&i| m.edges.get(i).is_some_and(|p| bx.takes(&to2(p)))) };
-                    if edge_pickable(app, &m, ei) && takes {
+                    // A window takes an edge when all its pieces are inside: only an edge that is
+                    // itself inside is asked for them, so a marquee over a large model does not
+                    // walk every edge's record.
+                    let takes = edge_pickable(app, &m, ei)
+                        && bx.takes(&to2(e))
+                        && (bx.crossing || edge_pieces(b, &m, ei).iter().all(|&i| m.edges.get(i).is_some_and(|p| bx.takes(&to2(p)))));
+                    if takes {
                         out.push(Sel::Edge { body: b.name.clone(), index: ei, point: polyline_mid(e) });
                     }
                 }
@@ -12492,6 +12512,195 @@ mod tests {
                 assert_eq!(grouped_selection(&app.session, &sel).len(), 1);
             }
         }
+    }
+
+    /// A ball of radius 12.5 resting on the origin, revolved from a half disc sketched upright on
+    /// the XZ plane, with a slot 10 wide cut from its top down to z = 15 right through it (walls at
+    /// x = ±5). The ball's seam ends on the top of the x = +5 wall's arc, so that arc is two edges
+    /// and its mirror one.
+    fn slotted_ball_app() -> SolveApp {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"name": "Sketch1", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 0], [0, 25]]})).unwrap();
+        s.execute("sketch.arc.three_point", &json!({"start": [0, 0], "through": [12.5, 12.5], "end": [0, 25]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.revolve", &json!({"sketch": "Sketch1", "axis": "Z", "angle": "360 deg", "operation": "new", "body_name": "Ball"})).unwrap();
+        s.execute("sketch.create", &json!({"name": "Sketch2", "plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})).unwrap();
+        s.execute("sketch.rectangle.center", &json!({"center": [0, 0], "corner": [5, 20]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"sketch": "Sketch2", "distance": 15, "operation": "cut"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        app
+    }
+
+    /// The edges of `m` whose every point passes `on`, in index order.
+    fn mesh_edges_where(m: &solidcraft_engine::geom::Mesh, on: impl Fn(&[Vec3]) -> bool) -> Vec<usize> {
+        m.edges.iter().enumerate().filter(|(_, p)| on(p)).map(|(i, _)| i).collect()
+    }
+
+    fn edge_indices(items: &[Sel]) -> Vec<usize> {
+        let mut out: Vec<usize> = items.iter().filter_map(|x| if let Sel::Edge { index, .. } = x { Some(*index) } else { None }).collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// An open arc a ball's seam splits in two is one edge to hover, click, box select and a
+    /// dialog's pick, as a whole circle's pieces are; its unsplit mirror, the floor's arcs and the
+    /// wall's lines stay single.
+    #[test]
+    fn an_arc_a_seam_splits_is_hovered_clicked_and_boxed_whole() {
+        let mut app = slotted_ball_app();
+        let st = app.session.world_state().unwrap();
+        let b = st.body("Ball").unwrap();
+        let m = b.mesh();
+        let arc_on = |x: f64| move |p: &[Vec3]| p.len() > 2 && p.iter().all(|q| (q.x - x).abs() < 1e-6);
+        let plus = mesh_edges_where(&m, arc_on(5.0));
+        let minus = mesh_edges_where(&m, arc_on(-5.0));
+        assert_eq!(plus.len(), 2, "the seam splits the x = +5 arc");
+        assert_eq!(minus.len(), 1, "the x = -5 arc is one edge");
+        let floor_arcs = mesh_edges_where(&m, |p| p.len() > 2 && p.iter().all(|q| (q.z - 15.0).abs() < 1e-6));
+        let wall_line = mesh_edges_where(&m, |p| p.len() == 2 && p.iter().all(|q| (q.x - 5.0).abs() < 1e-6 && (q.z - 15.0).abs() < 1e-6));
+        assert_eq!((floor_arcs.len(), wall_line.len()), (2, 1));
+        let edge = |index: usize| Sel::Edge { body: b.name.clone(), index, point: polyline_mid(&m.edges[index]) };
+        for &half in &plus {
+            assert_eq!(edge_indices(&grouped_selection(&app.session, &edge(half))), plus);
+        }
+        for single in minus.iter().chain(&floor_arcs).chain(&wall_line) {
+            assert_eq!(edge_indices(&grouped_selection(&app.session, &edge(*single))), vec![*single]);
+        }
+        let lines = |pieces: &[usize]| pieces.iter().map(|&i| 2 * (m.edges[i].len() - 1) * crate::gpu::LINE_SIZE).sum::<usize>();
+        for (picked, whole) in plus.iter().map(|&h| (h, plus.clone())).chain([(minus[0], minus.clone())]) {
+            // Hover lights the whole edge.
+            let mid = polyline_mid(&m.edges[picked]);
+            app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: picked, mid, point: mid });
+            assert_eq!(build_highlight(&app).merged().lines.len(), lines(&whole), "hovering {picked}");
+            // A click selects it whole, each piece at its own middle; Ctrl/Shift-click takes it out.
+            let item = hit_sel(app.viewport.hover.as_ref().unwrap()).unwrap();
+            select(&mut app, Some(item.clone()), false, false);
+            assert_eq!(edge_indices(&app.session.selection), whole);
+            for s in &app.session.selection {
+                let Sel::Edge { index, point, .. } = s else { panic!("{s:?}") };
+                assert!(point.dist(polyline_mid(&m.edges[*index])) < 1e-9);
+            }
+            select(&mut app, Some(item), true, true);
+            assert!(app.session.selection.is_empty());
+        }
+        app.viewport.hover = None;
+        // Fillet with Tangent chain off: one pick on a half takes both, a second takes both out.
+        // With it on, the chain holds each piece once.
+        for chain in [false, true] {
+            let mut d = crate::dialogs::Dialog::for_command(&app, "solid.fillet").unwrap();
+            if let crate::dialogs::Kind::Fillet { chain: c, .. } = &mut d.kind {
+                *c = chain;
+            }
+            d.pick(&app.session, edge(plus[1]));
+            let items = edge_indices(&d.items());
+            assert!(plus.iter().all(|h| items.contains(h)), "chain {chain}: {items:?}");
+            assert_eq!(items.len(), d.items().len(), "chain {chain}: no piece twice");
+            let mut once = items.clone();
+            once.dedup();
+            assert_eq!(once, items, "chain {chain}: no piece twice");
+            if !chain {
+                assert_eq!(items, plus);
+            }
+            d.pick(&app.session, edge(plus[0]));
+            assert!(d.items().is_empty(), "chain {chain}: {:?}", d.items());
+        }
+        // Box select, looking at the x = +5 wall: a window round one half leaves it, as it leaves
+        // a piece of a circle; a window round both takes both; a crossing box touching one half
+        // takes the whole edge, as a click does.
+        app.cam = app.cam.looking_from(Vec3::X);
+        app.cam.target = Vec3::new(0.0, 0.0, 15.0);
+        app.cam.distance = 40.0;
+        app.ui.perspective = false;
+        let boxed = |app: &mut SolveApp, pts: Vec<Vec3>, crossing: bool| -> Vec<usize> {
+            let proj = projection(app, Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)));
+            let screen: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
+            let r = Rect::from_points(&screen).expand(2.0);
+            let bx = if crossing { BoxSel::from_drag(r.right_bottom(), r.left_top()) } else { BoxSel::from_drag(r.left_top(), r.right_bottom()) };
+            assert_eq!(bx.crossing, crossing);
+            let mut d = crate::dialogs::Dialog::for_command(app, "solid.fillet").unwrap();
+            if let crate::dialogs::Kind::Fillet { chain, .. } = &mut d.kind {
+                *chain = false;
+            }
+            app.dialog = Some(d);
+            box_select(app, &proj, bx, false);
+            let taken = edge_indices(&app.dialog.take().unwrap().items());
+            taken.into_iter().filter(|i| plus.contains(i)).collect()
+        };
+        for &half in &plus {
+            assert!(boxed(&mut app, m.edges[half].clone(), false).is_empty(), "a window round half {half} alone");
+            let mid = polyline_mid(&m.edges[half]);
+            assert_eq!(boxed(&mut app, vec![mid, mid], true), plus, "a crossing box touching half {half}");
+        }
+        assert_eq!(boxed(&mut app, plus.iter().flat_map(|&h| m.edges[h].clone()).collect(), false), plus);
+    }
+
+    /// Measure keeps measuring the piece picked of an open edge a seam splits: a pick in its
+    /// dialog is that piece, two picks are two items. A click elsewhere selects the edge whole,
+    /// which Measure takes as one item, one of its pieces (#16122 leaves Measure as it was).
+    #[test]
+    fn measure_keeps_the_picked_piece_of_an_arc_a_seam_splits() {
+        let mut app = slotted_ball_app();
+        let st = app.session.world_state().unwrap();
+        let b = st.body("Ball").unwrap();
+        let m = b.mesh();
+        let plus = mesh_edges_where(&m, |p| p.len() > 2 && p.iter().all(|q| (q.x - 5.0).abs() < 1e-6));
+        assert_eq!(plus.len(), 2);
+        let edge = |index: usize| Sel::Edge { body: b.name.clone(), index, point: polyline_mid(&m.edges[index]) };
+        for &half in &plus {
+            assert_eq!(measurement_selection(&app.session, &edge(half)), edge(half));
+        }
+        let mut d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
+        d.pick(&app.session, edge(plus[1]));
+        assert_eq!(d.items(), vec![edge(plus[1])]);
+        d.pick(&app.session, edge(plus[0]));
+        assert_eq!(edge_indices(&d.items()), plus, "the two halves are two items, as before");
+        select(&mut app, Some(edge(plus[1])), false, false);
+        assert_eq!(edge_indices(&app.session.selection), plus);
+        let d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
+        assert_eq!(d.items().len(), 1, "{:?}", d.items());
+        assert!(plus.contains(&edge_indices(&d.items())[0]));
+    }
+
+    /// A box's corners and the pieces Split Face makes of a box's edges are single edges to
+    /// hover and click: nothing joins edges across a corner or an authored split.
+    #[test]
+    fn corners_and_authored_splits_stay_single_to_hover_and_click() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "B"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        let check = |app: &mut SolveApp| {
+            let st = app.session.world_state().unwrap();
+            let b = st.body("B").unwrap();
+            let m = b.mesh();
+            for (i, e) in m.edges.iter().enumerate() {
+                if !m.edge_pickable(i) {
+                    continue;
+                }
+                let item = Sel::Edge { body: b.name.clone(), index: i, point: polyline_mid(e) };
+                assert_eq!(grouped_selection(&app.session, &item), vec![item.clone()]);
+                let mid = polyline_mid(e);
+                app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: i, mid, point: mid });
+                assert_eq!(build_highlight(app).merged().lines.len(), 2 * (e.len() - 1) * crate::gpu::LINE_SIZE, "hovering {i}");
+                select(app, Some(item.clone()), false, false);
+                assert_eq!(app.session.selection, vec![item]);
+                select(app, None, false, false);
+            }
+            app.viewport.hover = None;
+            m.edges.len()
+        };
+        let corners = check(&mut app);
+        // Split Face on the +x side half way up cuts its two upright edges in two.
+        let bounds = app.session.world_state().unwrap().body("B").unwrap().mesh().bounds();
+        let (lo, hi) = (bounds.min, bounds.max);
+        let (y, z) = ((lo.y + hi.y) / 2.0, (lo.z + hi.z) / 2.0);
+        app.session
+            .execute("solid.split_face", &json!({"body": "B", "faces": [[hi.x, y, z]], "plane": {"origin": [0, 0, z], "normal": [0, 0, 1]}}))
+            .unwrap();
+        assert!(check(&mut app) > corners, "the split adds edges");
     }
 
     #[test]
