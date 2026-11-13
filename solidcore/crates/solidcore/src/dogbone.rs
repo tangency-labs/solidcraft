@@ -28,7 +28,7 @@
 
 use crate::eval::vec::VecExt as _;
 use crate::eval::Surface;
-use crate::math::{Point3, Vec3};
+use crate::math::{Point3, Vec3, EFF_ZERO};
 use crate::{Result, SolidError};
 
 const OP: &str = "dogbone";
@@ -43,13 +43,6 @@ const STRAIGHT: f64 = 1.0e-9;
 /// Angular slack (radians) on the largest corner angle relieved, so a corner computed at 90°
 /// plus rounding is still a 90° corner.
 const ANGLE_SLACK: f64 = 1.0e-6;
-
-/// Relative to the radius, the shortest stretch of a wall a circle must cut to bite it. A chord
-/// is `2 r sin φ` long, `φ` the angle at which the circle crosses the wall's line, so a shorter
-/// one crosses within about `STRAIGHT / 2` of tangent: the circle runs in line with the wall
-/// there, as directions within [`STRAIGHT`] are in line, and touches it without biting (a
-/// T-bone's other wall at 90°, a minimal circle that just reaches a wall).
-const MIN_BITE: f64 = STRAIGHT;
 
 /// Which wall a T-bone's bite is cut into.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -219,7 +212,16 @@ fn up(axis: Vec3) -> Vec3 {
 
 /// Whether the circle of radius `r` about `centre` (relative to the corner) bites the wall that
 /// leaves the corner along unit `d`: the stretch of that ray inside the circle, its start clamped
-/// to the corner, is longer than `r` times [`MIN_BITE`].
+/// to the corner, is longer than `√(8 r EFF_ZERO)`.
+///
+/// Biting is a matter of depth, not of angle. A stretch of length `L` goes at least `L² / (8 r)`
+/// beyond the wall's line (the sagitta of a chord that long; a stretch clamped at the corner goes
+/// deeper for its length), and at most `L² / r` when the centre's foot on the line lies on the
+/// wall (where it does not, a circle of these styles passes through the corner and the stretch is
+/// empty). So a longer stretch cuts deeper than the kernel's length tolerance [`EFF_ZERO`], and a
+/// shorter one at most eight times that: the circle only touches the wall (a T-bone's other wall
+/// at 90°, a minimal circle whose gap is within rounding of the largest that reaches), and a
+/// cylinder tangent to a face is no cut to send to the boolean.
 fn bites(centre: Vec3, d: Vec3, r: f64) -> bool {
     // |s d - c|² = r²: s² - 2 s (c·d) + |c|² - r² = 0.
     let h = centre.dot(d);
@@ -230,7 +232,7 @@ fn bites(centre: Vec3, d: Vec3, r: f64) -> bool {
     let root = disc.sqrt();
     let far = h + root;
     let near = (h - root).max(0.0);
-    far > near + r * MIN_BITE
+    far - near > (8.0 * r * EFF_ZERO).sqrt()
 }
 
 /// A straight edge of a solid, by its two ends.

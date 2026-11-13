@@ -1,4 +1,4 @@
-use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI};
+use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, SQRT_2};
 
 use super::*;
 
@@ -207,6 +207,36 @@ fn a_minimal_relief_stops_its_gap_short_of_the_corner() {
     // A gap so large the circle reaches no wall: no relief.
     assert_eq!(
         wedge_relief(a, b, Vec3::Z, 1.0, 1.0, &opts(Style::Minimal { gap: R })).unwrap(),
+        Err(Skip::Unreached)
+    );
+}
+
+#[test]
+fn a_minimal_circle_that_only_touches_its_walls_is_unreached() {
+    for theta in [PI / 3.0, FRAC_PI_2, 2.0 * PI / 3.0] {
+        let (a, b) = walls(theta);
+        let relief = |gap: f64| {
+            wedge_relief(a, b, Vec3::Z, 1.0, 1.0, &opts(Style::Minimal { gap })).unwrap()
+        };
+        // The largest gap that reaches: the circle about (r + g*) on the bisector is tangent to
+        // both walls, (r + g*) sin(θ/2) = r. A gap ε g* short of it goes ε g* sin(θ/2) deep.
+        let largest = R * (1.0 / (theta / 2.0).sin() - 1.0);
+        // At g* and 1e-13 g* short (under 1e-13 mm deep): a touch, no cut.
+        for eps in [0.0, 1e-13] {
+            assert_eq!(
+                relief(largest * (1.0 - eps)),
+                Err(Skip::Unreached),
+                "{theta} {eps}"
+            );
+        }
+        // 1e-9 g* short (over 1e-10 mm deep, past the kernel's length tolerance): a cut.
+        assert!(relief(largest * (1.0 - 1e-9)).is_ok(), "{theta}");
+    }
+    // The largest gap as typed for a square corner.
+    let (a, b) = walls(FRAC_PI_2);
+    let gap = R * (SQRT_2 - 1.0);
+    assert_eq!(
+        wedge_relief(a, b, Vec3::Z, 1.0, 1.0, &opts(Style::Minimal { gap })).unwrap(),
         Err(Skip::Unreached)
     );
 }
