@@ -43,7 +43,7 @@
 //!   not checked; where upstream then dereferences a null pointer (a loop without loop
 //!   use, a loop use without face use or mate, an edge use without edge or curve, ...)
 //!   the port returns [`SolidError::InvalidInput`]. `NER` / `SER` returns are
-//!   [`SolidError::Upstream`] (`SM_ERR_NULL_POINTER`, `SM_ERR`). `FlipLoopOrientation`
+//!   a [`TopologyFailure`](crate::error::topology::TopologyFailure) (`SM_ERR_NULL_POINTER`, `SM_ERR`). `FlipLoopOrientation`
 //!   reads the mate's start as the same kind as the loop use's own (an edge use read
 //!   as a vertex use, or the reverse, is undefined behaviour upstream) and swaps the
 //!   owner of vertex uses that are loop vertex uses; any other combination is
@@ -87,13 +87,11 @@
 //! - **Prepared queries.** The shared UV-corner walk can also borrow prepared topology
 //!   without mutation. It reports [`SolidError::Unported`] only if a trim curve needs
 //!   creating at the point where the mutable walk would create it.
-//! - **UV-corner failures (WR-262, #521).** By default `GetUVCornerBoundaries` ignores
-//!   failed endpoint evaluations and point drops, as upstream (an edge use can reuse
-//!   the preceding one's endpoints). With the opt-in
-//!   `Kernel::fixes.topology_failed_evaluations_propagate` it does as the fork
+//! - **UV-corner failures (WR-262, #521).** `GetUVCornerBoundaries` does as the fork
 //!   (tangency-labs/smlib 7a35f33): a trim curve that cannot be made is none (the 3D
 //!   ends are dropped), an edge use whose ends cannot be evaluated adds no boundary,
-//!   and failed drops stay ignored.
+//!   and failed drops stay ignored. Upstream ignores the failed endpoint evaluations
+//!   as well, so there an edge use can reuse the preceding one's endpoints.
 //! - The `std::unordered_set` overloads of `GetEdges` / `GetVertices`,
 //!   `GetEdgeusesAndVertexuses`, `CalculateBoundingBox`, `GetTurningAngDeg`,
 //!   `SmLoop::GetMaxSameDimGap3d`, `IsLamina`, `IsManifold`,
@@ -387,7 +385,7 @@ pub fn shell(b: &Brep, lu: LoopuseId) -> Result<Option<ShellId>> {
 ///
 /// # Errors
 ///
-/// [`SolidError::Upstream`] (`SM_ERR`) as above; [`SolidError::NotFound`] for a
+/// a [`TopologyFailure`](crate::error::topology::TopologyFailure) (`SM_ERR`) as above; [`SolidError::NotFound`] for a
 /// dangling id.
 pub fn set_edgeuse(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result<()> {
     if is_edge_loopuse(b, lu)? {
@@ -398,7 +396,10 @@ pub fn set_edgeuse(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result
             }
         }
     }
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::topology_failed(
+        OP,
+        "the edge use is not on this edge loop use",
+    ))
 }
 
 /// `CollectEdgeuses`: makes the loop use an edge loop use starting at `eu` and walks
@@ -407,12 +408,12 @@ pub fn set_edgeuse(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result
 ///
 /// # Errors
 ///
-/// [`SolidError::Upstream`] `SM_ERR_NULL_POINTER` for a null `eu` or a CCW list that
+/// a [`TopologyFailure`](crate::error::topology::TopologyFailure) `SM_ERR_NULL_POINTER` for a null `eu` or a CCW list that
 /// ends (the edge uses walked so far stay updated) and `SM_ERR` after
 /// 100000 steps; [`SolidError::NotFound`] for a dangling id.
 pub fn collect_edgeuses(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result<()> {
     // check state - input must be NonNULL
-    let start = eu.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let start = eu.ok_or_else(|| SolidError::topology_missing(OP, "the edge use to start from"))?;
 
     // local
     let mut count: u64 = 0;
@@ -425,7 +426,10 @@ pub fn collect_edgeuses(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> R
     loop {
         // check state - Edgeuse must be NonNULL
         let Some(this) = cur else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::topology_missing(
+                OP,
+                "the next edge use round the loop",
+            ));
         };
 
         // set pEdgeuse useType to SmLoopuse_TYPE and its BackPtr to this Loopuse
@@ -443,7 +447,10 @@ pub fn collect_edgeuses(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> R
         // reality check - error past 100k edges
         count += 1;
         if count > MAX_COLLECT_STEPS {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the loop has more than 100000 edge uses",
+            ));
         }
     }
 
@@ -931,7 +938,7 @@ pub fn loop_loopuse(b: &Brep, l: LoopId) -> Result<Option<LoopuseId>> {
 
 /// The primary loop use, which upstream dereferences.
 fn primary(b: &Brep, l: LoopId) -> Result<LoopuseId> {
-    loop_loopuse(b, l)?.ok_or_else(|| null("SmLoop: loop without loop use"))
+    loop_loopuse(b, l)?.ok_or_else(|| null("loop without loop use"))
 }
 
 /// `GetFace`: the face of the primary loop use's face use.
@@ -941,7 +948,7 @@ fn primary(b: &Brep, l: LoopId) -> Result<LoopuseId> {
 /// [`SolidError::InvalidInput`] for a loop without loop use or a loop use without face
 /// use; [`SolidError::NotFound`] for a dangling id.
 pub fn loop_face(b: &Brep, l: LoopId) -> Result<Option<FaceId>> {
-    let fu = faceuse(b, primary(b, l)?)?.ok_or_else(|| null("SmLoop::GetFace: no face use"))?;
+    let fu = faceuse(b, primary(b, l)?)?.ok_or_else(|| null("loop face: no face use"))?;
     eu1::faceuse_face(b, fu)
 }
 
@@ -1097,13 +1104,13 @@ pub(crate) fn face_notify_as(
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a loop without loop use or mates of different
-/// kinds (see the module docs); [`SolidError::Upstream`] `SM_ERR_NULL_POINTER` for a
+/// kinds (see the module docs); a [`TopologyFailure`](crate::error::topology::TopologyFailure) `SM_ERR_NULL_POINTER` for a
 /// missing mate or start; those of [`collect_edgeuses`]; [`SolidError::Unported`] for
 /// a loop on a face (the post-edit notification, `topology.face_p4`);
 /// [`SolidError::NotFound`] for a dangling id.
 pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     let (lu1, lu2) = loop_loopuses(b, l)?;
-    let lu2 = lu2.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let lu2 = lu2.ok_or_else(|| SolidError::topology_missing(OP, "the loop's second loop use"))?;
     let face = match faceuse(b, lu1)? {
         Some(fu) => eu1::faceuse_face(b, fu)?,
         None => None,
@@ -1116,11 +1123,15 @@ pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     let start2 = b.loopuse(lu2)?.start;
     if let LoopuseStart::Vertexuse(vu1) = start1 {
         // get Vertexuses for both mated Loopuses
-        let vu1 = vu1.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let vu1 =
+            vu1.ok_or_else(|| SolidError::topology_missing(OP, "the loop use's vertex use"))?;
         let vu2 = match start2 {
             LoopuseStart::Vertexuse(Some(vu)) => vu,
             LoopuseStart::Vertexuse(None) | LoopuseStart::Edgeuse(None) | LoopuseStart::Unknown => {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::topology_missing(
+                    OP,
+                    "the mate loop use's vertex use",
+                ));
             }
             LoopuseStart::Edgeuse(Some(_)) => {
                 return Err(null("FlipLoopOrientation: mate is not a vertex loop use"));
@@ -1143,12 +1154,18 @@ pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     } else {
         // get first Edgeuses for both mated Loopuses
         let LoopuseStart::Edgeuse(Some(eu1_)) = start1 else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::topology_missing(
+                OP,
+                "the loop use's first edge use",
+            ));
         };
         let eu2_ = match start2 {
             LoopuseStart::Edgeuse(Some(eu)) => eu,
             LoopuseStart::Edgeuse(None) | LoopuseStart::Vertexuse(None) | LoopuseStart::Unknown => {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::topology_missing(
+                    OP,
+                    "the mate loop use's first edge use",
+                ));
             }
             LoopuseStart::Vertexuse(Some(_)) => {
                 return Err(null("FlipLoopOrientation: mate is not an edge loop use"));
@@ -1233,12 +1250,12 @@ pub fn loop_is_connected_to(b: &Brep, l: LoopId, target: Option<EntityRef>) -> R
     };
     let this = EntityRef::Loop(l);
     let face_uses = |b: &Brep| -> Result<[Option<FaceuseId>; 2]> {
-        let f = loop_face(b, l)?.ok_or_else(|| null("SmLoop::IsConnectedTo: no face"))?;
+        let f = loop_face(b, l)?.ok_or_else(|| null("loop connection: no face"))?;
         let (a, c) = crate::topology::face::p2::faceuses(b, f)?;
         Ok([a, c])
     };
     let shell_of = |b: &Brep, fu: Option<FaceuseId>| -> Result<Option<ShellId>> {
-        let fu = fu.ok_or_else(|| null("SmLoop::IsConnectedTo: no face use"))?;
+        let fu = fu.ok_or_else(|| null("loop connection: no face use"))?;
         eu1::faceuse_shell(b, fu)
     };
     match target {
@@ -1257,7 +1274,7 @@ pub fn loop_is_connected_to(b: &Brep, l: LoopId, target: Option<EntityRef>) -> R
         EntityRef::Region(r) => {
             let [fu1, fu2] = face_uses(b)?;
             let region_of = |fu| -> Result<Option<crate::topology::RegionId>> {
-                let s = shell_of(b, fu)?.ok_or_else(|| null("SmLoop::IsConnectedTo: no shell"))?;
+                let s = shell_of(b, fu)?.ok_or_else(|| null("loop connection: no shell"))?;
                 eu1::shell_region(b, s)
             };
             Ok(region_of(fu1)? == Some(r) || region_of(fu2)? == Some(r))
@@ -1284,18 +1301,16 @@ pub struct UvCorners {
     pub on_params: Vec<f64>,
 }
 
-/// `pEdgeuse->GetOrCreateUVTrimCurve(pUVTrimCurve)`: the curve after the call (its status
-/// is ignored upstream; `None` when it could not be made). With the opt-in
-/// [`crate::kernel::UpstreamFixes::topology_failed_evaluations_propagate`] a failing
-/// status is no curve, as the fork has it (tangency-labs/smlib 7a35f33: the pointer kept
-/// the previous edge use's curve), so the walk drops the 3D ends instead.
+/// `pEdgeuse->GetOrCreateUVTrimCurve(pUVTrimCurve)`: the curve after the call, `None`
+/// when it could not be made. A failing status is no curve, as the fork has it
+/// (tangency-labs/smlib 7a35f33), so the walk drops the 3D ends instead; upstream
+/// ignores the status and its pointer keeps the previous edge use's curve.
 fn get_or_create_uv_trim_curve(
     k: &Kernel,
     b: &mut QueryTopology<'_>,
     eu: EdgeuseId,
 ) -> Result<Option<Curve>> {
-    let made = b.ensure_trim_curve(k, eu)?;
-    if k.fixes.topology_failed_evaluations_propagate && !made {
+    if !b.ensure_trim_curve(k, eu)? {
         return Ok(None);
     }
     Ok(crate::topology::edgeuse::p1::uv_trim_curve(b, eu)?
@@ -1311,9 +1326,7 @@ fn get_or_create_uv_trim_curve(
 /// With no guess and no solution array, `DropPoint` writes `rResultUV` only when it
 /// ends with `rbSuccess` set (its failed `GlobalPointSolve` returns before any write).
 ///
-/// The fork keeps these drops' statuses ignored (`SE`, tangency-labs/smlib 7a35f33), so
-/// [`crate::kernel::UpstreamFixes::topology_failed_evaluations_propagate`] does not change
-/// them.
+/// The fork keeps these drops' statuses ignored too (`SE`, tangency-labs/smlib 7a35f33).
 fn drop_point(k: &Kernel, s: &Surface, dom: &Extent2d, p: Point3) -> Result<Option<Point2>> {
     let opts = crate::surface::surface::p5::DropPointOptions::default();
     let r = s.drop_point::<crate::surface::surface::p4::NoObject>(k, p, dom, &opts);
@@ -1327,25 +1340,6 @@ fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
-    }
-}
-
-/// An end point of the corner walk.
-enum CornerEnd<T> {
-    /// Evaluated, or `None` where upstream ignores the failure and carries the previous
-    /// value on.
-    Value(Option<T>),
-    /// With the opt-in
-    /// [`crate::kernel::UpstreamFixes::topology_failed_evaluations_propagate`], the edge
-    /// use adds no boundary (the fork's `continue`, tangency-labs/smlib 7a35f33).
-    Skip,
-}
-
-/// The [`CornerEnd`] of an evaluation.
-fn evaluated<T>(k: &Kernel, r: Result<T>) -> Result<CornerEnd<T>> {
-    match ignored(r)? {
-        None if k.fixes.topology_failed_evaluations_propagate => Ok(CornerEnd::Skip),
-        v => Ok(CornerEnd::Value(v)),
     }
 }
 
@@ -1387,12 +1381,9 @@ pub(crate) fn uv_corner_boundaries_with_topology(
         return Ok(out);
     };
 
-    // locals (carried from one edge use to the next where upstream ignores a failed
-    // evaluation; with the opt-in fix that edge use adds no boundary instead)
+    // locals (carried from one edge use to the next where a point drop fails)
     let mut uv_pnt_beg = Point2::UNDEF;
     let mut uv_pnt_end = Point2::UNDEF;
-    let mut uv_beg = Vec3::UNDEF;
-    let mut uv_end = Vec3::UNDEF;
 
     // for every edgeuse - classify the end points
     for eu in edgeuses(b, lu, None, None)? {
@@ -1403,20 +1394,14 @@ pub(crate) fn uv_corner_boundaries_with_topology(
         if let Some(trim) = trim {
             // end points
             ivl = trim.natural_interval();
-            let CornerEnd::Value(beg) = evaluated(k, trim.evaluate_point(k, ivl.evaluate(0.0)))?
-            else {
+            // an edge use whose ends cannot be evaluated adds no boundary (the fork's
+            // `continue`, tangency-labs/smlib 7a35f33)
+            let Some(uv_beg) = ignored(trim.evaluate_point(k, ivl.evaluate(0.0)))? else {
                 continue;
             };
-            if let Some(p) = beg {
-                uv_beg = p;
-            }
-            let CornerEnd::Value(end) = evaluated(k, trim.evaluate_point(k, ivl.evaluate(1.0)))?
-            else {
+            let Some(uv_end) = ignored(trim.evaluate_point(k, ivl.evaluate(1.0)))? else {
                 continue;
             };
-            if let Some(p) = end {
-                uv_end = p;
-            }
             uv_pnt_beg = Point2::new(uv_beg.x, uv_beg.y);
             uv_pnt_end = Point2::new(uv_end.x, uv_end.y);
         } else {
@@ -1435,14 +1420,12 @@ pub(crate) fn uv_corner_boundaries_with_topology(
                 .as_ref()
                 .ok_or_else(|| null("GetUVCornerBoundaries: no curve"))?;
             ivl = edge.interval;
-            let CornerEnd::Value(beg) = evaluated(k, c.evaluate_point(k, ivl.min()))? else {
+            let Some(beg) = ignored(c.evaluate_point(k, ivl.min()))? else {
                 continue;
             };
-            let beg = beg.unwrap_or(Vec3::UNDEF);
-            let CornerEnd::Value(end) = evaluated(k, c.evaluate_point(k, ivl.max()))? else {
+            let Some(end) = ignored(c.evaluate_point(k, ivl.max()))? else {
                 continue;
             };
-            let end = end.unwrap_or(Vec3::UNDEF);
             if let Some(p) = drop_point(k, s, &dom, beg)? {
                 uv_pnt_beg = p;
             }
@@ -1993,10 +1976,8 @@ mod tests {
             eu_or_vu(&b, lu(0)).unwrap(),
             Some(EntityRef::Edgeuse(eu(4)))
         );
-        assert!(matches!(
-            set_edgeuse(&mut b, lu(0), Some(eu(1))),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        assert!(set_edgeuse(&mut b, lu(0), Some(eu(1)))
+            .is_err_and(|e| e.upstream_status() == Some(1001)));
         assert!(set_edgeuse(&mut b, lu(0), None).is_err());
         // CollectEdgeuses re-owns the CCW list
         collect_edgeuses(&mut b, lu(1), Some(eu(0))).unwrap();
@@ -2004,10 +1985,9 @@ mod tests {
             b.edgeuse(eu(6)).unwrap().owner,
             EdgeuseOwner::Loopuse(Some(lu(1)))
         );
-        assert!(matches!(
-            collect_edgeuses(&mut b, lu(1), None),
-            Err(SolidError::Upstream { code: 1006, .. })
-        ));
+        assert!(
+            collect_edgeuses(&mut b, lu(1), None).is_err_and(|e| e.upstream_status() == Some(1006))
+        );
         set_orientation(&mut b, lu(0), OrientType::Opposite).unwrap();
         assert_eq!(orientation(&b, lu(0)).unwrap(), OrientType::Opposite);
         set_loop(&mut b, lu(0), None).unwrap();
@@ -2048,35 +2028,11 @@ mod tests {
             }
             b.edgeuse_mut(eu(bad)).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
             let bad_edge = eu1::edge(&b, eu(bad)).unwrap();
-            let mut k = Kernel::default();
-            let off = uv_corner_boundaries(
-                &k,
-                &mut b.clone_standing_for_self().unwrap(),
-                LoopId::from_index(0),
-                &dom,
-                1e-6,
-            )
-            .unwrap();
-            k.fixes.topology_failed_evaluations_propagate = true;
+            let k = Kernel::default();
             let on = uv_corner_boundaries(&k, &mut b, LoopId::from_index(0), &dom, 1e-6).unwrap();
             assert!(!on.on_edges.contains(&bad_edge), "bad={bad}: {on:?}");
             assert_eq!(on.on_edges.len(), 6, "bad={bad}: {on:?}");
-            assert_ne!(off.on_edges, on.on_edges, "bad={bad}");
         }
-    }
-
-    #[test]
-    fn uv_corners_ignore_failed_trim_evaluation_by_default() {
-        // WR-262: upstream ignores the failed evaluation and keeps the previous ends.
-        let k = Kernel::default();
-        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let mut b = square(0.0);
-        for i in 0..4 {
-            b.edgeuse_mut(eu(2 * i)).unwrap().uv_trim_curve =
-                b.edge(EdgeId::from_index(i)).unwrap().curve.clone();
-        }
-        b.edgeuse_mut(eu(2)).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
-        assert!(uv_corner_boundaries(&k, &mut b, LoopId::from_index(0), &dom, 1e-6).is_ok());
     }
 
     #[test]

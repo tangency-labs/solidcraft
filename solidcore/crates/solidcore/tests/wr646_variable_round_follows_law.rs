@@ -6,9 +6,13 @@
 //! traced points: the round removes the wrong volume and its surface leaves the law's
 //! circles.
 //!
-//! The round of a cube's edge between two perpendicular planes with radius `r(s)` removes
-//! `(1 - pi/4) r(s)^2` of each section, so the volume removed is `(1 - pi/4)` times the
-//! integral of `r^2` along the edge, in closed form for a polynomial law.
+//! The round of a cube's edge between two perpendicular planes is the union of its balls
+//! (WR-685; since the G^n section's flag was retired, on every kernel: WR-685 addendum
+//! 2026-11-06). Each ball touches the balls' envelope along its touch circle, square to the
+//! centre line and moved along it by `-r r'/|c'|`, not along its great circle. The volume
+//! removed is the corner less the union of the balls, by quadrature ([`ENVELOPE_REMOVED`]);
+//! the great circles' `(1 - pi/4) r(s)^2` per section, integrated along the edge, removes
+//! 65.6068, 2.3% more.
 
 #![allow(
     clippy::unwrap_used,
@@ -81,9 +85,32 @@ fn law(t: f64) -> f64 {
     6.0 * s * s * s + 18.0 * t * s * s + 3.0 * t * t * s + t * t * t
 }
 
-/// The largest distance from the round's surface of the law's section points at
-/// 45 degrees, `(x, 20 - r + r/sqrt 2, 20 - r + r/sqrt 2)`, `x = 20 t` (taking the
-/// law from whichever end of the edge fits it).
+/// The law's slope `dr/dt` at `t`.
+fn law_slope(t: f64) -> f64 {
+    let s = 1.0 - t;
+    // 3 (6 - 6) s^2 + 6 (1 - 6) s t + 3 (1 - 1) t^2
+    -30.0 * s * t
+}
+
+/// The point of the ball at `x = 20 t` on its touch circle in the plane of symmetry
+/// `y = z`, on the edge's side: the ball of radius `r` centred `c = (x, 20 - r, 20 - r)`
+/// touches the balls' envelope along the circle where `<p - c, c'> = -r r'`
+/// (`c' = (1, -r', -r')`, `r' = dr/dx`), of radius `r sqrt(1 - r'^2 / |c'|^2)` about
+/// `c - (r r' / |c'|^2) c'`.
+fn touch_point(x: f64, r: f64, dr_dx: f64) -> Point3 {
+    let c = Vec3::new(x, 20.0 - r, 20.0 - r);
+    let cd = Vec3::new(1.0, -dr_dx, -dr_dx);
+    let n2 = cd.dot(cd);
+    let centre = c - cd * (r * dr_dx / n2);
+    let radius = r * (1.0 - dr_dx * dr_dx / n2).sqrt();
+    let d = Vec3::new(0.0, 1.0, 1.0);
+    let d = d - cd * (d.dot(cd) / n2);
+    let p = centre + d * (radius / d.length());
+    Point3::new(p.x, p.y, p.z)
+}
+
+/// The largest distance from the round's surface of the balls' touch points
+/// ([`touch_point`]) at `x = 20 t` (taking the law from whichever end of the edge fits it).
 fn surface_off_law(k: &Kernel, b: &Brep) -> f64 {
     let rounds: Vec<_> = b
         .faces()
@@ -97,9 +124,10 @@ fn surface_off_law(k: &Kernel, b: &Brep) -> f64 {
         (1..40)
             .map(|i| {
                 let x = f64::from(i) * 0.5;
-                let r = law(if reversed { 1.0 - x / 20.0 } else { x / 20.0 });
-                let c = 20.0 - r + r * core::f64::consts::FRAC_1_SQRT_2;
-                let p = Point3::new(x, c, c);
+                let t = if reversed { 1.0 - x / 20.0 } else { x / 20.0 };
+                let r = law(t);
+                let sign = if reversed { -1.0 } else { 1.0 };
+                let p = touch_point(x, r, sign * law_slope(t) / 20.0);
                 let uv = surface_closest_point(k, s, p).unwrap().uvs[0];
                 s.evaluate_point(k, uv).unwrap().distance(p)
             })
@@ -132,16 +160,16 @@ fn rounded_cube(fixed: bool) -> (f64, f64) {
     (volume(&k, &mut b), off)
 }
 
-/// `(1 - pi/4)` times the integral of `r^2` over the 20 mm edge: the square of the cubic
-/// Bezier law 6, 6, 1, 1 is the degree 6 Bezier whose mean control value, 107/7, is the
-/// mean of `r^2` over the edge.
-fn law_removed() -> f64 {
-    (1.0 - core::f64::consts::FRAC_PI_4) * 20.0 * 107.0 / 7.0
-}
+/// The volume the union of the balls of the law 6, 6, 1, 1 takes off the cube's edge: the
+/// integral along the edge of the area each plane `x` cuts between the rails
+/// (`y, z > 20 - r(x)`) above the union of the balls' discs (Gauss-Legendre, 16 points in
+/// each of 40 panels along the edge and 8 across, the union's top over 20001 balls; 40001
+/// balls agree to 1.1e-6).
+const ENVELOPE_REMOVED: f64 = 64.159_535;
 
 #[test]
 fn variable_round_on_planes_removes_the_laws_volume() {
-    let expected = 8000.0 - law_removed();
+    let expected = 8000.0 - ENVELOPE_REMOVED;
     let (v, off) = rounded_cube(true);
     eprintln!(
         "fixed: {v} expected {expected} diff {} off {off}",
@@ -149,25 +177,20 @@ fn variable_round_on_planes_removes_the_laws_volume() {
     );
     // the fork's bound: the law's volume to 1e-4 (here 5e-5 of the volume removed)
     assert!(
-        (v - expected).abs() < 1e-4 * law_removed(),
+        (v - expected).abs() < 1e-4 * ENVELOPE_REMOVED,
         "{v} vs {expected}"
     );
-    // the round holds the law's sections (2.0e-4 here)
+    // the round holds its balls' touch circles
     assert!(off < 3e-4, "{off}");
 }
 
+/// Without the fix the rails stray between the traced points: the surface is 8.0e-4 off the
+/// balls' touch circles, against 2.0e-4 with it. (The union of the balls removes about the
+/// same volume either way, within 3e-5 of the envelope's: before the round was the union of
+/// its balls, the great circles' volume showed the stray rails too.)
 #[test]
-fn variable_round_on_planes_keeps_upstreams_volume_without_the_fix() {
-    let expected = 8000.0 - law_removed();
+fn variable_round_on_planes_strays_off_its_balls_without_the_fix() {
     let (v, off) = rounded_cube(false);
-    eprintln!(
-        "upstream: {v} expected {expected} diff {} off {off}",
-        v - expected
-    );
-    // 1.5e-4 of the volume removed short, the surface 6.1e-4 off the law's sections
-    assert!(
-        (v - expected).abs() > 1e-4 * law_removed(),
-        "{v} vs {expected}"
-    );
+    eprintln!("upstream: {v} off {off}");
     assert!(off > 5e-4, "{off}");
 }

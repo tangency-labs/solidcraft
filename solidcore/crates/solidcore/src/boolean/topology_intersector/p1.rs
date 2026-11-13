@@ -178,6 +178,7 @@ pub const MAX_FACE_LIST: usize = 1 << 16;
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -587,7 +588,7 @@ pub trait IntersectorBrep<O>:
     fn vertex_update_edge_intervals(&mut self, k: &Kernel, vertex: O) -> Result<()> {
         let _ = (k, vertex);
         Err(SolidError::unported(
-            "SmBrep::UpdateVertexEdgeIntervals",
+            "topology::brep::p1::update_vertex_edge_intervals",
             "topology.brep_p1",
         ))
     }
@@ -628,7 +629,7 @@ pub(super) fn brep_make_edge_in_face<O: Copy, B: IntersectorBrep<O>>(
         &mut out,
     )?;
     out.map(|(edge, new_loop, new_face)| (Some(edge), new_loop, new_face))
-        .ok_or_else(|| SolidError::null_pointer(OP))
+        .ok_or_else(|| SolidError::entity_missing(OP, "a new edge"))
 }
 
 /// `MakeEdgeInFace`'s face, vertex and curve handles: its `SmFace::FindVertexSector`
@@ -695,7 +696,8 @@ impl<O: Copy, B: IntersectorBrep<O>> crate::topology::brep::p5::FaceEdgeBackend
         all: bool,
     ) -> Result<Option<O>> {
         // NER(cpVertex) before anything is resolved
-        let vertex = vertex.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let vertex =
+            vertex.ok_or_else(|| SolidError::entity_missing(OP, "a vertex to split an edge at"))?;
         let EntityRef::Vertex(vertex) = self.entity(vertex)? else {
             return Err(SolidError::invalid_input(OP, "not a vertex handle"));
         };
@@ -1464,7 +1466,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let copy =
                         Self::b_spline_copy(geometry, out.curves_3d.get(jj).copied().flatten())?;
                     let Some(h) = copy else {
-                        out.status = Some(SolidError::sm_err(OP_CHECK_SSI));
+                        out.status = Some(SolidError::stage_failed(
+                            OP_CHECK_SSI,
+                            "a curve could not be copied for the existing intersection",
+                        ));
                         return Ok(out);
                     };
                     if let Some(slot) = out.curves_3d.get_mut(jj) {
@@ -1645,10 +1650,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let brp = self.brep_mate(other_topo);
 
         if oth.is_some() && oth != other_topo {
-            return Err(SolidError::sm_err(OP_RELATE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_RELATE,
+                BooleanStage::Relate,
+                "another entity is already related to the other one",
+            ));
         }
         if brp.is_some() && brp != brep_topo {
-            return Err(SolidError::sm_err(OP_RELATE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_RELATE,
+                BooleanStage::Relate,
+                "another entity is already related to the other one",
+            ));
         }
 
         let brep_topo = brep_topo.ok_or(dangling("null B-rep object"))?;
@@ -1657,7 +1670,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         if brep_topo.class_kind() == ClassObjectKind::Vertex {
             let v2 = other_topo
                 .filter(|o| o.class_kind() == ClassObjectKind::Vertex)
-                .ok_or(SolidError::null_pointer(OP_RELATE))?;
+                .ok_or_else(|| {
+                    SolidError::boolean_entity_missing(
+                        OP_RELATE,
+                        BooleanStage::Relate,
+                        "a vertex of the other B-rep to relate the vertex to",
+                    )
+                })?;
             Self::max_tolerances(k, brep, brep_topo, v2)?;
         }
 
@@ -1665,7 +1684,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         if brep_topo.class_kind() == ClassObjectKind::Edge {
             let e2 = other_topo
                 .filter(|o| o.class_kind() == ClassObjectKind::Edge)
-                .ok_or(SolidError::null_pointer(OP_RELATE))?;
+                .ok_or_else(|| {
+                    SolidError::boolean_entity_missing(
+                        OP_RELATE,
+                        BooleanStage::Relate,
+                        "an edge of the other B-rep to relate the edge to",
+                    )
+                })?;
             Self::max_tolerances(k, brep, brep_topo, e2)?;
         }
 
@@ -2110,23 +2135,21 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
 
-        // WR-619 (opt-in): a vertex whose collapsed speck definition was skipped at imprint
+        // WR-619 (not upstream): a vertex whose collapsed speck definition was skipped at imprint
         // stands in for that speck's span, so grow its tolerance to twice the gained gap
         // (`AssertValid` tests 0-3 check half the vertex tolerance), covering any shift the
         // WR-306 edge-interval fit above made.
-        if k.fixes.imprint_skips_collapsed_definition {
-            let gain = crate::geom::tol::gap_gain(k);
-            let skipped = mgr.skipped_speck_vertices().to_vec();
-            for (v, imprint_gap, p0, p1) in skipped {
-                if brep.vertex_brep(v)?.is_none() {
-                    continue;
-                }
-                let cur_gap = ClassGeometry::classification_vertex_point(&*brep, v)
-                    .map_or(0.0, |vp| max2(vp.distance(p0), vp.distance(p1)));
-                let gap = max2(imprint_gap, cur_gap);
-                let min_tol = zone_tol3d(k, 2.0 * gain * gap);
-                brep.set_topology_tolerance(k, v, min_tol, true, true)?;
+        let gain = crate::geom::tol::gap_gain(k);
+        let skipped = mgr.skipped_speck_vertices().to_vec();
+        for (v, imprint_gap, p0, p1) in skipped {
+            if brep.vertex_brep(v)?.is_none() {
+                continue;
             }
+            let cur_gap = ClassGeometry::classification_vertex_point(&*brep, v)
+                .map_or(0.0, |vp| max2(vp.distance(p0), vp.distance(p1)));
+            let gap = max2(imprint_gap, cur_gap);
+            let min_tol = zone_tol3d(k, 2.0 * gain * gap);
+            brep.set_topology_tolerance(k, v, min_tol, true, true)?;
         }
 
         // At this point, there might be coincident Vertices and Edges in the Breps.
@@ -3032,7 +3055,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                                 // Record new face for output and to include in future intersections
                                 faces1.push(new_face); // some redundancy, will intersect all sFaces2, but only needs from jj+1
                                 if faces1.len() + faces2.len() > MAX_FACE_LIST {
-                                    return Err(SolidError::sm_err(OP_FACE_FACE));
+                                    return Err(SolidError::stage_failed(
+                                        OP_FACE_FACE,
+                                        "the new faces exceed the face list limit",
+                                    ));
                                 }
                                 out.new_faces.push(new_face);
                             }
@@ -3062,7 +3088,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                                 // Record new face for output and to intersect both the old and the new face
                                 out.new_faces.push(new_face);
                                 if faces1.len() + faces2.len() + 1 > MAX_FACE_LIST {
-                                    return Err(SolidError::sm_err(OP_FACE_FACE));
+                                    return Err(SolidError::stage_failed(
+                                        OP_FACE_FACE,
+                                        "the new faces exceed the face list limit",
+                                    ));
                                 }
 
                                 // Intersect both the old and the new face
@@ -3525,7 +3554,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                                 kk += 1;
                                 continue;
                             }
-                            return Err(SolidError::sm_err(OP_FFC));
+                            return Err(SolidError::boolean_stage_failed(
+                                OP_FFC,
+                                BooleanStage::Coincidence,
+                                "the face to delete has no B-rep",
+                            ));
                         };
                         let old_tol = brep
                             .topology_tolerance(del_face)
@@ -3749,11 +3782,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         if surface.face()?.is_none() {
             return surface_cache(k, surface, Some(handle));
         }
-        let face = self
-            .0
-            .inner()
-            .surface_face(handle)?
-            .ok_or(SolidError::null_pointer(OP_FACE_CACHES))?;
+        let face =
+            self.0.inner().surface_face(handle)?.ok_or_else(|| {
+                SolidError::entity_missing(OP_FACE_CACHES, "a face for the surface")
+            })?;
         match self.0.caches.built.get(&face) {
             Some(Ok(cache)) => {
                 self.0.caches.tree_requested.borrow_mut().insert(face);
@@ -3781,11 +3813,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         if surface.face()?.is_none() {
             return self.build_surface_cache(k, surface, Some(handle));
         }
-        let face = self
-            .0
-            .inner()
-            .surface_face(handle)?
-            .ok_or(SolidError::null_pointer(OP_FACE_CACHES))?;
+        let face =
+            self.0.inner().surface_face(handle)?.ok_or_else(|| {
+                SolidError::entity_missing(OP_FACE_CACHES, "a face for the surface")
+            })?;
         // after the attempt's first GetTree of the face's cache, upstream's cache has
         // its tree
         if self.0.caches.tree_requested.borrow().contains(&face) {
@@ -3822,7 +3853,7 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized>
             // DISPATCH GAP: the owner's objects cannot resolve the face handle to its
             // `Brep` and `FaceId`
             return Err(SolidError::unported(
-                "SmFace::PointClassify",
+                "query::face::p2::point_classify",
                 "query.face_p2",
             ));
         };
@@ -3849,7 +3880,7 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized>
             // DISPATCH GAP: the owner's objects cannot resolve the face handle to its
             // `Brep` and `FaceId`
             return Err(SolidError::unported(
-                "SmFace::PointClassify",
+                "query::face::p2::point_classify",
                 "query.face_p2",
             ));
         };
@@ -3909,7 +3940,11 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Face
         Some(
             inner
                 .curve_edge(curve)
-                .and_then(|edge| edge.ok_or(SolidError::null_pointer(OP_FACE_CACHES)))
+                .and_then(|edge| {
+                    edge.ok_or_else(|| {
+                        SolidError::entity_missing(OP_FACE_CACHES, "an edge for the curve")
+                    })
+                })
                 .and_then(|edge| inner.edge_tolerance(edge)),
         )
     }
@@ -4149,7 +4184,7 @@ where
         })
         .collect();
     trim_owner_face(&candidates, |b| caches.trims.trim_requested_on(b), eu)
-        .ok_or(SolidError::null_pointer(OP_FACE_CACHES))
+        .ok_or_else(|| SolidError::entity_missing(OP_FACE_CACHES, "a face that owns the trim"))
 }
 
 /// The candidate face whose B-rep `requested_on` accepts and whose loop uses hold `eu`
@@ -4469,7 +4504,10 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
 
         // Syncronize the two curve classifications.
         if ignore_soft(cc_homogenize(k, geometry, &mut crv_class1, &mut crv_class2))?.is_none() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::stage_failed(
+                OP,
+                "the two curve classifications could not be made consistent",
+            ));
         }
 
         // Create ProtoEdges from each segment.
@@ -4767,11 +4805,23 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
     let curve1 = geometry
         .edge_curve(edge1)
         .ok_or(dangling("edge handle is unknown"))?
-        .ok_or(SolidError::null_pointer(OP_SPLIT_TWO))?;
+        .ok_or_else(|| {
+            SolidError::boolean_entity_missing(
+                OP_SPLIT_TWO,
+                BooleanStage::Split,
+                "a curve on the first edge",
+            )
+        })?;
     let curve2 = geometry
         .edge_curve(edge2)
         .ok_or(dangling("edge handle is unknown"))?
-        .ok_or(SolidError::null_pointer(OP_SPLIT_TWO))?;
+        .ok_or_else(|| {
+            SolidError::boolean_entity_missing(
+                OP_SPLIT_TWO,
+                BooleanStage::Split,
+                "a curve on the second edge",
+            )
+        })?;
 
     let skip_global_coincidence_check = true; //cbi ?
 
@@ -4837,9 +4887,13 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
 
         // The intersection is interior to both Edges.
         // Split them both, and then glue the vertices.
-        let brep = geometry
-            .edge_brep_handle(edge1)?
-            .ok_or(SolidError::null_pointer(OP_SPLIT_TWO))?;
+        let brep = geometry.edge_brep_handle(edge1)?.ok_or_else(|| {
+            SolidError::boolean_entity_missing(
+                OP_SPLIT_TWO,
+                BooleanStage::Split,
+                "a B-rep for the first edge",
+            )
+        })?;
 
         let (e1, e2, new_v1) = match geometry
             .make_vertex_split_edge(k, brep, edge1, t1)
@@ -4859,7 +4913,13 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
                 continue;
             }
         };
-        let new_v1 = new_v1.ok_or(SolidError::null_pointer(OP_SPLIT_TWO))?;
+        let new_v1 = new_v1.ok_or_else(|| {
+            SolidError::boolean_entity_missing(
+                OP_SPLIT_TWO,
+                BooleanStage::Split,
+                "a vertex made by splitting the first edge",
+            )
+        })?;
         let new_edge = if e2 == Some(edge1) { e1 } else { e2 };
         out.new_edges1.push(new_edge);
 
@@ -4877,7 +4937,13 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
             Err(_) => continue, // SM_ASSERT(FALSE)
         };
         // pNewV2 will be deleted, so don't add to output list.
-        let new_v2 = new_v2.ok_or(SolidError::null_pointer(OP_SPLIT_TWO))?;
+        let new_v2 = new_v2.ok_or_else(|| {
+            SolidError::boolean_entity_missing(
+                OP_SPLIT_TWO,
+                BooleanStage::Split,
+                "a vertex made by splitting the second edge",
+            )
+        })?;
         let new_edge = if e2 == Some(edge2) { e1 } else { e2 };
         out.new_edges2.push(new_edge);
 
@@ -4933,7 +4999,13 @@ pub fn test_and_imprint_face<O: ClassObject + SolutionObject + Ord>(
     let surface = geometry
         .face_surface(face)
         .ok_or(dangling("face handle is unknown"))?
-        .ok_or(SolidError::null_pointer(OP_IMPRINT_FACE))?;
+        .ok_or_else(|| {
+            SolidError::boolean_entity_missing(
+                OP_IMPRINT_FACE,
+                BooleanStage::Imprint,
+                "a surface on the face",
+            )
+        })?;
     let uv_domain = geometry
         .face_uv_domain(face)
         .ok_or(dangling("face handle is unknown"))?;
@@ -4989,7 +5061,13 @@ pub fn test_and_imprint_face<O: ClassObject + SolutionObject + Ord>(
         .map(|(l, v)| (l, Some(v)))
     {
         Ok((_new_loop, new_v)) => {
-            let new_v = new_v.ok_or(SolidError::null_pointer(OP_IMPRINT_FACE))?;
+            let new_v = new_v.ok_or_else(|| {
+                SolidError::boolean_entity_missing(
+                    OP_IMPRINT_FACE,
+                    BooleanStage::Imprint,
+                    "a vertex made by the imprint",
+                )
+            })?;
             out.new_vertex = Some(new_v);
         }
         Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => return Err(e),
@@ -5128,8 +5206,10 @@ impl<I: Ord + Copy> MateMap<I> {
         if self.other(primary).is_some_and(|v| v != other)
             || self.primary(other).is_some_and(|v| v != primary)
         {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::boolean_stage_failed(
                 "boolean::topology_intersector::p1::record",
+                BooleanStage::Relate,
+                "another entity is already related to the other one",
             ));
         }
         self.to_other.insert(primary, other);
@@ -5175,7 +5255,11 @@ impl Relations {
                 .primary(other_edge)
                 .is_some_and(|e| e != brep_edge)
         {
-            return Err(SolidError::sm_err(OP_RELATE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_RELATE,
+                BooleanStage::Relate,
+                "another entity is already related to the other one",
+            ));
         }
 
         // when objects are edges - set object tolerances to max(object1 tol, object2 tol)
@@ -5322,10 +5406,18 @@ impl Relations {
         let oth = self.vertices.other(brep_vertex);
         let brp = self.vertices.primary(other_vertex);
         if oth.is_some_and(|v| v != other_vertex) {
-            return Err(SolidError::sm_err(OP_RELATE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_RELATE,
+                BooleanStage::Relate,
+                "another entity is already related to the other one",
+            ));
         }
         if brp.is_some_and(|v| v != brep_vertex) {
-            return Err(SolidError::sm_err(OP_RELATE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_RELATE,
+                BooleanStage::Relate,
+                "another entity is already related to the other one",
+            ));
         }
 
         // when objects are vertices - set object tolerances to max(object1 tol, object2 tol)

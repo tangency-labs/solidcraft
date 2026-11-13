@@ -4,9 +4,10 @@
 //! cache to the exact document, and to the source, platform and geometry kernel that computed it
 //! (docs/design-container.md).
 use super::*;
+use sha2::{Digest, Sha256};
 use solidcraft_doc::{ModelState, SavedModel};
 
-const FORMAT: &str = "solidcraft-model-cache/9";
+const FORMAT: &str = "solidcraft-model-cache/10";
 const PRODUCER: &str = "solidcraft-truck-adapter/4";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";
@@ -33,6 +34,10 @@ fn evaluation() -> String {
 /// earlier builds could run on) is not this build's result: the kernels differ in tolerances and in
 /// what they refuse, so a design opened from it evaluates again.
 pub(super) const KERNEL: &str = "solidcore";
+
+pub(super) fn identity() -> Value {
+    json!([FORMAT, PRODUCER, env!("CARGO_PKG_VERSION"), build()])
+}
 
 /// A 4 x 4 matrix as its 16 numbers, in storage order.
 fn matrix(t: &[[f64; 4]; 4]) -> Vec<f64> {

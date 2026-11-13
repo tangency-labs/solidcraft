@@ -28,8 +28,7 @@
 //! Opt-in ([`UpstreamFixes::analytic_copy_keeps_parameterization`](crate::kernel::UpstreamFixes::analytic_copy_keeps_parameterization), WR-450):
 //! `CopyAndAddAnalytics` keeps an exact copy where its analytic surface differs from the source at the same parameters.
 //!
-//! Opt-in ([`UpstreamFixes::sphere_from_arcs_common_centre`](crate::kernel::UpstreamFixes::sphere_from_arcs_common_centre), WR-103):
-//! `CreateSphereFromArcs` refuses an arc whose centre is farther than the 3D tolerance from
+//! WR-103: `CreateSphereFromArcs` refuses an arc whose centre is farther than the 3D tolerance from
 //! the first arc's, instead of reproducing upstream's aliased (dead) centre check.
 //!
 //! Deviations:
@@ -46,7 +45,7 @@
 //! - **Missing NURB.** Where upstream dereferences the `NULL` NURB of a surface built
 //!   by `SmBSplineSurface()` (`GetControlPointsExpert`, `SetControlPoint`,
 //!   `CopySubPatch`, `SplitAt`) the port returns `SM_ERR`
-//!   ([`SolidError::Upstream`]); `CreateIsoParametricCurve` keeps its
+//!   ([`BSplineFailure::NoNurbsForm`]); `CreateIsoParametricCurve` keeps its
 //!   `SM_ERR_NULL_POINTER` (`NER`).
 //! - **Array bounds.** `GetControlPointsExpert` checks indices also for a single
 //!   point (upstream reads outside the net there) and returns the output array
@@ -65,11 +64,12 @@
 //!   result upstream ignores keep the previous frame and angles when they fail. Its
 //!   `rOrigin` is a reference into the frame those calls overwrite, so the centre check
 //!   never fires and the sphere centre is the last examined arc's (WR-103): the port
-//!   reads the current frame's origin at each use. With
-//!   [`UpstreamFixes::sphere_from_arcs_common_centre`](crate::kernel::UpstreamFixes::sphere_from_arcs_common_centre)
-//!   it instead refuses an arc whose centre is farther than `tol_3d` from the first
+//!   reads the current frame's origin at each use, and refuses an arc whose centre is farther than `tol_3d` from the first
 //!   arc's with `SM_ERR`, after the radius test; construction still uses the current
-//!   frame's origin.
+//!   frame's origin. Not upstream (WR-502, SolidCraft oracle case 37; the default since
+//!   its flag was retired): four arcs of one centre and radius that close a loop get
+//!   their whole sphere, where upstream refuses anything but three ("only works for 3
+//!   now").
 //! - **Edit notifications.** `SetCanonical`'s `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`
 //!   (`this`, `SM_NO_GET_OWNER(this)` = null) need the wrapping [`Surface`]'s identity,
 //!   so the B-spline sends them through a caller hook
@@ -91,7 +91,8 @@ use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve as SmCurve;
 use crate::curve::curve::CurveKind;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::nurbs::BSplineFailure;
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -131,12 +132,8 @@ const OP_REV: &str = "nurbs::b_spline_surface::p2::BSplineSurface::create_surf_o
 
 /// `CreateSurfOfRevolution`'s `SER(v.Unitize())` of a zero vector: the
 /// `SM_ERR_INVALID_INPUT` that `SmVector3d::Unitize` returns.
-const fn unitize_status() -> SolidError {
-    SolidError::Upstream {
-        operation: OP_REV,
-        code: SM_ERR_INVALID_INPUT,
-        entity: None,
-    }
+fn unitize_status() -> SolidError {
+    SolidError::b_spline(OP_REV, BSplineFailure::ZeroAxis)
 }
 const OP_PLANE: &str =
     "nurbs::b_spline_surface::p2::BSplineSurface::create_trimmed_plane_from_ruled";
@@ -482,7 +479,14 @@ impl BSplineSurface {
 
             // error - ParamValue out of boundary tolerance
             if !ivl.is_value_on_boundary(iso_parameter, EFF_ZERO_SQRT).0 {
-                return Err(SolidError::sm_err(OP_ISO));
+                return Err(SolidError::b_spline(
+                    OP_ISO,
+                    BSplineFailure::ParameterOutside {
+                        parameter: iso_parameter,
+                        lo: min_param,
+                        hi: max_param,
+                    },
+                ));
             }
             iso_parameter = ivl.clamp_value(iso_parameter);
         }
@@ -497,7 +501,9 @@ impl BSplineSurface {
             None
         };
 
-        let surface = self.nurb.as_ref().ok_or(SolidError::null_pointer(OP_ISO))?;
+        let surface = self.nurb.as_ref().ok_or_else(|| {
+            SolidError::b_spline(OP_ISO, BSplineFailure::Missing("the NURBS form"))
+        })?;
         // constant U curves go in V direction, constant V curves in U direction
         let dir = if surf_param == SurfParamType::U {
             Direction::V
@@ -523,7 +529,7 @@ impl BSplineSurface {
                 u.resize(knots_highest + 1, 0.0);
                 NlCurve::new(pw, degree, u)?
             }
-            Err(e) => return Err(SolidError::nl_ser(OP_ISO)(e)),
+            Err(e) => return Err(SolidError::nurbs_routine(OP_ISO)(e)),
         };
 
         // Use it as m_pNurb in a BSplineCurve object
@@ -536,10 +542,8 @@ impl BSplineSurface {
             } else {
                 uv_domain.u_interval()
             };
-            if k.fixes.iso_curve_sliver_domain_is_degenerate
-                && trim_ivl.max() - trim_ivl.min() < EFF_ZERO
-            {
-                // not upstream (WR-562, opt-in; fork tangency-labs/smlib 8088f5e): a domain
+            if trim_ivl.max() - trim_ivl.min() < EFF_ZERO {
+                // not upstream (WR-562; fork tangency-labs/smlib 8088f5e): a domain
                 // of no length along the curve leaves of the iso curve only a point, a
                 // degenerate curve there (Trim refuses the interval, and upstream returns
                 // the whole curve)
@@ -565,15 +569,14 @@ impl BSplineSurface {
     ///
     /// Upstream's centre check compares the current frame's origin with a reference to
     /// itself, so it never fires and the sphere is built about the last examined arc's
-    /// centre (WR-103). The default keeps that; with
-    /// [`UpstreamFixes::sphere_from_arcs_common_centre`](crate::kernel::UpstreamFixes::sphere_from_arcs_common_centre)
-    /// an arc whose centre is farther than `tol_3d` from the first arc's is refused with
+    /// centre (WR-103); here an arc whose centre is farther than `tol_3d` from the first arc's is refused with
     /// `SM_ERR` after the radius test.
     ///
     /// # Errors
     ///
     /// `SM_ERR` unless there are exactly three arcs of a common center and radius
-    /// meeting at their ends; [`SolidError::Unported`] (`SmCurve::IsArc`).
+    /// meeting at their ends, or four that close a loop (not upstream, WR-502);
+    /// [`SolidError::Unported`] (`SmCurve::IsArc`).
     pub fn create_sphere_from_arcs(
         k: &Kernel,
         arcs: &[SmCurve],
@@ -581,18 +584,31 @@ impl BSplineSurface {
     ) -> Result<SphereFromArcs> {
         let total_curves = arcs.len();
 
-        // no work - not given exactly 3 curves
-        if total_curves == 4 && k.fixes.fillet_corner_sphere_from_four_arcs {
+        // no work - not given exactly 3 curves (not upstream, WR-502: or 4)
+        if total_curves == 4 {
             return Self::sphere_from_four_arcs(k, arcs, tol_3d);
         }
         if total_curves != 3 {
-            return Err(SolidError::sm_err(OP_SPHERE)); // Only works for 3 now
+            return Err(SolidError::b_spline(
+                OP_SPHERE,
+                BSplineFailure::Failed("a sphere is made from three arcs only"),
+            )); // Only works for 3 now
         }
-        let arc = |i: usize| arcs.get(i).ok_or_else(|| SolidError::sm_err(OP_SPHERE));
+        let arc = |i: usize| {
+            arcs.get(i).ok_or_else(|| {
+                SolidError::b_spline(
+                    OP_SPHERE,
+                    BSplineFailure::Failed("a sphere is made from three arcs only"),
+                )
+            })
+        };
 
         // no work - first curve is not an arc
         let Some(first) = curve_is_arc(k, arc(0)?, 5, tol_3d)? else {
-            return Err(SolidError::sm_err(OP_SPHERE));
+            return Err(SolidError::b_spline(
+                OP_SPHERE,
+                BSplineFailure::Failed("a boundary curve is not an arc"),
+            ));
         };
         let rad = first.radius;
         let first_centre = first.frame.origin();
@@ -603,25 +619,32 @@ impl BSplineSurface {
         let mut angle_span = first.end_deg - first.start_deg;
         // (upstream's `rOrigin` is a reference into `sRefFrame`, which every later `IsArc`
         // overwrites: the centre is read from the current frame at each use, WR-103. The
-        // copy above is only read by `sphere_from_arcs_common_centre`.)
+        // copy above is read by the common-centre check.)
 
         // for all other input arcs - check for Compatible centers and radii
         for i in 1..total_curves {
             // no work - other Curve is not an arc of the same radius as the 1st Curve
             let Some(a) = curve_is_arc(k, arc(i)?, 5, tol_3d)? else {
-                return Err(SolidError::sm_err(OP_SPHERE));
+                return Err(SolidError::b_spline(
+                    OP_SPHERE,
+                    BSplineFailure::Failed("a boundary curve is not an arc"),
+                ));
             };
             if (a.radius - rad).abs() > tol_3d {
-                return Err(SolidError::sm_err(OP_SPHERE));
+                return Err(SolidError::b_spline(
+                    OP_SPHERE,
+                    BSplineFailure::Failed("the arcs have different radii"),
+                ));
             }
             // no work - OtherCurve center is not the same as 1st Curve cent: upstream
             // compares `sRefFrame.GetOriginRef()` with `rOrigin`, a reference to that same
-            // origin, so the difference is zero and the check never fires (WR-103). The
-            // opt-in check reads the centre copied before the loop.
-            if k.fixes.sphere_from_arcs_common_centre
-                && (a.frame.origin() - first_centre).length() > tol_3d
-            {
-                return Err(SolidError::sm_err(OP_SPHERE));
+            // origin, so the difference is zero and the check never fires (WR-103). Here
+            // the check reads the centre copied before the loop.
+            if (a.frame.origin() - first_centre).length() > tol_3d {
+                return Err(SolidError::b_spline(
+                    OP_SPHERE,
+                    BSplineFailure::Failed("the arcs have different centres"),
+                ));
             }
             ref_frame = a.frame;
 
@@ -729,7 +752,10 @@ impl BSplineSurface {
             ccw_arcs.push(second_largest);
             orients.push(OrientType::Same);
         } else {
-            return Err(SolidError::sm_err(OP_SPHERE));
+            return Err(SolidError::b_spline(
+                OP_SPHERE,
+                BSplineFailure::Failed("the arcs do not meet end to end"),
+            ));
         }
 
         // Define ZAxis in same general direction as sRefZAxis
@@ -744,7 +770,12 @@ impl BSplineSurface {
         let gen_nurb = match gen_curve.kind() {
             CurveKind::BSpline(b) => b,
             CurveKind::Ellipse(e) => e.base(),
-            _ => return Err(SolidError::sm_err(OP_SPHERE)),
+            _ => {
+                return Err(SolidError::b_spline(
+                    OP_SPHERE,
+                    BSplineFailure::Failed("an arc is neither a B-spline nor an ellipse"),
+                ))
+            }
         };
         let sphere = Self::create_surf_of_revolution(
             k,
@@ -763,11 +794,16 @@ impl BSplineSurface {
     }
 
     /// [`Self::create_sphere_from_arcs`] for four arcs of one centre and radius that close a
-    /// loop (`Kernel::fixes.fillet_corner_sphere_from_four_arcs`; not upstream): the whole
+    /// loop (not upstream, WR-502): the whole
     /// sphere, a half-meridian revolved a turn about an axis square to the way the four arcs
     /// face, its seam on the far side, so the poles and the seam stay clear of the loop.
     fn sphere_from_four_arcs(k: &Kernel, arcs: &[SmCurve], tol_3d: f64) -> Result<SphereFromArcs> {
-        let err = || SolidError::sm_err(OP_SPHERE);
+        let err = || {
+            SolidError::b_spline(
+                OP_SPHERE,
+                BSplineFailure::Failed("the four arcs do not bound a sphere"),
+            )
+        };
         let mut centre = Point3::ZERO;
         let mut radius = 0.0;
         let mut towards = Vec3::ZERO;
@@ -974,7 +1010,12 @@ impl BSplineSurface {
 
         // quit when all GenCurve ControlPoints are on rotation vector
         if num_cir_ctrl_pts == 0 {
-            return Err(SolidError::sm_err(OP_REV));
+            return Err(SolidError::b_spline(
+                OP_REV,
+                BSplineFailure::Failed(
+                    "every control point of the generating curve is on the axis",
+                ),
+            ));
         }
 
         // For every ControlPoint in the output Surface, build a sweep circle.
@@ -1184,7 +1225,12 @@ impl BSplineSurface {
                 },
             )?
             .normal
-            .ok_or_else(|| SolidError::sm_err(OP_PLANE))?;
+            .ok_or_else(|| {
+                SolidError::b_spline(
+                    OP_PLANE,
+                    BSplineFailure::Failed("the ruled surface has no normal"),
+                )
+            })?;
         let size = bbox.size();
         let leng = size.length();
         let tmp_domain = Extent2d::from_bounds(-leng, -leng, leng, leng);
@@ -1192,10 +1238,16 @@ impl BSplineSurface {
 
         // Make sure both curves are on the plane before continuing.
         if !curve1.is_on_plane(pnt, plane.normal, tol, None)?.on_plane {
-            return Err(SolidError::sm_err(OP_PLANE));
+            return Err(SolidError::b_spline(
+                OP_PLANE,
+                BSplineFailure::Failed("a curve is not on the plane"),
+            ));
         }
         if !curve2.is_on_plane(pnt, plane.normal, tol, None)?.on_plane {
-            return Err(SolidError::sm_err(OP_PLANE));
+            return Err(SolidError::b_spline(
+                OP_PLANE,
+                BSplineFailure::Failed("a curve is not on the plane"),
+            ));
         }
 
         let (trimming_curves, trim_orientations) =
@@ -1235,7 +1287,7 @@ impl BSplineSurface {
         let sur = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::sm_err(OP_DEGEN))?;
+            .ok_or_else(|| SolidError::b_spline(OP_DEGEN, BSplineFailure::NoNurbsForm))?;
 
         // pass the call along
         is_nsrf_degenerate(sur, tol_3d)
@@ -1328,7 +1380,7 @@ impl BSplineSurface {
         let sur = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::sm_err(OP_EXPERT))?;
+            .ok_or_else(|| SolidError::b_spline(OP_EXPERT, BSplineFailure::NoNurbsForm))?;
         let is_rational = self.is_rational();
         let pt_size = if form == ControlPointForm::NonRational {
             3
@@ -1511,11 +1563,14 @@ impl BSplineSurface {
         let sur = self
             .nurb
             .as_mut()
-            .ok_or_else(|| SolidError::sm_err(OP_SET_CP))?;
+            .ok_or_else(|| SolidError::b_spline(OP_SET_CP, BSplineFailure::NoNurbsForm))?;
 
         // error check - out of bounds indices
         if u_index > sur.n() || v_index > sur.m() {
-            return Err(SolidError::sm_err(OP_SET_CP));
+            return Err(SolidError::b_spline(
+                OP_SET_CP,
+                BSplineFailure::Failed("the control point index is past the last control point"),
+            ));
         }
 
         // convert ControlPts to homogeneous rational form
@@ -1564,7 +1619,7 @@ impl BSplineSurface {
         let sur = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::sm_err(OP_PATCH))?;
+            .ok_or_else(|| SolidError::b_spline(OP_PATCH, BSplineFailure::NoNurbsForm))?;
 
         // Trim crUVDomain to NaturalUVDomain (a disjoint domain gives the Init state)
         let nat_uv_domain = self.natural_uv_domain();
@@ -1582,7 +1637,7 @@ impl BSplineSurface {
                 vt: uv.max().y,
             },
         )
-        .map_err(SolidError::nl_ser(OP_PATCH))?;
+        .map_err(SolidError::nurbs_routine(OP_PATCH))?;
 
         // copy sNewSur back into a SmBSplineSurface object
         Ok(Self::from_gw_nurb(&new_sur))
@@ -1614,16 +1669,22 @@ impl BSplineSurface {
         let sur = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::sm_err(OP_SPLIT))?;
+            .ok_or_else(|| SolidError::b_spline(OP_SPLIT, BSplineFailure::NoNurbsForm))?;
         let dir = match surf_param {
             SurfParamType::U => Direction::U,
             SurfParamType::V => Direction::V,
             // NL_NO: sm_SplitSrf fails before allocating
-            _ => return Err(SolidError::sm_err(OP_SPLIT)),
+            _ => {
+                return Err(SolidError::b_spline(
+                    OP_SPLIT,
+                    BSplineFailure::Failed("the direction is neither U nor V"),
+                ))
+            }
         };
 
         // split the gw_SURFACE object
-        let (sur_l, sur_r) = split_srf(sur, param, dir).map_err(SolidError::nl_ser(OP_SPLIT))?;
+        let (sur_l, sur_r) =
+            split_srf(sur, param, dir).map_err(SolidError::nurbs_routine(OP_SPLIT))?;
 
         // build BSplineSurfaces for each new gw_Surface object
         Ok((Self::from_nurb(sur_l, false), Self::from_nurb(sur_r, false)))
@@ -1709,6 +1770,7 @@ impl BSplineSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_INVALID_INPUT;
     use crate::nurbs::srf_basic::Surface;
 
     /// A rational quadratic arc from `p0` to `p2` with tangent corner `c` and corner
@@ -1726,10 +1788,9 @@ mod tests {
 
     /// WR-562 (fork tangency-labs/smlib 8088f5e): an iso curve over a domain of no
     /// length along it (v in `[0.5, 0.5]`) is the whole untrimmed curve upstream (`Trim`
-    /// refuses the interval) and a degenerate curve at the surface point with
-    /// `iso_curve_sliver_domain_is_degenerate`.
+    /// refuses the interval) and a degenerate curve at the surface point here.
     #[test]
-    fn wr562_iso_curve_over_a_sliver_domain_is_degenerate_with_the_opt_in() {
+    fn wr562_iso_curve_over_a_sliver_domain_is_degenerate() {
         let surface = BSplineSurface::create_bilinear_surface(
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(4.0, 0.0, 0.0),
@@ -1749,14 +1810,7 @@ mod tests {
             )
         };
 
-        let mut k = Kernel::default();
-        let upstream = surface
-            .create_iso_parametric_curve(&k, SurfParamType::U, 0.25, options)
-            .unwrap();
-        let (a, b) = ends(&upstream.curve);
-        assert!(a.distance(b) > 1.0, "{a:?} {b:?}");
-
-        k.fixes.iso_curve_sliver_domain_is_degenerate = true;
+        let k = Kernel::default();
         let fixed = surface
             .create_iso_parametric_curve(&k, SurfParamType::U, 0.25, options)
             .unwrap();
@@ -1768,37 +1822,8 @@ mod tests {
         );
     }
 
-    /// WR-103: arcs about two centres (the first two sharing their start point) build a
-    /// sphere, as upstream's aliased (dead) centre check lets them.
-    #[test]
-    fn sphere_from_arcs_about_two_centres() {
-        let k = &Kernel::default();
-        let arcs = [
-            arc3(
-                [5.0, 0.0, 0.0],
-                [5.0, 8.660_254_037_844_386, 0.0],
-                0.5,
-                [-2.5, 4.330_127_018_922_193, 0.0],
-            ),
-            arc3(
-                [5.0, 0.0, 0.0],
-                [5.0, 0.0, 5.0],
-                std::f64::consts::FRAC_1_SQRT_2,
-                [10.0, 0.0, 5.0],
-            ),
-            arc3(
-                [10.0, 5.0, 0.0],
-                [10.0, 5.0, 2.886_751_345_948_129],
-                0.866_025_403_784_438_6,
-                [10.0, 2.5, 4.330_127_018_922_193],
-            ),
-        ];
-        let r = BSplineSurface::create_sphere_from_arcs(k, &arcs, 1e-6).unwrap();
-        assert_eq!(r.ccw_arcs, vec![0, 1, 2]);
-    }
-
     /// Three radius-5 rational quadratic arcs of 120 degrees about the origin, closing a
-    /// loop: the positive control for `sphere_from_arcs_common_centre`.
+    /// loop: the positive control for the common-centre check.
     fn concentric_arcs() -> Vec<SmCurve> {
         let r = 5.0_f64;
         let step = 120.0_f64.to_radians();
@@ -1817,39 +1842,9 @@ mod tests {
         ]
     }
 
-    /// `sphere_from_arcs_common_centre`: the same NURB data with the flag on and off.
-    fn assert_nurb_bits_eq(a: &Surface, b: &Surface) {
-        assert_eq!(a.indices(), b.indices());
-        let ca = a.cpts();
-        let cb = b.cpts();
-        assert_eq!(ca.len(), cb.len());
-        for (ra, rb) in ca.iter().zip(&cb) {
-            assert_eq!(ra.len(), rb.len());
-            for (pa, pb) in ra.iter().zip(rb) {
-                assert_eq!(
-                    [
-                        pa.x.to_bits(),
-                        pa.y.to_bits(),
-                        pa.z.to_bits(),
-                        pa.w.to_bits()
-                    ],
-                    [
-                        pb.x.to_bits(),
-                        pb.y.to_bits(),
-                        pb.z.to_bits(),
-                        pb.w.to_bits()
-                    ]
-                );
-            }
-        }
-        let bits = |knots: &[f64]| -> Vec<u64> { knots.iter().map(|u| u.to_bits()).collect() };
-        assert_eq!(bits(a.u_knots()), bits(b.u_knots()));
-        assert_eq!(bits(a.v_knots()), bits(b.v_knots()));
-    }
-
-    /// WR-103 opt-in: three radius-5 arcs about two centres (the first two share their
-    /// start point) are refused with `SM_ERR` and `OP_SPHERE`; without the flag upstream's
-    /// aliased check accepts them and the sphere is about another centre.
+    /// WR-103: three radius-5 arcs about two centres (the first two share their start
+    /// point) are refused with `SM_ERR` and `OP_SPHERE` (upstream's aliased check accepts
+    /// them and the sphere is about another centre).
     #[test]
     fn sphere_from_arcs_common_centre_refuses_two_centres() {
         let arcs = [
@@ -1872,70 +1867,30 @@ mod tests {
                 [10.0, 2.5, 4.330_127_018_922_193],
             ),
         ];
-        let k = &Kernel::default();
-        let first_centre = curve_is_arc(k, &arcs[0], 5, 1e-6)
-            .unwrap()
-            .unwrap()
-            .frame
-            .origin();
-
-        // default: upstream's aliased check accepts the arcs
-        let default_sphere = BSplineSurface::create_sphere_from_arcs(k, &arcs, 1e-6).unwrap();
-        assert_eq!(default_sphere.ccw_arcs, vec![0, 1, 2]);
-        let default_surface = crate::surface::surface::Surface::from(default_sphere.sphere);
-        let domain = default_surface.natural_uv_domain_with_nurb(k).unwrap();
-        let (lo, hi) = (domain.min(), domain.max());
-        let mut max_deviation = 0.0_f64;
-        for i in 0..=4 {
-            for j in 0..=4 {
-                let uv = Point2::new(
-                    lo.x + (hi.x - lo.x) * f64::from(i) / 4.0,
-                    lo.y + (hi.y - lo.y) * f64::from(j) / 4.0,
-                );
-                let d = default_surface
-                    .evaluate_point(k, uv)
-                    .unwrap()
-                    .distance(first_centre);
-                max_deviation = max_deviation.max((d - 5.0).abs());
-            }
-        }
-        println!("WR-103 default max |distance(first centre) - 5| = {max_deviation:e}");
-        assert!(
-            max_deviation > 0.1,
-            "default sphere max |distance(first centre) - 5| = {max_deviation}"
-        );
-
-        // opt-in: the centres differ, so the arcs are refused
-        let mut on = Kernel::default();
-        on.fixes.sphere_from_arcs_common_centre = true;
+        // the centres differ, so the arcs are refused
+        let on = Kernel::default();
         let err = BSplineSurface::create_sphere_from_arcs(&on, &arcs, 1e-6).unwrap_err();
-        assert_eq!(err, SolidError::sm_err(OP_SPHERE));
+        assert_eq!(
+            err,
+            SolidError::b_spline(
+                OP_SPHERE,
+                BSplineFailure::Failed("the arcs have different centres")
+            )
+        );
         assert_eq!(err.sm_status(), Some(1001));
         assert_eq!(err.operation(), OP_SPHERE);
 
-        // the new flag does not enable the four-arc feature
-        let mut four_on = Kernel::default();
-        four_on.fixes.sphere_from_arcs_common_centre = true;
-        let err4 =
-            BSplineSurface::create_sphere_from_arcs(&four_on, &four_arcs(), 1e-6).unwrap_err();
-        assert_eq!(err4, SolidError::sm_err(OP_SPHERE));
+        // four arcs of one centre still get their sphere (WR-502)
+        assert!(BSplineSurface::create_sphere_from_arcs(&on, &four_arcs(), 1e-6).is_ok());
     }
 
-    /// `sphere_from_arcs_common_centre` on three arcs of one centre: both settings build
-    /// the same sphere, radius 5 about the origin over the whole NURB domain.
+    /// The common-centre check on three arcs of one centre: the sphere is radius 5 about the
+    /// origin over the whole NURB domain.
     #[test]
     fn sphere_from_arcs_common_centre_keeps_concentric_sphere() {
         let arcs = concentric_arcs();
         let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.sphere_from_arcs_common_centre = true;
         let a = BSplineSurface::create_sphere_from_arcs(&off, &arcs, 1e-6).unwrap();
-        let b = BSplineSurface::create_sphere_from_arcs(&on, &arcs, 1e-6).unwrap();
-        assert_eq!(a.ccw_arcs, b.ccw_arcs);
-        assert_eq!(a.orients, b.orients);
-        let na = a.sphere.gw_nurb().expect("nurb");
-        let nb = b.sphere.gw_nurb().expect("nurb");
-        assert_nurb_bits_eq(na, nb);
 
         let first_centre = curve_is_arc(&off, &arcs[0], 5, 1e-6)
             .unwrap()
@@ -2027,14 +1982,12 @@ mod tests {
             .collect()
     }
 
-    /// `fillet_corner_sphere_from_four_arcs`: the four arcs get the sphere they lie on, where
-    /// upstream refuses ("only works for 3 now").
+    /// WR-502: the four arcs get the sphere they lie on, where upstream refuses ("only
+    /// works for 3 now").
     #[test]
-    fn sphere_from_four_arcs_only_with_the_fix() {
-        let mut k = Kernel::default();
+    fn four_arcs_get_their_sphere() {
+        let k = Kernel::default();
         let arcs = four_arcs();
-        assert!(BSplineSurface::create_sphere_from_arcs(&k, &arcs, 1e-6).is_err());
-        k.fixes.fillet_corner_sphere_from_four_arcs = true;
         let sphere = BSplineSurface::create_sphere_from_arcs(&k, &arcs, 1e-6)
             .unwrap()
             .sphere;
@@ -2328,7 +2281,8 @@ mod tests {
         let c = s
             .create_iso_parametric_curve(&k, SurfParamType::V, 0.5, opts)
             .expect("iso v");
-        assert!(c.uv_iso_curve.is_none());
+        // constant v has its UV line too (WR-30)
+        assert!(c.uv_iso_curve.is_some());
         assert!(matches!(
             BSplineSurface::new().create_iso_parametric_curve(
                 &k,
@@ -2336,7 +2290,7 @@ mod tests {
                 0.0,
                 IsoCurveOptions::default()
             ),
-            Err(SolidError::Upstream { code: 1006, .. })
+            Err(e) if e.sm_status() == Some(1006)
         ));
     }
 
@@ -2537,7 +2491,7 @@ mod tests {
         assert!(!s.is_degenerate_point(k, 1e-6, Some(&sub)).unwrap());
         assert!(matches!(
             BSplineSurface::create_sphere_from_arcs(k, &[], 1e-6),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if e.sm_status() == Some(1001)
         ));
     }
 

@@ -181,7 +181,7 @@ fn polyhedron_record(hs: &[HalfSpace], verts: &[Vec3], faces: &[(usize, Vec<usiz
         edges,
         vertices,
     };
-    solidcraft_geom::brep::check::validate(&brep).map_err(|e| KernelError::Failed(format!("polyhedron: {e}")))?;
+    solidcore_ops::record_check::validate(&brep).map_err(|e| KernelError::Failed(format!("polyhedron: {e}")))?;
     Ok(brep)
 }
 

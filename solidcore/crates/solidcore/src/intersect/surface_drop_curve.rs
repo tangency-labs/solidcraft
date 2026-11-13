@@ -704,7 +704,10 @@ impl<'s> SurfaceDropCurve<'s> {
 
             // signal error when unable to get a surfaceNormal
             if norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_CPV));
+                return Err(SolidError::intersect_failed(
+                    OP_CPV,
+                    "the surface has no normal at the dropped point",
+                ));
             }
         }
 
@@ -721,7 +724,12 @@ impl<'s> SurfaceDropCurve<'s> {
             // copy PreviousPoint Tangent Value or signal error
             match prev.as_deref() {
                 Some(p) => pnt.curve_3d[1] = p.curve_3d[1],
-                None => return Err(SolidError::sm_err(OP_CPV)),
+                None => {
+                    return Err(SolidError::intersect_failed(
+                        OP_CPV,
+                        "the dropped curve's tangent is degenerate at its first point",
+                    ))
+                }
             }
         }
 
@@ -744,7 +752,10 @@ impl<'s> SurfaceDropCurve<'s> {
             let (on_boundary, uv_tang) = domain.is_point_on_boundary(uv, EFF_ZERO_SQRT);
             if !on_boundary {
                 // error - singular surface point not on boundary
-                return Err(SolidError::sm_err(OP_CPV));
+                return Err(SolidError::intersect_failed(
+                    OP_CPV,
+                    "the singular surface point is not on the domain's boundary",
+                ));
             }
 
             // drop a point a small step in the 3d tangent direction onto the surf
@@ -810,10 +821,9 @@ impl<'s> SurfaceDropCurve<'s> {
         }
 
         // locals - knot indices of CurveToDrop knot interval containing CurrPnt.parameter
-        let knots = self
-            .curve_knot_vector
-            .as_ref()
-            .ok_or(SolidError::null_pointer(OP_STEP))?;
+        let knots = self.curve_knot_vector.as_ref().ok_or_else(|| {
+            SolidError::intersect_missing(OP_STEP, "the knot vector of the curve to drop")
+        })?;
         let knot = |i: usize| -> Result<f64> {
             knots
                 .get(i)
@@ -1053,7 +1063,12 @@ impl<'s> SurfaceDropCurve<'s> {
         let curve_cache = match make_curve_cache::<()>(k, curve, None) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::null_pointer(OP_BOUNDARY)),
+            Err(_) => {
+                return Err(SolidError::intersect_missing(
+                    OP_BOUNDARY,
+                    "the curve cache",
+                ))
+            }
         };
 
         // select tolerance - from curve length or as given when Curve is on Surface
@@ -1389,7 +1404,10 @@ impl<'s> SurfaceDropCurve<'s> {
                     };
                     let Some(p) = pick else {
                         // we failed to resolve singularity problem
-                        return Err(SolidError::sm_err(OP_BOUNDARY));
+                        return Err(SolidError::intersect_failed(
+                            OP_BOUNDARY,
+                            "the singular point on the boundary could not be resolved",
+                        ));
                     };
                     if singular_dir == SurfParamType::U {
                         uv.x = p.x;
@@ -1441,7 +1459,9 @@ impl<'s> SurfaceDropCurve<'s> {
                         }
                     }
 
-                    let iso_curve = iso_curve.ok_or(SolidError::null_pointer(OP_BOUNDARY))?;
+                    let iso_curve = iso_curve.ok_or_else(|| {
+                        SolidError::intersect_missing(OP_BOUNDARY, "the boundary iso curve")
+                    })?;
 
                     // If there are more solutions to check, see if they're contained in this iso curve
                     if solutions.len() > jj + 1 {
@@ -1758,7 +1778,7 @@ impl<'s> SurfaceDropCurve<'s> {
         let breaks = self
             .curve_breaks
             .clone()
-            .ok_or(SolidError::null_pointer(OP_TRACE2))?;
+            .ok_or_else(|| SolidError::intersect_missing(OP_TRACE2, "the curve's break points"))?;
         let surface = self.base.surface;
 
         // If there are curve breaks - replace dMaxT with first break after dMinT.

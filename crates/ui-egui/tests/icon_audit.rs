@@ -455,13 +455,13 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     history.app.run("timeline.roll_to", json!({})).unwrap();
     // Named feature history has independent menus in both layout preferences.
     for left in [false, true] {
-        history.app.preferences.timeline_left = left;
+        history.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
         history.frames(3);
         context_rows(&mut history, "timeline:", &mut requested);
     }
-    // The seam has its own checked display menu, independent of feature and folder rows.
-    history.step(&json!({"click":{"handle":"history:names"},"button":"right"})).unwrap();
-    collect(&mut history, "history seam", &mut requested);
+    // The transport controls have their own menu, independent of feature and folder rows.
+    history.step(&json!({"click":{"handle":"history:back"},"button":"right"})).unwrap();
+    collect(&mut history, "history transport menu", &mut requested);
     escape(&mut history);
     let features = history.app.session.doc.features.iter().take(2).map(|f| f.id).collect::<Vec<_>>();
     let group = history.app.run("timeline.group", json!({"features":features,"name":"Audit history folder"})).unwrap()["group"].as_u64().unwrap();
@@ -658,7 +658,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     universal_panel_host_menus(&mut requested);
     icon_svg::audit::stop();
     let manifest = requested.iter().map(|(name, placeholder)| format!("{name}\t{placeholder}\n")).collect::<String>();
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons/ui/design/requested_icons.txt");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/icons/design/requested_icons.txt");
     if std::env::var("UPDATE_ICON_MANIFEST").as_deref() == Ok("1") {
         std::fs::write(&path, &manifest).unwrap();
     } else {
@@ -735,8 +735,7 @@ fn overflow_icons_with_many_pins_at_200_points() {
     }
     let requested = icon_svg::audit::take();
     icon_svg::audit::stop();
-    let manifest =
-        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons/ui/design/requested_icons.txt")).unwrap();
+    let manifest = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/icons/design/requested_icons.txt")).unwrap();
     for icon in requested {
         assert!(!icon.placeholder, "{}", icon.name);
         assert!(manifest.lines().any(|line| line == format!("{}\tfalse", icon.name)), "{} is absent from runtime discovery", icon.name);

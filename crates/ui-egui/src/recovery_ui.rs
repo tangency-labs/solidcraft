@@ -2,7 +2,7 @@
 
 use serde_json::json;
 use solidcraft_engine::recovery::{self, Autosaver, Entry};
-use solidcraft_engine::{Result, Session};
+use solidcraft_engine::{Result as EngineResult, Session};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -25,15 +25,21 @@ pub struct Autosaves {
 
 impl Autosaves {
     /// Save the active design immediately, including when taking over a recovered entry.
-    pub fn save(&mut self, session: &Session) -> Result<bool> {
+    pub fn save(&mut self, session: &Session) -> EngineResult<bool> {
         save_slot(&self.dir, &mut self.active, session, true, true)
+    }
+
+    /// Save a background tab's design now, under that tab's own autosaver. A recovered design
+    /// that lands behind keeps an entry of its own before the recovery entry it came from goes.
+    pub(crate) fn save_background(&mut self, slot: &mut crate::documents::DocSlot) -> EngineResult<bool> {
+        save_slot(&self.dir, &mut slot.autosave, &slot.session, true, true)
     }
 }
 
 /// Bring one tab's autosave up to date. `due`: its turn has come. `wait`: write on this thread
 /// and wait for it (Save, close, shutdown); otherwise the write runs on a worker thread, so a
 /// scheduled autosave of several large designs never holds up the window (#3044).
-fn save_slot(dir: &Path, slot: &mut Option<Autosaver>, session: &Session, due: bool, wait: bool) -> Result<bool> {
+fn save_slot(dir: &Path, slot: &mut Option<Autosaver>, session: &Session, due: bool, wait: bool) -> EngineResult<bool> {
     // Clean tabs need no serialization or entry, even between scheduled saves.
     if !session.is_dirty() {
         if let Some(mut a) = slot.take() {
@@ -186,8 +192,57 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         apply(app, entry, recover);
     }
     if later {
-        app.recoverable.clear();
+        let _ = answer(app, "later", None);
     }
+}
+
+/// The prompt as the control channel's `ui.inspect` reports it (`dialog`), or `None` when
+/// nothing waits to be recovered.
+pub fn describe(app: &SolveApp) -> Option<serde_json::Value> {
+    if app.recoverable.is_empty() {
+        return None;
+    }
+    let designs: Vec<_> = app
+        .recoverable
+        .iter()
+        .take(20)
+        .map(|e| json!({"id": e.id, "name": e.name, "path": e.path, "features": e.features, "saved_at": e.saved_at, "autosaved": ago(e.saved_at)}))
+        .collect();
+    Some(json!({
+        "kind": "recover_unsaved",
+        "title": "Recover unsaved design?",
+        "designs": designs,
+        "actions": ["recover", "discard", "later"],
+    }))
+}
+
+/// What the prompt's buttons do: `recover` or `discard` the design `id` (default: the first one
+/// listed), or `later` (keep them all for the next launch). The control channel's
+/// `ui.recover` answers through here too.
+pub fn answer(app: &mut SolveApp, action: &str, id: Option<&str>) -> Result<(), String> {
+    if app.recoverable.is_empty() {
+        return Err("no Recover unsaved design? prompt is open".into());
+    }
+    if action == "later" {
+        app.recoverable.clear();
+        return Ok(());
+    }
+    if action != "recover" && action != "discard" {
+        return Err(format!("unknown action `{action}` (recover, discard or later)"));
+    }
+    let e = match id {
+        Some(id) => app.recoverable.iter().find(|e| e.id == id).cloned().ok_or_else(|| format!("no recovered design `{id}` is offered"))?,
+        None => app.recoverable.first().cloned().ok_or("no recovered design is offered")?,
+    };
+    if action == "recover" && app.session.is_dirty() {
+        return Err("save or discard the open design's changes before recovering another".into());
+    }
+    // `file_load` refuses this later, after `apply` has taken the entry off the list.
+    if action == "recover" && app.docs.count() >= crate::documents::MAX_OPEN && !crate::documents::active_is_blank(app) {
+        return Err("too many open designs; close a tab before opening another".into());
+    }
+    apply(app, e, action == "recover");
+    Ok(())
 }
 
 /// A design copy the web app kept in the browser (#10220), as its "Restore unsaved design?"
@@ -458,6 +513,21 @@ mod tests {
         assert!(entries(&dir).is_empty());
         drop(app);
         assert!(recovery::orphans(&dir).is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Saving a background tab's design writes it under that tab's own autosaver: a recovered
+    /// design that lands behind keeps an entry of its own before the old recovery entry goes.
+    #[test]
+    fn a_background_tabs_design_saves_under_its_own_autosaver() {
+        let (mut app, dir) = app("save-background", Duration::ZERO);
+        edit(&mut app);
+        documents::new_tab(&mut app);
+        let uid = app.docs.background().next().map(|s| s.uid).expect("a background tab");
+        let (autosave, docs) = (&mut app.autosave, &mut app.docs);
+        let slot = docs.background_slot_mut(uid).expect("the background slot");
+        assert!(autosave.as_mut().expect("autosave").save_background(slot).unwrap(), "it wrote the design");
+        assert_eq!(entries(&dir).len(), 1, "the background design has an entry of its own");
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -10,7 +10,6 @@ use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 use solidcraft_render::{
     lighting::{DecodedHdr, HdrDecodeTask, HdrSource, HdrTaskPoll},
-    surface::unit_direction,
     texture_input::{
         MapRole, TextureSource,
         normalization::{ColorConversion, NormalizationOptions, NormalizationSource, UnprofiledColor},
@@ -20,6 +19,7 @@ use solidcraft_render::{
         mips::{MAX_MIP_TAIL_BYTES, MipChain},
     },
 };
+use solidcraft_viewport::surface::unit_direction;
 use std::{
     error::Error,
     f64::consts::PI,

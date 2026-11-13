@@ -105,7 +105,7 @@ fn count_behind_ahead(
                 let face_data = result.face(f)?;
                 let Some(surface) = face_data.surface.as_ref() else {
                     // (NER on GetSurface: a face without one is a null pointer)
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::offset_missing(OP, "the face's surface"));
                 };
                 (surface.clone_for_evaluation()?, face_data.uv_domain)
             };

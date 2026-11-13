@@ -1,12 +1,10 @@
 //! Original f64 opaque path proposals and finite rectangular emitter geometry.
 //! Evaluation remains the shared surface BRDF; no radiance clamp or changed material model.
 use super::{Ray, Result, TraceError};
-use crate::{
-    job::RectangleLightOptions,
-    surface::{OpaqueSurface, unit_direction},
-};
+use crate::job::RectangleLightOptions;
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_viewport::surface::{OpaqueSurface, unit_direction};
 use std::f64::consts::{PI, TAU};
 
 fn invalid(message: &'static str) -> TraceError {
@@ -31,7 +29,7 @@ pub(super) fn power_weight(a: f64, b: f64) -> Result<f64> {
     Ok(1.0 / (1.0 + ratio * ratio))
 }
 pub(super) fn surface_pdf(surface: OpaqueSurface, n: Vec3, v: Vec3, l: Vec3) -> Result<f64> {
-    crate::clear_coat::surface_pdf(surface, n, v, l).map_err(|_| invalid("invalid CPU path mixture PDF"))
+    solidcraft_viewport::clear_coat::surface_pdf(surface, n, v, l).map_err(|_| invalid("invalid CPU path mixture PDF"))
 }
 fn from_local(n: Vec3, local: Vec3) -> Result<Vec3> {
     let axis = if n.z.abs() > 0.9 { Vec3::Y } else { Vec3::Z };
@@ -95,8 +93,9 @@ pub(super) struct Sample {
     pub weight: Vec3,
 }
 
-/// The base mixes cosine and visible GGX normals equally. The coat selects its
-/// own visible normals with probability weight/2. Null mass is never retried.
+/// One variate picks the coat, diffuse or base specular lobe with the probabilities of
+/// `lobe_probabilities`, the ones `surface_pdf` weights its lobes by: the coat takes weight/2,
+/// and the diffuse lobe takes 0.5 × (1 − metallic) of the rest. Null mass is never retried.
 pub(super) fn sample(surface: OpaqueSurface, n: Vec3, geometric: Vec3, v: Vec3, u: [f64; 3]) -> Result<Option<Sample>> {
     if u.into_iter().any(|x| !x.is_finite() || !(0.0..1.0).contains(&x)) {
         return Err(invalid("CPU path variates must be in [0,1)"));
@@ -107,9 +106,8 @@ pub(super) fn sample(surface: OpaqueSurface, n: Vec3, geometric: Vec3, v: Vec3, 
     if n.dot(v) <= 0.0 || geometric.dot(v) <= 0.0 {
         return Ok(None);
     }
-    let coat_probability = surface.clear_coat().map_or(0.0, |coat| coat.weight() * 0.5);
-    let base_component = (u[0] - coat_probability) / (1.0 - coat_probability);
-    let direction = if u[0] >= coat_probability && base_component < 0.5 {
+    let [diffuse_probability, _, coat_probability] = solidcraft_viewport::clear_coat::lobe_probabilities(surface);
+    let direction = if u[0] >= coat_probability && u[0] - coat_probability < diffuse_probability {
         cosine_direction(n, [u[1], u[2]])?
     } else {
         let roughness = if u[0] < coat_probability {
@@ -117,7 +115,8 @@ pub(super) fn sample(surface: OpaqueSurface, n: Vec3, geometric: Vec3, v: Vec3, 
         } else {
             surface.roughness()
         };
-        let half = crate::glass_model::visible_normal(v, n, roughness * roughness, [u[1], u[2]]).map_err(|_| invalid("CPU visible GGX normal"))?;
+        let half =
+            solidcraft_viewport::surface::visible_normal(v, n, roughness * roughness, [u[1], u[2]]).map_err(|_| invalid("CPU visible GGX normal"))?;
         if v.dot(half) <= 0.0 {
             return Ok(None);
         }

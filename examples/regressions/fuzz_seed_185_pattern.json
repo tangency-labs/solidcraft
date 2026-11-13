@@ -1,0 +1,9 @@
+{
+  "description": "Issue #10: fuzzer seed 185. Box, join cylinder, cut cylinder, then rectangular pattern on the cut cylinder. The pattern's boolean result is refused as \"SMLib's result is not a closed solid\". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test that fails without the fix.",
+  "commands": [
+    {"command": "solid.box", "params": {"height": 5.0, "length": 47.5, "width": 55.0}},
+    {"command": "solid.cylinder", "params": {"axis": [0.0, 0.0, 1.0], "base": [47.5, 37.5, 0.0], "height": 17.5, "operation": "join", "radius": 7.5}},
+    {"command": "solid.cylinder", "params": {"axis": [0.0, 1.0, 0.0], "base": [54.995646772172904, 15.0, 15.0], "height": 22.5, "operation": "cut", "radius": 2.5}},
+    {"command": "solid.pattern.rectangular", "params": {"count1": 3, "dir1": [0.0, 1.0, 0.0], "features": ["Cylinder2"], "spacing1": 10.0}}
+  ]
+}

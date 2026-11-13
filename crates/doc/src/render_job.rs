@@ -4,13 +4,13 @@ use std::{fmt, marker::PhantomData};
 
 use serde::{Deserialize, Serialize};
 use solidcraft_render::{
-    Camera,
     job::{
         CpuBudget, CpuProgressiveOptions, DenoiseSettings, DirectionalLightOptions, JobOptions, LightingPreset, PunctualLightOptions,
         RaytraceEnvironmentOptions, RaytraceOptions, RectangleLightOptions, StudioLighting, Sun, ThinLens, ToneMap,
     },
     lighting::environment::SkyGradient,
 };
+use solidcraft_viewport::Camera;
 
 use crate::{
     DocError, Result,
@@ -294,6 +294,9 @@ pub struct GpuJob {
     pub seed: u32,
     pub tone_map: ToneMap,
     pub denoise: bool,
+    /// Biased firefly control; absent keeps every path contribution (see `JobOptions`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clamp_indirect: Option<f64>,
     #[serde(skip_serializing_if = "DenoiseSettings::is_default")]
     pub denoise_settings: DenoiseSettings,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -331,6 +334,7 @@ impl Default for GpuJob {
             seed: options.seed,
             tone_map: options.tone_map,
             denoise: options.denoise,
+            clamp_indirect: options.clamp_indirect,
             denoise_settings: options.denoise_settings,
             denoise_diagnostics: options.denoise_diagnostics,
             supersampling: options.supersampling,
@@ -384,6 +388,7 @@ impl GpuJob {
             seed: self.seed,
             tone_map: self.tone_map,
             denoise: self.denoise,
+            clamp_indirect: self.clamp_indirect,
             denoise_settings: self.denoise_settings,
             denoise_diagnostics: self.denoise_diagnostics,
             supersampling: self.supersampling,

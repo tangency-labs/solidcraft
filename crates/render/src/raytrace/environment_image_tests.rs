@@ -32,8 +32,8 @@ fn scene() -> ProductScene {
     }
 }
 fn request() -> ImageRequest {
-    let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
-    camera.set_view(crate::StandardView::Top);
+    let mut camera = solidcraft_viewport::Camera { distance: 50.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Top);
     ImageRequest {
         studio_weights: None,
         environment: None,

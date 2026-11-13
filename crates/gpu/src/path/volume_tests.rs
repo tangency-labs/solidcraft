@@ -1,4 +1,5 @@
 use super::*;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::job::{StudioLighting, volume::HomogeneousVolume};
 
 fn empty() -> ProductScene {
@@ -31,7 +32,7 @@ fn settings(volume: HomogeneousVolume) -> JobOptions {
 }
 fn camera() -> ImageRequest {
     let mut r = request(8);
-    r.camera = solidcraft_render::Camera { distance: 4.0, pitch: std::f64::consts::FRAC_PI_2, yaw: 0.0, fov: 0.001, ..Default::default() };
+    r.camera = solidcraft_viewport::Camera { distance: 4.0, pitch: std::f64::consts::FRAC_PI_2, yaw: 0.0, fov: 0.001, ..Default::default() };
     r
 }
 

@@ -86,6 +86,13 @@
 //! - **Loops.** The trimmed-face search (WR-588, opt-in) takes its cells from an explicit
 //!   stack, not recursion, bounded at `FACE_EXTREME_MAX_DEPTH` (16 halvings) and
 //!   `FACE_EXTREME_MAX_CELLS` (4096 cells); a cell past either counts with its greatest value.
+//!   Not the fork's (#14452): each cell of a B-spline face open both ways is solved on its
+//!   exact subpatch over the cell, not on the whole surface (a solve's control-net guesses
+//!   read every control point of the surface it is given), and a cell whose subpatch's
+//!   control points reach no higher than the box so far is skipped unsolved. A cell whose
+//!   subpatch gives no solution is divided, and at the limits counts with that bound.
+//!   Not the fork's (#14460): a cell is divided only the ways a knot lies inside it while
+//!   either way has one, halved both ways only once it lies within one span each way.
 //!   The step-off loops keep upstream's bounds (20 rounds in the sector
 //!   classification; its UV fallback doubles the step-off until it leaves the curve
 //!   interval, and stops after [`MAX_UV_STEP_OFF_ROUNDS`] rounds when the curve
@@ -116,6 +123,7 @@ use crate::intersect::point_class::{
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, min3, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -147,7 +155,6 @@ const OP_SECTOR: &str = "query::face::p3::sector_classify_curve_on";
 const OP_OBJECTS: &str = "query::face::p3::LoopObjectCurves";
 
 // `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
 
 /// The most step-off rounds of the sector classification (`lCount < 20`).
 const MAX_STEP_OFF_ROUNDS: u32 = 20;
@@ -167,12 +174,8 @@ fn null(operation: &'static str, reason: &'static str) -> SolidError {
 }
 
 /// `return(SM_ERR_INVALID_INPUT)`.
-const fn invalid_status(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR_INVALID_INPUT,
-        entity: None,
-    }
+fn invalid_status(operation: &'static str) -> SolidError {
+    SolidError::query_invalid_value(operation, "a vector of zero length has no direction")
 }
 
 /// `SER(v.Unitize())`: the unit vector, or the `SM_ERR_INVALID_INPUT` status of a zero
@@ -672,26 +675,45 @@ const FACE_EXTREME_MAX_DEPTH: u32 = 16;
 /// this distance, so a part nearer than that is no cell of its own.
 const FACE_EXTREME_KNOT_SNAP: f64 = 1.0e-08;
 
-/// Where a cell of `[lo, hi]` is divided along one way (`sm_CellDivision`, WR-651,
-/// tangency-labs/smlib@326de73): at the knot strictly inside it (by more than
-/// [`FACE_EXTREME_KNOT_SNAP`]) nearest its middle, the first such in `knots` on a tie,
-/// else at its middle. Divided at knots, a cell comes to lie within one knot span that
-/// way, as [`cell_monotone`] asks of a rational patch; halved at middles alone, a cell
-/// over a knot off the dyadic points of the domain (a screw surface's at every eighth of
-/// a turn) never does.
-fn cell_division(knots: &[f64], lo: f64, hi: f64) -> f64 {
+/// The knot strictly inside `[lo, hi]` (by more than [`FACE_EXTREME_KNOT_SNAP`]) nearest
+/// its middle, the first such in `knots` on a tie (`sm_CellDivision`, WR-651,
+/// tangency-labs/smlib@326de73); `None` when the cell lies within one knot span that way.
+/// Divided at knots, a cell comes to lie within one knot span, as [`cell_monotone`] asks of
+/// a rational patch; halved at middles alone, a cell over a knot off the dyadic points of
+/// the domain (a screw surface's at every eighth of a turn) never does.
+fn cell_division_knot(knots: &[f64], lo: f64, hi: f64) -> Option<f64> {
     let mid = 0.5 * (lo + hi);
-    let (mut at, mut off) = (mid, crate::math::BIG_DOUBLE);
+    let mut at: Option<(f64, f64)> = None;
     for &knot in knots {
         if knot > lo + FACE_EXTREME_KNOT_SNAP
             && knot < hi - FACE_EXTREME_KNOT_SNAP
-            && (knot - mid).abs() < off
+            && at.is_none_or(|(_, off)| (knot - mid).abs() < off)
         {
-            at = knot;
-            off = (knot - mid).abs();
+            at = Some((knot, (knot - mid).abs()));
         }
     }
-    at
+    at.map(|(knot, _)| knot)
+}
+
+/// Where [`face_directed_max`] divides an undecided cell: each way at the knot inside it
+/// nearest its middle ([`cell_division_knot`]). A way the cell lies within one knot span
+/// is left whole while the other way still has a knot inside the cell, and both ways are
+/// halved at their middles once neither has (not the fork's, which halves a way with no
+/// knot inside at once: #14460). Until a cell lies within one span each way the
+/// monotone test of a rational patch cannot decide it, so halving the way it already
+/// lies within one span only multiplies the cells along a trim: a thread's screw wall,
+/// a knot every eighth of a turn along u and one span across v, came to as many cells as
+/// it has spans along u, each solved twice. Returns the u and v of the division, `None`
+/// for a way left whole.
+fn cell_division(knots_u: &[f64], knots_v: &[f64], cell: &Extent2d) -> (Option<f64>, Option<f64>) {
+    let (u0, v0, u1, v1) = (cell.min().x, cell.min().y, cell.max().x, cell.max().y);
+    match (
+        cell_division_knot(knots_u, u0, u1),
+        cell_division_knot(knots_v, v0, v1),
+    ) {
+        (None, None) => (Some(0.5 * (u0 + u1)), Some(0.5 * (v0 + v1))),
+        at => at,
+    }
 }
 
 /// Whether `x` is above zero, false for NaN (the negation of `x > 0`, without the lint).
@@ -719,13 +741,19 @@ fn cell_directed_max(
     lb: &mut LazyBrep<'_>,
     f: FaceId,
     surface: &Surface,
+    solve_on: &Surface,
     face_zone_tol_3d: f64,
     cell: &Extent2d,
     dir: Vec3,
 ) -> Result<CellDirectedMax> {
+    let net = solve_on
+        .number_control_points(k, SurfParamType::U)
+        .saturating_mul(solve_on.number_control_points(k, SurfParamType::V));
+    k.work_counters
+        .add_face_extreme_control_points(u64::try_from(net).unwrap_or(u64::MAX));
     let solutions = ignored(global_point_solve_starts(
         k,
-        surface,
+        solve_on,
         cell,
         SolverOperation::Signed3dDirectedMaximize,
         dir,
@@ -881,6 +909,16 @@ fn rises(net: &MonotoneNet<'_>, along_v: bool, sign: f64) -> Option<bool> {
 /// differences being a Bezier in the other parameter. `false` when it cannot be told (a
 /// surface kind with no B-spline base, a subpatch short of the cell, a weight not positive).
 fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> Result<bool> {
+    match cell_patch(k, surface, cell)? {
+        Some(patch) => Ok(patch_monotone(&patch, dir)),
+        None => Ok(false),
+    }
+}
+
+/// The exact subpatch of the surface's B-spline base over `cell` (`CopySubPatch`), as
+/// [`cell_monotone`] reads it: `None` for a surface kind with no B-spline base, or a
+/// subpatch short of the cell (`CopySubPatch` snaps to knots).
+fn cell_patch(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<BSplineSurface>> {
     let base = match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(bs) => bs,
         SurfaceKind::Plane(p) => p.base(),
@@ -893,11 +931,11 @@ fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> R
         SurfaceKind::ProceduralBlend(pb) => pb.net(),
         // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
         SurfaceKind::BallPatch(pb) => pb.net(),
-        _ => return Ok(false),
+        _ => return Ok(None),
     };
     // CopySubPatch snaps to knots: a patch short of the cell says nothing about the rest.
     let Ok(patch) = base.copy_sub_patch(cell) else {
-        return Ok(false);
+        return Ok(None);
     };
     let patch_domain = patch.natural_uv_domain();
     if patch_domain.min().x > cell.min().x
@@ -905,26 +943,31 @@ fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> R
         || patch_domain.max().x < cell.max().x
         || patch_domain.max().y < cell.max().y
     {
-        return Ok(false);
+        return Ok(None);
     }
+    Ok(Some(patch))
+}
+
+/// [`cell_monotone`] of the subpatch over the cell ([`cell_patch`]).
+fn patch_monotone(patch: &BSplineSurface, dir: Vec3) -> bool {
     let Ok(control) = patch.control_point_net() else {
-        return Ok(false);
+        return false;
     };
     let (nu, nv) = (control.u_count, control.v_count);
     if nu < 2 || nv < 2 || control.points.len() != nu * nv {
-        return Ok(false);
+        return false;
     }
     let mut rational = false;
     if !control.weights.is_empty() {
         if control.weights.len() != control.points.len() {
-            return Ok(false);
+            return false;
         }
         let Some(&w0) = control.weights.first() else {
-            return Ok(false);
+            return false;
         };
         for &w in &control.weights {
             if w.is_nan() || w <= 0.0 {
-                return Ok(false);
+                return false;
             }
             rational = rational || w != w0;
         }
@@ -932,7 +975,7 @@ fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> R
     if rational
         && (nu != patch.degree(SurfParamType::U) + 1 || nv != patch.degree(SurfParamType::V) + 1)
     {
-        return Ok(false);
+        return false;
     }
     let net = MonotoneNet {
         nu,
@@ -942,9 +985,43 @@ fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> R
         rational,
         dir,
     };
-    Ok([(true, 1.0), (true, -1.0), (false, 1.0), (false, -1.0)]
+    [(true, 1.0), (true, -1.0), (false, 1.0), (false, -1.0)]
         .into_iter()
-        .any(|(along_v, sign)| rises(&net, along_v, sign).unwrap_or(false)))
+        .any(|(along_v, sign)| rises(&net, along_v, sign).unwrap_or(false))
+}
+
+/// The greatest `P . dir` of the control points of `patch`, which bounds `S . dir` over
+/// all of it (each point of a B-spline with positive weights is a convex combination of
+/// its control points); `None` when it cannot be told (no net, a weight not positive).
+fn patch_hull_max(patch: &BSplineSurface, dir: Vec3) -> Option<f64> {
+    let control = patch.control_point_net().ok()?;
+    if !control.weights.is_empty()
+        && (control.weights.len() != control.points.len()
+            || control.weights.iter().any(|w| !is_positive(*w)))
+    {
+        return None;
+    }
+    let mut hull: Option<f64> = None;
+    for p in &control.points {
+        let value = p.x * dir.x + p.y * dir.y + p.z * dir.z;
+        if value.is_nan() {
+            return None;
+        }
+        hull = Some(hull.map_or(value, |h| h.max(value)));
+    }
+    hull
+}
+
+/// The face's B-spline surface over `cell` alone: its exact subpatch there
+/// ([`cell_patch`]), owned by the same face with the same zone tolerance, so a solve over
+/// the cell starts from the cell's own control net (the control-net guesses of the
+/// global solve read every control point of the surface it is given, the whole net for
+/// a cell of a few spans) and takes the same tolerances.
+fn cell_sub_surface(surface: &Surface, patch: BSplineSurface) -> Surface {
+    let mut sub = Surface::from(patch);
+    sub.set_owner(surface.owner());
+    sub.set_owner_zone_tol_3d(surface.owner_zone_tol_3d());
+    sub
 }
 
 /// The greatest `S . dir` over the trimmed region of the face's surface, raised to `best`,
@@ -961,10 +1038,11 @@ fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> R
 ///    on the face's boundary or on the cell's own sides, which `best` and the neighbouring
 ///    cells hold;
 ///
-/// otherwise the cell is divided each way ([`cell_division`]: at a knot inside it, else at
-/// its middle; WR-651). A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past
-/// [`FACE_EXTREME_MAX_CELLS`] counts with its greatest value. The cells are an explicit
-/// stack (no recursion), taken last first, as the fork's.
+/// otherwise the cell is divided ([`cell_division`]: at the knots inside it, a way within
+/// one span left whole while the other has a knot inside, else at its middles; WR-651).
+/// A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past [`FACE_EXTREME_MAX_CELLS`] counts
+/// with its greatest value. The cells are an explicit stack (no recursion), taken last
+/// first, as the fork's.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -984,11 +1062,52 @@ fn face_directed_max(
     } else {
         (Vec::new(), Vec::new())
     };
+    // A B-spline face open both ways is decided cell by cell on its exact subpatch over
+    // the cell ([`cell_patch`]); any other face on its own surface.
+    let by_patch = matches!(surface.kind(), SurfaceKind::BSpline(_))
+        && !surface
+            .is_closed(k, uv_domain, SurfParamType::U, None, false)?
+            .0
+        && !surface
+            .is_closed(k, uv_domain, SurfParamType::V, None, false)?
+            .0;
     let mut cells: Vec<(Extent2d, u32)> = vec![(*uv_domain, 0)];
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
-        let top = cell_directed_max(k, lb, f, surface, face_zone_tol_3d, &cell, dir)?;
-        if !top.found {
+        // The cell's subpatch and the greatest `P . dir` of its control points, which no
+        // point of the cell exceeds (each is a convex combination of them).
+        let patch = if by_patch {
+            cell_patch(k, surface, &cell)?
+                .and_then(|patch| patch_hull_max(&patch, dir).map(|hull| (patch, hull)))
+        } else {
+            None
+        };
+        // 1., from the control points: nothing in the cell is higher than `best`.
+        if patch
+            .as_ref()
+            .is_some_and(|(_, hull)| *hull <= best + EFF_ZERO_SQRT)
+        {
+            continue;
+        }
+        let sub = patch
+            .as_ref()
+            .map(|(patch, _)| cell_sub_surface(surface, patch.clone()));
+        let solve_on = sub.as_ref().unwrap_or(surface);
+        let top = cell_directed_max(k, lb, f, surface, solve_on, face_zone_tol_3d, &cell, dir)?;
+        if top.found {
+            if top.top <= best + EFF_ZERO_SQRT {
+                continue;
+            }
+            if top.in_face {
+                best = top.top;
+                continue;
+            }
+            let least =
+                cell_directed_max(k, lb, f, surface, solve_on, face_zone_tol_3d, &cell, -dir)?;
+            if least.found && -least.top > best {
+                continue;
+            }
+        } else if patch.is_none() {
             // No solution to decide by: the surface's loose box over the cell holds it.
             let loose = surface_bounding_box(k, lb.get(), f, surface, &cell)?;
             let (lo, hi) = (loose.min(), loose.max());
@@ -998,18 +1117,13 @@ fn face_directed_max(
             best = best.max(loose_top);
             continue;
         }
-        if top.top <= best + EFF_ZERO_SQRT {
-            continue;
-        }
-        if top.in_face {
-            best = top.top;
-            continue;
-        }
-        let least = cell_directed_max(k, lb, f, surface, face_zone_tol_3d, &cell, -dir)?;
-        if least.found && -least.top > best {
-            continue;
-        }
-        if cell_monotone(k, surface, &cell, dir)? {
+        // (a cell whose subpatch gives no solution, its greatest value on its sides, is
+        // left to the tests below and its parts, as one whose greatest is outside the face)
+        let monotone = match &patch {
+            Some((patch, _)) => patch_monotone(patch, dir),
+            None => cell_monotone(k, surface, &cell, dir)?,
+        };
+        if monotone {
             continue;
         }
         let exhausted = depth >= FACE_EXTREME_MAX_DEPTH || {
@@ -1021,17 +1135,23 @@ fn face_directed_max(
             continue;
         }
         let (u0, v0, u1, v1) = (cell.min().x, cell.min().y, cell.max().x, cell.max().y);
-        // WR-651 (tangency-labs/smlib@326de73): divided at a knot inside the cell, else at
-        // its middle (`sm_CellDivision`).
-        let at = Point2::new(
-            cell_division(&knots_u, u0, u1),
-            cell_division(&knots_v, v0, v1),
-        );
+        // WR-651 (tangency-labs/smlib@326de73): divided at a knot inside the cell, a way
+        // within one span left whole while the other has one, else at the middles.
+        let (at_u, at_v) = cell_division(&knots_u, &knots_v, &cell);
+        let us = match at_u {
+            Some(u) => [(u0, u), (u, u1)].to_vec(),
+            None => [(u0, u1)].to_vec(),
+        };
+        let vs = match at_v {
+            Some(v) => [(v0, v), (v, v1)].to_vec(),
+            None => [(v0, v1)].to_vec(),
+        };
         let child_depth = depth + 1;
-        cells.push((Extent2d::from_bounds(u0, v0, at.x, at.y), child_depth));
-        cells.push((Extent2d::from_bounds(at.x, v0, u1, at.y), child_depth));
-        cells.push((Extent2d::from_bounds(u0, at.y, at.x, v1), child_depth));
-        cells.push((Extent2d::from_bounds(at.x, at.y, u1, v1), child_depth));
+        for &(lo_v, hi_v) in &vs {
+            for &(lo_u, hi_u) in &us {
+                cells.push((Extent2d::from_bounds(lo_u, lo_v, hi_u, hi_v), child_depth));
+            }
+        }
     }
     Ok(best)
 }
@@ -1359,7 +1479,8 @@ fn uv_line<O: ClassObject>(
     // build UVLine
     let start = Point3::new(uv_start.x, uv_start.y, 0.0);
     let end = Point3::new(uv_end.x, uv_end.y, 0.0);
-    Line::create_line_segment(2, start, end, None).map_err(|_| SolidError::null_pointer(OP_UV_LINE))
+    Line::create_line_segment(2, start, end, None)
+        .map_err(|_| SolidError::query_missing(OP_UV_LINE, "the UV line"))
 }
 
 /// `sm_FaceClassifyUVLine` after the tolerance: loads `line` into `cc`.
@@ -2050,7 +2171,8 @@ fn project(p: Vec3, v: Vec3) -> Vec3 {
 ///
 /// [`SolidError::InvalidInput`] where upstream dereferences null (an edge use without
 /// edge or loop use, an edge without curve, a face without surface, a missing vertex use
-/// or mate); `SM_ERR_INVALID_INPUT` ([`SolidError::Upstream`]) for a zero vector the
+/// or mate); `SM_ERR_INVALID_INPUT`
+/// ([`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) for a zero vector the
 /// projection or step-off tangents unitize or measure angles with (`SER`); those of the
 /// curve and edge evaluations and of `EvaluateNormalAtSingularity`;
 /// [`SolidError::Unported`]: those of `SmEdgeuse::EvaluateBinormal` and a 2D curve on a

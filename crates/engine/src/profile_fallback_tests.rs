@@ -5,6 +5,7 @@
 //! fails and takes its body (and everything after it) with it.
 
 use serde_json::{Value, json};
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 

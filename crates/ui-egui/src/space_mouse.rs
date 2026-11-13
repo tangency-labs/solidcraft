@@ -199,7 +199,7 @@ fn buttons_active(app: &SolveApp, ctx: &egui::Context, focused: bool) -> bool {
         && app.space_mouse.calibrating.is_none()
         && !app.home.open
         && !app.file_picker_busy()
-        && !app.file_load.busy()
+        && !app.file_load_holds()
         // The keyboard shortcuts wait for a report draft too (`SolveApp::logic`).
         && app.issue_report.draft.is_none()
         && !crate::keymap::capturing(app)
@@ -690,7 +690,7 @@ mod tests {
     use crate::Services;
     use solidcraft_engine::Session;
     use solidcraft_engine::geom::prelude::*;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
     /// the orientation, as editing a sketch does.
@@ -1838,7 +1838,7 @@ mod tests {
         app.preferences.look_at_anim = false;
         assert!(bridge(&mut app, &ctx, BridgeMotion::default(), &["top"]));
         let mut top = Camera::default();
-        top.set_view(solidcraft_engine::render::StandardView::Top);
+        top.set_view(solidcraft_viewport::StandardView::Top);
         let target = app.cam_anim.map_or(app.cam, |a| a.to);
         assert_eq!((target.yaw, target.pitch), (top.yaw, top.pitch));
         // Names it doesn't know are no view.

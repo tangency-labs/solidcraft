@@ -216,6 +216,12 @@ target_point!(
     "must be a point [x, y, z] to turn to"
 );
 
+target_point!(
+    /// Emboss's `face`: a [`Point3`], with the handler's message.
+    EmbossFacePoint,
+    "must be a finite point [x,y,z]"
+);
+
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
 /// them, with its messages.
 #[derive(Clone, Debug, PartialEq)]
@@ -278,7 +284,7 @@ impl JsonSchema for AxisDir {
 /// `Camera`, with finite fields, a positive distance and a field of view in [0, π), and the
 /// handlers' message, "invalid camera", for anything else (#10898).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CameraParam(pub solidcraft_render::Camera);
+pub struct CameraParam(pub solidcraft_viewport::Camera);
 
 impl<'de> Deserialize<'de> for CameraParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -300,10 +306,10 @@ impl JsonSchema for CameraParam {
                 "pitch": {"description": "Elevation above the ground plane, from -π/2 (looking up) to π/2 (looking down).", "type": "number"},
                 "roll": {"description": "Turn about the viewing direction; 0 keeps the up axis upright. Default: 0.", "type": "number", "default": 0.0},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
-                "fov": {"description": "Vertical field of view; 0 is orthographic.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI},
+                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI, "default": 0.0},
                 "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"}
             },
-            "required": ["target", "yaw", "pitch", "distance", "fov"]
+            "required": ["target", "yaw", "pitch", "distance"]
         })
     }
 }
@@ -504,6 +510,46 @@ keyword_param!(
     &["in_plane", "plane", "normal"],
     "in_plane or normal",
     "Which way the wall grows from the curves: in_plane (the default; plane is an alias), across the sketch plane, or normal, along the sketch plane's normal. Matching ignores case."
+);
+keyword_param!(
+    /// `solid.coil`'s `section`.
+    CoilSectionParam,
+    "section",
+    &["circular", "circle", "square"],
+    "circular or square",
+    "The shape swept along the helix: circular (the default; circle is an alias) or square. Any case."
+);
+keyword_param!(
+    /// `solid.coil`'s `section_position`.
+    CoilSectionPositionParam,
+    "section position",
+    &["inside", "center", "on", "on_center", "outside"],
+    "inside, center or outside",
+    "Where the section sits against the coil's diameter: center (the default; on and on_center are aliases) on it, inside it or outside it. Any case."
+);
+keyword_param!(
+    /// `solid.emboss`'s `mode`.
+    EmbossModeParam,
+    "mode",
+    &["emboss", "deboss"],
+    "emboss or deboss",
+    "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
+);
+keyword_param!(
+    /// `surface.ruled`'s `mode`.
+    RuledModeParam,
+    "mode",
+    &["normal", "tangent", "angle", "direction"],
+    "normal, tangent, angle or direction",
+    "Which way the rulings run from each edge: normal (the default: along the normal of the face beside the edge), tangent (continuing that face), angle (`angle` from `direction`, else from the face's normal, turned away from the face) or direction (along `direction`). Matching ignores case."
+);
+keyword_param!(
+    /// `surface.ruled`'s `corners`.
+    RuledCornersParam,
+    "corners",
+    &["mitre", "miter", "round"],
+    "mitre or round",
+    "How the strip turns the chain's sharp corners: mitre (the default; miter is an alias) or round. Inside corners are always cut back. Matching ignores case."
 );
 keyword_param!(
     /// `solid.fillet`'s `type`.
@@ -1104,12 +1150,15 @@ impl JsonSchema for RailFitParam {
     }
 }
 
-/// What `features::guide_rails` says about a sweep's or a loft's (`what`) `rails`, as given (not
-/// `null`), before it looks a sketch up: its message, or `None`. `default_sketch`: a rail may
+/// What `features::guide_rails` says about a sweep's or a loft's `rails`, as given (not `null`),
+/// before it looks a sketch up: its message, or `None`. `count_for`: the command whose one or two
+/// rails to count; `None` leaves the count to the handler. `default_sketch`: a rail may
 /// leave its `sketch` out. A key a rail doesn't take, which the handler ignores, is refused too.
-fn guide_rails_problem(v: &Value, what: &str, default_sketch: bool) -> Option<String> {
+pub(super) fn guide_rails_problem(v: &Value, count_for: Option<&str>, default_sketch: bool) -> Option<String> {
     let Value::Array(given) = v else { return Some(whole("`rails` must list one or two rails: [{sketch, curves: [ids]}]")) };
-    if !(1..=2).contains(&given.len()) {
+    if let Some(what) = count_for
+        && !(1..=2).contains(&given.len())
+    {
         return Some(whole(format!("a {what} takes one or two guide rails")));
     }
     for (i, rail) in given.iter().enumerate() {
@@ -1144,7 +1193,7 @@ pub struct SweepRails(pub Value);
 impl<'de> Deserialize<'de> for SweepRails {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
-        match guide_rails_problem(&v, "sweep", true) {
+        match guide_rails_problem(&v, Some("sweep"), true) {
             Some(why) => Err(D::Error::custom(why)),
             None => Ok(SweepRails(v)),
         }
@@ -1256,8 +1305,8 @@ fn geo_problem(v: &Value) -> Option<String> {
 }
 
 /// The reference types a saved reference's `type` names (`solidcraft_doc::construct::GeoRef`).
-const SAVED_REFS: [&str; 11] =
-    ["point", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
+const SAVED_REFS: [&str; 13] =
+    ["point", "datum", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve", "snap"];
 
 /// `{key: point}`, unless it has `type` (then it is a saved reference).
 fn picked_at(key: &str, point: &Schema) -> Value {
@@ -1428,6 +1477,42 @@ impl JsonSchema for AxisLine {
     }
 }
 
+/// Circular Pattern's `axis`, as `features::pattern_axis` reads it: an [`AxisLine`], except that
+/// the coordinates of `{origin, dir}`'s origin may be expressions. Kept as given, for the handler.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatternAxis(pub Value);
+
+impl<'de> Deserialize<'de> for PatternAxis {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let Some(origin) = v.get("origin").filter(|_| v.is_object() && !crate::cmd::is_model_axis(&v)) else {
+            return AxisLine::deserialize(v).map(|axis| PatternAxis(axis.0)).map_err(D::Error::custom);
+        };
+        if serde_json::from_value::<PointExpr3>(origin.clone()).is_err() {
+            return Err(D::Error::custom(whole("`axis.origin` must be a point [x, y, z] of numbers or length expressions")));
+        }
+        if v.get("dir").and_then(params::vec3).and_then(solidcraft_geom::Vec3Geom::normalized).is_none() {
+            return Err(D::Error::custom(whole("axis needs a non-zero `dir`")));
+        }
+        Ok(PatternAxis(v))
+    }
+}
+
+impl JsonSchema for PatternAxis {
+    fn schema_name() -> Cow<'static, str> {
+        "PatternAxis".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let origin = generator.subschema_for::<PointExpr3>();
+        let mut schema = AxisLine::json_schema(generator);
+        let slot = schema.as_object_mut().and_then(|o| o.get_mut("anyOf")).and_then(|forms| forms.pointer_mut("/1/properties/origin"));
+        if let Some(slot) = slot {
+            *slot = json!(origin);
+        }
+        schema
+    }
+}
+
 /// What `features::axis_param` says to an `axis` that is none of its forms.
 const REVOLVE_AXIS_MESSAGE: &str =
     "`axis` must be a sketch line id, x, y (sketch axes), X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}";
@@ -1438,6 +1523,11 @@ fn revolve_axis_object_problem(o: &Value) -> Option<String> {
     if o.get("type").and_then(Value::as_str) == Some("world") {
         let ok = o.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"));
         return (!ok).then(|| whole("world axis requires `axis` to be X, Y or Z"));
+    }
+    if o.get("curve").and_then(Value::as_str).is_some() {
+        // A line of a named sketch (#6548): {sketch?, curve}, also saved as {type: "sketch_line", …}.
+        // Whether that sketch and line exist is the handler's, which has the design.
+        return None;
     }
     if let Some(origin) = o.get("origin")
         && serde_json::from_value::<PointExpr3>(origin.clone()).is_err()
@@ -1452,7 +1542,8 @@ fn revolve_axis_object_problem(o: &Value) -> Option<String> {
 
 /// Revolve's `axis`, as `features::axis_param` reads it before it looks anything up: a sketch
 /// line's id or name, `x` or `y`, X, Y or Z, a construction axis's name (any text), `{type: "world",
-/// axis}`, `{origin?, dir}`, or an edge or face of the model (as `construct::model_axis_param`
+/// axis}`, `{sketch?, curve}` (a line of another sketch, #6548), `{origin?, dir}`, or an edge or
+/// face of the model (as `construct::model_axis_param`
 /// reads it). Kept as given, for the handler. Whether a line or axis exists, and whether a picked
 /// edge or face gives an axis, is checked by the handler, which has the design.
 #[derive(Clone, Debug, PartialEq)]
@@ -1484,12 +1575,14 @@ impl JsonSchema for RevolveAxis {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let point = generator.subschema_for::<Point3>();
         let origin = generator.subschema_for::<PointExpr3>();
+        let id_or_name = generator.subschema_for::<IdOrName>();
         let model = json!({"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, {"required": ["type"], "properties": {"type": {"enum": ["edge", "face"]}}}]});
         json_schema!({
-            "description": "The axis to turn about: a sketch line's id or name (a line of the profile's sketch wins over a construction axis of the same name); x or y, the sketch's own axes; X, Y or Z, the world axes (any other case is a name); a construction axis's name, which the revolve follows when it is edited; {\"type\": \"world\", \"axis\": X, Y or Z}, as timeline.inspect gives one back; {\"origin\"?: [x, y, z] (numbers or length expressions; default: the world origin), \"dir\": [x, y, z]}, which the revolve follows when parameters change; or an edge or face of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on a straight or circular edge, or on a cylinder, cone or torus face, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), about whose axis it turns, followed as the model changes.",
+            "description": "The axis to turn about: a sketch line's id or name (a line of the profile's sketch wins over a construction axis of the same name); {\"sketch\"?: an id or name, \"curve\": an id} — a line of that sketch, which the revolve follows when that sketch is edited; x or y, the sketch's own axes; X, Y or Z, the world axes (any other case is a name); a construction axis's name, which the revolve follows when it is edited; {\"type\": \"world\", \"axis\": X, Y or Z}, as timeline.inspect gives one back; {\"origin\"?: [x, y, z] (numbers or length expressions; default: the world origin), \"dir\": [x, y, z]}, which the revolve follows when parameters change; or an edge or face of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on a straight or circular edge, or on a cylinder, cone or torus face, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), about whose axis it turns, followed as the model changes.",
             "anyOf": [
                 {"type": "string"},
                 {"type": "object", "properties": {"type": {"enum": ["world"]}, "axis": {"enum": ["X", "Y", "Z"]}}, "required": ["type", "axis"]},
+                {"type": "object", "properties": {"sketch": id_or_name, "curve": {"type": "string"}}, "required": ["curve"]},
                 {
                     "type": "object",
                     "properties": {"origin": origin, "dir": point},

@@ -9,11 +9,16 @@ use solidcraft_doc::point_cloud::{
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_};
-use crate::schema::point_cloud::{PointCloudReloadParams, PointCloudReloadResult};
+use crate::schema::point_cloud::{
+    PointCloudDeleteParams, PointCloudDeleteResult, PointCloudFilter, PointCloudFilterKeeps, PointCloudInfo, PointCloudListParams,
+    PointCloudListResult, PointCloudProperty, PointCloudReloadParams, PointCloudReloadResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const RELOAD_CONTRACT: TypedContract<PointCloudReloadParams> = TypedContract::new();
+const DELETE_CONTRACT: TypedContract<PointCloudDeleteParams> = TypedContract::new();
+const LIST_CONTRACT: TypedContract<PointCloudListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("pointcloud.insert", "Insert Point Cloud", insert)
@@ -28,11 +33,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RELOAD_CONTRACT)
         .output(output_schema_for::<PointCloudReloadResult>)
         .params("cloud: id or name (its file is read again from where it was inserted; name, placement, units, colouring and the filters on properties it still has are kept; read under the limit it was inserted with, so a file that grew is thinned only past that limit) → cloud, points, segments, triangles, warnings"),
-    CommandSpec::new("pointcloud.delete", "Delete Point Cloud", delete).icon("delete").params("cloud: id or name → deleted"),
-    CommandSpec::new("pointcloud.list", "Point Clouds", list)
+    CommandSpec::new("pointcloud.delete", "Delete Point Cloud", crate::checked!("pointcloud.delete", delete))
+        .icon("delete")
+        .contract(&DELETE_CONTRACT)
+        .output(output_schema_for::<PointCloudDeleteResult>)
+        .params("cloud: id or name → deleted"),
+    CommandSpec::new("pointcloud.list", "Point Clouds", crate::checked!("pointcloud.list", list))
         .icon("list")
         .noundo()
         .doc_only()
+        .contract(&LIST_CONTRACT)
+        .output(output_schema_for::<PointCloudListResult>)
         .params("→ clouds: [{cloud, name, file, source (the file's path, read again by pointcloud.reload), points, segments, triangles, source_points, units, visible, point_size, color_by (file, single, height or a property's name), color, colored, properties: [{name, integer, span, names}], filters, color_range (the ramp's now, exact over what the filters keep), height_range (the ramp's own range or the automatic one by height), height_auto, bounds: [[x,y,z], [x,y,z]] in the design, matrix}]"),
 ];
 
@@ -185,8 +196,8 @@ fn matrix_rows(m: &Mat) -> Vec<f64> {
     (0..3).flat_map(|row| (0..4).map(move |col| m[col][row])).collect()
 }
 
-fn bounds(c: &PointCloud) -> Value {
-    let Some(corners) = c.world_corners() else { return Value::Null };
+fn bounds(c: &PointCloud) -> Option<[[f64; 3]; 2]> {
+    let corners = c.world_corners()?;
     // The box around the corners in the design.
     let mut a = [f64::INFINITY; 3];
     let mut b = [f64::NEG_INFINITY; 3];
@@ -196,7 +207,7 @@ fn bounds(c: &PointCloud) -> Value {
             b[k] = b[k].max(v);
         }
     }
-    json!([a, b])
+    Some([a, b])
 }
 
 fn insert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -387,44 +398,61 @@ fn reload(s: &mut Session, p: &Value) -> Result<Value> {
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let i = find(s, p, "pointcloud.delete")?;
     let c = s.doc_mut().point_clouds.remove(i);
-    Ok(json!({"deleted": c.id}))
+    serde_json::to_value(PointCloudDeleteResult { deleted: c.id, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn list(s: &mut Session, _: &Value) -> Result<Value> {
-    let clouds: Vec<Value> = s
+    let clouds: Vec<PointCloudInfo> = s
         .doc
         .point_clouds
         .iter()
-        .map(|c| {
-            json!({
-                "cloud": c.id,
-                "name": c.name,
-                "file": c.file,
-                "points": c.len(),
-                "source_points": c.source_points,
-                "units": c.units,
-                "visible": c.visible,
-                "point_size": c.point_size,
-                "color_by": c.colored_property().filter(|_| c.color_by == ColorBy::Property).unwrap_or(c.color_by.name()),
-                "segments": c.complex.segment_count(),
-                "triangles": c.complex.triangle_count(),
-                "properties": c
-                    .property_names()
-                    .map(|n| json!({"name": n, "integer": c.complex.integer(n), "span": c.span(n), "names": c.complex.names(n).map(|m| &m.values)}))
-                    .collect::<Vec<_>>(),
-                "filters": c.filters,
-                "color_range": solidcraft_doc::point_cloud_distribution::color_range(c, &solidcraft_doc::point_cloud_distribution::Geometry::of(c), &c.filters),
-                "source": c.source,
-                "color": c.color,
-                "colored": !c.colors.is_empty(),
-                "height_range": c.height_range_now(),
-                "height_auto": c.height_range.is_none(),
-                "bounds": bounds(c),
-                "matrix": matrix_rows(&c.transform),
-            })
+        .map(|c| PointCloudInfo {
+            cloud: c.id,
+            name: c.name.clone(),
+            file: c.file.clone(),
+            source: c.source.clone(),
+            points: c.len(),
+            segments: c.complex.segment_count(),
+            triangles: c.complex.triangle_count(),
+            source_points: c.source_points,
+            units: c.units.clone(),
+            visible: c.visible,
+            point_size: c.point_size,
+            color_by: c.colored_property().filter(|_| c.color_by == ColorBy::Property).unwrap_or(c.color_by.name()).to_string(),
+            color: c.color,
+            colored: !c.colors.is_empty(),
+            properties: c
+                .property_names()
+                .map(|n| PointCloudProperty {
+                    name: n.to_string(),
+                    integer: c.complex.integer(n),
+                    span: c.span(n),
+                    names: c.complex.names(n).map(|m| m.values.clone()),
+                })
+                .collect(),
+            filters: c
+                .filters
+                .iter()
+                .map(|f| PointCloudFilter {
+                    property: f.property.clone(),
+                    keep: match &f.keep {
+                        Keep::Range { range } => PointCloudFilterKeeps::Range { range: *range },
+                        Keep::Values { values } => PointCloudFilterKeeps::Values { values: values.clone() },
+                    },
+                })
+                .collect(),
+            color_range: solidcraft_doc::point_cloud_distribution::color_range(
+                c,
+                &solidcraft_doc::point_cloud_distribution::Geometry::of(c),
+                &c.filters,
+            ),
+            height_range: c.height_range_now(),
+            height_auto: c.height_range.is_none(),
+            bounds: bounds(c),
+            matrix: matrix_rows(&c.transform),
         })
         .collect();
-    Ok(json!({"clouds": clouds}))
+    serde_json::to_value(PointCloudListResult { clouds, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(test)]
@@ -508,6 +536,28 @@ mod tests {
         assert_eq!(opened.point_clouds, s.doc.point_clouds);
         s.execute("pointcloud.delete", &json!({"cloud": id})).unwrap();
         assert!(s.doc.point_clouds.is_empty());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn a_saved_scan_with_properties_edges_and_faces_opens_again() {
+        // The file's normals and other numbers, an edge and a face (#14572): a design file keeps
+        // the points apart from them, so they were checked against no points and it didn't open.
+        let d = dir("properties");
+        let path = d.join("normals.ply");
+        let text = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\n\
+            property float nx\nproperty float ny\nproperty float nz\nproperty int layer\nelement edge 1\nproperty int vertex1\n\
+            property int vertex2\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n\
+            0 0 0 0 0 1 0\n1 0 0 0 0 1 1\n0 1 0 0 0 1 1\n0 1\n3 0 1 2\n";
+        std::fs::write(&path, text).unwrap();
+        let mut s = Session::default();
+        s.execute("pointcloud.insert", &json!({"path": path})).unwrap();
+        assert_eq!(s.doc.point_clouds[0].complex.columns.len(), 4, "nx, ny, nz and layer");
+        let compact = solidcraft_io::write_design_container_with_compression(&s.doc, solidcraft_io::DesignCompression::Compact).unwrap();
+        for file in [solidcraft_io::write_design_container(&s.doc).unwrap(), compact] {
+            let opened = solidcraft_io::read_design(&file).unwrap();
+            assert_eq!(opened.point_clouds, s.doc.point_clouds);
+        }
         let _ = std::fs::remove_dir_all(d);
     }
 

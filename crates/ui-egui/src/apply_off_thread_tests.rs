@@ -354,10 +354,15 @@ fn an_edit_without_a_preview_adopts_its_suffix_without_window_evaluation() {
     if let Some(crate::dialogs::Kind::OffsetPlane { offset }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
         *offset = "15".into();
     }
+    // The worker's result is held until OK has been seen computing: the click settles over a few
+    // frames, and a window thread held up under load would find it in and apply it at once.
+    let (finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
     let window = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
     solidcraft_engine::doc::progress::watch(window.clone(), || {
         h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
         assert!(h.app.applying.is_some(), "computing beside the window");
+        finish.send(()).unwrap();
         until_applied(&mut h);
     });
     assert_eq!(window.features(), (0, 0), "nothing evaluated on the window thread");

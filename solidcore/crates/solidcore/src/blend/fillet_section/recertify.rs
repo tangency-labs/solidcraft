@@ -40,7 +40,7 @@
 
 use core::cmp::Ordering;
 
-use super::certificate::{gn_certify_span, GnLaw, NurbsCurve};
+use super::certificate::{gn_certify_span, gn_certify_span_reusing, GnLaw, NurbsCurve, SpanReuse};
 use super::continuation::{growth, section_degree, section_weight_range};
 use super::section::{
     certificate_faces, crosses_knot, inner_knots, net_of_spans, param, varying, NetForm,
@@ -775,7 +775,13 @@ fn recertify_in_frame(
                 "the net is not within its bound of its definition",
             ));
         }
-        let certified = gn_certify_span(
+        // to the target: the bound was proved before, and the levels' halving guess must
+        // not stop this run a level short of it where its rounding differs from that run's
+        let mut reuse = SpanReuse {
+            to_target: true,
+            ..SpanReuse::default()
+        };
+        let certified = gn_certify_span_reusing(
             k,
             face_n,
             &leader_n,
@@ -790,6 +796,7 @@ fn recertify_in_frame(
             if equal_area { Some(&mut vary) } else { None },
             law.as_ref(),
             if any_defs { Some(&mut defs) } else { None },
+            &mut reuse,
         )?;
         let late = match (across, early) {
             (Some(ext), None) => Some(section_growth(

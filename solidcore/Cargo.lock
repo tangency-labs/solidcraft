@@ -107,9 +107,10 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcore",
+ "solidcore-record",
  "solidcore-ssi",
  "ssi",
- "step-import",
+ "step-export",
  "toml",
 ]
 
@@ -333,6 +334,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-step"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-ops",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcore-tess"
 version = "0.1.0"
 dependencies = [
@@ -342,6 +353,7 @@ dependencies = [
  "serde_json",
  "solidcore",
  "solidcore-convert",
+ "solidcore-ops",
  "solidcore-record",
  "spade",
  "thiserror",
@@ -364,24 +376,12 @@ name = "ssi"
 version = "0.1.0"
 
 [[package]]
-name = "step-brep"
-version = "0.1.0"
-dependencies = [
- "solidcore",
- "step-export",
- "step-import",
-]
-
-[[package]]
 name = "step-export"
 version = "0.1.0"
 dependencies = [
- "step-import",
+ "solidcore",
+ "solidcore-record",
 ]
-
-[[package]]
-name = "step-import"
-version = "0.1.0"
 
 [[package]]
 name = "syn"

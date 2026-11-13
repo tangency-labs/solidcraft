@@ -389,7 +389,7 @@ fn replies_are_todays_json() {
         json!({"preset": "performance", "enabled": false, "display_quality": "normal", "supersampling": 1.0, "supersampling_adaptive": true})
     );
     assert_eq!(run("view.ambient_occlusion", json!({"enabled": false})), json!({"enabled": false}));
-    let cam: solidcraft_render::Camera = serde_json::from_value(nav_camera()).unwrap();
+    let cam: solidcraft_viewport::Camera = serde_json::from_value(nav_camera()).unwrap();
     let turned = run("view.navigate", json!({"camera": nav_camera(), "action": "fit"}));
     assert_eq!(turned, json!({"camera": cam, "fit": true}));
     let moved = run("view.navigate", json!({"camera": nav_camera(), "motion": "zoom", "factor": 2}));

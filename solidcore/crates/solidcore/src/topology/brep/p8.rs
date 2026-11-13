@@ -5,7 +5,7 @@
 //! | Rust                                   | Upstream                                  |
 //! |----------------------------------------|-------------------------------------------|
 //! | [`create_faces_with_curves`]           | `SmBrep::CreateFacesWithCurves`           |
-//! | [`create_planar_faces_with_3d_curves`] | `SmBrep::CreatePlanarFacesWith3DCurves`   |
+//! | [`create_planar_faces_with_3d_curves`], [`create_planar_faces_with_3d_curves_and_edges`] | `SmBrep::CreatePlanarFacesWith3DCurves` |
 //! | [`create_planar_face_with_3d_curves`]  | `SmBrep::CreatePlanarFaceWith3DCurves`    |
 //! | [`create_face_in_region_from_surface`] | `SmBrep::CreateFaceInRegionFromSurface`   |
 //! | [`create_face_from_surface`]           | `SmBrep::CreateFaceFromSurface`           |
@@ -66,7 +66,7 @@
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -131,6 +131,9 @@ pub struct NewFaces {
     pub shell: Option<ShellId>,
     /// `rResultingFaces` / `rNewFaces`.
     pub faces: Vec<FaceId>,
+    /// (not upstream; [`create_faces_with_curves`] only) The edge made from each curve,
+    /// in the order of the curves given.
+    pub curve_edges: Vec<Option<EdgeId>>,
 }
 
 fn invalid(reason: &'static str) -> SolidError {
@@ -152,12 +155,15 @@ fn with_editing<R>(b: &mut Brep, f: impl FnOnce(&mut Brep) -> Result<R>) -> Resu
     r
 }
 
-/// `SER(SM_ERR)` after a failed call: [`SolidError::Unported`] goes through.
-fn as_sm_err(e: SolidError) -> SolidError {
-    if e.is_unported_or_cancelled() {
-        e
-    } else {
-        SolidError::sm_err(OP)
+/// `SER(SM_ERR)` after a failed call: a failure saying `what` could not be done, with
+/// status `SM_ERR`; [`SolidError::Unported`] goes through.
+fn failed_as(what: &'static str) -> impl Fn(SolidError) -> SolidError {
+    move |e| {
+        if e.is_unported_or_cancelled() {
+            e
+        } else {
+            SolidError::topology_failed(OP, what)
+        }
     }
 }
 
@@ -167,7 +173,7 @@ fn as_sm_err(e: SolidError) -> SolidError {
 fn plane_failed(e: SolidError) -> SolidError {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => e,
-        other => as_sm_err(other),
+        other => failed_as("the plane through the curves could not be made")(other),
     }
 }
 
@@ -206,14 +212,17 @@ pub fn create_face_in_region_from_surface(
     fenv: &mut FaceBuildEnv<'_, '_>,
 ) -> Result<FaceInRegion> {
     // check inputs
-    let surface = surface.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface = surface.ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
 
     // Check for region default.
     let region = region.or_else(|| b.infinite_region());
 
     // check input - crUVDomain contained within the pSurface->GetNaturalUVDomain()
     if !uv_domain.is_contained_by(&surface.natural_uv_domain_with_nurb(k)?, EFF_ZERO) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the UV domain is not inside the surface's natural domain",
+        ));
     }
 
     with_editing(b, |b| {
@@ -254,7 +263,9 @@ pub fn create_face_in_region_from_surface(
             fenv.this_face,
             fenv.env,
         )
-        .map_err(as_sm_err)?;
+        .map_err(failed_as(
+            "the face with a rectangular trim could not be made",
+        ))?;
 
         // set m_bRectangularTrim = TRUE
         let face = made
@@ -307,7 +318,7 @@ pub fn create_faces_from_surface(
     fenv: &mut FaceBuildEnv<'_, '_>,
 ) -> Result<Vec<FaceId>> {
     let _ = uv_domain; // SM_REF1(crUVDomain)
-    let surface = surface.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface = surface.ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
     let mut new_faces = Vec::new();
 
     with_editing(b, |b| {
@@ -459,6 +470,31 @@ pub fn create_planar_faces_with_3d_curves(
     tol_3d: f64,
     fenv: &mut FaceBuildEnv<'_, '_>,
 ) -> Result<Vec<FaceId>> {
+    create_planar_faces_with_3d_curves_and_edges(k, b, region, curves, tol_3d, fenv)
+        .map(|(faces, _)| faces)
+}
+
+/// The faces [`create_planar_faces_with_3d_curves_and_edges`] makes, and the edge made
+/// from each curve with that curve's index.
+pub type PlanarFacesAndEdges = (Vec<FaceId>, Vec<(EdgeId, usize)>);
+
+/// [`create_planar_faces_with_3d_curves`], also returning the edge made from each
+/// curve with that curve's index in `curves` (not upstream: the skin's face sources,
+/// tangency-labs/solidcore#3139). The faces are those
+/// [`create_planar_faces_with_3d_curves`] makes.
+///
+/// # Errors
+///
+/// Those of [`create_planar_faces_with_3d_curves`]; the edges add none (a curve that
+/// made no edge is left out).
+pub fn create_planar_faces_with_3d_curves_and_edges(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    curves: &[Curve],
+    tol_3d: f64,
+    fenv: &mut FaceBuildEnv<'_, '_>,
+) -> Result<PlanarFacesAndEdges> {
     let _ = tol_3d; // SM_REF1(d3DToleranceArg)
 
     // Check for region default.
@@ -484,7 +520,19 @@ pub fn create_planar_faces_with_3d_curves(
         Some(plane.plane),
         fenv,
     )?;
-    Ok(made.faces)
+    // one entry per ordered curve, in order (create_faces_with_curves pushes one per curve);
+    // were a count ever to differ, no edge is recorded, so the trace says `EdgeUntraced`
+    // rather than give a wall another curve's index
+    let edges = if made.curve_edges.len() == plane.ordered_curves.len() {
+        made.curve_edges
+            .iter()
+            .zip(&plane.ordered_curves)
+            .filter_map(|(&e, &ci)| e.map(|e| (e, ci)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok((made.faces, edges))
 }
 
 // ---- CreateFacesWithCurves ------------------------------------------------------------
@@ -521,7 +569,8 @@ pub fn create_faces_with_curves(
 
     with_editing(b, |b| {
         let mut out = NewFaces::default();
-        let mut curves_3d = curves_3d.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let mut curves_3d =
+            curves_3d.ok_or_else(|| SolidError::topology_missing(OP, "the 3D curves"))?;
         let tol = b.tolerance();
 
         // First create the big face covering the whole surface.
@@ -536,7 +585,10 @@ pub fn create_faces_with_curves(
 
         let face_loops = face2::loops(b, new_face, false, None)?;
         if face_loops.len() != 1 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the natural face does not have exactly one loop",
+            ));
         }
         // The loop we will have to delete
         let big_loop = *at(&face_loops, 0)?;
@@ -554,7 +606,8 @@ pub fn create_faces_with_curves(
                     .ok_or_else(|| invalid("loop counts exceed the curves"))?
                     .take();
                 let last_edge = jj + 1 == n_edges;
-                let curve = curve.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let curve = curve
+                    .ok_or_else(|| SolidError::topology_missing(OP, "a 3D curve of the loop"))?;
 
                 let ivl = curve.natural_interval();
                 let (start_param, end_param, orient) =
@@ -572,7 +625,10 @@ pub fn create_faces_with_curves(
                 } else {
                     {
                         if v.is_some() {
-                            return Err(SolidError::sm_err(OP));
+                            return Err(SolidError::topology_failed(
+                                OP,
+                                "the loop has a vertex but no face",
+                            ));
                         }
                         let face = if faces.len() == 1 {
                             new_face
@@ -598,11 +654,9 @@ pub fn create_faces_with_curves(
                             // if face not found then use first "big" face
                             match found {
                                 Some(face) => face,
-                                None => faces
-                                    .first()
-                                    .copied()
-                                    .flatten()
-                                    .ok_or_else(|| SolidError::null_pointer(OP))?,
+                                None => faces.first().copied().flatten().ok_or_else(|| {
+                                    SolidError::topology_missing(OP, "the first new face")
+                                })?,
                             }
                         };
                         f = Some(face);
@@ -651,16 +705,23 @@ pub fn create_faces_with_curves(
                     &mut made,
                     Some(&mut *fenv.env),
                 )?;
+                out.curve_edges.push(made.edge);
 
                 // A new face must be created when the loop exhausts:
                 if last_edge && made.face.is_none() {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::topology_failed(
+                        OP,
+                        "the closed loop split off no new face",
+                    ));
                 }
                 // Register any new face created:
                 if let Some(nf) = made.face {
                     // new face must not be created before the loop is exhausted
                     if !last_edge {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(
+                            OP,
+                            "a new face was split off before its loop closed",
+                        ));
                     }
                     faces.push(Some(nf));
                 }
@@ -676,7 +737,8 @@ pub fn create_faces_with_curves(
         p1::mark_loops_to_delete(b, &mut loops_to_delete, big_loop, 0)?;
 
         for &l in &loops_to_delete {
-            let face = loopuse::loop_face(b, l)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let face = loopuse::loop_face(b, l)?
+                .ok_or_else(|| SolidError::topology_missing(OP, "the loop's face"))?;
             let loop_edges = loopuse::loop_edges(b, l)?;
             let loop_vertices = loopuse::loop_vertices(b, l)?;
 
@@ -694,7 +756,10 @@ pub fn create_faces_with_curves(
             )?;
 
             let Some(slot) = faces.iter_mut().find(|x| **x == Some(face)) else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::topology_failed(
+                    OP,
+                    "the loop's face is not one of the new faces",
+                ));
             };
             *slot = None;
 
@@ -820,11 +885,10 @@ pub fn make_faces_with_curves(
     };
     // check state - valid sCurveLoops data structure
     if !loops.is_valid() {
-        return Err(SolidError::Upstream {
-            operation: OP,
-            code: SM_ERR_INVALID_INPUT,
-            entity: None,
-        });
+        return Err(SolidError::topology_invalid_value(
+            OP,
+            "the curve loops are not valid",
+        ));
     }
 
     // Create iso curves at each discontinuity.
@@ -1339,10 +1403,7 @@ mod tests {
     use crate::surface::plane::Plane;
 
     fn code(e: &SolidError) -> Option<i32> {
-        match e {
-            SolidError::Upstream { code, .. } => Some(*code),
-            _ => None,
-        }
+        e.upstream_status()
     }
 
     /// Runs `f` on a new B-rep (`new SmBrep()`) with an arena-only notification store.

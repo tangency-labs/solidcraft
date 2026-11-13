@@ -1,7 +1,6 @@
 //! WR-696 (#2273, step 5 of the generic blend; the fork's tangency-labs/smlib#79, 410dfe1,
-//! 20ba5a9, 8c40818, a34b5e8 and a3d6d81, merged at 5e8c9c1): with
-//! `fixes.fillet_gn_section_generator` the rolling ball's local regularity is judged along
-//! every blend before the corners (`SmFilletSolver::BallIsRegular`), and a blend that is not
+//! 20ba5a9, 8c40818, a34b5e8 and a3d6d81, merged at 5e8c9c1): the rolling ball's local
+//! regularity is judged along every blend before the corners (`SmFilletSolver::BallIsRegular`), and a blend that is not
 //! regular is refused with `NoRoom`, naming the radius that works and noting the largest
 //! size that builds ([`FilletSession::fit_size`]).
 //!
@@ -33,12 +32,11 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
 
-fn kernel(gn: bool) -> Kernel {
-    let mut k = Kernel::default();
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_gn_section_generator = gn;
-    k.fixes = fixes;
-    k
+fn kernel() -> Kernel {
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
@@ -93,7 +91,7 @@ fn round(k: &mut Kernel, b: &mut Brep, at: Point3, r: f64) -> Result<(), Refusal
 #[test]
 fn a_ball_wider_than_its_pin_is_refused_naming_the_pin() {
     for pin in [1.99, 1.5, 1.0] {
-        let mut k = kernel(true);
+        let mut k = kernel();
         let mut b = create_cylinder(&mut k, Point3::ZERO, pin, 10.0).unwrap();
         let refusal = round(&mut k, &mut b, Point3::new(0.0, pin, 10.0), 2.0).expect_err("refused");
         eprintln!("R {pin}: {} fit {:?}", refusal.comment, refusal.fit);
@@ -108,21 +106,6 @@ fn a_ball_wider_than_its_pin_is_refused_naming_the_pin() {
         assert!(
             (fit - pin).abs() <= 1e-9 * pin,
             "{fit} vs closed form {pin}"
-        );
-    }
-}
-
-/// Without the flag the round is not refused by the ball's regularity: no fit is noted.
-#[test]
-fn without_the_flag_no_fit_is_noted() {
-    let mut k = kernel(false);
-    let mut b = create_cylinder(&mut k, Point3::ZERO, 1.5, 10.0).unwrap();
-    if let Err(refusal) = round(&mut k, &mut b, Point3::new(0.0, 1.5, 10.0), 2.0) {
-        assert!(refusal.fit.is_none());
-        assert!(
-            !refusal.comment.contains("a radius below"),
-            "{}",
-            refusal.comment
         );
     }
 }
@@ -161,7 +144,7 @@ fn pin_on_a_slope(k: &mut Kernel) -> Brep {
 
 #[test]
 fn a_round_at_a_pin_on_a_slope_folds_past_two() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = pin_on_a_slope(&mut k);
     let refusal = round(&mut k, &mut b, Point3::new(0.0, 2.0, 0.0), 2.2).expect_err("refused");
     eprintln!("{} fit {:?}", refusal.comment, refusal.fit);
@@ -176,7 +159,7 @@ fn a_round_at_a_pin_on_a_slope_folds_past_two() {
     );
     assert!((fit - 1.9899999999991815).abs() < 1e-9, "{fit} vs fork");
 
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = pin_on_a_slope(&mut k);
     round(&mut k, &mut b, Point3::new(0.0, 2.0, 0.0), 1.8)
         .map_err(|r| r.comment)

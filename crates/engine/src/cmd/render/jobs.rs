@@ -2,6 +2,7 @@ use crate::schema::render_jobs::{
     ExportFormat, ImageCopied, ImageExported, Job, JobProgressReply, JobState, PreparationCancelled, QueueReply, RenderCancelled, RenderProgress,
     ResultPinned,
 };
+use crate::schema::render_start::{Checked, Denoising, GpuChecked, IndirectClamp, RenderChecked, RenderStarted, RuntimeChecked};
 use crate::{Result, Session, params::bad, render_jobs::job_error};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -24,6 +25,7 @@ struct Start {
     studio_weights: Option<[f64; 3]>,
     progressive: bool,
     denoise: bool,
+    clamp_indirect: Option<f64>,
     samples: Option<u32>,
     max_depth: Option<u32>,
     seed: Option<u32>,
@@ -88,12 +90,13 @@ struct ProgressiveStart {
     tone_map: Option<solidcraft_render::job::ToneMap>,
     environment: Option<super::environment::Input>,
     denoise: bool,
+    clamp_indirect: Option<f64>,
 }
 
 pub(crate) struct Prepared {
     pub(crate) replace: bool,
     pub(crate) submission: Option<solidcraft_render::job::PreparedSubmission>,
-    pub(crate) reply: Value,
+    pub(crate) reply: RenderChecked,
 }
 
 fn lower_led(input: &mut Start, command: &str) -> Result<()> {
@@ -151,15 +154,65 @@ struct Normalized {
     optics: solidcraft_doc::render_optics::OpticalBindings,
 }
 
+/// The runtime key beside a saved job, refused: the job already decides the method and its options.
+fn job_companion_refusal(object: &serde_json::Map<String, Value>) -> Option<String> {
+    let key = object.keys().find(|key| !matches!(key.as_str(), "setup" | "settings" | "replace" | "studio_weights"))?;
+    Some(format!(
+        "saved job already defines the active method and its options; runtime `{key}` cannot override it (use job: null for a runtime request)"
+    ))
+}
+
+/// What `normalize_saved_job` refuses from the JSON alone, in its order: both `setup` and
+/// `settings`, then inline `settings` with a `job` that doesn't parse or has a runtime key beside
+/// it. A named setup's job is in the design, so its companions are checked there. The contract of
+/// `render.start` and `render.preflight` (`schema::render_start`) calls it too.
+pub(crate) fn saved_job_refusal(params: &Value) -> Option<String> {
+    let object = params.as_object()?;
+    let inline = object.get("settings").filter(|value| !value.is_null());
+    if object.get("setup").is_some_and(|value| !value.is_null()) && inline.is_some() {
+        return Some("choose either setup or settings".into());
+    }
+    let inline = inline.filter(|value| value.get("job").is_some_and(|job| !job.is_null()))?;
+    if let Err(e) = serde_json::from_value::<RenderSetup>(inline.clone()) {
+        return Some(e.to_string());
+    }
+    job_companion_refusal(object)
+}
+
+/// What `prepare` and `prepare_progressive` refuse from the JSON alone before parsing: the runtime
+/// form (`progressive` not true) refuses the GPU controls, the GPU form the CPU and LED options.
+/// The contract of `render.start` and `render.preflight` (`schema::render_start`) calls it too.
+pub(crate) fn form_refusal(params: &Value, progressive: bool) -> Option<&'static str> {
+    let raytrace = params.get("raytrace").and_then(Value::as_object);
+    let environment = params.get("environment");
+    if progressive {
+        let cpu_raytrace = raytrace.is_some_and(|o| o.keys().any(|key| !matches!(key.as_str(), "dielectrics" | "clear_coats" | "textures")));
+        let refused = params.get("integrator").is_some_and(|v| v.as_str() != Some("raster"))
+            || cpu_raytrace
+            || params.get("led_strip").is_some()
+            || params.get("led_samples").is_some()
+            || environment.is_some_and(|e| e.is_object() && e.get("kind").is_none());
+        return refused.then_some("progressive rendering does not accept CPU raytrace, environment or LED options");
+    }
+    let refused = raytrace.is_some_and(|o| ["clear_coats", "textures"].iter().any(|key| o.contains_key(*key)))
+        || environment.is_some_and(|e| e.get("kind").is_some())
+        || ["lens", "lighting", "tone_map", "supersampling", "denoise_settings", "denoise_diagnostics"].iter().any(|key| params.get(*key).is_some())
+        || params.get("denoise").is_some_and(|value| value != &json!(false))
+        || params.get("clamp_indirect").is_some_and(|value| !value.is_null());
+    refused.then_some(
+        "runtime GPU transmission, texture, lens, environment, lighting, tone-map, denoise and clamp_indirect controls require progressive rendering",
+    )
+}
+
 fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Option<Normalized>> {
     let Some(object) = params.as_object() else {
         return Ok(None);
     };
+    if let Some(message) = saved_job_refusal(params) {
+        return Err(bad(command, message));
+    }
     let named = object.get("setup").filter(|value| !value.is_null());
     let inline = object.get("settings").filter(|value| !value.is_null());
-    if named.is_some() && inline.is_some() {
-        return Err(bad(command, "choose either setup or settings"));
-    }
     let mut settings = if let Some(value) = inline {
         if value.get("job").is_none_or(Value::is_null) {
             return Ok(None);
@@ -173,13 +226,8 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
     } else {
         return Ok(None);
     };
-    if let Some(key) = object.keys().find(|key| !matches!(key.as_str(), "setup" | "settings" | "replace" | "studio_weights")) {
-        return Err(bad(
-            command,
-            format!(
-                "saved job already defines the active method and its options; runtime `{key}` cannot override it (use job: null for a runtime request)"
-            ),
-        ));
+    if let Some(message) = job_companion_refusal(object) {
+        return Err(bad(command, message));
     }
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
     s.doc.render.validate_resources(&settings).map_err(|e| bad(command, e.to_string()))?;
@@ -206,7 +254,7 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
             "transparent_background":transparent_background,
             "samples":options.samples,"max_depth":options.max_depth,"seed":options.seed,
             "lens":options.lens,"lighting":options.lighting,"tone_map":options.tone_map,
-            "denoise":options.denoise,"environment":options.environment,
+            "denoise":options.denoise,"clamp_indirect":options.clamp_indirect,"environment":options.environment,
             "supersampling":options.supersampling,"denoise_settings":options.denoise_settings,"denoise_diagnostics":options.denoise_diagnostics,
             "finishing":options.finishing,"backdrop":options.backdrop,"linear_exr":options.linear_exr,
             "texture_filtering":options.texture_filtering,"metal_energy_compensation":options.metal_energy_compensation,"caustics":options.caustics,"adaptive":options.adaptive,"transmission_samples":options.transmission_samples,"volume":options.volume,"nested_media":options.nested_media,"aging":options.aging
@@ -257,17 +305,8 @@ pub(crate) fn prepare_with_metadata(
             retained,
         );
     }
-    let gpu_raytrace =
-        params.get("raytrace").and_then(Value::as_object).is_some_and(|o| ["clear_coats", "textures"].iter().any(|key| o.contains_key(*key)));
-    if gpu_raytrace
-        || params.get("environment").is_some_and(|e| e.get("kind").is_some())
-        || ["lens", "lighting", "tone_map", "supersampling", "denoise_settings", "denoise_diagnostics"].iter().any(|key| params.get(*key).is_some())
-        || params.get("denoise").is_some_and(|value| value != &json!(false))
-    {
-        return Err(bad(
-            command,
-            "runtime GPU transmission, texture, lens, environment, lighting, tone-map and denoise controls require progressive rendering",
-        ));
+    if let Some(message) = form_refusal(params, false) {
+        return Err(bad(command, message));
     }
     let mut input: Start = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     let coats = input.settings.as_mut().map_or_else(Default::default, |settings| std::mem::take(&mut settings.coats));
@@ -309,6 +348,9 @@ pub(crate) fn prepare_with_metadata(
     }
     if input.denoise {
         return Err(bad(command, "denoise requires GPU progressive rendering"));
+    }
+    if input.clamp_indirect.is_some() {
+        return Err(bad(command, "clamp_indirect requires GPU progressive rendering"));
     }
     if input.samples.is_some() || input.max_depth.is_some() || input.seed.is_some() {
         return Err(bad(command, "sampling controls require progressive rendering"));
@@ -488,7 +530,7 @@ pub(crate) fn prepare_with_metadata(
         if let Some(camera) = s.camera {
             settings.camera = camera;
         } else {
-            settings.camera.fit(&scene.bounds);
+            settings.camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
         }
         settings
     };
@@ -621,25 +663,31 @@ pub(crate) fn prepare_with_metadata(
         (true, false) => vec!["thin_sheet", "closed_box"],
         (false, _) => Vec::new(),
     };
-    let mut reply = json!({"ignored_controls":ignored,"stage_panels":settings.stage.len(),"stage_transport":stage_transport, "cpu_budget":budget,"cpu_limits":budget.limits(),"environment":environment_info,"textures":request.textures.as_ref().map(|maps|maps.summary()),"retained_request_bytes":retained_request_bytes,"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":transparency,"refraction":refraction,"dielectric_boundaries":dielectric_boundaries});
-    if !coats.is_empty() {
-        reply["coats"] = json!(coats);
-    }
-    if let Some(options) = request.raytrace.as_ref().filter(|options| options.denoise) {
-        reply["denoising"] = json!({
-            "method":"edge_aware_atrous", "backend":"native_cpu", "passes":options.denoise_settings.passes,
-            "steps":denoise_steps(options.denoise_settings.passes), "settings":options.denoise_settings,
-            "diagnostics_requested":options.denoise_diagnostics,
-            "outlier_policy":if options.denoise_settings.firefly_suppression {DENOISE_OUTLIER_POLICY} else {"disabled"},
-            "optical_policy":if options.denoise_settings.optical_filter {DENOISE_OPTICAL_POLICY} else {DENOISE_OPAQUE_ONLY_POLICY},
-            "guides":"deterministic_center_ray_albedo_normal_camera_relative_position_depth",
-            "bypass":if options.denoise_settings.optical_filter {"unsupported or ambiguous optical paths, emitter, background and partial coverage"} else {"all optical paths, emitter, background and partial coverage"},
-            "limitation":"biased spatial filter; optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences",
-            "raw_linear_accumulator_preserved":true,"raw_linear_exr_preserved":true,
-            "output_stage":"linear_before_tone_map", "work_units":"one pixel visit per pass, each with at most 25 taps",
-            "checkpoints":"every complete published pass uses the same filter"
-        });
-    }
+    let denoising = request.raytrace.as_ref().filter(|options| options.denoise);
+    let checked = Checked {
+        resolved: retyped(command, &resolved)?,
+        admission: retyped(command, &admission)?,
+        request: retyped(command, request)?,
+        scene_generation: s.revision,
+        host: retyped(command, &host.kind())?,
+        stage_panels: settings.stage.len(),
+        environment: environment_info.as_ref().map(|info| retyped(command, info)).transpose()?,
+        textures: request.textures.as_ref().map(|maps| retyped(command, &maps.summary())).transpose()?,
+        transparency,
+        refraction,
+        dielectric_boundaries,
+        coats: (!coats.is_empty()).then(|| retyped(command, &coats)).transpose()?,
+        denoising: denoising.map(|options| denoising_reply(command, &options.denoise_settings, options.denoise_diagnostics, true)).transpose()?,
+        param_warnings: Vec::new(),
+    };
+    let reply = RenderChecked::Runtime(RuntimeChecked {
+        checked,
+        ignored_controls: ignored,
+        stage_transport,
+        cpu_budget: retyped(command, &budget)?,
+        cpu_limits: retyped(command, &budget.limits())?,
+        retained_request_bytes,
+    });
     Ok(Prepared { replace: input.replace, submission: Some(submission), reply })
 }
 
@@ -654,17 +702,8 @@ fn prepare_progressive(
     cancel: &solidcraft_render::job::CancelToken,
     retained: Option<&solidcraft_render::job::RetainedMetadata>,
 ) -> Result<Prepared> {
-    let cpu_raytrace = params
-        .get("raytrace")
-        .and_then(Value::as_object)
-        .is_some_and(|o| o.keys().any(|key| !matches!(key.as_str(), "dielectrics" | "clear_coats" | "textures")));
-    if params.get("integrator").is_some_and(|v| v.as_str() != Some("raster"))
-        || cpu_raytrace
-        || params.get("led_strip").is_some()
-        || params.get("led_samples").is_some()
-        || params.get("environment").is_some_and(|e| e.is_object() && e.get("kind").is_none())
-    {
-        return Err(bad(command, "progressive rendering does not accept CPU raytrace, environment or LED options"));
+    if let Some(message) = form_refusal(params, true) {
+        return Err(bad(command, message));
     }
     let mut input: ProgressiveStart = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     let coats = input.settings.as_mut().map_or_else(Default::default, |settings| std::mem::take(&mut settings.coats));
@@ -699,11 +738,12 @@ fn prepare_progressive(
             || input.lighting.is_some()
             || input.tone_map.is_some()
             || input.environment.is_some()
-            || input.denoise)
+            || input.denoise
+            || input.clamp_indirect.is_some())
     {
         return Err(bad(
             command,
-            "runtime transmission, clear-coat, texture, lens, environment, lighting, tone-map and denoise controls require progressive rendering",
+            "runtime transmission, clear-coat, texture, lens, environment, lighting, tone-map, denoise and clamp_indirect controls require progressive rendering",
         ));
     }
     if let Some(bindings) = saved_surfaces.filter(|bindings| !bindings.is_empty()) {
@@ -733,7 +773,7 @@ fn prepare_progressive(
         if let Some(camera) = s.camera {
             settings.camera = camera;
         } else {
-            settings.camera.fit(&scene.bounds);
+            settings.camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
         }
         settings
     };
@@ -760,6 +800,7 @@ fn prepare_progressive(
     options.lighting = input.lighting;
     options.tone_map = input.tone_map.unwrap_or_default();
     options.denoise = input.denoise;
+    options.clamp_indirect = input.clamp_indirect;
     options.denoise_settings = input.denoise_settings;
     options.denoise_diagnostics = input.denoise_diagnostics;
     options.supersampling = input.supersampling.unwrap_or(1);
@@ -836,6 +877,9 @@ fn prepare_progressive(
     if options.denoise && resolved.executor.as_str() != "gpu-path" {
         return Err(bad(command, "denoise requires the native gpu-path executor"));
     }
+    if options.clamp_indirect.is_some() && resolved.executor.as_str() != "gpu-path" {
+        return Err(bad(command, "clamp_indirect requires the native gpu-path executor"));
+    }
     let host = s.render_jobs.host_for(&resolved.executor).ok_or_else(|| bad(command, "resolved executor is not installed as an image job host"))?;
     if !host.is_available() {
         return Err(bad(command, "image host is unavailable"));
@@ -870,24 +914,40 @@ fn prepare_progressive(
         .and_then(|bytes| bytes.checked_add(retained_options_bytes))
         .filter(|bytes| *bytes <= host.job_limit_bytes())
         .ok_or_else(|| bad(command, "GPU work and retained metadata exceed the per-job limit"))?;
-    let reply = json!({"stage_panels":settings.stage.len(),"resolved":resolved,"admission":admission,"request":request,"textures":request.textures.as_ref().map(|resources|resources.summary()),"scene_generation":s.revision,"host":host.kind(),"transparency":if refraction {"physical_transmission"} else if input.transparent_background {"coverage_alpha"} else if input.progressive {"opaque_only"} else {"sorted_alpha_approximation"},"options":options,"retained_options_bytes":retained_options_bytes,"environment":request.environment.as_ref().map(|source|source.info()),"refraction":refraction,"dielectric_boundaries": if resolved.executor.as_str() == "gpu-path" {vec!["thin_sheet","closed_box","closed_mesh"]} else {Vec::<&str>::new()}});
-    let mut reply = reply;
-    if !coats.is_empty() {
-        reply["coats"] = json!(coats);
-    }
-    if options.denoise {
-        reply["denoising"] = json!({
-            "method":"edge_aware_atrous", "passes":options.denoise_settings.passes,
-            "steps":denoise_steps(options.denoise_settings.passes), "settings":options.denoise_settings,
-            "diagnostics_requested":options.denoise_diagnostics,
-            "outlier_policy":if options.denoise_settings.firefly_suppression {DENOISE_OUTLIER_POLICY} else {"disabled"},
-            "optical_policy":if options.denoise_settings.optical_filter {DENOISE_OPTICAL_POLICY} else {DENOISE_OPAQUE_ONLY_POLICY},
-            "guides":"deterministic_center_ray_albedo_normal_position_depth",
-            "bypass":if options.denoise_settings.optical_filter {"unsupported or ambiguous optical paths, emitter, background and partial coverage"} else {"all optical paths, emitter, background and partial coverage"},
-            "limitation":"optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences",
-            "raw_linear_accumulator_preserved":true, "output_stage":"linear_before_tone_map"
-        });
-    }
+    let transparency = if refraction {
+        "physical_transmission"
+    } else if input.transparent_background {
+        "coverage_alpha"
+    } else if input.progressive {
+        "opaque_only"
+    } else {
+        "sorted_alpha_approximation"
+    };
+    let dielectric_boundaries = if resolved.executor.as_str() == "gpu-path" { vec!["thin_sheet", "closed_box", "closed_mesh"] } else { Vec::new() };
+    let checked = Checked {
+        resolved: retyped(command, &resolved)?,
+        admission: retyped(command, &admission)?,
+        request: retyped(command, request)?,
+        scene_generation: s.revision,
+        host: retyped(command, &host.kind())?,
+        stage_panels: settings.stage.len(),
+        environment: request.environment.as_ref().map(|source| retyped(command, source.info())).transpose()?,
+        textures: request.textures.as_ref().map(|resources| retyped(command, &resources.summary())).transpose()?,
+        transparency,
+        refraction,
+        dielectric_boundaries,
+        coats: (!coats.is_empty()).then(|| retyped(command, &coats)).transpose()?,
+        denoising: options.denoise.then(|| denoising_reply(command, &options.denoise_settings, options.denoise_diagnostics, false)).transpose()?,
+        param_warnings: Vec::new(),
+    };
+    let indirect_clamp = options.clamp_indirect.map(|limit| IndirectClamp {
+        limit,
+        from_bounce: 1,
+        keeps_hue: true,
+        biased: true,
+        limitation: "dims real caustics and glints; the raw linear EXR master is clamped too; optical glass light connections resolved after the path are not clamped",
+    });
+    let reply = RenderChecked::Gpu(GpuChecked { checked, options: retyped(command, &options)?, retained_options_bytes, indirect_clamp });
     Ok(Prepared { replace: input.replace, submission: Some(submission), reply })
 }
 
@@ -906,8 +966,43 @@ fn ignored_controls(settings: &RenderSetup) -> Vec<&'static str> {
     ignored
 }
 
+/// How the denoising filter of a CPU ray tracing or GPU request works, for its preflight reply.
+fn denoising_reply(command: &str, settings: &solidcraft_render::job::DenoiseSettings, diagnostics: bool, cpu: bool) -> Result<Denoising> {
+    Ok(Denoising {
+        method: "edge_aware_atrous",
+        backend: cpu.then_some("native_cpu"),
+        passes: settings.passes,
+        steps: denoise_steps(settings.passes),
+        settings: retyped(command, settings)?,
+        diagnostics_requested: diagnostics,
+        outlier_policy: if settings.firefly_suppression { DENOISE_OUTLIER_POLICY } else { "disabled" },
+        optical_policy: if settings.optical_filter { DENOISE_OPTICAL_POLICY } else { DENOISE_OPAQUE_ONLY_POLICY },
+        guides: if cpu {
+            "deterministic_center_ray_albedo_normal_camera_relative_position_depth"
+        } else {
+            "deterministic_center_ray_albedo_normal_position_depth"
+        },
+        bypass: if settings.optical_filter {
+            "unsupported or ambiguous optical paths, emitter, background and partial coverage"
+        } else {
+            "all optical paths, emitter, background and partial coverage"
+        },
+        limitation: if cpu {
+            "biased spatial filter; optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences"
+        } else {
+            "optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences"
+        },
+        raw_linear_accumulator_preserved: true,
+        raw_linear_exr_preserved: cpu.then_some(true),
+        output_stage: "linear_before_tone_map",
+        work_units: cpu.then_some("one pixel visit per pass, each with at most 25 taps"),
+        checkpoints: cpu.then_some("every complete published pass uses the same filter"),
+    })
+}
+
 pub(super) fn preflight(s: &mut Session, params: &Value) -> Result<Value> {
-    prepare(s, params, "render.preflight", &solidcraft_render::job::CancelToken::default()).map(|p| p.reply)
+    let cmd = "render.preflight";
+    super::typed_reply(cmd, prepare(s, params, cmd, &solidcraft_render::job::CancelToken::default())?.reply)
 }
 
 pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
@@ -921,11 +1016,28 @@ pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
             params.get("setup").and_then(Value::as_str).map(str::to_owned),
         )
         .map_err(job_error)?;
-    let mut status = json!(status);
-    if let (Some(out), Some(ignored)) = (status.as_object_mut(), p.reply.get("ignored_controls")) {
-        out.insert("ignored_controls".into(), ignored.clone());
-    }
-    Ok(status)
+    Ok(started("render.start", &status, &p.reply))
+}
+
+/// What Render Image returns once its job is queued: the job's `status`, and for a runtime
+/// request the ignored controls of its preflight reply `checked`. The window's own preparation
+/// (`render_preparation`) returns it too.
+pub(crate) fn started(command: &str, status: &solidcraft_render::job::JobStatus, checked: &RenderChecked) -> Value {
+    let ignored_controls = match checked {
+        RenderChecked::Runtime(runtime) => Some(runtime.ignored_controls.clone()),
+        RenderChecked::Gpu(_) => None,
+    };
+    // The job is queued already, so this never fails: should the status ever not read as a
+    // `JobState`, the reply is the status as the render crate gives it, as before the reply type.
+    let typed =
+        retyped(command, status).and_then(|state| super::typed_reply(command, RenderStarted { state, ignored_controls: ignored_controls.clone() }));
+    typed.unwrap_or_else(|_| {
+        let mut reply = json!(status);
+        if let (Some(out), Some(ignored)) = (reply.as_object_mut(), ignored_controls) {
+            out.insert("ignored_controls".into(), json!(ignored));
+        }
+        reply
+    })
 }
 
 #[derive(Deserialize)]
@@ -1100,4 +1212,11 @@ fn validate_studio_weights(weights: Option<[f64; 3]>, command: &str) -> Result<O
         return Err(bad(command, "studio visibility weights must be finite in 0..1"));
     }
     Ok(weights)
+}
+
+/// Read `params` as `prepare` reads a request: as a `ProgressiveStart` when `progressive`, else as
+/// a `Start`, with serde's message. The contract of `render.start` and `render.preflight`
+/// (`schema::render_start`) calls it, so it accepts what these readers accept.
+pub(crate) fn read_request(params: Value, progressive: bool) -> serde_json::Result<()> {
+    if progressive { serde_json::from_value::<ProgressiveStart>(params).map(drop) } else { serde_json::from_value::<Start>(params).map(drop) }
 }
