@@ -3,10 +3,10 @@
 #[path = "support/raster.rs"]
 mod raster;
 
+use solidcraft_theme as theme;
 use solidcraft_ui_egui::{
     broken_view_preview::BreakPreview,
     scenario::Harness,
-    theme,
     ui_kit::{Container, Surface},
 };
 use std::collections::HashMap;

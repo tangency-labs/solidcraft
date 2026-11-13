@@ -16,9 +16,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::EPS;
 use crate::drawing_view::Scale;
 use crate::paper::MAX_COORDINATE_MM;
-use crate::{EPS, Vec2};
+use crate::prelude::*;
+use solidcore_record::Vec2;
 
 /// Bound work before sorting or producing pieces.
 pub const MAX_BREAKS: usize = 64;

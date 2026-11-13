@@ -21,6 +21,39 @@ fn oblique_sample_preserves_the_plate_height_and_hole_alignment() {
 }
 
 #[test]
+fn undo_and_redo_restore_the_angle_that_defines_the_break_bands() {
+    for (next, accepted, clear_angle) in [(-90.0, true, -90.0), (0.0, false, -42.0)] {
+        let mut p = BreakPreview::oblique_sample();
+        let broken = p.output.as_ref().unwrap().lines.clone();
+        assert!(p.edit(Vec::new()));
+        let clear = p.output.as_ref().unwrap().lines.clone();
+        assert_eq!(p.change_angle(next), accepted);
+        assert_eq!(p.angle, clear_angle);
+        assert_eq!(p.error.is_none(), accepted);
+        assert!(p.bands.is_empty() && p.map().is_ok());
+        assert_eq!((p.undo.len(), p.redo.len()), (2, 0));
+        assert_eq!(p.output.as_ref().unwrap().lines, clear);
+
+        for _ in 0..2 {
+            p.undo();
+            assert_eq!(p.angle, -42.0);
+            assert_eq!(p.bands.len(), 1);
+            assert!(p.error.is_none());
+            assert_eq!((p.undo.len(), p.redo.len()), (1, 1));
+            assert_eq!(p.output.as_ref().unwrap().lines, broken);
+            assert!(p.output.as_ref().unwrap().shortening_mm > 0.0);
+
+            p.redo();
+            assert_eq!(p.angle, clear_angle);
+            assert!(p.bands.is_empty() && p.error.is_none());
+            assert_eq!((p.undo.len(), p.redo.len()), (2, 0));
+            assert_eq!(p.output.as_ref().unwrap().lines, clear);
+            assert_eq!(p.output.as_ref().unwrap().shortening_mm, 0.0);
+        }
+    }
+}
+
+#[test]
 fn repeated_pairs_pending_cancel_and_history_preserve_completed_breaks() {
     let mut p = BreakPreview { active: true, ..Default::default() };
     p.place(Vec2::new(60.0, 35.0));

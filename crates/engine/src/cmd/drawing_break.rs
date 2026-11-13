@@ -1,6 +1,6 @@
 //! Read-only W36 geometry preview, independent of the pending persistent view/session APIs.
 use serde_json::Value;
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_geom::drawing_break::{Band, BreakMap, MAX_BREAKS};
 use solidcraft_geom::drawing_view::Scale;
 

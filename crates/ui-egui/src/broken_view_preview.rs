@@ -1,22 +1,30 @@
 //! W36's runnable interaction harness, backed by the real read-only engine command.
 //! Temporary sample geometry only: this is not a Drawing workspace or a file format.
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
+use solidcore_record::Vec2;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::Vec2;
 use solidcraft_engine::geom::drawing_break::{Band, BreakMap};
 use solidcraft_engine::geom::drawing_view::Scale;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::schema::drawing_break::{BreakBand, PreviewParams, PreviewResult};
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::tr_label as tr;
 
-use crate::i18n::tr_label as tr;
-use crate::theme::Tokens;
 use crate::ui_kit::{self, Button};
+
+// Band coordinates belong to the normal of this angle, so history restores both.
+#[derive(Clone)]
+struct BreakState {
+    angle: f64,
+    bands: Vec<BreakBand>,
+}
 
 /// Developer preview state. Completed edits are undoable within this temporary session.
 pub struct BreakPreview {
     session: Session,
     bands: Vec<BreakBand>,
-    undo: Vec<Vec<BreakBand>>,
-    redo: Vec<Vec<BreakBand>>,
+    undo: Vec<BreakState>,
+    redo: Vec<BreakState>,
     output: Option<PreviewResult>,
     angle: f64,
     gap: f64,
@@ -113,14 +121,28 @@ impl BreakPreview {
         }
     }
 
+    fn change_angle(&mut self, next: f64) -> bool {
+        let previous = std::mem::replace(&mut self.angle, next);
+        if self.refresh() {
+            true
+        } else {
+            self.angle = previous;
+            false
+        }
+    }
+
+    fn replace_state(&mut self, next: BreakState) -> BreakState {
+        BreakState { angle: std::mem::replace(&mut self.angle, next.angle), bands: std::mem::replace(&mut self.bands, next.bands) }
+    }
+
     fn edit(&mut self, next: Vec<BreakBand>) -> bool {
-        let old = std::mem::replace(&mut self.bands, next);
+        let old = self.replace_state(BreakState { angle: self.angle, bands: next });
         if self.refresh() {
             self.undo.push(old);
             self.redo.clear();
             true
         } else {
-            self.bands = old;
+            self.replace_state(old);
             false
         }
     }
@@ -135,12 +157,12 @@ impl BreakPreview {
     fn undo(&mut self) {
         self.pending = None;
         if let Some(old) = self.undo.last().cloned() {
-            let current = std::mem::replace(&mut self.bands, old);
+            let current = self.replace_state(old);
             if self.refresh() {
                 let _ = self.undo.pop();
                 self.redo.push(current);
             } else {
-                self.bands = current;
+                self.replace_state(current);
             }
         }
     }
@@ -148,12 +170,12 @@ impl BreakPreview {
     fn redo(&mut self) {
         self.pending = None;
         if let Some(next) = self.redo.last().cloned() {
-            let current = std::mem::replace(&mut self.bands, next);
+            let current = self.replace_state(next);
             if self.refresh() {
                 let _ = self.redo.pop();
                 self.undo.push(current);
             } else {
-                self.bands = current;
+                self.replace_state(current);
             }
         }
     }
@@ -208,12 +230,12 @@ impl BreakPreview {
         ui.horizontal(|ui| {
             ui.set_width(390.0);
             ui.add_enabled_ui(self.bands.is_empty() && self.pending.is_none(), |ui| {
-                let previous = self.angle;
+                let mut next = self.angle;
                 ui_kit::row(ui, tr("Line angle"), |ui| {
-                    ui_kit::slider(ui, &mut self.angle, -180.0..=180.0, ui_kit::Slider { step: Some(1.0), ..Default::default() });
+                    ui_kit::slider(ui, &mut next, -180.0..=180.0, ui_kit::Slider { step: Some(1.0), ..Default::default() });
                 });
-                if previous != self.angle {
-                    self.refresh();
+                if next != self.angle {
+                    self.change_angle(next);
                 }
             });
         });

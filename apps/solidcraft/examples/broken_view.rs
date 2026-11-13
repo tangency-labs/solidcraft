@@ -13,7 +13,7 @@ struct App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        let tokens = solidcraft_ui_egui::theme::Tokens::get();
+        let tokens = solidcraft_theme::Tokens::get();
         Container::new(&ctx, Surface::Viewport)
             .frame(&ctx, tokens.panel, solidcraft_ui_egui::frame::Side::Right)
             .inner_margin(tokens.space_12)
@@ -30,7 +30,7 @@ fn main() -> eframe::Result {
         "SolidCraft — Broken View interaction preview",
         eframe::NativeOptions { viewport: egui::ViewportBuilder::default().with_inner_size([1180.0, 820.0]), ..Default::default() },
         Box::new(|cc| {
-            solidcraft_ui_egui::theme::apply(&cc.egui_ctx);
+            solidcraft_theme::apply(&cc.egui_ctx);
             let preview =
                 if std::env::args().any(|arg| arg == "--oblique-sample") { BreakPreview::oblique_sample() } else { BreakPreview::default() };
             Ok(Box::new(App { preview }))
