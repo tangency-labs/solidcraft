@@ -107,6 +107,17 @@ fn tubes(app: &SolveApp) -> &[Centreline] {
     if open && !app.preview.busy { &app.preview.centrelines } else { &[] }
 }
 
+/// What the view's picks take from the dialog, for its pick cache: whether Ghost Frame Members
+/// is ticked and the centrelines shown.
+pub(crate) fn hash_picks(app: &SolveApp, h: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    matches!(app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Frame(m)) if m.ghost).hash(h);
+    for c in tubes(app) {
+        c.id.hash(h);
+        [c.a.x, c.a.y, c.a.z, c.b.x, c.b.y, c.b.z].map(f64::to_bits).hash(h);
+    }
+}
+
 /// The nearest centreline within [`TUBE_PX`] of `pos`.
 pub(crate) fn tube_near(app: &SolveApp, proj: &crate::viewport::Proj, pos: egui::Pos2) -> Option<Hit> {
     tubes(app)
@@ -191,7 +202,9 @@ pub(crate) fn remove_picked(app: &mut SolveApp) -> bool {
 /// pair shares stays), a line's pick. Each other entry keeps its reference and pair id. With All
 /// Lines, the lines kept are listed from then on, so the one taken out stays out.
 pub(crate) fn remove_tubes(app: &mut SolveApp, ids: &[String]) {
-    let all = tubes(app).to_vec();
+    // The last finished preview's, busy or not: tubes are picked again whenever the path
+    // changes, so a preview still computing is of this same path.
+    let all = app.preview.centrelines.clone();
     let Some(d) = app.dialog.as_mut() else { return };
     let (Some(path), Kind::Frame(m)) = (d.inputs.first_mut(), &mut d.kind) else { return };
     m.sync(&path.items);
@@ -503,6 +516,8 @@ fn refusal(app: &SolveApp, d: &Dialog, before: &[Sel]) -> Option<String> {
             return None;
         }
     }
+    // ponytail: one Frame Member evaluation per completing pick, on the UI thread; check the
+    // async preview's result and take the pick back then if a large frame makes clicks lag.
     match crate::dialogs::apply_commands(app, d) {
         Ok(cmds) => app.session.preview(&cmds).err().map(|e| e.to_string()),
         Err(e) => Some(e),

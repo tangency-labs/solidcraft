@@ -885,3 +885,43 @@ fn cancel_after_remove_tube_leaves_the_feature_unchanged() {
     assert!(app.dialog.is_none());
     assert_eq!((stored(&app), members(&app)), (before, bodies));
 }
+
+/// Remove Tube while the preview is computing (of the same path: picks go when the path changes)
+/// still takes the picked tubes out, from the last finished preview's centrelines.
+#[test]
+fn remove_tube_while_the_preview_is_busy_still_removes_the_picked_tubes() {
+    let mut app = box_app();
+    dialog_with(&mut app, &[corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 0.), corner(600., 0., 400.)]);
+    assert!(super::click_tube(&mut app, &centreline("pair1")));
+    app.preview.busy = true;
+    assert!(super::remove_picked(&mut app));
+    assert_eq!(path(app.dialog.as_ref().unwrap()), [corner(600., 0., 0.), corner(600., 0., 400.)], "pair1's two points go");
+}
+
+/// The view's pick cache knows the centrelines it offers: they go when the preview starts again
+/// and come back when it finishes, and Ghost Frame Members changes what a click goes through.
+#[test]
+fn the_pick_cache_follows_the_previews_centrelines_and_ghosting() {
+    let mut app = box_app();
+    let (a, b) = diagonal(&mut app);
+    let proj = model_proj(&app);
+    let middle = a + (b - a) * 0.5;
+    let tube_hit = |app: &mut SolveApp| crate::viewport::pick_cached(app, &proj, middle).contains(&centreline("pair1"));
+    assert!(tube_hit(&mut app));
+    app.preview.busy = true;
+    assert!(!tube_hit(&mut app), "no centreline while the preview computes");
+    app.preview.busy = false;
+    assert!(tube_hit(&mut app));
+    let mut app = railed_box();
+    frame_dialog(&mut app);
+    let proj = model_proj(&app);
+    let first_face = |app: &mut SolveApp| {
+        crate::viewport::pick_cached(app, &proj, egui::pos2(480.0, 300.0)).into_iter().find_map(|h| match h {
+            crate::viewport::Hit::Face { body, .. } => Some(body),
+            _ => None,
+        })
+    };
+    assert_eq!(first_face(&mut app).as_deref(), Some("Box"), "ghosted, the click goes through the rail");
+    member(open(&mut app)).ghost = false;
+    assert_eq!(first_face(&mut app).as_deref(), Some("Rail"));
+}
