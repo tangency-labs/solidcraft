@@ -28,6 +28,7 @@ pub mod fill;
 pub mod fill_general;
 pub mod fill_iso;
 pub mod fill_matched;
+pub mod gdt;
 mod grid;
 pub mod hlr;
 pub mod ids;
