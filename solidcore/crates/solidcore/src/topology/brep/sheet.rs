@@ -1,11 +1,13 @@
 //! A one-face sheet on a surface's whole natural box ([`sheet_on`]), the kernel's one
 //! arena-notify `CreateFaceFromSurface` wrapper, a face on a box of a surface's parameters
-//! ([`face_on`]), and a sheet turned over ([`turn_over_shell`], [`turn_over_sheet`]).
+//! ([`face_on`]), a sheet turned over ([`turn_over_shell`], [`turn_over_sheet`]), and a planar
+//! face rebuilt as the Coons spline of its edges ([`face_spline_sheet`]).
 //!
 //! Not upstream: the composition an operation that rebuilds a face on a new surface (a sheet
 //! extended past a side) makes of `new_brep` and `SmBrep::CreateFaceFromSurface`, kept in the
 //! kernel so the modelling layer holds no notification plumbing; and the turn-over of every
-//! face of an open shell ([`crate::topology::face::p1::turn_over`]).
+//! face of an open shell ([`crate::topology::face::p1::turn_over`]); and a planar face's spline
+//! sheet, so the control-net edits of the modelling layer have a net on a flat face.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
@@ -23,6 +25,20 @@ use crate::topology::face::p1::turn_over;
 use crate::topology::topology_traverser::Marks;
 use crate::topology::{Brep, FaceId, ShellId};
 use crate::EntityRef;
+
+use crate::curve::curve::CurveKind;
+use crate::geom::tol::{context_zone_tol_3d, SmallTopoType};
+use crate::math::Point3;
+use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use crate::nurbs::b_spline_surface::BSplineSurface;
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::knots::Side;
+use crate::primitive::api_curve_ops::make_curves_compatible;
+use crate::surface::surface::SurfaceKind;
+use crate::topology::edge::create_trimmed_nurbs_curve;
+use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::face::p2 as fp2;
+use crate::topology::loopuse;
 
 /// A new body of one face on `surface` over its whole natural box, at `tolerance`, and that
 /// face.
@@ -129,4 +145,158 @@ fn open_shell_faces(b: &Brep, s: ShellId) -> Result<Vec<FaceId>> {
         }
     }
     Ok(faces)
+}
+
+const OP_SPLINE: &str = "topology::brep::sheet::face_spline_sheet";
+
+fn not_rebuilt(reason: &'static str) -> SolidError {
+    SolidError::Unsupported {
+        operation: OP_SPLINE,
+        reason,
+    }
+}
+
+/// The curve that stays at `p`: degree 1 on `[0, 1]`, both control points `p` (a Coons side
+/// collapsed to a corner).
+fn at_point(p: Point3) -> Result<BSplineCurve> {
+    let points = [p, p];
+    BSplineCurve::create_canonical(&CanonicalData {
+        dim: 3,
+        degree: 1,
+        control_points: &points,
+        form: BSplineCurveForm::Unspecified,
+        knot_multiplicities: &[2, 2],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::Unspecified,
+        weights: None,
+        trim: None,
+    })
+}
+
+/// `c` running the other way.
+fn reversed(mut c: BSplineCurve) -> Result<BSplineCurve> {
+    let interval = c.natural_interval();
+    c.reverse_parameterization(&interval)?;
+    Ok(c)
+}
+
+/// `a` and `b` made compatible, exactly (one degree, parameter range and knot vector).
+fn compatible(a: BSplineCurve, b: BSplineCurve) -> Result<[BSplineCurve; 2]> {
+    let mut pair = [a, b];
+    make_curves_compatible(&mut pair)?;
+    Ok(pair)
+}
+
+/// The bilinear Coons patch bounded by `sides`, three or four B-spline curves running end to end
+/// round one loop in their order (`c0` from `P0` to `P1`, `c1` on to `P2`, `c2` on to `P3` and
+/// `c3` back to `P0`; with three, `c2` runs back to `P0` and the fourth side stays at `P0`, a
+/// degenerate patch). Its sides in the patch's order are `P0` to `P1` and `P3` to `P2` (in u, at
+/// v min and max) and `P0` to `P3` and `P1` to `P2` (in v, at u min and max); opposite sides are
+/// made compatible first, exactly (one degree, parameter range and knot vector each pair), so
+/// the patch's sides are the curves themselves (`create_coons_patch` with `tol`). Not upstream:
+/// the one sequence the modelling layer's boundary patch and [`face_spline_sheet`] share.
+///
+/// # Errors
+///
+/// `InvalidInput` for other than three or four curves; those of the reversal, the
+/// compatibility and the patch.
+pub fn coons_patch_of_loop(sides: Vec<BSplineCurve>, tol: f64) -> Result<BSplineSurface> {
+    let mut sides = sides.into_iter();
+    let (Some(c0), Some(c1), Some(c2)) = (sides.next(), sides.next(), sides.next()) else {
+        return Err(SolidError::invalid_input(
+            OP_SPLINE,
+            "a Coons patch of other than three or four sides",
+        ));
+    };
+    let c3 = match sides.next() {
+        Some(c3) => c3,
+        None => at_point(c0.ends()?.start)?,
+    };
+    if sides.next().is_some() {
+        return Err(SolidError::invalid_input(
+            OP_SPLINE,
+            "a Coons patch of other than three or four sides",
+        ));
+    }
+    let [u0, u1] = compatible(c0, reversed(c2)?)?;
+    let [v0, v1] = compatible(reversed(c3)?, c1)?;
+    let mut quad = [u0, u1, v0, v1];
+    BSplineSurface::create_coons_patch(tol, true, &mut quad, &mut [])
+}
+
+/// Face `f` of `b`, when its surface is a plane, rebuilt as a one-face sheet on the bilinear
+/// Coons patch of its edges: a spline surface whose whole box is the face. The edges are taken
+/// round the face's one loop as its upward use runs it, each as a B-spline copy of its curve
+/// over its interval (`CreateTrimmedNURBSCurve`), and bound the patch [`coons_patch_of_loop`]
+/// makes (three edges: its fourth side collapsed to the corner where the third meets the
+/// first). The patch's sides are the edges themselves,
+/// and each of its points is an affine combination of points of the edges, so it lies in their
+/// plane; its degrees are the edges' own (a skin of two cubic sections gives (3, 1), its wall).
+/// `None` for a face that is not on a plane.
+///
+/// # Errors
+///
+/// `Unsupported` for a planar face with holes or with fewer than three or more than four edges,
+/// an edge with no B-spline form, or a patch that folds (its normal not the face's at every
+/// point of a 5 by 5 grid inside its box: a dart-shaped outline); those of the curves, the
+/// compatibility, the patch and the sheet.
+pub fn face_spline_sheet(k: &mut Kernel, b: &Brep, f: FaceId) -> Result<Option<Brep>> {
+    let face = b.face(f)?;
+    let surface = face
+        .surface
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP_SPLINE, "a face without a surface"))?;
+    let SurfaceKind::Plane(plane) = surface.kind() else {
+        return Ok(None);
+    };
+    let normal = plane.position().z_axis();
+    if fp2::loops(b, f, false, None)?.len() != 1 {
+        return Err(not_rebuilt("a planar face with holes"));
+    }
+    let fu = fp2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP_SPLINE, "a face without its upward use"))?;
+    let lu = eu1::faceuse_loopuses(b, fu, false, None)?
+        .first()
+        .copied()
+        .ok_or_else(|| SolidError::invalid_input(OP_SPLINE, "a face without its loop"))?;
+    let mut sides = Vec::new();
+    for eu in loopuse::edgeuses(b, lu, None, None)? {
+        let e = eu1::edge(b, eu)?
+            .ok_or_else(|| SolidError::invalid_input(OP_SPLINE, "an edge use without its edge"))?;
+        let c = create_trimmed_nurbs_curve(k, b, e)?
+            .ok_or_else(|| not_rebuilt("an edge with no B-spline form"))?;
+        let CurveKind::BSpline(c) = c.into_kind() else {
+            return Err(not_rebuilt("an edge with no B-spline form"));
+        };
+        // as the loop runs
+        sides.push(if eu1::orientation(b, eu)? == OrientType::Same {
+            c
+        } else {
+            reversed(c)?
+        });
+    }
+    if !(3..=4).contains(&sides.len()) {
+        return Err(not_rebuilt(
+            "a planar face of other than three or four edges",
+        ));
+    }
+    let tol = context_zone_tol_3d(k, None, SmallTopoType::NormalSize);
+    let patch = coons_patch_of_loop(sides, tol)?;
+    let patch = Surface::from(patch);
+    // no fold: the patch faces the face's way inside its box
+    let bx = patch.natural_uv_domain_with_nurb(k)?;
+    for i in 1..=5 {
+        for j in 1..=5 {
+            let uv = bx.evaluate(f64::from(i) / 6.0, f64::from(j) / 6.0);
+            let n = patch.evaluate_normal(k, uv, Side::Left, Side::Left)?;
+            #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+            if !(n.dot(normal) > 0.0) {
+                return Err(not_rebuilt(
+                    "a planar face whose Coons patch folds (its outline is not convex enough)",
+                ));
+            }
+        }
+    }
+    let (sheet, _) = sheet_on(k, patch, b.tolerance())?;
+    Ok(Some(sheet))
 }
