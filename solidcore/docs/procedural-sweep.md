@@ -55,7 +55,8 @@ The rules that follow from it, decided on [#2572](https://github.com/tangency-la
 | along lines and arcs, piece by piece (`sweep::segments`) | each piece the linear or rotational sweep's exact surface | out: exact without a definition |
 | along a general path (`curve_sweep`), path of lines and circular arcs | `ProceduralSweep`, `Motion::Path`, exact net (§4) | **in** |
 | along a general path, any other span | fitted net, no definition: ledger `path-spline` | **in** (open, §9) |
-| along a closed path | fitted net, no definition: ledger `path-closed` | **in** (open) |
+| along a closed path of lines and arcs whose transported frame closes | exact net and definition, as for an open path | **in** |
+| along any other closed path | fitted net, no definition: ledger `path-closed` | **in** (open) |
 | translational (`translational_sweep`) | the exact S(u) + T(v), its net its own definition: ledger `path-translational` | ledger |
 | scaled along the path | sections no rigid images of the profile: ledger `path-scaled` | ledger |
 | screw (`sweep::screw`: threads, coils) | `ProceduralSweep`, `Motion::Screw`, certified net (§6) | **in** |
@@ -88,8 +89,10 @@ screw motion for the frame (§6).
 ### 3.1 The path
 
 The path is the B-spline `curve_sweep` sweeps along, copied into the definition. It must be a 3D
-curve, open (first and last control points more than 10⁻⁹ (1 + |P₀|) apart), and G1 at every
-interior knot (the unit tangents from both sides within 10⁻⁸). Each knot span is classified once
+curve and G1 at every interior knot (the unit tangents from both sides within 10⁻⁸).
+When its ends coincide within 10⁻⁹ (1 + |P₀|), its transported tangent and normal must also
+return to their start within 10⁻⁸. A frame that does not close still needs the fitted sweep's
+closure correction and keeps no definition. Each knot span is classified once
 (`classify`) as one of:
 
 | span | test | frame on it |
@@ -151,9 +154,9 @@ coordinates: C(w) placed by the frame is `Frame::place`, T + x C_x + y C_y + z C
 
 ### 3.4 The net and the map
 
-The net's parameter across the sweep is not always the path's t, so the definition carries a
-map (`PathMotion::nodes`): pairs (v_k, t_k), both strictly ascending, read by linear
-interpolation and held beyond the ends. The face's (u, v) reach the definition's (w, t) through a
+The definition carries a map (`PathMotion::nodes`): pairs (v_k, t_k), both strictly ascending,
+read by linear interpolation and held beyond the ends. Constructed path sweeps use the
+identity map. The face's (u, v) reach the definition's (w, t) through a
 second, affine map (`SweepMap`: w = a₀ + b₀ p, t = a₁ + b₁ q, (p, q) = (u, v) or (v, u) when
 swapped) that the net's reversals, reparametrisations and swaps move.
 
@@ -161,10 +164,10 @@ There are two nets:
 - **Exact** (`PathMotion::create_exact`), for a path of lines and arcs: built from the definition
   itself (§4). Its parameter across the sweep is the path's t; the nodes are the path's joints,
   mapped to themselves.
-- **Fitted** (`PathMotion::create`): the net `sweep_scale` skinned. Its parameter across the sweep
-  is the skin's chord length: piece k's sections at k + their averaged normalised chord lengths
-  (`find_nodes`, `chord_parameters`, replaying the skin's `interp_params`). A net whose domain is
-  not [0, piece count] has no definition rather than a loose one.
+- **Fitted** (`PathMotion::create`): the net `sweep_scale` skinned. Its sections use the path's
+  parameters and its boundary derivatives in that same parameter. Contiguous pieces join
+  without shifting their parameters, so `find_nodes` maps each traced station to itself.
+  A net whose domain differs from the path's has no definition rather than a loose one.
 
 `curve_sweep` (`primitive/primitive_creation/p3/construct.rs`) tries the exact net first and keeps
 it when its bound is at most `ZONE_TOL_3D`; otherwise it keeps the fitted net, with a definition
@@ -200,6 +203,14 @@ along a line gives the exact NURBS cylinder; along an arc, the exact NURBS torus
 stays a B-spline carrying its definition; `tests/general_path_sweep.rs` checks the definition's
 points at RADIUS from the axis or the arc's circle to 10⁻¹² and the net within the bound
 (`a_circle_along_a_line_is_the_exact_cylinder`, `a_circle_along_an_arc_is_the_exact_torus`).
+
+**Horn bends keep poles on face boundaries.** When the profile reaches an arc's centre,
+its inner rail collapses to a point. After the continuity partition, the face builder splits
+at any interior knot iso curve whose positive-weight control points coincide within the
+B-rep tolerance. This leaves the pole on the resulting faces' boundaries, whatever the
+closed profile's seam. The exact natural UV trims are retained with `keep_exact_pcurves`,
+so reprojection cannot choose another parameter at that pole. The rounded-rectangle
+regression checks both profile seams, with and without caps, against analytic area and volume.
 
 **General splines get a fitted net and a ledger entry.** A path with any span that is neither a
 line nor an arc keeps the fitted net and no definition (`path-spline`). The certified enclosure
@@ -381,7 +392,7 @@ A reviewer can check each of these against the code and the tests.
    (`the_definitions_partials_at_a_faces_ends_are_its_own_sides`).
 9. A scale that is not uniform drops the definition and keeps the B-spline; so do a piece that is
    not a B-spline, an extension, a mirror and an offset (`carry_definition`, the module docs).
-10. A closed path, a span neither line nor arc, a vanishing tangent, a joint that is not G1, an
+10. A closed path whose frame does not close, a span neither line nor arc, a vanishing tangent, a joint that is not G1, an
     arc span of half a turn or more, a net whose sections are not the profile's control points and
     a bound not finite are refused with `InvalidInput`; hostile definitions are refused, never a
     panic (`hostile_definitions_are_refused`).
@@ -409,7 +420,7 @@ a block's rim lies flush on it and the union builds where the fitted net crossed
 
 | issue | topic |
 |---|---|
-| [#2572](https://github.com/tangency-labs/solidcore/issues/2572) | the rotation-minimizing frame of a general spline path with a certified enclosure; the closed path; the tolerance guard (a sweep that misses its tolerance refuses with the bound it reached, a join gap above the zone tolerance refused) |
+| [#2572](https://github.com/tangency-labs/solidcore/issues/2572) | the rotation-minimizing frame of a general spline path with a certified enclosure; closed paths whose transported frame does not close; the tolerance guard (a sweep that misses its tolerance refuses with the bound it reached, a join gap above the zone tolerance refused) |
 | [#2724](https://github.com/tangency-labs/solidcore/issues/2724) | offsetting a screw wall on its definition; walls meeting along a helix; the thread's definition in the record; one wall per thread |
 
 Known limits of what is merged:
@@ -423,16 +434,16 @@ Known limits of what is merged:
   given path's own rotation-minimizing frame.
 - **The ops layer's note is about the fit.** `solidcore_ops::sweep::sweep_placed` routes lines
   and arcs through the exact linear, rotational or piecewise sweeps first; what reaches the
-  curve sweep with `SweepFrame::Follow` is a path of other curves, a corner or a closed path, which
-  has no definition today.
+  curve sweep with `SweepFrame::Follow` is a path of other curves, a corner or a closed path.
+  Closed paths of lines and arcs have a definition when their transported frame closes.
 
 ## 10. If you're stuck
 
 - **A wall has no definition.** Find its kind in the ledger first. If it should have one, check in
-  order: is the path closed (`open_path_spans`), is every span a line or an arc (`classify`), is
+  order: does a closed path's frame close (`path_spans`), is every span a line or an arc (`classify`), is
   every joint G1 (`spans_of`), is the sweep scaled or translational (`curve_sweep`'s match on
-  `prepared.scale`), did the exact net's bound pass `ZONE_TOL_3D`, does the fitted net's domain end
-  at the piece count (`find_nodes`). Each refusal is an `InvalidInput` with its reason; call
+  `prepared.scale`), did the exact net's bound pass `ZONE_TOL_3D`, does the fitted net's domain match
+  the path's (`find_nodes`). Each refusal is an `InvalidInput` with its reason; call
   `ProceduralSweep::create_path_exact` or `PathMotion::create` in a test to read it.
 - **The bound is far larger than the gap.** For a path, the cell budget may be spent (raise
   nothing; find why the second-order terms are large: a path span whose |T″| bound from its

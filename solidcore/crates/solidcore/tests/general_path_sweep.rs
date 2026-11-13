@@ -632,6 +632,26 @@ fn issue_2572_every_path_wall_is_a_definition_or_in_the_ledger() {
     );
     let wire = Curve::from(wire_path(&k));
     let closed = Curve::from(create_arc(Point3::new(0.0, 0.0, 0.0), 10.0, 0.0, 360.0).unwrap());
+    // Closed general splines still lack a certified frame. The circle above now
+    // has an exact definition because its transported frame closes.
+    let closed_spline = Curve::from(
+        BSplineCurve::interpolate_points(
+            &[
+                Vec3::new(10.0, 0.0, 0.0),
+                Vec3::new(0.0, 10.0, 2.0),
+                Vec3::new(-10.0, 0.0, 0.0),
+                Vec3::new(0.0, -10.0, -1.0),
+                Vec3::new(10.0, 0.0, 0.0),
+            ],
+            None,
+            3,
+            None,
+            None,
+            true,
+            ParamMethod::ChordLength,
+        )
+        .unwrap(),
+    );
     // (the kind its bare walls are listed as, the body)
     let cases: Vec<(&str, Brep)> = vec![
         (
@@ -688,6 +708,10 @@ fn issue_2572_every_path_wall_is_a_definition_or_in_the_ledger() {
         (
             "path-closed",
             create_pipe_sweep(&mut k, RADIUS, Some(&closed), false).unwrap(),
+        ),
+        (
+            "path-closed",
+            create_pipe_sweep(&mut k, RADIUS, Some(&closed_spline), false).unwrap(),
         ),
     ];
     let ledger = path_ledger();
@@ -947,4 +971,149 @@ fn the_definitions_partials_at_a_faces_ends_are_its_own_sides() {
         }
     }
     assert!(checked >= 20, "{checked}");
+}
+
+/// Equal profile and corner radii make each inner arc rail stationary. The old G1
+/// skin rescales its derivatives using that zero travel and corrupts the net.
+#[test]
+fn closed_rounded_rectangle_has_no_internal_pole() {
+    use solidcore::curve::composite_curve::CompositeCurve;
+    use solidcore::nurbs::b_spline_surface::BSplineSurface;
+    use solidcore::surface::surface::assert_valid::has_internal_pole;
+    let mut k = Kernel::default();
+    // Match the application's pole, closure and exact-trim handling.
+    k.fixes.internal_pole_row_through_knot = true;
+    k.fixes.curve_sweep_closed_path_joins_ends = true;
+    k.fixes.sweep_statuses_pass_on = true;
+    k.fixes.uv_trim_corner_end_points_only = true;
+    k.fixes.bspline_trim_preserves_uv_spans = true;
+    k.fixes.bspline_trim_keeps_rational_end_spans = true;
+    k.fixes.closed_smooth_pole_tangent_limit = true;
+    k.fixes.keep_exact_pcurves = true;
+    k.fixes.face_swap_uv_transposes_trims = true;
+    k.fixes.degen_param_tiebreak_uses_actual_param = true;
+    let mut curves = Vec::new();
+    for (cx, cy, angle) in [
+        (8.0, 2.0, -90.0),
+        (8.0, 8.0, 0.0),
+        (2.0, 8.0, 90.0),
+        (2.0, 2.0, 180.0),
+    ] {
+        let arc = create_arc(Vec3::new(cx, cy, 0.0), 2.0, angle, angle + 90.0).unwrap();
+        let end = arc.evaluate_point(arc.natural_interval().max()).unwrap();
+        curves.push(Curve::from(arc));
+        let next = match angle as i32 {
+            -90 => Vec3::new(10.0, 8.0, 0.0),
+            0 => Vec3::new(2.0, 10.0, 0.0),
+            90 => Vec3::new(0.0, 2.0, 0.0),
+            _ => Vec3::new(8.0, 0.0, 0.0),
+        };
+        curves.push(Curve::from(
+            BSplineCurve::create_line_segment(3, end, next).unwrap(),
+        ));
+    }
+    let path = CompositeCurve::build_composites_from_curves(&k, curves, 1e-6, 0.0)
+        .unwrap()
+        .composites[0]
+        .make_composite_nurb()
+        .unwrap();
+    let profile = BSplineCurve::create_circle_segment(
+        3,
+        &Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z),
+        2.0,
+        0.0,
+        360.0,
+        NurbCircleParam::Quadratic,
+    )
+    .unwrap();
+    let net = BSplineSurface::create_sweep_surface(&profile, &path, None, false, 1e-6).unwrap();
+    let surface = Surface::from(net.clone());
+    let points = net.control_point_net().unwrap();
+    assert!(points
+        .points
+        .iter()
+        .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
+    assert!(!has_internal_pole(&k, &surface, &net, 1e-6).unwrap());
+    let domain = net.natural_uv_domain();
+    let mut radial_error = 0.0_f64;
+    let mut closure_gap = 0.0_f64;
+    for i in 0..128 {
+        let t = domain.u_interval().evaluate((f64::from(i) + 0.37) / 128.0);
+        let center = path.evaluate_point(t).unwrap();
+        for j in 0..16 {
+            let v = domain.v_interval().evaluate((f64::from(j) + 0.23) / 16.0);
+            let point = net.evaluate_point(Point2::new(t, v)).unwrap();
+            radial_error = radial_error.max((point.distance(center) - 2.0).abs());
+            closure_gap = closure_gap.max(
+                net.evaluate_point(Point2::new(domain.min().x, v))
+                    .unwrap()
+                    .distance(net.evaluate_point(Point2::new(domain.max().x, v)).unwrap()),
+            );
+        }
+    }
+    eprintln!("radial error {radial_error:e}, closure gap {closure_gap:e}");
+    assert!(radial_error < 2e-5, "{radial_error}");
+    assert!(closure_gap < 1e-10, "{closure_gap}");
+    let path = Curve::from(path);
+    // -270 degrees places the second seam at +90 while keeping both endpoint
+    // angles inside the circle constructor's supported range.
+    for (cap, start) in [(false, 0.0), (true, 0.0), (false, -270.0), (true, -270.0)] {
+        let profile = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z),
+                2.0,
+                start,
+                start + 360.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let options = SweepOptions {
+            cap_ends: cap,
+            ..pipe_options()
+        };
+        let mut swept = create_curve_sweep(
+            &mut k,
+            &[Some(&profile)],
+            Some(&path),
+            None,
+            None,
+            Some(&options),
+        )
+        .unwrap()
+        .brep;
+        let all = walls(&swept);
+        assert!(!all.is_empty());
+        eprintln!("cap {cap}, seam {start}: constructed {} faces", all.len());
+        for wall in &all {
+            let mut reports = solidcore::geom::assert_array::AssertArray::new();
+            let valid = wall
+                .assert_valid(
+                    &k,
+                    Some(&mut reports),
+                    0,
+                    solidcore::geom::assert_array::ObjectKey(0),
+                )
+                .unwrap();
+            let failed: Vec<_> = reports.reports().iter().filter(|r| !r.ok).collect();
+            assert!(valid, "{failed:?}");
+        }
+        let area =
+            solidcore::mass::integrator::properties::brep_area(&k, &mut swept, 1e-6).unwrap();
+        let expected = 96.0 * std::f64::consts::PI + 16.0 * std::f64::consts::PI.powi(2);
+        eprintln!(
+            "cap {cap}, seam {start}: faces {}, area {area}, expected {expected}",
+            all.len()
+        );
+        assert!((area - expected).abs() < 1e-3, "{area}");
+        if cap {
+            assert!(solidcore::topology::brep::p2::is_manifold_solid(&swept).unwrap());
+            let volume =
+                solidcore::mass::integrator::properties::brep_volume_default(&k, &mut swept, 1e-6)
+                    .unwrap();
+            eprintln!("volume {volume}, expected {expected}");
+            assert!((volume - expected).abs() < 1e-3, "{volume}");
+        }
+    }
 }
