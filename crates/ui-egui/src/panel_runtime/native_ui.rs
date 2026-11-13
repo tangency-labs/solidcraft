@@ -141,7 +141,8 @@ fn grip(ui: &mut egui::Ui, active: &InstanceId, rtl: bool) -> Option<super::work
         selected: false,
         enabled: true,
         drag: true,
-        title: false,
+        // The kit paints a header's section grip only for a title control.
+        title: true,
         grip_only: true,
         rtl,
     };
