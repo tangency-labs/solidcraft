@@ -133,12 +133,11 @@ fn link_refused(design: Option<&str>, link: &str) -> Result<()> {
     solidcraft_io::vfs::check_design_path(&file.to_string_lossy(), design).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// Resolve a design's component links against its original file, before opening it from a
-/// different location (for example a recovery file) or keeping it in session history.
+/// Resolve a design's links (its component links and its drawings' sources) against its original
+/// file, before opening it from a different location (for example a recovery file) or keeping it
+/// in session history.
 pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
-    for link in doc.links.values_mut() {
-        link.path = absolute(&resolve(from, &link.path)).to_string_lossy().into_owned();
-    }
+    super::design_link::located(doc, from);
 }
 
 /// The bodies of a linked design: its name, the Import feature that holds them and the names

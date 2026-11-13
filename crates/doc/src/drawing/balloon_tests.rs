@@ -27,7 +27,7 @@ fn ballooned() -> (Drawing, [u64; 2]) {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Bolted", "en", "Sheet 1", a3, None, &BTreeSet::new(), &mut id_source).unwrap();
     let source = d.allocate_id(&mut id_source).unwrap();
-    d.sources.push(Source { id: source });
+    d.sources.push(Source { id: source, path: None });
     let (view, sheet) = (d.allocate_id(&mut id_source).unwrap(), d.sheets[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     d.add_views([Arc::new(View {

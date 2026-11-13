@@ -14,7 +14,7 @@ fn tabled() -> (Drawing, u64) {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Bolted", "en", "Sheet 1", a3, None, &BTreeSet::new(), &mut id_source).unwrap();
     let source = d.allocate_id(&mut id_source).unwrap();
-    d.sources.push(DrawingSource { id: source });
+    d.sources.push(DrawingSource { id: source, path: None });
     let sheet = d.sheets[0].id;
     let list = Kind::PartsList(PartsList {
         of: SheetComponent { source, component: 0 },

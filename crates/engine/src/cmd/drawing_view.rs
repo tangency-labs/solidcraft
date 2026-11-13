@@ -1133,7 +1133,10 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
     let request: BaseParams = crate::schema::read(BASE, p)?;
     let record = s.drawing(BASE)?.clone();
     let (sheet, middle) = sheet_named(&record, &request.sheet, BASE)?;
-    let source = record.sources.first().map(|source| source.id).ok_or_else(|| bad(BASE, "the drawing draws no design"))?;
+    // The design it is in, else the first it draws: read through the one accessor.
+    let source =
+        record.own_source().or_else(|| record.sources.first().map(|source| source.id)).ok_or_else(|| bad(BASE, "the drawing draws no design"))?;
+    s.drawn(&record, source).map_err(|why| bad(BASE, why.to_string()))?;
     let chosen = request.source.as_ref().map(|chosen| chosen.occurrences.as_slice());
     check_paths(s, chosen, request.hide.as_deref().unwrap_or_default(), BASE)?;
     let direction = request.view.unwrap_or_default().0;
