@@ -84,12 +84,15 @@ fn status(s: &mut Session, p: &Value) -> Result<Value> {
         .into_iter()
         .map(|v| ViewStatusResult { view: ids::encode(v.view), sheet: ids::encode(v.sheet), status: v.status, reason: v.reason })
         .collect();
-    let wanted: Vec<u64> = d.dimensions.iter().map(|dimension| dimension.id).collect();
-    let read = s.doc.resolve_dimensions(&s.model, &d, &wanted).map_err(|e| crate::params::bad(STATUS, e.to_string()))?;
+    let wanted: Vec<(u64, u64)> = d.dimensions.iter().map(|dimension| (dimension.id, dimension.view)).collect();
+    // Each on the session its view draws from (#13048), as the sheet reads it.
+    let read = crate::drawing_view::ViewSessions::new(s)
+        .read_on(&d, &wanted, solidcraft_doc::Document::resolve_dimensions)
+        .map_err(|e| crate::params::bad(STATUS, e.to_string()))?;
     let dimensions = wanted
         .iter()
         .zip(read)
-        .map(|(id, r)| {
+        .map(|((id, _), r)| {
             let (status, why, _) = super::drawing_dimension::status_words(r.status);
             DimensionStatusResult { dimension: ids::encode(*id), status, why, out_of_date: standing.annotations.contains(id) }
         })

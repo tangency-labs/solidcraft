@@ -792,21 +792,12 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
     PoseResult { setting, drawn: Some(drawn), skipped: Some(skipped), study }
 }
 
-/// Refuses a drawing in which one of `views` draws its parts apart in a way it can't draw yet: shaded
-/// ([`crate::drawing_view::not_drawable_apart`]), or with dimensions, balloons or notes on its model
-/// ([`crate::drawing_view::draws_apart`]), which would measure its parts where the design places them.
+/// Refuses a drawing in which one of `views` draws its parts apart in a way it can't draw yet
+/// ([`crate::drawing_view::not_drawable_apart`]).
 fn check_apart(d: &Drawing, views: impl Iterator<Item = u64>, cmd: &str) -> Result<()> {
-    let on_model = |view: u64| {
-        d.dimensions.iter().any(|record| record.view == view)
-            || d.balloons.iter().any(|balloon| balloon.view == view)
-            || d.notes.iter().any(|note| note.anchor.view() == Some(view) && note.on_model())
-    };
     for view in views {
         if let Some(why) = d.resolve_view(view).ok().as_ref().and_then(crate::drawing_view::not_drawable_apart) {
             return Err(bad(cmd, why));
-        }
-        if let Some(apart) = crate::drawing_view::draws_apart(d, view).filter(|_| on_model(view)) {
-            return Err(bad(cmd, format!("not supported yet: {} with dimensions, balloons or notes on its model", apart.view())));
         }
     }
     Ok(())

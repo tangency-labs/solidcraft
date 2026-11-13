@@ -2376,3 +2376,95 @@ fn a_layout_reads_the_model_as_it_is_now_in_a_deferred_drawing() {
     let (_, drawn, _) = drawn_parts(&shown_now(&mut s), length);
     assert!(same_points(&tips, &drawn, 1e-9), "{tips:?} {drawn:?}");
 }
+
+/// That `reply` reads ok and `value` to within what the joints' solve places parts to.
+fn reads_about(reply: &Value, value: f64) {
+    assert_eq!(reply["status"].as_str(), Some("ok"), "{reply}");
+    assert!((reply["value"].as_f64().unwrap() - value).abs() < 1e-6, "{reply}");
+}
+
+/// [`crate::drawing_scene::tests::hinge_pair`] with a second top view at 1:1 on (150, 250), in a
+/// position of its own: Hinge at 90°, the leaf turned up. The session, the view of the design's
+/// placement, the posed one and the leaf's occurrence.
+fn hinge_posed() -> (Session, u64, u64, u64) {
+    let (mut s, designed, _) = crate::drawing_scene::tests::hinge_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let pose = json!([{"joint": "Hinge", "values": [90]}]);
+    let p = json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 250], "pose": pose});
+    let posed = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    (s, designed, posed, leaf)
+}
+
+/// From the plate's far top corner (0, 0, 2) to the leaf's free top corner, (0, 40, 2) as designed,
+/// along y: vertical in a top view.
+fn plate_to_free_edge(leaf: u64) -> Value {
+    json!({"linear": {"a": [0, 0, 2], "b": {"point": [0, 40, 2], "path": [leaf]}, "direction": "vertical"}})
+}
+
+/// A view in a position of its own measures its parts where it draws them (#13048). With the leaf
+/// flat, its free corner is 40 from the plate's far edge; turned up 90° about the hinge line (y 20,
+/// z 0), (0, 40, 2) goes to (0, 20 - 2, 0 + 20), 18 from it. The leaf's own free edge is 40 long in both.
+#[test]
+fn a_posed_view_measures_its_parts_where_it_draws_them() {
+    let (mut s, designed, posed, leaf) = hinge_posed();
+    reads_about(&add(&mut s, designed, plate_to_free_edge(leaf)), 40.0);
+    reads_about(&add(&mut s, posed, plate_to_free_edge(leaf)), 18.0);
+    let free_edge = json!({"length": {"edge": {"point": [20, 40, 2], "path": [leaf]}}});
+    reads_about(&add(&mut s, designed, free_edge.clone()), 40.0);
+    reads_about(&add(&mut s, posed, free_edge), 40.0);
+}
+
+/// A posed view's dimension reads its own position, not the design's: Hinge driven to 45° in the design
+/// moves the designed view's reading to 20 + 20 cos 45° - 2 sin 45° = 20 + 18 / √2 = 32.7279, and leaves
+/// the posed view's at 18.
+#[test]
+fn driving_the_design_moves_a_designed_views_dimension_and_not_a_posed_ones() {
+    let (mut s, designed, posed, leaf) = hinge_posed();
+    let on_designed = add(&mut s, designed, plate_to_free_edge(leaf))["dimension"].clone();
+    let on_posed = add(&mut s, posed, plate_to_free_edge(leaf))["dimension"].clone();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "joint.drive", json!({"joint": "Hinge", "values": [45]}));
+    run(&mut s, "drawing.open", drawing);
+    reads_about(&run(&mut s, INSPECT, json!({"dimension": on_designed})), 20.0 + 18.0 / 2f64.sqrt());
+    reads_about(&run(&mut s, INSPECT, json!({"dimension": on_posed})), 18.0);
+}
+
+/// A plate 100 x 60 x 10 mm from the origin; a 10 mm cube in component Bolt at (0, 0, 20), and one in
+/// component Nut at (30, 0, 20), as an exploded view needs two components; exploded view Apart, moving
+/// the Bolt 50 mm up; and a drawing, open, with two front views at 1:1, one assembled at (100, 150) and
+/// one drawing Apart at (300, 150). The session, the two views and the Bolt's occurrence.
+fn bolt_apart() -> (Session, [u64; 2], u64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    let bolt = run(&mut s, "component.create", json!({"name": "Bolt"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 20], "body_name": "Cube"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Nut"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 20], "body_name": "Nut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": bolt, "translate": [0, 0, 50]}]}));
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let view = |s: &mut Session, at: [f64; 2], exploded: &str| {
+        let p = json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": at, "exploded": exploded});
+        ids::decode(run(s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap()
+    };
+    let views = [view(&mut s, [100.0, 150.0], "assembled"), view(&mut s, [300.0, 150.0], "Apart")];
+    (s, views, bolt)
+}
+
+/// An exploded view measures its parts where it draws them (#13048): the plate's top (z 10) to the
+/// bolt's top (z 30) reads 20 assembled and 50 more, 70, with the bolt moved up; the bolt's own height
+/// reads 10 in both.
+#[test]
+fn an_exploded_view_measures_its_parts_where_it_draws_them() {
+    let (mut s, [assembled, exploded], bolt) = bolt_apart();
+    let tops = json!({"linear": {"a": [0, 0, 10], "b": {"point": [0, 0, 30], "path": [bolt]}, "direction": "vertical"}});
+    reads_about(&add(&mut s, assembled, tops.clone()), 20.0);
+    reads_about(&add(&mut s, exploded, tops), 70.0);
+    let height = json!({"length": {"edge": {"point": [0, 0, 25], "path": [bolt]}}});
+    reads_about(&add(&mut s, assembled, height.clone()), 10.0);
+    reads_about(&add(&mut s, exploded, height), 10.0);
+}

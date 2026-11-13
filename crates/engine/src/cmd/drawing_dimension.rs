@@ -231,19 +231,19 @@ impl Refused {
     }
 }
 
-/// `new` as `drawing.dimension.add` places it on `record`, with how it reads, and nothing added: an
-/// error when its view draws its parts apart ([`crate::drawing_view::refuse_apart`]); refused
-/// when its view doesn't draw what it measures or can't measure it; a new id; a radial one
+/// `new` as `drawing.dimension.add` places it on `record`, with how it reads, and nothing added:
+/// refused when its view doesn't draw what it measures or can't measure it; a new id; a radial one
 /// a diameter when it is a whole circle, if left to the default; a linear, length or chain one,
 /// with no offset given, on the side away from what it measures. It is read on `record` itself,
-/// which is left as it was. One rule for every command that adds a dimension.
+/// which is left as it was, on the session its view draws from, so on a view that draws its parts
+/// apart it measures them where the view draws them (#13048). One rule for every command that adds
+/// a dimension.
 pub(crate) fn placed(
     s: &mut Session,
     record: &mut Drawing,
     cmd: &str,
     new: NewDimension,
 ) -> Result<std::result::Result<(Dimension, Option<Resolved>), Refused>> {
-    crate::drawing_view::refuse_apart(record, new.view, "dimensions", cmd)?;
     if let Err(e) = check_drawn(record, new.view, new.kind.paths(), cmd) {
         return Ok(Err(Refused::NotDrawn(e)));
     }
@@ -261,6 +261,8 @@ pub(crate) fn placed(
     };
     // Read before it is added: a dimension its view can't measure would show nothing. Its id is the
     // newest, so taking it out again leaves the record as it was.
+    let mut sessions = crate::drawing_view::ViewSessions::new(s);
+    let s = sessions.of_view(record, new.view);
     record.add_dimensions([Arc::new(dimension.clone())]);
     let read = s.doc.resolve_dimensions(&s.model, record, &[id]).map_err(|e| bad(cmd, e.to_string()));
     record.dimensions.retain(|d| d.id != id);
@@ -288,8 +290,10 @@ fn repair(s: &mut Session, p: &Value) -> Result<Value> {
     let id = request.dimension.0;
     let unknown = || bad(REPAIR, format!("the drawing has no dimension {}", ids::encode(id)));
     let d = s.drawing(REPAIR)?;
-    d.dimension(id).ok_or_else(unknown)?;
-    let read = s.doc.resolve_dimensions(&s.model, d, &[id]).map_err(|e| bad(REPAIR, e.to_string()))?;
+    let view = d.dimension(id).ok_or_else(unknown)?.view;
+    let read = crate::drawing_view::ViewSessions::new(s)
+        .read_on(d, &[(id, view)], solidcraft_doc::Document::resolve_dimensions)
+        .map_err(|e| bad(REPAIR, e.to_string()))?;
     let now = read.into_iter().next().map(|r| r.status).ok_or_else(unknown)?;
     repair_reference(s, REPAIR, now, |s, copy| {
         let record = copy.dimension_index(id).and_then(|at| copy.dimensions.get_mut(at)).map(Arc::make_mut).ok_or_else(unknown)?;
@@ -301,7 +305,9 @@ fn repair(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(REPAIR, "both silhouettes would be on one cylinder: its diameter is a dimension of its own (add one)"));
         }
         // Read before it is kept, as add does: a reference its view can't measure would show nothing.
-        let read = s.doc.resolve_dimensions(&s.model, copy, &[id]).map_err(|e| bad(REPAIR, e.to_string()))?;
+        let read = crate::drawing_view::ViewSessions::new(s)
+            .read_on(copy, &[(id, view)], solidcraft_doc::Document::resolve_dimensions)
+            .map_err(|e| bad(REPAIR, e.to_string()))?;
         match read.first().map(|r| &r.status) {
             Some(Status::Unmeasurable(why)) => Err(bad(REPAIR, why.clone())),
             _ => Ok(()),
@@ -573,7 +579,9 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?.clone();
     let dimension = d.dimension(id).ok_or_else(|| bad(cmd, format!("the drawing has no dimension {}", ids::encode(id))))?;
-    let resolved = s.doc.resolve_dimensions(&s.model, &d, &[id]).map_err(|e| bad(cmd, e.to_string()))?;
+    let resolved = crate::drawing_view::ViewSessions::new(s)
+        .read_on(&d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
+        .map_err(|e| bad(cmd, e.to_string()))?;
     let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("dimension {} wasn't read", ids::encode(id))))?;
     let last_good = match r.measured {
         Some(m) => {

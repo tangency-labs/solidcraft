@@ -254,6 +254,47 @@ impl<'a> ViewSessions<'a> {
     pub fn copies(&self) -> usize {
         self.copies.values().filter(|copy| copy.is_ok()).count()
     }
+
+    /// The session view `view` of `d` draws from, where its dimensions, balloons and notes on its model
+    /// are read, so they measure its parts where it draws them (#13048). A view whose copy can't be
+    /// made draws its placeholder, so the sheet draws none of its records: they read as the design
+    /// places its parts, as they did before each view read its own.
+    pub fn of_view(&mut self, d: &Drawing, view: u64) -> &Session {
+        let placed = self.placed;
+        match d.resolve_view(view) {
+            Ok(view) => self.drawing(&Choice::of(&view)).unwrap_or(placed),
+            Err(_) => placed,
+        }
+    }
+
+    /// What `read` (a resolver: [`solidcraft_doc::Document::resolve_dimensions`], `resolve_notes`
+    /// or `resolve_balloons`) gives for `records` of `d`, each its id and its view's, each read on
+    /// the session its view draws from ([`ViewSessions::of_view`]), in `records`' order. One call per
+    /// state of the assembly, so each body's names are worked out once per state, not per record.
+    pub fn read_on<T>(
+        &mut self,
+        d: &Drawing,
+        records: &[(u64, u64)],
+        read: impl Fn(&solidcraft_doc::Document, &solidcraft_doc::Model, &Drawing, &[u64]) -> solidcraft_doc::Result<Vec<T>>,
+    ) -> solidcraft_doc::Result<Vec<T>> {
+        let mut states: BTreeMap<Choice, Vec<usize>> = BTreeMap::new();
+        for (at, (_, view)) in records.iter().enumerate() {
+            let choice = d.resolve_view(*view).map(|view| Choice::of(&view)).unwrap_or_default();
+            states.entry(choice).or_default().push(at);
+        }
+        let mut out: Vec<Option<T>> = records.iter().map(|_| None).collect();
+        let placed = self.placed;
+        for (choice, ats) in states {
+            let from = self.drawing(&choice).unwrap_or(placed);
+            let ids: Vec<u64> = ats.iter().filter_map(|at| records.get(*at)).map(|(id, _)| *id).collect();
+            for (at, one) in ats.into_iter().zip(read(&from.doc, &from.model, d, &ids)?) {
+                if let Some(slot) = out.get_mut(at) {
+                    *slot = Some(one);
+                }
+            }
+        }
+        Ok(out.into_iter().flatten().collect())
+    }
 }
 
 /// A copy of `placed` as a view drawing `choice` draws it: its position's joints driven to their

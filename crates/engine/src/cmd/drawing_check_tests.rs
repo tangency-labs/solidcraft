@@ -696,36 +696,36 @@ fn whys(reply: &Value, kind: &str) -> Vec<(String, String, String)> {
     all
 }
 
-/// A dimension that a view drawing an exploded view holds back is listed out of date with why: no
-/// update draws it, as no update would.
+/// A dimension on a view drawing an exploded view is checked as any view's (#13048): it is drawn, so
+/// nothing lists it out of date.
 #[test]
-fn a_dimension_an_exploded_view_holds_back_says_why() {
-    let mut width = Value::Null;
-    let (mut s, ..) = exploded(|s, view| width = length(s, view, [50.0, 0.0, 0.0]));
+fn a_dimension_on_an_exploded_view_is_checked_as_any_views() {
+    let (mut s, ..) = exploded(|s, view| {
+        length(s, view, [50.0, 0.0, 0.0]);
+    });
     let reply = checked(&mut s, json!({}));
-    let why = "its view draws an exploded view: not supported yet, so it isn't drawn".to_string();
-    assert_eq!(whys(&reply, "out_of_date"), [("dimension".to_string(), width.as_str().unwrap().to_string(), why)], "{reply}");
+    assert!(whys(&reply, "out_of_date").is_empty(), "{reply}");
 }
 
-/// A dimension that a view in a position of its own holds back is listed out of date with why, as an
-/// exploded view's is, and covers no feature: both read the design's placements.
+/// A dimension on a view in a position of its own is checked as any view's, as an exploded view's is:
+/// not out of date, and it covers the plate, whose bottom front edge it measures.
 #[test]
-fn a_dimension_a_posed_view_holds_back_says_why_and_covers_nothing() {
+fn a_dimension_on_a_posed_view_is_checked_as_any_views_and_covers_its_feature() {
     let mut width = Value::Null;
     let (mut s, _, plate) = posed(|s, view| width = length(s, view, [50.0, 0.0, 0.0]));
     let reply = checked(&mut s, json!({}));
-    let why = "its view draws a position of its own: not supported yet, so it isn't drawn".to_string();
-    assert_eq!(whys(&reply, "out_of_date"), [("dimension".to_string(), width.as_str().unwrap().to_string(), why)], "{reply}");
-    assert_eq!(coverage_of(&reply, plate)["state"], json!("not_covered"), "{reply}");
+    assert!(whys(&reply, "out_of_date").is_empty(), "{reply}");
+    assert_eq!(coverage_of(&reply, plate)["by"], json!([{"kind": "dimension", "id": width}]), "{reply}");
 }
 
-/// A dimension that a view drawing an exploded view holds back covers no feature: the plate, which it
-/// would cover, is not covered. Drawn assembled again, the view's dimension covers it.
+/// A dimension on a view drawing an exploded view covers the plate, whose bottom front edge it
+/// measures, and still does once the view is drawn assembled again.
 #[test]
-fn a_dimension_an_exploded_view_holds_back_covers_nothing() {
+fn a_dimension_on_an_exploded_view_covers_its_feature_drawn_either_way() {
     let mut width = Value::Null;
     let (mut s, view, plate) = exploded(|s, view| width = length(s, view, [50.0, 0.0, 0.0]));
-    assert_eq!(coverage_of(&checked(&mut s, json!({})), plate)["state"], json!("not_covered"));
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(coverage_of(&reply, plate)["by"], json!([{"kind": "dimension", "id": width}]), "{reply}");
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"exploded": "assembled"}}));
     let reply = checked(&mut s, json!({}));
     assert_eq!(coverage_of(&reply, plate)["by"], json!([{"kind": "dimension", "id": width}]), "{reply}");
@@ -763,14 +763,13 @@ fn a_notes_branch_covers_the_feature_it_points_at() {
     assert_eq!((&entry["state"], &entry["by"]), (&json!("covered"), &json!([{"kind": "note", "id": note}])), "{reply}");
 }
 
-/// A note on the model that a view drawing an exploded view holds back is listed out of date as a note,
-/// with why, and covers nothing, as a held dimension does.
+/// A note on the model of a view drawing an exploded view is checked as any view's note, as a
+/// dimension there is: not out of date, and it covers the plate, whose bottom front edge it points at.
 #[test]
-fn a_note_an_exploded_view_holds_back_is_a_note_out_of_date_and_covers_nothing() {
+fn a_note_on_an_exploded_view_is_checked_as_any_views_and_covers_its_feature() {
     let mut note = Value::Null;
     let (mut s, _, plate) = exploded(|s, view| note = note_on(s, view, [50.0, 0.0, 0.0]));
     let reply = checked(&mut s, json!({}));
-    let why = "its view draws an exploded view: not supported yet, so it isn't drawn".to_string();
-    assert_eq!(whys(&reply, "out_of_date"), [("note".to_string(), note.as_str().unwrap().to_string(), why)], "{reply}");
-    assert_eq!(coverage_of(&reply, plate)["state"], json!("not_covered"), "{reply}");
+    assert!(whys(&reply, "out_of_date").is_empty(), "{reply}");
+    assert_eq!(coverage_of(&reply, plate)["by"], json!([{"kind": "note", "id": note}]), "{reply}");
 }

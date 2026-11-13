@@ -448,3 +448,46 @@ fn hostile_notes_are_refused() {
     let e = refused(&mut s, EDIT, json!({"note": id, "set": {"content": []}}));
     assert!(e.contains("some text"), "{e}");
 }
+
+/// That `reply` reads ok with its leader ending on `p`, to within what the joints' solve places parts to.
+fn leader_ends_near(reply: &Value, p: [f64; 3]) {
+    let point: Vec<f64> = reply["point"].as_array().unwrap_or_else(|| panic!("no point: {reply}")).iter().map(|x| x.as_f64().unwrap()).collect();
+    assert!(reply["status"] == "ok" && point.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-6), "{reply}");
+}
+
+/// A note with a leader on the model goes on a view in a position of its own, and its leader ends
+/// where that view draws the edge (#13048): on [`hinge_pair`](crate::drawing_scene::tests::hinge_pair)'s
+/// view with the leaf turned up 90° about the hinge line (y 20, z 0), the leaf's free bottom edge,
+/// (0..40, 40, 0) as designed, has its middle at (20, 20, 20). A branch can be added there too.
+#[test]
+fn a_note_on_a_posed_view_ends_where_the_view_draws_its_edge() {
+    let (mut s, view, _) = crate::drawing_scene::tests::hinge_pair();
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    let v = ids::encode(view);
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"pose": [{"joint": "Hinge", "values": [90]}]}}));
+    let edge = json!({"point": [20, 40, 0], "path": [leaf]});
+    let added = run(&mut s, ADD, json!({"anchor": {"edge": {"view": v, "edge": edge}}, "at": [60, 40], "content": "Deburr"}));
+    leader_ends_near(&added, [20.0, 20.0, 20.0]);
+    leader_ends_near(&run(&mut s, INSPECT, json!({"note": added["note"]})), [20.0, 20.0, 20.0]);
+    let plain = run(&mut s, ADD, json!({"anchor": {"view": v}, "at": [0, -30], "content": "Turned up"}))["note"].clone();
+    let branched = run(&mut s, EDIT, json!({"note": plain, "set": {"branches": {"add": [{"edge": edge}]}}}));
+    assert_eq!(branched["changed"], json!(["branches"]), "{branched}");
+}
+
+/// A note with a leader on the model goes on a view that draws an exploded view, and its leader ends
+/// where that view draws the edge: with the second copy moved 50 mm up, its Box's bottom front edge,
+/// (100..180, 0, 0) assembled, has its middle at (140, 0, 0 + 50).
+#[test]
+fn a_note_on_an_exploded_view_ends_where_the_view_draws_its_edge() {
+    let (mut s, _, view, [_, second]) = placed();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": second, "translate": [0, 0, 50]}]}));
+    run(&mut s, "drawing.open", drawing);
+    let v = ids::encode(view);
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"exploded": "Apart"}}));
+    let edge = json!({"point": [140, 0, 0], "path": [second]});
+    let added = run(&mut s, ADD, json!({"anchor": {"edge": {"view": v, "edge": edge}}, "at": [60, 40], "content": "Deburr"}));
+    leader_ends_near(&added, [140.0, 0.0, 50.0]);
+    leader_ends_near(&run(&mut s, INSPECT, json!({"note": added["note"]})), [140.0, 0.0, 50.0]);
+}
