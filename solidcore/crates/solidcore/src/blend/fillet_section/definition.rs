@@ -213,7 +213,10 @@ impl<Z: Ring> T2Of<Z> {
 pub fn t2_pow<Z: T2Scalar>(x: &T2Of<Z>, p: f64) -> Result<T2Of<Z>> {
     let x0 = x.constant();
     if !x0.positive_finite() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the section degenerates at this point (a weight or a length is zero)",
+        ));
     }
     let mut z = x.scale(Z::lift(1.0) / x0);
     z.set(0, 0, Z::lift(0.0));
@@ -467,13 +470,20 @@ pub fn evaluate_definition(
             if i > 0 {
                 fact *= i as f64;
             }
-            let di = d.get(i).ok_or_else(|| SolidError::sm_err(OP))?;
+            let di = d.get(i).ok_or_else(|| {
+                SolidError::blend_failed(OP, "the radius law has no derivative of this order")
+            })?;
             law_ser.set(i, 0, di.x / fact);
         }
-        let d0 = d.first().ok_or_else(|| SolidError::sm_err(OP))?;
+        let d0 = d
+            .first()
+            .ok_or_else(|| SolidError::blend_failed(OP, "the radius law has no value"))?;
         if d0.x.partial_cmp(&0.0) != Some(Ordering::Greater) {
             // "its radius law is not positive here"
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the radius law is not positive here",
+            ));
         }
         r = [d0.x, d0.x];
         law = Some(&law_ser);
@@ -531,7 +541,10 @@ pub fn evaluate_definition(
         let mut dir = [0.0_f64; 4];
         for (f, sd) in def.seeds.iter().enumerate() {
             let w = sd.evaluate(s, 1, !before, false)?;
-            let w1 = w.get(1).copied().ok_or_else(|| SolidError::sm_err(OP))?;
+            let w1 = w
+                .get(1)
+                .copied()
+                .ok_or_else(|| SolidError::blend_failed(OP, "the seed has no derivative"))?;
             if let Some(x) = dir.get_mut(2 * f) {
                 *x = w1.x;
             }
@@ -627,7 +640,10 @@ pub fn evaluate_definition(
             let d = gn_area_sum(n, Tay::of_terms(w0, 1.0));
             if d.at(1).partial_cmp(&0.0) != Some(Ordering::Less) {
                 // "the section's area does not fall with its thumbweight"
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the section's area does not fall with its thumbweight",
+                ));
             }
             let ws = gn_invert(&gn_target(&u), &d, w0);
             if let Some(m) = slot {
@@ -782,5 +798,23 @@ fn smax(a: f64, b: f64) -> f64 {
         a
     } else {
         b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_power_of_a_zero_constant_is_a_typed_failure() {
+        let error = t2_pow(&T2::new(1, 1, 0.0), 0.5).unwrap_err();
+        assert_eq!(
+            error,
+            SolidError::blend_failed(
+                OP,
+                "the section degenerates at this point (a weight or a length is zero)"
+            )
+        );
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }
 }

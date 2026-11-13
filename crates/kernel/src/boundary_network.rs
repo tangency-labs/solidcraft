@@ -396,8 +396,8 @@ impl CrossFace for EdgeFaces {
 /// The face of a network surface: its four sides from the surface's boundary rows, each split
 /// at the `corners` that lie on it (inner vertices of edge chains), the pieces edges on the side's
 /// own curve over parts of its interval. A side collapsed to a point (a three-sided patch) is left
-/// out: the two sides beside it meet at one vertex there. Refused when more than one side
-/// shrinks to a point.
+/// out: the two sides beside it meet at one vertex there. Two sides shrunk to a point leave a
+/// lens of two edges; refused when fewer than two sides are left.
 fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
     let fail = |m: &str| KernelError::Failed(format!("boundary surface: {m}"));
     let [nu, nv] = s.count();
@@ -420,14 +420,19 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
         (column(0), kv, [0, 3], false, [Some(u0), None]),
     ];
     let collapsed: Vec<bool> = sides.iter().map(|(_, _, [a, z], ..)| c[*a].dist(c[*z]) <= size * 1e-9).collect();
-    if collapsed.iter().filter(|x| **x).count() > 1 {
-        return Err(KernelError::Invalid("not supported yet: a boundary surface with more than one side shrunk to a point".into()));
+    // Two sides left at least: a lens (the two opposite sides, or two beside each other, shrunk).
+    if collapsed.iter().filter(|x| !**x).count() < 2 {
+        return Err(KernelError::Invalid("not supported yet: a boundary surface with fewer than two sides left".into()));
     }
-    // Vertices: the corners, a collapsed side's two ends one vertex.
+    // Vertices: the corners, a collapsed side's two ends one vertex (chains of them one vertex).
     let mut vertex_of = [0usize, 1, 2, 3];
-    for (k, (_, _, [a, z], ..)) in sides.iter().enumerate() {
-        if collapsed.get(k).copied().unwrap_or(false) {
-            vertex_of[*z] = vertex_of[*a];
+    for _ in 0..4 {
+        for (k, (_, _, [a, z], ..)) in sides.iter().enumerate() {
+            if collapsed.get(k).copied().unwrap_or(false) {
+                let low = vertex_of[*a].min(vertex_of[*z]);
+                vertex_of[*a] = low;
+                vertex_of[*z] = low;
+            }
         }
     }
     let tolerance = (size * 1e-6).max(1e-5);
@@ -631,13 +636,29 @@ mod tests {
         assert!(near(tess), "measuring mesh: {tess}");
         let display = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(display), "display mesh: {display}");
-        // Two collapsed sides are no patch.
         let p = |l: &str, q: Vec3| BoundaryCurve { label: l.into(), source: CurveSource::Point(q), continuity: Continuity::G0 };
-        assert!(
-            boundary_surface(&[sketch("arc", pl, vec![arc]), p("o", Vec3::ZERO)], &[p("a", Vec3::new(r, 0.0, 0.0)), sketch("y", pl, vec![y])])
-                .is_err()
-        );
         assert!(boundary_surface(&[sketch("arc", pl, vec![arc]), p("nan", Vec3::new(f64::NAN, 0.0, 0.0))], &[]).is_err());
+    }
+
+    /// Two arcs that meet at both ends (#11878) are a lens: both side curves collapse to a point,
+    /// the face has the two arcs for its edges and the two ends for its vertices, and it measures
+    /// the lens's area, two segments of radius 10 over a 12 mm chord.
+    #[test]
+    fn two_curves_meeting_at_both_ends_are_a_lens() {
+        use std::f64::consts::PI;
+        let r = 10.0_f64;
+        let half = 6.0_f64;
+        let h = (r * r - half * half).sqrt();
+        let theta = (half / r).asin();
+        let up = Seg2::Arc { center: Vec2::new(0.0, -h), radius: r, start: PI / 2.0 + theta, sweep: -2.0 * theta };
+        let down = Seg2::Arc { center: Vec2::new(0.0, h), radius: r, start: -PI / 2.0 - theta, sweep: 2.0 * theta };
+        let pl = Plane::XY;
+        let body = boundary_surface(&[sketch("up", pl, vec![up]), sketch("down", pl, vec![down])], &[]).unwrap();
+        assert!(body.is_surface() && body.face_count() == 1);
+        assert_eq!(body.edge_count(), 2, "the two collapsed sides are no edges");
+        let want = 2.0 * (r * r * theta - half * h);
+        let faces = body.faces(0.01).unwrap();
+        assert!((faces[0].area - want).abs() < 0.25, "area {} vs {want}", faces[0].area);
     }
 
     /// The angle between the two faces' normals across the edge at `p`.

@@ -67,7 +67,6 @@ pub(super) fn closed(ctx: &egui::Context) {
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
     if !crate::panel_runtime::preferences_enabled(app) {
-        ui_kit::settings_section(ui, "panel_layout", app.tr("ui.panel_layout.panel_layout"), |ui| panel_system(app, ui));
         return;
     }
     let key = Id::unique(STATE);
@@ -90,7 +89,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
     }
     ui_kit::settings_section(ui, "panel_layout", app.tr("ui.panel_layout.panel_layout"), |ui| {
         ui.spacing_mut().item_spacing.y = Tokens::get().space_16;
-        panel_system(app, ui);
         workspace_selector(app, ui, &view);
         tiles(app, ui, &view, &mut state);
     });
@@ -98,11 +96,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
         popover(app, ui, &view, &mut state);
         ui.ctx().data_mut(|data| data.insert_temp(key, state));
     }
-}
-
-fn panel_system(app: &mut SolveApp, ui: &mut Ui) {
-    ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.shared_panel_layout"), &mut app.preferences.shared_panel_layout)
-        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.shared_panel_layout_help"));
 }
 
 fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView) {
@@ -243,7 +236,7 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                 .iter()
                 .map(|item| match item {
                     Tile::Custom => app.tr("ui.panel_layout.custom"),
-                    Tile::Saved(entry) => entry.name.as_str(),
+                    Tile::Saved(entry) => preset_label(app, view, entry),
                     Tile::Save => app.tr("ui.panel_layout.save_as_tile"),
                 })
                 .collect();
@@ -351,6 +344,15 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
     });
 }
 
+fn preset_label<'a>(app: &'a SolveApp, view: &'a LayoutPreferencesView, entry: &'a LayoutPreferenceEntry) -> &'a str {
+    if !entry.user
+        && let Some(workspace) = view.workspaces.iter().find(|workspace| workspace.id == entry.layout.workspace)
+    {
+        return app.tr(&workspace.title_key);
+    }
+    &entry.name
+}
+
 fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesView, state: &State, focused: bool) -> Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(TILE_WIDTH, TILE_HEIGHT), Sense::CLICK);
@@ -359,7 +361,7 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
         Tile::Custom => (app.tr("ui.panel_layout.custom"), true, t.pref_note_fill, t.form_ink),
         Tile::Saved(entry) => {
             let selected = entry.matches && state.source_name.as_ref().map_or(entry.selected, |name| name == &entry.name);
-            (entry.name.as_str(), selected, if selected { t.selected_bg } else { t.pref_well }, t.form_ink)
+            (preset_label(app, view, entry), selected, if selected { t.selected_bg } else { t.pref_well }, t.form_ink)
         }
         Tile::Save => (app.tr("ui.panel_layout.save_as_tile"), false, t.pref_well, t.form_primary),
     };
@@ -404,7 +406,8 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
         ui.painter().circle_filled(pos2(text_rect.left() + 3.5, text_rect.center().y), 3.5, t.pref_note);
         text_rect.min.x += t.space_12;
     }
-    let font = if selected || matches!(item, Tile::Save) { crate::fonts::semibold(t.font_body) } else { FontId::proportional(t.font_body) };
+    let font =
+        if selected || matches!(item, Tile::Save) { crate::ui_kit::type_face::semibold(t.font_body) } else { FontId::proportional(t.font_body) };
     let mut job = egui::text::LayoutJob::single_section(name.to_owned(), egui::TextFormat::simple(font, ink));
     job.wrap.max_width = text_rect.width();
     job.wrap.max_rows = 1;

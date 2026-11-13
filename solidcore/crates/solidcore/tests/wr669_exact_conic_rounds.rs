@@ -217,6 +217,7 @@ fn round_flux(ball: &dyn Fn(f64) -> Ball, o: Point3) -> (f64, f64) {
 /// radial frame `e1`, `e2`) between the edge and the rail, `n` into the cylinder: the rail
 /// at the spine's height `ws` along the axis, the edge at `we`; trapezoid over the loop.
 fn cylinder_flux(
+    rr: f64,
     e1: Vec3,
     e2: Vec3,
     o: Point3,
@@ -228,7 +229,7 @@ fn cylinder_flux(
     for i in 0..nt {
         let t = 2.0 * PI * f64::from(i) / f64::from(nt);
         let u = radial(e1, e2, t);
-        total += -(R - o.dot(u)) * R * (ws(t) - we(t));
+        total += -(rr - o.dot(u)) * rr * (ws(t) - we(t));
     }
     total * (2.0 * PI / f64::from(nt)) / 3.0
 }
@@ -263,6 +264,11 @@ fn plate_and_peg_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<
 /// origin: the plate's strip lies in z = 0 and contributes nothing, the cylinder's
 /// `-(R / 3) R 2 pi r / cos(tau)`.
 fn plate_and_peg_round(tau: f64) -> (impl Fn(f64) -> Point3, f64, f64) {
+    peg_round(R, tau)
+}
+
+/// [`plate_and_peg_round`] for a peg of radius `rr`.
+fn peg_round(rr: f64, tau: f64) -> (impl Fn(f64) -> Point3, f64, f64) {
     let (e1, e2, a) = (
         Vec3::new(1.0, 0.0, 0.0),
         Vec3::new(0.0, tau.cos(), tau.sin()),
@@ -271,15 +277,17 @@ fn plate_and_peg_round(tau: f64) -> (impl Fn(f64) -> Point3, f64, f64) {
     // on the cylinder of radius rho about the peg's axis at angle t, the height along the
     // axis where the plane z = h is
     let w = move |rho: f64, h: f64, t: f64| (h - rho * radial(e1, e2, t).z) / a.z;
-    let spine = move |t: f64| radial(e1, e2, t) * (R + FILLET) + a * w(R + FILLET, FILLET, t);
+    let spine = move |t: f64| radial(e1, e2, t) * (rr + FILLET) + a * w(rr + FILLET, FILLET, t);
     let ball = |t: f64| Ball {
         c: spine(t),
         a: Vec3::new(0.0, 0.0, -1.0),
         b: -radial(e1, e2, t),
     };
     let o = Point3::new(0.0, 0.0, 0.0);
-    let strip = cylinder_flux(e1, e2, o, &|t| w(R + FILLET, FILLET, t), &|t| w(R, 0.0, t));
-    assert!((strip + R * R * 2.0 * PI * FILLET / (3.0 * tau.cos())).abs() < 1e-12);
+    let strip = cylinder_flux(rr, e1, e2, o, &|t| w(rr + FILLET, FILLET, t), &|t| {
+        w(rr, 0.0, t)
+    });
+    assert!((strip + rr * rr * 2.0 * PI * FILLET / (3.0 * tau.cos())).abs() < 1e-12);
     let (flux, area) = round_flux(&ball, o);
     (spine, flux + strip, area)
 }
@@ -324,14 +332,17 @@ fn an_oblique_plane_and_cylinder_round_is_the_exact_rational_ball_sweep() {
     );
 }
 
+/// Without the fix the round is traced: a skin through its stations' sections (the ball's
+/// exact circles, so rational too), off the ball between them where the exact sweep is on it
+/// to 1e-12.
 #[test]
 fn upstream_traces_the_oblique_plane_and_cylinder_round() {
-    let (_, _, _, rounds) = plate_and_peg(false);
+    let (spine, _, _) = plate_and_peg_round(30f64.to_radians());
+    let (k, _, _, rounds) = plate_and_peg(false);
     assert_eq!(rounds.len(), 2);
-    assert!(
-        rounds.iter().all(|(_, rational)| !*rational),
-        "the traced fit"
-    );
+    let off = off_spine(&k, &rounds, &spine);
+    eprintln!("the traced fit is off the ball by {off:e}");
+    assert!(off > 1e-9, "the traced fit is off the ball by only {off:e}");
 }
 
 /// The r3 pole up z from -12 to 8 and the 45 degree cone tilted 15 degrees, its apex
@@ -370,8 +381,10 @@ fn pole_and_cone_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<
     (k, b, before, rounds)
 }
 
-#[test]
-fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
+/// The pole and the tilted cone's round: its spine (the conic where the offsets of the
+/// cylinder of radius R about z and of the cone tangent to the same ball meet) and the volume
+/// it adds and its area by the divergence theorem about the cone's apex.
+fn pole_and_cone_round() -> (impl Fn(f64) -> Point3, f64, f64) {
     let (alpha, tau) = (45f64.to_radians(), 15f64.to_radians());
     let (e1, e2, a) = (
         Vec3::new(1.0, 0.0, 0.0),
@@ -385,11 +398,11 @@ fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
     // about the origin meet where (x.a) cos(alpha) = +-(x.uc - rho sin(alpha)); the cone
     // leaves the pole on x.(a cos(alpha) + uc) = rho sin(alpha): on the cylinder at angle
     // t, the height
-    let w = |rho: f64, t: f64| {
+    let w = move |rho: f64, t: f64| {
         rho * (alpha.sin() - radial(e1, e2, t).dot(uc)) / (alpha.cos() + tau.cos())
     };
     let rho = R + FILLET;
-    let spine = |t: f64| radial(e1, e2, t) * rho + a * w(rho, t);
+    let spine = move |t: f64| radial(e1, e2, t) * rho + a * w(rho, t);
     let ball = |t: f64| {
         let c = spine(t);
         let across = (c - uc * c.dot(uc)).unitize().unwrap();
@@ -401,8 +414,14 @@ fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
     };
     // about the apex the cone's strip contributes nothing
     let (flux, area) = round_flux(&ball, apex);
-    let added = flux + cylinder_flux(e1, e2, apex, &|t| w(rho, t), &|t| w(R, t));
+    let added = flux + cylinder_flux(R, e1, e2, apex, &|t| w(rho, t), &|t| w(R, t));
 
+    (spine, added, area)
+}
+
+#[test]
+fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
+    let (spine, added, area) = pole_and_cone_round();
     let (k, mut b, before, rounds) = pole_and_cone(true);
     assert_eq!(rounds.len(), 2);
     assert!(
@@ -424,14 +443,15 @@ fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
     );
 }
 
+/// Without the fix the round is traced, off the ball between its stations (as for the peg).
 #[test]
 fn upstream_traces_the_round_between_two_quadrics_touching_one_ball() {
-    let (_, _, _, rounds) = pole_and_cone(false);
+    let (spine, _, _) = pole_and_cone_round();
+    let (k, _, _, rounds) = pole_and_cone(false);
     assert_eq!(rounds.len(), 2);
-    assert!(
-        rounds.iter().all(|(_, rational)| !*rational),
-        "the traced fit"
-    );
+    let off = off_spine(&k, &rounds, &spine);
+    eprintln!("the traced fit is off the ball by {off:e}");
+    assert!(off > 1e-9, "the traced fit is off the ball by only {off:e}");
 }
 
 // ---- #2485: an exact round is a blend by its definition, its net the exact surface ----
@@ -547,4 +567,44 @@ fn the_conic_pair_rounds_are_their_definitions() {
     );
     let (k0, b0, _, _) = pole_and_cone_kept(true, false);
     assert_eq!(body_bits(&k, &b), body_bits(&k0, &b0));
+}
+
+/// tangency-labs/solidcraft#14000, #15037: a boss r5 standing 10 out of a 40 x 40 x 10 block
+/// (sunk 5 into it), its axis turned a few degrees off square, its root rounded r1. The
+/// supports are a plane and a cylinder not square to it: a conic round on an ellipse
+/// spine that is proved on both offsets once the plane's section is computed without
+/// cancellation. At every tilt the round keeps its exact definition (bound 0, re-certified,
+/// through its record) and adds the divergence theorem's volume.
+#[test]
+fn a_round_on_a_boss_tilted_a_few_degrees_is_its_definition() {
+    let boss = 5.0;
+    for deg in [0.25_f64, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0] {
+        let tau = deg.to_radians();
+        let mut k = Kernel::default();
+        k.fixes.fillet_exact_round_classes = true;
+        k.fixes.fillet_round_as_definition = true;
+        let block = create_box(&mut k, Point3::new(-20.0, -20.0, -10.0), 40.0, 40.0, 10.0).unwrap();
+        let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -5.0), boss, 15.0).unwrap();
+        tilt(&mut k, &mut peg, tau);
+        let mut b = boolean_union(&mut k, block, peg).unwrap();
+        let before = volume(&k, &mut b);
+        let root = edges_where(&k, &b, |m| {
+            m.z.abs() < 1e-6 && m.x.abs() < 10.0 && m.y.abs() < 10.0
+        });
+        assert!(!root.is_empty(), "{deg} degrees: the root");
+        fillet_edges(&mut k, &mut b, &root, FILLET, 1, 1, 1.0)
+            .unwrap_or_else(|e| panic!("{deg} degrees: {e:?}"));
+        let checked = exact_round_checks(&k, &b);
+        assert_eq!(checked.len(), root.len(), "{deg} degrees: {checked:?}");
+        assert!(
+            checked.iter().all(|(c, _)| *c == ExactClass::Conic),
+            "{deg} degrees: {checked:?}"
+        );
+        let (_, added, _) = peg_round(boss, tau);
+        let after = volume(&k, &mut b);
+        assert!(
+            (after - before - added).abs() < 1e-3,
+            "{deg} degrees: {before} + {added} != {after}"
+        );
+    }
 }

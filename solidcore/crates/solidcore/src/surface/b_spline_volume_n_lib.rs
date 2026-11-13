@@ -150,7 +150,10 @@ impl BSplineVolume {
 
         // check state - nonDegenerate knot vectors must have 2 or more knots
         if knot_cnt <= 1 {
-            return Err(SolidError::sm_err(OP_CONTS));
+            return Err(SolidError::surface_failed(
+                OP_CONTS,
+                "the knot vector has fewer than two knots",
+            ));
         }
 
         let degree = self.degree(param);

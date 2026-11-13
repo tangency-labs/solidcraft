@@ -185,7 +185,7 @@ rotated box or arbitrary closed mesh does not gain support. Thin sheets retain
 the strict one/two-triangle planar certificate and authored virtual thickness.
 All overlap, near-plane, camera/lens, coat and per-path guards still apply.
 
-CPU glass supports the authored IOR and per-mm Beer extinction for at most eight
+Legacy CPU glass supports the authored IOR and per-mm Beer extinction for at most eight
 targets. Extinction is 0..100 per mm and virtual thickness 0..10000 mm. Authored
 transmissive shadows and any subsurface value refuse explicitly. Common thin
 recipes retain their transmissive-shadow flag: turn that flag off explicitly

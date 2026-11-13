@@ -18,6 +18,9 @@
 //! | [`subdivide_face_at_discontinuities`] | `SmBrep::SubdivideFaceAtDiscontinuities`     |
 //!
 //! Deviations:
+//! - **A failed side projection refuses the trim.** `ProjectAndTrim`'s face votes read
+//!   every failure of `sm_FindSideOfCurve` as a point on the curve; a point whose
+//!   projection onto the curve has no solution is refused here instead (#13679).
 //! - **Out-params -> return values.** `rpNewShells` / `rpNewRegions` are returned in a
 //!   [`ClosureSplit`].
 //! - **Arena model.** Upstream stores the new objects' addresses in the B-rep data
@@ -600,7 +603,9 @@ fn build_regions(
     if data.manifold == 1 && data.regions.len() == 1 {
         // smiges_ReadIges: a single solid region; the infinite region and the void
         // regions are implied.
-        let rr = data.regions.first().ok_or(SolidError::sm_err(OP_MAKE))?;
+        let rr = data.regions.first().ok_or_else(|| {
+            SolidError::topology_failed(OP_MAKE, "the single solid region's record is not there")
+        })?;
         let solid = new_region(b, env, Region::default())?;
         add_attributes(env, EntityRef::Region(solid), &rr.topology.attributes)?;
         set_topology(env, EntityRef::Region(solid), &rr.topology);
@@ -695,7 +700,10 @@ fn build_regions(
                 *slot = Some(s);
             }
             if rs.shell_type > 2 {
-                return Err(SolidError::sm_err(OP_MAKE));
+                return Err(SolidError::topology_failed(
+                    OP_MAKE,
+                    "the shell record's type is not a known shell type",
+                ));
             }
             b.shell_mut(s)?.shell_type = match rs.shell_type {
                 0 => ShellType::Faceuse,
@@ -881,7 +889,7 @@ fn face_surface(
         .face(owner_face)?
         .surface
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP_MAKE))?;
+        .ok_or_else(|| SolidError::topology_missing(OP_MAKE, "the owner face's surface"))?;
     let mut copy = owner.copy(k)?;
     let key = env.new_key()?;
     let copy_ref = ObjectRef {
@@ -1136,7 +1144,7 @@ fn edge_curve(
         .edge(owner_edge)?
         .curve
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP_MAKE))?;
+        .ok_or_else(|| SolidError::topology_missing(OP_MAKE, "the owner edge's curve"))?;
     let mut curve = owner.copy(k)?;
     let key = env.new_key()?;
     let curve_ref = ObjectRef {
@@ -1180,7 +1188,10 @@ fn build_edgeuses(
             // NER(pNewVU), NER(pNewVU->m_pNext): the next use of a non-empty
             // circular list is never null
             if list.is_empty() {
-                return Err(SolidError::null_pointer(OP_MAKE));
+                return Err(SolidError::topology_missing(
+                    OP_MAKE,
+                    "the vertex's next vertex use",
+                ));
             }
             continue;
         }
@@ -1591,7 +1602,11 @@ fn link_loops(b: &mut Brep, data: &BrepData, built: &Built) -> Result<()> {
             }
         }
         let Some((mut last1, mut last2)) = last else {
-            return Err(SolidError::sm_err(OP_MAKE)); // Big problems here
+            // Big problems here
+            return Err(SolidError::topology_failed(
+                OP_MAKE,
+                "no edge use of the loop record was built",
+            ));
         };
 
         let mut first = true;
@@ -2178,6 +2193,7 @@ fn project_and_trim_body(
     mut tol: f64,
 ) -> Result<()> {
     // Process each surface
+    let mut imprinted: Vec<EdgeId> = Vec::new();
     for (ii, &face) in projected.faces.iter().enumerate() {
         let c3 = projected.curves_3d.get(ii).cloned();
         let uv = projected.uv_curves.get(ii).cloned().flatten();
@@ -2195,8 +2211,9 @@ fn project_and_trim_body(
             }
         }
         let curve_ref = |e: EdgeId, _type_code: i64| (env.keys)(CacheObject::Curve(e));
-        let _ =
+        let (_, edges) =
             merge_curves_on_surface(k, b, notify, &curve_ref, face, tol, &c3, Some(&uv), false)?;
+        imprinted.extend(edges);
     }
 
     // If we're just Splitting, then we're done.
@@ -2207,12 +2224,70 @@ fn project_and_trim_body(
     // Turn off editing for classification.
     let editing = b.editing_enabled();
     b.set_editing_enabled(false);
-    let to_delete = faces_to_delete(k, b, env, curve, direction, reference, trim_type, tol);
+    let to_delete = faces_to_delete(
+        k, b, env, curve, direction, reference, trim_type, tol, &imprinted,
+    );
     b.set_editing_enabled(editing);
     let to_delete = to_delete?;
 
     // Remove the indicated Faces.
     remove_faces(k, b, notify, &to_delete)
+}
+
+/// The vote of one point of a face on the face's side of the projected curve: `Some`
+/// with the side, `None` where the side is open (the point is on the curve, or the
+/// query failed with a status upstream drops).
+///
+/// # Errors
+///
+/// [`SolidError::Unsupported`] when the point's projection onto the curve has no
+/// solution. Upstream reads that as a point on the curve, and a face whose every
+/// vote fails that way is then taken to lie opposite the reference point, whichever
+/// side it is on (#13679). The classification is refused instead, before any face is
+/// removed.
+fn side_vote(
+    k: &Kernel,
+    curve: &Curve,
+    point: Point3,
+    direction: Vec3,
+    tol: f64,
+) -> Result<Option<i32>> {
+    match ignored(p1::side_of_curve(k, curve, point, direction, tol))? {
+        Some(p1::SideOfCurve::Right(right)) => Ok(Some(i32::from(right))),
+        Some(p1::SideOfCurve::Undecided(_)) | None => Ok(None),
+        Some(p1::SideOfCurve::NoProjection) => Err(SolidError::Unsupported {
+            operation: OP_PROJECT,
+            reason:
+                "a point of a face has no projection onto the curve, so the face's side is unknown",
+        }),
+    }
+}
+
+/// Whether the projected curve ends inside `face` (not upstream, #13697, WR-781): one
+/// of the edges the projection imprinted is used twice by one loop of the face, once in
+/// each direction, so the face lies on both sides of it. An edge that cuts the face in
+/// two is used once by each part. An imprinted edge that a later imprint merged away is
+/// skipped.
+fn ends_inside(b: &Brep, face: FaceId, imprinted: &[EdgeId]) -> Result<bool> {
+    for &edge in imprinted {
+        let Ok(record) = b.edge(edge) else {
+            continue;
+        };
+        let mut loops = Vec::new();
+        for &eu in &record.edgeuses {
+            if eu1::face(b, eu)? != Some(face) {
+                continue;
+            }
+            let Some(lu) = eu1::loopuse(b, eu)? else {
+                continue;
+            };
+            if loops.contains(&lu) {
+                return Ok(true);
+            }
+            loops.push(lu);
+        }
+    }
+    Ok(false)
 }
 
 /// Classifies each face against the plane of the projected curve: by the votes of
@@ -2227,6 +2302,7 @@ fn faces_to_delete(
     reference: Point3,
     trim_type: TrimType,
     tol: f64,
+    imprinted: &[EdgeId],
 ) -> Result<Vec<FaceId>> {
     let mut to_delete = Vec::new();
     let mut edges: Vec<EdgeId> = Vec::new();
@@ -2248,7 +2324,7 @@ fn faces_to_delete(
         for &v in &vertices {
             let rec = b.vertex(v)?;
             let tol1 = 5.0 * (rec.tolerance + tol);
-            if let Some(side) = ignored(find_side_of_curve(k, curve, rec.point, direction, tol1))? {
+            if let Some(side) = side_vote(k, curve, rec.point, direction, tol1)? {
                 if side == 1 {
                     right_votes += 1;
                 } else if side == 0 {
@@ -2266,10 +2342,10 @@ fn faces_to_delete(
                 let c = rec
                     .curve
                     .as_ref()
-                    .ok_or(SolidError::null_pointer(OP_PROJECT))?;
+                    .ok_or_else(|| SolidError::topology_missing(OP_PROJECT, "the edge's curve"))?;
                 let tol1 = 5.0 * (rec.tolerance + tol);
                 let p = c.evaluate_point(k, rec.interval.evaluate(0.5))?;
-                if let Some(side) = ignored(find_side_of_curve(k, curve, p, direction, tol1))? {
+                if let Some(side) = side_vote(k, curve, p, direction, tol1)? {
                     if side != 0 {
                         right_votes += 1;
                     } else {
@@ -2281,8 +2357,19 @@ fn faces_to_delete(
 
         let mut face_right_side = i32::from(right_votes >= left_votes);
 
-        if right_votes == left_votes {
-            // Make a face shape with the face and its edges and vertices.
+        // (not upstream, #13697, WR-781) A face the curve ends inside is not cut in
+        // two, and neither is one with votes on both sides. Upstream gives such a face
+        // to the side with more votes, so the count of its corners decides, and the face
+        // under the reference point can go to the other side. It is judged like a tie,
+        // by its point nearest the reference point.
+        let uncut = (right_votes > 0 && left_votes > 0) || ends_inside(b, face, imprinted)?;
+        if right_votes == left_votes || uncut {
+            // Make a face shape with the face and its edges and vertices. The edges
+            // were collected only for a face without a vertex vote; upstream's list
+            // otherwise still holds the edges of an earlier face (not upstream, WR-781).
+            if right_votes > 0 || left_votes > 0 {
+                edges = face_edges(b, face)?;
+            }
             let edge_keys: Vec<_> = edges.iter().map(|&e| (env.brep_id, e)).collect();
             let vertex_keys: Vec<_> = vertices.iter().map(|&v| (env.brep_id, v)).collect();
             let shape = Shape::new(
@@ -2341,7 +2428,7 @@ fn faces_to_delete(
             };
             let p = point_from_solution(k, b, first, 1)?;
             let tol1 = 5.0 * (b.face(face)?.tolerance + tol);
-            match ignored(find_side_of_curve(k, curve, p, direction, tol1))? {
+            match side_vote(k, curve, p, direction, tol1)? {
                 Some(side) => face_right_side = side,
                 // Surface is on opposite side as point: the closest point is under
                 // the curve.
@@ -2394,7 +2481,10 @@ fn delete_vertex(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, v: Verte
 pub fn remove_all_topology(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::sm_err(OP_REMOVE));
+        return Err(SolidError::topology_failed(
+            OP_REMOVE,
+            "editing is disabled on the B-rep",
+        ));
     }
     crate::topology::brep::p3::with_kernel_callbacks(k, b, remove_all_topology_notified)
 }
@@ -2413,7 +2503,10 @@ pub fn remove_all_topology_notified(
 ) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::sm_err(OP_REMOVE));
+        return Err(SolidError::topology_failed(
+            OP_REMOVE,
+            "editing is disabled on the B-rep",
+        ));
     }
 
     let faces = brep_faces(b)?;
@@ -2477,7 +2570,7 @@ fn test_closure_split_region_at_faceuse(
         fu,
     ) {
         Ok(v) => Ok(Some(v)),
-        Err(SolidError::Upstream { .. }) => Ok(None),
+        Err(e) if e.upstream_status().is_some() => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -2619,7 +2712,10 @@ fn subdivide_face_body(
             // Null segment at interior of curve: split the edge, both halves inspected
             let split = p9::make_vertex_split_edge(k, b, e, first, env, curve_ref)?;
             if !split.split {
-                return Err(SolidError::sm_err(OP_SUBDIVIDE));
+                return Err(SolidError::topology_failed(
+                    OP_SUBDIVIDE,
+                    "the edge could not be split at its null segment",
+                ));
             }
             let [e1, e2] = split.edges.ok_or(SolidError::invalid_input(
                 OP_SUBDIVIDE,
@@ -3163,10 +3259,12 @@ mod tests {
         ));
         let mut d = square(0);
         d.shells[0].shell_type = 7;
-        assert!(matches!(
-            build(&mut d, MakeTopologyOptions::default()),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        assert_eq!(
+            build(&mut d, MakeTopologyOptions::default())
+                .err()
+                .and_then(|e| e.upstream_status()),
+            Some(1001)
+        );
         let mut d = square(0);
         d.edgeuses[0].next_eu = 99;
         assert!(matches!(
@@ -3364,5 +3462,240 @@ mod tests {
         b.set_editing_enabled(true);
         // topology.brep_p4 (SmBrep::DeleteEdge and friends) is ported
         assert!(remove_all_topology(&mut k, &mut b).is_ok());
+    }
+
+    /// The cutter of the `raw_vote_*` cases: three straight pieces, the middle one from
+    /// (-1, 0) to (1, 1) run through in a knot span `gap` wide.
+    fn raw_vote_cutter(gap: f64) -> Curve {
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::CPoint;
+        let net = Net::new(
+            vec![
+                CPoint::new(-2.0, 0.0, 0.0, 1.0),
+                CPoint::new(-1.0, 0.0, 0.0, 1.0),
+                CPoint::new(1.0, 1.0, 0.0, 1.0),
+                CPoint::new(2.0, 1.0, 0.0, 1.0),
+            ],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0 + gap, 2.0, 2.0],
+        )
+        .unwrap();
+        Curve::from(BSplineCurve::from_nurb(net, 3, true))
+    }
+
+    fn raw_vote_key_of(e: EntityRef) -> ObjectRef {
+        let (type_code, kind, index) = match e {
+            EntityRef::Brep(x) => (16011, 0, x.index()),
+            EntityRef::Region(x) => (16012, 1, x.index()),
+            EntityRef::Shell(x) => (16013, 2, x.index()),
+            EntityRef::Faceuse(x) => (16022, 3, x.index()),
+            EntityRef::Face(x) => (16002, 4, x.index()),
+            EntityRef::Loopuse(x) => (16004, 5, x.index()),
+            EntityRef::Loop(x) => (16003, 6, x.index()),
+            EntityRef::Edgeuse(x) => (16005, 7, x.index()),
+            EntityRef::Edge(x) => (16016, 8, x.index()),
+            EntityRef::Vertexuse(x) => (16006, 9, x.index()),
+            EntityRef::Vertex(x) => (16021, 10, x.index()),
+        };
+        ObjectRef {
+            type_code,
+            key: ObjectKey((1u64 << 40) * (kind + 1) + u64::from(index)),
+        }
+    }
+
+    /// Classifies the one face of a `raw_vote_*` fixture against [`raw_vote_cutter`],
+    /// with the reference point below the cutter, as the face is: the trim's result and
+    /// the faces left.
+    fn raw_vote_trim(file: &str, gap: f64, trim_type: TrimType) -> (Result<()>, usize) {
+        use crate::topology::database_io::FileType;
+        use crate::topology::topology::NotifyRecords;
+        let key_of = raw_vote_key_of;
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/topology.brep_p10")
+            .join(file);
+        let mut k = Kernel::default();
+        let mut data =
+            BrepData::read_from_file(&k, std::fs::read(path).unwrap(), FileType::Ascii).unwrap();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let mut store = AttributeStore::new();
+        let mut records = NotifyRecords::new();
+        let mut env = TopologyEnv {
+            all_attributes: &[],
+            attributes: &mut store,
+            key_of: &key_of,
+            records: &mut records,
+            next_key: 1u64 << 50,
+        };
+        let options = MakeTopologyOptions {
+            make_uv_trim_curves: false,
+            add_analytics: false,
+            force_same_tol: false,
+            check_uv_trim_curves: false,
+            always_heal: false,
+            healer_enabled: false,
+        };
+        make_topology_from_data(&mut k, &mut b, &mut data, &mut env, options).unwrap();
+        let keys = |o: CacheObject| match o {
+            CacheObject::Edge(e) | CacheObject::Curve(e) => key_of(EntityRef::Edge(e)),
+            CacheObject::Face(f) | CacheObject::Surface(f) => key_of(EntityRef::Face(f)),
+            CacheObject::Vertex(v) => key_of(EntityRef::Vertex(v)),
+            CacheObject::Other(r) => r,
+            _ => key_of(EntityRef::Brep(BrepId::from_index(0))),
+        };
+        let owner_of = |_: ObjectRef| None;
+        let project_env = ProjectEnv {
+            brep_id: BrepId::from_index(0),
+            keys: &keys,
+            owner_of: &owner_of,
+        };
+        let mut notify = NotifyEnv {
+            records: &mut records,
+            attributes: &mut store,
+            context: None,
+            key_of: &key_of,
+        };
+        let result = project_and_trim(
+            &mut k,
+            &mut b,
+            &project_env,
+            &mut notify,
+            &raw_vote_cutter(gap),
+            Vec3::Z,
+            Vec3::new(-1.5, -1.0, 0.0),
+            trim_type,
+            // no face is imprinted: the trim is the classification alone
+            &ProjectAndTrimOptions {
+                subset_faces: Some(&[]),
+                ..Default::default()
+            },
+        );
+        (result, p1::faces(&b, None).unwrap().len())
+    }
+
+    /// #13679: on the cutter's 1.5e-12 knot span the projection of a face's points has
+    /// no solution. The lens, whose every vote failed that way, was classified opposite
+    /// the reference point and the wrong face kept or deleted, with success. The trim
+    /// is refused and the face left; where the projections succeed, the face on the
+    /// reference point's side is kept, or deleted.
+    #[test]
+    fn a_face_whose_side_projection_fails_is_not_classified() {
+        for file in ["raw_vote_rectangle.smb", "raw_vote_midpoint_lens.smb"] {
+            for gap in [1.5e-12, 1.9e-12] {
+                for trim_type in [TrimType::KeepPoint, TrimType::DeletePoint] {
+                    let (result, faces) = raw_vote_trim(file, gap, trim_type);
+                    assert!(
+                        matches!(
+                            result,
+                            Err(SolidError::Unsupported { operation, .. }) if operation == OP_PROJECT
+                        ),
+                        "{file} gap={gap}: {result:?}"
+                    );
+                    assert_eq!(faces, 1, "{file} gap={gap}");
+                }
+            }
+            for (trim_type, left) in [(TrimType::KeepPoint, 1), (TrimType::DeletePoint, 0)] {
+                let (result, faces) = raw_vote_trim(file, 1e-8, trim_type);
+                assert_eq!(result, Ok(()), "{file} faces left: {left}");
+                assert_eq!(faces, left, "{file}");
+            }
+        }
+    }
+
+    /// A point on the curve stays an open vote, a failed projection does not pass for
+    /// one, and `sm_FindSideOfCurve` keeps the failure it had for each.
+    #[test]
+    fn side_of_curve_tells_a_failed_projection_from_a_point_on_the_curve() {
+        let k = Kernel::default();
+        let below = Point3::new(0.0, 0.3, 0.0);
+        let on_curve = Point3::new(-1.5, 0.0, 0.0);
+        let narrow = raw_vote_cutter(1.5e-12);
+        let wide = raw_vote_cutter(1e-8);
+        let side = |curve: &Curve, p: Point3| p1::side_of_curve(&k, curve, p, Vec3::Z, 1e-6);
+        assert_eq!(side(&wide, below), Ok(p1::SideOfCurve::Right(true)));
+        assert_eq!(side(&narrow, below), Ok(p1::SideOfCurve::NoProjection));
+        assert!(matches!(
+            side(&narrow, on_curve),
+            Ok(p1::SideOfCurve::Undecided(_))
+        ));
+        let not_once = SolidError::topology_failed(
+            "topology::brep::p1",
+            "the point does not project onto the curve exactly once",
+        );
+        let status = p1::find_side_of_curve(&k, &narrow, below, Vec3::Z, 1e-6);
+        assert_eq!(status, Err(not_once));
+        assert!(p1::find_side_of_curve(&k, &narrow, on_curve, Vec3::Z, 1e-6).is_err());
+        assert_eq!(side_vote(&k, &narrow, on_curve, Vec3::Z, 1e-6), Ok(None));
+        assert_eq!(side_vote(&k, &wide, below, Vec3::Z, 1e-6), Ok(Some(1)));
+        assert!(side_vote(&k, &narrow, below, Vec3::Z, 1e-6).is_err());
+    }
+
+    /// #13697: a cutting line that ends inside a face does not cut the face in two, so
+    /// the face holds the reference point whichever side of the line that point is on,
+    /// and a trim that keeps the reference point's side keeps the face. The line runs
+    /// along x = 0.5 and ends at y = 0.5, half-way up each outline. The hexagon is the
+    /// square with two more corners right of the line: it has one corner left of the
+    /// line and three right of it, and was deleted for a reference point on the left.
+    /// The pentagon has both its voting corners right of the line, and was deleted too.
+    #[test]
+    fn a_face_the_curve_ends_inside_is_kept_with_the_reference_point() {
+        use crate::primitive::{api_curves, api_trim_ops};
+        let segment = |a: (f64, f64), b: (f64, f64), z: f64| {
+            let line =
+                api_curves::create_line_segment(Point3::new(a.0, a.1, z), Point3::new(b.0, b.1, z));
+            Curve::from(line.unwrap())
+        };
+        // the number of faces left, and the x range of their vertices
+        let trim = |outline: &[(f64, f64)], end: f64, reference: (f64, f64)| {
+            let mut k = Kernel::default();
+            let sides: Vec<Curve> = (0..outline.len())
+                .map(|i| segment(outline[i], outline[(i + 1) % outline.len()], 0.0))
+                .collect();
+            let mut b = api_trim_ops::create_planar_faces(&mut k, &sides).unwrap();
+            let cutter = segment((0.5, -1.0), (0.5, end), 1.0);
+            let reference = Point3::new(reference.0, reference.1, 0.0);
+            api_trim_ops::project_and_trim(&mut k, &mut b, &cutter, Vec3::Z, reference).unwrap();
+            let faces = p1::faces(&b, None).unwrap();
+            let mut range = (f64::MAX, f64::MIN);
+            for &face in &faces {
+                for vertex in face_vertices(&b, face).unwrap() {
+                    let x = b.vertex(vertex).unwrap().point.x;
+                    range = (range.0.min(x), range.1.max(x));
+                }
+            }
+            (faces.len(), range)
+        };
+        let square = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let hexagon = [
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (1.2, 0.1),
+            (1.2, 0.3),
+            (1.0, 1.0),
+            (0.0, 1.0),
+        ];
+        // the square without its lower left corner: its two voting corners are both
+        // right of the line
+        let pentagon = [(0.6, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.6)];
+        let (left, right) = ((0.25, 0.25), (0.75, 0.25));
+        // the line ends inside the face: the whole face is kept
+        for reference in [left, right] {
+            assert_eq!(
+                trim(&square, 0.5, reference),
+                (1, (0.0, 1.0)),
+                "{reference:?}"
+            );
+            assert_eq!(
+                trim(&hexagon, 0.5, reference),
+                (1, (0.0, 1.2)),
+                "{reference:?}"
+            );
+        }
+        assert_eq!(trim(&pentagon, 0.5, (0.25, 0.4)), (1, (0.0, 1.0)));
+        assert_eq!(trim(&pentagon, 0.5, right), (1, (0.0, 1.0)));
+        // the line crosses the face: the part on the reference point's side is kept
+        assert_eq!(trim(&square, 2.0, left), (1, (0.0, 0.5)));
+        assert_eq!(trim(&square, 2.0, right), (1, (0.5, 1.0)));
+        assert_eq!(trim(&hexagon, 2.0, left), (1, (0.0, 0.5)));
+        assert_eq!(trim(&hexagon, 2.0, right), (1, (0.5, 1.2)));
     }
 }

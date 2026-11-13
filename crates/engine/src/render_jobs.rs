@@ -53,7 +53,7 @@ struct Completed {
 
 pub(crate) struct BatchShot {
     pub name: String,
-    pub camera: solidcraft_render::Camera,
+    pub camera: solidcraft_viewport::Camera,
     pub request: Arc<serde_json::Value>,
 }
 

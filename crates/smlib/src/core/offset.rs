@@ -18,8 +18,6 @@
 
 use solidcore::EntityRef;
 use solidcore::SolidError;
-use solidcore::error::offset::OffsetFailure;
-use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{Attribute, Behavior, ids};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::object::Shape;
@@ -51,22 +49,18 @@ type Out<T> = std::result::Result<T, Error>;
 /// `SM_ERR_INVALID_INPUT`.
 const INVALID_INPUT: i32 = 1007;
 
-/// `status` (smlib_shim.h): an offset whose walls touch is [`Error::WallsTouch`]; a vertex moved
-/// past an edge's other end (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4) is
-/// `SMLIB_ERR_UNSUPPORTED`; a wall whose face's offset folds, which solidcore's one construction
-/// refuses (`fixes.shell_one_construction`, solidcore#2367), is [`Error::WallFolds`] with the
-/// largest wall it names; any other status as the blends pass it on. solidcore names an offset's
-/// refusals by their kind and reason (its errors in its own terms, solidcore#2654), whichever
-/// status the pinned C++ gives them.
+/// `status` (smlib_shim.h): an offset's refusal as solidcore-ops routes it
+/// ([`solidcore_ops::offset::refusal`], the routing of ops' own offsets): walls that touch
+/// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`] with the largest
+/// wall it names, solidcore#2367), a vertex moved past an edge's other end
+/// (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4: `SMLIB_ERR_UNSUPPORTED`); anything else as the
+/// blends pass it on, which carries ops' other offset refusals as they are.
 fn status(e: SolidError) -> Error {
-    if let SolidError::Failed(f) = &e
-        && let Reason::Offset(OffsetFailure::Folds { largest, .. }) = f.reason
-    {
-        return Error::WallFolds { largest: Some(largest) };
-    }
-    match e.kind() {
-        ErrorKind::OffsetWallsTouch => Error::WallsTouch,
-        ErrorKind::OffsetEdgeVanishes => Error::Unsupported,
+    use solidcore_ops::Error as Ops;
+    match solidcore_ops::offset::refusal(&e) {
+        Some(Ops::WallsTouch) => Error::WallsTouch,
+        Some(Ops::WallFolds { largest }) => Error::WallFolds { largest },
+        Some(Ops::Unsupported(_)) => Error::Unsupported,
         _ => blend_status(e),
     }
 }

@@ -229,6 +229,7 @@ fn designs_survive_mutation() {
         positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0].into(),
         triangles: vec![0, 1, 2].into(),
         color: None,
+        corner_normals: Default::default(),
     };
     let preview = crate::DesignPreview { meshes: vec![mesh] };
     let container = crate::write_design_container_with_preview(&doc, crate::DesignCompression::Fast, Some(&preview)).unwrap();

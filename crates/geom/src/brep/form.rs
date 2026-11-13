@@ -61,24 +61,29 @@ fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
     if !(a0.is_finite() && a1.is_finite() && a1 > a0 && a1 - a0 <= TAU * (1.0 + 1e-9)) {
         return None;
     }
-    let on_end = |a: f64| {
-        let end = (a / FRAC_PI_2).round() * FRAC_PI_2;
-        if (a - end).abs() <= reach { end } else { a }
-    };
-    let (a0, a1) = (on_end(a0), on_end(a1));
+    let (a0, a1) = (on_quarter_line(a0, reach), on_quarter_line(a1, reach));
     let q0 = quarter_of(a0);
     let q1 = (a1 / FRAC_PI_2 - SLACK).ceil();
     let n = (q1 - q0).max(1.0) as usize;
     (n <= 5).then_some((q0, n))
 }
 
+/// An angle within `reach` of a quarter's end, on it; another as it is.
+fn on_quarter_line(a: f64, reach: f64) -> f64 {
+    let end = (a / FRAC_PI_2).round() * FRAC_PI_2;
+    if (a - end).abs() <= reach { end } else { a }
+}
+
 /// A face's quarters along an angle direction and its domain there: a whole turn is exactly
 /// four quarters from the one it starts in (the form closes on itself, so it is periodic and the
-/// face's seam uses lie a period apart), anything less the quarters it needs ([`quarters`], ends
-/// within `reach` of a quarter's end on it).
+/// face's seam uses lie a period apart), a start within `reach` of a quarter's end starting on
+/// it (a seam a rounding short of the quarter line its frame puts it on would otherwise start
+/// the form a quarter early, and the seam's second use would lie a quarter past its end);
+/// anything less the quarters it needs ([`quarters`], ends within `reach` of a quarter's end on
+/// it).
 fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
     if a[1] - a[0] >= TAU * (1.0 - 1e-9) {
-        let q0 = quarter_of(a[0]);
+        let q0 = quarter_of(on_quarter_line(a[0], reach));
         return Some(((q0, 4), [q0, q0 + 4.0]));
     }
     let grid = quarters(a, reach)?;

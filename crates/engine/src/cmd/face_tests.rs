@@ -537,3 +537,105 @@ fn shelled_cylinder_floor_keeps_its_cap_identity() {
         certificate_of(&s, floor)
     );
 }
+
+/// Two boxes touching flush at Y=0: "Big" (40 × 30 × 20 from the origin, made first) and
+/// "Small" (10 × 10 × 5 in front of it). Their end faces at Y=0 coincide where Small's lies.
+fn flush_boxes(s: &mut Session) {
+    run(s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "operation": "new", "body_name": "Big"}));
+    run(s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [10, -10, 5], "operation": "new", "body_name": "Small"}));
+}
+
+/// The exact volume of the body called `name`, after a rebuild.
+fn body_volume(s: &mut Session, name: &str) -> f64 {
+    s.refresh();
+    let state = s.model.state();
+    let b = state.bodies.iter().find(|b| b.name == name).unwrap_or_else(|| panic!("no body {name}"));
+    solidcraft_kernel::measure(&b.body).unwrap().volume
+}
+
+/// A point-only pick on the face two flush boxes share (the call in #12385) warns, naming both
+/// bodies and the one changed, instead of changing the first body silently.
+#[test]
+fn a_face_pick_on_coincident_faces_of_two_bodies_warns_and_names_them() {
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    // The point lies on Big's end face and on Small's: without `body` it says neither. The
+    // command does what it always did (Big, first, takes it: 40 × 32 × 20), and says so.
+    let out = run(&mut s, "solid.offset_face", json!({"faces": [[15, 0, 7.5]], "distance": 2}));
+    let warning = out["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("Big and Small") && warning.contains("Big was changed") && warning.contains("`body`"), "{out}");
+    assert!((body_volume(&mut s, "Big") - 25600.0).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Small") - 500.0).abs() < 1e-6);
+}
+
+/// With `body` given, a pick on a shared face changes that body, shown or hidden.
+#[test]
+fn a_named_body_takes_a_pick_on_coincident_faces_even_when_hidden() {
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    // Small's end face moves 2 mm into Big's side: 10 × 12 × 5.
+    run(&mut s, "solid.offset_face", json!({"faces": [[15, 0, 7.5]], "distance": 2, "body": "Small"}));
+    assert!((body_volume(&mut s, "Small") - 600.0).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
+    // A hidden body named outright is still the one changed: 40 × 32 × 20.
+    run(&mut s, "browser.visibility", json!({"visible": false, "items": ["Big"]}));
+    run(&mut s, "solid.offset_face", json!({"faces": [[15, 0, 7.5]], "distance": 2, "body": "Big"}));
+    assert!((body_volume(&mut s, "Big") - 25600.0).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Small") - 600.0).abs() < 1e-6);
+}
+
+/// A pick on one body's own face, with several bodies in the design, saves that body in the
+/// feature, so rebuilds don't depend on which body is nearest.
+#[test]
+fn a_face_pick_on_one_body_of_several_saves_that_body_in_the_feature() {
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    // Small's front face at Y=-10 belongs to Small alone.
+    let out = run(&mut s, "solid.offset_face", json!({"faces": [[15, -10, 7.5]], "distance": 2}));
+    let id = out["feature"].as_u64().unwrap();
+    let kind = &s.doc.feature(id).unwrap().kind;
+    assert_eq!(kind.face_body(), Some("Small"));
+    // 10 × 12 × 5.
+    assert!((body_volume(&mut s, "Small") - 600.0).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
+}
+
+/// A point where two round walls touch along a line is on both bodies, decided exactly.
+#[test]
+fn a_face_pick_where_two_round_walls_touch_on_a_line_is_on_both() {
+    // Two discs touching along the line x = 10 (gears in mesh): a point there is on both walls
+    // exactly, though their display meshes put it nearer one. Nothing is saved, and evaluation
+    // decides as before, so the first disc (radius 10 → 12) is the one changed, and the result
+    // says the pick was on both.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 10, "height": 5, "operation": "new", "body_name": "A"}));
+    run(&mut s, "solid.cylinder", json!({"base": [30, 0, 0], "axis": [0, 0, 1], "radius": 20, "height": 5, "operation": "new", "body_name": "B"}));
+    let out = run(&mut s, "solid.offset_face", json!({"faces": [[10, 0, 2.5]], "distance": 2}));
+    let warning = out["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("A and B") && warning.contains("A was changed"), "{out}");
+    let id = out["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.feature(id).unwrap().kind.face_body(), None);
+    assert!((body_volume(&mut s, "A") - PI * 144.0 * 5.0).abs() < 1.0);
+    assert!((body_volume(&mut s, "B") - PI * 400.0 * 5.0).abs() < 1.0);
+}
+
+/// Replace Face on a flush face moves the named body, and warns when no body is named.
+#[test]
+fn replace_face_moves_the_named_body_of_a_flush_face_and_warns_for_an_unnamed_one() {
+    let target = json!({"origin": [0, -3, 0], "normal": [0, 1, 0]});
+    // Unnamed, the shared face says neither body: the planar face is still found, Big takes it
+    // (its front face moves to Y=-3: 40 × 33 × 20) and the result warns.
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    let out = run(&mut s, "solid.replace_face", json!({"faces": [[15, 0, 7.5]], "target": target}));
+    let warning = out["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("Big and Small") && warning.contains("`body`"), "{out}");
+    assert!((body_volume(&mut s, "Big") - 26400.0).abs() < 1e-6, "{}", body_volume(&mut s, "Big"));
+    assert!((body_volume(&mut s, "Small") - 500.0).abs() < 1e-6);
+    // Named, Small's back face moves to Y=-3: 10 × 7 × 5.
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    run(&mut s, "solid.replace_face", json!({"faces": [[15, 0, 7.5]], "target": target, "body": "Small"}));
+    assert!((body_volume(&mut s, "Small") - 350.0).abs() < 1e-6, "{}", body_volume(&mut s, "Small"));
+    assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
+}

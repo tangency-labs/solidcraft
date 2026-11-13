@@ -24,7 +24,7 @@ use serde_json::json;
 use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
 use solidcraft_engine::sketch::{
-    ConstraintKind, DimFrame, chain_centres, default_text, default_text_offset, dim_frame, dim_layout_reaching, dim_reach,
+    ConstraintKind, DimFrame, chain_centres, default_text, default_text_offset, dim_frame_at, dim_layout_reaching, dim_reach,
 };
 
 use crate::SolveApp;
@@ -71,15 +71,29 @@ struct Edit {
     /// Where the box sat last frame: a press only takes the value over once the box stayed put
     /// under it, so the click that placed or pinned the value does not.
     shown: Option<Pos2>,
-    /// The last dimension a click referenced, and when: the second click of a double-click on
-    /// it must not insert its name again.
-    picked: Option<(String, f64)>,
+    /// A click on another dimension waiting out egui's double-click window: its name goes in
+    /// once no second click came, at the caret the click found. A second click opens that
+    /// dimension for editing instead.
+    pending: Option<Pending>,
+    /// The caret and selection as they were before the pointer went down: a press on a dimension
+    /// takes the keyboard from the field, and the field takes it back with everything selected.
+    caret: Option<egui::text::CCursorRange>,
     /// A shown dimension of a finished sketch, edited from the model view without editing the
     /// sketch (its id). None: a dimension of the sketch being edited.
     sketch: Option<u64>,
     /// A driven dimension that nothing else fixes any more, which the value makes driving (its
     /// constraint id; `param` names the parameter it gets).
     driven: Option<String>,
+}
+
+/// A reference click not yet acted on (see [`Edit::pending`]).
+#[derive(Clone, Debug)]
+struct Pending {
+    /// The parameter whose name is inserted.
+    name: String,
+    /// When the click came (egui time), and where the caret and selection were then.
+    at: f64,
+    selection: Option<egui::text::CCursorRange>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -117,6 +131,9 @@ struct DimensionDraft {
     /// The first dimension of a sketch scales it rather than distorting it (#1365), unless the
     /// Sketch preference is off (#4109).
     scale_sketch: bool,
+    /// It scales about the sketch origin even for a drawing nothing ties there (the Sketch
+    /// preference, off by default: a free drawing scales about its own middle, #11043).
+    scale_about_origin: bool,
 }
 
 impl DimensionDraft {
@@ -130,7 +147,12 @@ impl DimensionDraft {
     fn params(&self, expr: &str) -> serde_json::Value {
         // The first dimension of a sketch scales it rather than distorting it (#1365), unless the
         // Sketch preference is off (#4109).
-        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": self.scale_sketch});
+        let mut params = json!({
+            "entities": entities_value(&self.entities),
+            "value": expr,
+            "scale_sketch": self.scale_sketch,
+            "scale_about_origin": self.scale_about_origin,
+        });
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -183,9 +205,10 @@ pub(crate) fn ellipse_as_before(half_axes: bool, params: &mut serde_json::Value)
 }
 
 /// How a dimension is drawn: with Draw ellipses with their axes off, a radius on an ellipse
-/// is drawn as a radius, as before, instead of to its minor axis end.
-pub(crate) fn shown_frame(half_axes: bool, sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind) -> Option<DimFrame> {
-    match dim_frame(sk, k)? {
+/// is drawn as a radius, as before, instead of to its minor axis end. `text` is the stored text
+/// position: an angle's arc goes in the sector of its value that the text sits in.
+pub(crate) fn shown_frame(half_axes: bool, sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind, text: Option<Vec2>) -> Option<DimFrame> {
+    match dim_frame_at(sk, k, text)? {
         DimFrame::HalfAxis { center, len, .. } if !half_axes => Some(DimFrame::Radial { center, radius: len, diameter: false, arc: None }),
         frame => Some(frame),
     }
@@ -242,7 +265,8 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             owned: false,
             typed: false,
             shown: None,
-            picked: None,
+            pending: None,
+            caret: None,
             sketch: None,
             driven: None,
         })
@@ -282,7 +306,8 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             owned: false,
             typed: false,
             shown: None,
-            picked: None,
+            pending: None,
+            caret: None,
             sketch: None,
             driven: None,
         })
@@ -409,6 +434,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         driven,
         half_axes: app.preferences.ellipse_axes,
         scale_sketch: app.preferences.first_dimension_scales,
+        scale_about_origin: app.preferences.first_dimension_scales_about_origin,
     };
     if !draft.preview.sketch(sketch).is_some_and(|solved| solved.report.ok()) {
         return Err("That dimension conflicts with the sketch constraints".into());
@@ -474,6 +500,13 @@ thread_local! {
     /// Value texts of finished sketches' shown dimensions (Show Dimensions), as the model view
     /// drew them last frame: sketch, constraint id, parameter (None: driven), text box.
     static MODEL: RefCell<Vec<ModelDim>> = const { RefCell::new(Vec::new()) };
+    /// The value box of the dimension being placed or typed, as drawn this frame.
+    static DRAFT_TEXT: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
+/// Where the value of the dimension being placed or typed was drawn this frame.
+pub(crate) fn draft_text() -> Option<Rect> {
+    DRAFT_TEXT.with(std::cell::Cell::get)
 }
 
 /// A shown dimension of a finished sketch, as drawn in the model view (screen space).
@@ -509,6 +542,11 @@ pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
         return false;
     }
     let Some(d) = model_hit(pos) else { return false };
+    open_model(app, d)
+}
+
+/// Open a finished sketch's shown dimension in the inline editor (true: always).
+fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
     let Some(param) = d.param else {
         app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
         return true;
@@ -527,7 +565,8 @@ pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
             owned: false,
             typed: false,
             shown: None,
-            picked: None,
+            pending: None,
+            caret: None,
             sketch: Some(d.sketch),
             driven: None,
         })
@@ -629,7 +668,8 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             owned: false,
             typed: false,
             shown: None,
-            picked: None,
+            pending: None,
+            caret: None,
             sketch: None,
             driven,
         })
@@ -761,6 +801,7 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
 
 /// Draw the active sketch's dimensions and remember where they are for picking.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    DRAFT_TEXT.with(|d| d.set(None));
     let mut drawn = Vec::new();
     let editor_draft = EDIT.with(|edit| {
         let mut edit = edit.borrow_mut();
@@ -833,7 +874,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let tk = Tokens::get();
     let is_sel = |id: &str| app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if x == id));
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(hit);
-    let font = FontId::monospace(solidcraft_theme::Tokens::get().font_body);
+    let font = FontId::monospace(tk.font_body * crate::prefs::dimension_text_scale(&app.preferences));
     let centres = chain_centres(sk);
     let draft_sketch = draft.as_ref().and_then(|(_, d)| d.preview.sketch(d.sketch));
     let draft_centres = draft_sketch.map(|solved| chain_centres(&solved.sketch));
@@ -860,18 +901,13 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         // A draft is drawn as it will be added: with the preference it was made with.
         let half_axes =
             if is_draft { draft.as_ref().map_or(app.preferences.ellipse_axes, |(_, d)| d.half_axes) } else { app.preferences.ellipse_axes };
-        let Some(frame) = shown_frame(half_axes, sk, &c.kind) else { continue };
+        let Some(frame) = shown_frame(half_axes, sk, &c.kind, c.text) else { continue };
         let anchor = match frame {
             DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
             DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
             DimFrame::Angular { vertex, .. } => vertex,
         };
-        // Millimetres per pixel at the dimension.
-        let (Some(a), Some(b)) = (to(anchor), to(anchor + Vec2::X)) else { continue };
-        let px = 1.0 / f64::from(a.distance(b)).max(1e-9);
-        if !px.is_finite() {
-            continue;
-        }
+        let Some(px) = mm_per_pixel(to, anchor) else { continue };
         let display_doc =
             if is_draft { draft.as_ref().map(|(_, d)| d.preview_doc.as_ref()).unwrap_or(app.session.doc.as_ref()) } else { app.session.doc.as_ref() };
         let expr = c.param.as_ref().and_then(|p| display_doc.param(p)).map(|p| p.expr.as_str());
@@ -880,10 +916,8 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             crate::viewport::Conflict::glyph_colour(app, &tk)
         } else if is_sel(&c.id) || hover.as_deref() == Some(c.id.as_str()) {
             tk.accent
-        } else if c.driven {
-            tk.dimension_driven
         } else {
-            tk.dimension
+            crate::prefs::dimension_colour(&app.preferences, c.driven)
         };
         let galley = painter.layout_no_wrap(
             frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
@@ -895,7 +929,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         // Unplaced linear dimensions sit outside the shape they measure.
         let away = first_point(sk, &c.kind).and_then(|p| centres.get(p).copied()).unwrap_or(anchor);
         let reach = dim_reach(sk, &c.kind);
-        let mut text = c.text.or_else(|| default_text(&frame, away, px));
+        let mut text = c.text.or_else(|| default_text(&frame, away, px, half));
         let mut lay = dim_layout_reaching(&frame, text, px, half, reach);
         // #44: a text that would land on an already-drawn dimension's text steps to the next
         // row — across the dimension line for a linear one, out from the centre for the rest —
@@ -906,7 +940,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
                 break;
             }
             let row = (f64::from(size.y) + 2.0) * px;
-            let base = text.unwrap_or_else(|| default_text_offset(&frame, px));
+            let base = text.unwrap_or_else(|| default_text_offset(&frame, px, half));
             text = Some(match frame {
                 DimFrame::Linear { .. } => base + Vec2::new(0.0, row * if base.y < 0.0 { -1.0 } else { 1.0 }),
                 _ => base + base.normalized().unwrap_or(Vec2::X) * row,
@@ -929,6 +963,9 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         }
         let Some(tc) = to(lay.text) else { continue };
         let r = Rect::from_center_size(tc, size);
+        if is_draft {
+            DRAFT_TEXT.with(|d| d.set(Some(r)));
+        }
         placed.push(r);
         painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
         painter.galley(r.min + vec2(3.0, 1.0), galley, col);
@@ -953,6 +990,18 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     DRAWN.with(|d| *d.borrow_mut() = drawn);
     window::paint(app, painter, proj);
     edit_box(app, ui.ctx());
+}
+
+/// Millimetres per pixel at the sketch point `at`, along whichever of the sketch's x and y
+/// directions looks longer on screen (`to`: sketch to screen). Seen nearly edge-on, one of them
+/// points at the eye and looks a pixel long or less: sized from it alone, a dimension's text and
+/// gaps grew so large that its lines ran across the window (#14826). Face-on both are the same.
+/// A direction that does not project leaves the other to size it; with neither, there is no size.
+pub(crate) fn mm_per_pixel(to: impl Fn(Vec2) -> Option<Pos2>, at: Vec2) -> Option<f64> {
+    let a = to(at)?;
+    let longest = [Vec2::X, Vec2::Y].into_iter().filter_map(|d| to(at + d)).map(|p| a.distance(p)).reduce(f32::max)?;
+    let px = 1.0 / f64::from(longest).max(1e-9);
+    px.is_finite().then_some(px)
 }
 
 /// A point a dimension measures (for the shape it belongs to).
@@ -992,7 +1041,8 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             owned: false,
             typed: false,
             shown: None,
-            picked: None,
+            pending: None,
+            caret: None,
             sketch: None,
             driven: None,
         })
@@ -1017,7 +1067,7 @@ fn is_plain_value(text: &str) -> bool {
 ///   appended. Nothing else (spaces, operators) is added.
 ///
 /// The cursor ends just after the name and the field keeps the keyboard.
-fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
+fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str, selection: Option<egui::text::CCursorRange>) {
     edit.typed = true;
     let id = egui::Id::unique("sc_dim_edit");
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
@@ -1025,7 +1075,8 @@ fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
     let (start, end) = if is_plain_value(&edit.expr) {
         (0, len)
     } else {
-        edit.selection
+        selection
+            .or(edit.selection)
             .or_else(|| state.cursor.char_range())
             .map(|r| {
                 let a = r.primary.index.0.min(len);
@@ -1048,39 +1099,91 @@ fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
     }
 }
 
-/// Consume dimension clicks while editing: a click on another driving dimension inserts its
-/// name at the cursor (replacing selected text), keeping what was typed. The second click of a
-/// double-click on the same dimension does not insert it again.
-pub fn pick_reference(app: &SolveApp, ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
+/// What a click while editing is on: another dimension (to insert, or to open), or the one being
+/// edited, or neither.
+enum Hit {
+    Other { param: Option<String>, model: Option<ModelDim>, id: Option<String> },
+    Own,
+}
+
+fn hit_while_editing(pos: Pos2) -> Option<Hit> {
     EDIT.with(|editor| {
-        let mut editor = editor.borrow_mut();
-        let Some(edit) = editor.as_mut() else { return false };
-        let param = if edit.sketch.is_some() {
-            let Some(d) = model_hit(pos) else { return false };
-            d.param
+        let editor = editor.borrow();
+        let edit = editor.as_ref()?;
+        let (param, model, id) = if edit.sketch.is_some() {
+            let d = model_hit(pos)?;
+            (d.param.clone(), Some(d), None)
         } else {
-            let Some(id) = hit(pos) else { return false };
-            DRAWN.with(|d| d.borrow().iter().find(|d| d.id == id).and_then(|d| d.param.clone()))
+            let id = hit(pos)?;
+            let param = DRAWN.with(|d| d.borrow().iter().find(|d| d.id == id).and_then(|d| d.param.clone()));
+            (param, None, Some(id))
         };
-        // Self references and driven dimensions cannot supply a reference.
-        if let Some(param) = param.filter(|p| p != &edit.param) {
-            let now = ctx.input(|i| i.time);
-            let delay = ctx.options(|o| o.input_options.max_double_click_delay);
-            let repeat = double && edit.picked.as_ref().is_some_and(|(p, at)| *p == param && now - *at <= delay);
-            if !repeat {
-                insert_reference(ctx, edit, &param);
-                edit.picked = Some((param, now));
-                // Solved now, as a typed value is: the overlays read the preview before the
-                // editor runs this frame.
-                if let Some(draft) = edit.draft.as_mut() {
-                    let expr = edit.expr.clone();
-                    reevaluate(app, draft, &expr);
+        if param.as_ref() == Some(&edit.param) { Some(Hit::Own) } else { Some(Hit::Other { param, model, id }) }
+    })
+}
+
+/// Consume dimension clicks while editing (true: the click was on a dimension). A single click
+/// on another driving dimension inserts its name at the caret (replacing selected text) once
+/// egui's double-click window has passed without a second click ([`flush_pending`]); the second
+/// click of a double-click instead applies the current value, as Enter does, and opens the
+/// clicked dimension for editing with its value selected. A value that does not apply keeps its
+/// box open with its error, and nothing switches.
+pub fn pick_reference(app: &mut SolveApp, ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
+    let Some(target) = hit_while_editing(pos) else { return false };
+    let Hit::Other { param, model, id } = target else {
+        EDIT.with(|e| e.borrow_mut().as_mut().map(|e| e.fresh = FRESH - 1));
+        return true;
+    };
+    if double {
+        let Some(mut edit) = EDIT.with(|e| e.borrow_mut().take()) else { return false };
+        edit.pending = None;
+        edit.fresh = FRESH;
+        settle(app, edit, Some(true), false);
+        if EDIT.with(|e| e.borrow().is_none()) {
+            match (model, id) {
+                (Some(d), _) => {
+                    open_model(app, d);
+                }
+                (_, id) => {
+                    open_editor(app, id);
                 }
             }
         }
+        return true;
+    }
+    EDIT.with(|editor| {
+        let mut editor = editor.borrow_mut();
+        let Some(edit) = editor.as_mut() else { return };
+        // Driven dimensions have no parameter to name.
+        if let Some(name) = param {
+            let selection = edit
+                .caret
+                .or(edit.selection)
+                .or_else(|| egui::TextEdit::load_state(ctx, egui::Id::unique("sc_dim_edit")).and_then(|s| s.cursor.char_range()));
+            edit.pending = Some(Pending { name, at: ctx.input(|i| i.time), selection });
+        }
         edit.fresh = FRESH - 1;
-        true
-    })
+    });
+    true
+}
+
+/// Insert the name of a clicked dimension once the double-click window has passed. Called every
+/// frame the editor is open; asks for a frame when the window ends.
+fn flush_pending(app: &SolveApp, ctx: &egui::Context, edit: &mut Edit) {
+    let Some(pending) = edit.pending.as_ref() else { return };
+    let delay = ctx.options(|o| o.input_options.max_double_click_delay);
+    let waited = ctx.input(|i| i.time) - pending.at;
+    if waited <= delay {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64((delay - waited).max(0.0) + 0.01));
+        return;
+    }
+    let Some(Pending { name, selection, .. }) = edit.pending.take() else { return };
+    insert_reference(ctx, edit, &name, selection);
+    // Solved now, as a typed value is: the overlays read the preview before the editor runs.
+    if let Some(draft) = edit.draft.as_mut() {
+        let expr = edit.expr.clone();
+        reevaluate(app, draft, &expr);
+    }
 }
 
 /// The gap the value box keeps from the point it belongs to (#11057): a click at the pointer
@@ -1131,6 +1234,10 @@ fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, size: egui::V
 
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut e) = EDIT.with(|x| x.borrow_mut().take()) else { return };
+    if !ctx.input(|i| i.pointer.any_down()) {
+        e.caret = egui::TextEdit::load_state(ctx, egui::Id::unique("sc_dim_edit")).and_then(|s| s.cursor.char_range()).or(e.selection);
+    }
+    flush_pending(app, ctx, &mut e);
     if e.at.is_none() {
         e.at = DRAWN.with(|d| d.borrow().iter().find(|x| x.param.as_deref() == Some(e.param.as_str())).map(|x| x.text.center()));
     }
@@ -1513,6 +1620,63 @@ mod tests {
             assert_ne!(c, tk.sketch, "{name}");
             assert_ne!(c, tk.sketch_fixed, "{name}");
         }
+        cancel();
+    }
+
+    /// #14121: the size preference scales a sketch dimension's text, and a custom colour paints
+    /// its lines, arrows and value; the theme's dimension colour is replaced.
+    #[test]
+    fn dimension_text_size_and_colour_follow_the_preferences() {
+        fn strokes(s: &Shape, out: &mut std::collections::BTreeSet<[u8; 4]>) {
+            match s {
+                Shape::LineSegment { stroke, .. } => {
+                    out.insert(stroke.color.to_array());
+                }
+                Shape::Path(p) => {
+                    if let egui::epaint::ColorMode::Solid(c) = p.stroke.color {
+                        out.insert(c.to_array());
+                    }
+                }
+                Shape::Vec(v) => v.iter().for_each(|s| strokes(s, out)),
+                _ => {}
+            }
+        }
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[30,0]],"connect":false,"infer":false})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities":["l1"],"value":30})).unwrap();
+        h.app.session.selection.clear();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        h.frames(2);
+        let (_, centre) = drawn().into_iter().next().expect("the dimension is drawn");
+        fn text_near(s: &Shape, centre: Pos2) -> Option<egui::epaint::TextShape> {
+            match s {
+                // The painted galley's box differs a little from the dimension's text box around it.
+                Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 8.0 => Some(t.clone()),
+                Shape::Vec(v) => v.iter().find_map(|s| text_near(s, centre)),
+                _ => None,
+            }
+        }
+        let text_at = |h: &crate::scenario::Harness| h.shapes.iter().find_map(|s| text_near(&s.shape, centre)).expect("the dimension value is drawn");
+        let before = text_at(&h);
+        let custom = egui::Color32::from_rgb(0x12, 0x34, 0x56);
+        h.call("ui.prefs", json!({"dimension_text_scale":2.0,"dimension_colour":[0x12,0x34,0x56]}));
+        h.frames(2);
+        let after = text_at(&h);
+        assert!(
+            (after.galley.size().y - before.galley.size().y * 2.0).abs() <= 2.0,
+            "the text height {} doubles to {}",
+            before.galley.size().y,
+            after.galley.size().y
+        );
+        assert_eq!(after.fallback_color, custom, "the value takes the custom colour");
+        let mut seen = std::collections::BTreeSet::new();
+        h.shapes.iter().for_each(|s| strokes(&s.shape, &mut seen));
+        assert!(seen.contains(&custom.to_array()), "the dimension lines and arrows take the custom colour: {seen:?}");
+        assert!(!seen.contains(&Tokens::get().dimension.to_array()), "the theme's dimension colour is replaced");
         cancel();
     }
 
@@ -1924,7 +2088,9 @@ mod tests {
         // The placed offset (15 above the measured line) is kept with the dimension.
         assert_eq!(c.text, Some(Vec2::new(0.0, 15.0)), "{c:?}");
         // And the text draws at that offset from the edited geometry, not at the default place.
-        let DimFrame::Linear { p0, p1, dir } = dim_frame(&solved.sketch, &c.kind).unwrap() else { panic!("a length dimension is linear") };
+        let DimFrame::Linear { p0, p1, dir } = solidcraft_engine::sketch::dim_frame(&solved.sketch, &c.kind).unwrap() else {
+            panic!("a length dimension is linear")
+        };
         let t = c.text.unwrap();
         let want = h
             .at(&json!({"world":[(p0 + p1).x * 0.5 + dir.x * t.x + dir.perp().x * t.y, (p0 + p1).y * 0.5 + dir.y * t.y + dir.perp().y * t.y, 0.]}))

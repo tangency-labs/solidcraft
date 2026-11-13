@@ -89,21 +89,14 @@ fn check(k: &mut Kernel) {
 }
 
 #[test]
-fn issue_1473_box_with_sealed_void_upstream_statuses() {
+fn issue_1473_box_with_sealed_void() {
     let mut k = Kernel::default();
-    check(&mut k);
-}
-
-#[test]
-fn issue_1473_box_with_sealed_void_fork_statuses() {
-    let mut k = Kernel::default();
-    k.fixes.shell_inner_shell_of_statuses = true;
     check(&mut k);
 }
 
 /// WR-497: an outer face-use shell whose closure traversal fails (its face-use list is
 /// empty, so there is no first face use). Upstream ignores the status and reads the
-/// shell as not closed (FALSE); with the opt-in fix the failure is UNSURE.
+/// shell as not closed (FALSE); here the failure is UNSURE.
 fn failed_closure(k: &mut Kernel) -> i32 {
     let mut b = void_body(k);
     let solid = p1::regions(&b, None)
@@ -122,14 +115,7 @@ fn failed_closure(k: &mut Kernel) -> i32 {
 }
 
 #[test]
-fn issue_1473_failed_closure_traversal_upstream_is_false() {
+fn issue_1473_failed_closure_traversal_is_unsure() {
     let mut k = Kernel::default();
-    assert_eq!(failed_closure(&mut k), SM_FALSE);
-}
-
-#[test]
-fn issue_1473_failed_closure_traversal_fix_is_unsure() {
-    let mut k = Kernel::default();
-    k.fixes.shell_inner_shell_of_statuses = true;
     assert_eq!(failed_closure(&mut k), SM_UNSURE);
 }

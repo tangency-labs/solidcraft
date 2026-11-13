@@ -26,7 +26,7 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.inside_component(to, o.component) {
         return Err(bad(cmd, format!("{} can't go inside itself or a component within it", o.name)));
     }
-    if s.doc.marker.is_some() {
+    if s.doc.marker.is_some_and(|m| m < s.doc.features.len()) {
         return Err(bad(cmd, "finish timeline rollback before moving placements"));
     }
     if s.held_by_rigid_group(id).is_some() {
@@ -65,6 +65,14 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
         x.parent = to;
         x.transform = transform;
+        // A move typed in world axes takes them into the new parent's frame.
+        if x.expressed_moves.iter().any(|m| m.world) {
+            let mut frame = inverse;
+            frame[3] = [0.0, 0.0, 0.0, 1.0];
+            for m in x.expressed_moves.iter_mut().filter(|m| m.world) {
+                m.frame = frame;
+            }
+        }
     }
     // Once all its placements sit in the new parent, the component belongs there too, so what
     // follows the component tree (the parent's eye, its bodies) takes it along.

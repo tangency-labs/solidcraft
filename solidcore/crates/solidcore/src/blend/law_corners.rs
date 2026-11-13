@@ -4,8 +4,7 @@
 //! between rail points at a peak.
 //!
 //! Not in the pinned upstream: the SolidCraft fork's law corners (tangency-labs/smlib#79,
-//! 7babe17, 58d03ef and 62fcc82), for `fixes.fillet_gn_section_generator` (WR-685's
-//! law-corner addendum, #2273). The round is the union of its balls: each side of a law
+//! 7babe17, 58d03ef and 62fcc82; WR-685's law-corner addendum, #2273). The round is the union of its balls: each side of a law
 //! corner is skinned on its own and ends on the corner ball's touch circle of its own
 //! side, through the same two rail points. Where the law dips the circle after lies ahead
 //! of the one before and the ball's own sphere fills the zone between them; where it
@@ -22,7 +21,7 @@
 //! | [`sphere_zone`]              | `sm_SphereZone` (`SmFilletExecutive.cpp`)                |
 //! | [`curve_between`]            | `sm_CurveBetween` (`SmFilletExecutive.cpp`)              |
 //!
-//! What is in, under `fixes.fillet_gn_section_generator`: 6eecf04's trace (the law's
+//! What is in: 6eecf04's trace (the law's
 //! corners, [`FilletLaw::corner_parameters`](crate::blend::fillet_standard_solver::p1::FilletLaw::corner_parameters),
 //! are through points, and the fillet intersector steps onto them and flushes each span
 //! with its own side's tangents, so the round's curves turn there), and its piecewise skin
@@ -165,7 +164,10 @@ impl LawCornerPieces {
         };
         for (i, pair) in kept.pieces.windows(2).enumerate() {
             let (Some(&t), [before, after]) = (ends.get(i + 1), pair) else {
-                return Err(SolidError::sm_err(OP_CLASSIFY));
+                return Err(SolidError::blend_failed(
+                    OP_CLASSIFY,
+                    "a kept piece has no end parameter",
+                ));
             };
             // the fork's `Evaluate(dT, 1, TRUE, ...)`, `bNonZeroTangents` at its default FALSE
             let cent_pv = center_line.evaluate(t, 1, true, false)?;
@@ -173,10 +175,16 @@ impl LawCornerPieces {
             let (Some(&centre), Some(&rail_point), Some(&along)) =
                 (cent_pv.first(), rail_pv.first(), rail_pv.get(1))
             else {
-                return Err(SolidError::sm_err(OP_CLASSIFY));
+                return Err(SolidError::blend_failed(
+                    OP_CLASSIFY,
+                    "the center or rail evaluation has too few derivatives",
+                ));
             };
             if along.length() <= EFF_ZERO {
-                return Err(SolidError::sm_err(OP_CLASSIFY));
+                return Err(SolidError::blend_failed(
+                    OP_CLASSIFY,
+                    "the rail's tangent has zero length",
+                ));
             }
             let along = along / along.length();
             let mut mid = [Point3::ZERO; 2];
@@ -306,7 +314,10 @@ pub fn sphere_zone(
 ) -> Result<BallPatch> {
     let k2 = (two - one).dot(two - one);
     if k2 <= EFF_ZERO {
-        return Err(SolidError::sm_err(OP_ZONE));
+        return Err(SolidError::blend_failed(
+            OP_ZONE,
+            "the two sphere centers coincide",
+        ));
     }
     let invert = |x: Point3| {
         let d = x - one;
@@ -316,7 +327,10 @@ pub fn sphere_zone(
     let mut first = invert(on_first) - q;
     let mut second = invert(on_second) - q;
     if first.length() <= EFF_ZERO || second.length() <= EFF_ZERO {
-        return Err(SolidError::sm_err(OP_ZONE));
+        return Err(SolidError::blend_failed(
+            OP_ZONE,
+            "an inverted foot coincides with the inverted center",
+        ));
     }
     first = first / first.length();
     second = second / second.length();
@@ -328,7 +342,10 @@ pub fn sphere_zone(
     // sqrt((1 + cos) / 2) at least 7e-4. It refuses wedges within about 1.4e-3 rad
     // (sqrt(2e-6)) of a half turn.
     if cos <= -1.0 + EFF_ZERO_SQRT {
-        return Err(SolidError::sm_err(OP_ZONE));
+        return Err(SolidError::blend_failed(
+            OP_ZONE,
+            "the wedge is within about 1.4e-3 rad of a half turn",
+        ));
     }
     // the unit vector's rational quadratic arc: its control points and weights
     let d = [first, (first + second) / (1.0 + cos), second];
@@ -342,7 +359,10 @@ pub fn sphere_zone(
         let num = [qo * wi, dh * 0.5, Vec3::new(0.0, 0.0, 0.0)];
         for (&den_j, &num_j) in den.iter().zip(&num) {
             if den_j <= EFF_ZERO {
-                return Err(SolidError::sm_err(OP_ZONE));
+                return Err(SolidError::blend_failed(
+                    OP_ZONE,
+                    "a weight of the patch is not positive",
+                ));
             }
             points.push(one + num_j * (k2 / den_j));
             weights.push(den_j);
@@ -391,4 +411,23 @@ pub fn curve_between(
         copy.reverse_parameterization(k, &natural)?;
     }
     Ok(Some(copy))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #13790: a sphere zone whose two centers coincide is refused with a typed blend
+    /// failure that keeps the `SM_ERR` status of the bare `Upstream` it replaced.
+    #[test]
+    fn a_zone_with_coincident_centers_is_a_typed_failure() {
+        let p = Point3::new(1.0, 0.0, 0.0);
+        let error = sphere_zone(Point3::ZERO, 1.0, p, p, p, p).unwrap_err();
+        assert_eq!(
+            error,
+            SolidError::blend_failed(OP_ZONE, "the two sphere centers coincide")
+        );
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+    }
 }

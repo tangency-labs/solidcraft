@@ -1,7 +1,7 @@
 //! Stateless camera commands shared by the navigation cube and programmatic callers.
 use serde_json::{Value, json};
 use solidcraft_geom::prelude::*;
-use solidcraft_render::{Camera, StandardView};
+use solidcraft_viewport::{Camera, StandardView};
 
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
@@ -243,7 +243,19 @@ fn normal_target(s: &Session) -> Option<(solidcore_record::Vec3, solidcore_recor
             let plane = state.body(body)?.body.planar_face(*index)?;
             Some((*point, plane.normal()))
         }
-        Sel::Plane { name } => solidcore_record::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
+        Sel::Plane { name } => {
+            // The design's world planes keep the precedence they always had: `XY` looks at the
+            // design's XY plane before a construction plane of the same name answers (an older
+            // design can hold one named `XY`) (#7313 review). A component origin key follows
+            // its placement, with a construction plane of the same name still winning over it.
+            let feature = || crate::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, plane)| plane);
+            let plane = if crate::origins::datum(name).is_some() {
+                feature().or_else(|| s.origin_plane(name))
+            } else {
+                solidcore_record::Plane::named(name).or_else(feature)
+            };
+            plane.map(|plane| (plane.origin, plane.normal()))
+        }
         _ => None,
     })
 }
@@ -653,7 +665,7 @@ pub(crate) fn square_heading(yaw: f64) -> f64 {
 mod tests {
     use super::*;
     use solidcore_record::Vec3;
-    use solidcraft_render::UpAxis;
+    use solidcraft_viewport::UpAxis;
 
     #[test]
     fn view_bar_commands_validate_json_without_editing_design_or_history() {

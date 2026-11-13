@@ -2,7 +2,8 @@
 //! and structural validation ([`brep`]), its history and metadata records, the native body
 //! file ([`native`]), and the plain data of vectors ([`Vec2`], [`Vec3`]), sketch planes
 //! ([`Plane`]) and planar profiles ([`Seg2`], [`Loop2`], [`Region2`]), and STEP's Part 21
-//! exchange structure as parsed from a file ([`step`]).
+//! exchange structure as parsed from a file with the units of its representation contexts and
+//! its Part 42 curves and surfaces ([`step`]).
 //!
 //! The record computes no geometric quantity: no square roots, trigonometry, dot or cross
 //! products, normalising or solves (clippy `disallowed-methods`, this crate's `clippy.toml`). It
@@ -17,6 +18,7 @@
 // one.
 #[allow(missing_docs)]
 pub mod brep;
+pub mod cell_grid;
 pub mod native;
 pub mod plane;
 // Profiles are SolidCraft's sketch wire format, carried over as it is: each variant says what it

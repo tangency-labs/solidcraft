@@ -104,7 +104,8 @@ the code runs:
 3. **`AssertValid`** (`brep/validation/assert_valid.rs`): the whole-body check, below.
 4. **A solid** (`topology/brep.rs`, `is_outward_solid`): `is_manifold_solid` (at least two regions,
    no shell vertices, every edge manifold), the pointer check clean, `AssertValid` at level 0 true, no
-   unsure region, and the integrated volume positive at relative accuracy 1e-3. The volume's sign
+   unsure region, and the volume proved positive by its certified enclosure (`mass/enclosure.rs`,
+   `volume_sign`); a sign the enclosure leaves undecided is not a solid. The volume's sign
    catches a body turned inside out; the pointer check catches faces flipped without their uses.
 
 `check_brep` runs the pointer check and, when it reports nothing, `AssertValid`. Ops exposes it as

@@ -1,0 +1,38 @@
+{
+  "ar": {
+    "prefs.live_panel_drag_preview": "معاينة موضع اللوحة أثناء السحب",
+    "prefs.live_panel_drag_preview_help": "يعرض اللوحة واللوحات الأخرى في مواضعها المقترحة قبل الإفلات. عند الإيقاف، يظهر إطار يحدد موضع الإفلات."
+  },
+  "de": {
+    "prefs.live_panel_drag_preview": "Bereichsposition beim Ziehen als Vorschau anzeigen",
+    "prefs.live_panel_drag_preview_help": "Zeigt den Bereich und die anderen Bereiche vor dem Ablegen an ihren vorgesehenen Positionen. Ist die Vorschau aus, markiert ein Umriss die Ablageposition."
+  },
+  "en": {
+    "prefs.live_panel_drag_preview": "Preview panel placement while dragging",
+    "prefs.live_panel_drag_preview_help": "Show the panel and the other panels in their proposed positions before you drop it. When off, an outline marks the drop position."
+  },
+  "he": {
+    "prefs.live_panel_drag_preview": "תצוגה מקדימה של מיקום החלונית בזמן גרירה",
+    "prefs.live_panel_drag_preview_help": "מציגה את החלונית ואת שאר החלוניות במיקומים המוצעים לפני השחרור. כשהאפשרות כבויה, מסגרת מסמנת את מיקום השחרור."
+  },
+  "ja": {
+    "prefs.live_panel_drag_preview": "ドラッグ中にパネルの配置をプレビュー",
+    "prefs.live_panel_drag_preview_help": "ドロップする前に、ドラッグ中のパネルと他のパネルを配置予定の位置に表示します。オフにすると、ドロップ位置を枠線で示します。"
+  },
+  "ko": {
+    "prefs.live_panel_drag_preview": "드래그 중 패널 배치 미리 보기",
+    "prefs.live_panel_drag_preview_help": "놓기 전에 드래그 중인 패널과 다른 패널을 배치 예정 위치에 표시합니다. 끄면 놓을 위치가 윤곽선으로 표시됩니다."
+  },
+  "pl": {
+    "prefs.live_panel_drag_preview": "Podgląd położenia panelu podczas przeciągania",
+    "prefs.live_panel_drag_preview_help": "Pokazuje przeciągany panel i pozostałe panele w proponowanych miejscach przed upuszczeniem. Po wyłączeniu obrys wskazuje miejsce upuszczenia."
+  },
+  "vi": {
+    "prefs.live_panel_drag_preview": "Xem trước vị trí bảng điều khiển khi kéo",
+    "prefs.live_panel_drag_preview_help": "Hiển thị bảng đang kéo và các bảng khác ở vị trí dự kiến trước khi thả. Khi tắt, đường viền đánh dấu vị trí thả."
+  },
+  "zh": {
+    "prefs.live_panel_drag_preview": "拖动时预览面板位置",
+    "prefs.live_panel_drag_preview_help": "放下前，在预定位置显示正在拖动的面板和其他面板。关闭后，用轮廓标出放置位置。"
+  }
+}

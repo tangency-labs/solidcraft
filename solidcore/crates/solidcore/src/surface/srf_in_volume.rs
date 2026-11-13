@@ -783,7 +783,10 @@ impl SrfInVolume {
             hu == 0 || hv == 0
         };
         if !supported {
-            return Err(SolidError::sm_err(OP_EVAL));
+            return Err(SolidError::surface_failed(
+                OP_EVAL,
+                "the asked derivatives are not supported",
+            ));
         }
 
         // limit the number of derivatives to 3
@@ -1086,13 +1089,14 @@ impl SrfInVolume {
                 .inv_map_point(k, point_on_surf, None, None, true)?
         };
         if !inv.success {
-            return Err(SolidError::sm_err(OP_STEP));
+            return Err(SolidError::surface_failed(
+                OP_STEP,
+                "the volume's inversion failed",
+            ));
         }
-        let first = inv
-            .points
-            .first()
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(OP_STEP))?;
+        let first = inv.points.first().copied().ok_or_else(|| {
+            SolidError::surface_failed(OP_STEP, "the volume's inversion gave no point")
+        })?;
 
         // Project the inverted volume point back through the base surface
         self.surface
@@ -1154,7 +1158,10 @@ impl SrfInVolume {
         if self.owns_surface() {
             Ok(())
         } else {
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::surface_failed(
+                OP,
+                "the surface in volume does not own its base surface",
+            ))
         }
     }
 

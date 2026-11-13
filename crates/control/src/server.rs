@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 
 use crate::Effect;
 use crate::auth::tokens_match;
+use crate::cancel::{Cancel, Ticket};
 use crate::request::{ControlRequest, DOCUMENT_WATCH, DocumentWatch, Subscriber};
 
 /// What the server needs to know of a request before it sends it to the window: how to name it
@@ -94,28 +95,104 @@ impl Hub {
     /// on it). A listener that is not on a loopback address is refused: the channel never goes on
     /// the network.
     pub fn listen(self: &Arc<Self>, listener: TcpListener, token: String, requests: Sender<ControlRequest>, patient: bool) -> std::io::Result<()> {
+        self.listen_stoppable(listener, token, requests, patient).map(drop)
+    }
+
+    /// [`Hub::listen`], and a [`Stop`] that closes the listener and the connections it accepted
+    /// (a channel turned off in the app's settings). Dropping the [`Stop`] leaves it serving.
+    pub fn listen_stoppable(
+        self: &Arc<Self>,
+        listener: TcpListener,
+        token: String,
+        requests: Sender<ControlRequest>,
+        patient: bool,
+    ) -> std::io::Result<Stop> {
         let addr = listener.local_addr()?;
         if !addr.ip().is_loopback() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("the control channel listens on loopback only, not {addr}")));
         }
         let hub = Arc::clone(self);
         let token = Arc::new(token);
+        let shared = Arc::new(Accepted::default());
+        let (closed_tx, closed) = channel::<()>();
+        let stop = Stop { addr, shared: Arc::clone(&shared), closed };
         std::thread::spawn(move || {
+            // Dropped when this thread ends, with the listener: `Stop::stop` waits for that.
+            let _closed = closed_tx;
             for stream in listener.incoming().flatten() {
+                if shared.stopped.load(Ordering::SeqCst) {
+                    break;
+                }
                 if hub.open.fetch_add(1, Ordering::Relaxed) >= MAX_CONNECTIONS {
                     hub.open.fetch_sub(1, Ordering::Relaxed);
                     let mut refused = stream;
                     let _ = send(&mut refused, &json!({"ok": false, "error": "too many connections"}));
                     continue;
                 }
-                let (hub, tx, token) = (Arc::clone(&hub), requests.clone(), Arc::clone(&token));
+                let id = shared.next.fetch_add(1, Ordering::Relaxed);
+                if let Ok(copy) = stream.try_clone() {
+                    shared.lock().push((id, copy));
+                }
+                // Stopped while this one was being accepted: it is closed with the rest.
+                if shared.stopped.load(Ordering::SeqCst) {
+                    shared.close_all();
+                }
+                let (hub, tx, token, shared) = (Arc::clone(&hub), requests.clone(), Arc::clone(&token), Arc::clone(&shared));
                 std::thread::spawn(move || {
                     hub.serve(stream, &token, tx, patient);
                     hub.open.fetch_sub(1, Ordering::Relaxed);
+                    shared.lock().retain(|(i, _)| *i != id);
                 });
             }
+            // A captured value drops after the body's locals, so without this `_closed` would tell
+            // `Stop::stop` the port is free while the listener still holds it (#14752).
+            drop(listener);
         });
-        Ok(())
+        Ok(stop)
+    }
+}
+
+/// The connections a stoppable listener accepted, so stopping it can close them too.
+#[derive(Default)]
+struct Accepted {
+    stopped: AtomicBool,
+    next: AtomicU64,
+    streams: Mutex<Vec<(u64, TcpStream)>>,
+}
+
+impl Accepted {
+    fn lock(&self) -> MutexGuard<'_, Vec<(u64, TcpStream)>> {
+        self.streams.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn close_all(&self) {
+        for (_, stream) in self.lock().drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+/// Stops a listener started with [`Hub::listen_stoppable`].
+pub struct Stop {
+    addr: std::net::SocketAddr,
+    shared: Arc<Accepted>,
+    closed: Receiver<()>,
+}
+
+impl Stop {
+    /// The port the listener is on.
+    pub fn port(&self) -> u16 {
+        self.addr.port()
+    }
+
+    /// Stop accepting, close the port and end every connection it accepted. Returns once the
+    /// port is closed (at most a couple of seconds), so the same port can be bound again at once.
+    pub fn stop(self) {
+        self.shared.stopped.store(true, Ordering::SeqCst);
+        // The listener waits in `accept`: a connection of our own wakes it to see the flag.
+        let _ = TcpStream::connect_timeout(&self.addr, Duration::from_secs(1));
+        let _ = self.closed.recv_timeout(Duration::from_secs(2));
+        self.shared.close_all();
     }
 }
 
@@ -277,6 +354,62 @@ struct Pending {
     /// The request in messages ("`engine.execute` (solid.fillet)").
     what: String,
     reply: Receiver<Value>,
+    /// Where it is in the app, to cancel it (`control.cancel`).
+    job: Arc<Ticket>,
+}
+
+/// `control.cancel {id?}`: cancel the request this connection still waits for (the one
+/// `control.pending` reports; `id`, when given, must name it). A connection can only cancel its
+/// own requests. Waiting its turn, it is removed; computing off the window thread, it is stopped
+/// as the app's Stop stops it. Either way nothing of it is applied and the connection is free.
+/// One that runs on the window thread can't be cancelled; one that finished is answered.
+fn cancel(pending: &mut Option<Pending>, late: Option<Value>, id: Option<&Value>, document: &str) -> Value {
+    let id = id.filter(|v| !v.is_null());
+    let mine = pending.as_ref().filter(|p| id.is_none_or(|id| *id == p.id));
+    let Some(p) = mine else {
+        return match id {
+            None => json!({"ok": true, "result": {"cancelled": null, "note": "nothing to cancel: no request of this connection is running"}}),
+            Some(id) => json!({"ok": false, "error": format!(
+                "nothing to cancel: request {} is not running on this connection (a connection can only cancel its own requests)",
+                id.to_string().chars().take(64).collect::<String>()
+            )}),
+        };
+    };
+    let (what, id) = (format!("request {} ({})", p.id, p.what), p.id.clone());
+    let finished = |p: Pending, reply: Value| {
+        json!({"ok": true, "result": {"cancelled": null, "pending": p.id, "method": p.method, "done": true, "reply": reply,
+            "note": format!("nothing to cancel: {what} had already finished; its reply is here")}})
+    };
+    if let Some(reply) = late {
+        return pending.take().map_or(Value::Null, |p| finished(p, reply));
+    }
+    let outcome = p.job.cancel();
+    let note = match outcome {
+        Cancel::Removed => format!("cancelled: {what} was still waiting its turn and will not run; nothing was applied"),
+        Cancel::Stopped { writes_file: false } => format!("stopped: {what} was computing off the window thread; nothing was applied"),
+        Cancel::Stopped { writes_file: true } => {
+            format!("stopped: {what} was computing on a copy of the {document}, which is unchanged; its worker may still write the file")
+        }
+        Cancel::Already => format!("{what} was already cancelled or stopped; nothing of it was applied"),
+        Cancel::Running => {
+            // It may have just finished.
+            if let Some(reply) = pending.as_ref().and_then(|p| p.reply.try_recv().ok()) {
+                return pending.take().map_or(Value::Null, |p| finished(p, reply));
+            }
+            return json!({"ok": false, "cancellable": false, "error": format!(
+                "cannot be cancelled: {what} already runs in the app (on its window thread, or as a file it opens) and will \
+                 still finish; ask `control.pending` for its result. Only a request still waiting its turn, or a change or \
+                 export computing off the window thread, can be cancelled"
+            )});
+        }
+    };
+    let method = pending.take().map(|p| p.method);
+    let how = match outcome {
+        Cancel::Removed => "removed",
+        Cancel::Stopped { .. } => "stopped",
+        _ => "already",
+    };
+    json!({"ok": true, "result": {"cancelled": id, "method": method, "outcome": how, "note": note}})
 }
 
 /// Every request the app has been sent and not answered yet, from every connection, for
@@ -311,7 +444,7 @@ impl Running {
 
     /// List `req`, sent on `connection`, until the returned ticket is dropped; `command` and
     /// `steps` as the app's [`Protocol`] summarised it.
-    fn add(self: &Arc<Self>, connection: u64, id: &Value, req: &ControlRequest, command: Option<&'static str>, steps: Option<usize>) -> Ticket {
+    fn add(self: &Arc<Self>, connection: u64, id: &Value, req: &ControlRequest, command: Option<&'static str>, steps: Option<usize>) -> Listing {
         let key = self.keys.fetch_add(1, Ordering::Relaxed);
         // Ids and methods come from the client: only short ones are repeated to the others.
         let id = match id {
@@ -322,7 +455,7 @@ impl Running {
         let method = req.method.chars().take(64).collect();
         let started = req.started.clone();
         self.lock().push(InFlight { key, connection, id, method, command, steps, since: Instant::now(), started });
-        Ticket { running: Arc::clone(self), key }
+        Listing { running: Arc::clone(self), key }
     }
 
     /// The `control.running` result, as `asker`'s connection sees it.
@@ -355,12 +488,12 @@ impl Running {
 }
 
 /// A listed request; dropped when its reply arrives.
-struct Ticket {
+struct Listing {
     running: Arc<Running>,
     key: u64,
 }
 
-impl Drop for Ticket {
+impl Drop for Listing {
     fn drop(&mut self) {
         let key = self.key;
         self.running.lock().retain(|e| e.key != key);
@@ -369,7 +502,7 @@ impl Drop for Ticket {
 
 /// The reply to a timed-out request, received on a thread of its own so the request stays listed
 /// until the app answers, also once its connection has closed (#3654).
-fn watch(reply: Receiver<Value>, ticket: Ticket) -> Receiver<Value> {
+fn watch(reply: Receiver<Value>, ticket: Listing) -> Receiver<Value> {
     let (late_tx, late_rx) = channel();
     // A small thread per timed-out request (each connection has at most one). If none can be
     // made, the reply is lost and `control.pending` says the app ended the request without one.
@@ -395,11 +528,12 @@ pub fn timeout_message(what: &str, effect: Effect, document: &str) -> String {
         }
         Effect::WritesFile => format!(
             "timeout: {what} is still running in the app and will still write the file when it finishes (it was not cancelled: \
-             don't send it again; the {document} does not change); ask `control.pending` for its result"
+             don't send it again; the {document} does not change); ask `control.pending` for its result, or `control.cancel` to \
+             cancel it"
         ),
         Effect::Changes => format!(
             "timeout: {what} is still running in the app and will still apply when it finishes (it was not cancelled: don't send it \
-             again); ask `control.pending` for its result"
+             again); ask `control.pending` for its result, or `control.cancel` to cancel it"
         ),
     }
 }
@@ -597,6 +731,10 @@ impl Hub {
                         json!({"ok": true, "result": running.result(connection)})
                     } else if method == "control.capabilities" {
                         json!({"ok": true, "result": self.protocol.capabilities()})
+                    } else if method == "control.cancel" {
+                        let r = cancel(&mut pending, late, params.get("id"), self.protocol.document());
+                        (self.wake)();
+                        r
                     } else if method == "control.pending" {
                         match (pending.take(), late) {
                             (None, _) => json!({"ok": true, "result": {"pending": null}}),
@@ -636,6 +774,7 @@ impl Hub {
                         // answer on.
                         joining = (method == "control.subscribe").then(|| documents.join());
                         let (req, rrx) = ControlRequest::new(method.clone(), params);
+                        let job = Arc::clone(&req.ticket);
                         let ticket = running.add(connection, &id, &req, command, steps);
                         if tx.send(req).is_err() {
                             break;
@@ -645,7 +784,7 @@ impl Hub {
                             Ok(r) => r,
                             Err(_) => {
                                 let r = json!({"ok": false, "running": true, "error": timeout_message(&what, effect, self.protocol.document())});
-                                pending = Some(Pending { id: id.clone(), method, what, reply: watch(rrx, ticket) });
+                                pending = Some(Pending { id: id.clone(), method, what, reply: watch(rrx, ticket), job });
                                 r
                             }
                         }
@@ -661,7 +800,7 @@ impl Hub {
                 }
             };
             // Subscribed once the window named the design (not when it refused or timed out).
-            let sent = match joining.and_then(|counted| document_of(&reply).map(|seen| (counted, seen))) {
+            let sent = match joining.zip(document_of(&reply)) {
                 Some((counted, seen)) => match Subscription::start(documents, self.protocol.change_event(), counted, &out, seen, &reply) {
                     Some((subscription, sent)) => {
                         events = Some(subscription);
@@ -805,6 +944,104 @@ mod tests {
         let mut l = String::new();
         BufReader::new(wrong).read_line(&mut l).unwrap();
         assert!(l.contains("unauthorized"), "{l}");
+    }
+
+    /// #1989: `control.cancel` cancels the connection's own outstanding request. One still
+    /// waiting its turn is removed and never runs, and the connection is free at once; one that
+    /// already runs in the app can't be, and says so; another connection's request is refused;
+    /// with nothing outstanding there is nothing to cancel.
+    #[test]
+    fn control_cancel_cancels_only_this_connections_request() {
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let (gate_tx, gate_rx) = channel::<()>();
+        let ran = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = ran.clone();
+        // A stand-in for the window thread: `queued` waits behind the others (never taken until
+        // `slow` is done), `slow` runs until the gate opens.
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for req in rx {
+                if req.method == "queued" {
+                    held.push(req);
+                    continue;
+                }
+                if !req.ticket.take() {
+                    continue;
+                }
+                seen.lock().unwrap().push(req.method.clone());
+                if req.method == "slow" {
+                    let _ = gate_rx.recv();
+                }
+                let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+                if req.method == "slow" {
+                    for req in held.drain(..) {
+                        if req.ticket.take() {
+                            seen.lock().unwrap().push(req.method.clone());
+                        }
+                    }
+                }
+            }
+        });
+        let waits = Waits { short: Duration::from_millis(100), long: Duration::from_millis(100), token: TOKEN_WAIT };
+        let hub = hub(waits, &DOCUMENT_WATCH);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (tx, hub) = (tx.clone(), Arc::clone(&hub));
+                std::thread::spawn(move || hub.serve(stream, token, tx, false));
+            }
+        });
+        let connect = || {
+            let s = TcpStream::connect(addr).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            let out = s.try_clone().unwrap();
+            (out, BufReader::new(s))
+        };
+        let ask = |(out, lines): &mut (TcpStream, BufReader<TcpStream>), v: Value| -> Value {
+            writeln!(out, "{v}").unwrap();
+            let mut l = String::new();
+            lines.read_line(&mut l).unwrap();
+            serde_json::from_str(&l).unwrap()
+        };
+        let mut a = connect();
+        let mut b = connect();
+        let r = ask(&mut b, json!({"id": 1, "method": "control.cancel", "token": token}));
+        assert!(r["ok"] == true && r["result"]["cancelled"].is_null(), "nothing to cancel: {r}");
+
+        // Waiting its turn: removed, never run, and the connection is free.
+        let r = ask(&mut a, json!({"id": 1, "method": "queued", "token": token}));
+        assert_eq!(r["running"], true, "{r}");
+        let r = ask(&mut a, json!({"id": 2, "method": "control.cancel", "params": {"id": 1}}));
+        assert_eq!((&r["ok"], &r["result"]["cancelled"], &r["result"]["outcome"]), (&json!(true), &json!(1), &json!("removed")), "{r}");
+        assert!(r["result"]["note"].as_str().is_some_and(|n| n.contains("will not run")), "{r}");
+        let r = ask(&mut a, json!({"id": 3, "method": "control.pending"}));
+        assert_eq!(r["result"]["pending"], Value::Null, "{r}");
+
+        // Already running in the app: it can't be, and it still answers.
+        let r = ask(&mut a, json!({"id": 4, "method": "slow"}));
+        assert_eq!(r["running"], true, "{r}");
+        let r = ask(&mut b, json!({"id": 2, "method": "control.cancel", "params": {"id": 4}}));
+        assert!(r["ok"] == false && r["error"].as_str().is_some_and(|e| e.contains("its own requests")), "another connection's: {r}");
+        let r = ask(&mut a, json!({"id": 5, "method": "control.cancel", "params": {"id": 99}}));
+        assert!(r["ok"] == false && r["error"].as_str().is_some_and(|e| e.starts_with("nothing to cancel")), "{r}");
+        let r = ask(&mut a, json!({"id": 6, "method": "control.cancel"}));
+        assert!(r["ok"] == false && r["cancellable"] == false, "{r}");
+        assert!(r["error"].as_str().is_some_and(|e| e.starts_with("cannot be cancelled") && e.contains("control.pending")), "{r}");
+        gate_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let r = loop {
+            let r = ask(&mut a, json!({"id": 7, "method": "control.pending"}));
+            if r["result"]["done"] == true || Instant::now() > deadline {
+                break r;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(r["result"]["reply"]["result"], "slow", "{r}");
+        let r = ask(&mut a, json!({"id": 8, "method": "control.cancel"}));
+        assert!(r["ok"] == true && r["result"]["cancelled"].is_null(), "{r}");
+        assert_eq!(*ran.lock().unwrap(), ["slow"], "the cancelled request never ran");
     }
 
     /// #1618: a request that outlasts its wait says it is still running; the connection keeps its
@@ -1153,5 +1390,44 @@ mod tests {
         assert_eq!(out.writes, 1);
         assert_eq!(out.bytes.last(), Some(&b'\n'));
         assert_eq!(serde_json::from_slice::<Value>(&out.bytes).unwrap(), reply);
+    }
+
+    /// A stopped listener frees its port at once and ends the connections it had, so a channel
+    /// turned off in the settings leaves nothing listening and can be turned on again on the
+    /// same port.
+    #[test]
+    fn a_stopped_listener_closes_its_port_and_its_connections() {
+        use std::io::Read;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, _rx) = channel();
+        let stop = hub(Waits::default(), &DOCUMENT_WATCH).listen_stoppable(listener, "0123456789abcdef0123456789abcdef".into(), tx, false).unwrap();
+        assert_eq!(stop.port(), port);
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
+        // Wait until the server holds the connection, so stopping has one to close.
+        let held = Instant::now();
+        while stop.shared.lock().is_empty() && held.elapsed() < Duration::from_secs(4) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let started = Instant::now();
+        stop.stop();
+        let mut byte = [0u8; 1];
+        match client.read(&mut byte) {
+            Ok(n) => assert_eq!(n, 0, "the connection ends"),
+            Err(e) => {
+                assert!(!matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut), "the connection ends, not waits: {e}")
+            }
+        }
+        assert!(started.elapsed() < Duration::from_secs(3), "before the token wait runs out");
+        // The listener thread closes its socket when it notices the stop; on a loaded machine that can
+        // take a moment after `stop()` returns. Wait for the port to be free, not for one instant.
+        let freed = Instant::now();
+        let mut bound = TcpListener::bind(("127.0.0.1", port));
+        while bound.is_err() && freed.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(10));
+            bound = TcpListener::bind(("127.0.0.1", port));
+        }
+        assert!(bound.is_ok(), "the port is free again: {:?}", bound.err());
     }
 }

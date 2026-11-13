@@ -68,7 +68,7 @@ impl Colors {
 
     fn for_tool(t: &Tokens, tab: &str, active: bool) -> Colors {
         let mut colors = Self::from_tokens(t);
-        let accent = solidcraft_theme::TabAccent::for_tab(t, tab);
+        let accent = crate::workspace::tab_accent(t, tab);
         if active && accent.color != t.accent {
             colors.added = accent.color.to_srgba_unmultiplied();
             colors.new_body = t.body.lerp_to_gamma(accent.color, 0.45).to_srgba_unmultiplied();
@@ -101,6 +101,9 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
+    /// how free the part is with the constraint it shows.
+    pub placed: Option<serde_json::Value>,
 }
 
 type Job = Result<Built, String>;
@@ -109,6 +112,10 @@ type Job = Result<Built, String>;
 /// them, a new job waits for the running one as before, so a quick series of picks keeps at
 /// most this many kernel computations going beside the current one.
 const DETACHED: usize = 2;
+
+/// How long a joint pose for a slider value since moved past may keep computing (#14264). Past
+/// it, the pose is cancelled and the latest value starts, so only the latest keeps solving.
+const STALE_MOTION_MS: f64 = 500.0;
 
 #[derive(Default)]
 pub struct PreviewState {
@@ -125,6 +132,9 @@ pub struct PreviewState {
     running_tool: bool,
     /// Inputs of a joint or distance preview, excluding only its driven values.
     running_stream_key: Option<u64>,
+    /// The running job is a joint pose (see [`motion_key`]): once obsolete, it gets
+    /// [`STALE_MOTION_MS`].
+    running_motion: bool,
     /// Bodies the preview stands in for (hidden in the model scene).
     pub replaced: Vec<String>,
     /// The preview scene for the GPU and its key (changes whenever the scene does).
@@ -146,6 +156,8 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (see [`Built::placed`]).
+    pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     straight: crate::extrude_preview::StraightPreview,
@@ -180,6 +192,7 @@ impl PreviewState {
         self.error = None;
         self.applied = None;
         self.stopped = None;
+        self.placed = None;
         self.tapered.clear();
         self.sketches.clear();
         self.busy = false;
@@ -216,6 +229,7 @@ impl PreviewState {
                 self.error = b.error;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.set_scene(b.scene);
             }
@@ -227,6 +241,7 @@ impl PreviewState {
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
+                self.placed = None;
                 self.tapered.clear();
             }
         }
@@ -235,9 +250,16 @@ impl PreviewState {
     /// Errors validate only the current inputs. Keep the last good geometry while
     /// computing new inputs, but never let an obsolete result block their Apply.
     fn poll(&mut self, key: u64, stream_key: Option<u64>) {
+        self.poll_at(key, stream_key, crate::now_ms());
+    }
+
+    fn poll_at(&mut self, key: u64, stream_key: Option<u64>, now: f64) {
         if self.shown_key != Some(key) {
             self.sketches.clear();
             self.error = None;
+            // A constraint's reply says how free its part is with the inputs it was for: with other
+            // picks it would describe the wrong rule, so the dialog falls back to the saved design.
+            self.placed = None;
         }
         if let Some((k, rx)) = &self.running {
             let k = *k;
@@ -252,6 +274,7 @@ impl PreviewState {
                 let intermediate = good && (self.running_tool || stream_key.is_some() && self.running_stream_key == stream_key);
                 self.running_stream_key = None;
                 self.running_tool = false;
+                self.running_motion = false;
                 // A held slider, a dragged arrow or an animation may advance faster than the
                 // worker. Show completed joint/distance results from the same setup, and tools built for
                 // inputs since changed, then compute the latest. Errors still require an exact
@@ -270,7 +293,10 @@ impl PreviewState {
         // wait as before. At most `DETACHED` jobs are left behind; while they run, the next
         // obsolete one is waited for as before.
         let other_setup = !self.running_tool && stream_key.is_some() && self.running_stream_key.is_some() && self.running_stream_key != stream_key;
-        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && other_setup && self.detached.len() < DETACHED {
+        // A joint pose for a value the slider has left, still running after `STALE_MOTION_MS`:
+        // stop it and start the latest value (#14264).
+        let stale_motion = self.running_motion && stream_key.is_some() && now - self.started >= STALE_MOTION_MS;
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && (other_setup || stale_motion) && self.detached.len() < DETACHED {
             self.detach();
         }
     }
@@ -287,6 +313,7 @@ impl PreviewState {
         }
         self.running_tool = false;
         self.running_stream_key = None;
+        self.running_motion = false;
     }
 }
 
@@ -307,6 +334,8 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.rack_pinion"
                     | "joint.screw"
                     | "joint.cam"
+                    | "assembly.constraint.create"
+                    | "assembly.constraint.edit"
             )
         })
     {
@@ -399,6 +428,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if pv.running.is_none() && pv.shown_key != Some(key) {
         pv.started = crate::now_ms();
         pv.running_stream_key = stream_key;
+        pv.running_motion = motion_key(&cmds, app.session.revision, colors).is_some();
         let mut straight = std::mem::take(&mut app.preview.straight);
         let mut job = straight.compute(app, &cmds, colors);
         app.preview.straight = straight;
@@ -630,6 +660,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        placed: None,
     }
 }
 
@@ -778,7 +809,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
     }
     let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None, placed: None }
 }
 
 /// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
@@ -1020,11 +1051,11 @@ mod tests {
                         assert_eq!(colors.removed, base.removed);
                         assert_eq!(colors.body, base.body);
                         assert_eq!(colors.edge, base.edge);
-                        if !active || solidcraft_theme::TabAccent::for_tab(&t, tab).color == t.accent {
+                        if !active || crate::workspace::tab_accent(&t, tab).color == t.accent {
                             assert_eq!(colors.added, base.added);
                             assert_eq!(colors.new_body, base.new_body);
                         } else {
-                            let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
+                            let accent = crate::workspace::tab_accent(&t, tab);
                             assert_eq!(colors.added, accent.color.to_srgba_unmultiplied());
                             assert_ne!(colors.new_body, colors.added);
                         }
@@ -1094,6 +1125,7 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            placed: None,
         }
     }
 
@@ -1124,6 +1156,55 @@ mod tests {
         pv.poll(4, Some(42));
         assert_eq!(pv.shown_key, Some(4), "release catches up to the exact final pose");
         assert!(pv.running.is_none());
+    }
+
+    /// A constraint's reply belongs to the inputs it was computed for: when they change (other picks
+    /// in the Constrain dialog), it goes with the old error, and is kept while they stand.
+    #[test]
+    fn a_constraint_reply_goes_when_the_inputs_change() {
+        let mut pv = PreviewState { shown_key: Some(1), placed: Some(serde_json::json!({"dof": []})), ..PreviewState::default() };
+        pv.poll_at(1, None, 0.0);
+        assert!(pv.placed.is_some(), "the same inputs keep their reply");
+        pv.poll_at(2, None, 0.0);
+        assert!(pv.placed.is_none(), "other inputs drop the old reply");
+    }
+
+    /// A pose for a value the slider has left gets 500 ms (#14264): before that it keeps running
+    /// (and shows when done); past it, it is cancelled and the latest value may start.
+    #[test]
+    fn a_stale_joint_pose_is_cancelled_after_its_budget() {
+        let start = |pv: &mut PreviewState| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            let progress = Arc::new(Progress::default());
+            pv.running = Some((1, rx));
+            pv.running_progress = Some(progress.clone());
+            pv.running_stream_key = Some(42);
+            pv.running_motion = true;
+            pv.started = 1000.0;
+            (tx, progress)
+        };
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(2, Some(42), 1000.0 + STALE_MOTION_MS - 1.0);
+        assert!(pv.running.is_some(), "within the budget the pose keeps running");
+        assert!(!progress.is_cancelled());
+        pv.poll_at(2, Some(42), 1000.0 + STALE_MOTION_MS);
+        assert!(pv.running.is_none(), "past the budget the latest value can start");
+        assert!(progress.is_cancelled(), "the stale pose is asked to stop");
+        assert_eq!(pv.detached.len(), 1);
+
+        // The latest value itself is never cancelled, however long it takes.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(1, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
+
+        // Other streamed previews (a fillet radius) keep waiting for their running job.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.running_motion = false;
+        pv.poll_at(2, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
     }
 
     #[test]

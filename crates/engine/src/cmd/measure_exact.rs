@@ -1,4 +1,4 @@
-//! What a face measures on the surface behind it (#9086).
+//! What a face measures on the surface behind it (#9086), and around it (#12048).
 //!
 //! A curved face's area is the area of the surface it lies on: a cylinder's band is
 //! r·θ·h and a whole sphere 4πr². The display mesh's triangles run inside a curve, so
@@ -170,6 +170,79 @@ fn border_edges(mesh: &Mesh, patch: &[usize]) -> Vec<usize> {
         })
         .map(|(edge, _)| edge)
         .collect()
+}
+
+/// The length of the edges around a face.
+pub(crate) struct Perimeter {
+    pub(crate) total: f64,
+    /// The outer loop's length and the summed length of the hole loops, on a flat face with holes.
+    pub(crate) outer_inner: Option<(f64, f64)>,
+}
+
+/// The perimeter of the patch of faces `patch`: the length of its drawn border edges, each as
+/// long as `edge_len` says. A hidden seam is no border. `None` for a face with no border, such as
+/// a whole sphere. Only a flat face tells an outer loop from its holes: the two rims of a
+/// cylinder's side are neither.
+pub(crate) fn patch_perimeter(mesh: &Mesh, patch: &[usize], flat: bool, edge_len: impl Fn(usize) -> f64) -> Option<Perimeter> {
+    let edges: Vec<usize> = border_edges(mesh, patch).into_iter().filter(|&edge| mesh.edge_visible(edge)).collect();
+    let lengths: Vec<f64> = edges.iter().map(|&edge| edge_len(edge)).collect();
+    let total: f64 = lengths.iter().sum();
+    if !(total > 0.0) {
+        return None;
+    }
+    let outer_inner = flat.then(|| outer_loop_length(mesh, &edges, &lengths)).flatten().map(|outer| (outer, total - outer));
+    Some(Perimeter { total, outer_inner })
+}
+
+/// The length of the outer loop of a flat face's border `edges`, when they form several loops.
+/// The outer loop is the one with the widest box: every hole lies inside the outer loop, so a
+/// hole's box fits in the outer loop's box, even when the hole's own length is the greater.
+fn outer_loop_length(mesh: &Mesh, edges: &[usize], lengths: &[f64]) -> Option<f64> {
+    let polylines: Vec<&Vec<Vec3>> = edges.iter().map(|&edge| mesh.edges.get(edge)).collect::<Option<_>>()?;
+    let mut loop_of: Vec<usize> = (0..edges.len()).collect();
+    // Two edges in one loop share an end: the tessellator ends every edge on its B-rep vertices'
+    // own points, so a shared vertex is the same point to the last bit. A tolerance would join a
+    // hole to the outer loop where the two pass closer than it. The ends are sorted along X and
+    // each one meets only the ends with its X, so a face with many edges stays cheap.
+    let mut ends: Vec<(Vec3, usize)> =
+        polylines.iter().enumerate().flat_map(|(i, p)| [p.first(), p.last()].into_iter().flatten().map(move |end| (*end, i))).collect();
+    ends.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
+    for (i, (end, edge)) in ends.iter().enumerate() {
+        for (other, other_edge) in ends.iter().skip(i + 1).take_while(|(other, _)| other.x == end.x) {
+            if *end == *other {
+                let (a, b) = (loop_root(&loop_of, *edge), loop_root(&loop_of, *other_edge));
+                if let Some(slot) = loop_of.get_mut(a) {
+                    *slot = b;
+                }
+            }
+        }
+    }
+    let roots: Vec<usize> = (0..edges.len()).map(|edge| loop_root(&loop_of, edge)).collect();
+    // Each loop's box, in one pass over the border points.
+    let mut boxes: std::collections::BTreeMap<usize, (Vec3, Vec3)> = std::collections::BTreeMap::new();
+    for (polyline, root) in polylines.iter().zip(&roots) {
+        for p in polyline.iter() {
+            let (low, high) = boxes.entry(*root).or_insert((*p, *p));
+            (low.x, low.y, low.z) = (low.x.min(p.x), low.y.min(p.y), low.z.min(p.z));
+            (high.x, high.y, high.z) = (high.x.max(p.x), high.y.max(p.y), high.z.max(p.z));
+        }
+    }
+    if boxes.len() < 2 {
+        return None;
+    }
+    let (outer, _) = boxes.into_iter().map(|(id, (low, high))| (id, low.dist(high))).max_by(|a, b| a.1.total_cmp(&b.1))?;
+    Some(lengths.iter().zip(&roots).filter(|(_, r)| **r == outer).map(|(length, _)| *length).sum())
+}
+
+/// The loop `edge` belongs to, as the edge that stands for that loop.
+fn loop_root(loop_of: &[usize], mut edge: usize) -> usize {
+    while let Some(&next) = loop_of.get(edge) {
+        if next == edge {
+            break;
+        }
+        edge = next;
+    }
+    edge
 }
 
 /// Whether edge `edge` is a straight line parallel to `axis`.
