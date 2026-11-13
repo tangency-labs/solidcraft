@@ -1108,17 +1108,201 @@ fn between(
     between(g, (mid, &lo), high, best, depth + 1)
 }
 
-/// The least-cost walk for two loops whose whole grid is past [`MAX_CELLS`]: from one start
-/// (`b`'s vertex that pairs most cheaply with `a`'s vertex 0), through a band of columns about
-/// where each of `a`'s vertices falls at its share of the length round `b`, as wide as the bound
-/// allows (the band's cells, at most (m + 1)(2h + 1) + 2n, stay within it). Corners pair wherever
-/// they lie within the band of where their shares put them: about 400 vertices either way for two
-/// loops of 5000.
+/// A vertex turns more than this (one less the cosine of the angle between the tangents arriving
+/// and leaving, about 26°) to be a corner the band of [`banded_walk`] is anchored at.
+const CORNER_TURN: f64 = 0.1;
+
+/// The corners of a loop ([`CORNER_TURN`]).
+fn corners(side: &Side) -> Vec<usize> {
+    (0..side.count())
+        .filter(|&i| match (side.before.get(i), side.after.get(i)) {
+            (Some(b), Some(a)) => turn(*b, *a) > CORNER_TURN,
+            _ => false,
+        })
+        .collect()
+}
+
+/// The corners of the two loops paired as the pairing pairs the polygons through them (each loop's
+/// corners joined by straight lines, in its frame): `(i, j)` vertex numbers in order from the
+/// first. Empty when either loop has fewer than three corners or their grid is past
+/// [`MAX_CELLS`].
+fn corner_pairs(g: &Grid) -> Vec<(usize, usize)> {
+    let (ca, cb) = (corners(&g.a), corners(&g.b));
+    if ca.len() < 3 || cb.len() < 3 || (ca.len() + 1).saturating_mul(cb.len() + 1) > MAX_CELLS {
+        return Vec::new();
+    }
+    let chords = |side: &Side, c: &[usize]| -> Vec<Seg2> {
+        (0..c.len())
+            .filter_map(|k| {
+                let a = side.segs.get(*c.get(k)?)?.start();
+                let b = side.segs.get(*c.get(wrap(k + 1, c.len()))?)?.start();
+                Some(Seg2::Line { a, b })
+            })
+            .collect()
+    };
+    let (pa, pb) = (chords(&g.a, &ca), chords(&g.b, &cb));
+    let (Ok(a), Ok(b)) = (Side::new(&pa, g.a.frame), Side::new(&pb, g.b.frame)) else {
+        return Vec::new();
+    };
+    let small = Grid { a, b };
+    let Ok(w) = best_walk(&small) else {
+        return Vec::new();
+    };
+    let n = cb.len();
+    let (mut i, mut j) = (0usize, w.start);
+    let mut out = Vec::new();
+    for st in &w.steps {
+        match st {
+            Step::Pair => {
+                if let (Some(&x), Some(&y)) = (ca.get(i), cb.get(wrap(j, n))) {
+                    out.push((x, y));
+                }
+                (i, j) = (i + 1, j + 1);
+            }
+            Step::A => i += 1,
+            Step::B => j += 1,
+        }
+    }
+    out
+}
+
+/// For the rows `i0..i1` of `a` (vertex numbers, counted on round the loop), the columns of `b`
+/// (from `j0` to at most `j1`, counted on likewise) whose share of `b`'s length from `j0` to `j1`
+/// is nearest the row vertex's share of `a`'s length from `i0` to `i1`.
+fn share_columns(g: &Grid, (i0, i1): (usize, usize), (j0, j1): (usize, usize)) -> Vec<usize> {
+    let (m, n) = (g.a.count(), g.b.count());
+    let la: f64 = (i0..i1)
+        .map(|i| g.a.len.get(wrap(i, m)).copied().unwrap_or(0.0))
+        .sum();
+    let lb: f64 = (j0..j1)
+        .map(|j| g.b.len.get(wrap(j, n)).copied().unwrap_or(0.0))
+        .sum();
+    let share = |d: f64, l: f64| if l > 0.0 { d / l } else { 0.0 };
+    let mut out = Vec::new();
+    let (mut k, mut db, mut da) = (j0, 0.0f64, 0.0f64);
+    for i in i0..i1 {
+        let target = share(da, la);
+        while k < j1 {
+            let next = db + g.b.len.get(wrap(k, n)).copied().unwrap_or(0.0);
+            if (share(next, lb) - target).abs() <= (share(db, lb) - target).abs() {
+                (db, k) = (next, k + 1);
+            } else {
+                break;
+            }
+        }
+        out.push(k);
+        da += g.a.len.get(wrap(i, m)).copied().unwrap_or(0.0);
+    }
+    out
+}
+
+/// Each row's column (0 to m) and the paired corners as (row, column) ([`band_centres`]).
+type Band = (Vec<usize>, Vec<(usize, usize)>);
+
+/// The column of every row (0 to m), from `s` for row 0 to `s + n` for row m: between two paired
+/// corners ([`corner_pairs`]), each of `a`'s vertices at its share of the length between them;
+/// with no paired corners, from `b`'s vertex that pairs most cheaply with `a`'s vertex 0, at its
+/// share of the length round. With them, the paired corners as (row, column).
+fn band_centres(g: &Grid) -> Option<Band> {
+    let (m, n) = (g.a.count(), g.b.count());
+    let anchors = corner_pairs(g);
+    let Some(&(i_first, _)) = anchors.first() else {
+        let s = (0..n).min_by(|x, y| g.pair(0, *x).total_cmp(&g.pair(0, *y)))?;
+        let mut c = share_columns(g, (0, m), (s, s + n));
+        c.push(s + n);
+        return Some((c, Vec::new()));
+    };
+    // The paired corners' columns counted on round `b` so they increase, from n on.
+    let mut on: Vec<(usize, usize)> = Vec::new();
+    for &(i, j) in &anchors {
+        let floor = on.last().map_or(n, |&(_, p)| p + 1);
+        let mut c = j + n;
+        while c < floor {
+            c += n;
+        }
+        on.push((i, c));
+    }
+    let (&(i0, j0), last) = (on.first()?, on.len());
+    // The columns of rows i_first to i_first + m - 1, piece by piece between paired corners.
+    let mut cols: Vec<usize> = Vec::new();
+    for k in 0..last {
+        let &(ia, ja) = on.get(k)?;
+        let (ib, jb) = on.get(k + 1).copied().unwrap_or((i0 + m, j0 + n));
+        cols.extend(share_columns(g, (ia, ib), (ja, jb)));
+    }
+    // Row i < i_first comes round after the last corner: its column, one turn of `b` back.
+    let mut centre: Vec<usize> = (0..m)
+        .map(|i| {
+            let r = wrap(i + m - i_first, m);
+            let c = cols.get(r).copied().unwrap_or(j0);
+            if i < i_first {
+                c.saturating_sub(n)
+            } else {
+                c
+            }
+        })
+        .collect();
+    let s = *centre.first()?;
+    centre.push(s + n);
+    // Columns from below n, so the start is one of `b`'s vertex numbers.
+    let shift = s.checked_div(n).unwrap_or(0).saturating_mul(n);
+    let centre: Vec<usize> = centre
+        .into_iter()
+        .map(|c| c.saturating_sub(shift))
+        .collect();
+    // The paired corners at their rows' columns, in order of row.
+    let mut pinned: Vec<(usize, usize)> = anchors
+        .iter()
+        .filter_map(|&(i, _)| Some((i, *centre.get(i)?)))
+        .collect();
+    pinned.sort_unstable();
+    Some((centre, pinned))
+}
+
+/// The rows' column ranges `lo` and `hi` narrowed so a walk pairs every `(row, column)` of
+/// `pinned` (increasing in both): up to a pinned row a walk stays at or left of its column, and
+/// from the row after on, right of it, which only the pair step can do.
+fn pin(pinned: &[(usize, usize)], lo: &mut [usize], hi: &mut [usize]) {
+    let mut next = 0usize;
+    let mut last: Option<usize> = None;
+    for (i, (l, h)) in lo.iter_mut().zip(hi.iter_mut()).enumerate() {
+        while pinned.get(next).is_some_and(|p| p.0 < i) {
+            last = pinned.get(next).map(|p| p.1);
+            next += 1;
+        }
+        if let Some(c) = last {
+            *l = (*l).max(c + 1);
+        }
+        if let Some(&(_, c)) = pinned.get(next) {
+            *h = (*h).min(c);
+        }
+    }
+}
+
+/// The least-cost walk that pairs the corners the polygons through both loops' corners pair
+/// ([`corner_pairs`]), from the start [`band_centres`] gives; `None` when there are none or no
+/// such walk.
+fn pinned_walk(g: &Grid) -> Option<Walk> {
+    let (m, n) = (g.a.count(), g.b.count());
+    let (centre, pinned) = band_centres(g)?;
+    if pinned.is_empty() {
+        return None;
+    }
+    let s = *centre.first()?;
+    let (mut lo, mut hi) = (vec![s; m + 1], vec![s + n; m + 1]);
+    pin(&pinned, &mut lo, &mut hi);
+    walk(g, s, &lo, &hi)
+}
+
+/// The least-cost walk for two loops whose whole grid is past [`MAX_CELLS`]: from one start,
+/// through a band of columns about where each of `a`'s vertices falls ([`band_centres`]: at its
+/// share of the length between the corners the polygons through both loops' corners pair), as
+/// wide as the bound allows (the band's cells, at most (m + 1)(2h + 1) + 2n, stay within it:
+/// h is about 400 vertices for two loops of 5000). The corners those polygons pair are paired
+/// ([`pin`]); other vertices pair wherever they lie within the band of where their shares put
+/// them.
 fn banded_walk(g: &Grid) -> Result<Walk> {
     let (m, n) = (g.a.count(), g.b.count());
-    let s = (0..n)
-        .min_by(|x, y| g.pair(0, *x).total_cmp(&g.pair(0, *y)))
-        .ok_or_else(unpaired)?;
     let h = MAX_CELLS
         .saturating_sub(n.saturating_mul(2))
         .checked_div(m + 1)
@@ -1132,30 +1316,8 @@ fn banded_walk(g: &Grid) -> Result<Walk> {
             reason: "loft sections too large to pair",
         });
     }
-    let (la, lb): (f64, f64) = (g.a.len.iter().sum(), g.b.len.iter().sum());
-    // The column of each row: `b`'s vertex from `s` whose share of `b`'s length round from `s`
-    // is nearest the share of `a`'s length before the row's vertex.
-    let mut centre: Vec<usize> = Vec::new();
-    let (mut k, mut db, mut da) = (0usize, 0.0f64, 0.0f64);
-    for i in 0..=m {
-        let target = da / la;
-        while k < n {
-            let next = db + g.b.len.get(wrap(s + k, n)).copied().unwrap_or(0.0);
-            if (next / lb - target).abs() <= (db / lb - target).abs() {
-                (db, k) = (next, k + 1);
-            } else {
-                break;
-            }
-        }
-        centre.push(if i == 0 {
-            s
-        } else if i == m {
-            s + n
-        } else {
-            s + k
-        });
-        da += g.a.len.get(i).copied().unwrap_or(0.0);
-    }
+    let (centre, pinned) = band_centres(g).ok_or_else(unpaired)?;
+    let s = *centre.first().ok_or_else(unpaired)?;
     // Each row's band also spans the columns of the rows either side, so a walk can step from
     // any column of one row's band into the next row and run along it.
     let column = |i: usize, c: usize| centre.get(i).copied().unwrap_or(c);
@@ -1172,7 +1334,11 @@ fn banded_walk(g: &Grid) -> Result<Walk> {
             (c.max(column(i + 1, c)) + h).min(s + n)
         })
         .collect();
-    walk(g, s, &lo, &hi).ok_or_else(unpaired)
+    let (mut plo, mut phi) = (lo.clone(), hi.clone());
+    pin(&pinned, &mut plo, &mut phi);
+    walk(g, s, &plo, &phi)
+        .or_else(|| walk(g, s, &lo, &hi))
+        .ok_or_else(unpaired)
 }
 
 /// What an event of the correspondence is on one of the loops: one of its vertices, or a point
@@ -1195,6 +1361,8 @@ fn correspond(a: &[Seg2], fa: Frame, b: &[Seg2], fb: Frame) -> Result<Correspond
     let (m, n) = (g.a.count(), g.b.count());
     let w = if (m + 1).saturating_mul(n + 1) > MAX_CELLS {
         banded_walk(&g)?
+    } else if let Some(w) = pinned_walk(&g) {
+        w
     } else {
         best_walk(&g)?
     };
@@ -2525,6 +2693,48 @@ mod tests {
             assert!(
                 dist(starts(&m[1])[k], c) < 1e-9,
                 "{c:?} runs to {:?}",
+                starts(&m[1])[k]
+            );
+        }
+    }
+
+    /// The `w` x `h` rectangle from (0, 0), its bottom, right, top and left sides each cut into
+    /// `cuts` equal segments.
+    fn cut_rectangle(w: f64, h: f64, cuts: [usize; 4]) -> Vec<Seg2> {
+        let corners = [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)];
+        let mut pts = Vec::new();
+        for (k, &c) in cuts.iter().enumerate() {
+            let (a, b) = (corners[k], corners[(k + 1) % 4]);
+            for q in 0..c {
+                let t = q as f64 / c as f64;
+                pts.push((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
+            }
+        }
+        poly(&pts)
+    }
+
+    /// A 10 x 1 and a 1.5 x 1 rectangle, each in 5000 segments of about equal length, past
+    /// [`MAX_CELLS`]: their corners lie at different shares of their perimeters (the bottom right
+    /// at 45% of the one and 30% of the other, some 770 vertices from where the shares round the
+    /// whole loop put it), yet all four pair.
+    #[test]
+    fn corners_at_different_shares_pair_in_sections_too_large_for_the_whole_grid() {
+        let a = cut_rectangle(10.0, 1.0, [2273, 227, 2273, 227]);
+        let b = cut_rectangle(1.5, 1.0, [1500, 1000, 1500, 1000]);
+        assert_eq!((a.len(), b.len()), (5000, 5000));
+        let m = match_loft_sections(&[at(0.0, a), at(10.0, b)], 20_000).unwrap();
+        sound(&m);
+        assert_eq!(m[0].segs.len(), m[1].segs.len());
+        let ca = [p(0.0, 0.0), p(10.0, 0.0), p(10.0, 1.0), p(0.0, 1.0)];
+        let cb = [p(0.0, 0.0), p(1.5, 0.0), p(1.5, 1.0), p(0.0, 1.0)];
+        for (x, y) in ca.iter().zip(cb) {
+            let k = starts(&m[0])
+                .iter()
+                .position(|q| dist(*q, *x) < 1e-12)
+                .unwrap();
+            assert!(
+                dist(starts(&m[1])[k], y) < 1e-9,
+                "{x:?} runs to {:?}",
                 starts(&m[1])[k]
             );
         }
