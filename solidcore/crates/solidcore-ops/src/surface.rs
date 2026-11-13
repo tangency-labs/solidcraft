@@ -20,16 +20,18 @@ use solidcore::nurbs::n_sided::{n_sided as kernel_n_sided, NSidedRefusal, MAX_SI
 use solidcore::primitive::api_curve_ops::make_curves_compatible;
 use solidcore::query::api_queries::point_distance;
 use solidcore::surface::surface::Surface;
+use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::sheet::face_on;
+use solidcore::topology::face::p1::flip_face_orientation;
 use solidcore::topology::Brep;
 use solidcore::SolidError;
 use solidcore_record::brep::{Brep as Record, Curve, Natural};
 
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
-use crate::session::run;
+use crate::session::{run, with_body};
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
@@ -368,6 +370,34 @@ pub fn ruled(a: &Curve, b: &Curve, reversed: bool) -> Result<Record> {
             Err(e) => Ok(Err(status(e))),
         }
     }))
+}
+
+/// `sheet` turned over: each face reversed (the kernel's `flip_face_orientation`: the face's
+/// other use made the upward one, and each loop's other loop use its primary), so each face's
+/// normal in its shell is the other way. The record reads the other way: each face's `forward`
+/// in its shell is negated, its surface, domain, loops and edges as they were (the edges still
+/// shared between faces). Turning a sheet over twice gives it back.
+///
+/// # Errors
+/// [`Error::Unsupported`] for a closed body (a manifold solid: turned over, it would be inside
+/// out); those of [`Body::from_record`] and [`Body::to_record`]; the kernel's status.
+pub fn reverse_sheet(sheet: &Record) -> Result<Record> {
+    let (body, _) = Body::from_record(sheet, true)?;
+    with_body("surface::reverse_sheet", &body, |_, b| {
+        if is_manifold_solid(b)? {
+            return Ok(Err(Error::Unsupported(
+                "a closed body: turned over it would be inside out",
+            )));
+        }
+        for f in b.face_list().to_vec() {
+            if let Err(e) = flip_face_orientation(b, f) {
+                return Ok(Err(status(e)));
+            }
+        }
+        b.refresh_cached_topology();
+        Ok(Ok(()))
+    })??;
+    body.to_record().map(|(r, _)| r)
 }
 
 #[cfg(test)]
@@ -736,3 +766,4 @@ mod tests {
         assert!(matches!(n_sided(&arcs), Err(Error::Unsupported(_))));
     }
 }
+
