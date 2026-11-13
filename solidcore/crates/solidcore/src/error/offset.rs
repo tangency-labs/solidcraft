@@ -59,10 +59,11 @@ pub enum OffsetFailure {
         /// The largest wall that works.
         largest: f64,
     },
-    /// The offset of `face` by `distance` is not proved regular, and no wall size would help:
-    /// the face does not bend towards that side anywhere the sizing looked, so no radius of
-    /// curvature limits the wall. The proof ran out where the face's normal vanishes (a flat
-    /// patch whose boundary curves leave a corner tangent to each other) or out of patches.
+    /// The offset of `face` by `distance` is neither proved regular nor proved to fold, so no
+    /// wall size is named: the proof ran out of patches (where the face's normal vanishes, a
+    /// flat patch whose boundary curves leave a corner tangent to each other; where the
+    /// offset collapses; or where a fold point is not proved), or a fold was proved but the
+    /// face does not bend towards that side anywhere the sizing looked.
     NotCertified {
         /// The face whose offset is not certified.
         face: FaceId,
@@ -519,9 +520,8 @@ impl core::fmt::Display for OffsetFailure {
             ),
             Self::NotCertified { face, distance } => write!(
                 f,
-                "the offset of face {} by {distance} is not proved regular: its parametrisation \
-                 defeats the proof, and no radius of curvature limits the wall, so no size is \
-                 named",
+                "the offset of face {} by {distance} is neither proved regular nor proved to \
+                 fold, so no size is named",
                 face.index()
             ),
             Self::Collapses {
