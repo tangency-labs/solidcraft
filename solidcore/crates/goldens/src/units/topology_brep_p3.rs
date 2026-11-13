@@ -607,7 +607,7 @@ fn status<T>(r: Result<T, SolidError>) -> Result<(f64, Option<T>), Fail> {
         Err(e) => match Output::unported(&e) {
             Some(o) => Err(Fail::Deferred(Box::new(o))),
             None => match e {
-                SolidError::Upstream { code, .. } => Ok((f64::from(code), None)),
+                e if solidcore::error::upstream_status(&e).is_some() => Ok((f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), None)),
                 other => Err(Fail::Harness(harness(format!("rust: {other}")))),
             },
         },

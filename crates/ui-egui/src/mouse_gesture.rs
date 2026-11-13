@@ -144,13 +144,17 @@ impl Studio {
 /// Tools that are not commands: what they are called in a list of tools.
 const SPECIALS: [(&str, &str); 3] = [("repeat", "Repeat"), ("delete", "Delete"), ("undo", "Undo")];
 /// View actions (`ui.*`): id, label, icon.
-const ACTIONS: [(&str, &str, &str); 5] = [
+const ACTIONS: [(&str, &str, &str); 6] = [
     ("ui.fit", "Fit", "fit"),
     ("ui.home", "Home View", "home"),
+    ("ui.lookAt", "Look At", "lookat"),
     ("ui.finishSketch", "Finish Sketch", "finish"),
     ("ui.workspace.design", "Design Workspace", "box"),
     ("ui.clear", "Clear Selection", ""),
 ];
+
+/// The standard views: commands on no toolbar tab that a ring can hold all the same.
+const VIEWS: [&str; 7] = ["view.front", "view.back", "view.left", "view.right", "view.top", "view.bottom", "view.isometric"];
 
 /// A command's label without its shortcut hint: `Line (L)` is `Line`.
 fn short(label: &str) -> &str {
@@ -195,11 +199,12 @@ pub(crate) fn item(app: &SolveApp, id: &str) -> Option<Item> {
     }
 }
 
-/// Every tool a ring can hold, as (id, label): the specials and view actions, then the commands
-/// that sit on the toolbar.
+/// Every tool a ring can hold, as (id, label): the specials and view actions, the standard views,
+/// then the commands that sit on the toolbar.
 pub(crate) fn catalog() -> Vec<(String, String)> {
     let mut v: Vec<(String, String)> = SPECIALS.iter().map(|(i, l)| ((*i).to_string(), (*l).to_string())).collect();
     v.extend(ACTIONS.iter().map(|(i, l, _)| ((*i).to_string(), (*l).to_string())));
+    v.extend(VIEWS.iter().filter_map(|id| Some(((*id).to_string(), label_of(id)?))));
     for spec in solidcraft_engine::command_specs() {
         if !spec.tab.is_empty() && spec.planned.is_none() && !v.iter().any(|(i, _)| i == spec.id) {
             v.push((spec.id.to_string(), short(spec.label).to_string()));
@@ -557,9 +562,10 @@ enum Op {
     Set(usize, String),
 }
 
-/// The first tool of the catalog that `list` doesn't hold.
+/// The first tool of the catalog that `list` doesn't hold. The standard views and Look At are
+/// only there to be chosen: "Add a tool" keeps adding what it did before they were offered.
 fn next_unused(list: &[String]) -> Option<String> {
-    catalog().into_iter().map(|(id, _)| id).find(|id| !list.contains(id))
+    catalog().into_iter().map(|(id, _)| id).find(|id| id != "ui.lookAt" && !VIEWS.contains(&id.as_str()) && !list.contains(id))
 }
 
 /// Applies `op` to `list`; false when it was refused (a ring keeps 1 to [`MAX_TOOLS`] tools, each
@@ -1255,6 +1261,60 @@ mod tests {
             .set_tools(Studio::Part, ["undo", "delete", "sketch.create", "solid.extrude", "solid.move"].map(String::from).to_vec());
         drag(&mut app, &[PRESS, PRESS + dir * 20.0, PRESS + dir * 200.0], false);
         assert!(!is_open(&app) && (app.tool.is_some() || app.dialog.is_some()), "Create Sketch started");
+    }
+
+    /// A design with a selected flat face, on a ring holding `tools`, the first at the top (#12406).
+    fn view_ring(tools: [&str; 2]) -> (crate::scenario::Harness, solidcore_record::Vec3) {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.cylinder", serde_json::json!({"diameter": 30, "height": 20})).unwrap();
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let body = state.bodies.first().unwrap();
+        let faces = body.body.faces(0.1).unwrap();
+        let flat = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();
+        let normal = flat.plane_normal.unwrap();
+        h.app.session.selection = vec![solidcraft_engine::Sel::Face { body: body.name.clone(), index: flat.index, point: flat.centroid }];
+        h.app.preferences.nav = MOUSE_MODE.into();
+        h.app.preferences.mouse_gestures.enabled = true;
+        h.app.preferences.mouse_gestures.set_tools(Studio::Part, tools.map(String::from).to_vec());
+        (h, normal)
+    }
+
+    fn take_top_slot(h: &mut crate::scenario::Harness) {
+        let up = vec2(0.0, -1.0);
+        drag(&mut h.app, &[PRESS, PRESS + up * 20.0, PRESS + up * 200.0], false);
+        assert!(!is_open(&h.app), "the slot's tool was taken");
+        h.frames(90);
+    }
+
+    #[test]
+    fn the_standard_views_and_look_at_can_go_on_a_ring() {
+        use solidcraft_engine::geom::Vec3Geom as _;
+        let offered = catalog();
+        for id in ["view.front", "view.back", "view.left", "view.right", "view.top", "view.bottom", "view.isometric", "ui.lookAt"] {
+            assert!(offered.iter().any(|(i, _)| i == id), "`{id}` is offered");
+        }
+        assert_eq!(label_of("ui.lookAt").as_deref(), Some("Look At"));
+        // "Add a tool" picks what it always picked: the views are only there to be chosen.
+        let mut list: Vec<String> = ["repeat", "delete", "undo", "ui.fit", "ui.home"].map(String::from).to_vec();
+        assert!(apply(&mut list, Op::Add));
+        assert_eq!(list.last().map(String::as_str), Some("ui.finishSketch"));
+        let shipped: Vec<&str> = Studio::ALL.iter().flat_map(|s| s.defaults().iter().copied()).collect();
+        assert!(!shipped.iter().any(|id| id.starts_with("view.") || *id == "ui.lookAt"), "no shipped ring changes");
+
+        // A view on a slot turns the camera as the command does.
+        let (mut ring, _) = view_ring(["view.top", "undo"]);
+        take_top_slot(&mut ring);
+        let (mut direct, _) = view_ring(["undo", "delete"]);
+        direct.app.start("view.top");
+        direct.frames(90);
+        assert!(ring.app.cam.back().dist(direct.app.cam.back()) < 2e-6);
+
+        // Look At on a slot faces the selected flat face, as Ctrl+8 does.
+        let (mut ring, normal) = view_ring(["ui.lookAt", "undo"]);
+        take_top_slot(&mut ring);
+        let back = ring.app.cam.back();
+        assert!(back.dist(normal) < 2e-6 || back.dist(-normal) < 2e-6, "{back:?} faces {normal:?}");
     }
 
     #[test]

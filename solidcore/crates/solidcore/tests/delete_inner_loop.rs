@@ -66,7 +66,8 @@ fn assert_clean(k: &mut Kernel, b: &mut Brep) {
 }
 
 fn is_sm_err(r: &Result<(), SolidError>) -> bool {
-    matches!(r, Err(SolidError::Upstream { code, .. }) if *code == solidcore::error::SM_ERR)
+    r.as_ref()
+        .is_err_and(|e| solidcore::error::upstream_status(e) == Some(solidcore::error::SM_ERR))
 }
 
 /// The (loops, loop uses, edges, edge uses, vertices, vertex uses) records alive.

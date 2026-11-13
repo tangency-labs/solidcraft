@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
     Admission, AlphaConvention, CancelToken, ColourEncoding, ErrorCode, FrameInfo, ImageExecutor, ImageRequest, ImageTask, ImageWork, Integrator,
-    JobError, JobId, JobOptions, Phase, Progress, Result, TaskPoll,
+    JobError, JobId, JobOptions, NativeMemoryPolicy, Phase, Progress, Result, TaskPoll,
 };
 use crate::{
     Availability, ExecutorDescriptor, ExecutorId, ProductScene, RenderFormat, RenderLimits, RenderMode, RenderOperation, RenderProfile, ScratchLayout,
@@ -25,6 +25,25 @@ use super::admit;
 
 const MEMORY_LIMIT: u64 = 512 * 1024 * 1024;
 const QUEUE_LIMIT: usize = 2;
+
+fn validate_image_profiles(descriptor: &ExecutorDescriptor) -> Result<()> {
+    if descriptor.profiles.is_empty()
+        || descriptor.profiles.len() > 2
+        || descriptor.profiles.iter().any(|profile| {
+            !matches!(profile.mode, RenderMode::Preview | RenderMode::Final)
+                || profile.operation != RenderOperation::Image
+                || profile.formats != [RenderFormat::Png]
+        })
+        || descriptor
+            .profiles
+            .iter()
+            .enumerate()
+            .any(|(index, profile)| descriptor.profiles[..index].iter().any(|previous| previous.mode == profile.mode))
+    {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "image worker requires unique Preview/Final Image/PNG profiles"));
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 struct CpuExecutor;
@@ -61,8 +80,7 @@ impl ImageExecutor for CpuExecutor {
 #[cfg(all(test, feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 impl ImageHost {
     pub(super) fn join_worker_for_test(&mut self) -> Result<()> {
-        self.0.shared.stop.store(true, Ordering::Release);
-        self.0.shared.wake.notify_all();
+        self.0.shared.stop_worker();
         let inner = Arc::get_mut(&mut self.0).ok_or_else(|| JobError::new(ErrorCode::Internal, "test must own its host"))?;
         if let Some(worker) = inner._worker.take() {
             worker.join().map_err(|_| JobError::new(ErrorCode::Internal, "test worker panicked"))?;
@@ -88,14 +106,45 @@ pub enum HostKind {
 struct Budget {
     used: AtomicU64,
     limit: u64,
+    legacy_memory_admission: AtomicBool,
+    #[cfg(not(target_arch = "wasm32"))]
+    memory: Option<Arc<super::host_memory::NativeMemoryPool>>,
 }
+struct EpochActivity {
+    #[cfg(not(target_arch = "wasm32"))]
+    _memory: Option<super::host_memory::MemoryActivity>,
+}
+impl EpochActivity {
+    fn finish(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        drop(self._memory.take());
+    }
+}
+
 pub(crate) struct Reservation {
     budget: Arc<Budget>,
     bytes: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    memory: Option<super::host_memory::MemoryLease>,
 }
 
 impl Budget {
+    fn activity(&self) -> Result<EpochActivity> {
+        Ok(EpochActivity {
+            #[cfg(not(target_arch = "wasm32"))]
+            _memory: self.memory.as_ref().map(|pool| pool.activity()).transpose()?,
+        })
+    }
+
+    fn memory_policy(&self) -> NativeMemoryPolicy {
+        if self.legacy_memory_admission.load(Ordering::Acquire) { NativeMemoryPolicy::SoftwarePoolOnly } else { NativeMemoryPolicy::AvailableRam }
+    }
+
     fn reserve(self: &Arc<Self>, bytes: u64) -> Result<Reservation> {
+        // The native process-wide lease is acquired first and rolls back if this
+        // individual host's finite software pool subsequently refuses the job.
+        #[cfg(not(target_arch = "wasm32"))]
+        let memory = self.memory.as_ref().map(|pool| pool.reserve(bytes, self.memory_policy())).transpose()?;
         let mut used = self.used.load(Ordering::Acquire);
         loop {
             let next = used.checked_add(bytes).filter(|n| *n <= self.limit).ok_or_else(|| {
@@ -106,18 +155,52 @@ impl Budget {
                 Err(current) => used = current,
             }
         }
-        Ok(Reservation { budget: self.clone(), bytes })
+        Ok(Reservation {
+            budget: self.clone(),
+            bytes,
+            #[cfg(not(target_arch = "wasm32"))]
+            memory,
+        })
+    }
+
+    fn memory_admission(&self, required: u64, credit: u64) -> Result<Option<super::HostMemoryAdmission>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.memory.as_ref().map(|pool| pool.check(required, credit, self.memory_policy())).transpose()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (required, credit);
+            Ok(None)
+        }
     }
 }
 impl Reservation {
+    /// Backing is complete and immutable; keep its software debit but allow a
+    /// later quiescent epoch to observe RAM while the owner remains alive.
+    pub(crate) fn settle(&mut self) -> Result<()> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(memory) = &mut self.memory {
+            memory.settle()?;
+        }
+        Ok(())
+    }
+
     /// Transfer an already admitted portion without changing the pool's total.
     /// CPU progressive admission prepays at most two reusable checkpoint slots.
     fn split(&mut self, bytes: u64) -> Result<Self> {
         if bytes > self.bytes {
             return Err(JobError::new(ErrorCode::LimitExceeded, "preview exceeds its prepaid reservation"));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        let memory = self.memory.as_mut().map(|lease| lease.split(bytes)).transpose()?;
         self.bytes -= bytes;
-        Ok(Self { budget: self.budget.clone(), bytes })
+        Ok(Self {
+            budget: self.budget.clone(),
+            bytes,
+            #[cfg(not(target_arch = "wasm32"))]
+            memory,
+        })
     }
 
     /// Return a lease to the same prepaid pool without reserving memory again.
@@ -125,7 +208,14 @@ impl Reservation {
         if !Arc::ptr_eq(&self.budget, &other.budget) {
             return Err(JobError::new(ErrorCode::Internal, "checkpoint lease belongs to another pool"));
         }
-        self.bytes = self.bytes.checked_add(other.bytes).ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "checkpoint lease overflow"))?;
+        let bytes = self.bytes.checked_add(other.bytes).ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "checkpoint lease overflow"))?;
+        #[cfg(not(target_arch = "wasm32"))]
+        match (&mut self.memory, &mut other.memory) {
+            (Some(lease), Some(other)) => lease.merge_from(other)?,
+            (None, None) => {}
+            _ => return Err(JobError::new(ErrorCode::Internal, "checkpoint native memory lease mismatch")),
+        }
+        self.bytes = bytes;
         other.bytes = 0;
         Ok(())
     }
@@ -133,6 +223,10 @@ impl Reservation {
     pub(crate) fn shrink(&mut self, bytes: u64) -> Result<()> {
         if bytes > self.bytes {
             return Err(JobError::new(ErrorCode::LimitExceeded, "completed PNG exceeds its reservation"));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(memory) = &mut self.memory {
+            memory.shrink(bytes)?;
         }
         self.budget.used.fetch_sub(self.bytes - bytes, Ordering::AcqRel);
         self.bytes = bytes;
@@ -216,8 +310,7 @@ mod light_union_lease_tests {
         assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
         // Synchronize this test's completed worker before asserting final Arc release;
         // publication wakes waiters just before Running drops its temporary handle.
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         let retained = job.0.request.raytrace.as_ref().unwrap();
         assert_eq!(
@@ -243,7 +336,13 @@ mod light_union_lease_tests {
     }
     #[test]
     fn failed_union_metadata_reservation_releases_work_and_does_not_enqueue() {
-        let host = CpuHost::for_platform().unwrap();
+        let host = ImageHost(Arc::new(Owner {
+            executor: None,
+            shared: ImageHost::shared(MEMORY_LIMIT),
+            kind: HostKind::NativeWorker,
+            running: Mutex::new(None),
+            _worker: None,
+        }));
         let request = request().unwrap();
         let work = admit(&scene(), &request).unwrap().estimated_total_bytes;
         let fill = host.0.shared.budget.reserve(host.pool_limit_bytes() - work).unwrap();
@@ -287,6 +386,15 @@ struct RetainedPresentation {
     _reservation: Reservation,
 }
 
+/// Identity of the categorical guide image, independent of the colour PNG.
+#[derive(Clone, Debug, Serialize)]
+pub struct DenoiseMaskInfo {
+    pub width: u32,
+    pub height: u32,
+    pub bytes: u64,
+    pub sha256: String,
+}
+
 pub struct RenderFrame {
     // Derivatives point directly at the original, never form a retention chain.
     source_master: Option<Arc<RenderFrame>>,
@@ -294,6 +402,7 @@ pub struct RenderFrame {
     pub info: FrameInfo,
     png: Vec<u8>,
     exr: Option<(Vec<u8>, LinearMasterInfo)>,
+    denoise_mask: Option<(Vec<u8>, DenoiseMaskInfo)>,
     _reservation: Reservation,
 }
 impl RenderFrame {
@@ -314,6 +423,15 @@ impl RenderFrame {
     }
     pub fn linear_master_info(&self) -> Option<&LinearMasterInfo> {
         self.exr.as_ref().map(|(_, info)| info).or_else(|| self.source_master.as_ref().and_then(|source| source.linear_master_info()))
+    }
+    pub fn denoise_mask_png(&self) -> Option<&[u8]> {
+        self.denoise_mask
+            .as_ref()
+            .map(|(bytes, _)| bytes.as_slice())
+            .or_else(|| self.source_master.as_ref().and_then(|source| source.denoise_mask_png()))
+    }
+    pub fn denoise_mask_info(&self) -> Option<&DenoiseMaskInfo> {
+        self.denoise_mask.as_ref().map(|(_, info)| info).or_else(|| self.source_master.as_ref().and_then(|source| source.denoise_mask_info()))
     }
     pub fn png(&self) -> &[u8] {
         &self.png
@@ -435,6 +553,10 @@ pub enum JobEnvironmentInfo {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct JobStatus {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub denoise_diagnostics: Option<super::DenoiseDiagnostics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub denoise_mask: Option<DenoiseMaskInfo>,
     /// Complete passes omitted only when both prepaid snapshots are externally retained.
     /// Final rendering continues; this is not a dropped sample or a stalled job.
     pub preview_retention_skips: u32,
@@ -465,6 +587,7 @@ pub struct JobStatus {
 }
 
 struct Data {
+    denoise_diagnostics: Option<super::DenoiseDiagnostics>,
     preview_retention_skips: u32,
     completed_duration: Option<std::time::Duration>,
     punctual_diagnostics: Option<super::PunctualDiagnostics>,
@@ -482,7 +605,6 @@ struct Record {
     textures: Option<super::textures::TextureSummary>,
     options: Option<RetainedOptions>,
     environment: Option<JobEnvironmentInfo>,
-    _request_reservation: Option<Reservation>,
     id: JobId,
     scene_generation: u64,
     request: ImageRequest,
@@ -491,6 +613,9 @@ struct Record {
     data: Mutex<Data>,
     #[cfg(not(target_arch = "wasm32"))]
     done: Condvar,
+    // Request, options, resource metadata and published payload owners drop
+    // before this settled lease returns any current-epoch debit.
+    _request_reservation: Option<Reservation>,
 }
 
 impl Record {
@@ -510,6 +635,15 @@ impl Record {
 pub struct JobHandle(Arc<Record>);
 
 impl JobHandle {
+    fn settle_request_metadata(&mut self) -> Result<()> {
+        let record =
+            Arc::get_mut(&mut self.0).ok_or_else(|| JobError::new(ErrorCode::Internal, "render metadata was shared before construction finished"))?;
+        if let Some(reservation) = record._request_reservation.as_mut() {
+            reservation.settle()?;
+        }
+        Ok(())
+    }
+
     pub fn id(&self) -> JobId {
         self.0.id
     }
@@ -531,6 +665,8 @@ impl JobHandle {
     pub fn status(&self) -> Result<JobStatus> {
         let data = self.0.data.lock().map_err(|_| JobError::new(ErrorCode::Internal, "render status lock poisoned"))?;
         Ok(JobStatus {
+            denoise_diagnostics: data.denoise_diagnostics,
+            denoise_mask: data.frame.as_ref().and_then(|frame| frame.denoise_mask_info().cloned()),
             preview_retention_skips: data.preview_retention_skips,
             preview_unavailable_reason: self.0.preview_unavailable_reason,
             punctual_diagnostics: data.punctual_diagnostics,
@@ -601,10 +737,18 @@ impl JobHandle {
 /// The last field of Work and Running. Rust drops earlier fields first, so
 /// observers cannot see this barrier until captured inputs, executor tasks,
 /// pending PNGs, reservations and checkpoint credits have actually been released.
-struct WorkRelease(Weak<Record>);
+struct WorkRelease {
+    record: Weak<Record>,
+    // Dropped after every temporary field in Work/Running, even if the final
+    // frame has already settled its own reservation.
+    _activity: EpochActivity,
+}
 impl Drop for WorkRelease {
     fn drop(&mut self) {
-        if let Some(record) = self.0.upgrade() {
+        // All task backing is already gone. Publish the release barrier only
+        // after the physical snapshot is eligible to advance as well.
+        self._activity.finish();
+        if let Some(record) = self.record.upgrade() {
             record.work_released.store(true, Ordering::Release);
             record.notify();
         }
@@ -615,6 +759,12 @@ impl Drop for WorkRelease {
 /// The owner must place its backing before this field so backing drops first.
 pub struct RetainedMetadata(Reservation);
 impl RetainedMetadata {
+    /// Call only after constructing and validating the owner's immutable
+    /// backing. A prepaid metadata reservation must not settle at acquisition.
+    pub fn settle(&mut self) -> Result<()> {
+        self.0.settle()
+    }
+
     pub fn bytes(&self) -> u64 {
         self.0.bytes
     }
@@ -745,6 +895,7 @@ pub struct PreparedSubmission {
     environment_info: Option<JobEnvironmentInfo>,
     textures: Option<super::textures::TextureSummary>,
     resolved: crate::ResolvedRequest,
+    execution_descriptor: [u8; 32],
     admission: Admission,
     cancel: CancelToken,
     #[cfg(feature = "raytrace-cpu")]
@@ -754,6 +905,48 @@ pub struct PreparedSubmission {
     host: ImageHost,
 }
 impl PreparedSubmission {
+    /// Preserve the requested image mode in queued/status metadata without
+    /// changing its owning producer, captured scene, numerical options or proof.
+    pub fn select_image_mode(&mut self, mode: RenderMode) -> Result<()> {
+        self.check_cancel()?;
+        if !matches!(mode, RenderMode::Preview | RenderMode::Final) {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "image mode must be Preview or Final"));
+        }
+        let mut descriptor = self.host.descriptor_for_request(self.request())?;
+        for profile in &mut descriptor.profiles {
+            profile.formats.sort_unstable();
+            profile.features.sort_unstable();
+        }
+        descriptor.profiles.sort_unstable_by_key(|profile| (profile.mode, profile.operation));
+        if capture_fingerprint(&descriptor)? != self.execution_descriptor {
+            return Err(JobError::new(ErrorCode::HostUnavailable, "prepared image executor descriptor changed"));
+        }
+        if !descriptor.profiles.iter().any(|profile| profile == &self.resolved.profile) {
+            return Err(JobError::new(ErrorCode::HostUnavailable, "prepared image executor profile changed"));
+        }
+        let mut backend = crate::builtin_backend();
+        backend.id = self.resolved.backend.clone();
+        backend.executors = vec![descriptor];
+        let resolved = crate::resolve_request(
+            &[backend],
+            &crate::RenderRequest {
+                backend: Some(self.resolved.backend.clone()),
+                mode,
+                operation: RenderOperation::Image,
+                width: self.resolved.width,
+                height: self.resolved.height,
+                format: self.resolved.format,
+                features: self.resolved.profile.features.clone(),
+                policy: Default::default(),
+            },
+        )
+        .map_err(|error| JobError::new(ErrorCode::InvalidRequest, error.to_string()))?;
+        if resolved.executor != self.resolved.executor {
+            return Err(JobError::new(ErrorCode::WrongOwner, "image mode changed the captured executor"));
+        }
+        self.resolved = resolved;
+        Ok(())
+    }
     /// Check a simultaneously retained metadata owner under the same unchanged
     /// per-job/profile cap. It is not funded by a Work/frame lease.
     pub fn check_retained_metadata(&self, bytes: u64) -> Result<()> {
@@ -795,6 +988,8 @@ impl PreparedSubmission {
 struct Work {
     #[cfg(feature = "raytrace-cpu")]
     proof: Vec<crate::raytrace::image::CertifiedOptics>,
+    #[cfg(feature = "raytrace-cpu")]
+    cpu_workers: Option<u16>,
     regrade: Option<(Arc<RenderFrame>, super::presentation::Presentation)>,
     request: Option<ImageRequest>,
     executor: Option<Arc<dyn ImageExecutor>>,
@@ -815,7 +1010,8 @@ const _: [(); 1] = [(); (std::mem::size_of::<Work>() <= 4096) as usize];
 // this fixed state until publication; it is not another image task or pool.
 const PNG_HASH_CHUNK_BYTES: usize = 16_384;
 const PNG_HASH_CHUNKS_PER_ADVANCE: usize = 4;
-pub(crate) const FRAME_METADATA_BYTES: u64 = 1024;
+// Includes separate colour, linear-master and categorical-mask identities.
+pub(crate) const FRAME_METADATA_BYTES: u64 = 2048;
 #[cfg(feature = "raytrace-cpu")]
 const PREPARED_PROOF_HEADER_BYTES: usize = std::mem::size_of::<Vec<crate::raytrace::image::CertifiedOptics>>();
 #[cfg(not(feature = "raytrace-cpu"))]
@@ -835,6 +1031,10 @@ struct PendingPng {
     preview_samples: Option<u32>,
     exr: Option<Vec<u8>>,
     exr_hashed: usize,
+    exr_digest: Option<sha2::digest::Output<Sha256>>,
+    denoise_mask: Option<Vec<u8>>,
+    denoise_mask_hashed: usize,
+    denoise_mask_digest: Option<sha2::digest::Output<Sha256>>,
 }
 // Keep the new fixed completion state within the existing metadata allowance
 // even if the hashing dependency's representation changes on another target.
@@ -850,7 +1050,19 @@ const _: [(); 1] = [(); (std::mem::size_of::<Running>()
 
 impl PendingPng {
     fn new(png: Vec<u8>) -> Self {
-        Self { png, digest: Sha256::new(), png_digest: None, hashed: 0, preview_samples: None, exr: None, exr_hashed: 0 }
+        Self {
+            png,
+            digest: Sha256::new(),
+            png_digest: None,
+            hashed: 0,
+            preview_samples: None,
+            exr: None,
+            exr_hashed: 0,
+            exr_digest: None,
+            denoise_mask: None,
+            denoise_mask_hashed: 0,
+            denoise_mask_digest: None,
+        }
     }
 
     fn preview(png: Vec<u8>, samples: u32) -> Self {
@@ -860,11 +1072,13 @@ impl PendingPng {
     fn step(&mut self, units: usize, cancel: &CancelToken) -> Result<bool> {
         cancel.check()?;
         for _ in 0..units.min(PNG_HASH_CHUNKS_PER_ADVANCE) {
-            self.finish_png_digest();
+            self.finish_digests();
             let (bytes, hashed) = if self.hashed < self.png.len() {
                 (&self.png, &mut self.hashed)
             } else if let Some(exr) = self.exr.as_ref().filter(|exr| self.exr_hashed < exr.len()) {
                 (exr, &mut self.exr_hashed)
+            } else if let Some(mask) = self.denoise_mask.as_ref().filter(|mask| self.denoise_mask_hashed < mask.len()) {
+                (mask, &mut self.denoise_mask_hashed)
             } else {
                 break;
             };
@@ -873,23 +1087,64 @@ impl PendingPng {
             *hashed = end;
             cancel.check()?;
         }
-        self.finish_png_digest();
-        Ok(self.hashed == self.png.len() && self.exr.as_ref().is_none_or(|exr| self.exr_hashed == exr.len()))
+        self.finish_digests();
+        Ok(self.hashed == self.png.len()
+            && self.exr.as_ref().is_none_or(|exr| self.exr_hashed == exr.len())
+            && self.denoise_mask.as_ref().is_none_or(|mask| self.denoise_mask_hashed == mask.len()))
     }
-    fn finish_png_digest(&mut self) {
+    fn finish_digests(&mut self) {
         if self.hashed == self.png.len() && self.png_digest.is_none() {
-            // PNG and EXR are scanned sequentially. Keep only its fixed digest
-            // while resetting the same SHA state for the optional raw companion.
             self.png_digest = Some(self.digest.finalize_reset());
+        }
+        if self.png_digest.is_some() && self.exr.as_ref().is_some_and(|exr| self.exr_hashed == exr.len()) && self.exr_digest.is_none() {
+            self.exr_digest = Some(self.digest.finalize_reset());
+        }
+        if self.png_digest.is_some()
+            && (self.exr.is_none() || self.exr_digest.is_some())
+            && self.denoise_mask.as_ref().is_some_and(|mask| self.denoise_mask_hashed == mask.len())
+            && self.denoise_mask_digest.is_none()
+        {
+            self.denoise_mask_digest = Some(self.digest.finalize_reset());
         }
     }
     fn progress(&self) -> Progress {
         Progress {
             phase: Phase::Encoding,
-            done: self.hashed as u64 + self.exr_hashed as u64,
-            total: self.png.len() as u64 + self.exr.as_ref().map_or(0, |bytes| bytes.len() as u64),
+            done: self.hashed as u64 + self.exr_hashed as u64 + self.denoise_mask_hashed as u64,
+            total: self.png.len() as u64
+                + self.exr.as_ref().map_or(0, |bytes| bytes.len() as u64)
+                + self.denoise_mask.as_ref().map_or(0, |bytes| bytes.len() as u64),
         }
     }
+}
+
+fn validate_denoise_mask(bytes: &Vec<u8>, request: &ImageRequest, scale: u32, report: Option<super::DenoiseDiagnostics>) -> Result<()> {
+    // Native CPU Workstation requests retain their earlier dimension envelope;
+    // the producer has already admitted it. X2 uses the shared 8K output cap.
+    let (trace_width, trace_height) =
+        if scale == 1 { (request.width, request.height) } else { super::supersampled_dimensions(request.width, request.height, scale)? };
+    let report = report.ok_or_else(|| JobError::new(ErrorCode::Internal, "guide mask has no classification report"))?;
+    let total = report
+        .counts
+        .iter()
+        .try_fold(0_u64, |sum, count| sum.checked_add(*count))
+        .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "guide classification count overflow"))?;
+    if (report.width, report.height) != (trace_width, trace_height) || total != u64::from(trace_width) * u64::from(trace_height) {
+        return Err(JobError::new(ErrorCode::Internal, "guide classification counts differ from the admitted trace grid"));
+    }
+    let limit = u64::from(request.width)
+        .checked_mul(u64::from(request.height))
+        .and_then(|pixels| pixels.checked_mul(8))
+        .and_then(|bytes| bytes.checked_add(65_536))
+        .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "guide PNG bound overflow"))?;
+    if bytes.capacity() as u64 > limit
+        || bytes.get(..16) != Some(&[137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82])
+        || bytes.get(16..20) != Some(request.width.to_be_bytes().as_slice())
+        || bytes.get(20..24) != Some(request.height.to_be_bytes().as_slice())
+    {
+        return Err(JobError::new(ErrorCode::LimitExceeded, "guide mask exceeds its bound or has invalid PNG dimensions"));
+    }
+    Ok(())
 }
 
 struct Running {
@@ -967,6 +1222,23 @@ enum WorkPoll {
 }
 
 impl WorkTask {
+    fn denoise_diagnostics(&self) -> Option<super::DenoiseDiagnostics> {
+        match self {
+            Self::Registered(task) => task.denoise_diagnostics(),
+            #[cfg(feature = "raytrace-cpu")]
+            Self::Raytrace(slot) => slot.0.first().and_then(|task| task.denoise_diagnostics()),
+            _ => None,
+        }
+    }
+    fn take_denoise_mask(&mut self) -> Option<Vec<u8>> {
+        match self {
+            Self::Registered(task) => task.take_denoise_mask(),
+            #[cfg(feature = "raytrace-cpu")]
+            Self::Raytrace(slot) => slot.0.first_mut().and_then(|task| task.take_denoise_mask()),
+            _ => None,
+        }
+    }
+
     fn punctual_diagnostics(&self) -> Option<super::PunctualDiagnostics> {
         match self {
             #[cfg(feature = "raytrace-cpu")]
@@ -1006,6 +1278,7 @@ impl WorkTask {
         cancel: CancelToken,
         environment: Option<crate::lighting::environment_input::EnvironmentInput>,
         #[cfg(feature = "raytrace-cpu")] proof: Option<crate::raytrace::image::CertifiedOptics>,
+        #[cfg(feature = "raytrace-cpu")] cpu_workers: Option<u16>,
     ) -> Result<Self> {
         let _ = &environment;
         match request.integrator {
@@ -1014,7 +1287,8 @@ impl WorkTask {
                 #[cfg(feature = "raytrace-cpu")]
                 {
                     let options = request.raytrace.clone().unwrap_or_default();
-                    crate::raytrace::image::ImageTask::new_prepared(scene, request, cancel, options, environment, proof)
+                    let workers = cpu_workers.ok_or_else(|| JobError::new(ErrorCode::Internal, "CPU work is missing its admitted worker count"))?;
+                    crate::raytrace::image::ImageTask::new_prepared_with_workers(scene, request, cancel, options, environment, proof, workers)
                         .and_then(TaskSlot::new)
                         .map(Self::Raytrace)
                 }
@@ -1131,6 +1405,8 @@ impl Running {
                     work.environment,
                     #[cfg(feature = "raytrace-cpu")]
                     work.proof.pop(),
+                    #[cfg(feature = "raytrace-cpu")]
+                    work.cpu_workers,
                 )
             }
         }))
@@ -1163,6 +1439,9 @@ impl Running {
         let result = self.task.as_mut().ok_or_else(|| JobError::new(ErrorCode::Internal, "missing render task"))?.step(units)?;
         let mut data = self.handle.0.data.lock().map_err(|_| JobError::new(ErrorCode::Internal, "render status lock poisoned"))?;
         data.punctual_diagnostics = self.task.as_ref().and_then(WorkTask::punctual_diagnostics);
+        if let Some(diagnostics) = self.task.as_ref().and_then(WorkTask::denoise_diagnostics) {
+            data.denoise_diagnostics = Some(diagnostics);
+        }
         // The final publication check is under the same lock as cancellation.
         if self.handle.0.cancel.is_cancelled() {
             data.progress.phase = Phase::Cancelled;
@@ -1199,9 +1478,25 @@ impl Running {
                         return Err(JobError::new(ErrorCode::LimitExceeded, "linear master exceeds its bound or has an invalid signature"));
                     }
                 }
+                let denoise_mask = self.task.as_mut().and_then(WorkTask::take_denoise_mask);
+                let options = self.handle.0.options()?;
+                let (collect_guides, supersampling) = self
+                    .handle
+                    .0
+                    .request
+                    .raytrace
+                    .as_ref()
+                    .map_or((options.denoise_diagnostics, options.supersampling), |cpu| (cpu.denoise_diagnostics, cpu.supersampling));
+                if denoise_mask.is_some() != collect_guides {
+                    return Err(JobError::new(ErrorCode::Internal, "guide mask availability differs from the admitted request"));
+                }
+                if let Some(mask) = &denoise_mask {
+                    validate_denoise_mask(mask, &self.handle.0.request, supersampling, data.denoise_diagnostics)?;
+                }
                 self.task = None;
                 let mut pending = PendingPng::new(png);
                 pending.exr = exr;
+                pending.denoise_mask = denoise_mask;
                 data.progress = pending.progress();
                 self.pending_png = Some(pending);
                 Ok(true)
@@ -1227,7 +1522,7 @@ impl Running {
             data.progress = progress;
             return Ok(true);
         }
-        let PendingPng { png, digest, png_digest, preview_samples, exr, .. } =
+        let PendingPng { png, png_digest, preview_samples, exr, exr_digest, denoise_mask, denoise_mask_digest, .. } =
             self.pending_png.take().ok_or_else(|| JobError::new(ErrorCode::Internal, "missing completed PNG digest"))?;
         let info = FrameInfo {
             job: self.handle.0.id,
@@ -1250,7 +1545,7 @@ impl Running {
         // the checkpoint's own metadata allowance as well as its PNG capacity.
         let checkpoint_metadata = if preview_samples.is_some() { std::mem::size_of::<CheckpointCredits>() + 32 } else { 0 };
         let fixed_metadata = std::mem::size_of::<Running>() + frame_layout + checkpoint_metadata + 2 * crate::MAX_RENDER_ID_BYTES + 32;
-        let linear_digest_bytes = if exr.is_some() { 64 } else { 0 };
+        let linear_digest_bytes = (if exr.is_some() { 64 } else { 0 }) + (if denoise_mask.is_some() { 64 } else { 0 });
         if fixed_metadata
             .checked_add(info.png_sha256.capacity())
             .and_then(|n| n.checked_add(linear_digest_bytes))
@@ -1300,13 +1595,14 @@ impl Running {
                 .next_checkpoint_pass
                 .checked_add(1)
                 .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "checkpoint pass ordinal exhausted"))?;
-            let Some(reservation) = reservation else {
+            let Some(mut reservation) = reservation else {
                 data.preview_retention_skips = data
                     .preview_retention_skips
                     .checked_add(1)
                     .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "checkpoint retention diagnostic overflow"))?;
                 return Ok(true);
             };
+            reservation.reservation.settle()?;
             data.preview = Some(Arc::new(RenderPreview {
                 info: PreviewInfo {
                     frame_sequence,
@@ -1337,25 +1633,44 @@ impl Running {
             self.handle.0.notify();
             return Ok(true);
         }
-        let exr = exr.map(|bytes| {
-            let info = LinearMasterInfo {
-                bytes: bytes.len() as u64,
-                sha256: format!("{:x}", digest.finalize()),
-                encoding: LinearColourEncoding::SceneLinearSrgbD65,
-                alpha: LinearAlphaConvention::CoveragePremultiplied,
-            };
-            (bytes, info)
-        });
-        let retained = png.capacity() as u64 + exr.as_ref().map_or(0, |(bytes, _)| bytes.capacity() as u64) + FRAME_METADATA_BYTES;
+        let exr = exr
+            .map(|bytes| -> Result<_> {
+                let info = LinearMasterInfo {
+                    bytes: bytes.len() as u64,
+                    sha256: format!("{:x}", exr_digest.ok_or_else(|| JobError::new(ErrorCode::Internal, "missing linear master digest"))?),
+                    encoding: LinearColourEncoding::SceneLinearSrgbD65,
+                    alpha: LinearAlphaConvention::CoveragePremultiplied,
+                };
+                Ok((bytes, info))
+            })
+            .transpose()?;
+        let denoise_mask = denoise_mask
+            .map(|bytes| -> Result<_> {
+                let mask_info = DenoiseMaskInfo {
+                    width: info.width,
+                    height: info.height,
+                    bytes: bytes.len() as u64,
+                    sha256: format!("{:x}", denoise_mask_digest.ok_or_else(|| JobError::new(ErrorCode::Internal, "missing guide mask digest"))?),
+                };
+                Ok((bytes, mask_info))
+            })
+            .transpose()?;
+        let retained = (png.capacity() as u64)
+            .checked_add(exr.as_ref().map_or(0, |(bytes, _)| bytes.capacity() as u64))
+            .and_then(|bytes| bytes.checked_add(denoise_mask.as_ref().map_or(0, |(bytes, _)| bytes.capacity() as u64)))
+            .and_then(|bytes| bytes.checked_add(FRAME_METADATA_BYTES))
+            .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "retained image byte overflow"))?;
         if let Some(credits) = &self.checkpoints {
             credits.close();
         }
         let mut reservation = self.reservation.take().ok_or_else(|| JobError::new(ErrorCode::Internal, "missing render reservation"))?;
         reservation.shrink(retained)?;
+        reservation.settle()?;
         data.frame = Some(Arc::new(RenderFrame {
             info,
             png,
             exr,
+            denoise_mask,
             source_master: self.source_master.take(),
             presentation: self.handle.0.presentation.clone(),
             _reservation: reservation,
@@ -1392,6 +1707,19 @@ struct Shared {
     wake: Condvar,
 }
 
+impl Shared {
+    /// Tell the native worker to stop and wake it. The worker checks `stop` and starts waiting
+    /// while it holds the queue lock, so both happen under that lock: a wake sent between the
+    /// check and the wait would be lost, and the worker would wait for good (#14500).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn stop_worker(&self) {
+        // A poisoned lock still hands back its guard; holding it is all that matters here.
+        let _queue = self.queue.lock();
+        self.stop.store(true, Ordering::Release);
+        self.wake.notify_all();
+    }
+}
+
 struct Owner {
     executor: Option<Arc<dyn ImageExecutor>>,
     shared: Arc<Shared>,
@@ -1422,7 +1750,7 @@ impl Drop for Owner {
             terminal(&work.handle, JobError::new(ErrorCode::Cancelled, "render host closed"));
         }
         #[cfg(not(target_arch = "wasm32"))]
-        self.shared.wake.notify_all();
+        self.shared.stop_worker();
         // Detaching cannot stall the UI; the bounded worker observes stop/cancel at its next unit.
     }
 }
@@ -1434,12 +1762,38 @@ pub struct ImageHost(Arc<Owner>);
 pub type CpuHost = ImageHost;
 
 impl ImageHost {
+    /// Select the policy used by subsequent native checks and reservations.
+    /// Existing leases remain funded and tracked across policy changes. This
+    /// never changes image quality, software limits, or device allocation checks.
+    /// Cooperative/browser hosts retain their software budgets in either mode.
+    pub fn set_native_memory_policy(&self, policy: NativeMemoryPolicy) {
+        self.0.shared.budget.legacy_memory_admission.store(policy == NativeMemoryPolicy::SoftwarePoolOnly, Ordering::Release);
+    }
+
+    pub fn native_memory_policy(&self) -> NativeMemoryPolicy {
+        self.0.shared.budget.memory_policy()
+    }
+
     fn shared(limit: u64) -> Arc<Shared> {
+        Self::shared_with_memory(
+            limit,
+            #[cfg(not(target_arch = "wasm32"))]
+            None,
+        )
+    }
+
+    fn shared_with_memory(limit: u64, #[cfg(not(target_arch = "wasm32"))] memory: Option<Arc<super::host_memory::NativeMemoryPool>>) -> Arc<Shared> {
         Arc::new(Shared {
             queue: Mutex::new(VecDeque::new()),
             active: Mutex::new(None),
             stop: AtomicBool::new(false),
-            budget: Arc::new(Budget { used: AtomicU64::new(0), limit }),
+            budget: Arc::new(Budget {
+                used: AtomicU64::new(0),
+                limit,
+                legacy_memory_admission: AtomicBool::new(false),
+                #[cfg(not(target_arch = "wasm32"))]
+                memory,
+            }),
             #[cfg(not(target_arch = "wasm32"))]
             wake: Condvar::new(),
         })
@@ -1477,7 +1831,7 @@ impl ImageHost {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let pool = if usize::BITS >= 64 { super::NATIVE_CPU_POOL_BYTES } else { MEMORY_LIMIT };
-            let shared = Self::shared(pool);
+            let shared = Self::shared_with_memory(pool, Some(super::host_memory::shared_native_memory()));
             let worker_shared = shared.clone();
             let worker = std::thread::Builder::new()
                 .name("solidcraft-render".into())
@@ -1491,20 +1845,13 @@ impl ImageHost {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_executor(executor: Arc<dyn ImageExecutor>) -> Result<Self> {
         let descriptor = executor.descriptor()?;
-        if descriptor.profiles.len() != 1
-            || descriptor
-                .profiles
-                .iter()
-                .any(|p| p.mode != RenderMode::Preview || p.operation != RenderOperation::Image || p.formats != [RenderFormat::Png])
-        {
-            return Err(JobError::new(ErrorCode::InvalidRequest, "image worker currently accepts one Preview/Image/PNG profile"));
-        }
+        validate_image_profiles(&descriptor)?;
         let limit = executor.memory_limit_bytes();
         let ceiling = if usize::BITS >= 64 { super::NATIVE_CPU_POOL_BYTES } else { MEMORY_LIMIT };
         if limit == 0 || limit > ceiling {
             return Err(JobError::new(ErrorCode::InvalidRequest, "registered image pool exceeds supported address space"));
         }
-        let shared = Self::shared(limit);
+        let shared = Self::shared_with_memory(limit, Some(super::host_memory::shared_native_memory()));
         let worker_shared = shared.clone();
         let worker = std::thread::Builder::new()
             .name("solidcraft-render".into())
@@ -1568,7 +1915,7 @@ impl ImageHost {
             budget.validate_execution()?;
         }
         let descriptor = self.descriptor_for(profile.integrator())?;
-        if descriptor.availability != Availability::Available || descriptor.profiles.len() != 1 {
+        if descriptor.availability != Availability::Available || descriptor.profiles.is_empty() || descriptor.profiles.len() > 2 {
             return Err(JobError::new(ErrorCode::HostUnavailable, "capture executor is unavailable"));
         }
         Ok(descriptor)
@@ -1593,7 +1940,8 @@ impl ImageHost {
             profile.formats.sort_unstable();
             profile.features.sort_unstable();
         }
-        let execution = capture_fingerprint(&(&descriptor.id, descriptor.profiles.first()))?;
+        descriptor.profiles.sort_unstable_by_key(|profile| (profile.mode, profile.operation));
+        let execution = capture_fingerprint(&(&descriptor.id, &descriptor.profiles))?;
         let reservation = self.0.shared.budget.reserve(bytes)?;
         Ok(CaptureLease {
             host: self.clone(),
@@ -1610,7 +1958,15 @@ impl ImageHost {
     /// Strict blocking API. Native UI callers prepare beside the window. The
     /// temporary lease exists before any new box proof backing is allocated.
     pub fn admit(&self, scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
-        let admission = self.admit_layout(scene, request, options)?;
+        let mut admission = self.admit_layout(scene, request, options)?;
+        let option_bytes = options.retained_bytes()?;
+        let required = admission
+            .estimated_total_bytes
+            .checked_add(retained_request_bytes(request)?)
+            .and_then(|bytes| bytes.checked_add(request.retained_resource_metadata_bytes()))
+            .and_then(|bytes| bytes.checked_add(option_bytes))
+            .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "native preflight byte count overflow"))?;
+        admission.host_memory = self.0.shared.budget.memory_admission(required, 0)?;
         #[cfg(feature = "raytrace-cpu")]
         if self.0.executor.is_none() && request.integrator == Integrator::Raytrace {
             let defaults = super::RaytraceOptions::default();
@@ -1642,7 +1998,7 @@ impl ImageHost {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement the authored advanced Glass models"));
             }
             if options.caustics.is_some() && !executor.supports_caustics() {
-                return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement delta-light caustic photons"));
+                return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement caustic photons"));
             }
             if request.raytrace.is_some() {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "registered executors do not accept CPU raytrace options"));
@@ -1664,6 +2020,15 @@ impl ImageHost {
             }
             if options.transmission_samples != 1 && !executor.supports_transmission_sampling() {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement transmission strata"));
+            }
+            if options.supersampling != 1 && !executor.supports_supersampling() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "this executor does not support supersampling"));
+            }
+            if !options.denoise_settings.is_default() && !executor.supports_denoise_controls() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "this executor does not support denoising settings"));
+            }
+            if options.denoise_diagnostics && !executor.supports_denoise_diagnostics() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "this executor does not support denoising guide diagnostics"));
             }
             if options.linear_exr && !executor.supports_linear_exr() {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "this executor cannot retain a raw linear EXR"));
@@ -1768,18 +2133,25 @@ impl ImageHost {
             } else {
                 Availability::Available
             },
-            profiles: vec![RenderProfile {
-                mode: RenderMode::Preview,
-                operation: RenderOperation::Image,
-                formats: vec![RenderFormat::Png],
-                features: if integrator == Integrator::Raytrace && cfg!(feature = "raytrace-cpu") && self.kind() == HostKind::NativeWorker {
-                    // Refraction is the certified thin-sheet/axis-aligned-box CPU preview
-                    // contract. Admission still refuses unsupported geometry and combinations.
-                    vec![crate::RenderFeature::Pbr, crate::RenderFeature::Hdri, crate::RenderFeature::Refraction]
-                } else {
-                    vec![crate::RenderFeature::Pbr]
-                },
-            }],
+            profiles: [RenderMode::Preview, RenderMode::Final]
+                .into_iter()
+                .filter(|mode| {
+                    *mode == RenderMode::Preview
+                        || (integrator == Integrator::Raytrace && cfg!(feature = "raytrace-cpu") && self.kind() == HostKind::NativeWorker)
+                })
+                .map(|mode| RenderProfile {
+                    mode,
+                    operation: RenderOperation::Image,
+                    formats: vec![RenderFormat::Png],
+                    features: if integrator == Integrator::Raytrace && cfg!(feature = "raytrace-cpu") && self.kind() == HostKind::NativeWorker {
+                        // Admission certifies the same physical producer and combinations
+                        // for both image modes. Numerical quality remains authored intent.
+                        vec![crate::RenderFeature::Pbr, crate::RenderFeature::Hdri, crate::RenderFeature::Refraction]
+                    } else {
+                        vec![crate::RenderFeature::Pbr]
+                    },
+                })
+                .collect(),
             limits: if integrator == Integrator::Raytrace && self.kind() == HostKind::NativeWorker && usize::BITS >= 64 {
                 super::CpuBudget::Workstation.image_limits(false)
             } else {
@@ -1939,8 +2311,12 @@ impl ImageHost {
         }
         let mut admission = self.admit_layout(&scene, &request, options)?;
         let estimated_total_bytes = admission.estimated_total_bytes;
-        let environment_bytes =
-            environment.as_ref().map_or(Ok(0), |e| e.required_bytes()).map_err(|e| JobError::new(ErrorCode::InvalidRequest, e.to_string()))?;
+        let environment_bytes = environment
+            .as_ref()
+            .map_or(Ok(0), |e| {
+                e.required_bytes_with_importance(request.raytrace.as_ref().is_some_and(|options| options.environment_importance_sampling))
+            })
+            .map_err(|e| JobError::new(ErrorCode::InvalidRequest, e.to_string()))?;
         let estimated_total_bytes = estimated_total_bytes
             .checked_add(environment_bytes)
             .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "environment admission overflow"))?;
@@ -1949,20 +2325,29 @@ impl ImageHost {
             .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "retained preparation byte overflow"))?;
         self.check_request_sum(estimated_total_bytes, simultaneous, request.cpu_budget())?;
         let mut backend = crate::builtin_backend();
-        let descriptor = self.descriptor_for_request(&request)?;
+        let mut descriptor = self.descriptor_for_request(&request)?;
         if let Some(credit) = capture.as_deref()
             && credit.profile == CaptureProfile::Registered
             && capture_fingerprint(&descriptor)? != credit.descriptor
         {
             return Err(JobError::new(ErrorCode::HostUnavailable, "resolved capture executor metadata changed"));
         }
+        for profile in &mut descriptor.profiles {
+            profile.formats.sort_unstable();
+            profile.features.sort_unstable();
+        }
+        descriptor.profiles.sort_unstable_by_key(|profile| (profile.mode, profile.operation));
+        let execution = capture_fingerprint(&(&descriptor.id, &descriptor.profiles))?;
+        let execution_descriptor = capture_fingerprint(&descriptor)?;
+        let initial_mode =
+            if descriptor.profiles.iter().any(|profile| profile.mode == RenderMode::Preview) { RenderMode::Preview } else { RenderMode::Final };
         let expected_executor = descriptor.id.clone();
         backend.executors = vec![descriptor];
         let resolved = crate::resolve_request(
             &[backend],
             &crate::RenderRequest {
                 backend: None,
-                mode: RenderMode::Preview,
+                mode: initial_mode,
                 operation: RenderOperation::Image,
                 width: u64::from(request.width),
                 height: u64::from(request.height),
@@ -1986,7 +2371,7 @@ impl ImageHost {
             .checked_add(request_bytes)
             .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "prepared work/request byte overflow"))?;
         if let Some(credit) = capture.as_deref()
-            && capture_fingerprint(&(&resolved.executor, Some(&resolved.profile)))? != credit.execution
+            && execution != credit.execution
         {
             return Err(JobError::new(ErrorCode::WrongOwner, "resolved capture executor/profile changed"));
         }
@@ -2032,6 +2417,7 @@ impl ImageHost {
             environment_info,
             textures,
             resolved,
+            execution_descriptor,
             admission,
             cancel,
             #[cfg(feature = "raytrace-cpu")]
@@ -2061,8 +2447,17 @@ impl ImageHost {
                 prepared.proof.push(certified);
             }
         }
+        if let Some(executor) = &self.0.executor {
+            executor.validate_prepared(&prepared.scene, prepared.request(), options, &prepared.cancel)?;
+        }
         prepared.cancel.check()?;
         prepared.options = if options.is_structural_default() { None } else { Some(RetainedOptions::new(options)?) };
+        let held = prepared
+            .reservation
+            .bytes
+            .checked_add(prepared.request_reservation.as_ref().map_or(0, |lease| lease.bytes))
+            .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "prepared native memory receipt overflow"))?;
+        prepared.admission.host_memory = self.0.shared.budget.memory_admission(held, held)?;
         Ok(prepared)
     }
 
@@ -2095,6 +2490,13 @@ impl ImageHost {
         if queue.len() >= QUEUE_LIMIT {
             return Err(JobError::new(ErrorCode::QueueFull, "image queue is full"));
         }
+        let activity = self.0.shared.budget.activity()?;
+        // The capsule already owns complete immutable request backing. Settle
+        // before taking it: a poisoned ledger must leave worker-owned retirement
+        // intact. The activity guard pins this epoch through Record construction.
+        if let Some(reservation) = slot.as_mut().and_then(|prepared| prepared.request_reservation.as_mut()) {
+            reservation.settle()?;
+        }
         let prepared = slot.take().ok_or_else(|| JobError::new(ErrorCode::Internal, "prepared render vanished before enqueue"))?;
         let PreparedSubmission {
             scene,
@@ -2105,6 +2507,7 @@ impl ImageHost {
             environment_info,
             textures,
             resolved,
+            execution_descriptor: _,
             admission,
             cancel,
             #[cfg(feature = "raytrace-cpu")]
@@ -2128,6 +2531,7 @@ impl ImageHost {
             resolved,
             cancel,
             data: Mutex::new(Data {
+                denoise_diagnostics: None,
                 preview_retention_skips: 0,
                 completed_duration: None,
                 punctual_diagnostics: None,
@@ -2144,6 +2548,8 @@ impl ImageHost {
             regrade: None,
             #[cfg(feature = "raytrace-cpu")]
             proof,
+            #[cfg(feature = "raytrace-cpu")]
+            cpu_workers: admission.cpu_workers,
             request: work_request,
             executor: self.0.executor.clone(),
             scene,
@@ -2151,7 +2557,7 @@ impl ImageHost {
             encoded_limit: admission.encoded_limit,
             reservation,
             environment,
-            _work_release: WorkRelease(Arc::downgrade(&handle.0)),
+            _work_release: WorkRelease { record: Arc::downgrade(&handle.0), _activity: activity },
         });
         drop(queue);
         #[cfg(not(target_arch = "wasm32"))]
@@ -2166,7 +2572,9 @@ impl ImageHost {
             return Err(JobError::new(ErrorCode::WrongOwner, "regrade requires a new identity in the source document session"));
         }
         let frame = source.frame()?.ok_or_else(|| JobError::new(ErrorCode::NotCompleted, "regrade requires a completed frame"))?;
+        let denoise_diagnostics = source.status()?.denoise_diagnostics;
         let master = frame.master_source()?;
+        let activity = self.0.shared.budget.activity()?;
         let bytes = super::regrade::required_bytes(&master, presentation)?;
         let raw = master.linear_master_info().ok_or_else(|| JobError::new(ErrorCode::InvalidRequest, "raw master metadata is missing"))?;
         let origin = super::presentation::MasterPresentation {
@@ -2243,8 +2651,12 @@ impl ImageHost {
         let reservation = self.0.shared.budget.reserve(bytes)?;
         let metadata = self.0.shared.budget.reserve(metadata_bytes)?;
         let option_reservation = if request_bytes == 0 { None } else { Some(self.0.shared.budget.reserve(request_bytes)?) };
-        let origin = Arc::new(RetainedPresentation { info: origin, _reservation: metadata });
-        let handle = JobHandle(Arc::new(Record {
+        let mut origin = Arc::new(RetainedPresentation { info: origin, _reservation: metadata });
+        Arc::get_mut(&mut origin)
+            .ok_or_else(|| JobError::new(ErrorCode::Internal, "render presentation was shared before construction finished"))?
+            ._reservation
+            .settle()?;
+        let mut handle = JobHandle(Arc::new(Record {
             work_released: AtomicBool::new(false),
             preview_unavailable_reason: None,
             started: web_time::Instant::now(),
@@ -2259,6 +2671,7 @@ impl ImageHost {
             resolved,
             cancel: CancelToken::default(),
             data: Mutex::new(Data {
+                denoise_diagnostics,
                 preview_retention_skips: 0,
                 completed_duration: None,
                 punctual_diagnostics: None,
@@ -2271,9 +2684,12 @@ impl ImageHost {
             #[cfg(not(target_arch = "wasm32"))]
             done: Condvar::new(),
         }));
+        handle.settle_request_metadata()?;
         queue.push_back(Work {
             #[cfg(feature = "raytrace-cpu")]
             proof: Vec::new(),
+            #[cfg(feature = "raytrace-cpu")]
+            cpu_workers: None,
             regrade: Some((master, presentation)),
             request: None,
             executor: None,
@@ -2283,7 +2699,7 @@ impl ImageHost {
             // Regrades are final-only and never create checkpoint slots.
             encoded_limit: 0,
             reservation,
-            _work_release: WorkRelease(Arc::downgrade(&handle.0)),
+            _work_release: WorkRelease { record: Arc::downgrade(&handle.0), _activity: activity },
         });
         drop(queue);
         #[cfg(not(target_arch = "wasm32"))]
@@ -2366,6 +2782,8 @@ fn native_worker(shared: Arc<Shared>) {
 #[cfg(test)]
 mod retained_request_tests {
     use super::*;
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+    use solidcraft_geom::MeshGeom;
 
     #[test]
     fn retained_native_options_charge_actual_single_capacity_only_for_structural_nondefaults() {
@@ -2433,8 +2851,7 @@ mod retained_request_tests {
                 assert_eq!(slot.0.capacity() as u64 * std::mem::size_of::<JobOptions>() as u64, expected);
             }
             assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
-            host.0.shared.stop.store(true, Ordering::Release);
-            host.0.shared.wake.notify_all();
+            host.0.shared.stop_worker();
             Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
             assert!(job.work_released());
             let frame = job.frame().unwrap().unwrap();
@@ -2503,8 +2920,7 @@ mod retained_request_tests {
         received.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
         job.cancel().unwrap();
         assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Cancelled);
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         assert!(job.work_released());
         assert!(job.frame().unwrap().is_none());
@@ -2537,8 +2953,7 @@ mod retained_request_tests {
         let presentation = super::super::presentation::Presentation { exposure_ev: 1.0, ..Default::default() };
         let derivative = host.submit_regrade(JobId { session: 903, serial: 2, generation: 2 }, &original, presentation).unwrap();
         assert_eq!(derivative.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         let frame = derivative.frame().unwrap().unwrap();
         assert_eq!(frame.linear_exr().unwrap(), original_frame.linear_exr().unwrap());
@@ -2579,7 +2994,13 @@ mod retained_request_tests {
             + 32 * std::mem::size_of::<super::super::SurfaceEmission>() as u64
             + 256;
         assert_eq!(retained_request_bytes(&request).unwrap(), expected);
-        let budget = Arc::new(Budget { used: AtomicU64::new(0), limit: MEMORY_LIMIT });
+        let budget = Arc::new(Budget {
+            used: AtomicU64::new(0),
+            limit: MEMORY_LIMIT,
+            legacy_memory_admission: AtomicBool::new(false),
+            #[cfg(not(target_arch = "wasm32"))]
+            memory: None,
+        });
         let lease = budget.reserve(expected).unwrap();
         assert_eq!(budget.used.load(Ordering::Acquire), expected);
         assert!(admit_request_sum(super::super::image::MAX_JOB_BYTES - expected, expected).is_ok());
@@ -2628,8 +3049,7 @@ mod retained_request_tests {
         assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
         // Completion publication precedes the worker's last temporary handle release.
         // Join this test's worker before asserting exact lease ownership, as in the union test.
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         let frame = job.frame().unwrap().unwrap();
         let held = job.clone();
@@ -2658,7 +3078,7 @@ mod retained_request_tests {
         let surface = if mapped {
             Vec3::new(0.5, 0.5, 0.5)
         } else {
-            let v = [128, 64, 255].map(|v| crate::surface::srgb8_to_linear(v) as f32 as f64);
+            let v = [128, 64, 255].map(|v| solidcraft_viewport::surface::srgb8_to_linear(v) as f32 as f64);
             Vec3::new(v[0], v[1], v[2])
         };
         let mesh = Arc::new(Mesh {
@@ -2676,7 +3096,7 @@ mod retained_request_tests {
                 color: [255; 3],
                 opacity: 1.0,
                 transmission: None,
-                surface: Some(crate::surface::OpaqueSurface::new(surface, 0.0, 1.0, 1.0).unwrap()),
+                surface: Some(solidcraft_viewport::surface::OpaqueSurface::new(surface, 0.0, 1.0, 1.0).unwrap()),
                 faces: vec![],
             }],
         };
@@ -2693,7 +3113,7 @@ mod retained_request_tests {
         let request = ImageRequest {
             width: 1,
             height: 1,
-            camera: crate::Camera { distance: 1.0, fov: 0.0, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() },
+            camera: solidcraft_viewport::Camera { distance: 1.0, fov: 0.0, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() },
             background: [0; 3],
             transparent_background: false,
             integrator: Integrator::Raytrace,
@@ -2756,7 +3176,7 @@ mod retained_request_tests {
         assert_eq!(frame.linear_exr(), expected.linear_exr());
         assert!(frame.linear_exr().is_some());
         let color = [128, 64, 255].map(|v| {
-            let x = crate::surface::srgb8_to_linear(v) as f32 as f64;
+            let x = solidcraft_viewport::surface::srgb8_to_linear(v) as f32 as f64;
             solidcraft_color::srgb::encode8(x / (1.0 + x))
         });
         assert_eq!(image::load_from_memory(frame.png()).unwrap().to_rgba8().get_pixel(0, 0).0, [color[0], color[1], color[2], 255]);
@@ -3001,8 +3421,7 @@ mod surface_request_metadata_tests {
         let job = host.submit(id(40, 2), 1, scene, request).unwrap();
         assert_eq!(job.wait_timeout(Duration::from_secs(10)).unwrap().progress.phase, Phase::Completed);
         // Wait for this host's last temporary worker handle before exact lease checks.
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         let frame = job.frame().unwrap().unwrap();
         let png_bytes = frame._reservation.bytes;
@@ -3038,4 +3457,25 @@ mod surface_request_metadata_tests {
     fn id(owner: u64, serial: u64) -> JobId {
         JobId { session: owner, serial, generation: serial }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn completed_colour_linear_and_guide_images_have_independent_incremental_digests() {
+    let mut pending = PendingPng::new(b"display".to_vec());
+    pending.exr = Some(b"linear".to_vec());
+    pending.denoise_mask = Some(b"mask".to_vec());
+    let cancel = CancelToken::default();
+    assert!(!pending.step(1, &cancel).unwrap());
+    assert_eq!(pending.progress().done, 7);
+    assert!(!pending.step(1, &cancel).unwrap());
+    assert_eq!(pending.progress().done, 13);
+    assert!(pending.step(1, &cancel).unwrap());
+    assert_eq!(pending.progress().done, pending.progress().total);
+    assert_eq!(format!("{:x}", pending.png_digest.unwrap()), "dfbb889cf19bda82ed8deadf82de232979aa4ecc83238625c6453dc4c597b43a");
+    assert_eq!(format!("{:x}", pending.exr_digest.unwrap()), "7f2fe580edb35154041fa3d4b41dd6d3adaef0c85d2ff6309f1d4b520eeecda3");
+    assert_eq!(format!("{:x}", pending.denoise_mask_digest.unwrap()), "48bf9b4f142ab45cac6f33cf99415bca6ca8e07608a031237aa76560fec2204b");
+    let cancelled = CancelToken::default();
+    cancelled.cancel();
+    assert!(pending.step(1, &cancelled).is_err());
 }

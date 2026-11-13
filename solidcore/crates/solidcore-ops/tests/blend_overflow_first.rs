@@ -24,15 +24,13 @@ const PLATE: &[u8] =
 const NOTCHED: &[u8] =
     include_bytes!("../../solidcore/tests/data/issue_2364_solidcraft_1080_notched_block.smb");
 
-/// SolidCraft's rig set at the time of the kernel's check: every fix but six.
+/// SolidCraft's rig set at the time of the kernel's check: every fix but five.
 fn fixes() {
     let off = [
         "cone_unbounded_parameterized_as_nurb",
-        "ellipse_open_arc_keeps_end_angle",
         "fillet_round_on_round_as_definition",
         "fillet_overflow_crease_along_edge",
         "fillet_refuse_rounds_breaking_through",
-        "shell_one_construction",
     ];
     let on = solidcore::kernel::UpstreamFixes::NAMES
         .iter()

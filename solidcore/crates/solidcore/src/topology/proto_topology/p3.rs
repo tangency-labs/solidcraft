@@ -95,6 +95,7 @@
 
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::curve::curve::CurveKind;
 use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
@@ -281,8 +282,9 @@ impl<O> Mates<O> for NoMates {
     }
 
     fn remove_relationship(&mut self, _brep_entity: O, _other_entity: O) -> Result<()> {
-        Err(SolidError::sm_err(
+        Err(SolidError::topology_failed(
             "topology::proto_topology::p3::remove_relationship",
+            "the two are not a mated pair",
         ))
     }
 }
@@ -612,7 +614,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             k.fixes.ssi_proto_topology_statuses_pass_on,
         )?)?
         .map_or((None, false), |(vd, created)| (Some(vd), created));
-        let new_vd = new_vd.ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
+        let new_vd = new_vd.ok_or_else(|| {
+            SolidError::topology_missing(OP_ED_SPLIT, "the vertex definition at the split")
+        })?;
 
         // For cleanup object: don't do it if it was 'found' (vs. created).
         let clean_vd = created.then_some(new_vd);
@@ -652,42 +656,26 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.set_ed_interval(new_ed, new_ivl)?;
 
         let top = top_pe.ok_or(dangling("top proto edge is null"))?;
+
+        // The new definition (a copy holding `ed`'s curves) gets copies of its own, and both
+        // are trimmed to their intervals, before `AddEdgeDefinition`: it reparameterizes the
+        // definition onto the upper proto edge where their intervals or directions differ.
+        // Upstream copies and trims after that call, so the shared curve was moved too, the
+        // lower definition's trim missed it, and the whole curve, not the upper part, was
+        // mapped onto the upper proto edge.
+        self.copy_ed_curves(k, geometry, ed, new_ed)?;
+        for which in [0, 1, 2] {
+            for d in [ed, new_ed] {
+                let curve = self.ed_curve(d, which)?;
+                if curve.is_some() {
+                    self.trim_ed_curve(k, geometry, d, curve)?;
+                }
+            }
+        }
         ignore_soft(passed_on(
             self.add_edge_definition(k, &mut *geometry, top, new_ed),
             k.fixes.ssi_proto_topology_statuses_pass_on,
         )?)?;
-
-        // Copy the three curves; trim the copies and the originals.
-        let this_crv3d = self
-            .edge_def(ed)
-            .ok_or(dangling("edge definition is deleted"))?
-            .xsect_curve_3d();
-        let new_crv = curve_of(&*geometry, this_crv3d)?.copy(k)?;
-        let new_handle = geometry
-            .insert_curve(new_crv)
-            .ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
-        self.set_ed_curve_3d(new_ed, Some(new_handle))?;
-        self.trim_ed_curve(k, geometry, ed, this_crv3d)?;
-        self.trim_ed_curve(k, geometry, new_ed, Some(new_handle))?;
-
-        for which in [1, 2] {
-            let uv = self
-                .edge_def(ed)
-                .ok_or(dangling("edge definition is deleted"))?
-                .xsect_uv_curve(which);
-            if uv.is_some() {
-                let copy = curve_of(&*geometry, uv)?.copy(k)?;
-                let handle = geometry
-                    .insert_curve(copy)
-                    .ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
-                self.edge_def_mut(new_ed)
-                    .ok_or(dangling("edge definition is deleted"))?
-                    .set_xsect_curve_uv(which, Some(handle));
-                self.trim_ed_curve(k, geometry, new_ed, Some(handle))?;
-                self.trim_ed_curve(k, geometry, ed, uv)?;
-            }
-        }
-
         Ok((Some(new_vd), Some(new_ed)))
     }
 
@@ -704,6 +692,52 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.edge_def_mut(ed)
             .ok_or(dangling("edge definition is deleted"))?
             .set_xsect_curve_3d(curve);
+        Ok(())
+    }
+
+    /// An edge definition's 3D curve (`which` 0) or UV curve `which` (1, 2).
+    fn ed_curve(&self, ed: EdgeDefId, which: i32) -> Result<Option<O>> {
+        let d = self
+            .edge_def(ed)
+            .ok_or(dangling("edge definition is deleted"))?;
+        Ok(if which == 0 {
+            d.xsect_curve_3d()
+        } else {
+            d.xsect_uv_curve(which)
+        })
+    }
+
+    /// Gives `new_ed`, a copy of `ed` that holds the same curves, copies of `ed`'s 3D curve
+    /// and of each UV curve it has, so that editing one definition's curves leaves the
+    /// other's as they are.
+    fn copy_ed_curves(
+        &mut self,
+        k: &Kernel,
+        geometry: &mut impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        new_ed: EdgeDefId,
+    ) -> Result<()> {
+        let d = self
+            .edge_def(ed)
+            .ok_or(dangling("edge definition is deleted"))?;
+        let c3 = d.xsect_curve_3d();
+        let uvs = [d.xsect_uv_curve(1), d.xsect_uv_curve(2)];
+        let copy = curve_of(&*geometry, c3)?.copy(k)?;
+        let handle = geometry.insert_curve(copy).ok_or_else(|| {
+            SolidError::topology_missing(OP_ED_SPLIT, "the copied 3D curve's handle")
+        })?;
+        self.set_ed_curve_3d(new_ed, Some(handle))?;
+        for (which, uv) in [1, 2].into_iter().zip(uvs) {
+            if uv.is_some() {
+                let copy = curve_of(&*geometry, uv)?.copy(k)?;
+                let handle = geometry.insert_curve(copy).ok_or_else(|| {
+                    SolidError::topology_missing(OP_ED_SPLIT, "the copied UV curve's handle")
+                })?;
+                self.edge_def_mut(new_ed)
+                    .ok_or(dangling("edge definition is deleted"))?
+                    .set_xsect_curve_uv(which, Some(handle));
+            }
+        }
         Ok(())
     }
 
@@ -941,7 +975,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let (Some(&first1), Some(&first2)) =
             (e1.edge_definitions().first(), e2.edge_definitions().first())
         else {
-            return Err(SolidError::sm_err(OP_SPLIT_INT)); // [Reg_091215_simon_closed]
+            return Err(SolidError::topology_failed(
+                OP_SPLIT_INT,
+                "a proto edge has no edge definitions",
+            )); // [Reg_091215_simon_closed]
         };
 
         // no work - Skip the pair if they're known to overlap. Handled during Resolve
@@ -965,6 +1002,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // XSect ProtoEdge curves
         let c1 = curve_of(&*geometry, crv1)?;
         let c2 = curve_of(&*geometry, crv2)?;
+        // (not upstream, #14329) Two lines go to `IntersectWithLine`, whose first test
+        // returns no solution when the segments' boxes are apart: answer that here, before
+        // the intersection's setup. A boolean asks it for every pair of proto edges, so
+        // with long outlines nearly every pair ends here.
+        if let (CurveKind::Line(l1), CurveKind::Line(l2)) = (c1.kind(), c2.kind()) {
+            if l1.segments_apart(&dom1, l2, &dom2, tol) {
+                return Ok(deleted);
+            }
+        }
+        k.work_counters.add_proto_edge_intersection();
         let sols = match c1.global_curve_intersect::<CurveHandle>(
             k,
             &dom1,
@@ -1998,6 +2045,19 @@ mod tests {
     use crate::surface::volume::Volume;
     use crate::topology::Brep;
 
+    /// An intersector without relationships has no mated pair to unlink.
+    #[test]
+    fn no_mates_has_no_relationship_to_remove() {
+        let e = Mates::<H>::remove_relationship(&mut NoMates, vtx(0), vtx(1)).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Failed(
+                "the two are not a mated pair"
+            ))
+        );
+    }
+
     #[derive(Debug, Clone, Copy, PartialEq)]
     struct H(usize, ClassObjectKind);
 
@@ -2330,5 +2390,50 @@ mod tests {
         assert!(vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.9).unwrap());
         // a more grazing one than that does not
         assert!(!vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.5).unwrap());
+    }
+
+    /// An `n`-sided prism of circumradius 30 from `z0` up `h`.
+    fn prism(k: &mut Kernel, n: usize, z0: f64, h: f64) -> Brep {
+        use crate::curve::curve::Curve;
+        let point = |i: usize| {
+            let t = core::f64::consts::TAU * i as f64 / n as f64;
+            Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), z0)
+        };
+        let curves: Vec<Curve> = (0..n)
+            .map(|i| {
+                Curve::from(
+                    crate::primitive::api_curves::create_line_segment(point(i), point(i + 1))
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+        crate::sweep::api_brep::create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), h, true)
+            .unwrap()
+    }
+
+    /// A Join of a prism into a prism of the same outline (z 1..2 into z 0..2: coincident
+    /// sides and top) splits its proto edges where they cross. Every pair of proto edges
+    /// is asked; a pair of lines whose boxes are apart now ends before any curve
+    /// intersection (#14329). The intersections run stay flat as the outline grows:
+    /// none here, where 558 (12 sides) and 10,008 (48 sides) ran before, growing with
+    /// N². The union is the outer prism.
+    #[test]
+    fn a_join_of_coincident_prisms_intersects_no_far_apart_edges() {
+        let mut counts = Vec::new();
+        for n in [12, 48] {
+            let mut k = Kernel {
+                fixes: crate::kernel::UpstreamFixes::all(),
+                ..Kernel::default()
+            };
+            let a = prism(&mut k, n, 0.0, 2.0);
+            let b = prism(&mut k, n, 1.0, 1.0);
+            k.work_counters.reset();
+            let u = crate::boolean::api_brep::boolean_union(&mut k, a, b).unwrap();
+            counts.push(k.work_counters.proto_edge_intersections());
+            assert_eq!(u.faces().len(), n + 2, "{n} sides");
+            assert_eq!(u.edges().len(), 3 * n, "{n} sides");
+        }
+        assert_eq!(counts, [0, 0]);
     }
 }

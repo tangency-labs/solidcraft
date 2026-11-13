@@ -12,7 +12,6 @@ use solidcore::geom::context::MarkLock;
 use solidcore::kernel::Kernel;
 use solidcore::topology::topology_traverser::{self as tr, Entity, Marks};
 use solidcore::topology::{ArenaId, EdgeId, EdgeuseId, FaceId, FaceuseId, ShellId, VertexId};
-use solidcore::SolidError;
 
 /// Runner for the owned topology traversals.
 pub struct Runner;
@@ -281,7 +280,7 @@ impl UnitDiff for Runner {
                     return Ok(out);
                 }
                 match e {
-                    SolidError::Upstream { code, .. } => status = code,
+                    up_err if solidcore::error::upstream_status(&up_err).is_some() => status = solidcore::error::upstream_status(&up_err).unwrap_or(-1),
                     _ => return Err(HarnessError::new(e.to_string())),
                 }
                 break;

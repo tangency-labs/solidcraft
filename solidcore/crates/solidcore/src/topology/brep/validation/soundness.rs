@@ -1,7 +1,7 @@
 //! (not upstream) A body's soundness: its check at `SM_LEVEL_2`, and for a closed body,
 //! whether it is a manifold solid of positive volume. The local operation measures its
 //! input's [`standing`] (the check with the body's own owner naming, and the manifold
-//! test) and its result's, and the result's [`volume`] only to test it is positive
+//! test) and its result's, and the result's [`volume_sign`] only to test it is positive
 //! ([`crate::topology::brep::local_operation::local_operation`]); the goldens soundness
 //! probe (`goldens::soundness`) measures result bodies with [`soundness`] (the geometry's
 //! recorded owners).
@@ -15,10 +15,7 @@ use crate::kernel::Kernel;
 use crate::topology::Brep;
 
 use super::assert_valid::{check_brep_with_keys, BrepCheck, CheckLevel};
-
-/// The relative accuracy the volume is integrated at: its sign is a verdict on the body,
-/// which a closed solid's whole volume holds away from zero.
-const VOLUME_ACCURACY: f64 = 1e-6;
+use crate::mass::enclosure::VolumeSign;
 
 /// What [`soundness`] measured of one body.
 #[derive(Debug, Clone)]
@@ -28,16 +25,17 @@ pub struct Soundness {
     pub check: BrepCheck,
     /// Whether the body is a manifold solid ([`crate::topology::brep::is_manifold_solid`]).
     pub manifold: bool,
-    /// Its volume, when it is a manifold solid.
-    pub volume: Option<f64>,
+    /// Its volume's sign, when it is a manifold solid ([`volume_sign`]).
+    pub volume: Option<VolumeSign>,
 }
 
 impl Soundness {
     /// Whether the check is clean and, when the body is a manifold solid, its volume is
-    /// positive (a NaN volume is not).
+    /// proved positive (an undecided sign is not).
     #[must_use]
     pub fn sound(&self) -> bool {
-        self.check.is_valid() && (!self.manifold || self.volume.is_some_and(|v| v > 0.0))
+        self.check.is_valid()
+            && (!self.manifold || matches!(self.volume, Some(VolumeSign::Positive(_))))
     }
 }
 
@@ -99,7 +97,11 @@ pub fn soundness(k: &mut Kernel, b: &mut Brep) -> Result<Soundness> {
     };
     let check = check_brep_with_keys(k, b, CheckLevel::Level2, &keys)?;
     let manifold = crate::topology::brep::p2::is_manifold_solid(b)?;
-    let volume = if manifold { Some(volume(k, b)?) } else { None };
+    let volume = if manifold {
+        Some(volume_sign(k, b)?)
+    } else {
+        None
+    };
     Ok(Soundness {
         check,
         manifold,
@@ -111,7 +113,7 @@ pub fn soundness(k: &mut Kernel, b: &mut Brep) -> Result<Soundness> {
 /// geometry's owner the identity `b`'s naming scheme names the entity by
 /// ([`Brep::owner_identity`], as the operations that bind geometry set it), so a curve or
 /// surface owned under another entity's identity fails the owner tests; then the manifold
-/// test. Its volume is not measured ([`volume`]).
+/// test. Its volume is not measured ([`volume_sign`]).
 ///
 /// As for [`soundness`], the check edits what it measures: measure a private copy.
 ///
@@ -151,11 +153,15 @@ pub(crate) fn lost_manifold(
     Ok(Some(crate::error::offset::Unsoundness::NotManifoldSolid))
 }
 
-/// The volume of the manifold solid `b`, integrated at [`VOLUME_ACCURACY`].
+/// The sign of the manifold solid `b`'s volume, from its certified enclosure
+/// ([`crate::mass::enclosure::volume_sign`]): positive or negative where the enclosure
+/// proves it, undecided where it still holds 0 after its budget. A face whose net is
+/// certified within ε > 0 of its definition is read on its net: the sign is the stored
+/// body's (#3170 widens it by ε).
 ///
 /// # Errors
 ///
-/// Those of [`crate::mass::integrator::properties::brep_volume_default`].
-pub fn volume(k: &mut Kernel, b: &mut Brep) -> Result<f64> {
-    crate::mass::integrator::properties::brep_volume_default(k, b, VOLUME_ACCURACY)
+/// Those of [`crate::mass::enclosure::volume_sign`].
+pub fn volume_sign(k: &Kernel, b: &mut Brep) -> Result<VolumeSign> {
+    crate::mass::enclosure::volume_sign(k, b)
 }

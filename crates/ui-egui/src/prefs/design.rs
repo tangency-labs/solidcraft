@@ -10,6 +10,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         "prefs.parameter_list_rows",
         "prefs.origin_plane_names",
         "prefs.stand_up_unknown",
+        "prefs.export_name",
     ]
     .into_iter()
     .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
@@ -48,7 +49,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::row(ui, app.tr("ui.length_decimals"), |ui| {
                     ui.scope(|ui| {
                         ui.spacing_mut().interact_size.x = t.space_24 * 2.0 + t.space_8;
-                        let response = ui_kit::number_field(ui, &mut app.preferences.length_decimals, 0..=6, 1.0, "");
+                        let response = ui_kit::whole_number_field(ui, &mut app.preferences.length_decimals, 0..=6, "");
                         crate::scenario::publish_target("prefs:length_decimals", response.rect);
                     });
                     ui.add_space(t.space_6);
@@ -62,7 +63,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::row(ui, app.tr("ui.angle_decimals"), |ui| {
                     ui.scope(|ui| {
                         ui.spacing_mut().interact_size.x = t.space_24 * 2.0 + t.space_8;
-                        let response = ui_kit::number_field(ui, &mut app.preferences.angle_decimals, 0..=6, 1.0, "");
+                        let response = ui_kit::whole_number_field(ui, &mut app.preferences.angle_decimals, 0..=6, "");
                         crate::scenario::publish_target("prefs:angle_decimals", response.rect);
                     });
                     ui.add_space(t.space_6);
@@ -70,7 +71,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 ui_kit::settings_row_help(ui, app.tr("prefs.parameter_list_rows"), app.tr("prefs.parameter_list_rows_tip"), |ui| {
                     let response = ui_kit::named_control(ui, app.tr("prefs.design_tools.rows"), |ui| {
-                        ui_kit::settings_number(ui, &mut app.preferences.parameter_list_rows, PARAMETER_LIST_ROWS, 1.0)
+                        ui_kit::settings_whole_number(ui, &mut app.preferences.parameter_list_rows, PARAMETER_LIST_ROWS)
                     });
                     crate::scenario::publish_target("prefs:parameter_list_rows", response.rect);
                     crate::scenario::publish_target(&format!("dialog:{}", app.tr("prefs.parameter_list_rows")), response.rect);
@@ -169,7 +170,30 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                 });
             });
+            ui.horizontal_wrapped(|ui| {
+                let remember = setting::remember_stand_up(app, ui).on_hover_text(app.tr("prefs.remember_stand_up_note"));
+                crate::scenario::publish_handle("prefs:remember_stand_up", remember.rect.center());
+                if ui_kit::button(ui, app.tr("prefs.forget_stand_up"), ui_kit::Button::Normal).clicked() {
+                    forget_stand_up(app);
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                let reuse = setting::reuse_imports(app, ui).on_hover_text(app.tr("prefs.reuse_imports_note"));
+                crate::scenario::publish_handle("prefs:reuse_imports", reuse.rect.center());
+                let clear = ui_kit::button(ui, app.tr("prefs.clear_imports"), ui_kit::Button::Normal);
+                crate::scenario::publish_handle("prefs:clear_imports", clear.rect.center());
+                if clear.clicked() {
+                    match app.run("file.import_cache_clear", serde_json::json!({})) {
+                        Ok(reply) => {
+                            let count = reply.get("removed").and_then(serde_json::Value::as_u64).unwrap_or(0).to_string();
+                            app.set_status(solidcraft_ui_text::format("prefs.clear_imports_done", &[("count", &count)]), false);
+                        }
+                        Err(e) => app.set_status(e.to_string(), true),
+                    }
+                }
+            });
         });
+        export_name(app, ui, label_width);
         origin_plane_names(app, ui, label_width);
         ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
             let response = setting::update_changed_links(app, ui);
@@ -186,7 +210,42 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let response = setting::insert_lists_open_designs(app, ui);
             crate::scenario::publish_target("prefs:insert_lists_open_designs", response.rect);
             crate::scenario::publish_target("dialog:Insert Design lists the designs open in other tabs first", response.rect);
+            // Tabs and the Browser's top row named after the design's file (#7267).
+            let response = setting::names_from_file(app, ui);
+            crate::scenario::publish_target("prefs:names_from_file", response.rect);
         });
+        ui_kit::settings_section(ui, "assemblies", app.tr("prefs.assemblies"), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::joint_drag_trackball(app, ui).backing_on_hover_text(app.tr("prefs.joint_drag_trackball_help"));
+                crate::scenario::publish_target("prefs:joint_drag_trackball", response.rect);
+                if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.joint_drag_trackball_help"));
+                }
+            });
+        });
+    });
+}
+
+/// The file name exports offer (`export_name`), with the name it gives the open design.
+fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    ui_kit::settings_section(ui, "export_name", app.tr("prefs.export"), |ui| {
+        ui_kit::settings_form(ui, label_width, |ui| {
+            let tip = solidcraft_ui_text::format("prefs.export_name_tip", &[("placeholders", &crate::export_name::placeholder_list())]);
+            ui_kit::settings_row_help(ui, app.tr("prefs.export_name"), &tip, |ui| {
+                let hint = app.tr("prefs.export_name_hint").to_string();
+                let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.export_name, &hint, 0.0);
+                crate::scenario::publish_target("prefs:export_name", response.rect);
+            });
+        });
+        if !app.preferences.export_name.trim().is_empty() {
+            let body = crate::export_name::first_body(app);
+            let sample = crate::export_name::offered(app, body.as_deref(), &app.session.doc.name);
+            ui_kit::text(
+                ui,
+                &solidcraft_ui_text::format("prefs.export_name_sample", &[("name", &format!("{sample}.step"))]),
+                ui_kit::Text::Hint("export_name"),
+            );
+        }
     });
 }
 

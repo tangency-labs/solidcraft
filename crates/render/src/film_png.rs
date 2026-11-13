@@ -186,6 +186,7 @@ impl<'a> FilmPngTask<'a> {
                 self.pass = None;
                 let mut lease = self.lease.take().ok_or_else(|| invalid("missing film PNG lease"))?;
                 lease.shrink(bytes.capacity() as u64 + 1024)?;
+                lease.settle()?;
                 self.terminal = true;
                 return Ok(ResolvePoll::Complete(CompletedPng {
                     bytes,

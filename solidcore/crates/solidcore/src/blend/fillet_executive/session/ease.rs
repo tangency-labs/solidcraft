@@ -29,11 +29,9 @@ use super::{live_solver_ops, SessionObjects};
 use crate::blend::blend_setback::{ease_surface_of, interval_in, uv_at, EaseRamp};
 use crate::blend::fillet_geom::p1::{FilletGeomId, FilletVertexType, SurfaceHandle};
 use crate::blend::fillet_section::section::{GnFaces, GnSectionFsg};
-use crate::blend::fillet_solver::p1::{
-    FilletSolverOps, FilletSolverType, FilletSurfaceGeneratorType,
-};
-use crate::blend::fillet_standard_solver::p1::{BlendCurveCrossSectionFsg, RailSurface};
+use crate::blend::fillet_solver::p1::{FilletSolverOps, FilletSurfaceGeneratorType};
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -54,14 +52,15 @@ use super::FilletObject;
 
 const OP: &str = "blend::fillet_executive::session::ease";
 
-/// `SM_ERR`.
-fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+/// `SM_ERR`: the setback's sections cannot be eased, as `what` says.
+fn sm_err(what: &'static str) -> SolidError {
+    SolidError::blend_failed(OP, what)
 }
 
-/// `SM_ERR_NULL_POINTER` (`NER`).
-fn null() -> SolidError {
-    SolidError::null_pointer(OP)
+/// `SM_ERR_NULL_POINTER` (`NER`): `what`, which easing the setback's sections needs, is
+/// missing.
+fn null(what: &'static str) -> SolidError {
+    SolidError::blend_missing(OP, what)
 }
 
 /// The B-spline part of a curve (`SM_CAST_PTR(SmBSplineCurve, ..)`): the kinds derived from
@@ -91,11 +90,13 @@ fn arc_length_param(
     if r.converged {
         Ok(r.end_param)
     } else {
-        Err(SolidError::Upstream {
-            operation: OP,
-            code: r.status(),
-            entity: None,
-        })
+        Err(SolidError::blend(
+            OP,
+            BlendFailure::PassedOn {
+                what: "the parameter at the arc length is not found",
+                status: r.status(),
+            },
+        ))
     }
 }
 
@@ -105,9 +106,10 @@ impl SessionObjects<'_> {
     /// `SM_FV_SETBACK` vertex of a corner with an ease (in `corners`' order), the round's
     /// surface is replaced, over the rail parameter from where the plane square to the edge
     /// at the setback plus the ease cuts the rail to where the setback's section meets it,
-    /// by the C2 blend of its own surface into the one `SmBlendCurveCrossSectionFSG` (`G2`,
-    /// at thirds) builds on the same rails. A round whose sections are already that
-    /// (`SM_FSG_BLEND_CURVE`) keeps them; ramps on both ends of one round go into one
+    /// by the C2 blend of its own surface into the order-2 G^n section at thumbweight 0 on
+    /// the same rails (the fork's 11ea2d9 and 22d258a; its first version, `e74bbd3`, took
+    /// `SmBlendCurveCrossSectionFSG`'s `G2` at thirds). A round whose sections are already
+    /// curvature-continuous (`SM_FSG_BLEND_CURVE`) keeps them; ramps on both ends of one round go into one
     /// blend. Without an eased corner nothing changes.
     ///
     /// # Errors
@@ -133,7 +135,9 @@ impl SessionObjects<'_> {
             if !(corner.set_back_dist() > 0.0) || !(corner.ease_dist() > 0.0) {
                 continue;
             }
-            let cp_vertex: VertexId = corner.filleted_vertex().ok_or_else(null)?;
+            let cp_vertex: VertexId = corner
+                .filleted_vertex()
+                .ok_or_else(|| null("the corner's filleted vertex"))?;
             // the corner's setback along each of its edges (GetSetBackDistAlong), read while
             // the surfaces change
             let ease_dist = corner.ease_dist();
@@ -152,37 +156,53 @@ impl SessionObjects<'_> {
                     continue;
                 }
                 if !vertex.is_processed() {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "a setback vertex of the eased corner is not processed",
+                    ));
                 }
                 let class_object = vertex.point_class_object();
                 let fv_geoms = self.pseudo.vertex_fillet_geoms(fv)?;
                 if fv_geoms.len() != 1 {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "the setback vertex is not on exactly one fillet geometry",
+                    ));
                 }
-                let fg = *fv_geoms.first().ok_or_else(sm_err)?;
-                let solver_id = self.pseudo.geom(fg)?.solver.ok_or_else(null)?;
+                let fg = *fv_geoms
+                    .first()
+                    .ok_or_else(|| sm_err("the setback vertex has no fillet geometry"))?;
+                let solver_id = self
+                    .pseudo
+                    .geom(fg)?
+                    .solver
+                    .ok_or_else(|| null("the round's solver"))?;
                 let base = self.solver(solver_id)?.base();
                 let fsg_type = base
                     .fillet_surface_generator()
-                    .ok_or_else(null)?
+                    .ok_or_else(|| null("the round solver's surface generator"))?
                     .fillet_surface_generator_type();
                 if fsg_type == FilletSurfaceGeneratorType::BlendCurve {
                     continue; // its sections are curvature-continuous already
                 }
                 if fsg_type != FilletSurfaceGeneratorType::Circular {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "the round's sections are neither circular nor curvature-continuous",
+                    ));
                 }
                 // SM_CAST_PTR(SmFace, pFV->GetPointClassObject()), NER
                 let Some(EntityRef::Face(face)) = class_object else {
-                    return Err(null());
+                    return Err(null("the face the setback vertex classifies on"));
                 };
                 let rail_index = base.find_index_of_rail_on_face(self.target, Some(face))?;
                 if rail_index > 1 {
-                    return Err(sm_err());
+                    return Err(sm_err("the setback vertex's face carries neither rail"));
                 }
-                let rail = self.pseudo.geom(fg)?.rail(rail_index).ok_or_else(null)?;
+                let rail = self
+                    .pseudo
+                    .geom(fg)?
+                    .rail(rail_index)
+                    .ok_or_else(|| null("the round's rail on the setback vertex's face"))?;
                 let rail_curve = edge::curve(self.pseudo.brep(), rail)?
-                    .ok_or_else(null)?
+                    .ok_or_else(|| null("the rail's curve"))?
                     .clone();
                 let tol = base.this_approx_tol_3d();
                 let rail_ivl = rail_curve.natural_interval();
@@ -198,22 +218,26 @@ impl SessionObjects<'_> {
                     SolverOperation::Minimize,
                 )?;
                 if !dropped.success {
-                    return Err(sm_err());
+                    return Err(sm_err("the setback vertex does not drop onto the rail"));
                 }
                 let to = dropped.parameter;
 
                 // w = 0 where the plane square to the edge, the ease farther from the
                 // vertex, meets the rail (as SmFilletVertex::CalcSetBackVert finds the
                 // setback's)
-                let edgeuse = base.edgeuse(0)?.ok_or_else(null)?;
-                let e = eu::edge(self.target, edgeuse)?.ok_or_else(null)?;
+                let edgeuse = base
+                    .edgeuse(0)?
+                    .ok_or_else(|| null("the round solver's first edge use"))?;
+                let e = eu::edge(self.target, edgeuse)?
+                    .ok_or_else(|| null("the first edge use's edge"))?;
                 // each edge's own setback (the fork's 61547af, GetSetBackDistAlong)
                 let dist_at = along_edge
                     .iter()
                     .find(|(edge, _)| *edge == e)
                     .map_or(set_back_dist, |&(_, d)| d)
                     + ease_dist;
-                let edge_curve = edge::curve(self.target, e)?.ok_or_else(null)?;
+                let edge_curve = edge::curve(self.target, e)?
+                    .ok_or_else(|| null("the filleted edge's curve"))?;
                 let edge_ivl = edge::interval(self.target, e)?;
                 let from_start = edge::start_vertex(self.target, e)? == Some(cp_vertex);
                 let edge_param = arc_length_param(
@@ -228,20 +252,25 @@ impl SessionObjects<'_> {
                     Some(edge::tolerance(self.target, e)?),
                 )?;
                 if !edge_ivl.contains_value(edge_param, 0.0) {
-                    return Err(sm_err());
+                    return Err(sm_err("the ease runs past the end of the filleted edge"));
                 }
                 let pv = edge_curve.evaluate(k, edge_param, 1, true, true)?;
-                let plane_orig = pv.first().copied().ok_or_else(sm_err)?;
-                let plane_normal = pv.get(1).copied().ok_or_else(sm_err)?;
+                let plane_orig = pv
+                    .first()
+                    .copied()
+                    .ok_or_else(|| sm_err("the edge's curve has no point at the eased setback"))?;
+                let plane_normal = pv.get(1).copied().ok_or_else(|| {
+                    sm_err("the edge's curve has no tangent at the eased setback")
+                })?;
                 let surf1 = Surface::from(
                     base.surface(0)?
                         .map(|slot| slot.surface.surface.clone())
-                        .ok_or_else(null)?,
+                        .ok_or_else(|| null("the round solver's first surface"))?,
                 );
                 let surf2 = Surface::from(
                     base.surface(1)?
                         .map(|slot| slot.surface.surface.clone())
-                        .ok_or_else(null)?,
+                        .ok_or_else(|| null("the round solver's second surface"))?,
                 );
                 let domain1 = surf1.natural_uv_domain_with_nurb(k)?;
                 let domain2 = surf2.natural_uv_domain_with_nurb(k)?;
@@ -257,9 +286,13 @@ impl SessionObjects<'_> {
                         SolutionRequested::All,
                     )?;
                     if solutions.len() != 1 {
-                        return Err(sm_err());
+                        return Err(sm_err(
+                            "the plane's origin has no single closest point on an offset surface",
+                        ));
                     }
-                    let s = solutions.get(0).ok_or_else(sm_err)?;
+                    let s = solutions.get(0).ok_or_else(|| {
+                        sm_err("the closest point on an offset surface was not returned")
+                    })?;
                     Ok(Point2::new(s.start.param(0)?, s.start.param(1)?))
                 };
                 let uv1 = closest(&surf1, &domain1)?;
@@ -279,7 +312,9 @@ impl SessionObjects<'_> {
                     &mut tsect,
                 )?;
                 if !found {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "no section of the round lies in the plane at the eased setback",
+                    ));
                 }
                 let srf = if rail_index == 0 {
                     SrfIndex::First
@@ -287,7 +322,7 @@ impl SessionObjects<'_> {
                     SrfIndex::Second
                 };
                 let start = face2::surface(self.target, face)?
-                    .ok_or_else(null)?
+                    .ok_or_else(|| null("the setback vertex face's surface"))?
                     .evaluate_point(k, tsect.uv_pos(srf))?;
                 let dropped = rail_curve.drop_point(
                     k,
@@ -300,7 +335,7 @@ impl SessionObjects<'_> {
                 )?;
                 let from = dropped.parameter;
                 if !dropped.success || (from - to).abs() <= EFF_ZERO {
-                    return Err(sm_err());
+                    return Err(sm_err("the ease start does not drop onto the rail, or drops where the setback's section does"));
                 }
 
                 let index = if let Some(index) = geoms.iter().position(|&g| g == fg) {
@@ -312,23 +347,29 @@ impl SessionObjects<'_> {
                 };
                 ramps
                     .get_mut(index)
-                    .ok_or_else(sm_err)?
+                    .ok_or_else(|| sm_err("the round has no ramp list"))?
                     .push(EaseRamp { from, to });
             }
         }
 
         for (&fg, geom_ramps) in geoms.iter().zip(&ramps) {
-            let solver_id = self.pseudo.geom(fg)?.solver.ok_or_else(null)?;
-            let surface = self.fillet_surface(fg)?.ok_or_else(null)?;
+            let solver_id = self
+                .pseudo
+                .geom(fg)?
+                .solver
+                .ok_or_else(|| null("the eased round's solver"))?;
+            let surface = self
+                .fillet_surface(fg)?
+                .ok_or_else(|| null("the eased round's fillet surface"))?;
             let own_surface = surface.clone();
             let own = crate::topology::brep::p3::with_nurb(k, surface)?
-                .ok_or_else(null)?
+                .ok_or_else(|| null("the eased round surface's B-spline part"))?
                 .into_owned();
             let center = self
                 .pseudo
                 .geom(fg)?
                 .center_line_curve()
-                .ok_or_else(null)?
+                .ok_or_else(|| null("the eased round's centre line"))?
                 .clone();
             let base = self.solver(solver_id)?.base();
             let tol = base.this_approx_tol_3d();
@@ -336,24 +377,33 @@ impl SessionObjects<'_> {
             let mut uvs: Vec<BSplineCurve> = Vec::new();
             let mut face_surfs: Vec<Surface> = Vec::new();
             for r in 0..2 {
-                let rail_edge = self.pseudo.geom(fg)?.rail(r).ok_or_else(null)?;
+                let rail_edge = self
+                    .pseudo
+                    .geom(fg)?
+                    .rail(r)
+                    .ok_or_else(|| null("a rail of the eased round"))?;
                 let rail = edge::curve(self.pseudo.brep(), rail_edge)?
-                    .ok_or_else(null)?
+                    .ok_or_else(|| null("the eased round rail's curve"))?
                     .clone();
                 if bspline_curve(&rail).is_none() {
-                    return Err(null());
+                    return Err(null("the eased round rail's B-spline part"));
                 }
                 // the face the rail rolls on (the solver's surface r is its offset)
-                let edgeuse = base.edgeuse(r)?.ok_or_else(null)?;
-                let rail_face = eu::face(self.target, edgeuse)?.ok_or_else(null)?;
+                let edgeuse = base
+                    .edgeuse(r)?
+                    .ok_or_else(|| null("the eased round solver's edge use"))?;
+                let rail_face = eu::face(self.target, edgeuse)?
+                    .ok_or_else(|| null("the face of the eased round solver's edge use"))?;
                 let face_surf = face2::surface(self.target, rail_face)?
-                    .ok_or_else(null)?
+                    .ok_or_else(|| null("the surface of the face the rail rolls on"))?
                     .clone();
                 // the rail on that face's surface: as the trace left it, or (an analytic
                 // round, whose rails are lines) the rail dropped onto it, over the rail's
                 // own parameter
                 let uv = if let Some(curve) = self.pseudo.original_uv_curve(rail_edge)? {
-                    bspline_curve(curve).ok_or_else(null)?.clone()
+                    bspline_curve(curve)
+                        .ok_or_else(|| null("the rail's original UV curve's B-spline part"))?
+                        .clone()
                 } else {
                     let uv_curves = face_surf
                         .drop_curve::<NoObject>(
@@ -368,24 +418,32 @@ impl SessionObjects<'_> {
                         )?
                         .uv_curves;
                     if uv_curves.len() != 1 {
-                        return Err(sm_err());
+                        return Err(sm_err(
+                            "the rail does not drop onto its face's surface as one UV curve",
+                        ));
                     }
-                    let first = uv_curves.first().ok_or_else(sm_err)?;
-                    bspline_curve(first).ok_or_else(null)?.clone()
+                    let first = uv_curves
+                        .first()
+                        .ok_or_else(|| sm_err("the rail's dropped UV curve was not returned"))?;
+                    bspline_curve(first)
+                        .ok_or_else(|| null("the rail's dropped UV curve's B-spline part"))?
+                        .clone()
                 };
                 let uv_ivl = uv.natural_interval();
                 let rail_ivl = rail.natural_interval();
                 if (uv_ivl.min() - rail_ivl.min()).abs() > 1.0e-9 * (1.0 + rail_ivl.length())
                     || (uv_ivl.max() - rail_ivl.max()).abs() > 1.0e-9 * (1.0 + rail_ivl.length())
                 {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "the rail's UV curve does not run over the rail's own interval",
+                    ));
                 }
                 rails.push(rail);
                 uvs.push(uv);
                 face_surfs.push(face_surf);
             }
             let (Some(rail0), Some(rail1)) = (rails.first(), rails.get(1)) else {
-                return Err(sm_err());
+                return Err(sm_err("the eased round does not have two rails"));
             };
 
             // the rails' direction on the surface: the one over the rails' interval whose
@@ -410,7 +468,10 @@ impl SessionObjects<'_> {
                 {
                     continue;
                 }
-                let t = geom_ramps.first().ok_or_else(sm_err)?.to;
+                let t = geom_ramps
+                    .first()
+                    .ok_or_else(|| sm_err("the eased round has no ramp"))?
+                    .to;
                 let on_rail = rail0.evaluate_point(k, t)?;
                 let lo = own_surface.evaluate_point(k, uv_at(dir, t, across_ivl.min()))?;
                 let hi = own_surface.evaluate_point(k, uv_at(dir, t, across_ivl.max()))?;
@@ -420,62 +481,40 @@ impl SessionObjects<'_> {
                 }
             }
             if along == SurfParamType::Unknown {
-                return Err(sm_err());
+                return Err(sm_err(
+                    "neither surface direction runs along the eased round's rails",
+                ));
             }
 
             // the curvature-continuous surface on the same rails (CreateSurfaceFromCurves
             // changes the curves' knots: it is given copies)
-            let mut c0 = center;
-            let mut c1 = bspline_curve(rail0).ok_or_else(null)?.clone();
-            let mut c2 = bspline_curve(rail1).ok_or_else(null)?.clone();
-            let g2_generator = BlendCurveCrossSectionFsg {
-                continuity: 2,
-                blend_scale: 1.0,
-                at_thirds: true,
-            };
-            let solver = self.solver_mut(solver_id)?;
-            let need_g1 = live_solver_ops(solver).solver_type()? == FilletSolverType::ConstRadius;
+            let c0 = center;
+            let mut c1 = bspline_curve(rail0)
+                .ok_or_else(|| null("the first rail's B-spline part"))?
+                .clone();
+            let mut c2 = bspline_curve(rail1)
+                .ok_or_else(|| null("the second rail's B-spline part"))?
+                .clone();
             let (Some(surf0), Some(surf1)) = (face_surfs.first(), face_surfs.get(1)) else {
-                return Err(sm_err());
+                return Err(sm_err("the eased round does not have two rail faces"));
             };
-            let g2 = if k.fixes.fillet_gn_section_generator {
-                // the fork's order-2 G^n section (WR-685, tangency-labs/smlib@11ea2d9):
-                // the faces' curvature across the rails. Its thumbweight stays 0, not the
-                // equal area default: it is the corner's transition, not the blend's own
-                // section (the fork's 22d258a = d01d7b0's adb9854)
-                let (Some(uv0), Some(uv1)) = (uvs.first(), uvs.get(1)) else {
-                    return Err(null());
-                };
-                GnSectionFsg::new(2, 0.0).create_surface_from_curves(
-                    k,
-                    &c0,
-                    [&mut c1, &mut c2],
-                    tol,
-                    GnFaces {
-                        surfaces: [surf0, surf1],
-                        uv: [uv0, uv1],
-                    },
-                )?
-            } else {
-                g2_generator
-                    .create_surface_from_curves(
-                        k,
-                        &mut c0,
-                        &mut c1,
-                        &mut c2,
-                        tol,
-                        need_g1,
-                        RailSurface {
-                            surface: Some(surf0),
-                            uv_curve: uvs.first(),
-                        },
-                        RailSurface {
-                            surface: Some(surf1),
-                            uv_curve: uvs.get(1),
-                        },
-                    )
-                    .map(Surface::from)?
+            // the fork's order-2 G^n section (WR-685, tangency-labs/smlib@11ea2d9): the
+            // faces' curvature across the rails. Its thumbweight stays 0, not the equal area
+            // default: it is the corner's transition, not the blend's own section (the fork's
+            // 22d258a = d01d7b0's adb9854)
+            let (Some(uv0), Some(uv1)) = (uvs.first(), uvs.get(1)) else {
+                return Err(null("the eased round's two UV curves"));
             };
+            let g2 = GnSectionFsg::new(2, 0.0).create_surface_from_curves(
+                k,
+                &c0,
+                [&mut c1, &mut c2],
+                tol,
+                GnFaces {
+                    surfaces: [surf0, surf1],
+                    uv: [uv0, uv1],
+                },
+            )?;
 
             // (the fork's EaseSurface takes the G^n target, a blend by its definition with
             // `fillet_round_as_definition`, and the round's own surface as they are)
@@ -485,5 +524,28 @@ impl SessionObjects<'_> {
                 .set_fillet_surface(Some(Surface::from(eased)));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
+
+    /// Each ease failure names what was missing or what failed, and keeps its status.
+    #[test]
+    fn ease_failures_name_what_failed_and_keep_their_status() {
+        let missing = null("the corner's filleted vertex");
+        assert_eq!(
+            missing.to_string(),
+            "blend::fillet_executive::session::ease: the corner's filleted vertex is missing"
+        );
+        assert_eq!(missing.sm_status(), Some(SM_ERR_NULL_POINTER));
+        let failed = sm_err("the ease runs past the end of the filleted edge");
+        assert_eq!(
+            failed.to_string(),
+            "blend::fillet_executive::session::ease: the ease runs past the end of the filleted edge"
+        );
+        assert_eq!(failed.sm_status(), Some(SM_ERR));
     }
 }

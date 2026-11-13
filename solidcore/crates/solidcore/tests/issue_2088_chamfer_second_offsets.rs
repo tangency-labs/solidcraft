@@ -23,7 +23,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::{edge, vertex, EdgeId};
-use solidcore::{Brep, Kernel, Point3, SolidError};
+use solidcore::{Brep, Kernel, Point3};
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     b.refresh_cached_topology();
@@ -136,14 +136,10 @@ fn issue_2088_second_radii_size_mismatch() {
             1.0,
         )
         .unwrap_err();
-    assert!(
-        matches!(
-            err,
-            SolidError::Upstream {
-                code: solidcore::error::SM_ERR_INVALID_INPUT,
-                ..
-            }
-        ),
+    // the status, not the variant: a typed blend failure replaced the `Upstream` (#13790)
+    assert_eq!(
+        solidcore::error::upstream_status(&err),
+        Some(solidcore::error::SM_ERR_INVALID_INPUT),
         "{err:?}"
     );
 }
@@ -162,7 +158,6 @@ use solidcore::topology::edgeuse::p1 as eu1;
 /// The section generator and rounds (and chamfers) as their definitions.
 fn definition_kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = true;
     k
 }

@@ -183,14 +183,82 @@ pub fn check_kept(body: &Body) -> Result<()> {
         return Ok(());
     }
     let step = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r)));
-    let (what, check) = match &step {
-        Some((u, r)) => (u.what.as_str(), check_result(r, u.how)),
+    let (what, check) = match step {
+        Some((u, r)) => (u.what.as_str(), check_result_owned(r, u.how)),
         None => ("SMLib", body.smlib()?.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
     };
+    verdict(what, check)
+}
+
+/// What [`check_kept`] makes of SMLib's check of what it read (`what` names the step).
+fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>) -> Result<()> {
     match check {
         Ok(c) if c.is_valid() => Ok(()),
         Ok(c) => Err(KernelError::Failed(format!("{what}: SMLib's check refuses the result: {c}"))),
         Err(e) => Err(KernelError::Failed(format!("{what}: {e}"))),
+    }
+}
+
+/// [`check_result`] of a step's result nobody else reads, which it takes: the token over this
+/// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]).
+fn check_result_owned(r: solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {
+    fn failed(what: &'static str) -> impl Fn(&dyn std::fmt::Display) -> String {
+        move |e| format!("{what}: {e}")
+    }
+    match how {
+        Checked::Combined if !r.is_manifold_solid().map_err(|e| failed("check")(&e))? => {
+            let record = r.to_native().map_err(|e| failed("export")(&e))?;
+            drop(r);
+            let split = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| failed("the separate solids")(&e))?;
+            split.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e))
+        }
+        _ => r.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e)),
+    }
+}
+
+/// [`check_kept`] of a body, ready to run on another thread ([`detach_kept`]), under the token
+/// of the work that detached it: stopping that work stops the check too.
+pub struct KeptCheck(Kept, Option<solidcraft_smlib::stop::Stop>);
+
+enum Kept {
+    /// A mesh body: nothing to check.
+    Nothing,
+    /// The step's own result, taken from the body.
+    Step { what: String, how: Checked, result: solidcraft_smlib::Brep },
+    /// A copy of the body's SMLib form, made when the check was detached.
+    Copy(Result<solidcraft_smlib::Brep>),
+}
+
+/// [`check_kept`] of `body`, detached from it: the step's result is taken now, or the body's SMLib
+/// form is copied now, so the check reads nothing the operations after it use and can run on
+/// another thread beside them ([`KeptCheck::run`]).
+pub fn detach_kept(body: &Body) -> KeptCheck {
+    let stop = solidcraft_smlib::stop::current();
+    if body.is_mesh() {
+        return KeptCheck(Kept::Nothing, stop);
+    }
+    if let Some((u, result)) = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r))) {
+        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result }, stop);
+    }
+    KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))), stop)
+}
+
+impl KeptCheck {
+    /// The check: [`check_kept`]'s result for the body it was detached from.
+    pub fn run(self) -> Result<()> {
+        let KeptCheck(kept, stop) = self;
+        solidcraft_smlib::stop::scoped(stop, || kept.run())
+    }
+}
+
+impl Kept {
+    fn run(self) -> Result<()> {
+        match self {
+            Kept::Nothing => Ok(()),
+            // The step's result and the copy are the check's own: the work's token stops it.
+            Kept::Step { what, how, result } => verdict(&what, check_result_owned(result, how)),
+            Kept::Copy(copy) => verdict("SMLib", copy?.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+        }
     }
 }
 
@@ -210,14 +278,24 @@ mod tests {
         assert_eq!(step(), Step::Check);
     }
 
+    /// A check detached under a token runs under it on whatever thread runs it (the feature
+    /// check beside the evaluation): stopping the work stops the check (solidcore#3247).
+    #[test]
+    fn a_detached_check_stops_with_the_work_that_detached_it() {
+        let body = crate::cylinder(solidcore_record::Vec3::new(0.0, 0.0, 0.0), solidcore_record::Vec3::Z, 3.0, 10.0).unwrap();
+        let stop = solidcraft_smlib::stop::Stop::new();
+        let detached = stop.within(|| detach_kept(&body));
+        stop.stop();
+        let r = crate::par::kernel_thread("check").spawn(move || detached.run()).unwrap().join().unwrap();
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("cancelled")), "{r:?}");
+        let free = solidcraft_smlib::stop::Stop::new();
+        let detached = free.within(|| detach_kept(&body));
+        assert!(detached.run().is_ok(), "a token never stopped changes nothing");
+    }
+
     #[test]
     fn the_mode_reaches_the_kernels_worker_threads() {
         let items = [0, 1, 2, 3];
-        let (checked, deferred) = validating(Validation::EachFeature, || {
-            crate::par::map("validation", &items, true, |_| Ok(step())).into_iter().collect::<Result<Vec<Step>>>()
-        });
-        assert_eq!(checked.ok(), Some(vec![Step::Defer; 4]));
-        assert!(deferred);
         let (on_threads, deferred) = validating(Validation::EachFeature, || crate::par::map_on_threads(&items, 4, |_| step()));
         assert_eq!(on_threads, vec![Some(Step::Defer); 4]);
         assert!(deferred);

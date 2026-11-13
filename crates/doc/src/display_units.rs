@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::tolerance::{DimensionStyle, DimensionText, DimensionValue, format_dimension};
 use crate::{DocError, Result, expr};
 
 /// Units per millimetre and the unit's name. Unknown names use millimetres.
@@ -275,7 +276,7 @@ fn round_decimal_step(x: f64, step: f64, decimals: u8, resolution: usize, ties: 
     round_prepared(&magnitude, x.is_sign_negative(), decimals, ties)
 }
 
-fn grouped_digits(text: &mut String, digits: &str, integer: bool, groups: bool) {
+pub(crate) fn grouped_digits(text: &mut String, digits: &str, integer: bool, groups: bool) {
     for (i, digit) in digits.chars().enumerate() {
         if groups && digits.len() >= 5 && i > 0 && if integer { (digits.len() - i).is_multiple_of(3) } else { i.is_multiple_of(3) } {
             text.push('\u{202f}');

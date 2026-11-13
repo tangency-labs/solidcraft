@@ -69,7 +69,7 @@ fn construction_line_contracts_and_replies_match() {
     use super::{ConstructionLineParams, ConstructionLineResult};
     assert_keys(
         input_schema_for::<ConstructionLineParams>(),
-        &["alternate", "angle", "at", "construction", "curve", "curve2", "length", "mode", "near", "sketch", "solution", "through"],
+        &["alternate", "angle", "at", "construction", "curve", "curve2", "length", "mode", "near", "offset", "sketch", "solution", "through"],
     );
     let schema = output_schema_for::<ConstructionLineResult>();
     let schema = schema.as_value();
@@ -542,12 +542,14 @@ fn creation_replies_match_the_output_schema() {
     };
     let drawn = |s: &mut Session, id: &str, p: Value| {
         let r = run_ok(s, id, p);
-        matches(output_schema_for::<DrawResult>(), &r);
-        assert_eq!(
-            r.as_object().map(|o| o.keys().cloned().collect::<std::collections::BTreeSet<_>>()),
-            Some(["constraints", "created", "curves", "sketch"].map(String::from).into()),
-            "{r}"
-        );
+        let slot = id == "sketch.slot.center_point";
+        matches(if slot { output_schema_for::<crate::schema::sketch_shapes::SlotResult>() } else { output_schema_for::<DrawResult>() }, &r);
+        let expected: std::collections::BTreeSet<String> = if slot {
+            ["centre_line", "constraints", "created", "curves", "middle", "sketch"].map(String::from).into()
+        } else {
+            ["constraints", "created", "curves", "sketch"].map(String::from).into()
+        };
+        assert_eq!(r.as_object().map(|o| o.keys().cloned().collect::<std::collections::BTreeSet<_>>()), Some(expected), "{r}");
         r
     };
     let near = json!([30, 10]);
@@ -577,7 +579,7 @@ fn creation_replies_match_the_output_schema() {
     ] {
         let r = run_ok(&mut s, "sketch.slot.arc_three_point", p);
         matches(output_schema_for::<ArcSlotResult>(), &r);
-        assert!(r["centre_arc"].is_string(), "{r}");
+        assert!(r["centre_arc"].is_string() && r["middle"].is_string(), "{r}");
     }
     for p in [
         json!({"center": [200, 0], "start": [210, 0], "end": [200, 10], "width": 2}),
@@ -586,7 +588,7 @@ fn creation_replies_match_the_output_schema() {
     ] {
         let r = run_ok(&mut s, "sketch.slot.arc_center", p);
         matches(output_schema_for::<ArcSlotResult>(), &r);
-        assert!(r["centre_arc"].is_string(), "{r}");
+        assert!(r["centre_arc"].is_string() && r["middle"].is_string(), "{r}");
     }
     for p in [
         json!({"center": [300, 0], "major": [310, 0], "minor_radius": 4}),

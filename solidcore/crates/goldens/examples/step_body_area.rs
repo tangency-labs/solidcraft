@@ -1,5 +1,5 @@
 //! Diagnostics for `goldens --step-corpus`: the independent area estimate of one
-//! STEP body ([`step_import::script::step_face_area`] summed over its faces), or which
+//! STEP body ([`goldens::script::step_face_area`] summed over its faces), or which
 //! faces have no analytic estimate.
 //!
 //! `cargo run --profile goldens -p goldens --example step_body_area -- <file.stp> <body>`
@@ -15,7 +15,7 @@ fn main() {
     };
     let body = std::fs::read(file)
         .ok()
-        .and_then(|b| step_import::import(&b, &step_import::Limits::default()).ok())
+        .and_then(|b| step_export::import(&b, &step_export::Limits::default()).ok())
         .and_then(|m| m.bodies.into_iter().nth(index));
     let Some(body) = body else {
         eprintln!("no body {index} in {file}");
@@ -24,7 +24,7 @@ fn main() {
     let mut total = 0.0;
     let mut missing = 0usize;
     for f in &body.faces {
-        match step_import::script::step_face_area(&body, f, 2048) {
+        match goldens::script::step_face_area(&body, f, 2048) {
             Some(a) => total += a,
             None => missing += 1,
         }

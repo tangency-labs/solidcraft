@@ -85,7 +85,7 @@ fn glass_importance_normal(incident:vec3<f32>,outgoing:vec3<f32>,normal:vec3<f32
     return correction;
 }
 // One uniformly retained hard-light vertex keeps native optical visibility at
-// one call site with96 bytes of private payload. For K<=16 eligible camera
+// one call site with96 bytes of private payload. For K<=64 eligible camera
 // vertices, K*prefix[J]*direct[J] estimates their complete sum. Selection uses
 // its own RNG, leaving transport draws unchanged. Null/depth exits retain the
 // estimator; multi-vertex map-off paths acquire additional sampling variance.
@@ -97,7 +97,7 @@ fn glass_offer_light(lights:ptr<function,array<vec4<u32>,6>>,count:ptr<function,
     let studio=u.environment.w>0.0;
     if select(3u,u32(u.light_count.x)+u32(u.light_count.y),studio)==0u {return;}
     let index=*count;
-    if index>=16u || index>=u.sampling.y {atomicOr(&failures[7],8u);return;}
+    if index>=64u || index>=u.sampling.y {atomicOr(&failures[7],8u);return;}
     *count=index+1u;
     if index>0u && random(selection_rng)>=1.0/f32(index+1u) {return;}
     (*lights)[0]=vec4<u32>(bitcast<vec3<u32>>(point.hi),source_triangle);
@@ -112,7 +112,7 @@ fn glass_offer_light(lights:ptr<function,array<vec4<u32>,6>>,count:ptr<function,
 // Film planes precede this scratch and retain their historical offsets. Integer
 // metadata uses exact numeric f32 encoding rather than subnormal bit patterns.
 fn glass_tile_address(pixel:u32)->u32 {
-    return u.image.x*u.image.y*select(1u,3u,u.adaptive_budget.x>0u)+(pixel-u.image.w)*8u;
+    return film_pixels()*select(1u,3u,u.adaptive_budget.x>0u)+(pixel-u.image.w)*8u;
 }
 fn glass_capture_light(lights:ptr<function,array<vec4<u32>,6>>,count:u32,wavelength:f32,pixel:u32) {
     let address=glass_tile_address(pixel);

@@ -97,6 +97,8 @@ thread_local! {
     static EXTEND_PAIR: Cell<bool> = const { Cell::new(false) };
     /// Glyphs drawn this frame (constraint id, screen centre) and the selected one.
     static GLYPHS: RefCell<Vec<(String, Pos2)>> = const { RefCell::new(Vec::new()) };
+    /// The side of the glyphs drawn this frame (screen pixels), for [`glyph_at`] (#10794).
+    static GLYPH_PX: Cell<f32> = const { Cell::new(GLYPH) };
     static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The inference the cursor snapped to last (label, sketch point), for the hint.
     static SNAP: RefCell<Option<(&'static str, Vec2)>> = const { RefCell::new(None) };
@@ -375,12 +377,25 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
     // Offer the image types first: the default Open filter lists only designs and meshes.
     app.pick_open_for(&["png", "jpg", "jpeg"], move |app, path| {
         if let Some(path) = path {
-            IMAGE.with(|i| *i.borrow_mut() = Some(path));
-            app.last_command = solidcraft_engine::find_command(&command).map(|spec| (spec.id.into(), spec.label.into()));
-            app.tool = crate::tools::Tool::for_command(&command);
+            start_image_placement(app, &command, path);
         }
     });
     false
+}
+
+/// Whether `path` names an image the Canvas tool takes (PNG or JPEG, by its extension).
+pub(crate) fn is_canvas_image(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| ["png", "jpg", "jpeg"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+}
+
+/// Start placing image `path` with `command` (Canvas or Decal), as when it is chosen in the
+/// tool's file dialog: the next click on a plane or face (or the sketch plane) places it.
+/// Home closes, since the click needs the viewport (a picture can be dropped on Home).
+pub(crate) fn start_image_placement(app: &mut SolveApp, command: &str, path: String) {
+    app.home.open = false;
+    IMAGE.with(|i| *i.borrow_mut() = Some(path));
+    app.last_command = solidcraft_engine::find_command(command).map(|spec| (spec.id.into(), spec.label.into()));
+    app.tool = crate::tools::Tool::for_command(command);
 }
 
 fn v3(v: &Value) -> Option<Vec3> {
@@ -567,7 +582,8 @@ pub(crate) fn constrain_lined(app: &mut SolveApp, tool: &mut Tool, placed: &[Vec
         for target in targets {
             let Some(id) = &target.id else { continue };
             let mode = if target.horizontal { "horizontal" } else { "vertical" };
-            let params = json!({"points": [point, id], "mode": mode, "if_redundant": "refuse"});
+            let other = id.strip_prefix("mid:").map_or_else(|| json!(id), |line| json!({"midpoint": line}));
+            let params = json!({"points": [point, other], "mode": mode, "if_redundant": "refuse"});
             let _ = app.session.execute("sketch.constraint.horizontal_vertical", &params);
         }
     }
@@ -603,10 +619,22 @@ pub fn refine_snap(
     let px = 1.0 / (a.distance(b) as f64).max(1e-9);
     let tol = 7.0 * px;
     // A model vertex under the cursor: drawing on it projects it into the sketch.
+    // A snap point of a model edge or another sketch's curve (#11229) is one too: an end of a
+    // body's edge is a vertex, projected and linked like one; a centre or a middle (and a point
+    // of another sketch) is no vertex to link, so the point goes where it projects to.
     for h in pick(app, proj, a) {
-        if let Hit::Vertex { point, .. } = h {
-            SNAP.with(|s| *s.borrow_mut() = Some(("Pt", plane.to_local(point))));
-            return Some((plane.to_local(point), Some(format!("vertex:{},{},{}", point.x, point.y, point.z))));
+        if let Hit::Vertex { point, body } = h {
+            use solidcraft_engine::snap::SnapKind;
+            let vertex = Some(format!("vertex:{},{},{}", point.x, point.y, point.z));
+            let (label, arg) = match crate::snap_wake::woken_at(app, point).map(|p| p.kind) {
+                Some(SnapKind::Centre | SnapKind::FaceCentre) => ("Ctr", None),
+                Some(SnapKind::Middle) => ("Mid", None),
+                Some(SnapKind::End) if body.is_empty() => ("End", None),
+                Some(SnapKind::End) => ("End", vertex),
+                Some(SnapKind::Vertex) | None => ("Pt", vertex),
+            };
+            SNAP.with(|s| *s.borrow_mut() = Some((label, plane.to_local(point))));
+            return Some((plane.to_local(point), arg));
         }
     }
     let mid_only = crate::tool_modifiers::target_midpoint();
@@ -697,12 +725,26 @@ pub fn refine_snap(
             }
         }
     }
-    // The free coordinate still follows the grid.
-    let step = solidcraft_engine::view::grid_step(app.cam.half_height()).0 / 10.0;
-    let g = |v: f64| (v / step).round() * step;
+    // The free coordinate still follows the grid: on a crossing of the drawn grid's lines when
+    // the point can be on one, and on the finer lattice between the crossings otherwise (#7114).
+    let (minor, fine) = solidcraft_engine::view::sketch_grid_step(app.cam.half_height());
+    // `fixed` is the coordinate the point lines up with, on the other axis: the crossing has to
+    // run through it. With Snap off (Sketch Palette) the grid holds the point as before.
+    let g = |free: f64, fixed: f64| {
+        if sk.view.no_snap || !app.preferences.sketch_snap_to_visible_grid {
+            solidcraft_engine::view::sketch_grid_lattice_axis(free, fine)
+        } else {
+            solidcraft_engine::view::sketch_grid_free(free, fixed, minor, fine)
+        }
+    };
     // Points to line up with as well (#7828): with `sketch_align_points` off, none, so only the
     // previous point, one axis at a time, as before.
-    let targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
+    let mut targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
+    // A hovered line's midpoint guide lines up too, as the "mid:<line>" point the constraint
+    // command makes on that line (#13413).
+    if app.preferences.sketch_align_points {
+        targets.extend(app.viewport.tracking.line_midpoints(sk).into_iter().map(|(line, at)| (Some(format!("mid:{line}")), at)));
+    }
     let mut lined = Vec::new();
     if !mid_only
         && best.is_none()
@@ -712,10 +754,12 @@ pub fn refine_snap(
         // Level with (or plumb with) the previous point, and lined up across with another.
         let (level, plumb) = line_up(&targets, lp, tol);
         if dy < tol && dx > tol {
-            best = Some((dy, if plumb.is_some() { "H+V" } else { "H" }, Vec2::new(plumb.as_ref().map_or(g(lp.x), |p| p.at.x), prev.y)));
+            best =
+                Some((dy, if plumb.is_some() { "H+V" } else { "H" }, Vec2::new(plumb.as_ref().map_or_else(|| g(lp.x, prev.y), |p| p.at.x), prev.y)));
             lined.extend(plumb);
         } else if dx < tol && dy > tol {
-            best = Some((dx, if level.is_some() { "H+V" } else { "V" }, Vec2::new(prev.x, level.as_ref().map_or(g(lp.y), |l| l.at.y))));
+            best =
+                Some((dx, if level.is_some() { "H+V" } else { "V" }, Vec2::new(prev.x, level.as_ref().map_or_else(|| g(lp.y, prev.x), |l| l.at.y))));
             lined.extend(level);
         }
     }
@@ -731,7 +775,6 @@ pub fn refine_snap(
     // Lined up with other points, on one axis or on both at once (#7828).
     if !mid_only && best.is_none() {
         let (level, plumb) = line_up(&targets, lp, tol);
-        let at = Vec2::new(plumb.as_ref().map_or(g(lp.x), |p| p.at.x), level.as_ref().map_or(g(lp.y), |l| l.at.y));
         let off = |l: &Lined| if l.horizontal { (lp.y - l.at.y).abs() } else { (lp.x - l.at.x).abs() };
         let label = match (&level, &plumb) {
             (Some(_), Some(_)) => Some("H+V"),
@@ -740,6 +783,12 @@ pub fn refine_snap(
             (None, None) => None,
         };
         if let Some(label) = label {
+            // The coordinate that lines up with another point keeps that point's coordinate; the
+            // free one follows the grid.
+            let at = Vec2::new(
+                plumb.as_ref().map_or_else(|| g(lp.x, level.as_ref().map_or(lp.y, |l| l.at.y)), |p| p.at.x),
+                level.as_ref().map_or_else(|| g(lp.y, plumb.as_ref().map_or(lp.x, |p| p.at.x)), |l| l.at.y),
+            );
             best = Some((level.iter().chain(&plumb).map(off).fold(f64::INFINITY, f64::min), label, at));
             lined.extend(level);
             lined.extend(plumb);
@@ -808,7 +857,15 @@ pub fn active_glyph_deletion(app: &SolveApp, id: &str) -> Vec<solidcraft_engine:
 
 /// The constraint glyph under a screen position (its constraint id).
 pub fn glyph_at(pos: Pos2) -> Option<String> {
-    GLYPHS.with(|g| g.borrow().iter().find(|(_, c)| c.distance(pos) <= GLYPH * 0.6).map(|(id, _)| id.clone()))
+    let reach = GLYPH_PX.with(Cell::get) * 0.6;
+    GLYPHS.with(|g| nearest_glyph(g.borrow().iter().map(|(id, c)| (id.as_str(), *c)), pos, reach).map(|(id, _)| id.to_owned()))
+}
+
+/// The glyph within `reach` of `pos` whose centre is nearest (its id and centre). Large glyphs'
+/// hit regions overlap, so the first one in reach could be a neighbour of the one under the
+/// pointer (#10794); hover and click both pick with this rule.
+fn nearest_glyph<'a>(glyphs: impl IntoIterator<Item = (&'a str, Pos2)>, pos: Pos2, reach: f32) -> Option<(&'a str, Pos2)> {
+    glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
 }
 
 /// Constraint glyphs drawn last frame: (constraint id, screen centre).
@@ -853,6 +910,15 @@ pub fn takes(id: &str, hit: &Hit) -> bool {
     match id {
         "inspect.continuity" => matches!(hit, Hit::Edge { .. }),
         _ => true,
+    }
+}
+
+/// Whether a tool places points on the sketch plane (and so takes snap points, #11229).
+pub fn places_points(t: &Tool) -> bool {
+    match t.kind {
+        Kind::Draw(_) => true,
+        Kind::Ext => matches!(mode(t.cmd), Some(Mode::Points(_))),
+        _ => false,
     }
 }
 
@@ -937,7 +1003,9 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.slot.center_point" => "Slot: click the centre, an arc centre, then the width",
             "sketch.slot.arc_three_point" => "Arc slot: click start, a point on the arc, the end, then the width",
             "sketch.slot.arc_center" => "Arc slot: click the centre, the start, the end, then the width",
-            "sketch.spline.fit_point" => "Spline: click fit points; click the start to close smoothly, or right-click to finish",
+            "sketch.spline.fit_point" => {
+                "Spline: click fit points; click the start to close smoothly, or right-click to finish; then select the spline to drag its tangent handles"
+            }
             "sketch.spline.control_point" | "sketch.spline.control_point_5" => "Control point spline: click control points; right-click to finish",
             "sketch.text" => "Text: click where the text starts",
             "sketch.edit_text" => "Edit Text: click a letter interior or outline",
@@ -1724,8 +1792,81 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
 
 /// Constraint glyphs of the active sketch: a small badge per constraint at its anchor
 /// (failing ones in `sketch_conflict`).
-/// Glyph size and spacing (screen pixels).
+/// Glyph size and spacing (screen pixels) at the default `constraint_glyph_scale` of 1.
 const GLYPH: f32 = 15.0;
+
+/// The `constraint_glyph_scale` values Preferences › Sketch offers and the glyphs honour (#10794).
+pub const GLYPH_SCALES: std::ops::RangeInclusive<f32> = 1.0..=3.0;
+
+/// The side of a constraint glyph on screen for the `constraint_glyph_scale` preference. A value
+/// outside [`GLYPH_SCALES`] (a hand-edited settings file) is brought into it; one that is not a
+/// number gives the default size.
+pub fn glyph_px(scale: f32) -> f32 {
+    let scale = if scale.is_finite() { scale.clamp(*GLYPH_SCALES.start(), *GLYPH_SCALES.end()) } else { 1.0 };
+    GLYPH * scale
+}
+
+/// How far below and to the right of the pointer's hot spot a cursor can reach (screen pixels):
+/// an arrow or a hand hangs down and to the right of the point it marks.
+const CURSOR_REACH: f32 = 32.0;
+
+/// The widest the hovered glyph's label text may be in `bounds`: the view less the label's
+/// 3-pixel padding on each side (#10794).
+fn glyph_label_wrap_width(bounds: egui::Rect) -> f32 {
+    (bounds.width() - 6.0).max(1.0)
+}
+
+/// Where the hovered glyph's label goes (its background, `size` included): above the glyph and the
+/// pointer, where no cursor reaches, so the cursor never hides it (#10794). Without room above in
+/// `bounds`, it goes to the left of both; without room there either, below them, past the cursor,
+/// or to the right of the cursor. When none of those fits (a wrapped label in a short view), it is
+/// cut to whichever of those sides of the view has the most room, still clear of the cursor; only
+/// when no side has any room is it kept inside `bounds` regardless, cut to the view's height.
+pub fn glyph_label_rect(pointer: Pos2, glyph: egui::Rect, size: egui::Vec2, bounds: egui::Rect) -> egui::Rect {
+    const GAP: f32 = 6.0;
+    let fit_x = |left: f32| left.min(bounds.right() - size.x).max(bounds.left());
+    let fit_y = |top: f32| top.min(bounds.bottom() - size.y).max(bounds.top());
+    let above = pointer.y.min(glyph.top()) - GAP - size.y;
+    if above >= bounds.top() {
+        return egui::Rect::from_min_size(egui::pos2(fit_x(glyph.left()), above), size);
+    }
+    let left = pointer.x.min(glyph.left()) - GAP - size.x;
+    if left >= bounds.left() && size.y <= bounds.height() {
+        let top = fit_y(glyph.center().y - size.y * 0.5);
+        return egui::Rect::from_min_size(egui::pos2(left, top), size);
+    }
+    let below = (pointer.y + CURSOR_REACH).max(glyph.bottom()) + GAP;
+    if below + size.y <= bounds.bottom() {
+        return egui::Rect::from_min_size(egui::pos2(fit_x(glyph.left()), below), size);
+    }
+    let right = (pointer.x + CURSOR_REACH).max(glyph.right()) + GAP;
+    if right + size.x <= bounds.right() && size.y <= bounds.height() {
+        return egui::Rect::from_min_size(egui::pos2(right, fit_y(glyph.center().y - size.y * 0.5)), size);
+    }
+    // No side holds the whole label: cut it to the cursor-free side of the view with the most
+    // room, so it never covers the pointer or the cursor.
+    let beside = glyph.center().y - size.y * 0.5;
+    let sides = [
+        (egui::Rect::from_min_max(bounds.min, egui::pos2(bounds.right(), above + size.y)), egui::pos2(glyph.left(), above)),
+        (egui::Rect::from_min_max(bounds.min, egui::pos2(left + size.x, bounds.bottom())), egui::pos2(left, beside)),
+        (egui::Rect::from_min_max(egui::pos2(bounds.left(), below), bounds.max), egui::pos2(glyph.left(), below)),
+        (egui::Rect::from_min_max(egui::pos2(right, bounds.top()), bounds.max), egui::pos2(right, beside)),
+    ];
+    let room = |side: &egui::Rect| side.width().clamp(0.0, size.x) * side.height().clamp(0.0, size.y);
+    let mut best: Option<(egui::Rect, egui::Pos2)> = None;
+    for (side, at) in sides {
+        if room(&side) > best.map_or(0.0, |(b, _)| room(&b)) {
+            best = Some((side, at));
+        }
+    }
+    if let Some((side, at)) = best {
+        let x = at.x.min(side.right() - size.x).max(side.left());
+        let y = at.y.min(side.bottom() - size.y).max(side.top());
+        return egui::Rect::from_min_size(egui::pos2(x, y), size).intersect(side);
+    }
+    let fitted = egui::Rect::from_min_size(egui::pos2(fit_x(glyph.left()), fit_y(below)), size);
+    egui::Rect::from_min_max(fitted.min, egui::pos2(fitted.max.x, fitted.max.y.min(bounds.bottom())))
+}
 
 /// Screen pixels per millimetre of the sketch plane below which constraint glyphs hide when the
 /// `hide_constraint_glyphs_zoomed_out` preference is on (#8980). About two pixels per millimetre:
@@ -1794,6 +1935,10 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     // While a dimension's value is typed, the glyphs sit where that value puts their geometry.
     let st = crate::dim_view::preview_world(app).unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
     let Some(ss) = st.sketch(sid) else { return };
+    // The badge's side, from Preferences › Sketch (#10794); 15 px at the default.
+    let glyph = glyph_px(app.preferences.constraint_glyph_scale);
+    let scale = glyph / GLYPH;
+    GLYPH_PX.with(|g| g.set(glyph));
     if ss.sketch.view.hide_constraints {
         GLYPHS.with(|g| g.borrow_mut().clear());
         return;
@@ -1813,7 +1958,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     // that would sit on a dimension's value goes to the other side of its line.
     let dim_texts: Vec<egui::Rect> = crate::dim_view::text_rects().into_iter().map(|(_, r)| r.expand(2.0)).collect();
     let on_dim = |p: Pos2| {
-        let r = egui::Rect::from_center_size(p, egui::vec2(GLYPH, GLYPH));
+        let r = egui::Rect::from_center_size(p, egui::vec2(glyph, glyph));
         dim_texts.iter().any(|d| d.intersects(r))
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
@@ -1829,8 +1974,8 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
                 None => egui::vec2(0.7, -0.7),
             };
             let step = if dir.is_some() { egui::vec2(side.y, -side.x) } else { egui::vec2(1.0, 0.0) };
-            let free = |sp: Pos2| !placed.iter().any(|(_, q, _)| q.distance(sp) < GLYPH + 1.0);
-            let start = |s: egui::Vec2| base + s * (GLYPH * 0.9);
+            let free = |sp: Pos2| !placed.iter().any(|(_, q, _)| q.distance(sp) < glyph + 1.0);
+            let start = |s: egui::Vec2| base + s * (glyph * 0.9);
             let side = if on_dim(start(side)) && !on_dim(start(-side)) { -side } else { side };
             // Step along until clear of other glyphs, preferring a spot clear of dimension
             // values too.
@@ -1840,15 +1985,18 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
                     if free(sp) && !(avoid_dims && on_dim(sp)) {
                         return Some(sp);
                     }
-                    sp += step * (GLYPH + 2.0);
+                    sp += step * (glyph + 2.0);
                 }
                 None
             };
-            let sp = settle(true).or_else(|| settle(false)).unwrap_or_else(|| start(side) + step * (12.0 * (GLYPH + 2.0)));
+            let sp = settle(true).or_else(|| settle(false)).unwrap_or_else(|| start(side) + step * (12.0 * (glyph + 2.0)));
             placed.push((c.id.clone(), sp, base));
         }
     }
-    let hovered = hover.and_then(|h| placed.iter().find(|(_, q, _)| q.distance(h) <= GLYPH * 0.6).map(|(id, _, _)| id.clone()));
+    // The hovered glyph instance (a Parallel draws one per entity, all with the same id).
+    let hovered_at =
+        hover.and_then(|h| nearest_glyph(placed.iter().map(|(id, q, _)| (id.as_str(), *q)), h, glyph * 0.6)).map(|(id, q)| (id.to_owned(), q));
+    let hovered = hovered_at.as_ref().map(|(id, _)| id.clone());
     // The hovered (or selected) constraint's entities lit up.
     if let Some(id) = hovered.as_ref().or(picked.as_ref()) {
         let group = glyph_group(&ss.sketch, id);
@@ -1890,10 +2038,10 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
             tk.glyph_text
         };
         // A faint leader back to the entity when the glyph was pushed away from it.
-        if sp.distance(*base) > GLYPH * 1.6 {
+        if sp.distance(*base) > glyph * 1.6 {
             painter.line_segment([*base, *sp], Stroke::new(0.8, tk.text_dim.gamma_multiply(0.6)));
         }
-        let r = egui::Rect::from_center_size(*sp, egui::vec2(GLYPH, GLYPH));
+        let r = egui::Rect::from_center_size(*sp, egui::vec2(glyph, glyph));
         painter.rect_filled(r, tk.radius_sm.saturating_sub(1), if lit { tk.accent_soft } else { tk.glyph_bg });
         painter.rect_stroke(
             r,
@@ -1909,20 +2057,20 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
             }
         });
         match pattern_icon.or_else(|| glyph_icon(c.kind.name())) {
-            Some(icon) => crate::icons::paint_icon(painter, r.shrink(2.0), icon, f32::from(col.a()) / 255.0),
+            Some(icon) => crate::icons::paint_icon(painter, r.shrink(2.0 * scale), icon, f32::from(col.a()) / 255.0),
             None => {
                 painter.text(
                     *sp,
                     egui::Align2::CENTER_CENTER,
                     glyph_letter(c.kind.name()),
-                    egui::FontId::proportional(solidcraft_theme::Tokens::get().font_panel),
+                    egui::FontId::proportional(solidcraft_theme::Tokens::get().font_panel * scale),
                     col,
                 );
             }
         }
         drawn.push((id.clone(), *sp));
     }
-    if let (Some(id), Some(h)) = (hovered, hover)
+    if let (Some((id, at_glyph)), Some(h)) = (hovered_at, hover)
         && let Some(c) = ss.sketch.constraints.iter().find(|c| c.id == id)
     {
         let ids = glyph_group(&ss.sketch, &id).join(", ");
@@ -1931,10 +2079,16 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         } else {
             format!("{} ({ids})", c.kind.name())
         };
-        let at = h + egui::vec2(12.0, 12.0);
-        let g = painter.layout_no_wrap(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text);
-        painter.rect_filled(egui::Rect::from_min_size(at, g.size()).expand(3.0), tk.radius_sm.saturating_sub(1), tk.panel);
-        painter.galley(at, g, tk.text);
+        // Wrapped to the view's width so a narrow view never clips it (#10794).
+        let g =
+            painter.layout(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text, glyph_label_wrap_width(proj.rect));
+        // Clear of the cursor, which hangs below and right of the pointer, and next to the
+        // glyph instance under it (#10794).
+        let chip = glyph_label_rect(h, egui::Rect::from_center_size(at_glyph, egui::vec2(glyph, glyph)), g.size() + egui::vec2(6.0, 6.0), proj.rect);
+        crate::scenario::publish_rect("sketch:glyph_label", chip);
+        painter.rect_filled(chip, tk.radius_sm.saturating_sub(1), tk.panel);
+        // A label cut to fit beside the cursor shows only what fits in its chip.
+        painter.with_clip_rect(chip.intersect(painter.clip_rect())).galley(chip.min + egui::vec2(3.0, 3.0), g, tk.text);
     }
     GLYPHS.with(|g| *g.borrow_mut() = drawn);
 }
@@ -2019,6 +2173,9 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
     crate::scenario::publish_count("sketch_align_guides", guides.len() as f64);
     let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
+    // The tool at the cursor sits in the same corner of the pointer (#15391).
+    let r = crate::tool_cursor::clear_of_badge(app, painter, proj.rect, r);
+    crate::scenario::publish_rect("viewport:snap_hint", r);
     painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
     painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro), tk.text);
 }
@@ -2043,7 +2200,10 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 
 #[cfg(test)]
 mod glyph_zoom_tests {
-    use super::{MIN_GLYPH_PX_PER_MM, MIN_GLYPH_SPAN_PX, constraint_glyphs_visible_at_scale};
+    use super::{
+        CURSOR_REACH, GLYPH, MIN_GLYPH_PX_PER_MM, MIN_GLYPH_SPAN_PX, constraint_glyphs_visible_at_scale, glyph_label_rect, glyph_label_wrap_width,
+        glyph_px, nearest_glyph,
+    };
 
     /// A sketch that is small on screen.
     fn small() -> f32 {
@@ -2097,6 +2257,130 @@ mod glyph_zoom_tests {
         assert_eq!(anchors.len(), 1);
         assert!(anchors.first().is_some_and(|(at, dir)| (at.x - 2.5).abs() < 1e-9 && at.y.abs() < 1e-9 && dir.is_none()));
         assert_eq!(crate::icons::markers::glyph_icon(k.name()), Some("c_midpoint"));
+    }
+
+    #[test]
+    fn glyph_size_follows_the_preference_and_defaults_to_the_old_size() {
+        assert_eq!(glyph_px(crate::prefs::Prefs::default().constraint_glyph_scale), GLYPH);
+        assert_eq!(GLYPH, 15.0, "the default badge keeps its size (#10794)");
+        assert_eq!(glyph_px(2.0), 30.0);
+        // A hand-edited settings file can hold anything: it never gives a glyph out of range.
+        for hostile in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -4.0, 0.0, 1e9] {
+            let px = glyph_px(hostile);
+            assert!((GLYPH..=GLYPH * 3.0).contains(&px), "{hostile} gives {px}");
+        }
+    }
+
+    /// The hovered glyph's label never sits where the cursor hangs, below and right of the
+    /// pointer, wherever in the view the glyph is (#10794).
+    #[test]
+    fn glyph_label_stays_clear_of_the_cursor() {
+        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let size = egui::vec2(140.0, 20.0);
+        for glyph_px in [GLYPH, GLYPH * 3.0] {
+            for x in [0.0, 5.0, 60.0, 400.0, 790.0, 800.0] {
+                for y in [0.0, 5.0, 30.0, 300.0, 590.0, 600.0] {
+                    let glyph = egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(glyph_px, glyph_px));
+                    for pointer in [glyph.center(), glyph.left_top(), glyph.right_bottom(), glyph.center_top()] {
+                        let cursor = egui::Rect::from_min_size(pointer, egui::vec2(CURSOR_REACH, CURSOR_REACH));
+                        let label = glyph_label_rect(pointer, glyph, size, view);
+                        assert!(!label.intersects(cursor), "label {label:?} under the cursor at {pointer:?}");
+                        assert!(!label.contains(pointer), "label {label:?} on the pointer {pointer:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn glyph_label_goes_above_and_stays_in_the_view() {
+        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let size = egui::vec2(140.0, 20.0);
+        let glyph = egui::Rect::from_center_size(egui::pos2(400.0, 300.0), egui::vec2(GLYPH, GLYPH));
+        let label = glyph_label_rect(glyph.center(), glyph, size, view);
+        assert!(label.bottom() < glyph.top(), "above the glyph: {label:?}");
+        // At the right edge it moves left to stay readable.
+        let glyph = egui::Rect::from_center_size(egui::pos2(795.0, 300.0), egui::vec2(GLYPH, GLYPH));
+        assert!(view.contains_rect(glyph_label_rect(glyph.center(), glyph, size, view)));
+    }
+
+    /// At 300% the hit regions of neighbouring glyphs overlap: the pointer picks the glyph it is
+    /// nearest, not whichever was placed first (#10794).
+    #[test]
+    fn overlapping_glyphs_pick_the_nearest() {
+        let reach = glyph_px(3.0) * 0.6;
+        let glyphs = [("c1", egui::pos2(100.0, 100.0)), ("c2", egui::pos2(147.0, 100.0))];
+        let pointer = egui::pos2(125.0, 100.0);
+        assert!(glyphs.iter().all(|(_, c)| c.distance(pointer) <= reach), "the test needs overlapping reach");
+        assert_eq!(nearest_glyph(glyphs, pointer, reach).map(|(id, _)| id), Some("c2"));
+        assert_eq!(nearest_glyph(glyphs, egui::pos2(110.0, 100.0), reach).map(|(id, _)| id), Some("c1"));
+        assert_eq!(nearest_glyph(glyphs, egui::pos2(400.0, 400.0), reach), None);
+    }
+
+    /// A Parallel draws a glyph per entity under one id: the hovered instance is the one the
+    /// label goes next to, not the first one drawn (#10794).
+    #[test]
+    fn hovered_instance_of_a_shared_glyph_is_the_one_under_the_pointer() {
+        let far = egui::pos2(500.0, 400.0);
+        let glyphs = [("parallel", egui::pos2(100.0, 100.0)), ("parallel", far)];
+        let (_, at) = nearest_glyph(glyphs, far + egui::vec2(3.0, 2.0), GLYPH * 0.6).unwrap_or(("", egui::Pos2::ZERO));
+        assert_eq!(at, far);
+        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let glyph = egui::Rect::from_center_size(at, egui::vec2(GLYPH, GLYPH));
+        let label = glyph_label_rect(far, glyph, egui::vec2(140.0, 20.0), view);
+        assert!(label.center().distance(far) < 100.0, "label {label:?} beside the hovered glyph");
+    }
+
+    /// A label wrapped to the view's width fits a view narrower than its one-line text.
+    #[test]
+    fn glyph_label_fits_a_narrow_view() {
+        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 600.0));
+        let size = egui::vec2(glyph_label_wrap_width(view) + 6.0, 40.0);
+        for x in [0.0, 60.0, 120.0] {
+            let glyph = egui::Rect::from_center_size(egui::pos2(x, 300.0), egui::vec2(GLYPH, GLYPH));
+            let label = glyph_label_rect(glyph.center(), glyph, size, view);
+            assert!(label.left() >= view.left() && label.right() <= view.right(), "label {label:?} in {view:?}");
+        }
+    }
+
+    /// A wrapped label in a short view stays inside it wherever the glyph is, and one taller than
+    /// the view is cut to the view's height (#10794).
+    #[test]
+    fn glyph_label_stays_inside_a_short_view() {
+        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(300.0, 120.0));
+        for size in [egui::vec2(140.0, 80.0), egui::vec2(294.0, 80.0), egui::vec2(140.0, 200.0)] {
+            for x in [0.0, 150.0, 300.0] {
+                for y in [0.0, 10.0, 60.0, 110.0, 120.0] {
+                    let glyph = egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(GLYPH, GLYPH));
+                    for pointer in [glyph.center(), glyph.left_top(), glyph.right_bottom()] {
+                        let label = glyph_label_rect(pointer, glyph, size, view);
+                        assert!(view.contains_rect(label), "label {label:?} of {size:?} outside {view:?}");
+                        assert!(label.width() > 0.0 && label.height() > 0.0, "label {label:?} vanished");
+                    }
+                }
+            }
+        }
+    }
+
+    /// A label that fits on no side of a short view (above, left, below, right) is cut to a side
+    /// with room rather than laid over the pointer and the cursor (#10794).
+    #[test]
+    fn glyph_label_too_big_for_a_short_view_stays_clear_of_the_cursor() {
+        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(300.0, 120.0));
+        for size in [egui::vec2(140.0, 80.0), egui::vec2(294.0, 80.0), egui::vec2(140.0, 200.0)] {
+            for x in [0.0, 5.0, 150.0, 290.0, 300.0] {
+                for y in [0.0, 5.0, 60.0, 110.0, 120.0] {
+                    let glyph = egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(GLYPH, GLYPH));
+                    for pointer in [glyph.center(), glyph.left_top(), glyph.right_bottom()] {
+                        let cursor = egui::Rect::from_min_size(pointer, egui::vec2(CURSOR_REACH, CURSOR_REACH));
+                        let label = glyph_label_rect(pointer, glyph, size, view);
+                        assert!(view.contains_rect(label), "label {label:?} of {size:?} outside {view:?}");
+                        assert!(!label.intersects(cursor), "label {label:?} of {size:?} under the cursor at {pointer:?}");
+                        assert!(label.width() > 0.0 && label.height() > 0.0, "label {label:?} vanished");
+                    }
+                }
+            }
+        }
     }
 }
 

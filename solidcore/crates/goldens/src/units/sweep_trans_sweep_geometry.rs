@@ -7,6 +7,7 @@ use crate::case::CaseContext;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use solidcore::error::nurbs::nlib_number;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::hermite_curve::HermiteCurve;
@@ -79,9 +80,11 @@ fn v(p: [f64; 3]) -> Vec3 {
 }
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.,
-        SolidError::Nlib { .. } => 1001.,
+        e if nlib_number(e).is_some() => 1001.,
         _ => -1.,
     }
 }

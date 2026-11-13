@@ -21,7 +21,6 @@ assets/
   styles/web/loading.css             # web loading/canvas styles
   appearances/library.rs             # built-in visual presets
   materials/library.rs               # physical defaults and colours
-  shaders/viewport.wgsl               # original viewport shader
   fonts/biz-udp-gothic/              # unmodified font and OFL licence
   locales/{en,de,ja,ko}.json          # shared offline catalogs
   platforms/{macos,linux,windows}/    # bundle, freedesktop and WiX templates
