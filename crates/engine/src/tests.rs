@@ -1013,6 +1013,13 @@ fn a_copy_with_history_undoes_like_the_session_it_copies() {
 /// no command panics internally.
 #[test]
 fn hostile_params_never_panic() {
+    // `file.slicers` gets every hostile value like every command, but lists made-up slicers (none)
+    // instead of searching this machine's programs on each of its ~5,600 calls: a third of a second
+    // a call on Windows, half an hour in all. The tests that make slicers up take turns, and
+    // `MadeUp` puts the real search back.
+    let _turn = mesh_convert::CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _reset = mesh_convert::MadeUp;
+    *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
     let keys = [
         "plane",
         "offset",
