@@ -504,6 +504,24 @@ fn emboss_and_deboss_on_a_face() {
 }
 
 #[test]
+fn emboss_on_a_face_refuses_a_profile_off_it_and_leaves_the_design() {
+    // Two squares over a 40 x 40 top, one of them beside it: the emboss is refused as a whole
+    // rather than raising one square and leaving the other out.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 30], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Marks"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [15, 15]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 10], "p1": [55, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let saved = s.doc.to_json();
+    let v = volume(&mut s);
+    let e = s.execute("solid.emboss", &json!({"sketch": "Marks", "profiles": "all", "depth": 1, "face": [20, 20, 20]})).unwrap_err().to_string();
+    assert!(e.contains("not fitting the selected target face") && e.contains("profile 2 of 2 lies off it"), "{e}");
+    assert_eq!(s.doc.to_json(), saved);
+    assert_eq!(volume(&mut s), v);
+}
+
+#[test]
 fn emboss_face_off_the_part_says_how_far() {
     // #392: a point beside the face was refused with "`face` must identify exactly one target
     // body surface", which didn't say the point was off the face.
@@ -736,6 +754,7 @@ fn half_cylinder_interior_emboss_text() {
     run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
     run(&mut s, "sketch.finish", json!({}));
 
+    let before = volume(&mut s);
     let inner_pt = [0.0, 16.0, 15.0];
     run(
         &mut s,
@@ -749,27 +768,19 @@ fn half_cylinder_interior_emboss_text() {
     );
 
     let v_wrap = volume(&mut s);
-    assert!(v_wrap > 0.0);
-    let state = s.model.state();
-    let tube = state.body("Tube").unwrap();
-    assert_eq!(tube.body.shell_count(), 1);
-
-    let mesh = tube.mesh();
-    let embossed_pts: Vec<_> = mesh
-        .triangles
-        .iter()
-        .flat_map(|t| [t[0], t[1], t[2]])
-        .map(|idx| mesh.positions[idx as usize])
-        .filter(|p| {
-            let r = (p.x * p.x + p.y * p.y).sqrt();
-            r < 15.5
-        })
-        .collect();
-    assert!(!embossed_pts.is_empty(), "embossed text should protrude to radius < 15.5");
-    let min_z = embossed_pts.iter().map(|p| p.z).fold(f64::INFINITY, f64::min);
-    let max_z = embossed_pts.iter().map(|p| p.z).fold(f64::NEG_INFINITY, f64::max);
-    assert!((9.8..=10.5).contains(&min_z), "embossed text baseline should be ~10, got {min_z}");
-    assert!((15.5..=16.5).contains(&max_z), "embossed text top should be ~16, got {max_z}");
+    assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
+    // The same text raised 1 on a flat face: the wrapped text adds about as much (a little less,
+    // its cap lying on a smaller radius than its base).
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let flat_added = volume(&mut flat) - flat_before;
+    let added = v_wrap - before;
+    assert!(added > 0.85 * flat_added && added < 1.02 * flat_added, "wrapped {added}, flat {flat_added}");
 
     // Also test deboss
     let mut s2 = Session::default();
@@ -818,7 +829,6 @@ fn target_planar_face_with_adjacent_fillets_is_not_hijacked() {
 
     let v_before = volume(&mut s);
 
-    let sqrt2_inv = 1.0 / 2.0_f64.sqrt();
     run(
         &mut s,
         "sketch.create",
@@ -826,7 +836,7 @@ fn target_planar_face_with_adjacent_fillets_is_not_hijacked() {
             "plane": {
                 "origin": [10, 20, -30],
                 "x_dir": [0, 1, 0],
-                "y_dir": [sqrt2_inv, 0.0, -sqrt2_inv]
+                "y_dir": [std::f64::consts::FRAC_1_SQRT_2, 0.0, -std::f64::consts::FRAC_1_SQRT_2]
             },
             "name": "Badge"
         }),
