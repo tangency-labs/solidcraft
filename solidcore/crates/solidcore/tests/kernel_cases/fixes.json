@@ -108,7 +108,6 @@
   "transform_scales_each_tolerance",
   "transform_model_size_from_body_box",
   "torus_signed_gen_curve_interval",
-  "torus_keeps_inside_out",
   "torus_major_radius_from_origin",
   "torus_iso_circle_axis_from_midpoint",
   "found_torus_sphere_keep_tested_nurb",

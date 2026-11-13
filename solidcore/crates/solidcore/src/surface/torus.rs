@@ -55,14 +55,12 @@
 //! - **Iso endpoint angles.** Correct upstream's explicit-domain endpoint vectors
 //!   to be relative to the iso circle's center, not the torus origin (#774).
 //!   Extraction, periodic wrapping and interval-length policy remain unchanged.
-//! - **Copies.** As upstream's copy constructor, which leaves `m_bInsideOut` at its
-//!   default, `Clone` (and [`Torus::copy`]) resets [`Torus::inside_out`] to `false`.
-//!   The constructor also leaves it `false` (its `bInsideOut` only orients the minor
-//!   circle); only [`Torus::rebuild_step_from_nurb_parameters`] and
-//!   [`Torus::read_from_db`] set it. With the opt-in
-//!   `Kernel::fixes.torus_keeps_inside_out` (WR-500, #1490) the constructor sets it
-//!   from `bInsideOut` and a torus made, rebuilt or read that way keeps it in its
-//!   copies (`SmSurfOfRevolution` Test #11 compares it with the generator's).
+//! - **Inside out (WR-500, #1490).** The constructor sets [`Torus::inside_out`] from
+//!   its `bInsideOut`, and `Clone` (and [`Torus::copy`]) copies it, so the surface and
+//!   its generating circle always agree (`SmSurfOfRevolution` Test #11 compares them).
+//!   Upstream's constructor only orients the minor circle with `bInsideOut`, leaving
+//!   `m_bInsideOut` `FALSE`, and its copy constructor resets it; a torus that forgot it
+//!   was written to STEP with the wrong `same_sense`.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments and the
 //!   arguments upstream marks `NotUsed` (`EvaluateSTEP`'s side flags,
 //!   `CreateIsoParametricCurve`'s approximation tolerance, `ReadFromDB`'s type) are
@@ -173,23 +171,17 @@ pub struct Torus {
     pub(crate) minor_radius: f64,
     /// `m_bInsideOut`.
     pub(crate) inside_out: bool,
-    /// Not upstream (WR-500, #1490): made, rebuilt or read with
-    /// `Kernel::fixes.torus_keeps_inside_out`, so the copy keeps
-    /// [`Self::inside_out`].
-    pub(crate) keeps_inside_out: bool,
 }
 
-/// The copy constructor: copies the surface of revolution and the radii; the
-/// inside-out flag keeps its default (`false`), as upstream, unless the torus keeps it
-/// (`Kernel::fixes.torus_keeps_inside_out`, WR-500).
+/// The copy constructor: copies the surface of revolution, the radii and the inside-out
+/// flag (WR-500: upstream's resets the flag).
 impl Clone for Torus {
     fn clone(&self) -> Self {
         Self {
             base: self.base.clone(),
             major_radius: self.major_radius,
             minor_radius: self.minor_radius,
-            inside_out: self.keeps_inside_out && self.inside_out,
-            keeps_inside_out: self.keeps_inside_out,
+            inside_out: self.inside_out,
         }
     }
 }
@@ -229,7 +221,6 @@ impl Torus {
             major_radius: UNDEF_DOUBLE,
             minor_radius: UNDEF_DOUBLE,
             inside_out: false,
-            keeps_inside_out: false,
         }
     }
 
@@ -240,7 +231,7 @@ impl Torus {
     /// `x_axis x y_axis` over the domain's V interval, inside out with
     /// `opts.inside_out` (`SmCircle::CreateCanonical`); the generator is then not
     /// tested for planarity (it is marked planar). The surface's own inside-out flag
-    /// stays `false`, as upstream.
+    /// is `opts.inside_out` (WR-500; upstream leaves it `false`).
     ///
     /// # Errors
     ///
@@ -293,15 +284,13 @@ impl Torus {
         };
 
         // (the self-intersection test of a major radius below the minor radius only
-        // warns upstream); not upstream (WR-500, opt-in): the surface is inside out
-        // with its generator
-        let keeps_inside_out = k.fixes.torus_keeps_inside_out;
+        // warns upstream); not upstream (WR-500): the surface is inside out with its
+        // generator
         Ok(Self {
             base,
             major_radius,
             minor_radius,
-            inside_out: keeps_inside_out && opts.inside_out,
-            keeps_inside_out,
+            inside_out: opts.inside_out,
         })
     }
 
@@ -1504,8 +1493,6 @@ impl Torus {
         self.major_radius = maj_rad;
         self.minor_radius = min_rad;
         self.inside_out = inside_out;
-        // not upstream (WR-500, opt-in): its copies keep the flag
-        self.keeps_inside_out |= k.fixes.torus_keeps_inside_out;
         self.base.planar_generator = true;
         self.base.position = ref_frame;
         self.base.swap_uv = swap_uv;
@@ -1601,8 +1588,6 @@ impl Torus {
     pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
         // init output object
         let mut torus = Self::empty();
-        // not upstream (WR-500, opt-in): its copies keep the flag read
-        torus.keeps_inside_out = k.fixes.torus_keeps_inside_out;
 
         if db.file_type() == FileType::Ascii {
             if let Some(s) = db.in_stream_mut() {

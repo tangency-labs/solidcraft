@@ -930,9 +930,7 @@ impl Surface {
                 base: s.base().clone_for_evaluation(depth + 1)?,
                 major_radius: s.major_radius,
                 minor_radius: s.minor_radius,
-                // The copy constructor resets this flag; an evaluation copy must not.
                 inside_out: s.inside_out,
-                keeps_inside_out: s.keeps_inside_out,
             })),
             SurfaceKind::SurfOfRevolution(s) => {
                 SurfaceKind::SurfOfRevolution(Box::new(s.clone_for_evaluation(depth + 1)?))
@@ -3528,8 +3526,7 @@ impl Surface {
             // net the converter refuses leaves the surface as it was, with nothing notified;
             // then the surface itself is swapped with its notifications and takes the copy.
             // The copy is exact, as `clone_kind_exact`'s: the B-spline objects as they are
-            // (`Clone` fixes their knots up) and a torus's inside-out mark (`Clone` drops it
-            // without `keeps_inside_out`).
+            // (`Clone` fixes their knots up).
             SurfaceKind::Cone(s) => {
                 let mut swapped = s.clone();
                 swapped.rev = s.rev().clone_exact();
@@ -9124,8 +9121,7 @@ mod swap_definition_tests {
     }
 
     /// WR-701: a swap keeps the surface as it was made, swapped: a torus marked inside out
-    /// whose copy constructor drops the mark (`keeps_inside_out` false) is still inside out
-    /// after the swap, as it was before the swap was made on a copy.
+    /// is still inside out after the swap, as it was before the swap was made on a copy.
     #[test]
     fn a_swap_keeps_an_inside_out_torus_inside_out() {
         let k = Kernel::default();
@@ -9133,7 +9129,6 @@ mod swap_definition_tests {
         let mut torus =
             Torus::create_canonical(&k, &frame, 4.0, 1.5, TorusOptions::default(), None).unwrap();
         torus.inside_out = true;
-        torus.keeps_inside_out = false;
         let mut s = Surface::from(torus);
         s.swap_uv(&k).unwrap();
         let SurfaceKind::Torus(t) = s.kind() else {

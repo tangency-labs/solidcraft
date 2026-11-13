@@ -102,7 +102,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_major_radius_from_origin = true;
     f.fillet_nx1_opposite_continuation_side_edge = true;
     f.torus_iso_circle_axis_from_midpoint = true;
-    f.torus_keeps_inside_out = true;
     f.internal_pole_row_through_knot = true;
     f.extrusion_origin_scaled_zero = true;
     f.transform_scales_each_tolerance = true;

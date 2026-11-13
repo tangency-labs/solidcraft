@@ -204,7 +204,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "thicken_planar_side_walls",
     "torus_check_spindle_apex",
     "torus_iso_circle_axis_from_midpoint",
-    "torus_keeps_inside_out",
     "torus_major_radius_from_origin",
     "torus_signed_gen_curve_interval",
     "transform_model_size_from_body_box",
