@@ -534,7 +534,8 @@ exact section is a circle, an ellipse with semi-axes R and R / cos θ, or lines 
   axis to the plane. |d| > R + tol gives nothing; |d| ≥ R, or two lines closer than the tolerance,
   is one `Tangent` line; otherwise two `Crossing` lines at ±√(R² − d²) across the axis, each kept if
   its angle lies in the cylinder's sweep. |d| > R − zone tolerance of either face is also tangent
-  (WR-510), so a plane a hair off a wall does not cut it in two lines microns apart.
+  (WR-510), so a plane a hair off a wall does not cut it in two lines microns apart; when that
+  tangent line is outside the sweep, the crossings are tested instead.
 - θ near 0 (plane square to the axis): the circle of radius R about the axis point on the plane.
 - otherwise: the ellipse, centre where the axis meets the plane, built from the two generator lines
   in the plane spanned by a and n.
