@@ -11,6 +11,9 @@ use solidcraft_geom::Aabb3;
 use solidcraft_sketch::{CurveKind, Sketch};
 use solidcraft_viewport::{Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 
+/// The grid's spacing and reach for a view, shared with the other apps that draw a grid.
+pub use solidcraft_viewport::grid::{grid_ext, grid_step};
+
 use crate::{Result, Sel, Session};
 
 /// Colours (shared with the GPU viewport).
@@ -219,20 +222,6 @@ pub fn grid_plane(back: Vec3, last: GridPlane) -> GridPlane {
         return last;
     }
     GridPlane::Ground
-}
-
-/// Grid spacing (minor, major) for a view of the given half height.
-pub fn grid_step(half_height: f64) -> (f64, f64) {
-    let raw = (half_height / 10.0).max(1e-3);
-    let p = 10f64.powf(raw.log10().floor());
-    let minor = if raw / p < 2.0 {
-        p
-    } else if raw / p < 5.0 {
-        2.0 * p
-    } else {
-        5.0 * p
-    };
-    (minor, minor * 5.0)
 }
 
 /// How wide the cross-fade between two grid levels is, in powers of ten of the view's height
@@ -645,17 +634,6 @@ pub fn grid_far_reach(cam: &Camera, far: f64, c: Vec3, n: Vec3) -> f64 {
         return 0.0;
     }
     (far - depth) / len
-}
-
-/// The grid's half size for a view of the given half height, seen at the given slant (the cosine
-/// of the angle between the view and the grid's plane): the grid reaches as far on its plane as
-/// the view is wide, which stretches as the plane is seen at a slant (#3087).
-///
-/// The picture and the window share it, so that they draw the same grid (#4214).
-pub fn grid_ext(half_height: f64, major: f64, slant: f64) -> f64 {
-    let major = major.max(1e-3);
-    let ext = (half_height * 3.0 / major).ceil() * major;
-    (ext / slant.abs().max(0.25) / major).ceil() * major
 }
 
 /// Sketch curves as world polylines with their colour.
