@@ -133,6 +133,28 @@ fn unsupported(reason: &'static str) -> SolidError {
     }
 }
 
+/// Whether `c` is straight: a line, or a B-spline whose control points all lie within `tol` of
+/// the line through its first and last (a skin's rails and flat sections are such splines).
+/// Any other curve is not.
+fn is_straight(c: &Curve, tol: f64) -> Result<bool> {
+    let b = match c.kind() {
+        CurveKind::Line(_) => return Ok(true),
+        CurveKind::BSpline(b) => b,
+        _ => return Ok(false),
+    };
+    let (points, _) = b.control_polygon()?;
+    let (Some(&first), Some(&last)) = (points.first(), points.last()) else {
+        return Ok(false);
+    };
+    let Ok(u) = (last - first).unitize() else {
+        return Ok(false);
+    };
+    Ok(points.iter().all(|&p| {
+        let d = p - first;
+        (d - u * d.dot(u)).length() <= tol
+    }))
+}
+
 /// The straight segment from `a` to `b`, run from `a`.
 fn segment(a: Point3, b: Point3) -> Result<NewCurve> {
     Ok(NewCurve {
@@ -311,16 +333,26 @@ pub fn extend_trim(
     }
     let reach = REACH * (size + distance);
 
-    // the moved edge, run as the picked one: offset to its right seen from the side it runs
-    // with (the face's normal when it runs along its curve)
-    let side = if picked.same { normal } else { -normal };
-    let moved = offset(k, &picked.curve, side, distance, 0.1 * tol)?;
-    let straight = matches!(picked.curve.kind(), CurveKind::Line(_));
+    // the moved edge, run as the picked one, to its right seen from the face's normal: a straight
+    // edge (a line, or a spline whose control points lie on its chord, as a skin's
+    // rails and flat sections are) moves exactly along the in-plane normal; a curved one to its
+    // offset (to its right seen from the side it runs with: the face's normal when it runs along
+    // its curve)
+    let straight = is_straight(&picked.curve, tol)?;
+    let moved = if straight {
+        None
+    } else {
+        let side = if picked.same { normal } else { -normal };
+        Some(offset(k, &picked.curve, side, distance, 0.1 * tol)?)
+    };
 
     let mut new_outer: Vec<NewCurve> = Vec::new();
     let mut corners: Vec<Point3> = Vec::new();
     if n == 1 {
         // a closed edge: no neighbours, the offset alone
+        let Some(moved) = moved else {
+            return Err(unsupported("a loop of one straight edge"));
+        };
         new_outer.push(NewCurve {
             from: Some(e),
             curve: moved,
@@ -348,17 +380,20 @@ pub fn extend_trim(
         let (v0, v1) = (picked.start(k)?, picked.end(k)?);
         // the moved edge far enough along to meet the neighbours: a line extended both ways;
         // a curve as its offset over its own interval
-        let target = if straight {
-            let (p, q) = (
-                moved.evaluate_point(k, picked.interval.min())?,
-                moved.evaluate_point(k, picked.interval.max())?,
-            );
-            let u = (q - p)
-                .unitize()
-                .map_err(|_| unsupported("an edge of no length"))?;
-            Curve::from(create_line_segment(p - u * reach, q + u * reach)?)
-        } else {
-            moved.copy(k)?
+        let target = match &moved {
+            None => {
+                // the line `distance` out along the in-plane normal to the right of the run
+                let u = (v1 - v0)
+                    .unitize()
+                    .map_err(|_| unsupported("an edge of no length"))?;
+                let out = u
+                    .cross(normal)
+                    .unitize()
+                    .map_err(|_| unsupported("an edge along the plane's normal"))?;
+                let (p, q) = (v0 + out * distance, v1 + out * distance);
+                Curve::from(create_line_segment(p - u * reach, q + u * reach)?)
+            }
+            Some(moved) => moved.copy(k)?,
         };
         let (w0, t0) = hit(k, v0, before.direction(k, true)?, reach, &target, tol)?;
         let (w1, t1) = hit(k, v1, -after.direction(k, false)?, reach, &target, tol)?;
@@ -375,8 +410,8 @@ pub fn extend_trim(
         corners.push(w1);
         // the curves from the edge after the picked one round to the edge before it, then the
         // edge before carried, the moved edge, the edge after carried
-        let carried_before = matches!(before.curve.kind(), CurveKind::Line(_));
-        let carried_after = matches!(after.curve.kind(), CurveKind::Line(_));
+        let carried_before = is_straight(&before.curve, tol)?;
+        let carried_after = is_straight(&after.curve, tol)?;
         let last = round.len().saturating_sub(1);
         for (i, u) in round.iter().enumerate().skip(1) {
             if i == last {
@@ -401,11 +436,7 @@ pub fn extend_trim(
                 });
             }
         }
-        if straight {
-            let mut c = segment(w0, w1)?;
-            c.from = Some(e);
-            new_outer.push(c);
-        } else {
+        if let Some(moved) = moved {
             let mut c = moved;
             let mut ivl = Extent1d::from_raw(t0.min(t1), t0.max(t1));
             c.trim(k, &mut ivl, TrimMode::Silent)?;
@@ -419,6 +450,10 @@ pub fn extend_trim(
                 curve: c,
                 orientation: picked.orientation(),
             });
+        } else {
+            let mut c = segment(w0, w1)?;
+            c.from = Some(e);
+            new_outer.push(c);
         }
         // the edge after the picked one
         if carried_after {
