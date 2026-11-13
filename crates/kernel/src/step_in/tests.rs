@@ -662,6 +662,98 @@ fn a_sliver_planar_face_passes_smlibs_check() {
     crate::validation::check_kept(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{e}"));
 }
 
+/// A 20 × 30 × 10 mm block (in mm) whose 12 edges are straight cubic Béziers with the knots
+/// (0, `span`), as Siemens NX writes them (`span` 1.020781457822E-07), and whose edge from
+/// (0, 0, 0) to (20, 0, 0) is split at `split` mm from its start: a micro edge and the rest,
+/// both on that edge's curve, used in its place by both its faces' loops.
+fn bezier_block(span: &str, split: f64) -> String {
+    let mut s = String::from(HEAD);
+    let size = [20.0, 30.0, 10.0];
+    let corners = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)];
+    let pts: Vec<[f64; 3]> = corners.iter().map(|&(x, y, z)| [x as f64 * size[0], y as f64 * size[1], z as f64 * size[2]]).collect();
+    let f = |x: f64| format!("{x:.17E}");
+    let mut vertices: Vec<[f64; 3]> = pts.clone();
+    vertices.push([split, 0.0, 0.0]);
+    for (i, p) in vertices.iter().enumerate() {
+        s += &format!("#{}=CARTESIAN_POINT('',({},{},{}));\n#{}=VERTEX_POINT('',#{});\n", 200 + i, f(p[0]), f(p[1]), f(p[2]), 220 + i, 200 + i);
+    }
+    let edges = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
+    for (k, &(a, b)) in edges.iter().enumerate() {
+        let (p, q) = (pts[a], pts[b]);
+        let base = 1000 + 10 * k;
+        let cps: Vec<String> = (0..4)
+            .map(|j| {
+                let t = j as f64 / 3.0;
+                let c = [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1]), p[2] + t * (q[2] - p[2])];
+                s += &format!("#{}=CARTESIAN_POINT('',({},{},{}));\n", base + j, f(c[0]), f(c[1]), f(c[2]));
+                format!("#{}", base + j)
+            })
+            .collect();
+        s += &format!(
+            "#{}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,{span}),.PIECEWISE_BEZIER_KNOTS.);\n",
+            300 + k,
+            cps.join(",")
+        );
+        if k == 0 {
+            // The micro edge from the start vertex to the split vertex, then the rest (#332).
+            s += "#320=EDGE_CURVE('',#220,#228,#300,.T.);\n#332=EDGE_CURVE('',#228,#221,#300,.T.);\n";
+        } else {
+            s += &format!("#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n", 320 + k, 220 + a, 220 + b, 300 + k);
+        }
+    }
+    // Edge 12 is the rest of edge 0; loops run counter-clockwise seen from outside.
+    let faces: [(&[(usize, bool)], (i32, i32, i32), (i32, i32, i32)); 6] = [
+        (&[(3, false), (2, false), (1, false), (12, false), (0, false)], (0, 0, 0), (0, 0, -1)),
+        (&[(4, true), (5, true), (6, true), (7, true)], (0, 0, 1), (0, 0, 1)),
+        (&[(0, true), (12, true), (9, true), (4, false), (8, false)], (0, 0, 0), (0, -1, 0)),
+        (&[(1, true), (10, true), (5, false), (9, false)], (1, 0, 0), (1, 0, 0)),
+        (&[(2, true), (11, true), (6, false), (10, false)], (1, 1, 0), (0, 1, 0)),
+        (&[(3, true), (8, true), (7, false), (11, false)], (0, 1, 0), (-1, 0, 0)),
+    ];
+    let mut face_ids = Vec::new();
+    for (fi, (lp, o, n)) in faces.iter().enumerate() {
+        let base = 400 + fi * 20;
+        let oes: Vec<String> = lp
+            .iter()
+            .enumerate()
+            .map(|(j, (e, fwd))| {
+                s += &format!("#{}=ORIENTED_EDGE('',*,*,#{},{});\n", base + j, 320 + e, if *fwd { ".T." } else { ".F." });
+                format!("#{}", base + j)
+            })
+            .collect();
+        s += &format!("#{}=EDGE_LOOP('',({}));\n#{}=FACE_OUTER_BOUND('',#{},.T.);\n", base + 5, oes.join(","), base + 6, base + 5);
+        let o = [o.0 as f64 * size[0], o.1 as f64 * size[1], o.2 as f64 * size[2]];
+        s += &format!("#{}=CARTESIAN_POINT('',({},{},{}));\n#{}=DIRECTION('',({}.,{}.,{}.));\n", base + 7, f(o[0]), f(o[1]), f(o[2]), base + 8, n.0, n.1, n.2);
+        s += &format!("#{}=AXIS2_PLACEMENT_3D('',#{},#{},$);\n#{}=PLANE('',#{});\n", base + 9, base + 7, base + 8, base + 10, base + 9);
+        s += &format!("#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n", base + 11, base + 6, base + 10);
+        face_ids.push(format!("#{}", base + 11));
+    }
+    s += &format!("#100=CLOSED_SHELL('',({}));\n#101=MANIFOLD_SOLID_BREP('Bloco',#100);\n", face_ids.join(","));
+    s += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+    s += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    s += TAIL;
+    s
+}
+
+/// A 1.26 µm edge cut from the start of a straight cubic Bézier whose knots span 1.02e-7 (two
+/// things Siemens NX writes, here together on one edge of a 20 × 30 × 10 mm block): the micro
+/// edge covers 6.4e-15 of the curve's parameter, and the block once came in as no body ("a UV
+/// trim on [0, 1], its edge on [0, 6.5e-15]"). It imports as the closed 6000 mm³ block it is,
+/// as it does with the knots (0, 20).
+#[test]
+fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
+    for span in ["20.", "1.020781457822E-07"] {
+        let imp = step_import(&bezier_block(span, 1.26e-3)).unwrap_or_else(|e| panic!("knots (0, {span}): {e}"));
+        assert_eq!(imp.bodies.len(), 1, "knots (0, {span}): {:?}", imp.warnings);
+        let b = &imp.bodies[0];
+        assert!(b.closed, "knots (0, {span}): open");
+        crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("knots (0, {span}): {e}"));
+        let m = measure(&b.body).unwrap();
+        assert!(rel(m.volume, 6000.0) < 1e-9, "knots (0, {span}): volume {}", m.volume);
+        assert_eq!(m.faces, 6, "knots (0, {span})");
+    }
+}
+
 fn context(id: u64, unit: &str) -> String {
     format!(
         "#{id}=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{},#{}))REPRESENTATION_CONTEXT('',''));\n#{}=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-6),#{},'','');\n#{}={unit};\n#{}=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));\n",
