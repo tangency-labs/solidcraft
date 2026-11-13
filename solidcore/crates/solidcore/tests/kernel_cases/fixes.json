@@ -179,7 +179,6 @@
   "fillet_run_on_past_far_end_only",
   "fillet_run_on_bspline_trims",
   "fillet_rail_trim_at_near_knot",
-  "boolean_lists_virtual_surface_copies",
   "close_loop_relates_only_coincident_edges",
   "ssi_tangent_contact_points",
   "ssi_low_angle_start_on_probation",
