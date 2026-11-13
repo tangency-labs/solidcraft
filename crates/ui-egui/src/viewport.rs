@@ -4486,6 +4486,8 @@ struct HoverBlock {
     recoloured: Vec<crate::gpu::BlockTris>,
     /// Whole lit bodies' edges: the model's own lines, drawn again in the highlight's colours.
     lit_edges: Vec<crate::gpu::LitEdges>,
+    /// Whole lit bodies evaluated from their plans for the highlight itself (Wireframe).
+    planned: Vec<crate::gpu::PlannedBody>,
 }
 
 /// The plan the model draws a whole highlighted body from, when it draws one on the GPU. The
@@ -4501,6 +4503,23 @@ fn highlight_plan(
         return None;
     }
     drawn_plan(app, b, model_plan_class(app, b, active_bodies).is_some())
+}
+
+/// The plan a whole lit body's faces are evaluated from on the GPU for the highlight itself, in
+/// Wireframe: the model draws no faces there, so there are none to draw again, and copying
+/// every triangle of a whole hovered assembly took about 150 ms and 240 MB at each change of
+/// the hovered row. The highlight hands the GPU the body's plan instead, as the model does
+/// when it shades.
+fn wireframe_highlight_plan(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> Option<std::sync::Arc<solidcore_tess::TessPlan>> {
+    if app.ui.visual_style != 2 || crate::render_workspace::active(app) || app.preview.effective_replaced().contains(&b.name) {
+        return None;
+    }
+    app.viewport
+        .gpu
+        .is_some_and(|g| g.tess)
+        .then(|| refined(app, b).map(|(plan, _)| plan).or_else(|| b.gpu_plan_at(solidcraft_engine::doc::display_quality::current())))
+        .flatten()
+        .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH)
 }
 
 /// Whether the model draws a whole body opaque on the GPU, rather than building it on the CPU:
@@ -4643,8 +4662,10 @@ struct WholeBody {
 
 /// Light the whole of `b` from what the model already has on the GPU, copying no triangle: its
 /// plan or its opaque runs (tinted over the model's own colours), its block's vertices recoloured
-/// in the highlight's palette (faded and see-through bodies), or its placements. `false` when
-/// none applies (wireframe, a live preview standing in for the body): the caller copies it.
+/// in the highlight's palette (faded and see-through bodies), or its placements; in Wireframe,
+/// where the model draws no faces, its plan evaluated for the highlight itself. `false` when
+/// none applies (no GPU evaluation, a live preview standing in for the body): the caller copies
+/// it.
 fn light_whole_body(
     app: &SolveApp,
     b: &solidcraft_engine::doc::ModelBody,
@@ -4685,7 +4706,22 @@ fn light_whole_body(
         }
     }
     let colour = feedback.color(lit.colour);
-    instances.add(app, b, colour)
+    if instances.add(app, b, colour) {
+        return true;
+    }
+    // After the placements, as the copy it replaces was: a highlight without depth (Wireframe
+    // draws no faces) shows whichever lit face is drawn last. Evaluated bodies are drawn before
+    // the copied triangles, so a face lit over the body stays on top (see the renderer).
+    if let Some(plan) = wireframe_highlight_plan(app, b) {
+        feedback.planned.push(crate::gpu::PlannedBody {
+            plan,
+            face_colors: vec![colour],
+            class: crate::gpu::TriClass::Opaque,
+            closed: b.is_closed(),
+        });
+        return true;
+    }
+    false
 }
 
 /// The highlight scene: origin widget, construction planes, selection and hover.
@@ -4903,6 +4939,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         sc.selected_blocks = cached.selected_blocks;
         sc.recoloured = cached.recoloured;
         sc.lit_edges = cached.lit_edges;
+        sc.planned = cached.planned;
         sc.hover_instanced = cached.hover_instanced;
         sc.selected_instanced = cached.selected_instanced;
         return sc;
@@ -5231,6 +5268,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         sc.selected_blocks.append(&mut feedback.selected_blocks);
         sc.recoloured.append(&mut feedback.recoloured);
         sc.lit_edges.append(&mut feedback.lit_edges);
+        sc.planned.append(&mut feedback.planned);
         sc.hover_instanced.append(&mut feedback.hover_instanced);
         sc.selected_instanced.append(&mut feedback.selected_instanced);
     } else {
@@ -5253,6 +5291,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         let (hover_instanced, selected_instanced) = (feedback.hover_instanced, feedback.selected_instanced);
         let recoloured = feedback.recoloured;
         let lit_edges = feedback.lit_edges;
+        let planned = feedback.planned;
         if let Ok(mut cache) = app.viewport.hover_block.lock() {
             *cache = Some(HoverBlock {
                 key,
@@ -5268,6 +5307,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 selected_instanced: selected_instanced.clone(),
                 recoloured: recoloured.clone(),
                 lit_edges: lit_edges.clone(),
+                planned: planned.clone(),
             });
         }
         sc.blocks.push(block);
@@ -5279,6 +5319,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         sc.selected_instanced = selected_instanced;
         sc.recoloured = recoloured;
         sc.lit_edges = lit_edges;
+        sc.planned = planned;
     }
 
     if solidcraft_engine::geom::env::var_os("PROFILE_FRAMES").is_some() {
@@ -11668,6 +11709,85 @@ mod tests {
         assert_eq!(see_through.recoloured.len(), 1, "it is lit from the model's own vertices");
         assert!(!see_through.recoloured[0].vertices.is_empty());
         assert!(see_through.blocks.iter().all(|b| b.bytes.vertices.is_empty()), "no copy of its triangles");
+    }
+
+    /// In Wireframe the model draws no faces, so a whole hovered or selected body's faces cannot
+    /// be drawn again from the model: the highlight hands the GPU the body's plan to evaluate
+    /// itself, instead of copying every triangle (a whole assembly copied about 240 MB at each
+    /// change of the hovered row). Without GPU evaluation the triangles are copied as before.
+    #[test]
+    fn wireframe_whole_body_highlights_are_evaluated_from_plans() {
+        let mut app = cylinder_app();
+        app.set_origin_shown(false);
+        app.ui.visual_style = 2;
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+        let body = crate::open_meshing::session_world(&app.session).bodies[0].clone();
+        let plan = body.gpu_plan_at(solidcraft_engine::doc::display_quality::current()).expect("the test body has a plan");
+        build_scene(&app);
+        for selected in [false, true] {
+            app.viewport.hover_bodies = if selected { Vec::new() } else { vec![body.name.clone()] };
+            app.session.selection = if selected { vec![Sel::Body { name: body.name.clone() }] } else { Vec::new() };
+            let lit = build_highlight(&app);
+            assert_eq!(lit.planned.len(), 1, "selected {selected}: the body's faces are evaluated from its plan");
+            assert!(std::sync::Arc::ptr_eq(&lit.planned[0].plan, &plan));
+            assert!(lit.merged().tris.is_empty(), "selected {selected}: no copy of the body's triangles");
+        }
+        app.session.selection.clear();
+        app.viewport.hover_bodies = vec![body.name.clone()];
+        app.viewport.gpu = None;
+        let copied = build_highlight(&app);
+        assert!(copied.planned.is_empty());
+        assert!(!copied.merged().tris.is_empty(), "without GPU evaluation the triangles are copied");
+    }
+
+    /// A whole hovered body in Wireframe, its faces evaluated from its plan on the GPU, looks
+    /// like the copy of its triangles it replaces. Skipped without a GPU adapter.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn wireframe_whole_body_highlights_look_as_their_copies_did() {
+        const SIZE: u32 = 256;
+        let mut app = cylinder_app();
+        app.set_origin_shown(false);
+        app.ui.visual_style = 2;
+        app.fit_view();
+        let body = crate::open_meshing::session_world(&app.session).bodies[0].clone();
+        app.viewport.hover_bodies = vec![body.name.clone()];
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
+        let proj = projection(&app, rect);
+        let e = proj.cam.eye().to_f32();
+        let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+        let mut render = |tess: bool| {
+            app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+            let model = build_scene(&app);
+            let highlight = build_highlight(&app);
+            let planned = highlight.planned.len();
+            let image = crate::gpu::render_offscreen(
+                model,
+                Some(highlight),
+                proj.vp.to_f32(),
+                proj.cam.back().to_f32(),
+                eye,
+                SIZE,
+                tess.then_some(solidcraft_viewport_gpu::SHADER),
+                [0.0; 8],
+                crate::gpu::analysis_colors(&Tokens::get().analysis),
+            );
+            (planned, image)
+        };
+        let (planned, gpu) = render(true);
+        let (copied, cpu) = render(false);
+        let (Some(gpu), Some(cpu)) = (gpu, cpu) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        assert_eq!((planned, copied), (1, 0), "evaluated from the plan, then copied");
+        let px = |img: &[u8], i: usize| [img[4 * i], img[4 * i + 1], img[4 * i + 2]];
+        let n = (SIZE * SIZE) as usize;
+        let background = px(&cpu, 0);
+        let drawn = (0..n).filter(|&i| px(&cpu, i) != background).count();
+        assert!(drawn > n / 20, "the lit body covers the view: {drawn} pixels");
+        let differ = (0..n).filter(|&i| px(&gpu, i).iter().zip(px(&cpu, i)).any(|(a, b)| a.abs_diff(b) > 24)).count();
+        assert!(differ * 100 < drawn, "{differ} of {drawn} lit pixels differ from the copy");
     }
 
     /// A whole faded or see-through body lit from the model's own vertices, recoloured in the

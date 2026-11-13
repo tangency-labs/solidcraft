@@ -2478,6 +2478,9 @@ pub struct Renderer {
     /// the highlight's), smooth and flat.
     tri_hl_instanced: wgpu::RenderPipeline,
     tri_hl_instanced_flat: wgpu::RenderPipeline,
+    /// The highlight scene's own bodies drawn from their plans ([`GpuScene::planned`] of the
+    /// highlight, evaluated on the GPU), in their palette colours, as `tri_hl` draws built ones.
+    tri_hl_planned: wgpu::RenderPipeline,
     pbr: wgpu::RenderPipeline,
     /// `pbr` for built triangles whose palette entries name their materials (the product
     /// preview's blocks, [`TriClass::Pbr`]).
@@ -3383,6 +3386,7 @@ impl Renderer {
                 pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
                 see_through_instanced(TriSource::Instanced, ""),
                 solid("sc_tris_hl_instanced", "fs_tri", None, highlight_depth(t.depth), TriSource::Instanced),
+                solid("sc_tris_hl_planned", "fs_tri", None, highlight_depth(t.depth), TriSource::Planned),
             )
         };
         let see_through_flat = || {
@@ -3461,8 +3465,17 @@ impl Renderer {
             let (tri_instanced_flat, flat_marks) = flat.join();
             let (tri_hl_hover, tri_hl_hover_built) = hover.join();
             let (tri_hl_selected, tri_hl_selected_built) = selected.join();
-            let (tri_hl, trans, glass_far, glass_near, ghost, xray, (glass_far_smooth, glass_near_smooth, trans_smooth), tri_hl_instanced) =
-                see_through_tris.join();
+            let (
+                tri_hl,
+                trans,
+                glass_far,
+                glass_near,
+                ghost,
+                xray,
+                (glass_far_smooth, glass_near_smooth, trans_smooth),
+                tri_hl_instanced,
+                tri_hl_planned,
+            ) = see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
             let (line, line_hidden, line_lit, line_lit_hidden) = lines.join();
             let (overlay, guide_line) = lines_all.join();
@@ -3530,6 +3543,7 @@ impl Renderer {
                 tri_hl_selected_built,
                 tri_hl_instanced,
                 tri_hl_instanced_flat,
+                tri_hl_planned,
                 pbr,
                 pbr_palette,
                 pbr_instanced,
@@ -3968,7 +3982,10 @@ impl Renderer {
             None => {}
         }
         res.sketch.take(device, queue, &res.uniform, &res.uniform_bgl, cb.sketch_key, &cb.sketch_slot, None, oit);
-        res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, None, oit);
+        // The highlight evaluates plans of its own where the model has none to draw again (in
+        // Wireframe, a whole lit body's faces).
+        let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
+        res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, tess, oit);
         res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, oit);
         // See-through surfaces are drawn without sorting where the device can (order-independent
         // transparency, in an offscreen frame); else their triangles are sorted for the view.
@@ -4361,6 +4378,19 @@ impl Renderer {
             pass.set_vertex_buffer(0, vertices.slice(..));
             pass.draw(r.vertices.clone(), 0..1);
             tally.triangles(r.vertices.len() as u32, 1);
+        }
+        // Whole lit bodies the highlight evaluates from their plans itself (the model draws no
+        // faces of them to draw again: Wireframe). With the other whole bodies, before the
+        // copied triangles: a face lit over the body keeps its own colour, as above. A whole body
+        // still copied (no plan, or a plan too large for one batch) now comes after an evaluated
+        // one it overlaps, where the old copy order could put it before.
+        for d in &h.planned {
+            pass.set_pipeline(&res.tri_hl_planned);
+            pass.set_vertex_buffer(0, d.mesh.vertices.slice(..));
+            pass.set_vertex_buffer(1, d.colors.slice(..));
+            pass.set_index_buffer(d.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..d.mesh.index_count, 0, 0..1);
+            tally.triangles(d.mesh.index_count, 1);
         }
         // The highlight's own feedback triangles: its blocks' (kept while it is unchanged), then
         // the loose ones.
