@@ -318,9 +318,8 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
                 deg: s.deg,
                 dir: Direction::from_flag(s.dir).ok_or_else(|| harness("bad direction flag"))?,
                 e: s.e,
-                // the fork's options, off: upstream's sweep, as the golden records it
+                // the fork's upright option, off: upstream's sweep, as the golden records it
                 up: None,
-                spread_closing_turn: false,
             };
             let r = adv::create_sweep_scale(&traj, &sect, v3(s.z0), &opt);
             o.push(status(&r));

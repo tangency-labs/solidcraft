@@ -36,11 +36,6 @@
 //!   tangent at every section, the section is turned by the inverse start frame first, and
 //!   a trajectory whose tangent comes within [`MIN_UP_ACROSS`] (the sine) of the up
 //!   direction is refused (`Unsupported`): there is no upright there.
-//! - Not upstream (the SolidCraft fork): with [`SweepScaleOptions::spread_closing_turn`] a
-//!   closed trajectory's projection normal frame, which comes back turned about the tangent
-//!   round a trajectory that is not planar, has that turn spread along it in proportion to
-//!   the parameter ([`spread_turn`]), so the sweep closes; a turn within `1e-12` radians
-//!   (a planar trajectory's, to rounding) is left as it is.
 //! - `N_CreateSweepScale`: a trajectory, cross section or sweep degree above `32767`
 //!   (upstream's `NL_DEGREE` is a `short`, so it cannot be expressed there) is
 //!   `InvalidInput`.
@@ -108,43 +103,6 @@ fn after_start(xl: Vec3, yl: Vec3, zl: Vec3, f0: (Vec3, Vec3, Vec3)) -> (Vec3, V
     )
 }
 
-/// Not upstream: the least closing turn (radians) [`spread_turn`] spreads; below it the turn
-/// is rounding (a planar trajectory's) and the frame is left as it is.
-const LEAST_CLOSING_TURN: f64 = 1e-12;
-
-/// Not upstream: round the closed trajectory `traj` (its ends within [`MODEL_TOL`] of each
-/// other, its unit tangents there within `1e-8`, the procedural sweep's G1 rule), the frame
-/// vectors `z` (at the parameters `tt`, the first at the trajectory's start and the last at its
-/// end) turned about the tangent by `theta f`, `f` the fraction of the parameter run and
-/// `theta` the angle from the last to the first about the end's tangent: the last then lies
-/// on the first, and the turn is spread evenly in the parameter. Whether it turned them: not
-/// for an open trajectory, a corner at the join, or a turn below [`LEAST_CLOSING_TURN`].
-fn spread_turn(traj: &Curve, tt: &[f64], z: &mut [Vec3]) -> Result<bool> {
-    let (a, b) = traj.param_bounds();
-    let ((pa, xa), (pb, xb)) = (
-        traj.eval_tangent(a, Side::Left)?,
-        traj.eval_tangent(b, Side::Left)?,
-    );
-    let closed = (pa - pb).length() <= MODEL_TOL * (1.0 + pa.length());
-    if !closed || (xa - xb).length() > 1e-8 {
-        return Ok(false);
-    }
-    let (Some(&first), Some(&last)) = (z.first(), z.last()) else {
-        return Ok(false);
-    };
-    let theta = xb.dot(last.cross(first)).atan2(last.dot(first));
-    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
-    if !(theta.abs() > LEAST_CLOSING_TURN) || !(b > a) {
-        return Ok(false);
-    }
-    for (&t, zk) in tt.iter().zip(z.iter_mut()) {
-        let (_, x) = traj.eval_tangent(t, Side::Left)?;
-        let (sin, cos) = (theta * (t - a) / (b - a)).sin_cos();
-        *zk = *zk * cos + x.cross(*zk) * sin;
-    }
-    Ok(true)
-}
-
 /// Upstream `lto` of `N_FillNSidedHole`: the relative arc length tolerance.
 const LTO: f64 = 0.05;
 
@@ -205,11 +163,6 @@ pub struct SweepScaleOptions<'a> {
     /// and turns only about the up direction as the trajectory turns. `None`: upstream's z
     /// (`cur_z`, else the projection normal method).
     pub up: Option<Vec3>,
-    /// Not upstream (the SolidCraft fork): round a closed trajectory (its ends meeting, its
-    /// tangents there within `1e-8`), spread the projection normal frame's closing turn
-    /// along it ([`spread_turn`]), so the last section lies on the first. Upstream leaves the
-    /// frame turned at the end (its holonomy round a trajectory that is not planar).
-    pub spread_closing_turn: bool,
 }
 
 impl Default for SweepScaleOptions<'_> {
@@ -223,7 +176,6 @@ impl Default for SweepScaleOptions<'_> {
             dir: Direction::V,
             e: 1e-3,
             up: None,
-            spread_closing_turn: false,
         }
     }
 }
@@ -366,7 +318,6 @@ fn sweep_scale(
         dir,
         e,
         up,
-        spread_closing_turn,
     } = *opt;
     // not upstream: an upright sweep's unit up direction
     let up = match up {
@@ -494,10 +445,7 @@ fn sweep_scale(
             }
         }
         zl_vecs = create_b_vectors(cur_t, z0, &tt)?;
-        // not upstream: a closed trajectory's closing turn spread along it (then the sections
-        // are not the projection normal frame's, and there is no trace)
-        let spread = spread_closing_turn && spread_turn(cur_t, &tt, &mut zl_vecs)?;
-        if let (false, Some(trace)) = (spread, trace.as_mut()) {
+        if let Some(trace) = trace.as_mut() {
             trace.pieces.clone_from(&seg_pars);
             trace.chain.clone_from(&tt);
             trace.start_normal = normalize(z0)?.0;
@@ -1765,98 +1713,5 @@ mod tests {
         };
         assert!(create_sweep_scale(&t, &bad, Vec3::Z, &opts).is_err());
         assert!(create_sweep_scale(&bad, &c, Vec3::Z, &opts).is_err());
-    }
-
-    /// A closed cubic through sixteen points of the twisted loop `(r cos t, r sin t, lift sin 2t)`,
-    /// `r = 10 + lift cos 2t`: its radius and height swing a quarter period apart, so the loop is
-    /// chiral and its tangent indicatrix does not bound half the sphere, and the
-    /// rotation-minimising frame comes back turned (by about 1.58 radians at lift 3, its total
-    /// torsion; a saddle `lift cos 2t` with matching halves comes back unturned). Planar, the
-    /// circle of radius 10, at lift 0. The closed fit takes its points closed, the first repeated
-    /// last (`a[0] == a[n]`).
-    fn loop_traj(lift: f64) -> Curve {
-        let mut points: Vec<Vec3> = (0..16)
-            .map(|i| {
-                let t = std::f64::consts::TAU * f64::from(i) / 16.0;
-                let r = 10.0 + lift * (2.0 * t).cos();
-                Vec3::new(r * t.cos(), r * t.sin(), lift * (2.0 * t).sin())
-            })
-            .collect();
-        points.push(points[0]);
-        let b = crate::nurbs::b_spline_curve::BSplineCurve::interpolate_points(
-            &points,
-            None,
-            3,
-            None,
-            None,
-            true,
-            crate::nurbs::crv_fit::p1::ParamMethod::ChordLength,
-        )
-        .unwrap();
-        b.nurb.clone().unwrap()
-    }
-
-    /// The sweep of a vertical segment along `t` from the start axis `z0`, its closing turn
-    /// spread or not, and where its first, middle and last sections lie.
-    fn swept(t: &Curve, z0: Vec3, spread: bool) -> (Surface, SweepPlacements) {
-        let c = crv(
-            &[[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]],
-            1,
-            vec![0.0, 0.0, 1.0, 1.0],
-        );
-        let opts = SweepScaleOptions {
-            deg: 3,
-            dir: Direction::U,
-            e: 1e-4,
-            spread_closing_turn: spread,
-            ..SweepScaleOptions::default()
-        };
-        create_sweep_scale_with_placements(t, &c, z0, &opts).unwrap()
-    }
-
-    fn bits(s: &Surface) -> Vec<[u64; 4]> {
-        s.rows()
-            .flatten()
-            .map(|c| [c.x.to_bits(), c.y.to_bits(), c.z.to_bits(), c.w.to_bits()])
-            .collect()
-    }
-
-    /// Spreading the closing turn changes nothing on an open trajectory or a closed planar one:
-    /// the surface and placements are upstream's, bit for bit.
-    #[test]
-    fn an_open_or_planar_trajectory_sweeps_exactly_as_upstream() {
-        for (t, z0) in [(arc_traj(), Vec3::Y), (loop_traj(0.0), Vec3::Z)] {
-            let (a, pa) = swept(&t, z0, false);
-            let (b, pb) = swept(&t, z0, true);
-            assert_eq!(a.degrees(), b.degrees());
-            assert_eq!(a.u_knots(), b.u_knots());
-            assert_eq!(a.v_knots(), b.v_knots());
-            assert_eq!(bits(&a), bits(&b));
-            assert_eq!(pa, pb);
-        }
-    }
-
-    /// Round a closed twisted loop the projection normal frame comes back turned; with the turn
-    /// spread the last section's frame is the first's.
-    #[test]
-    fn round_a_closed_twisted_loop_the_turn_is_spread_and_the_sweep_closes() {
-        let t = loop_traj(3.0);
-        let near = |p: &Frame, q: &Frame, tol: f64| {
-            (p.x - q.x).length() <= tol
-                && (p.y - q.y).length() <= tol
-                && (p.z - q.z).length() <= tol
-        };
-        let (_, upstream) = swept(&t, Vec3::Z, false);
-        assert!(
-            !near(&upstream[0], &upstream[2], 1e-6),
-            "the loop turns the frame"
-        );
-        let (_, spread) = swept(&t, Vec3::Z, true);
-        assert!(
-            near(&spread[0], &spread[2], 1e-9),
-            "{:?} {:?}",
-            spread[0],
-            spread[2]
-        );
     }
 }

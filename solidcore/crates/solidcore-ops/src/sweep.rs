@@ -276,8 +276,8 @@ pub enum SweepRoute {
 pub enum SweepFrame {
     /// It turns with the path, keeping its attitude to the path's tangent: the path's
     /// rotation-minimising frame (exact along lines and arcs; the kernel's projection-normal
-    /// frame along any other path, its closing turn spread along a closed one so the sheet
-    /// closes).
+    /// frame along any other path, which the kernel brings back to its start round a closed
+    /// one, so the sheet closes).
     Follow,
     /// It only moves along the path, keeping its orientation.
     Translate,

@@ -1,8 +1,9 @@
 //! The curve sweep (`CreateSweepSurface`, NLib's `N_CreateSweepScale`) carries its section on
 //! the projection-normal frame, close to rotation-minimising. Round a closed rail that is not
-//! planar that frame comes back turned about the rail (its holonomy), so the last section does
-//! not lie on the first and the sheet does not close. The closing turn is spread along the rail:
-//! the last section's frame is the first's.
+//! planar a rotation-minimising frame comes back turned about the rail (its holonomy); the
+//! kernel's own closed-curve correction (`N_CreateBVectors`: on a closed curve the last frame
+//! vector is reset to the first and the others averaged back from it) brings it back, so the
+//! last section lies on the first and the sheet closes. A regression test of that guarantee.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

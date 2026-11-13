@@ -1600,12 +1600,9 @@ impl BSplineSurface {
                 dir: Direction::U,
                 e: approx_tol_3d,
                 up,
-                // (not upstream) a closed path's sweep closes
-                spread_closing_turn: true,
             };
-            // an upright sweep's sections, or a closed path's with its closing turn spread, are
-            // not the projection normal frame's: no trace
-            let traced = |t: SweepTrace| (up.is_none() && !t.chain.is_empty()).then_some(t);
+            // an upright sweep's sections are not the projection normal frame's: no trace
+            let traced = |t: SweepTrace| up.is_none().then_some(t);
             match opt_placements {
                 None => {
                     let (surf, t) =
