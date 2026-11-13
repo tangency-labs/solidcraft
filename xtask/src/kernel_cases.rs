@@ -648,10 +648,11 @@ pub const CASES_LIST: &str = "tests/kernel-cases/CASES";
 
 /// Where a new kernel case goes instead, for the check's failure message.
 const NEW_CASES_GO: &str = "tests/kernel-cases/ takes no new cases. A kernel case goes to solidcore's corpus, \
-crates/solidcore/tests/kernel_cases/<area>/ in tangency-labs/solidcore: draft it here as a recipe, export it with \
-`cargo xtask kernel-cases --area <area> --export DIR` and add DIR/<area>/<case>.json (and its .bodies.json.gz) there, \
-or write the entry by hand as that folder's README describes; then delete the draft. A case about a command, the UI \
-or a product rule is a test in its area's existing test file here (CONTRIBUTING.md, \"Tests\").";
+solidcore/crates/solidcore/tests/kernel_cases/<area>/ in this repository (mirrored to tangency-labs/solidcore): \
+draft it here as a recipe, export it with `cargo xtask kernel-cases --area <area> --export DIR` and add \
+DIR/<area>/<case>.json (and its .bodies.json.gz) there, or write the entry by hand as that folder's README describes; \
+then delete the draft. A case about a command, the UI or a product rule is a test in its area's existing test file \
+here (CONTRIBUTING.md, \"Tests\").";
 
 /// `cargo xtask lists`: every case directory under `tests/kernel-cases/` is in [`CASES_LIST`],
 /// and every line there is a case.
@@ -740,8 +741,13 @@ mod tests {
         assert!(options(&["--route", "boolean=solidcore"], "x").is_err());
         assert!(options(&["--kernel", "smlib"], "x").is_err());
         assert!(options(&["--kernel", "solidcore", "--known-failing", "/k"], "x").is_err());
-        let o = options(&["--known-failing", "/k", "--out", "/r"], "x").unwrap();
-        assert_eq!((o.known_failing, o.out), (Some(PathBuf::from("/k")), PathBuf::from("/r")));
+        let dir = std::env::current_dir().unwrap();
+        let known = dir.join("known.txt");
+        let out = dir.join("result");
+        let o = options(&["--known-failing", known.to_str().unwrap(), "--out", out.to_str().unwrap()], "x").unwrap();
+        assert_eq!((o.known_failing, o.out), (Some(known), out));
+        let o = options(&["--known-failing", "known.txt", "--out", "result"], "x").unwrap();
+        assert_eq!((o.known_failing, o.out), (Some(root().join("known.txt")), PathBuf::from("result")));
     }
 
     fn gate_on(text: &str, cases: &[(&str, &str)]) -> Result<String, String> {
@@ -817,7 +823,7 @@ mod tests {
         assert!(cases_listed(list, &found(&["ladder/01-tier/001-box", "booleans/1-a"])).is_ok());
         let new = cases_listed(list, &found(&["booleans/1-a", "booleans/2-b", "ladder/01-tier/001-box"])).unwrap_err();
         assert!(new.contains("NEW CASE: booleans/2-b"), "{new}");
-        assert!(new.contains("crates/solidcore/tests/kernel_cases/"), "{new}");
+        assert!(new.contains("solidcore/crates/solidcore/tests/kernel_cases/"), "{new}");
         let gone = cases_listed(list, &found(&["booleans/1-a"])).unwrap_err();
         assert!(gone.contains("remove its line): ladder/01-tier/001-box"), "{gone}");
         assert!(cases_listed("b\na\n", &found(&["a", "b"])).unwrap_err().contains("out of order"));

@@ -51,8 +51,8 @@ fn opened_boxes(size: [f64; 3], corners: &[[f64; 3]], programs: &str, prepare: i
     std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", programs)).unwrap();
     let mut h = Harness::new();
     prepare(&mut h);
-    h.app.open_path(&path);
-    h.frames(3);
+    h.app.open_path_async(&path);
+    h.settle();
     h
 }
 
@@ -157,7 +157,8 @@ fn turn_up_axis_in_the_component_menu_turns_and_undo_restores() {
     let occurrence = h.app.session.doc.occurrences.iter().map(|o| o.id).max().expect("the import's occurrence");
     h.app.run("occurrence.ground", json!({"occurrence": occurrence, "grounded": false})).unwrap();
     let items = solidcraft_ui_egui::context_menu::items(&h.app, &solidcraft_ui_egui::context_menu::Target::Occurrence { path: vec![occurrence] });
-    let turn = items.iter().find(|i| i.id == "ui.turnUpAxis").expect("Turn Up Axis is in the menu");
+    let placement = items.iter().find(|i| i.label == "Placement").expect("the Placement flyout is in the menu");
+    let turn = placement.children.iter().find(|i| i.id == "ui.turnUpAxis").expect("Turn Up Axis is in the Placement flyout");
     let labels: Vec<_> = turn.children.iter().map(|c| c.label.as_str()).collect();
     assert_eq!(labels, ["Y up \u{2192} Z up", "Z up \u{2192} Y up"]);
     let at = egui::pos2(10.0, 10.0);
@@ -310,10 +311,18 @@ fn which_way_is_up_weighs_flat_area_then_the_box() {
     assert_eq!(upright(f64::INFINITY, 1.0, [1.0, 1.0, 1.0]), Upright::Unclear);
 }
 
+fn click_note(h: &mut Harness, name: &str) {
+    let [x, y] = h.at(&json!({"handle": name})).unwrap();
+    h.call("ui.move", json!({"x": x, "y": y}));
+    // Refresh the notice position after hover lays out the viewport again.
+    let p = solidcraft_ui_egui::scenario::handle_at(name).unwrap();
+    h.call("ui.click", json!({"x": p.x, "y": p.y}));
+}
+
 #[test]
 fn the_notes_stand_it_up_turns_once_and_undo_restores() {
     let mut h = opened_box(ON_ITS_BACK, UNKNOWN, |_| {});
-    h.run(&json!([{"click": {"handle": "stand_up:stand"}}])).unwrap();
+    click_note(&mut h, "stand_up:stand");
     h.frames(3);
     assert!(h.app.stand_up.is_none() && !h.app.stand_up_note, "the note is gone");
     assert!(!painted(&h, "Did this part open the wrong way up?"));
@@ -325,7 +334,7 @@ fn the_notes_stand_it_up_turns_once_and_undo_restores() {
 #[test]
 fn the_notes_dont_ask_again_turns_the_offer_off() {
     let mut h = opened_box(ON_ITS_BACK, UNKNOWN, |_| {});
-    h.run(&json!([{"click": {"handle": "stand_up:never"}}])).unwrap();
+    click_note(&mut h, "stand_up:never");
     h.frames(3);
     assert!(h.app.stand_up.is_none(), "closed");
     assert!(!h.app.preferences.offer_stand_up, "the offer is off, as the dialog's Don't ask again");
@@ -335,7 +344,7 @@ fn the_notes_dont_ask_again_turns_the_offer_off() {
 #[test]
 fn the_note_closes_on_dismiss_and_by_itself() {
     let mut h = opened_box(ON_ITS_BACK, UNKNOWN, |_| {});
-    h.run(&json!([{"click": {"handle": "toast:stand_up:close"}}])).unwrap();
+    click_note(&mut h, "toast:stand_up:close");
     h.frames(3);
     assert!(h.app.stand_up.is_none(), "dismissed");
     assert!(h.app.preferences.offer_stand_up, "the preference stays");

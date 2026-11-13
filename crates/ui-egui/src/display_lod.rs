@@ -20,9 +20,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use solidcore_record::Vec3;
+use solidcore_tess::TessPlan;
 use solidcraft_engine::doc::ModelBody;
 use solidcraft_engine::doc::display_quality::{DisplayQuality, MAX_REFINE, refinement_for};
-use solidcraft_engine::geom::tess::TessPlan;
 use solidcraft_engine::geom::{Aabb3, Mesh};
 
 /// Most triangles all refined bodies may draw together (on top of the rest of the model).
@@ -73,7 +73,7 @@ pub(crate) struct Lens {
 
 impl Lens {
     /// The view of `cam` in a viewport `height_px` physical pixels high.
-    pub fn new(cam: &solidcraft_engine::render::Camera, height_px: f64) -> Lens {
+    pub fn new(cam: &solidcraft_viewport::Camera, height_px: f64) -> Lens {
         let perspective = cam.fov > 0.0;
         let scale = if perspective { height_px / (2.0 * (cam.fov * 0.5).tan()) } else { height_px / (2.0 * cam.half_height()) };
         Lens { eye: cam.eye(), back: cam.back(), scale, perspective, near: (cam.distance * 1e-2).max(1e-3) }
@@ -164,6 +164,8 @@ pub(crate) struct Stats {
 pub(crate) struct Lod {
     /// The step each body is drawn at, by [`body_id`] (absent: 0, the chosen level).
     shown: HashMap<usize, u8>,
+    /// The display quality the steps in `shown` are steps of.
+    shown_quality: Option<DisplayQuality>,
     cache: HashMap<(usize, DisplayQuality, u8), Entry>,
     #[cfg(not(target_arch = "wasm32"))]
     jobs: Vec<Job>,
@@ -197,6 +199,12 @@ impl Lod {
         self.clock += 1;
         self.collect();
         let mut changed = false;
+        // A step of another quality is not a step of this one (#15989): kept, it would hold the
+        // body at the new level's step 0, coarser than the level it was switched from.
+        if self.shown_quality.replace(q) != Some(q) && !self.shown.is_empty() {
+            self.shown.clear();
+            changed = true;
+        }
         // The bodies that need it most first, within the triangle budget.
         let mut order: Vec<usize> = (0..candidates.len()).collect();
         order.sort_by(|&a, &b| candidates[b].err_px.total_cmp(&candidates[a].err_px));
@@ -412,7 +420,7 @@ fn mesh_bytes(m: &Mesh) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     fn cylinder() -> ModelBody {
         let body = solidcraft_engine::kernel::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap();
@@ -468,7 +476,15 @@ mod tests {
         let sag = mesh
             .triangles
             .iter()
-            .map(|t| t.map(|i| mesh.positions[i as usize]))
+            .zip(&mesh.tri_face)
+            // The side wall's own triangles: the flat caps have corners on the rim too.
+            .filter(|(_, f)| {
+                matches!(
+                    solidcraft_engine::kernel::face_surface(&b.body, **f as usize),
+                    Some(solidcraft_engine::kernel::FaceSurface::Cylinder { .. })
+                )
+            })
+            .map(|(t, _)| t.map(|i| mesh.positions[i as usize]))
             .filter(|t| t.iter().all(|p| (r(*p) - 10.0).abs() < 1e-9))
             .map(|[a, b, c]| 10.0 - r((a + b + c) * (1.0 / 3.0)))
             .fold(0.0, f64::max);
@@ -484,6 +500,19 @@ mod tests {
         // Back in: swapped from the cache at once.
         assert!(lod.update(q, cand(6.0), &live));
         assert_eq!(lod.step(&b), 3);
+        // A finer quality chosen while zoomed in (#15989): refined at its own steps, never left at
+        // its step 0, coarser than the refined Normal it replaces.
+        let fine = DisplayQuality::Fine;
+        let fine_err = 6.0 * fine.chord_fraction() / q.chord_fraction();
+        for _ in 0..2000 {
+            lod.update(fine, vec![Candidate { body: &b, err_px: fine_err, triangles: base }], &live);
+            if lod.refined(&b, fine).is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(lod.step(&b), 2, "1.8 px of error at Fine: two steps");
+        assert!(lod.refined(&b, fine).is_some());
         // The body leaves the model: dropped.
         lod.update(q, Vec::new(), &Default::default());
         assert_eq!(lod.stats.cached, 0);

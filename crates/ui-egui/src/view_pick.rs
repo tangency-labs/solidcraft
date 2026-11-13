@@ -130,7 +130,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     // What the viewport shows now, and what a pick may not answer for.
     let st = crate::open_meshing::shown_world(app);
     let bounds = crate::viewport::body_bounds(app, &st);
-    let active_bodies = app.session.active_occurrence_path.as_ref().and_then(|q| app.session.occurrence_bodies(q, true).ok());
+    let active_bodies = crate::viewport::active_body_names(app);
     let replaced: &[String] = app.preview.effective_replaced();
     let section = crate::viewport::section_plane(app);
     let wireframe = app.ui.visual_style == 2;
@@ -215,7 +215,7 @@ fn face_candidates(
     st: &solidcraft_engine::doc::ModelState,
     bounds: &[(String, solidcraft_engine::geom::Aabb3)],
     input: &Input,
-    active_bodies: &Option<Vec<String>>,
+    active_bodies: &Option<crate::viewport::ActiveBodyNames>,
     replaced: &[String],
     include_ghosted: bool,
 ) -> Vec<Cand> {
@@ -312,7 +312,7 @@ fn section_cap(
     first_kept: Option<f64>,
     include_ghosted: bool,
     replaced: &[String],
-    active_bodies: &Option<Vec<String>>,
+    active_bodies: &Option<crate::viewport::ActiveBodyNames>,
 ) -> Option<(f64, String, Vec3)> {
     let den = sn.dot(input.d);
     if den.abs() < 1e-12 {
@@ -340,7 +340,7 @@ pub(crate) fn body_cut_at(
     t_cap: f64,
     include_ghosted: bool,
     replaced: &[String],
-    active_bodies: &Option<Vec<String>>,
+    active_bodies: &Option<crate::viewport::ActiveBodyNames>,
 ) -> Option<String> {
     let walk_eps = 1e-6 * (1.0 + crate::viewport::scene_radius(app));
     for (i, b) in st.bodies.iter().enumerate() {
@@ -392,7 +392,7 @@ fn near_edges(
     pos: Pos2,
     face_t: Option<f64>,
     edge_px: f32,
-    active_bodies: &Option<Vec<String>>,
+    active_bodies: &Option<crate::viewport::ActiveBodyNames>,
     replaced: &[String],
     include_ghosted: bool,
     wireframe: bool,

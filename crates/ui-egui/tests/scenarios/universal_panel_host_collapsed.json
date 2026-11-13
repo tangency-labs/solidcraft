@@ -1,0 +1,11 @@
+[
+  {"note":"Collapsed specimens keep full-width headers, declared actions and one-click restoration; hidden bodies keep their controllers."},
+  {"call":"ui.resize","params":{"width":1400,"height":900}},
+  {"panel_fixture":{"enabled":true,"preset":"collapsed"}},
+  {"widget":"Expand panel"},
+  {"widget":"Collapse panel"},
+  {"call":"engine.execute","params":{"command":"panel.action","params":{"target":{"type":"instance","id":"specimen-0"},"action":"apply"}}},
+  {"panel_fixture":{}},
+  {"expect":{"errors":0,"features":0,"dialog":null,"tool":null}},
+  {"panel_fixture":{"enabled":false}}
+]

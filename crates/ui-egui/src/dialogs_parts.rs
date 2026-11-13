@@ -12,7 +12,7 @@ use solidcraft_engine::{Sel, Session};
 use crate::SolveApp;
 use crate::dialogs::{Kind, combo, form_row};
 use crate::selection::{EDGES, FACES, SelInput};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// One family of the library.
 #[derive(Clone, Debug, PartialEq)]
@@ -58,7 +58,7 @@ pub fn families(v: &Value) -> Vec<Family> {
 /// name for a family the catalogs don't know.
 pub(crate) fn family_name(f: &Family) -> String {
     let id = format!("parts.family.{}", f.id);
-    match crate::i18n::tr(&id) {
+    match solidcraft_ui_text::tr(&id) {
         shown if shown == id => f.name.clone(),
         shown => shown.to_string(),
     }
@@ -170,7 +170,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     };
     if lib.is_empty() {
         ui.vertical(|ui| {
-            crate::ui_kit::text(ui, crate::i18n::tr_label("the parts library is not available"), crate::ui_kit::Text::Note("parts_unavailable"));
+            crate::ui_kit::text(
+                ui,
+                solidcraft_ui_text::tr_label("the parts library is not available"),
+                crate::ui_kit::Text::Note("parts_unavailable"),
+            );
         });
         return false;
     }
@@ -222,10 +226,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             k.length = Some(i);
         });
     }
-    text_row(ui, "Name", &mut k.name, crate::i18n::tr("parts.automatic_name"));
+    text_row(ui, "Name", &mut k.name, solidcraft_ui_text::tr("parts.automatic_name"));
     // The part, and its table values.
     let key = (k.family, k.size, k.length);
-    let tex_id = egui::Id::new("sc_part_picture");
+    let tex_id = egui::Id::unique("sc_part_picture");
     if k.picture != Some(key) {
         let tex = insert_params(&lib, k, &[])
             .ok()
@@ -244,7 +248,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             ui.add(egui::Image::new(&tx).fit_to_exact_size(vec2(180.0, 112.0)).corner_radius(t.radius_sm));
         }
         None => {
-            crate::ui_kit::text(ui, crate::i18n::tr_label("no picture"), crate::ui_kit::Text::Note("parts_picture"));
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr_label("no picture"), crate::ui_kit::Text::Note("parts_picture"));
         }
     });
     if let Some((_, row)) = f.sizes.get(k.size)
@@ -264,7 +268,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     }
     if inputs.first().is_some_and(|i| i.items.is_empty()) {
         ui.vertical(|ui| {
-            crate::ui_kit::text(ui, crate::i18n::tr("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
         });
     }
     false
@@ -330,9 +334,10 @@ mod tests {
     /// don't know keeps the library's name.
     #[test]
     fn family_names_follow_the_language() {
+        crate::i18n::install();
         let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap());
         assert!(l.len() >= 7, "{}", l.len());
-        let _german = crate::i18n::scope("de");
+        let _german = solidcraft_ui_text::scope("de");
         for f in &l {
             assert_ne!(family_name(f), f.name, "{}", f.id);
         }
@@ -409,13 +414,14 @@ mod tests {
     /// Every dimension the library gives for a size is labelled in words, in each family.
     #[test]
     fn every_library_dimension_has_a_label_in_words() {
+        crate::i18n::install();
         let mut s = solidcraft_engine::Session::default();
         let l = families(&s.execute("parts.library", &json!({})).unwrap());
         assert!(l.len() >= 7, "{}", l.len());
         for f in &l {
             for (size, row) in &f.sizes {
                 for key in row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| !matches!(k.as_str(), "size" | "default_length")) {
-                    let label = dimension_label(key).map(crate::i18n::tr);
+                    let label = dimension_label(key).map(solidcraft_ui_text::tr);
                     assert!(
                         label.is_some_and(|l| l.starts_with(char::is_uppercase) && !l.contains('_') && !l.starts_with("parts.")),
                         "{} {size}: {key} is labelled {label:?}",

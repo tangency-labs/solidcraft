@@ -35,6 +35,12 @@ face appearances keep their existing priority. Physical material changes affect 
 `delete` to remove it. Names must be unique. To remove a style column, use
 `config.column` with `material` or `appearance` set to the target body and `delete: true`.
 
+Each row also has a fixed id, which `config.table` lists with the row. A rename keeps the id, and a
+deleted row's id is never given to another row. `config.activate` and `config.preview` take `row`
+as a name or an id. `config.row` takes `name` and `from` the same way. A row picked by its id
+must exist. A name it doesn't find adds a new row. A number is always an id and text is always a
+name, so a row named `"17"` is not row `17`. The table still saves the active row by its name.
+
 Suppression cells accept `true`/`false`, `yes`/`no`, and `1`/`0`, ignoring case and surrounding
 whitespace. Creating, copying, or editing a row checks its final suppression values before saving.
 An invalid value leaves the table and undo history unchanged; accepted text keeps its spelling.

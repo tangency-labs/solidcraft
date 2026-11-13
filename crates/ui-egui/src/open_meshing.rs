@@ -84,7 +84,7 @@ impl Meshing {
                                 crate::viewport::warm_shared_tris(&mesh);
                             }
                             if plans {
-                                let _ = b.display_plan();
+                                let _ = b.gpu_plan_at(solidcraft_engine::doc::display_quality::current());
                                 let _ = b.plan_mesh_in_place_at(solidcraft_engine::doc::display_quality::current());
                             }
                         }
@@ -161,11 +161,15 @@ pub(crate) fn progress(app: &SolveApp) -> Option<(usize, usize)> {
 /// A small "Loading parts n/N" note at the foot of the viewport while bodies are being meshed:
 /// a part not drawn yet can't be picked yet either, and this says why.
 pub(crate) fn show(app: &SolveApp, ctx: &egui::Context) {
+    // The operations panel shows it instead.
+    if app.preferences.operations_panel {
+        return;
+    }
     let (Some((done, total)), Some(view)) = (progress(app), app.viewport.rect) else { return };
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let at = egui::pos2(view.left() + 12.0, view.bottom() - 12.0);
     Container::new(ctx, Surface::Toast)
-        .area(egui::Id::new("open_meshing"))
+        .area(egui::Id::unique("open_meshing"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::LEFT_BOTTOM)
         .fixed_pos(at)
@@ -215,9 +219,10 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         if let Some(m) = app.open_meshing.as_mut() {
             m.complete = true;
         }
+        crate::operations::ended(app, "meshing", crate::operations::Outcome::Done);
         if profiling() {
             let ms = began.map_or(0.0, |t| (ctx.input(|i| i.time) - t) * 1000.0);
-            eprintln!("SolidCraft open meshing: all {} bodies shown after {ms:.0} ms", world.bodies.len());
+            solidcraft_engine::note!("SolidCraft open meshing: all {} bodies shown after {ms:.0} ms", world.bodies.len());
         }
         // Framed from outlines and not moved since: frame the meshes.
         if framed == Some(app.cam) {
@@ -279,7 +284,7 @@ pub(crate) fn refresh(app: &mut SolveApp, now: f64) {
     if !m.first_shown && !st.bodies.is_empty() {
         m.first_shown = true;
         if profiling() {
-            eprintln!("SolidCraft open meshing: first {} bodies shown after {:.0} ms", st.bodies.len(), (now - began) * 1000.0);
+            solidcraft_engine::note!("SolidCraft open meshing: first {} bodies shown after {:.0} ms", st.bodies.len(), (now - began) * 1000.0);
         }
     }
     m.shown = Some((done, Arc::new(st)));

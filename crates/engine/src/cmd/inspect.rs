@@ -11,14 +11,27 @@ use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
+use crate::schema::inspect::{BodiesDetail, DocumentBodies, TimelineDetail, TimelineRow};
 use crate::schema::inspect::{
-    BodyListParams, FaceCylinder, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads, ModelThreadsParams,
+    BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox, CommandEntry,
+    CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentSketch,
+    FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
+    MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
+    ModelThread, ModelThreads, ModelThreadsParams, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile,
+    SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const BODY_LIST_CONTRACT: TypedContract<BodyListParams> = TypedContract::new();
 const THREADS_CONTRACT: TypedContract<ModelThreadsParams> = TypedContract::new();
+const BODY_FEATURES_CONTRACT: TypedContract<BodyFeaturesParams> = TypedContract::new();
+const MEASURE_CONTRACT: TypedContract<MeasureParams> = TypedContract::new();
+const DOCUMENT_INSPECT_CONTRACT: TypedContract<DocumentInspectParams> = TypedContract::new();
+const SKETCH_INSPECT_CONTRACT: TypedContract<SketchInspectParams> = TypedContract::new();
+const MATERIAL_ASSIGN_CONTRACT: TypedContract<MaterialAssignParams> = TypedContract::new();
+const MATERIAL_LIST_CONTRACT: TypedContract<MaterialListParams> = TypedContract::new();
+const COMMANDS_CONTRACT: TypedContract<CommandsParams> = TypedContract::new();
 
 #[path = "appearance_chain.rs"]
 mod appearance_chain;
@@ -26,32 +39,52 @@ mod appearance_chain;
 #[path = "appearance_gestures.rs"]
 pub(super) mod appearance_gestures;
 
+#[path = "body_features.rs"]
+mod body_features;
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("inspect.colored_components", "Enable Component Colors", colored_components)
+    CommandSpec::new("inspect.colored_components", "Component Colors", colored_components)
         .at("SOLID", "INSPECT").icon("colored_components").noundo()
         .params("enabled?: bool (omitted: toggle); temporary component colours, without changing appearances"),
-    CommandSpec::new("inspect.measure", "Measure", measure)
+    CommandSpec::new("inspect.measure", "Measure", crate::checked!("inspect.measure", measure))
         .at("SOLID", "INSPECT")
         .icon("measure")
         .key("I")
-        .noundo()
-        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
-    CommandSpec::new("document.inspect", "Inspect Design", inspect).icon("inspect").noundo().params("measure?: bool (include body measurements)"),
+        .noundo().read_only()
+        .contract(&MEASURE_CONTRACT)
+        .output(output_schema_for::<MeasureResult>)
+        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+    CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
+        .icon("inspect")
+        .noundo().read_only()
+        .contract(&DOCUMENT_INSPECT_CONTRACT)
+        .output(output_schema_for::<DocumentInspectResult>)
+        .params(
+            "measure?: bool (include body measurements); sketch_counts?: bool (each sketch also gives its plane and its number of points and constraints); \
+             timeline?: true (default) | \"summary\" (each feature as id, name, type, with error, warning, suppressed and rolled_back only when set) | false (left out); \
+             bodies?: true (default) | \"names\" (only the body names, nothing measured) | false (left out)",
+        ),
     CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
         "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
-    CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).at("SKETCH", "INSPECT").icon("inspect").noundo().params("sketch?: id|name (default active)"),
+    CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
+        .at("SKETCH", "INSPECT")
+        .icon("inspect")
+        .noundo().read_only()
+        .contract(&SKETCH_INSPECT_CONTRACT)
+        .output(output_schema_for::<SketchInspected>)
+        .params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", crate::checked!("model.edges", model_edges))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&BODY_LIST_CONTRACT)
         .output(output_schema_for::<ModelEdges>)
         .params("body: name"),
     CommandSpec::new("model.faces", "List Faces", crate::checked!("model.faces", model_faces))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&BODY_LIST_CONTRACT)
         .output(output_schema_for::<ModelFaces>)
         .params(
@@ -65,9 +98,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&THREADS_CONTRACT)
         .output(output_schema_for::<ModelThreads>),
-    CommandSpec::new("material.assign", "Physical Material", physical_material)
+    CommandSpec::new("model.body_features", "List Body Features", crate::checked!("model.body_features", body_features::model_body_features))
+        .icon("inspect")
+        .noundo()
+        .contract(&BODY_FEATURES_CONTRACT)
+        .output(output_schema_for::<ModelBodyFeatures>)
+        .params(
+            "body?: name (a placed copy's name means the body it shows; default every body) → bodies: [{body, features: [{id, name}]}], \
+             in timeline order the feature that created each body, every later one that changed it, and those of bodies consumed into it. Read-only",
+        ),
+    CommandSpec::new("material.assign", "Physical Material", crate::checked!("material.assign", physical_material))
         .at("SOLID", "MODIFY")
         .icon("material")
+        .contract(&MATERIAL_ASSIGN_CONTRACT)
+        .output(output_schema_for::<MaterialAssignResult>)
         .params("bodies: [names]; material: name (Steel, Aluminum, ABS Plastic, …, or one made with material.create; `material.list`)"),
     CommandSpec::new("appearance.assign", "Appearance", crate::checked!("appearance.assign", appearance))
         .at("SOLID", "MODIFY")
@@ -104,11 +148,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIST_CONTRACT)
         .output(crate::schema::output_schema_for::<AppearanceListResult>)
         .params("body?: name (or a placed copy's, `KB (K:2)`: the body it shows) → assigned appearances; with body, its resolved look and its faces' (face index, look)"),
-    CommandSpec::new("material.list", "List Materials", material_list).icon("list")
+    CommandSpec::new("material.list", "List Materials", crate::checked!("material.list", material_list))
+        .icon("list")
         .noundo()
         .doc_only()
+        .contract(&MATERIAL_LIST_CONTRACT)
+        .output(output_schema_for::<MaterialListResult>)
         .params("→ built-in and design-owned materials (user: true, look, optional physical_card/physical_validation/density_comparison). Read-only; candidate engineering records do not certify sources or supply a solver"),
-    CommandSpec::new("engine.commands", "List Commands", commands).icon("list").noundo(),
+    CommandSpec::new("engine.commands", "List Commands", crate::checked!("engine.commands", commands))
+        .icon("list")
+        .noundo()
+        .contract(&COMMANDS_CONTRACT)
+        .output(output_schema_for::<Vec<CommandEntry>>),
     CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe))
         .icon("list")
         .noundo()
@@ -128,26 +179,75 @@ pub(crate) fn encloses_volume(body: &solidcraft_kernel::Body) -> bool {
 }
 
 pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
-    match b.measure() {
+    serde_json::to_value(measure_sheet(b, None)).unwrap_or_default()
+}
+
+pub(super) fn measure_body(
+    b: &solidcraft_doc::ModelBody,
+    definitions: Option<&solidcraft_doc::ModelState>,
+) -> Result<solidcraft_kernel::BodyMeasure> {
+    let mut measured = b.measure()?;
+    if let Some(state) = definitions
+        && let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
+    {
+        let definition = state.body(b.definition_name()).ok_or_else(|| EngineError::Other(format!("missing sheet body `{}`", sheet.body)))?;
+        // A body transfer moves the geometry and sheet metadata together. Apply only
+        // the placement relative to the current definition, so holes move once.
+        let inverse = solidcraft_doc::mat_inverse(&definition.source_transform)
+            .ok_or_else(|| EngineError::Other(format!("invalid sheet placement for `{}`", sheet.body)))?;
+        let placement = solidcraft_doc::mat_mul(&b.source_transform, &inverse);
+        sheet.correct_perforation_properties(&mut measured, &placement)?;
+    }
+    Ok(measured)
+}
+
+fn measure_sheet(b: &solidcraft_doc::ModelBody, definitions: Option<&solidcraft_doc::ModelState>) -> BodyMeasurement {
+    let name = b.name.clone();
+    match measure_body(b, definitions) {
         Ok(m) => {
             let closed = encloses_volume(&b.body);
-            json!({
-                "name": b.name,
-                "closed": closed,
-                "volume_mm3": closed.then_some(m.volume),
-                "area_mm2": m.area,
-                "center_of_mass": closed.then_some(m.centroid),
-                "bbox": {"min": m.bbox.min, "max": m.bbox.max},
-                "faces": m.merged.faces,
-                "edges": m.merged.edges,
-                "vertices": m.merged.vertices,
-                "face_types": m.merged.face_types,
-                "kernel": {"faces": m.faces, "edges": m.edges, "vertices": m.vertices, "shells": m.shells},
-                "measured_by": m.measured_by,
-                "notes": m.notes,
-            })
+            let outcome = BodyOutcome::Measured(BodyFigures {
+                closed,
+                volume_mm3: closed.then_some(m.volume),
+                area_mm2: m.area,
+                center_of_mass: closed.then(|| m.centroid.into()),
+                bbox: BoundingBox { min: m.bbox.min.into(), max: m.bbox.max.into() },
+                faces: count(m.merged.faces),
+                edges: count(m.merged.edges),
+                vertices: count(m.merged.vertices),
+                face_types: m.merged.face_types,
+                kernel: KernelCounts { faces: m.faces, edges: m.edges, vertices: m.vertices, shells: m.shells },
+                measured_by: m.measured_by.to_string(),
+                notes: m.notes,
+            });
+            BodyMeasurement { name, outcome }
         }
-        Err(e) => json!({"name": b.name, "error": e.to_string()}),
+        Err(e) => measure_failed(name, e.to_string()),
+    }
+}
+
+fn measure_failed(name: String, error: String) -> BodyMeasurement {
+    BodyMeasurement { name, outcome: BodyOutcome::Failed(BodyFailure { error, faces: None, edges: None, vertices: None }) }
+}
+
+/// A topology count as the replies give it.
+fn count(n: usize) -> i64 {
+    i64::try_from(n).unwrap_or(0)
+}
+
+/// A reply as JSON: the commands build their replies from the types their output schemas
+/// describe, so the two can't drift apart.
+fn typed_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+impl BodyMeasurement {
+    /// The volume, when the body has one that is a number.
+    fn volume(&self) -> Option<f64> {
+        match &self.outcome {
+            BodyOutcome::Measured(f) => f.volume_mm3.filter(|v| v.is_finite()),
+            BodyOutcome::Failed(_) => None,
+        }
     }
 }
 
@@ -157,166 +257,257 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
         return super::measure_sel::measure_items(s, items);
     }
     let want = string_list(cmd, p, "bodies")?;
+    let definitions = s.model.state();
     let st = s.world_state()?;
     let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     if !want.is_empty() && selected.len() != want.len() {
         return Err(bad(cmd, "unknown body name"));
     }
     if bool_(p, "names_only").unwrap_or(false) {
-        let bodies: Vec<_> = selected.iter().map(|b| json!({"name": b.name, "definition": b.definition_name()})).collect();
-        return Ok(json!({"body_count": bodies.len(), "bodies": bodies}));
+        let bodies: Vec<_> = selected.iter().map(|b| BodyName { name: b.name.clone(), definition: b.definition_name().to_string() }).collect();
+        let measured = Measured::Names(BodyNames { body_count: bodies.len(), bodies });
+        return typed_reply(cmd, MeasureResult { measured, param_warnings: Vec::new() });
     }
     // Each body is measured on its own: on all cores, in body order.
-    let mut bodies: Vec<Value> = solidcraft_kernel::map_on_threads(&selected, 16, |b| measure_json(b))
+    let measurements: Vec<BodyMeasurement> = solidcraft_kernel::map_on_threads(&selected, 16, |b| measure_sheet(b, Some(&definitions)))
         .into_iter()
         .zip(&selected)
-        .map(|(m, b)| m.unwrap_or_else(|| json!({"name": b.name, "error": "measuring this body failed"})))
+        .map(|(m, b)| m.unwrap_or_else(|| measure_failed(b.name.clone(), "measuring this body failed".into())))
         .collect();
     // Mass from each body's material.
-    for (b, body) in bodies.iter_mut().zip(selected) {
+    let mut bodies: Vec<MeasuredBody> = Vec::with_capacity(measurements.len());
+    for (measurement, body) in measurements.into_iter().zip(selected) {
         let source = body.definition_name();
         // Every body's material, measured or not: naming it takes no measuring.
-        b["material"] = json!(s.doc.body_material(source));
-        if let Some(v) = b["volume_mm3"].as_f64() {
+        let mut b = MeasuredBody { measurement, material: s.doc.body_material(source), density_g_cm3: None, mass_g: None, sheet_metal: None };
+        if let Some(v) = b.measurement.volume() {
             let rho = s.doc.density(source);
-            b["density_g_cm3"] = json!(rho);
-            b["mass_g"] = json!(v * rho / 1000.0);
+            b.density_g_cm3 = Some(rho);
+            b.mass_g = Some(v * rho / 1000.0);
         }
-    }
-    // Sheet metal keeps the edges where bends meet flat faces (so bends stay visible): count its
-    // B-rep faces as they are, without merging coplanar neighbours.
-    let sheets = s.model.state().sheets.clone();
-    for b in &mut bodies {
-        if let Some(sh) = sheets.iter().find(|x| b["name"].as_str() == Some(x.body.as_str())) {
-            let (df, de, dv) = sh.round_hole_correction();
-            for (k, d) in [("faces", df), ("edges", de), ("vertices", dv)] {
-                b[k] = json!(b["kernel"][k].as_i64().unwrap_or(0) + d);
-            }
-            b["sheet_metal"] = json!(true);
-            // A perforation field (#732) is not cut into the B-rep: take its open area out of the volume, the mass
-            // and the area (both faces minus the holes, plus the bores).
-            let open = sh.perforated_area();
-            if open > 0.0 {
-                if let Some(v) = b["volume_mm3"].as_f64() {
-                    let nv = v - open * sh.t;
-                    if let Some(m) = b["mass_g"].as_f64().filter(|_| v > 0.0) {
-                        b["mass_g"] = json!(m * nv / v);
-                    }
-                    b["volume_mm3"] = json!(nv);
+        // Only Measure exposes sheet boundary counts; document.inspect keeps kernel counts.
+        if let Some(sheet) = definitions.sheets.iter().find(|sheet| sheet.body == source) {
+            let (df, de, dv) = sheet.round_hole_correction();
+            match &mut b.measurement.outcome {
+                BodyOutcome::Measured(f) => {
+                    f.faces = count(f.kernel.faces) + df;
+                    f.edges = count(f.kernel.edges) + de;
+                    f.vertices = count(f.kernel.vertices) + dv;
                 }
-                let bores: f64 = sh
-                    .perforations
-                    .iter()
-                    .map(|p| sh.perforation_holes(p).map_or(0.0, |h| h.len() as f64) * std::f64::consts::PI * p.diameter * sh.t)
-                    .sum();
-                b["area_mm2"] = json!(b["area_mm2"].as_f64().unwrap_or(0.0) - 2.0 * open + bores);
+                BodyOutcome::Failed(x) => (x.faces, x.edges, x.vertices) = (Some(df), Some(de), Some(dv)),
             }
+            b.sheet_metal = Some(true);
+        }
+        bodies.push(b);
+    }
+    fn figures(b: &MeasuredBody) -> Option<&BodyFigures> {
+        match &b.measurement.outcome {
+            BodyOutcome::Measured(f) => Some(f),
+            BodyOutcome::Failed(_) => None,
         }
     }
-    let skipped = bodies.iter().filter(|b| b["closed"] == false).count();
-    let tv: f64 = bodies.iter().filter_map(|b| b["volume_mm3"].as_f64()).sum();
-    let ta: f64 = bodies.iter().filter_map(|b| b["area_mm2"].as_f64()).sum();
-    let tf: u64 = bodies.iter().filter_map(|b| b["faces"].as_u64()).sum();
-    let te: u64 = bodies.iter().filter_map(|b| b["edges"].as_u64()).sum();
-    let tvx: u64 = bodies.iter().filter_map(|b| b["vertices"].as_u64()).sum();
-    let tm: f64 = bodies.iter().filter_map(|b| b["mass_g"].as_f64()).sum();
-    Ok(
-        json!({"body_count": bodies.len(), "bodies": bodies, "total": {"open_bodies_skipped": skipped, "volume_mm3": tv, "area_mm2": ta, "mass_g": tm, "faces": tf, "edges": te, "vertices": tvx}}),
+    let counted = |n: Option<i64>| n.and_then(|n| u64::try_from(n).ok());
+    let faces = |b: &MeasuredBody| match &b.measurement.outcome {
+        BodyOutcome::Measured(f) => (counted(Some(f.faces)), counted(Some(f.edges)), counted(Some(f.vertices))),
+        BodyOutcome::Failed(x) => (counted(x.faces), counted(x.edges), counted(x.vertices)),
+    };
+    let total = MeasureTotal {
+        open_bodies_skipped: bodies.iter().filter(|b| figures(b).is_some_and(|f| !f.closed)).count(),
+        volume_mm3: bodies.iter().filter_map(|b| b.measurement.volume()).sum(),
+        area_mm2: bodies.iter().filter_map(|b| figures(b)).map(|f| f.area_mm2).filter(|a| a.is_finite()).sum(),
+        mass_g: bodies.iter().filter_map(|b| b.mass_g).filter(|m| m.is_finite()).sum(),
+        faces: bodies.iter().filter_map(|b| faces(b).0).sum(),
+        edges: bodies.iter().filter_map(|b| faces(b).1).sum(),
+        vertices: bodies.iter().filter_map(|b| faces(b).2).sum(),
+    };
+    typed_reply(
+        cmd,
+        MeasureResult { measured: Measured::Bodies(MeasuredBodies { body_count: bodies.len(), bodies, total }), param_warnings: Vec::new() },
     )
 }
 
+/// A 2D position as the replies give it.
+fn at2(p: solidcore_record::Vec2) -> [f64; 2] {
+    [p.x, p.y]
+}
+
 /// Sketch `id`, placed where the placed model `world` has it (its component's placement).
-fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Option<Value> {
+fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Option<SketchInspected> {
     let state = s.model.state();
     let ss = state.sketch(id)?;
     let plane = world.sketch(id).map(|w| w.plane).unwrap_or(ss.plane);
     let sk = &ss.sketch;
-    let curves: Vec<Value> = sk
+    let curves: Vec<SketchCurve> = sk
         .curves
         .iter()
         .enumerate()
         .map(|(i, c)| {
             let det = ss.report.curve_determined.get(i).copied().unwrap_or(false);
             let pid = |k: usize| sk.points.get(k).map(|p| p.id.clone()).unwrap_or_default();
-            let mut v = match c.kind {
-                CurveKind::Line { a, b } => json!({"id": c.id, "type": "line", "start": pid(a), "end": pid(b), "start_at": sk.point(a), "end_at": sk.point(b), "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
-                CurveKind::Circle { c: cc, r } => json!({"id": c.id, "type": "circle", "center": pid(cc), "center_at": sk.point(cc), "radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
-                CurveKind::Arc { c: cc, a, b } => json!({"id": c.id, "type": "arc", "center": pid(cc), "start": pid(a), "end": pid(b), "center_at": sk.point(cc), "start_at": sk.point(a), "end_at": sk.point(b), "radius": sk.radius(i), "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
-                CurveKind::Ellipse { c: cc, m, r } => json!({"id": c.id, "type": "ellipse", "center": pid(cc), "major": pid(m), "center_at": sk.point(cc), "major_at": sk.point(m), "minor_radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
-                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs } => {
-                    let mut v = json!({"id": c.id, "type": "spline", "points": pts.iter().map(|q| pid(*q)).collect::<Vec<_>>(), "points_at": pts.iter().map(|q| sk.point(*q)).collect::<Vec<_>>(), "control": control, "degree": degree, "periodic": periodic, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det});
-                    // A control spline with its own knots (a projected free-form edge) says them.
-                    if let (Some(n), Some(o)) = (nurbs, v.as_object_mut()) {
-                        o.insert("knots".into(), json!(n.knots));
-                        if !n.weights.is_empty() {
-                            o.insert("weights".into(), json!(n.weights));
-                        }
-                    }
-                    v
+            let at = |k: usize| sk.point(k).map(at2);
+            let shape = match c.kind {
+                CurveKind::Line { a, b } => CurveShape::Line { start: pid(a), end: pid(b), start_at: at(a), end_at: at(b) },
+                CurveKind::Circle { c: cc, r } => CurveShape::Circle { center: pid(cc), center_at: at(cc), radius: r },
+                CurveKind::Arc { c: cc, a, b } => CurveShape::Arc {
+                    center: pid(cc),
+                    start: pid(a),
+                    end: pid(b),
+                    center_at: at(cc),
+                    start_at: at(a),
+                    end_at: at(b),
+                    radius: sk.radius(i),
+                },
+                CurveKind::Ellipse { c: cc, m, r } => {
+                    CurveShape::Ellipse { center: pid(cc), major: pid(m), center_at: at(cc), major_at: at(m), minor_radius: r }
                 }
-                CurveKind::Conic { a, b, apex, rho } => json!({"id": c.id, "type": "conic", "start": pid(a), "end": pid(b), "apex": pid(apex), "start_at": sk.point(a), "end_at": sk.point(b), "apex_at": sk.point(apex), "rho": rho, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
+                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs, ref handles } => CurveShape::Spline {
+                    points: pts.iter().map(|q| pid(*q)).collect(),
+                    points_at: pts.iter().map(|q| at(*q)).collect(),
+                    control,
+                    degree,
+                    periodic,
+                    tangent_handles: handles
+                        .iter()
+                        .map(|&point| SplineTangentHandle {
+                            point: pid(point),
+                            at: at(point),
+                            curve: sk
+                                .curves
+                                .iter()
+                                .find(|candidate| {
+                                    candidate.spline_handle_of.as_deref() == Some(c.id.as_str())
+                                        && matches!(candidate.kind, CurveKind::Line { a, b } if a == point || b == point)
+                                })
+                                .map(|candidate| candidate.id.clone()),
+                        })
+                        .collect(),
+                    // A control spline with its own knots (a projected free-form edge) says them.
+                    knots: nurbs.as_ref().map(|n| n.knots.clone()),
+                    weights: nurbs.as_ref().filter(|n| !n.weights.is_empty()).map(|n| n.weights.clone()),
+                },
+                CurveKind::Conic { a, b, apex, rho } => {
+                    CurveShape::Conic { start: pid(a), end: pid(b), apex: pid(apex), start_at: at(a), end_at: at(b), apex_at: at(apex), rho }
+                }
             };
-            if let (Some(l), Some(o)) = (&c.link, v.as_object_mut()) {
-                o.insert("link".into(), json!(l));
+            SketchCurve {
+                id: c.id.clone(),
+                shape,
+                construction: c.construction,
+                fixed: sk.curve_locked(i),
+                fully_constrained: det,
+                link: c.link.clone(),
             }
-            v
         })
         .collect();
     let locked = sk.locked_points();
-    let points: Vec<Value> = sk
+    let points: Vec<SketchPoint> = sk
         .points
         .iter()
         .enumerate()
-        .map(|(i, p)| json!({"id": p.id, "at": p.pos, "world": plane.to_world(p.pos), "fixed": locked.get(i).copied().unwrap_or(false), "link": p.link, "fully_constrained": ss.report.point_determined.get(i).copied().unwrap_or(false)}))
+        .map(|(i, p)| SketchPoint {
+            id: p.id.clone(),
+            at: at2(p.pos),
+            world: plane.to_world(p.pos).into(),
+            fixed: locked.get(i).copied().unwrap_or(false),
+            link: p.link.clone(),
+            fully_constrained: ss.report.point_determined.get(i).copied().unwrap_or(false),
+        })
         .collect();
-    let constraints: Vec<Value> = sk
+    let constraints: Vec<SketchConstraint> = sk
         .constraints
         .iter()
         .map(|c| {
-            let mut v = serde_json::to_value(&c.kind).unwrap_or_default();
-            if let Some(o) = v.as_object_mut() {
-                o.insert("id".into(), json!(c.id));
-                o.insert("name".into(), json!(c.kind.name()));
-                if let Some(p) = &c.param {
-                    o.insert("param".into(), json!(p));
-                    o.insert("expression".into(), json!(s.doc.param(p).map(|x| x.expr.clone())));
-                }
+            let mut kind = match serde_json::to_value(&c.kind) {
+                Ok(Value::Object(kind)) => kind,
+                _ => Default::default(),
+            };
+            // The constraint's own keys win over any of the kind's.
+            for key in ["id", "name", "param", "expression"] {
+                kind.remove(key);
             }
-            v
+            SketchConstraint {
+                id: c.id.clone(),
+                name: c.kind.name().to_string(),
+                param: c.param.clone(),
+                expression: c.param.as_ref().map(|p| s.doc.param(p).map(|x| x.expr.clone())),
+                kind,
+            }
         })
         .collect();
-    let profiles: Vec<Value> = ss
+    let profiles: Vec<SketchProfile> = ss
         .profiles
         .iter()
         .enumerate()
         // A loop records one entry per piece it walks, and a conic or spline is walked as many
         // short pieces: each loop names a curve once, in loop order.
-        .map(|(i, p)| {
-            let holes: Vec<Vec<String>> = p.hole_curves.iter().map(|h| solidcraft_sketch::distinct_curves(h)).collect();
-            json!({"index": i, "area_mm2": p.area, "centroid_sketch": p.centroid, "curves": solidcraft_sketch::distinct_curves(&p.outer_curves), "holes": holes})
+        .map(|(i, p)| SketchProfile {
+            index: i,
+            area_mm2: p.area,
+            centroid_sketch: at2(p.centroid),
+            curves: solidcraft_sketch::distinct_curves(&p.outer_curves),
+            holes: p.hole_curves.iter().map(|h| solidcraft_sketch::distinct_curves(h)).collect(),
         })
         .collect();
-    Some(json!({
-        "id": id,
-        "name": ss.name,
-        "plane": ss.plane,
-        "status": ss.report.status,
-        "dof": ss.report.dof,
-        "fully_constrained": ss.report.fully_constrained(),
-        "failing": ss.report.failing,
-        "curves": curves,
-        "points": points,
-        "constraints": constraints,
-        "profiles": profiles,
-        "links": sk.links,
-        "wires": sk.wires.iter().map(|w| json!({"id": w.id, "points": w.pts.len(), "start": w.pts.first(), "end": w.pts.last(), "link": w.link, "arc": w.arc.map(|a| json!({"center": a.center, "radius": a.radius, "start": a.start, "end": a.end, "sweep_deg": solidcraft_sketch::arc_sweep(&a).to_degrees()}))})).collect::<Vec<_>>(),
-        "visible": crate::view::sketch_shown(s, id),
-    }))
+    // Planar loops the 3D sketch curves close in planes of their own (#741): the plane is given
+    // as an origin and a unit normal, and the centroid is in the same frame as the sketch plane.
+    let profiles_3d: Vec<Value> = ss
+        .profiles_3d
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            json!({
+                "index": i,
+                "area_mm2": p.area,
+                "plane": { "origin": p.plane.origin, "normal": p.plane.normal() },
+                "centroid": p.centroid,
+                "curves": p.outer_curves,
+                "holes": p.hole_curves,
+            })
+        })
+        .collect();
+    let wires = sk
+        .wires
+        .iter()
+        .map(|w| SketchWire {
+            id: w.id.clone(),
+            points: w.pts.len(),
+            start: w.pts.first().map(|&p| p.into()),
+            end: w.pts.last().map(|&p| p.into()),
+            link: w.link.clone(),
+            arc: w.arc.map(|a| WireArcInfo {
+                center: a.center.into(),
+                radius: a.radius,
+                start: a.start.into(),
+                end: a.end.into(),
+                sweep_deg: solidcraft_sketch::arc_sweep(&a).to_degrees(),
+            }),
+        })
+        .collect();
+    Some(SketchInspected {
+        id,
+        name: ss.name.clone(),
+        plane: serde_json::to_value(ss.plane).unwrap_or_default(),
+        status: ss.report.status.into(),
+        dof: ss.report.dof,
+        fully_constrained: ss.report.fully_constrained(),
+        failing: ss.report.failing.clone(),
+        curves,
+        points,
+        constraints,
+        profiles,
+        profiles_3d,
+        links: serde_json::to_value(&sk.links).unwrap_or_default(),
+        wires,
+        visible: crate::view::sketch_shown(s, id),
+        param_warnings: Vec::new(),
+    })
 }
 
 fn sketch_inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let id = super::sketch_store::target(s, p, "sketch.inspect")?;
-    sketch_json(s, &*s.world_state()?, id).ok_or_else(|| EngineError::Other("that sketch is not evaluated (rolled back or not a sketch)".into()))
+    let inspected = sketch_json(s, &*s.world_state()?, id)
+        .ok_or_else(|| EngineError::Other("that sketch is not evaluated (rolled back or not a sketch)".into()))?;
+    typed_reply("sketch.inspect", inspected)
 }
 
 /// Revisions of every design of this run (#6646).
@@ -373,60 +564,131 @@ fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
+    let timeline_detail = TimelineDetail::read(p.get("timeline")).map_err(|e| bad("document.inspect", e))?;
+    let bodies_detail = BodiesDetail::read(p.get("bodies")).map_err(|e| bad("document.inspect", e))?;
     let st = s.model.state();
     let (vals, perr) = s.doc.param_values();
-    let params: Vec<Value> = s
+    let params: Vec<DocumentParam> = s
         .doc
         .params
         .iter()
-        .map(|p| json!({"name": p.name, "expression": p.expr, "unit": p.unit, "value": vals.get(&p.name).map(|v| v.v), "model": p.model, "comment": p.comment, "error": perr.get(&p.name)}))
-        .collect();
-    let marker = s.doc.marker.unwrap_or(s.doc.features.len());
-    let timeline: Vec<Value> = s
-        .doc
-        .features
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
-            let r = s.model.result(f.id);
-            json!({
-                "id": f.id, "name": f.name, "type": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": i >= marker,
-                "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()), "ms": r.map(|r| r.ms),
-            })
+        .map(|p| DocumentParam {
+            name: p.name.clone(),
+            expression: p.expr.clone(),
+            unit: p.unit.clone(),
+            value: vals.get(&p.name).map(|v| v.v),
+            model: p.model,
+            comment: p.comment.clone(),
+            error: perr.get(&p.name).cloned(),
         })
         .collect();
-    let with_measure = bool_(p, "measure").unwrap_or(false);
+    let marker = s.doc.marker.unwrap_or(s.doc.features.len());
+    let timeline: Option<Vec<TimelineRow>> = (timeline_detail != TimelineDetail::Left).then(|| {
+        s.doc
+            .features
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let r = s.model.result(f.id);
+                let (error, warning) = (r.and_then(|r| r.error.clone()), r.and_then(|r| r.warning.clone()));
+                if timeline_detail == TimelineDetail::Summary {
+                    return TimelineRow::Summary(TimelineSummary {
+                        id: f.id,
+                        name: f.name.clone(),
+                        kind: f.kind.type_name().to_string(),
+                        error,
+                        warning,
+                        suppressed: f.suppressed.then_some(true),
+                        rolled_back: (i >= marker).then_some(true),
+                    });
+                }
+                TimelineRow::Full(TimelineEntry {
+                    id: f.id,
+                    name: f.name.clone(),
+                    kind: f.kind.type_name().to_string(),
+                    suppressed: f.suppressed,
+                    rolled_back: i >= marker,
+                    error,
+                    warning,
+                    ms: r.map(|r| r.ms),
+                })
+            })
+            .collect()
+    });
+    let definitions = s.model.state();
+    // Only bodies given in full are measured.
+    let with_measure = bool_(p, "measure").unwrap_or(false) && bodies_detail == BodiesDetail::Full;
+    let with_counts = bool_(p, "sketch_counts").unwrap_or(false);
     // Each body is measured on its own: on all cores, in body order (as `inspect.measure`).
-    let mut measured = if with_measure { solidcraft_kernel::map_on_threads(&st.bodies, 16, measure_json) } else { Vec::new() }.into_iter();
-    let bodies: Vec<Value> = st
+    let mut measured =
+        if with_measure { solidcraft_kernel::map_on_threads(&st.bodies, 16, |b| measure_sheet(b, Some(&definitions))) } else { Vec::new() }
+            .into_iter();
+    let bodies: Vec<DocumentBody> = st
         .bodies
         .iter()
         .map(|b| {
-            let mut v = match measured.next() {
-                Some(m) => m.unwrap_or_else(|| json!({"name": b.name, "error": "measuring this body failed"})),
-                None => json!({"name": b.name, "feature": b.feature}),
-            };
-            if let Some(o) = v.as_object_mut() {
-                o.insert("visible".into(), json!(s.body_visible(&b.name)));
-                if s.body_removed_later(&b.name) {
-                    // Editing a sketch rolls the timeline back; this body is deleted further on.
-                    o.insert("removed_later".into(), json!(true));
+            let detail = match measured.next() {
+                Some(m) => {
+                    DocumentBodyDetail::Measured(Box::new(m.unwrap_or_else(|| measure_failed(b.name.clone(), "measuring this body failed".into()))))
                 }
+                None => DocumentBodyDetail::Listed { name: b.name.clone(), feature: b.feature },
+            };
+            // Editing a sketch rolls the timeline back; a body deleted further on is `removed_later`.
+            DocumentBody { detail, visible: s.body_visible(&b.name), removed_later: s.body_removed_later(&b.name).then_some(true) }
+        })
+        .collect();
+    let bodies = match bodies_detail {
+        BodiesDetail::Full => Some(DocumentBodies::Full(bodies)),
+        BodiesDetail::Names => Some(DocumentBodies::Names(st.bodies.iter().map(|b| b.name.clone()).collect())),
+        BodiesDetail::Left => None,
+    };
+    let sketches: Vec<DocumentSketch> = st
+        .sketches
+        .iter()
+        .map(|ss| {
+            let mut v = DocumentSketch {
+                id: ss.feature,
+                name: ss.name.clone(),
+                dof: ss.report.dof,
+                status: ss.report.status.into(),
+                curves: ss.sketch.curves.len(),
+                profiles: ss.profiles.len(),
+                visible: crate::view::sketch_shown(s, ss.feature),
+                plane: None,
+                points: None,
+                constraints: None,
+            };
+            // A summary that stands in for the sketch's contents (the compact MCP inspect_design).
+            if with_counts {
+                v.plane = Some(serde_json::to_value(ss.plane).unwrap_or_default());
+                v.points = Some(ss.sketch.points.len());
+                v.constraints = Some(ss.sketch.constraints.len());
             }
             v
         })
         .collect();
-    let sketches: Vec<Value> = st
-        .sketches
-        .iter()
-        .map(|ss| json!({"id": ss.feature, "name": ss.name, "dof": ss.report.dof, "status": ss.report.status, "curves": ss.sketch.curves.len(), "profiles": ss.profiles.len(), "visible": crate::view::sketch_shown(s, ss.feature)}))
-        .collect();
-    Ok(json!({
-        "name": s.doc.name, "units": s.doc.units, "metadata": s.doc.metadata, "path": s.path, "dirty": s.is_dirty(), "revision": s.revision,
-        "active_sketch": s.active_sketch, "marker": marker,
-        "params": params, "timeline": timeline, "bodies": bodies, "sketches": sketches,
-        "selection": s.selection, "undo": s.undo.len(), "redo": s.redo.len(), "hidden_origin": s.visibility.hidden_origin,
-    }))
+    typed_reply(
+        "document.inspect",
+        DocumentInspectResult {
+            name: s.doc.name.clone(),
+            units: s.doc.units.clone(),
+            metadata: s.doc.metadata.0.clone(),
+            path: s.path.clone(),
+            dirty: s.is_dirty(),
+            revision: s.revision,
+            active_sketch: s.active_sketch,
+            marker,
+            params,
+            timeline,
+            bodies,
+            sketches,
+            selection: serde_json::to_value(&s.selection).unwrap_or_default(),
+            undo: s.undo.len(),
+            redo: s.redo.len(),
+            hidden_origin: s.visibility.hidden_origin.clone(),
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 fn body_of<'a>(st: &'a solidcraft_doc::ModelState, p: &Value, cmd: &str) -> Result<&'a solidcraft_doc::ModelBody> {
@@ -500,8 +762,11 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
 const DESCRIBE_CONTRACT: crate::schema::TypedContract<crate::schema::inspect::DescribeParams> = crate::schema::TypedContract::new();
 
 /// A command's prose documentation and, for converted commands, its schemas.
-fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
+fn describe(s: &mut Session, p: &Value) -> Result<Value> {
     let id = p.get("command").and_then(Value::as_str).ok_or_else(|| crate::params::bad("engine.describe", "`command` must be a command id"))?;
+    if let Some(entry) = crate::plugin::describe_entry(s, id)? {
+        return Ok(entry);
+    }
     let spec = super::find_command(id).ok_or_else(|| crate::EngineError::UnknownCommand(id.to_string()))?;
     let reply = crate::schema::inspect::DescribeResult {
         id: spec.id.to_string(),
@@ -515,7 +780,28 @@ fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(Value::Array(crate::command_specs().iter().map(|c| serde_json::to_value(c.info(s)).unwrap_or_default()).collect()))
+    let mut list: Vec<CommandEntry> = crate::command_specs().iter().map(|c| c.info(s).into()).collect();
+    for (package_id, path) in &s.plugin_state.packages {
+        if let Ok(package) = crate::plugin::read_package(path)
+            && let Some(runtime) = package.manifest.runtime
+        {
+            for entry in runtime.entries {
+                list.push(CommandEntry {
+                    id: format!("{package_id}.{}", entry.name),
+                    label: entry.name,
+                    tab: String::new(),
+                    panel: String::new(),
+                    icon: "play".into(),
+                    shortcut: None,
+                    params: "approval, params: declared entry inputs (engine.describe)".into(),
+                    enabled: !s.disabled_plugins.contains(package_id),
+                    disabled_reason: s.disabled_plugins.contains(package_id).then(|| "plugin is disabled".into()),
+                    planned: None,
+                });
+            }
+        }
+    }
+    typed_reply("engine.commands", list)
 }
 
 fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -539,7 +825,7 @@ fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
             s.doc_mut().materials.insert(b.clone(), canonical.clone());
         }
     }
-    Ok(json!({"bodies": bodies, "material": canonical}))
+    typed_reply(cmd, MaterialAssignResult { bodies, material: canonical, param_warnings: Vec::new() })
 }
 
 /// A colour parameter: `"#rrggbb"` or `[r, g, b]` (0–255).
@@ -599,7 +885,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut comps: Vec<u64> = Vec::new();
     for c in string_list(cmd, p, "components")? {
-        let id = s.component_or_placement(&c).ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
+        let id = s.component_or_placement(&c).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
         comps.push(id);
     }
     if bodies.is_empty() && faces.is_empty() && comps.is_empty() {
@@ -741,7 +1027,7 @@ pub(super) fn appearance_look(cmd: &str, p: &Value) -> Result<Option<solidcraft_
 }
 
 fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcore_record::Vec3) -> f64 {
-    let bb = b.mesh().bounds();
+    let bb = b.body.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
     let c = solidcore_record::Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
     c.dist(p)
 }
@@ -886,18 +1172,18 @@ fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn material_list(s: &mut Session, _p: &Value) -> Result<Value> {
-    let built_in = solidcraft_doc::MATERIALS.iter().map(|(n, d)| json!({"name": n, "density_g_cm3": d}));
+    let built_in = solidcraft_doc::MATERIALS.iter().map(|(n, d)| ListedMaterial::BuiltIn { name: n.to_string(), density_g_cm3: *d });
     let user = s
         .doc
         .user_materials
         .iter()
         .map(|m| {
-            let mut out = super::materials::material_json(m)?;
-            out["appearance"] = json!(s.doc.material_look(&m.name).as_ref().map(look_json));
-            Ok(out)
+            let mut out = super::materials::listed_material(m)?;
+            out.appearance = s.doc.material_look(&m.name).as_ref().map(LookReply::from);
+            Ok(ListedMaterial::Design(Box::new(out)))
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(json!({"materials": built_in.chain(user).collect::<Vec<_>>()}))
+    typed_reply("material.list", MaterialListResult { materials: built_in.chain(user).collect(), param_warnings: Vec::new() })
 }
 
 fn colored_components(s: &mut Session, p: &Value) -> Result<Value> {

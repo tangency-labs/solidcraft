@@ -11,8 +11,8 @@ fn invalid(message: &str) -> JobError {
 /// The writer checks exact dimensions and payload before reserving any output.
 pub fn encoded_limit(width: u32, height: u32) -> Result<u64> {
     let (w, h) = (u64::from(width), u64::from(height));
-    if w == 0 || h == 0 || w > 8192 || h > 8192 || w * h > 16_777_216 {
-        return Err(invalid("linear EXR requires 1..8192 sides and at most 16777216 pixels"));
+    if w == 0 || h == 0 || w > 8192 || h > 8192 || w * h > super::MAX_OUTPUT_PIXELS {
+        return Err(invalid("linear EXR requires 1..8192 sides and at most 33554432 pixels"));
     }
     Ok(w * h * 16 + h * 16 + 4096)
 }
@@ -32,6 +32,28 @@ fn attribute(out: &mut Vec<u8>, name: &[u8], kind: &[u8], value: &[u8]) -> Resul
 }
 
 pub(super) fn header(width: u32, height: u32) -> Result<Vec<u8>> {
+    header_for(width, height, b"SolidCraft native GPU path")
+}
+#[cfg(feature = "raytrace-cpu")]
+pub(super) fn cpu_header(width: u32, height: u32) -> Result<Vec<u8>> {
+    header_for(width, height, b"SolidCraft native CPU raytrace")
+}
+/// Accept only this writer's exact native profiles, never external EXR metadata.
+pub(super) fn native_header(bytes: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    let gpu = header(width, height)?;
+    if bytes.starts_with(&gpu) {
+        return Ok(gpu);
+    }
+    #[cfg(feature = "raytrace-cpu")]
+    {
+        let cpu = cpu_header(width, height)?;
+        if bytes.starts_with(&cpu) {
+            return Ok(cpu);
+        }
+    }
+    Err(invalid("master is not a retained native FLOAT32 linear-sRGB/D65 profile"))
+}
+fn header_for(width: u32, height: u32, software: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     out.try_reserve_exact(4096).map_err(|_| JobError::new(ErrorCode::AllocationFailed, "EXR header allocation failed"))?;
     out.extend_from_slice(&20_000_630_u32.to_le_bytes());
@@ -65,7 +87,7 @@ pub(super) fn header(width: u32, height: u32) -> Result<Vec<u8>> {
         chromaticities.extend_from_slice(&value.to_le_bytes());
     }
     attribute(&mut out, b"chromaticities", b"chromaticities", &chromaticities)?;
-    attribute(&mut out, b"software", b"string", b"SolidCraft native GPU path")?;
+    attribute(&mut out, b"software", b"string", software)?;
     attribute(&mut out,b"comments",b"string",b"Raw scene-linear sRGB/D65; RGB coverage-premultiplied; before exposure, denoising, finishing, backdrop and tone mapping. Relative radiance, not calibrated SI units.")?;
     out.push(0);
     Ok(out)
@@ -83,12 +105,20 @@ pub struct ExrTask {
 }
 impl ExrTask {
     pub fn new(width: u32, height: u32, pixels: Vec<[f32; 4]>, cancel: CancelToken) -> Result<Self> {
+        encoded_limit(width, height)?;
+        Self::with_header(width, height, pixels, cancel, header(width, height)?)
+    }
+    #[cfg(feature = "raytrace-cpu")]
+    pub(crate) fn new_cpu(width: u32, height: u32, pixels: Vec<[f32; 4]>, cancel: CancelToken) -> Result<Self> {
+        encoded_limit(width, height)?;
+        Self::with_header(width, height, pixels, cancel, cpu_header(width, height)?)
+    }
+    fn with_header(width: u32, height: u32, pixels: Vec<[f32; 4]>, cancel: CancelToken, mut bytes: Vec<u8>) -> Result<Self> {
         let limit = encoded_limit(width, height)?;
         if pixels.len() as u64 != u64::from(width) * u64::from(height) {
             return Err(invalid("EXR pixel count differs from dimensions"));
         }
         cancel.check()?;
-        let mut bytes = header(width, height)?;
         let row_bytes = u64::from(width) * 16;
         let first = bytes.len() as u64 + u64::from(height) * 8;
         let total = first + u64::from(height) * (row_bytes + 8);

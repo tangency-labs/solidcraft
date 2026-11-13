@@ -38,8 +38,8 @@ fn rel(a: f64, b: f64) -> f64 {
 /// The record of solidcore's arrays, validated and its geometry checked.
 fn record(a: &Arrays) -> b::Brep {
     let (rec, _) = native(a).unwrap();
-    solidcraft_geom::brep::check::validate(&rec).unwrap();
-    solidcraft_geom::brep::geometry::check(&rec).unwrap();
+    solidcore_ops::record_check::validate(&rec).unwrap();
+    solidcore_ops::record_check::agreement(&rec).unwrap();
     rec
 }
 
@@ -281,4 +281,85 @@ fn shells_listed_inner_first_import_outer_first() {
     outer_first(&to_arrays(&back).unwrap(), "inner first");
     let v = volume(&back, 1e-9).unwrap();
     assert!(rel(v, SEALED_VOID_VOLUME) < 1e-9, "inner first: {v}");
+}
+
+/// A half torus of minor radius 0.1 at coordinates of about 200 (a fillet round a hole): its weights,
+/// found from the points, differ from the rebuilt ones by rounding of the coordinates' size, not of 1.
+#[test]
+fn nurbs_weights_far_from_the_origin_compare_within_their_rounding() {
+    use solidcore::Vec3 as P;
+    let cv = [
+        197.06,
+        33.35,
+        62.217999999999996,
+        197.06,
+        33.25,
+        62.218,
+        197.06,
+        33.25,
+        62.117999999999995,
+        191.16000000000003,
+        33.35,
+        62.218,
+        191.16000000000005,
+        33.25,
+        62.217999999999996,
+        191.26,
+        33.25,
+        62.118,
+        191.16000000000003,
+        33.35,
+        56.318,
+        191.16000000000003,
+        33.25,
+        56.318000000000005,
+        191.26000000000002,
+        33.25,
+        56.318,
+        191.16000000000003,
+        33.35,
+        50.418,
+        191.16000000000003,
+        33.25,
+        50.418,
+        191.26,
+        33.25,
+        50.518,
+        197.06,
+        33.35,
+        50.418,
+        197.06,
+        33.25,
+        50.418,
+        197.06,
+        33.25,
+        50.518,
+    ];
+    let pts: Vec<_> = cv.chunks(3).map(|c| P::new(c[0], c[1], c[2])).collect();
+    let mut w = [
+        1.0,
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0,
+        std::f64::consts::FRAC_1_SQRT_2,
+        0.5000000000000001,
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0,
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0,
+        std::f64::consts::FRAC_1_SQRT_2,
+        0.5000000000000001,
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0,
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0,
+    ];
+    let (uk, vk) = ([2.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0], [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+    let make = |w: &[f64]| super::convert::bspline_surface_from_arrays(&pts, w, &uk, &vk, 2, 2).unwrap();
+    let s = make(&w);
+
+    // weights 4e-12 apart at coordinates of 200 are the same NURBS; 1e-9 apart are not
+    w[1] += 4e-12;
+    assert!(super::convert::same_nurbs(s.gw_nurb().unwrap(), make(&w).gw_nurb().unwrap(), 0.01));
+    w[1] += 1e-9;
+    assert!(!super::convert::same_nurbs(s.gw_nurb().unwrap(), make(&w).gw_nurb().unwrap(), 0.01));
 }

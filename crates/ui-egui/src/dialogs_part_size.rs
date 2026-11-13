@@ -197,7 +197,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
             ui.label(configuration_name(&k.family.id, size, k.length));
         });
     }
-    crate::ui_kit::text(ui, crate::i18n::tr("ui.part_size_shared"), crate::ui_kit::Text::Hint("part_size_shared"));
+    crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.part_size_shared"), crate::ui_kit::Text::Hint("part_size_shared"));
     false
 }
 
@@ -224,6 +224,7 @@ mod tests {
     use crate::context_menu::{self, Target};
     use solidcore_record::Vec3;
     use solidcraft_engine::Session;
+    use solidcraft_engine::geom::MeshGeom;
 
     fn part(family: &str, size: &str, length: Option<f64>) -> (SolveApp, u64) {
         let mut app = SolveApp::new(Session::default(), crate::Services::default());
@@ -478,6 +479,7 @@ mod tests {
         for (family, size, length) in [
             ("socket_head_cap_screw", "M5", Some(20.0)),
             ("button_head_cap_screw", "M5", Some(20.0)),
+            ("countersunk_socket_screw", "M5", Some(20.0)),
             ("hex_bolt", "M5", Some(20.0)),
             ("hex_nut", "M5", None),
             ("washer", "M5", None),

@@ -1,0 +1,159 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 18
+            }
+          ],
+          "points": [
+            [
+              97.5,
+              89.58333333333333,
+              11.666666666666666
+            ]
+          ],
+          "tolerance": 0.14456932294800962
+        },
+        "thickness": -0.5
+      }
+    }
+  ],
+  "case": "545-shell-ring-cut-frame-open-at-an-outer-wall",
+  "expected": {
+    "bbox": {
+      "max": [
+        100,
+        100,
+        30
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "every wall of the frame is at least 0.5 thick except the 0.5 mm floor, which a 0.5 shell hollows to nothing: the floor stays solid, and the core under the recess (x, y 16..84, z 0..18) is hollowed to a sealed void, x, y 16.5..83.5, z 0.5..17.5, the floor and the core's walls between it and the open cavity. The cavity is that void, the ring between the squares 0.5..99.5 and 2..98 for z 0.5..18, the ring between 0.5..99.5 and 5.5..94.5 for z 18..29.5, and x 97.5..98, y 2..98, z 0.5..18 behind the open wall: 67^2 17 + (99^2 - 96^2) 17.5 + (99^2 - 89^2) 11.5 + 0.5 96 17.5 = 109010.5. V = 130054.5 - 109010.5 = 21044, the body's outer shell and the void's",
+    "shells": 2,
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#545"
+    ],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 21044.0,
+    "what": "the frame of examples/regressions/ring_cut_below_recess_thin_floor (a recess from the top, a ring cut from the bottom, a 0.5 mm floor between) shelled 0.5 mm open at the ring cut's outer wall (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): regressions/ring_cut_below_recess_thin_floor, Frame/F6:side:l2 face.shell)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 100,
+      "faces": 42,
+      "vertices": 66
+    }
+  },
+  "records": "545-shell-ring-cut-frame-open-at-an-outer-wall.bodies.json.gz",
+  "result": [
+    {
+      "body": "Frame",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 83978.5,
+      "body_count": 1,
+      "edges": 100,
+      "faces": 42,
+      "vertices": 66,
+      "volume_mm3": 21043.999999999985
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#545"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "the frame of examples/regressions/ring_cut_below_recess_thin_floor (a recess from the top, a ring cut from the bottom, a 0.5 mm floor between) shelled 0.5 mm open at the ring cut's outer wall (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): regressions/ring_cut_below_recess_thin_floor, Frame/F6:side:l2 face.shell)",
+  "why_not": []
+}

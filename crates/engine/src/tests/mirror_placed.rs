@@ -4,6 +4,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 use super::run;
 use crate::*;
@@ -278,7 +279,7 @@ fn assert_as_evaluated_afresh(s: &Session) {
         assert!(x.edges.iter().flatten().zip(y.edges.iter().flatten()).all(|(p, q)| p.dist(*q) < 1e-7), "{}: edges", a.name);
         assert_same_surface(&x, &y, &a.name);
         // A plan's ties fall by the pose it was made at.
-        let (x, y) = (a.display_plan().unwrap().evaluate(), b.display_plan().unwrap().evaluate());
+        let (x, y) = (a.display_plan().unwrap().evaluate_mesh(), b.display_plan().unwrap().evaluate_mesh());
         assert_eq!(x.triangles.len(), y.triangles.len(), "{}: plan", a.name);
         assert_same_surface(&x, &y, &a.name);
     }
@@ -399,4 +400,171 @@ fn an_insert_after_a_mirror_keeps_its_meshes_through_a_drag() {
         assert_eq!(drawn(&s), 0.0, "frame {k}");
     }
     assert_as_evaluated_afresh(&s);
+}
+
+/// The model of `s` against a fresh evaluation of its design: each body's name, volume, bounds
+/// and reference mesh. Not the shown meshes: a copy's display triangles can tie differently by
+/// the pose they were made at, with or without reuse (as in the drag test above).
+fn assert_model_as_evaluated_afresh(s: &Session) {
+    let mut fresh = solidcraft_doc::Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&s.doc);
+    let errors: Vec<_> = fresh.results.iter().filter_map(|r| r.error.as_ref()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let (got, want) = (s.model.state(), fresh.state());
+    assert_eq!(got.bodies.len(), want.bodies.len());
+    for (a, b) in got.bodies.iter().zip(&want.bodies) {
+        assert_eq!(a.name, b.name);
+        let (va, vb) = (a.measure().unwrap().volume, b.measure().unwrap().volume);
+        assert!((va - vb).abs() < 1e-6, "{}: {va} != {vb}", a.name);
+        assert_eq!(a.mesh().triangles, b.mesh().triangles, "{}", a.name);
+        let (ma, mb) = (a.mesh().bounds(), b.mesh().bounds());
+        assert!(ma.min.dist(mb.min) < 1e-6 && ma.max.dist(mb.max) < 1e-6, "{}: {ma:?} != {mb:?}", a.name);
+    }
+}
+
+/// Driving a joint evaluates a mirror of the part it moves again, and the features after it
+/// only when they read its copy: a box, a sketch and its extrusion, and a cut into another
+/// body are kept (#12139).
+#[test]
+fn a_joint_drive_evaluates_only_what_reads_the_mirrored_copy() {
+    for dependent in [false, true] {
+        let mut s = Session::default();
+        moved_arm(&mut s);
+        run(
+            &mut s,
+            "joint.as_built",
+            json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+        );
+        let copy = created(&run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"})));
+        run(&mut s, "solid.box", json!({"corner": [0, -100, 0], "length": 10, "width": 10, "height": 10, "body_name": "Later"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-100, -100], "p1": [-90, -90]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 4, "operation": "new"}));
+        run(&mut s, "solid.box", json!({"corner": [2, -98, 5], "length": 2, "width": 2, "height": 10, "operation": "cut", "targets": ["Later"]}));
+        if dependent {
+            run(&mut s, "solid.move", json!({"bodies": [copy.clone()], "translate": [0, 0, 5]}));
+        }
+        for angle in [20, -35, 60] {
+            run(&mut s, "joint.drive", json!({"joint": "Pan", "value": angle, "quiet": true}));
+            let recomputed = s.model.last_recomputed + s.model.last_restored;
+            if dependent {
+                assert_eq!(recomputed, 2, "the mirror and the move of its copy at {angle}°");
+            } else {
+                assert_eq!(recomputed, 1, "only the mirror at {angle}°");
+            }
+            assert_box(world_box(&s, &copy), {
+                let (lo, hi) = mirrored_yz(&s, "ArmBody");
+                if dependent { (lo + Vec3::new(0., 0., 5.), hi + Vec3::new(0., 0., 5.)) } else { (lo, hi) }
+            });
+            assert_model_as_evaluated_afresh(&s);
+        }
+        for command in ["edit.undo", "edit.redo"] {
+            run(&mut s, command, json!({}));
+            assert_model_as_evaluated_afresh(&s);
+        }
+    }
+}
+
+/// A combined mirror inside the part a joint moves, of that part's own body picked where the part
+/// is placed, reads nothing that moves relative to the part: driving the joint to a new angle
+/// keeps it and the cut after it (#14271). The same mirror made in the root still follows each
+/// pose of the part.
+#[test]
+fn a_joint_drive_keeps_a_combined_mirror_inside_the_part_it_moves() {
+    for inside in [true, false] {
+        let mut s = Session::default();
+        let (component, _) = moved_arm(&mut s);
+        run(
+            &mut s,
+            "joint.as_built",
+            json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+        );
+        if inside {
+            run(&mut s, "component.activate", json!({"component": component}));
+        }
+        run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ", "combine": true}));
+        let placed =
+            s.doc.features.iter().any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Mirror { placements, .. } if !placements.is_empty()));
+        assert!(placed, "the mirror keeps the placement it picked the body at");
+        if inside {
+            run(
+                &mut s,
+                "solid.box",
+                json!({"corner": [12, 1, 2], "length": 2, "width": 2, "height": 10, "operation": "cut", "targets": ["ArmBody"]}),
+            );
+            run(&mut s, "component.activate", json!({"component": 0}));
+        }
+        for angle in [20, -35, 60] {
+            run(&mut s, "joint.drive", json!({"joint": "Pan", "value": angle, "quiet": true}));
+            let recomputed = s.model.last_recomputed + s.model.last_restored;
+            if inside {
+                assert_eq!(recomputed, 0, "nothing in the arm at {angle}°");
+            } else {
+                assert_eq!(recomputed, 1, "the root's mirror at {angle}°");
+            }
+            assert_model_as_evaluated_afresh(&s);
+        }
+        for command in ["edit.undo", "edit.redo"] {
+            run(&mut s, command, json!({}));
+            assert_model_as_evaluated_afresh(&s);
+        }
+    }
+}
+
+/// A saved model's pose-only mirror was made at the pose the design had when it was saved: one
+/// adopted for a design posed otherwise is evaluated again, not taken from the cache (#12139).
+#[test]
+fn an_adopted_model_mirrors_at_the_designs_own_pose() {
+    let mut s = Session::default();
+    moved_arm(&mut s);
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+    );
+    run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"}));
+    run(&mut s, "solid.box", json!({"corner": [0, -100, 0], "length": 10, "width": 10, "height": 10, "body_name": "Later"}));
+    let saved = s.model.saved(&s.doc).unwrap();
+    run(&mut s, "joint.drive", json!({"joint": "Pan", "value": 40, "quiet": true}));
+    // As opening installs it, before any evaluation; and once evaluated.
+    s.model = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+    assert_model_as_evaluated_afresh(&s);
+    let before = s.model.recomputed;
+    s.model.evaluate(&s.doc);
+    assert_eq!(s.model.recomputed, before, "the adopted model is current");
+    assert_model_as_evaluated_afresh(&s);
+}
+
+/// A cut revolved about an edge of a mirrored copy turns about it where the copy now is, when
+/// a joint drive moves the copy: the axis is a pick of the model, not a body by name (#12139).
+/// (Not checked against a fresh evaluation: one without the cache finds no edge at the pick.)
+#[test]
+fn a_revolve_about_a_mirrored_copys_edge_follows_a_joint_drive() {
+    let mut s = Session::default();
+    moved_arm(&mut s);
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+    );
+    let copy = created(&run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"})));
+    // An edge of the copy along X, on its lowest Y and Z.
+    let (lo, hi) = world_box(&s, &copy);
+    let edge = [(lo.x + hi.x) / 2., lo.y, lo.z];
+    let (x, y) = (edge[0], lo.y - 30.);
+    run(&mut s, "solid.box", json!({"corner": [x - 50., y - 30., -40], "length": 100, "width": 60, "height": 80, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [x - 5., y], "p1": [x + 5., y + 10.]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": {"edge": edge}, "angle": "360 deg", "operation": "cut", "targets": ["Block"]}));
+    let block = |s: &Session| s.model.state().body("Block").unwrap().mesh().positions.clone();
+    let before = block(&s);
+    for angle in [5, -5] {
+        run(&mut s, "joint.drive", json!({"joint": "Pan", "value": angle, "quiet": true}));
+        assert_eq!(s.model.last_recomputed + s.model.last_restored, 2, "the mirror and the revolve at {angle}°");
+        let after = block(&s);
+        assert_ne!(after, before, "the cut turned about the old axis at {angle}°");
+    }
 }

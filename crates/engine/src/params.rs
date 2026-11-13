@@ -88,14 +88,16 @@ pub fn req_expr(cmd: &str, p: &Value, k: &str) -> Result<Expr> {
 }
 
 /// The most names a list parameter may carry.
-const MAX_STRING_LIST: usize = 10_000;
+pub(crate) const MAX_STRING_LIST: usize = 10_000;
 
 /// The command name for a caller that does not know it: the engine names the command that ran
 /// when the error reaches it.
 pub const UNKNOWN_COMMAND: &str = "";
 
-/// A short description of a value that is not a name, for the message that refuses it.
-fn json_brief(v: &Value) -> String {
+/// A short description of a value that is not a name, for the message that refuses it. The
+/// schema contracts quote it too (`schema::config::NameList`), so strict refuses with the same
+/// words.
+pub(crate) fn json_brief(v: &Value) -> String {
     match v {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
@@ -140,16 +142,11 @@ pub fn string_list(cmd: &str, p: &Value, k: &str) -> Result<Vec<String>> {
 }
 
 /// A list of keys, where an entry is a name or an id: a feature can be named or numbered, and
-/// both kinds can sit in one list.
+/// both kinds can sit in one list (#6651). The entries keep their JSON types, so a name that
+/// looks like a number stays a name and resolves before an id (#9748).
 ///
 /// A value of the wrong kind is refused, and so is an entry that is neither a name nor an id,
-/// named by its position as in [`string_list`]. The commands that take feature keys read them
-/// here, because their list is not a list of names (#6651).
-pub fn name_or_id_list(cmd: &str, p: &Value, k: &str) -> Result<Vec<String>> {
-    Ok(name_or_id_values(cmd, p, k)?.iter().map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())).collect())
-}
-
-/// Keep the JSON types when a command distinguishes a numeric name from a numeric id.
+/// named by its position as in [`string_list`].
 pub(crate) fn name_or_id_values<'a>(cmd: &str, p: &'a Value, k: &str) -> Result<&'a [Value]> {
     match p.get(k) {
         None | Some(Value::Null) => Ok(&[]),
@@ -231,8 +228,8 @@ mod tests {
         list(p).expect_err("the parameter is refused")
     }
 
-    fn keys(p: &Value) -> Result<Vec<String>> {
-        name_or_id_list(CMD, p, "features")
+    fn keys(p: &Value) -> Result<Vec<Value>> {
+        name_or_id_values(CMD, p, "features").map(<[Value]>::to_vec)
     }
 
     #[test]
@@ -301,10 +298,12 @@ mod tests {
 
     #[test]
     fn a_list_of_names_or_ids_is_read_in_the_order_given() {
-        assert_eq!(keys(&json!({"features": ["Base", 3]})).unwrap(), ["Base", "3"]);
-        assert_eq!(keys(&json!({"features": [3, "Base"]})).unwrap(), ["3", "Base"]);
-        assert_eq!(keys(&json!({"features": "Base"})).unwrap(), ["Base"]);
-        assert_eq!(keys(&json!({})).unwrap(), Vec::<String>::new());
+        assert_eq!(keys(&json!({"features": ["Base", 3]})).unwrap(), [json!("Base"), json!(3)]);
+        assert_eq!(keys(&json!({"features": [3, "Base"]})).unwrap(), [json!(3), json!("Base")]);
+        // A name that looks like a number stays a name.
+        assert_eq!(keys(&json!({"features": ["3"]})).unwrap(), [json!("3")]);
+        assert_eq!(keys(&json!({"features": "Base"})).unwrap(), [json!("Base")]);
+        assert_eq!(keys(&json!({})).unwrap(), Vec::<Value>::new());
     }
 
     #[test]

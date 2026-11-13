@@ -73,7 +73,7 @@ fn extruded() -> (Session, u64) {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     let extrude = s.doc.features.last().map(|f| f.id).expect("the extrude");
-    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1", "restore_marker": false}));
     (s, extrude)
 }
 
@@ -314,7 +314,7 @@ fn a_live_frame_swaps_only_the_dragged_sketch() {
     run(&mut s, "sketch.create", json!({"plane": "XZ"}));
     run(&mut s, "sketch.circle.center", json!({"center": [50, 50], "radius": 4}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1", "restore_marker": false}));
     let id = s.active_sketch.expect("sketch mode");
     let other = |s: &Session| s.model.state().sketches.iter().find(|x| x.feature != id).cloned().expect("the other sketch");
     let before = other(&s);
@@ -386,6 +386,30 @@ fn a_drag_with_the_rest_of_a_selection_moves_it_as_one() {
     }
 }
 
+/// A selection dragged by an ellipse's axis takes the ellipse and its other axis along, as the
+/// axis dragged alone does: the whole ellipse slides by the cursor's move, keeping its size.
+#[test]
+fn a_selection_dragged_by_an_ellipse_axis_takes_the_ellipse_along() {
+    for live in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        let r = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}));
+        let e = r["curves"][0].as_str().expect("the ellipse").to_string();
+        run(&mut s, "sketch.line", json!({"points": [[40, -10], [40, 10]], "connect": false}));
+        let sk = s.doc.sketch(s.active_sketch.expect("sketch mode")).expect("the sketch");
+        let Some((Some((major, _)), _)) = sk.ellipse_axis_lines(sk.curve_index(&e).expect("the ellipse")) else { panic!("its axes") };
+        let axis = sk.curves[major].id.clone();
+        let line = sk.curves.last().expect("the line").id.clone();
+        run(&mut s, "sketch.drag", json!({"entity": axis, "with": [line], "from": [10, 0], "to": [10, 15], "live": live}));
+        let sk = s.doc.sketch(s.active_sketch.expect("sketch mode")).expect("the sketch");
+        let ei = sk.curve_index(&e).expect("the ellipse");
+        let solidcraft_sketch::CurveKind::Ellipse { c, m, .. } = sk.curves[ei].kind else { panic!("an ellipse") };
+        let v = solidcore_record::Vec2::new;
+        assert!(sk.point(c).expect("its centre").dist(v(0.0, 15.0)) < 1e-6, "live {live}: the centre follows: {:?}", sk.point(c));
+        assert!(sk.point(m).expect("its major end").dist(v(20.0, 15.0)) < 1e-6, "live {live}: the major end follows: {:?}", sk.point(m));
+    }
+}
+
 /// A 5 x 5 square drawn on the top face of a 30 x 20 x 10 box, the face's edges projected into
 /// its sketch; returns the session and a corner of the square (its id and where it is).
 fn on_a_face() -> (Session, String, solidcore_record::Vec2) {
@@ -437,4 +461,45 @@ fn a_live_gesture_projects_a_face_sketchs_links_once() {
     refresh_count::take();
     live_frame(&mut s, &point, at, 0.5);
     assert_eq!(refresh_count::take(), 1);
+}
+
+/// A dragged fit point of a spline whose tangent handles nobody turned keeps it the natural
+/// curve: its handles follow (#6502). A turned handle stays where it was put.
+#[test]
+fn untouched_spline_handles_follow_a_dragged_fit_point() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let id = run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [10, 8], [20, 0], [30, 6]], "connect": false}))["curves"][0]
+        .as_str()
+        .expect("a spline")
+        .to_owned();
+    run(&mut s, "sketch.spline.handles", json!({"curve": id}));
+    let fit = |s: &Session| {
+        let sk = sketch_of(s);
+        let ci = sk.curve_index(&id).expect("the spline");
+        match &sk.curves[ci].kind {
+            solidcraft_sketch::CurveKind::Spline { pts, handles, .. } => (pts.clone(), handles.clone()),
+            _ => panic!("a spline"),
+        }
+    };
+    let (pts, handles) = fit(&s);
+    let name = sketch_of(&s).points[pts[1]].id.clone();
+    run(&mut s, "sketch.drag", json!({"entity": name, "from": [10, 8], "to": [11, 10], "live": true}));
+    let sk = sketch_of(&s);
+    let at: Vec<_> = pts.iter().map(|i| sk.points[*i].pos).collect();
+    assert!(at[1].dist(solidcore_record::Vec2::new(11.0, 10.0)) < 1e-6, "{:?}", at[1]);
+    let natural = solidcraft_sketch::fit_tangent_handles(&at, false).expect("handles");
+    for (h, n) in handles.iter().zip(&natural) {
+        assert!(sk.points[*h].pos.dist(*n) < 1e-6, "an untouched handle follows the curve");
+    }
+    // Turn the last handle; dragging a fit point now leaves every handle where it is.
+    let turned = sk.points[handles[3]].id.clone();
+    let from = sk.points[handles[3]].pos;
+    run(&mut s, "sketch.drag", json!({"entity": turned, "from": [from.x, from.y], "to": [from.x + 2.0, from.y + 3.0]}));
+    let before: Vec<_> = handles.iter().map(|h| sketch_of(&s).points[*h].pos).collect();
+    run(&mut s, "sketch.drag", json!({"entity": name, "from": [11, 10], "to": [12, 11], "live": true}));
+    let sk = sketch_of(&s);
+    for (h, b) in handles.iter().zip(&before) {
+        assert!(sk.points[*h].pos.dist(*b) < 1e-6, "a turned spline keeps its handles");
+    }
 }

@@ -7,7 +7,7 @@ use solidcraft_doc::expr::Kind;
 use solidcraft_doc::sheet::{self, SheetBody, SheetRule};
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{FacePick, Position};
-use solidcraft_doc::{FeatureKind, FlangeEdge};
+use solidcraft_doc::{FeatureKind, FlangeEdge, FlangeSegment};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, Ring};
 
@@ -16,8 +16,10 @@ use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
-    ConvertParams, FlangeParams, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, PerforateParams, RuleFeatureError,
-    RuleReply, RulesParams, RulesResult, UnfoldParams,
+    BendDirection, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams,
+    FlatBend, FlatBore, FlatCircle, FlatPatternParams, FlatPatternResult, FlatPerforation, FlatPerforationPattern, FlatPocket, FlatSegment,
+    FlatShape, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, PathFlangeParams, PerforateParams, PocketSide,
+    RuleFeatureError, RuleReply, RulesParams, RulesResult, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -32,6 +34,11 @@ const CONVERT_CONTRACT: TypedContract<ConvertParams> = TypedContract::new();
 const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
 const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
 
+const PATH_FLANGE_CONTRACT: TypedContract<PathFlangeParams> = TypedContract::new();
+const FLAT_PATTERN_CONTRACT: TypedContract<FlatPatternParams> = TypedContract::new();
+const BEND_TABLE_CONTRACT: TypedContract<BendTableParams> = TypedContract::new();
+const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sheet.flange", "Flange", crate::checked!("sheet.flange", flange))
         .at("SHEET METAL", "CREATE")
@@ -39,8 +46,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FLANGE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines) + distance (rule?, flip?, reverse?) | \
-         edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?} for an edge with its own angle and height] + \
+        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines and tangent arcs) + distance (rule?, flip?, reverse?) | \
+         edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?, segments?} for an edge with its own angle and height, \
+         or split into 1…64 segments [{from, to, angle?, height?, flip?}] that tile the stretch the sheet still has there (from, to are \
+         fractions 0…1 of it, first from 0, last to 1; consecutive segments that match make one bend)] + \
          height (along the flange, to its far edge), angle? (default 90 deg), radius? (default: rule), \
          height_from?: outer|inner|tangent (where the height is measured from: the outer virtual sharp (default), \
          the inner virtual sharp, or past 90 deg the line square to the flange touching the bend's outside (tangent; up to 90 deg the outer sharp)), \
@@ -53,7 +62,12 @@ pub static COMMANDS: &[CommandSpec] = &[
          Thickness, K-factor and bend radius come from the rule (sheet.manage_rules); passing them here is refused, \
          and so is the corner relief on a base or contour flange",
     ),
-    CommandSpec::new("sheet.path_flange", "Path Flange", path_flange).at("SHEET METAL", "CREATE").icon("path_flange").params(
+    CommandSpec::new("sheet.path_flange", "Path Flange", crate::checked!("sheet.path_flange", path_flange))
+        .at("SHEET METAL", "CREATE")
+        .icon("path_flange")
+        .contract(&PATH_FLANGE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
         "edge: [x,y,z] on a top or bottom edge of the sheet; sketch + curves: an open chain of sketch lines drawn on a plane across \
          that edge, from the edge out (each line one flange as long as the line, to the outer face from the virtual sharp; each \
          corner one bend, turning the way the lines turn); radius? (default: rule); body?. One feature, one body",
@@ -121,15 +135,19 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("sheet.rules", "List Sheet Metal Rules", crate::checked!("sheet.rules", list_rules))
         .contract(&RULES_CONTRACT).output(output_schema_for::<RulesResult>).icon("sheet_rules").noundo().doc_only().params("→ rules with their expressions and values, and the active one"),
-    CommandSpec::new("sheet.flat_pattern", "Create Flat Pattern", flat_pattern)
+    CommandSpec::new("sheet.flat_pattern", "Create Flat Pattern", crate::checked!("sheet.flat_pattern", flat_pattern))
         .at("SHEET METAL", "CREATE")
         .icon("flat")
         .noundo()
+        .contract(&FLAT_PATTERN_CONTRACT)
+        .output(output_schema_for::<FlatPatternResult>)
         .params(
             "body? → flat size, outline loops and cut-outs (flat coordinates, as point lists), cutout_shapes (the same cut-outs exactly, in the same order: {circle: {center, radius}} for a round hole, else {segments: [{line: [a, b]} | {arc: {center, radius, start_deg, sweep_deg}} | {polyline: [...]}]}), pockets (with their own cutout_shapes), bend lines and the bend table",
         ),
-    CommandSpec::new("sheet.export_dxf", "Export Flat Pattern as DXF", export_dxf).icon("dxf")
+    CommandSpec::new("sheet.export_dxf", "Export Flat Pattern as DXF", crate::checked!("sheet.export_dxf", export_dxf)).icon("dxf")
         .noundo()
+        .contract(&EXPORT_DXF_CONTRACT)
+        .output(output_schema_for::<ExportDxfResult>)
         .params(
             "body?, path?, curves?: exact|arcs (default exact: an ellipse as ELLIPSE, splines, text outlines and other Béziers as SPLINE; arcs: tangent arcs and lines within 0.001 mm, for machines that read only those), \
              text?: cut|etch (default cut: letters that text cut through the sheet are cut contours on layer TEXT; etch: single contours on layer ETCH and the sheet keeps its material there; text machined to a depth is always on ETCH), \
@@ -141,8 +159,10 @@ pub static COMMANDS: &[CommandSpec] = &[
              → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
              POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth) and PERFORATION; inner contours come before the outline",
         ),
-    CommandSpec::new("sheet.export_bend_table", "Export Bend Table", export_bend_table).icon("bendtable")
+    CommandSpec::new("sheet.export_bend_table", "Export Bend Table", crate::checked!("sheet.export_bend_table", export_bend_table)).icon("bendtable")
         .noundo()
+        .contract(&BEND_TABLE_CONTRACT)
+        .output(output_schema_for::<BendTableResult>)
         .params("body?, format?: csv|json (default csv), path? → bend table in mm and degrees, including rule and flat centre-line coordinates; angle_deg is the bend angle and included_angle_deg the angle left between the bend's sides (180° less it); a bend that cut-outs split has a row for each piece"),
 ];
 
@@ -234,6 +254,13 @@ fn flange_edges(s: &Session, p: &Value, cmd: &str) -> Result<Vec<FlangeEdge>> {
                 check_expr(s, e, kind, cmd, &format!("edges[{i}].{k}"))?;
             }
         }
+        for (j, seg) in edge.segments.iter().enumerate() {
+            for (k, e, kind) in [("angle", &seg.angle, Kind::Angle), ("height", &seg.height, Kind::Length)] {
+                if let Some(e) = e {
+                    check_expr(s, e, kind, cmd, &format!("edges[{i}].segments[{j}].{k}"))?;
+                }
+            }
+        }
         edges.push(edge);
     }
     Ok(edges)
@@ -251,16 +278,20 @@ pub(crate) fn flange_edge_list(v: Option<&Value>) -> std::result::Result<&Vec<Va
     Ok(a)
 }
 
+/// Most segments one picked edge may be split into (`sheet.flange`'s `segments`), in the style
+/// of [`MAX_THEN`]; each bend costs two flat pieces, so this keeps the flat budget reachable.
+pub(crate) const MAX_SEGMENTS: usize = 64;
+
 /// Item `i` of an edge flange's `edges`, without the design: whether its expressions suit the
 /// design is checked by the handler.
 pub(crate) fn flange_edge(i: usize, v: &Value) -> std::result::Result<FlangeEdge, String> {
-    const KEYS: [&str; 3] = ["point", "angle", "height"];
+    const KEYS: [&str; 4] = ["point", "angle", "height", "segments"];
     // A bare point, as before: [x, y, z] or {x, y, z}.
     let Some(o) = v.as_object().filter(|o| KEYS.iter().any(|k| o.contains_key(*k))) else {
         return vec3(v).map(FlangeEdge::at).ok_or_else(|| format!("edges[{i}]: {FLANGE_EDGE_LIST}"));
     };
     if let Some(k) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
-        return Err(format!("edges[{i}]: unknown key `{k}` (an edge takes point, angle and height)"));
+        return Err(format!("edges[{i}]: unknown key `{k}` (an edge takes point, angle, height and segments)"));
     }
     let point = o.get("point").and_then(vec3).ok_or_else(|| format!("edges[{i}]: `point` must be [x, y, z]"))?;
     let own = |k: &str| -> std::result::Result<Option<solidcraft_doc::Expr>, String> {
@@ -269,7 +300,68 @@ pub(crate) fn flange_edge(i: usize, v: &Value) -> std::result::Result<FlangeEdge
         }
         expr(v, k).map(Some).ok_or_else(|| format!("edges[{i}]: `{k}` {}", expr_problem(v.get(k))))
     };
-    Ok(FlangeEdge { point: Position(point), angle: own("angle")?, height: own("height")? })
+    let segments = match o.get("segments").filter(|v| !v.is_null()) {
+        Some(v) => flange_segments(i, v)?,
+        None => Vec::new(),
+    };
+    Ok(FlangeEdge { point: Position(point), angle: own("angle")?, height: own("height")?, segments })
+}
+
+/// The `segments` of edge `i`: 1…[`MAX_SEGMENTS`] stretches of the edge that tile it, each
+/// `{from, to, angle?, height?, flip?}`. `from` and `to` are fractions of the stretch the sheet
+/// still has there, so they are read here; the angle and height expressions are checked by the
+/// handler. Every refusal says which segment it is about, never clamps a value.
+pub(crate) fn flange_segments(i: usize, v: &Value) -> std::result::Result<Vec<FlangeSegment>, String> {
+    let list = format!("edges[{i}].segments must list segments {{from, to, angle?, height?, flip?}}");
+    let a = v.as_array().ok_or_else(|| list.clone())?;
+    if a.is_empty() || a.len() > MAX_SEGMENTS {
+        return Err(format!("edges[{i}].segments must list 1…{MAX_SEGMENTS} segments"));
+    }
+    let mut out: Vec<FlangeSegment> = Vec::with_capacity(a.len());
+    let mut last_to = 0.0;
+    for (j, seg) in a.iter().enumerate() {
+        let o = seg.as_object().ok_or_else(|| format!("edges[{i}].segments[{j}]: {list}"))?;
+        if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "from" | "to" | "angle" | "height" | "flip")) {
+            return Err(format!("edges[{i}].segments[{j}]: unknown key `{k}` (a segment takes from, to, angle, height and flip)"));
+        }
+        let fraction = |k: &str| -> std::result::Result<f64, String> {
+            o.get(k)
+                .and_then(Value::as_f64)
+                .filter(|x| (0.0..=1.0).contains(x))
+                .ok_or_else(|| format!("edges[{i}].segments[{j}].{k} must be a fraction from 0 to 1"))
+        };
+        let (from, to) = (fraction("from")?, fraction("to")?);
+        if !(to > from) {
+            return Err(format!("edges[{i}].segments[{j}].to must be more than its from"));
+        }
+        if j == 0 && from.abs() > sheet::SEGMENT_JOIN_EPS {
+            return Err(format!("edges[{i}].segments[0].from must be 0: the segments cover the whole edge"));
+        }
+        if j > 0 && (from - last_to).abs() > sheet::SEGMENT_JOIN_EPS {
+            return Err(format!(
+                "edges[{i}].segments[{j}].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)"
+            ));
+        }
+        let flip = match o.get("flip").filter(|v| !v.is_null()) {
+            Some(v) => Some(v.as_bool().ok_or_else(|| format!("edges[{i}].segments[{j}].flip must be true or false"))?),
+            None => None,
+        };
+        let own = |k: &str| -> std::result::Result<Option<solidcraft_doc::Expr>, String> {
+            if o.get(k).is_none_or(Value::is_null) {
+                return Ok(None);
+            }
+            expr(seg, k).map(Some).ok_or_else(|| format!("edges[{i}].segments[{j}]: `{k}` {}", expr_problem(o.get(k))))
+        };
+        let angle = own("angle")?;
+        let height = own("height")?;
+        last_to = to;
+        out.push(FlangeSegment { from, to, angle, height, flip });
+    }
+    if (last_to - 1.0).abs() > sheet::SEGMENT_JOIN_EPS {
+        let n = out.len() - 1;
+        return Err(format!("edges[{i}].segments[{n}].to must be 1: the segments cover the whole edge"));
+    }
+    Ok(out)
 }
 
 fn rule_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<String>> {
@@ -310,6 +402,14 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     if ty != "edge" && p.get("then").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`then` (further bends) is only for edge flanges"));
     }
+    if ty != "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "segments is only for edge flanges (a base or contour flange has no edge to divide)"));
+    }
+    // A top-level `segments` is a whole-edge bend's key, not a flange's: it belongs in an `edges`
+    // item, and saying so is better than a flange that quietly ignores it.
+    if ty == "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`segments` belongs inside an `edges` item: edges [{point, segments}]"));
+    }
     match flange_type(&ty).map_err(|why| bad(cmd, why))? {
         FlangeType::Base => {
             let sketch = feature_sketch(s, p, cmd)?;
@@ -324,7 +424,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
             let curves = string_list(cmd, p, "curves")?;
             if curves.is_empty() || curves.len() > 1000 {
-                return Err(bad(cmd, "`curves` must list the open chain's lines"));
+                return Err(bad(cmd, "`curves` must list the open chain's lines and arcs"));
             }
             let distance = req_expr(cmd, p, "distance")?;
             check_expr(s, &distance, Kind::Length, cmd, "distance")?;
@@ -345,6 +445,9 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
         FlangeType::Edge => {
             let edges = flange_edges(s, p, cmd)?;
             let then = then_steps(s, p, cmd)?;
+            if !then.is_empty() && edges.iter().any(|e| !e.segments.is_empty()) {
+                return Err(bad(cmd, "not supported yet: then on a segmented edge (bend each segment's far edge in its own feature)"));
+            }
             let height = req_expr(cmd, p, "height")?;
             check_expr(s, &height, Kind::Length, cmd, "height")?;
             let angle = expr(p, "angle").unwrap_or_else(|| "90 deg".into());
@@ -734,24 +837,24 @@ fn loop_circle(lp: &solidcore_record::Loop2) -> Option<(Vec2, f64)> {
 
 /// A loop's exact shape for the flat pattern JSON: a circle, or its lines and arcs (other
 /// curves as point lists at the flat pattern's 0.001 mm tolerance).
-fn loop_shape(lp: &solidcore_record::Loop2) -> Value {
+fn loop_shape(lp: &solidcore_record::Loop2) -> FlatShape {
     use solidcore_record::Seg2;
-    let pt = |v: Vec2| json!([v.x, v.y]);
+    let pt = |v: Vec2| [v.x, v.y];
     if let Some((center, radius)) = loop_circle(lp) {
-        return json!({"circle": {"center": pt(center), "radius": radius}});
+        return FlatShape::Circle { circle: FlatCircle { center: pt(center), radius } };
     }
-    let segments: Vec<Value> = lp
+    let segments: Vec<FlatSegment> = lp
         .segs
         .iter()
         .map(|seg| match *seg {
-            Seg2::Line { a, b } => json!({"line": [pt(a), pt(b)]}),
+            Seg2::Line { a, b } => FlatSegment::Line([pt(a), pt(b)]),
             Seg2::Arc { center, radius, start, sweep } => {
-                json!({"arc": {"center": pt(center), "radius": radius, "start_deg": start.to_degrees(), "sweep_deg": sweep.to_degrees()}})
+                FlatSegment::Arc { center: pt(center), radius, start_deg: start.to_degrees(), sweep_deg: sweep.to_degrees() }
             }
-            ref other => json!({"polyline": other.polyline(1e-3).into_iter().map(pt).collect::<Vec<_>>()}),
+            ref other => FlatSegment::Polyline(other.polyline(1e-3).into_iter().map(pt).collect()),
         })
         .collect();
-    json!({"segments": segments})
+    FlatShape::Segments { segments }
 }
 
 fn flat_json(sh: &SheetBody) -> Result<Value> {
@@ -759,63 +862,98 @@ fn flat_json(sh: &SheetBody) -> Result<Value> {
     let loops: Vec<Ring<Vec2>> = regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
     let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
     let (w, h) = (size.x, size.y);
-    let pt = |v: &Vec2| json!([v.x, v.y]);
-    let outline: Vec<Value> = loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect();
-    let holes: Vec<Value> = regions.iter().flat_map(|r| &r.holes).map(|h| Value::Array(h.polyline(1e-3).iter().map(pt).collect())).collect();
-    let hole_shapes: Vec<Value> = regions.iter().flat_map(|r| &r.holes).map(loop_shape).collect();
-    let bends: Vec<Value> = sh
+    let pt = |v: &Vec2| [v.x, v.y];
+    let outline: Vec<Vec<[f64; 2]>> = loops.iter().map(|l| l.iter().map(pt).collect()).collect();
+    let holes: Vec<Vec<[f64; 2]>> = regions.iter().flat_map(|r| &r.holes).map(|h| h.polyline(1e-3).iter().map(pt).collect()).collect();
+    let hole_shapes: Vec<FlatShape> = regions.iter().flat_map(|r| &r.holes).map(loop_shape).collect();
+    let bends: Vec<FlatBend> = sh
         .bends()
         .iter()
-        .map(|b| {
-            json!({"bend": b.index, "angle_deg": b.angle_deg, "included_angle_deg": b.included_angle_deg(), "radius": b.radius, "direction": if b.up { "up" } else { "down" },
-                "allowance": b.allowance, "length": b.length, "start": pt(&b.start), "end": pt(&b.end)})
+        .map(|b| FlatBend {
+            bend: b.index,
+            angle_deg: b.angle_deg,
+            included_angle_deg: b.included_angle_deg(),
+            radius: b.radius,
+            direction: if b.up { BendDirection::Up } else { BendDirection::Down },
+            allowance: b.allowance,
+            length: b.length,
+            start: pt(&b.start),
+            end: pt(&b.end),
         })
         .collect();
-    let pockets: Vec<Value> = sh
+    let pockets: Vec<FlatPocket> = sh
         .machining()?
         .iter()
         .map(|p| {
             let side = if p.z0 == 0.0 {
-                "bottom"
+                PocketSide::Bottom
             } else if p.z1 == sh.t {
-                "top"
+                PocketSide::Top
             } else {
-                "internal"
+                PocketSide::Internal
             };
-            json!({"outline": p.region.outer.polyline(1e-3).iter().map(pt).collect::<Vec<_>>(),
-            "cutouts": p.region.holes.iter().map(|h| h.polyline(1e-3).iter().map(pt).collect::<Vec<_>>()).collect::<Vec<_>>(),
-            "cutout_shapes": p.region.holes.iter().map(loop_shape).collect::<Vec<_>>(),
-            "side": side, "depth_mm": p.z1-p.z0, "z0_mm": p.z0, "z1_mm": p.z1})
+            FlatPocket {
+                outline: p.region.outer.polyline(1e-3).iter().map(pt).collect(),
+                cutouts: p.region.holes.iter().map(|h| h.polyline(1e-3).iter().map(pt).collect()).collect(),
+                cutout_shapes: p.region.holes.iter().map(loop_shape).collect(),
+                side,
+                depth_mm: p.z1 - p.z0,
+                z0_mm: p.z0,
+                z1_mm: p.z1,
+            }
         })
         .collect();
     // Holes drilled along a panel into its rim: drilled after cutting, not in the outline.
-    let bores: Vec<Value> = sh
+    let bores: Vec<FlatBore> = sh
         .bores
         .iter()
-        .map(|b| json!({"start": [b.base.x, b.base.y, b.base.z], "axis": [b.axis.x, b.axis.y, b.axis.z], "diameter": b.radius * 2.0, "length": b.height.abs()}))
+        .map(|b| FlatBore {
+            start: [b.base.x, b.base.y, b.base.z],
+            axis: [b.axis.x, b.axis.y, b.axis.z],
+            diameter: b.radius * 2.0,
+            length: b.height.abs(),
+        })
         .collect();
     let mut perforations = Vec::new();
     for p in &sh.perforations {
         let n = sh.perforation_holes(p)?.len();
-        perforations.push(json!({"feature": p.feature, "diameter": p.diameter, "pitch": p.pitch, "margin": p.margin,
-            "pattern": if p.square { "square" } else { "staggered" }, "count": n,
-            "open_area_mm2": n as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2)}));
+        perforations.push(FlatPerforation {
+            feature: p.feature,
+            diameter: p.diameter,
+            pitch: p.pitch,
+            margin: p.margin,
+            pattern: if p.square { FlatPerforationPattern::Square } else { FlatPerforationPattern::Staggered },
+            count: n,
+            open_area_mm2: n as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2),
+        });
     }
-    let bend_zones: Vec<Value> = sh
+    let bend_zones: Vec<[f64; 4]> = sh
         .bend_zones()
         .iter()
         .map(|z| {
             let pts = z.outer.polyline(1e-3);
             let f = |g: fn(&Vec2) -> f64, m: fn(f64, f64) -> f64, s: f64| pts.iter().map(g).fold(s, m);
-            json!([f(|p| p.x, f64::min, f64::MAX), f(|p| p.x, f64::max, f64::MIN), f(|p| p.y, f64::min, f64::MAX), f(|p| p.y, f64::max, f64::MIN)])
+            [f(|p| p.x, f64::min, f64::MAX), f(|p| p.x, f64::max, f64::MIN), f(|p| p.y, f64::min, f64::MAX), f(|p| p.y, f64::max, f64::MIN)]
         })
         .collect();
-    let mut out = json!({"body": sh.body, "rule": sh.rule, "thickness": sh.t, "k_factor": sh.k, "flat_size_mm": [w, h, sh.t], "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "unfolded": sh.flat,
-        "perforations": perforations, "bend_zones": bend_zones});
-    if !bores.is_empty() {
-        out["bores"] = Value::Array(bores);
-    }
-    Ok(out)
+    let out = FlatPatternResult {
+        body: sh.body.clone(),
+        rule: sh.rule.clone(),
+        thickness: sh.t,
+        k_factor: sh.k,
+        flat_size_mm: [w, h, sh.t],
+        outline,
+        cutouts: holes,
+        cutout_shapes: hole_shapes,
+        pockets,
+        bends,
+        unfolded: sh.flat,
+        perforations,
+        bend_zones,
+        bores,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(out).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1021,26 +1159,53 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
     Ok(solidcraft_io::write_dxf_drawing(&layers, &entities)?)
 }
 
+/// A DXF export's `curves`: exact or arcs, in any case.
+pub(crate) fn dxf_curves(t: &str) -> Option<DxfCurves> {
+    match t.to_ascii_lowercase().as_str() {
+        "exact" => Some(DxfCurves::Exact),
+        "arcs" => Some(DxfCurves::Arcs),
+        _ => None,
+    }
+}
+
+/// Where a DXF export puts the letters text cut through the sheet: its `text` is cut or etch, in
+/// any case.
+pub(crate) fn dxf_text(t: &str) -> Option<DxfText> {
+    match t.to_ascii_lowercase().as_str() {
+        "cut" => Some(DxfText::Cut),
+        "etch" => Some(DxfText::Etch),
+        _ => None,
+    }
+}
+
+/// A DXF export's `layers`: false for a layer for each role, true for everything on layer 0, in
+/// any case.
+pub(crate) fn dxf_layers(t: &str) -> Option<bool> {
+    match t.to_ascii_lowercase().as_str() {
+        "roles" => Some(false),
+        "single" => Some(true),
+        _ => None,
+    }
+}
+
+/// A DXF export's `note_height`: how high a bend note's letters are, in mm, 0.1 to 100.
+pub(crate) fn dxf_note_height(mm: f64) -> Option<f64> {
+    (0.1..=100.0).contains(&mm).then_some(mm)
+}
+
 /// What a `sheet.export_dxf` call asks for; a value it cannot use is refused.
 fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
-    let curves = match str_(p, "curves").map(str::to_ascii_lowercase).as_deref() {
-        None | Some("exact") => DxfCurves::Exact,
-        Some("arcs") => DxfCurves::Arcs,
-        Some(_) => return Err(bad(cmd, "`curves` must be exact or arcs")),
+    let curves = match str_(p, "curves") {
+        None => DxfCurves::Exact,
+        Some(v) => dxf_curves(v).ok_or_else(|| bad(cmd, "`curves` must be exact or arcs"))?,
     };
     let text = match p.get("text").filter(|v| !v.is_null()) {
         None => DxfText::Cut,
-        Some(v) => match v.as_str().map(str::to_ascii_lowercase).as_deref() {
-            Some("cut") => DxfText::Cut,
-            Some("etch") => DxfText::Etch,
-            _ => return Err(bad(cmd, "`text` must be cut or etch")),
-        },
+        Some(v) => v.as_str().and_then(dxf_text).ok_or_else(|| bad(cmd, "`text` must be cut or etch"))?,
     };
     let height = match p.get("note_height").filter(|v| !v.is_null()) {
         None => 3.0,
-        Some(v) => {
-            v.as_f64().filter(|h| (0.1..=100.0).contains(h)).ok_or_else(|| bad(cmd, "`note_height` must be a number of mm from 0.1 to 100"))?
-        }
+        Some(v) => v.as_f64().and_then(dxf_note_height).ok_or_else(|| bad(cmd, "`note_height` must be a number of mm from 0.1 to 100"))?,
     };
     let bend_notes = match p.get("bend_notes").filter(|v| !v.is_null()) {
         None | Some(Value::Bool(false)) => None,
@@ -1054,11 +1219,7 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
     };
     let one_layer = match p.get("layers").filter(|v| !v.is_null()) {
         None => false,
-        Some(v) => match v.as_str().map(str::to_ascii_lowercase).as_deref() {
-            Some("roles") => false,
-            Some("single") => true,
-            _ => return Err(bad(cmd, "`layers` must be roles or single")),
-        },
+        Some(v) => v.as_str().and_then(dxf_layers).ok_or_else(|| bad(cmd, "`layers` must be roles or single"))?,
     };
     Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer })
 }
@@ -1120,37 +1281,47 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
             let bends = sh.bends().len();
             if let Some(file) = paths.as_ref().and_then(|paths| paths.get(i)) {
                 solidcraft_io::vfs::write(file, text.as_bytes()).map_err(|e| EngineError::Other(format!("{file}: {e}")))?;
-                files.push(json!({"body": sh.body, "path": file, "bends": bends}));
+                files.push(DxfFile { body: sh.body.clone(), path: Some(file.clone()), dxf: None, bends });
             } else {
-                files.push(json!({"body": sh.body, "dxf": text, "bends": bends}));
+                files.push(DxfFile { body: sh.body.clone(), path: None, dxf: Some(text.clone()), bends });
             }
         }
-        return Ok(json!({"files": files}));
+        return serde_json::to_value(ExportDxfResult::Files { files, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()));
     }
     let sh = sheet_of(s, p, cmd)?;
     sh.flat_matches_body()?;
     let text = flat_dxf(&sh, &options)?;
-    if let Some(path) = path {
+    let bends = sh.bends().len();
+    let reply = if let Some(path) = path {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "bends": sh.bends().len()}));
+        ExportDxfResult::Written { path: path.to_string(), bends, param_warnings: Vec::new() }
+    } else {
+        ExportDxfResult::Text { dxf: text, bends, param_warnings: Vec::new() }
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// A bend table's `format`: csv or json, in any case.
+pub(crate) fn bend_table_format(t: &str) -> Option<BendTableFormat> {
+    match t.to_ascii_lowercase().as_str() {
+        "csv" => Some(BendTableFormat::Csv),
+        "json" => Some(BendTableFormat::Json),
+        _ => None,
     }
-    Ok(json!({"dxf": text, "bends": sh.bends().len()}))
 }
 
 fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.export_bend_table";
-    let format = str_(p, "format").unwrap_or("csv").to_ascii_lowercase();
-    if !matches!(format.as_str(), "csv" | "json") {
-        return Err(bad(cmd, "`format` must be csv or json"));
-    }
+    let format = str_(p, "format").map_or(Some(BendTableFormat::Csv), bend_table_format).ok_or_else(|| bad(cmd, "`format` must be csv or json"))?;
     let sh = sheet_of(s, p, cmd)?;
     sh.flat_matches_body()?;
     let table = flat_json(&sh)?;
-    let text = if format == "json" {
+    let text = if format == BendTableFormat::Json {
         serde_json::to_string_pretty(&table).map_err(|e| EngineError::Other(e.to_string()))?
     } else {
-        // Always quote text fields: body/rule names may include commas, quotes or newlines.
-        let quote = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+        // Always quote text fields: body/rule names may include commas, quotes or newlines, or start
+        // as a spreadsheet formula does.
+        let quote = solidcraft_doc::csv::quoted;
         let mut csv =
             "body,rule,thickness_mm,k_factor,bend,angle_deg,direction,radius_mm,allowance_mm,length_mm,start_x_mm,start_y_mm,end_x_mm,end_y_mm,included_angle_deg\r\n"
                 .to_string();
@@ -1176,11 +1347,14 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
         }
         csv
     };
-    if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
+    let bends = sh.bends().len();
+    let reply = if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "format": format, "bends": sh.bends().len()}));
-    }
-    Ok(json!({"format": format, "text": text, "bends": sh.bends().len()}))
+        BendTableResult::Written { path: path.to_string(), format, bends, param_warnings: Vec::new() }
+    } else {
+        BendTableResult::Text { format, text, bends, param_warnings: Vec::new() }
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(test)]

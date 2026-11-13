@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcore_record::Vec3;
-use solidcraft_engine::doc::{Document, Mat, apply_point, apply_vector, expr::Kind, rigid};
+use solidcraft_engine::doc::{Document, IDENTITY, Mat, apply_point, apply_vector, expr::Kind, mat_inverse, mat_mul, rigid};
 use solidcraft_engine::geom::{Aabb3, Mesh};
 
 use crate::{
@@ -26,12 +26,22 @@ pub(crate) struct MovePreview {
 }
 
 /// The world meshes of the bodies drawn (the listed bodies, and the bodies of the components
-/// copied), for the design and revision they were taken from.
+/// copied) and the frames that place them, for the design and revision they were taken from.
 struct Cached {
     document: Arc<Document>,
     revision: u64,
     names: Vec<String>,
     meshes: Vec<Arc<Mesh>>,
+    frames: Vec<Mat>,
+}
+
+/// Where the components of `bodies` place them, the world for a body outside one.
+fn placed_frames(app: &SolveApp, bodies: &[String]) -> Vec<Mat> {
+    if app.session.doc.occurrences.is_empty() {
+        return vec![IDENTITY; bodies.len()];
+    }
+    let frames = app.session.placed_document().body_frames(&app.session.model.state());
+    bodies.iter().map(|name| frames.iter().find(|f| f.0 == *name).map_or(IDENTITY, |f| f.3)).collect()
 }
 
 impl MovePreview {
@@ -48,6 +58,10 @@ impl MovePreview {
             "timeline.redefine" if params.get("command").and_then(Value::as_str) == Some("solid.move") => params.get("params")?,
             _ => return None,
         };
+        // A matrix is the engine's to read (`move_matrix_params`).
+        if params.get("matrix").is_some() {
+            return None;
+        }
         let doc = &app.session.doc;
         let length = |v: &Value| match v {
             Value::Number(n) => n.as_f64(),
@@ -59,18 +73,26 @@ impl MovePreview {
             None => Vec3::ZERO,
             _ => return None,
         };
-        let axis = match params.get("axis") {
-            Some(Value::Array(a)) if a.len() == 3 => Vec3::new(a[0].as_f64()?, a[1].as_f64()?, a[2].as_f64()?),
-            None => Vec3::Z,
+        let origin = match params.get("origin") {
+            Some(Value::Array(a)) if a.len() == 3 => Some(Vec3::new(length(&a[0])?, length(&a[1])?, length(&a[2])?)),
+            None => None,
             _ => return None,
         };
+        let given_axis = match params.get("axis") {
+            Some(Value::Array(a)) if a.len() == 3 => Some(Vec3::new(a[0].as_f64()?, a[1].as_f64()?, a[2].as_f64()?)),
+            None => None,
+            _ => return None,
+        };
+        let axis = given_axis.unwrap_or(Vec3::Z);
         let angle = match params.get("angle") {
             None | Some(Value::Null) => 0.0,
             Some(Value::String(e)) => doc.eval(e, Kind::Angle).ok()?,
             Some(Value::Number(n)) => doc.eval(&n.to_string(), Kind::Angle).ok()?,
             _ => return None,
         };
-        if !(translate.is_finite() && axis.is_finite() && angle.is_finite()) || (angle != 0.0 && axis.normalized().is_none()) {
+        if !(translate.is_finite() && axis.is_finite() && angle.is_finite() && origin.is_none_or(|o| o.is_finite()))
+            || (angle != 0.0 && axis.normalized().is_none())
+        {
             return None;
         }
         let bodies: Vec<String> = params.get("bodies")?.as_array()?.iter().map(|b| b.as_str().map(str::to_string)).collect::<Option<_>>()?;
@@ -101,15 +123,31 @@ impl MovePreview {
             if meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
                 return None;
             }
-            self.cached = Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, names: names.clone(), meshes });
+            // A component's copy moves in the world (`occurrence.move`), so its bodies take the world's.
+            let mut frames = placed_frames(app, &bodies);
+            frames.resize(names.len(), IDENTITY);
+            self.cached = Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, names: names.clone(), meshes, frames });
         }
         let cache = self.cached.as_ref()?;
-        // About the world origin, as the Move feature turns bodies (`kernel::transform`).
-        let m = rigid(translate, Vec3::ZERO, axis, angle);
+        // The move in the world as a body in `frame` takes it: about the given origin and axis,
+        // which are in the world; without an origin, about the frame's origin and, without an
+        // axis too, its Z (`frames::map_local`). A component's copy has the world's frame.
+        let world = |frame: &Mat| {
+            let o = origin.unwrap_or_else(|| apply_point(frame, Vec3::ZERO));
+            let a = given_axis.unwrap_or_else(|| if origin.is_some() { Vec3::Z } else { apply_vector(frame, Vec3::Z) });
+            rigid(translate, o, a, angle)
+        };
+        // A solid.move splits by frame and takes the values into each body's own
+        // (`frames::split_move`), so each body moves as `world` says. An edit takes them into the
+        // first body's frame, and the feature applies that local move to every body in its own.
+        let first = *cache.frames.first()?;
+        let in_first = mat_mul(&mat_mul(&mat_inverse(&first)?, &world(&first)), &first);
+        let edit = id == "timeline.redefine";
         let mut scene = GpuScene::default();
         let removed = scene.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
-        for mesh in &cache.meshes {
+        for (mesh, frame) in cache.meshes.iter().zip(&cache.frames) {
+            let m = if edit { mat_mul(&mat_mul(frame, &in_first), &mat_inverse(frame)?) } else { world(frame) };
             draw(&mut scene, mesh, &m, colors, &mut bounds);
             if !copy && colors.cut_tint {
                 // Where the body was, as the scratch-design preview shows a body moved away.
@@ -128,6 +166,7 @@ impl MovePreview {
             applied: None,
             stopped: None,
             mirror_meets: None,
+            placed: None,
             tapered: Vec::new(),
             replaced: if copy { Vec::new() } else { bodies },
             error: None,
@@ -177,7 +216,7 @@ mod tests {
 
     fn colors(app: &SolveApp) -> Colors {
         let _ = app;
-        Colors::from_tokens(&crate::theme::Tokens::get())
+        Colors::from_tokens(&solidcraft_theme::Tokens::get())
     }
 
     fn near(a: Vec3, b: Vec3) -> bool {
@@ -206,6 +245,52 @@ mod tests {
         assert!(pv.compute(&app, &copy, c).unwrap().unwrap().replaced.is_empty());
     }
 
+    /// A turn about a given origin is drawn about that point: the Move dialog names its pivot as
+    /// `origin` and leaves `translate` alone, so a preview about the world origin drew the body
+    /// far from where it lands. Checked at the root and on a body in a turned, placed component,
+    /// where a given origin is in the world too.
+    #[test]
+    fn a_turn_about_a_given_origin_is_previewed_where_the_move_puts_it() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20, "corner": [100, 0, 0], "body_name": "Plate"})).unwrap();
+        let made = s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 15, "body_name": "Peg"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        let occurrence = made["occurrence"].as_u64().unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": occurrence, "axis": [0, 0, 1], "angle": "30 deg", "translate": [-80, 20, 20]})).unwrap();
+        let peg = s.occurrence_bodies(&[occurrence], true).unwrap()[0].clone();
+        let app = SolveApp::new(s, Services::default());
+        for body in ["Plate".to_string(), peg] {
+            let p =
+                json!({"bodies": [body], "origin": ["120 mm", "15 mm", "10 mm"], "axis": [1, 0, 0], "angle": "25 deg", "translate": ["5 mm", 0, 0]});
+            let built =
+                MovePreview::default().compute(&app, &[("solid.move".to_string(), p.clone())], colors(&app)).expect("taken here").expect("built");
+            let mut s = app.session.scratch();
+            s.execute("solid.move", &p).unwrap();
+            let moved = s.world_state().unwrap().body(&body).unwrap().mesh().bounds();
+            assert!(built.bounds.min.dist(moved.min) < 1e-6 && built.bounds.max.dist(moved.max) < 1e-6, "{body}: {:?} vs {moved:?}", built.bounds);
+        }
+    }
+
+    /// A body in a turned, placed component turns about its component's origin, not the world's:
+    /// previewed about the world's, it was drawn far from where the feature puts it.
+    #[test]
+    fn a_placed_body_is_previewed_where_the_feature_puts_it() {
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "30 deg", "translate": [130, 20, 20]})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        let app = SolveApp::new(s, Services::default());
+        let cmds =
+            [("solid.move".to_string(), json!({"bodies": ["Body1"], "translate": ["10 mm", "-5 mm", "0 mm"], "axis": [1, 0, 0], "angle": "25 deg"}))];
+        let built = MovePreview::default().compute(&app, &cmds, colors(&app)).expect("taken here").expect("built");
+        let mut s = app.session.scratch();
+        s.execute("solid.move", &cmds[0].1).unwrap();
+        let moved = s.world_state().unwrap().body("Body1").unwrap().mesh().bounds();
+        assert!(built.bounds.min.dist(moved.min) < 1e-6 && built.bounds.max.dist(moved.max) < 1e-6, "{:?} vs {moved:?}", built.bounds);
+    }
+
     /// Anything it can't take is left to the scratch-design preview.
     #[test]
     fn what_it_cannot_take_goes_to_the_full_preview() {
@@ -217,6 +302,10 @@ mod tests {
             json!({"bodies": ["Plate"], "translate": ["width + ?", 0, 0]}),
             json!({"bodies": ["Plate"], "translate": [1, 0]}),
             json!({"bodies": [], "translate": [1, 0, 0]}),
+            json!({"bodies": ["Plate"], "angle": "90 deg", "origin": ["width + ?", 0, 0]}),
+            json!({"bodies": ["Plate"], "angle": "90 deg", "origin": [1, 0]}),
+            json!({"bodies": ["Plate"], "angle": "90 deg", "origin": "here"}),
+            json!({"bodies": ["Plate"], "matrix": [0, -1, 0, 30, 1, 0, 0, 0, 0, 0, 1, 0]}),
         ] {
             assert!(pv.compute(&app, &[("solid.move".to_string(), p.clone())], c).is_none(), "{p}");
         }
@@ -248,5 +337,49 @@ mod tests {
         let built = pv.compute(&app, &mixed, c).expect("taken here").expect("built");
         assert!(near(Vec3::new(built.bounds.min.x, 0.0, 0.0), Vec3::new(50.0, 0.0, 0.0)), "{:?}", built.bounds);
         assert!(near(Vec3::new(0.0, 0.0, built.bounds.max.z), Vec3::new(0.0, 0.0, 15.0)), "{:?}", built.bounds);
+    }
+
+    /// A turned copy of a placed component turns about the world origin, as `occurrence.move`
+    /// turns it, not about the origin of the component's frame as a body of it would.
+    #[test]
+    fn a_turned_component_copy_is_previewed_where_the_copy_lands() {
+        let mut s = Session::default();
+        let made = s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 15, "body_name": "Peg"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        let occurrence = made["occurrence"].as_u64().unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": occurrence, "translate": [100, 0, 0]})).unwrap();
+        let app = SolveApp::new(s, Services::default());
+        let p = json!({"bodies": [], "occurrences": [[occurrence]], "copy": true, "translate": [10, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"});
+        let built = MovePreview::default().compute(&app, &[("solid.move".to_string(), p.clone())], colors(&app)).expect("taken here").expect("built");
+        let mut s = app.session.scratch();
+        let copy = s.execute("solid.move", &p).unwrap()["occurrences"][0].as_u64().unwrap();
+        let mut landed = Aabb3::EMPTY;
+        for name in s.occurrence_bodies(&[copy], true).unwrap() {
+            landed = landed.union(&s.world_state().unwrap().body(&name).unwrap().mesh().bounds());
+        }
+        assert!(built.bounds.min.dist(landed.min) < 1e-6 && built.bounds.max.dist(landed.max) < 1e-6, "{:?} vs {landed:?}", built.bounds);
+    }
+
+    /// Bodies in differently turned frames move apart in the world (`frames::split_move`), each by
+    /// the world vector: drawn with the first body's frame, the other moved along its own axes.
+    #[test]
+    fn bodies_in_differently_turned_frames_are_previewed_where_the_move_puts_them() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5, "body_name": "Plate"})).unwrap();
+        let made = s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 15, "body_name": "Peg"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        let occurrence = made["occurrence"].as_u64().unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": occurrence, "axis": [0, 0, 1], "angle": "90 deg", "translate": [100, 0, 0]})).unwrap();
+        let peg = s.occurrence_bodies(&[occurrence], true).unwrap()[0].clone();
+        let app = SolveApp::new(s, Services::default());
+        let p = json!({"bodies": ["Plate", peg], "translate": [30, 0, 0]});
+        let built = MovePreview::default().compute(&app, &[("solid.move".to_string(), p.clone())], colors(&app)).expect("taken here").expect("built");
+        let mut s = app.session.scratch();
+        s.execute("solid.move", &p).unwrap();
+        let st = s.world_state().unwrap();
+        let moved = st.body("Plate").unwrap().mesh().bounds().union(&st.body(&peg).unwrap().mesh().bounds());
+        assert!(built.bounds.min.dist(moved.min) < 1e-6 && built.bounds.max.dist(moved.max) < 1e-6, "{:?} vs {moved:?}", built.bounds);
     }
 }

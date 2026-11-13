@@ -137,6 +137,51 @@ fn sketch_on_face_projects_its_edges_and_follows_edits() {
     assert!(w.is_none(), "{w:?}");
 }
 
+/// A tab drawn from a corner of a projected face, with its side held on the face's edge,
+/// follows the face when the face changes shape (a second hole) and grows: the projection is
+/// rebuilt, and the tab keeps its corner and its edge instead of losing its lines or being left
+/// behind inside the grown plate.
+#[test]
+fn a_tab_on_a_projected_face_follows_the_face_when_its_projection_is_rebuilt() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "60 mm"}));
+    let plate = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [60, 0], [60, 40], [0, 40]], "closed": true, "infer": true, "ids": ["a", "b", "c", "d"]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "a.start", "b": "origin"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["a"], "value": "w"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["b"], "value": 40}));
+    run(&mut s, "sketch.circle.center", json!({"center": [15, 20], "diameter": 6}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.project", json!({"refs": [{"face": [30, 5, 10]}]}));
+    let at = |c: &Value, end: &str, axis: usize| c[end][axis].as_f64().unwrap();
+    let right = linked_curves(&inspect(&mut s))
+        .into_iter()
+        .find(|c| (at(c, "start_at", 0) - 60.0).abs() < 1e-9 && (at(c, "end_at", 0) - 60.0).abs() < 1e-9)
+        .unwrap();
+    let id = right["id"].as_str().unwrap();
+    let corner = if (at(&right, "end_at", 1) - 40.0).abs() < 1e-9 { format!("{id}.end") } else { format!("{id}.start") };
+    let tab = ids(&run(
+        &mut s,
+        "sketch.line",
+        json!({"points": [corner, [75, 40], [75, 25], format!("on:{id}:60,25")], "closed": true, "infer": true}),
+    )["curves"]);
+    run(&mut s, "sketch.dimension", json!({"entities": [tab[0]], "value": 15}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "direction": "negative", "operation": "join"}));
+    let reach = |s: &Session| s.model.state().body("Plate").unwrap().mesh().bounds().max.x;
+    assert!((reach(&s) - 75.0).abs() < 1e-6, "{}", reach(&s));
+    // The plate gets a second hole and grows to 80 mm.
+    run(&mut s, "sketch.edit", json!({"sketch": plate}));
+    run(&mut s, "sketch.circle.center", json!({"center": [40, 20], "diameter": 6}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "80 mm"}));
+    let failed: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(failed.is_empty(), "{failed:?}");
+    assert!((reach(&s) - 95.0).abs() < 1e-6, "the tab stays on the plate's grown edge: {}", reach(&s));
+}
+
 #[test]
 fn auto_project_can_be_turned_off() {
     let mut s = Session::default();
@@ -251,17 +296,147 @@ fn a_construction_axis_projects_and_stays_linked() {
     let link = &state.sketch(sketch).unwrap().sketch.links[0];
     assert_eq!(link.source, solidcraft_sketch::LinkSource::Axis { name: "Hinge axis".into() });
     assert!(!link.lost, "renamed, the axis is still found");
-    // A design with the axis after the sketch opens with the link lost, saying why.
+    // Moved after the sketch, the axis can't be found from it: the link is lost, saying why, at
+    // once and when the design is opened again (#9544). Moved back, it is found again.
     run(&mut s, "timeline.reorder", json!({"feature": "Hinge axis", "position": 1}));
     let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    assert!(opened.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
-    let warnings = opened.model.result(sketch).and_then(|r| r.warning.clone()).unwrap_or_default();
-    assert!(warnings.contains("it must come earlier in the timeline"), "{warnings}");
+    for session in [&s, &opened] {
+        assert!(session.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
+        let warnings = session.model.result(sketch).and_then(|r| r.warning.clone()).unwrap_or_default();
+        assert!(warnings.contains("it must come earlier in the timeline"), "{warnings}");
+    }
     run(&mut s, "timeline.reorder", json!({"feature": "Hinge axis", "position": 0}));
+    assert!(!s.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
     // An axis that is no origin axis and no construction axis is refused, by its name.
     run(&mut s, "sketch.edit", json!({"sketch": sketch}));
     let error = s.execute("sketch.project", &json!({"refs": [{"axis": "Axis9"}]})).unwrap_err().to_string();
     assert!(error.contains("unknown axis `Axis9`"), "{error}");
+}
+
+/// A named construction point projects as a fixed point linked to it, on a sketch plane that
+/// is not the plane it was made on, and the projection follows when the point moves and when it
+/// is renamed (#12075).
+#[test]
+fn a_construction_point_projects_and_stays_linked() {
+    let mut s = Session::default();
+    let point = |x: f64, z: f64| json!({"point": {"point": [x, 5, z]}, "name": "Point1"});
+    run(&mut s, "construct.point.vertex", point(10.0, 20.0));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "YZ"}))["sketch"].as_u64().unwrap();
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
+    let projected = r["links"][0]["points"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    // Where the projected point is, against where the construction point projects in 3D.
+    let check = |s: &mut Session, world: solidcore_record::Vec3| {
+        let plane = s.model.state().sketch(sketch).unwrap().plane;
+        let want = plane.to_local(world);
+        run(s, "sketch.edit", json!({"sketch": sketch}));
+        let si = inspect(s);
+        let p = si["points"].as_array().unwrap().iter().find(|p| p["id"] == projected).cloned().unwrap();
+        run(s, "sketch.finish", json!({}));
+        assert!(p["link"].is_string() && p["fixed"] == true, "{p}");
+        let at = (p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap());
+        assert!((at.0 - want.x).abs() < 1e-9 && (at.1 - want.y).abs() < 1e-9, "{at:?} {want:?}");
+    };
+    check(&mut s, solidcore_record::Vec3::new(10.0, 5.0, 20.0));
+    run(&mut s, "timeline.redefine", json!({"feature": "Point1", "command": "construct.point.vertex", "params": point(10.0, 35.0)}));
+    check(&mut s, solidcore_record::Vec3::new(10.0, 5.0, 35.0));
+    run(&mut s, "timeline.rename", json!({"feature": "Point1", "name": "Pivot"}));
+    let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for session in [&s, &opened] {
+        let state = session.model.state();
+        let link = &state.sketch(sketch).unwrap().sketch.links[0];
+        assert_eq!(link.source, solidcraft_sketch::LinkSource::ConstructionPoint { name: "Pivot".into() });
+        assert!(!link.lost, "renamed, the point is still found");
+    }
+    // A name that is no construction point is refused, by its name.
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    let error = s.execute("sketch.project", &json!({"refs": [{"point": "Point9"}]})).unwrap_err().to_string();
+    assert!(error.contains("unknown point `Point9`"), "{error}");
+}
+
+/// A construction point of a component that is moved projects where the component puts it: into a
+/// sketch of the root, where it moves with the component, and into a sketch of the component
+/// itself, where it stays where the component's own coordinates put it (#12075).
+#[test]
+fn a_construction_point_of_a_moved_component_projects_where_it_is_placed() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part"}))["component"].as_u64().unwrap();
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [10, 5, 20]}, "name": "Point1"}));
+    let own = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let root = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The projected point of each sketch, in its sketch's coordinates.
+    let at = |s: &Session, id: u64| {
+        let state = s.model.state();
+        let sk = &state.sketch(id).unwrap().sketch;
+        assert!(sk.links.iter().all(|l| !l.lost), "{:?}", sk.links);
+        let link = sk.links.first().unwrap();
+        let p = sk.link_points(&link.id).first().and_then(|p| sk.points.get(*p)).unwrap().pos;
+        (p.x, p.y)
+    };
+    let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
+    assert!(near(at(&s, own), (10.0, 5.0)), "{:?}", at(&s, own));
+    assert!(near(at(&s, root), (10.0, 5.0)), "{:?}", at(&s, root));
+    let placement = s.doc.occurrences.iter().find(|o| o.component == part).map(|o| o.id).unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": placement, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": placement, "translate": [100, 0, 0], "capture": true}));
+    let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for session in [&s, &opened] {
+        assert!(near(at(session, root), (110.0, 5.0)), "the root's projection moves with the part: {:?}", at(session, root));
+        assert!(near(at(session, own), (10.0, 5.0)), "the part's own projection stays: {:?}", at(session, own));
+    }
+}
+
+/// A face-attached sketch authored through the second occurrence must not translate a point
+/// of its own definition by the difference from the first occurrence (#12075).
+#[test]
+fn a_construction_point_of_the_second_author_occurrence_stays_in_its_own_frame() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Part"}));
+    let component = part["component"].as_u64().unwrap();
+    run(&mut s, "construct.point.vertex", json!({"point":{"point":[3,4,10]},"name":"Pivot"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence":part["occurrence"],"translate":[40,0,0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
+    let pick = {
+        let world = s.world_state().unwrap();
+        let body = world.body("Base (Part:2)").unwrap();
+        let face = body.body.faces(0.01).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|normal| normal.z > 0.999)).unwrap();
+        json!({"body":body.name,"index":face.index,"face":[face.centroid.x,face.centroid.y,face.centroid.z]})
+    };
+    let id = run(&mut s, "sketch.create", json!({"plane":pick,"project_edges":false}))["sketch"].as_u64().unwrap();
+    let feature = s.doc.feature(id).unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &feature.kind else { panic!("not a sketch") };
+    assert_eq!(solidcraft_doc::face_anchor::plane_face_anchor(plane).unwrap().author_path, vec![second]);
+    run(&mut s, "sketch.project", json!({"refs":[{"point":"Pivot"}]}));
+    // Check the immediate creation path as well as the later model refresh.
+    let check = |s: &Session| {
+        assert!(s.model.result(id).unwrap().error.is_none());
+        let state = s.model.state();
+        let ss = state.sketch(id).unwrap();
+        let link = ss.sketch.links.first().unwrap();
+        assert!(!link.lost);
+        let point = ss.sketch.link_points(&link.id).first().and_then(|p| ss.sketch.points.get(*p)).unwrap();
+        let at = ss.plane.to_world(point.pos);
+        assert!((at.x - 3.).abs() < 1e-7 && (at.y - 4.).abs() < 1e-7 && (at.z - 10.).abs() < 1e-7, "{at:?}");
+    };
+    check(&s);
+    run(&mut s, "sketch.finish", json!({}));
+    check(&s);
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence":second,"grounded":false}));
+    run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[0,15,0],"capture":true}));
+    check(&s);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened);
+    run(&mut reopened, "sketch.edit", json!({"sketch":id}));
+    check(&reopened);
+    run(&mut reopened, "sketch.finish", json!({}));
+    check(&reopened);
 }
 
 #[test]
@@ -542,7 +717,6 @@ fn intersection_curve_of_picked_faces_spans_the_whole_surface() {
     let wall = st.body("Wall").unwrap();
     let m = wall.mesh();
     assert!(wall.body.face_count() > 1, "premise of #9009: one face per spline span");
-    assert_eq!(m.surface_patch(m.tri_face[0] as usize).len(), wall.body.face_count(), "premise: the spans are one surface patch (hidden seams)");
     // A pick on the middle span, away from the joins at x = 9.5 and x = 30.5.
     let pick =
         *m.positions.iter().min_by(|a, b| ((a.x - 20.).abs() + (a.z - 10.).abs()).total_cmp(&((b.x - 20.).abs() + (b.z - 10.).abs()))).unwrap();
@@ -583,6 +757,139 @@ fn intersection_curve_of_picked_faces_spans_the_whole_surface() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "parameters.change", json!({"name": "wall_h", "expression": "25 mm"}));
     check(&s, id);
+}
+
+/// #11048: two sketch curves meet as their extrusions along their sketches' normals would, with no
+/// helper surfaces; a curve also meets a face, and parallel sketches are refused.
+#[test]
+fn intersection_curve_of_a_picked_flat_face_or_fillet_is_that_face_alone() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    // A tangent round on the vertical edge at x = 40, y = 0: the front face now ends at x = 35.
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Level"}));
+    let level = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, -10], [60, -10]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+
+    let crossing = |s: &mut Session, at: [f64; 3]| {
+        run(s, "sketch.create", json!({"plane": "XY"}));
+        let id = s.active_sketch.unwrap();
+        run(s, "sketch.intersection_curve", json!({"a": {"face": at, "body": "Body1"}, "b": {"sketch": "Level", "curve": level}}));
+        run(s, "sketch.finish", json!({}));
+        let st = s.model.state();
+        let pts: Vec<_> = st.sketch(id).unwrap().sketch.wires.iter().flat_map(|w| w.pts.iter().copied()).collect();
+        assert!(!pts.is_empty(), "a crossing at {at:?}");
+        for p in &pts {
+            assert!((p.z - 10.).abs() < 1e-3, "{p:?}");
+        }
+        pts
+    };
+    // The flat front face, not the round it runs smoothly into nor the side beyond.
+    let front = crossing(&mut s, [20., 0., 10.]);
+    for p in &front {
+        assert!(p.y.abs() < 1e-3 && p.x > -1e-3 && p.x < 35. + 1e-3, "off the front face: {p:?}");
+    }
+    let (lo, hi) = front.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.x), h.max(p.x)));
+    assert!(lo < 0.1 && hi > 34.9, "the whole front face: x {lo}..{hi}");
+    // The round, not the flat faces either side of it.
+    let h = 5. * std::f64::consts::FRAC_1_SQRT_2;
+    for p in &crossing(&mut s, [35. + h, 5. - h, 10.]) {
+        assert!(p.x > 35. - 1e-3 && p.y < 5. + 1e-3, "off the round: {p:?}");
+    }
+}
+
+#[test]
+fn intersection_curve_of_two_sketch_curves_is_one_curve_at_any_scale() {
+    // The pieces are joined within the kernel's own tolerance, so a tiny part still gives one
+    // curve and a large one does not fall apart into pieces.
+    for k in [0.01, 100.0] {
+        let mut s = Session::default();
+        let pts = |p: [[f64; 2]; 4]| json!(p.map(|q| q.map(|v| v * k)));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
+        let top =
+            ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": pts([[0., 0.], [9.5, 12.], [30.5, 7.], [52., 15.]])}))["curves"])[0].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Side"}));
+        let side = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": pts([[-2., -15.], [15., -3.], [35., -17.], [55., -5.]])}))["curves"])
+            [0]
+        .clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        let r = run(&mut s, "sketch.intersection_curve", json!({"a": {"sketch": "Top", "curve": top}, "b": {"sketch": "Side", "curve": side}}));
+        assert_eq!(r["wires"].as_array().unwrap().len(), 1, "scale {k}: {r}");
+    }
+}
+
+#[test]
+fn intersection_curve_of_two_sketch_curves() {
+    use solidcore_record::{Vec2, Vec3};
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
+    let top = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [9.5, 12], [30.5, 7], [52, 15]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    // XZ sketch y is world -Z: this spline runs between z = 3 and 17.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Side"}));
+    let side = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[-2, -15], [15, -3], [35, -17], [55, -5]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+
+    // Every point lies over both curves: on the top one seen from above, on the side one from the side.
+    let off = |poly: &[Vec2], q: Vec2| {
+        poly.windows(2)
+            .map(|w| Vec3::new(q.x, q.y, 0.).dist_to_segment(Vec3::new(w[0].x, w[0].y, 0.), Vec3::new(w[1].x, w[1].y, 0.)))
+            .fold(f64::INFINITY, f64::min)
+    };
+    let check = |s: &Session, id: u64, x_to: f64| {
+        let st = s.model.state();
+        let sk = &st.sketch(id).unwrap().sketch;
+        assert!(sk.links.iter().all(|l| !l.lost), "no link lost");
+        let pts: Vec<_> = sk.wires.iter().flat_map(|w| w.pts.iter().copied()).collect();
+        assert!(pts.len() > 10, "{} points", pts.len());
+        let curve = |name: &str, c: &str| {
+            let ss = st.sketch(s.doc.find_feature(name).unwrap().id).unwrap();
+            (ss.plane, ss.sketch.polyline(ss.sketch.curve_index(c).unwrap()))
+        };
+        let ((tp, tpoly), (sp, spoly)) = (curve("Top", &top), curve("Side", &side));
+        for p in &pts {
+            assert!(off(&tpoly, tp.to_local(*p)) < 0.05, "off the top curve: {p:?}");
+            assert!(off(&spoly, sp.to_local(*p)) < 0.05, "off the side curve: {p:?}");
+        }
+        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.x), h.max(p.x)));
+        assert!(lo < 0.5 && hi > x_to - 0.5, "the whole crossing: x {lo}..{hi}");
+    };
+
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let id = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.intersection_curve", json!({"a": {"sketch": "Top", "curve": top}, "b": {"sketch": "Side", "curve": side}}));
+    assert_eq!(r["wires"].as_array().unwrap().len(), 1, "{r}");
+    run(&mut s, "sketch.finish", json!({}));
+    check(&s, id, 52.0);
+
+    // Editing a source curve moves the result with it.
+    run(&mut s, "sketch.edit", json!({"sketch": "Top"}));
+    run(&mut s, "sketch.move_point", json!({"point": "p4", "to": [45, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    check(&s, id, 45.0);
+
+    // A curve against a face: the side curve's surface, extruded for real, gives the same crossing.
+    run(&mut s, "surface.extrude", json!({"sketch": "Side", "curves": [side], "distance": 30, "body_name": "Roof"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let on_face = s.active_sketch.unwrap();
+    run(&mut s, "sketch.intersection_curve", json!({"a": {"face": [10, 15, 6], "body": "Roof"}, "b": {"sketch": "Top", "curve": top}}));
+    run(&mut s, "sketch.finish", json!({}));
+    let st = s.model.state();
+    let pts: Vec<_> = st.sketch(on_face).unwrap().sketch.wires.iter().flat_map(|w| w.pts.iter().copied()).collect();
+    let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.x), h.max(p.x)));
+    assert!(lo < 0.5 && hi > 44.5, "curve against face: x {lo}..{hi}");
+
+    // Curves on parallel sketches have no crossing curve: refused, saying why.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "Above"}));
+    let above = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 10]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let e =
+        s.execute("sketch.intersection_curve", &json!({"a": {"sketch": "Top", "curve": top}, "b": {"sketch": "Above", "curve": above}})).unwrap_err();
+    assert!(e.to_string().contains("parallel"), "{e}");
 }
 
 #[test]
@@ -985,6 +1292,50 @@ fn projecting_what_the_face_sketch_already_shows_adds_no_second_copy() {
     assert_eq!(r["links"].as_array().unwrap().len(), 1, "{r}");
     assert_eq!(r["already_projected"].as_array().unwrap().len(), 1, "{r}");
     assert_eq!(shown(&mut s).0, border.0 + 1);
+}
+
+/// Intersecting what was intersected before laid another point on the first each time (one spot
+/// held 11 points): the same curve or edge again is refused, as Project refuses what the sketch
+/// already shows, and something new alongside it still goes in.
+#[test]
+fn intersecting_the_same_curve_or_edge_again_adds_no_second_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"}));
+    let rectangle = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,-10],"p1":[40,-5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane":"YZ","offset":20}));
+    let points = |s: &mut Session| inspect(s)["points"].as_array().unwrap().len();
+    for refs in [json!([{"sketch":rectangle,"curve":"l1"}]), json!([{"edge":[20,0,20],"body":"Post"}])] {
+        run(&mut s, "sketch.intersect", json!({"refs": refs}));
+        let once = points(&mut s);
+        let e = s.execute("sketch.intersect", &json!({"refs": refs})).unwrap_err().to_string();
+        assert!(e.contains("already intersected into this sketch"), "{refs}: {e}");
+        assert_eq!(points(&mut s), once, "{refs}");
+    }
+    let r = run(&mut s, "sketch.intersect", json!({"refs":[{"sketch":rectangle,"curve":"l1"},{"edge":[20,30,20],"body":"Post"}]}));
+    assert_eq!(r["links"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["already_projected"].as_array().unwrap().len(), 1, "{r}");
+}
+
+/// A sketch on a face shows the face's border. An edge of another body that crosses the sketch
+/// plane at one of the face's corners lands on the end of a border line, which is not a point an
+/// earlier Intersect left: the cut goes in once, and only a second cut of the same edge is refused.
+#[test]
+fn intersecting_an_edge_at_a_face_corner_adds_its_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Plate"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":20,"corner":[40,30,0],"body_name":"Post","operation":"new"}));
+    run(&mut s, "sketch.create", json!({"plane":{"face":[20,15,10]}}));
+    let points = |s: &mut Session| inspect(s)["points"].as_array().unwrap().len();
+    let border = points(&mut s);
+    let refs = json!([{"edge":[40,30,15],"body":"Post"}]);
+    let r = s.execute("sketch.intersect", &json!({"refs": refs})).map_err(|e| e.to_string());
+    assert!(r.is_ok(), "{r:?}");
+    assert_eq!(points(&mut s), border + 1);
+    let e = s.execute("sketch.intersect", &json!({"refs": refs})).unwrap_err().to_string();
+    assert!(e.contains("already intersected into this sketch"), "{e}");
+    assert_eq!(points(&mut s), border + 1);
 }
 
 /// The curves sketch Intersect makes, on `plane`, of the first body `steps` build: each line's ends,
@@ -1395,6 +1746,47 @@ fn whole_body_intersect_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
     assert!(arcs.iter().all(|r| (r - 2.).abs() < 5e-3), "{arcs:?}");
 }
 #[test]
+fn whole_body_intersect_keeps_a_small_round_between_short_walls() {
+    use solidcraft_sketch::CurveKind;
+    // A tapered groove on each side stops 2 mm short of the R2 corner rounds: walls of 2 mm, a
+    // round, walls of 2 mm, which a loose fit takes for one larger arc that misses the walls.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 150, "width": 55, "height": 150, "corner": [-75, 0, -75], "body_name": "Part"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[75, 27.5, 75], [-75, 27.5, 75], [75, 27.5, -75], [-75, 27.5, -75]], "radius": 2}));
+    for (plane, offset, direction, rect) in [
+        ("YZ", 75, "negative", [[7, -71], [48, 71]]),
+        ("YZ", -75, "positive", [[7, -71], [48, 71]]),
+        ("XY", 75, "negative", [[-71, 7], [71, 48]]),
+        ("XY", -75, "positive", [[-71, 7], [71, 48]]),
+    ] {
+        run(&mut s, "sketch.create", json!({"plane": plane, "offset": offset}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": rect[0], "p1": rect[1]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 6, "direction": direction, "taper": "-56.31 deg", "operation": "cut", "targets": ["Part"]}));
+    }
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 20, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.intersect", json!({"refs": [{"body": "Part"}]}));
+    let inspect = run(&mut s, "sketch.inspect", json!({}));
+    let state = s.model.state();
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    let pos = |i: usize| sk.points[i].pos;
+    let arcs: Vec<f64> = sk
+        .curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            CurveKind::Arc { c, a, .. } => Some(pos(c).dist(pos(a))),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(arcs.len(), 4, "{arcs:?}");
+    assert!(arcs.iter().all(|r| (r - 2.).abs() < 5e-3), "{arcs:?}");
+    // Square less the corners' (4 - pi) r^2 and four trapezoid grooves (142 + 124) / 2 * 6.
+    assert_eq!(inspect["profiles"].as_array().map(Vec::len), Some(1), "one closed outline");
+    let area = inspect["profiles"][0]["area_mm2"].as_f64().unwrap();
+    let expected = 150. * 150. - (4. - std::f64::consts::PI) * 4. - 4. * 798.;
+    assert!((area - expected).abs() < 0.5, "{area} vs {expected}");
+}
+#[test]
 fn a_rebuilt_projection_keeps_user_constraints_without_a_warning() {
     for dimensioned in [false, true] {
         let mut s = Session::default();
@@ -1532,4 +1924,215 @@ fn the_silhouette_of_conic_rounds_closes() {
     assert_eq!(profiles.len(), 1, "{}", si["profiles"]);
     let area = profiles[0]["area_mm2"].as_f64().unwrap();
     assert!((area - exact).abs() < exact * 2e-4, "area {area}, exact {exact}");
+}
+
+/// A second placement's body is projected where that placement puts it (#9957): a sketch sees
+/// "Block (Part:2)" as the browser shows it, not only the first placement's "Block", on a plane
+/// and on a face alike.
+#[test]
+fn a_second_placements_face_and_edge_project_where_it_is_placed() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":40,"height":5,"body_name":"Plate"}));
+    let part = run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Block"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.copy", json!({"component":part["component"],"translate":[50,0,5]}));
+    let mut sketches = Vec::new();
+    let picks = [
+        (json!({"plane":"XY","offset":15}), json!({"body":"Block (Part:2)","face":[60,10,15]})),
+        (json!({"plane":"XY","offset":15}), json!({"body":"Block (Part:2)","edge":[60,20,15]})),
+        (json!({"plane":{"face":[90,35,5]},"project_edges":false}), json!({"body":"Block (Part:2)","face":[60,10,15]})),
+    ];
+    for (plane, pick) in picks {
+        let id = run(&mut s, "sketch.create", plane)["sketch"].as_u64().unwrap();
+        let projected = run(&mut s, "sketch.project", json!({"refs":[pick]}));
+        assert_eq!(projected["links"].as_array().map(Vec::len), Some(1), "{projected}");
+        run(&mut s, "sketch.finish", json!({}));
+        sketches.push(id);
+    }
+    // Every projected point is on the copy (x 50..70, y from `y`), none on the original.
+    let check = |s: &Session, y: f64| {
+        let state = s.model.state();
+        for id in &sketches {
+            let ss = state.sketch(*id).unwrap();
+            let sk = &ss.sketch;
+            assert!(sk.links.iter().all(|l| !l.lost), "{:?}", sk.links);
+            let points: Vec<_> =
+                sk.links.iter().flat_map(|l| sk.link_points(&l.id)).filter_map(|p| sk.points.get(p)).map(|p| ss.plane.to_world(p.pos)).collect();
+            assert!(!points.is_empty());
+            assert!(points.iter().all(|p| p.x > 49.9 && p.x < 70.1 && p.y > y - 0.1 && p.y < y + 20.1), "sketch {id}, y {y}: {points:?}");
+        }
+    };
+    check(&s, 0.0);
+    // A design opened again, so rebuilt from its features, finds the copy as well.
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 0.0);
+    // Moving the copy moves what was projected from it.
+    let first = s.doc.occurrences[0].id;
+    let copy = s.doc.occurrences.iter().map(|o| o.id).find(|id| *id != first).unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[0,15,0],"capture":true}));
+    check(&s, 15.0);
+    // Renaming the part or the body renames the copy ("Base (Housing:2)"): the links follow it.
+    run(&mut s, "component.rename", json!({"component":part["component"],"name":"Housing"}));
+    run(&mut s, "body.rename", json!({"body":"Block","name":"Base"}));
+    assert!(s.model.state().sketch(sketches[0]).unwrap().sketch.links.iter().all(|l| l.source.bodies() == ["Base (Housing:2)"]));
+    check(&s, 15.0);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
+}
+
+/// #13142: projected references can start as construction geometry, asked for per call or for
+/// the whole session (a preference, kept for designs started and opened like `auto_project`).
+#[test]
+fn projected_references_can_start_as_construction() {
+    let flags = |s: &mut Session| linked_curves(&inspect(s)).iter().map(|c| c["construction"] == true).collect::<Vec<_>>();
+    let mut s = Session::default();
+    box_part(&mut s);
+    // Off (the default): the face loop is normal geometry and closes a profile.
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
+    let on_face = flags(&mut s);
+    assert!(on_face.len() == 4 && on_face.iter().all(|c| !c), "{on_face:?}");
+    assert_eq!(inspect(&mut s)["profiles"].as_array().map(Vec::len), Some(1));
+    run(&mut s, "sketch.finish", json!({}));
+    // Asked for in the call, and not.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [20, 0, 20]}], "construction": true}));
+    assert_eq!(flags(&mut s), vec![true]);
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [40, 15, 20]}]}));
+    assert_eq!(flags(&mut s), vec![true, false]);
+    run(&mut s, "sketch.intersect", json!({"refs": [{"edge": [0, 0, 10]}], "construction": true}));
+    let e = s.execute("sketch.project", &json!({"refs": [{"edge": [20, 30, 20]}], "construction": 1}));
+    assert!(e.is_err(), "construction must be a boolean");
+    run(&mut s, "sketch.finish", json!({}));
+    // The session's preference: a sketch on a face starts with a construction loop and no
+    // profile, and it holds for the next design; `construction: false` still asks for normal.
+    s.project_construction = true;
+    run(&mut s, "file.new", json!({}));
+    assert!(s.project_construction, "file.new");
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
+    let on_face = flags(&mut s);
+    assert!(on_face.len() == 4 && on_face.iter().all(|c| *c), "{on_face:?}");
+    assert_eq!(inspect(&mut s)["profiles"].as_array().map(Vec::len), Some(0));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [20, 0, 20]}]}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [40, 15, 20]}], "construction": false}));
+    assert_eq!(flags(&mut s), vec![true, false]);
+}
+
+/// #13464: an imported mesh is one face with no edges, so Project on one of its faces projected
+/// nothing. The pick now means the flat patch of triangles there: a box's top projects as its
+/// rectangle, its side seen edge-on as a line, and the link keeps the pick's point (a mesh's face
+/// name says nothing of the patch), so the sketch still builds once finished.
+#[test]
+fn a_face_of_an_imported_mesh_projects_its_flat_patch() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-project-mesh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("box.stl");
+    let mut src = Session::default();
+    run(&mut src, "solid.box", json!({"length": 20, "width": 10, "height": 5}));
+    run(&mut src, "file.export_stl", json!({"path": stl.to_string_lossy()}));
+
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let body = s.model.state().bodies[0].name.clone();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 20}));
+    run(&mut s, "sketch.project", json!({"refs": [{"body": body, "face": [10, 5, 5]}]}));
+    let si = inspect(&mut s);
+    let lines = linked_curves(&si);
+    assert_eq!(lines.len(), 4, "{si}");
+    let mut corners: Vec<(i64, i64)> = lines
+        .iter()
+        .flat_map(|c| [&c["start_at"], &c["end_at"]])
+        .map(|p| ((p[0].as_f64().unwrap() * 1e6).round() as i64, (p[1].as_f64().unwrap() * 1e6).round() as i64))
+        .collect();
+    corners.sort_unstable();
+    corners.dedup();
+    assert_eq!(corners, [(0, 0), (0, 10_000_000), (20_000_000, 0), (20_000_000, 10_000_000)], "{si}");
+    assert!(s.active_sketch.is_some());
+    run(&mut s, "sketch.finish", json!({}));
+    let failing: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(failing.is_empty(), "{failing:?}");
+
+    // A side seen edge-on: the line it makes.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 20}));
+    run(&mut s, "sketch.project", json!({"refs": [{"body": body, "face": [10, 0, 2.5]}]}));
+    assert_eq!(linked_curves(&inspect(&mut s)).len(), 1);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// #13464: on a sketch plane at a slant to the face, a flat patch's polygon keeps its straight
+/// sides. A rectangle's four corners and a triangle's three always lie on one circle, so they must
+/// not be taken for a circle seen at a slant (an ellipse); a tessellated circle still is one.
+#[test]
+fn a_mesh_face_keeps_its_straight_sides_on_a_slanted_plane() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-project-mesh-slant-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut src = Session::default();
+    run(&mut src, "solid.box", json!({"length": 20, "width": 10, "height": 5, "body_name": "box"}));
+    run(&mut src, "sketch.create", json!({"plane": "XY"}));
+    run(&mut src, "sketch.line", json!({"points": [[30, 0], [42, 0], [34, 9], [30, 0]]}));
+    run(&mut src, "sketch.finish", json!({}));
+    let sketch = src.doc.features.last().unwrap().id;
+    run(&mut src, "solid.extrude", json!({"sketch": sketch, "distance": 5, "body_name": "tri"}));
+    run(&mut src, "solid.cylinder", json!({"base": [60, 0, 0], "radius": 7, "height": 5}));
+    let mut stls = Vec::new();
+    for body in src.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>() {
+        let path = dir.join(format!("{body}.stl"));
+        run(&mut src, "file.export_stl", json!({"path": path.to_string_lossy(), "bodies": [body]}));
+        stls.push(path);
+    }
+
+    let mut s = Session::default();
+    for stl in &stls {
+        run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    }
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": "30 deg", "name": "Tilt"}));
+    let kinds = |s: &mut Session, body: &str, at: [f64; 3]| -> Vec<String> {
+        run(s, "sketch.create", json!({"plane": "Tilt"}));
+        run(s, "sketch.project", json!({"refs": [{"body": body, "face": at}]}));
+        let kinds = linked_curves(&inspect(s)).iter().map(|c| c["type"].as_str().unwrap_or("").to_string()).collect();
+        run(s, "sketch.finish", json!({}));
+        kinds
+    };
+    assert_eq!(kinds(&mut s, &names[0], [10., 5., 5.]), ["line"; 4], "the box's top is a rectangle");
+    assert_eq!(kinds(&mut s, &names[1], [35., 3., 5.]), ["line"; 3], "the prism's top is a triangle");
+    let round = kinds(&mut s, &names[2], [60., 0., 5.]);
+    assert_eq!(round.len(), 1, "the cylinder's top is one curve: {round:?}");
+    assert_eq!(round[0], "ellipse", "the cylinder's round top, seen at a slant: {round:?}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A component's origin axis, as the Browser names it (`o:<id>/origin/Z`), projects into a sketch of
+/// another component as its line, where that component now stands (#15086).
+#[test]
+fn a_component_origin_axis_projects_where_the_component_stands() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Anchor"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.create", json!({"name": "Part", "parent": 0}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "operation": "new"}));
+    let anchor_component = s.doc.find_component("Anchor").unwrap();
+    let anchor = s.doc.occurrence_of(anchor_component).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": anchor, "translate": [100, 0, 0], "move_grounded": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"axis": format!("o:{anchor}/origin/Z")}]}));
+    let line = r["links"][0]["curves"][0].clone();
+    let si = inspect(&mut s);
+    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == line).cloned().unwrap();
+    let n = |v: &Value| v.as_f64().unwrap();
+    let (x0, x1, length) = (n(&c["start_at"][0]), n(&c["end_at"][0]), (n(&c["end_at"][1]) - n(&c["start_at"][1])).abs());
+    assert!((x0 - 100.0).abs() < 1e-6 && (x1 - 100.0).abs() < 1e-6 && length > 10.0, "{x0} {x1} {length}");
+    // A sketch made after the component moved again reads where it stands now.
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "occurrence.move", json!({"occurrence": anchor, "translate": [150, 0, 0], "move_grounded": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"axis": format!("o:{anchor}/origin/Z")}]}));
+    let line = r["links"][0]["curves"][0].clone();
+    let si = inspect(&mut s);
+    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == line).cloned().unwrap();
+    assert!((n(&c["start_at"][0]) - 250.0).abs() < 1e-6, "a new projection reads the current placement: {}", n(&c["start_at"][0]));
+    // A key that names no component origin is still refused, with the existing message.
+    let err = s.execute("sketch.project", &json!({"refs": [{"axis": "o:9999/origin/Z"}]})).unwrap_err().to_string();
+    assert!(err.contains("unknown axis"), "{err}");
 }

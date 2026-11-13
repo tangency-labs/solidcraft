@@ -1,0 +1,638 @@
+{
+ "cases": [
+  {
+   "name": "oblique_square_dir101_d3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:433 TestSmCreateLinearSweepOblique (v1.0.1)",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       -1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       -1.0,
+       0
+      ]
+     }
+    ],
+    "dir": [
+     1.0,
+     0.0,
+     1.0
+    ],
+    "dist": 3.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "oblique_circle_axis_d10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:433 TestSmCreateLinearSweepOblique (v1.0.1)",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "dir": [
+     0.0,
+     0.0,
+     2.0
+    ],
+    "dist": 10.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "oblique_circle_tilt0p3deg_d10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:433 TestSmCreateLinearSweepOblique (v1.0.1)",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "dir": [
+     0.00523596383141958,
+     0.0,
+     0.9999862922474267
+    ],
+    "dist": 10.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "oblique_circle_tilt5em5deg_d1000",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:433 TestSmCreateLinearSweepOblique (v1.0.1)",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "dir": [
+     8.726646259970539e-07,
+     0.0,
+     0.9999999999996192
+    ],
+    "dist": 1000.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "oblique_circle_axis_dneg10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:433 TestSmCreateLinearSweepOblique (v1.0.1)",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "dir": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "dist": -10.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "oblique_circle_tilt30deg_dneg10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:433 TestSmCreateLinearSweepOblique (v1.0.1)",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "dir": [
+     0.49999999999999994,
+     0.0,
+     0.8660254037844387
+    ],
+    "dist": -10.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "oblique_square_dir101_dneg3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:433 TestSmCreateLinearSweepOblique (v1.0.1)",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       -1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       -1.0,
+       0
+      ]
+     }
+    ],
+    "dir": [
+     1.0,
+     0.0,
+     1.0
+    ],
+    "dist": -3.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "oblique_square_reps2_magnitude_ignored",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:433 TestSmCreateLinearSweepOblique (v1.0.1)",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       -1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       -1.0,
+       0
+      ]
+     }
+    ],
+    "dir": [
+     0.0,
+     0.0,
+     2.0
+    ],
+    "dist": 1.0,
+    "reps": 2,
+    "cap": false
+   }
+  },
+  {
+   "name": "repeated_capped_square_z",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:560 TestSmCreateLinearSweepRepeatedCapped (v1.0.1)",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       -1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       -1.0,
+       0
+      ]
+     }
+    ],
+    "dir": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "dist": 1.0,
+    "reps": 3,
+    "cap": true
+   }
+  },
+  {
+   "name": "repeated_capped_annulus_z",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:560 TestSmCreateLinearSweepRepeatedCapped (v1.0.1)",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 2.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "dir": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "dist": 1.0,
+    "reps": 3,
+    "cap": true
+   }
+  },
+  {
+   "name": "repeated_capped_two_circles_z",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:560 TestSmCreateLinearSweepRepeatedCapped (v1.0.1)",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       5.0,
+       0,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "dir": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "dist": 1.0,
+    "reps": 3,
+    "cap": true
+   }
+  },
+  {
+   "name": "repeated_capped_square_diag",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:560 TestSmCreateLinearSweepRepeatedCapped (v1.0.1)",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       -1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       -1.0,
+       0
+      ],
+      "end": [
+       1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       1.0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       -1.0,
+       1.0,
+       0
+      ],
+      "end": [
+       -1.0,
+       -1.0,
+       0
+      ]
+     }
+    ],
+    "dir": [
+     0.7071067811865476,
+     0.0,
+     0.7071067811865476
+    ],
+    "dist": 1.0,
+    "reps": 3,
+    "cap": true
+   }
+  },
+  {
+   "name": "repeated_capped_annulus_diag",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:560 TestSmCreateLinearSweepRepeatedCapped (v1.0.1)",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 2.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "dir": [
+     0.7071067811865476,
+     0.0,
+     0.7071067811865476
+    ],
+    "dist": 1.0,
+    "reps": 3,
+    "cap": true
+   }
+  },
+  {
+   "name": "repeated_capped_two_circles_diag",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:560 TestSmCreateLinearSweepRepeatedCapped (v1.0.1)",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       5.0,
+       0,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "dir": [
+     0.7071067811865476,
+     0.0,
+     0.7071067811865476
+    ],
+    "dist": 1.0,
+    "reps": 3,
+    "cap": true
+   }
+  }
+ ]
+}

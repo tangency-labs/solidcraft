@@ -1,0 +1,12 @@
+id = "nlib.crv_fit_p1"
+upstream = ["source/SMLib/src/NL_CrvFit.cpp"]
+rust_module = "nurbs::crv_fit::p1"
+depends_on = ["nlib.knots", "nlib.math"]
+soft_depends_on = ["nlib.basis_basic", "nlib.crv_basic", "nlib.geom"]
+est_lines = 1707
+layer = 5
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nlib.crv_fit_p1-a1"
+claimed_at = "2026-10-12T20:49:55Z"
+notes = "12 fns; largest: N_FitCrvApproxKnots, N_FitCrvKnotsAndDeriv, N_FitCrvFirstDerivAndKnots, N_FitCrvKnotsAndDerivs; 317 upstream test entry points reach this unit; difftest green: 2084 cases (84 fixtures + 2000 generated), 0 deferred, max_rel_err 0"

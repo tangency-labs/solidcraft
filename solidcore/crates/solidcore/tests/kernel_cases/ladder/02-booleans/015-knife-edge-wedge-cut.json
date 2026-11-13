@@ -1,0 +1,162 @@
+{
+  "area": "ladder/02-booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "015-knife-edge-wedge-cut",
+  "expected": {
+    "body_count": 1,
+    "edges": 9,
+    "faces": 5,
+    "method": "the tool removes the half above the plane through the edge x=0,z=0 and the edge x=60,z=20: a wedge 60x40x20/2 = 24000 with a knife edge at x=0, z=0",
+    "source": "analytic",
+    "sources": [],
+    "vertices": 6,
+    "volume_mm3": 24000.0,
+    "what": "a triangular prism cut whose slope meets the bottom face along one line (a knife edge), its other faces on the stock's"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 6929.822128134705,
+      "body_count": 1,
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6,
+      "volume_mm3": 24000.000000000007
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6
+    }
+  },
+  "records": "015-knife-edge-wedge-cut.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6929.822128134705,
+      "body_count": 1,
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6,
+      "volume_mm3": 24000.000000000007
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a triangular prism cut whose slope meets the bottom face along one line (a knife edge), its other faces on the stock's",
+  "why_not": []
+}

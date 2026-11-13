@@ -129,7 +129,7 @@ impl Spec {
 impl Surface {
     /// solidcore's surface, made the first time it is needed.
     fn core(&self) -> Result<&crate::core::split::Tool> {
-        self.core.get_or_init(|| crate::core::ssi::surface(&self.spec)).as_ref().map_err(Clone::clone)
+        self.core.get_or_init(|| crate::stop::unstoppable(|| crate::core::ssi::surface(&self.spec))).as_ref().map_err(Clone::clone)
     }
 
     pub(crate) fn spec(&self) -> &Spec {
@@ -251,7 +251,7 @@ impl Surface {
                 Surface::nurbs(degree, nu, nv, u_knots, v_knots, &flat, Some(&weights))
             }
             // A ball patch's label has no (u, v): its face's NURBS form is the surface.
-            S::PlacedRevolution { .. } | S::BallPatch { .. } => Err(Error::Unsupported),
+            S::PlacedRevolution { .. } | S::BallPatch { .. } | S::Blend { .. } => Err(Error::Unsupported),
         }
     }
 
