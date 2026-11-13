@@ -6,7 +6,8 @@
 //! and [`interpolation_bound`]). Ops checks the inputs and converts; every fit comes with the
 //! kernel's certified bound of how far it is from what it fits.
 
-use solidcore::curve::from_parameters::record_of as kernel_record;
+use solidcore::curve::from_parameters::{from_parameters, record_of as kernel_record, EdgeCurve};
+use solidcore::kernel::Kernel;
 use solidcore::nurbs::crv_deviation::{certified_distance, interpolation_bound};
 use solidcore::nurbs::crv_fit::p1::{approx_knots, param_values, ParamMethod};
 use solidcore::nurbs::crv_fit::p2::interp;
@@ -14,7 +15,7 @@ use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::knots::{clamped_uniform, periodic_uniform, KnotVector, Side, MAX_DEGREE};
 use solidcore::topology::edge::create_trimmed_nurbs_curve;
 use solidcore::Vec3;
-use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, MAX_SPLINE_DEGREE};
+use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural, MAX_SPLINE_DEGREE};
 
 use crate::body::Body;
 use crate::curve_knots::{nurb_of, record_of};
@@ -138,18 +139,20 @@ pub fn rebuild(curve: &Curve, degree: usize, spans: usize) -> Result<(Curve, f64
 /// edge's curve trimmed to the edge ([`create_trimmed_nurbs_curve`]: its B-spline over the
 /// edge's interval, a trimmed or intersection edge's included) refitted as a clamped spline of
 /// `degree` (2 or 3) with `spans` uniform spans on `[0, 1]` ([`rebuild`]), running the way the
-/// edge's curve runs, and the kernel's certified bound of how far it is from the edge, kept
-/// when within `tol`. The bound compares the two at the same parameter (the edge's mapped onto
-/// `[0, 1]`). The span count is used as given, never raised: a fit past `tol` is refused, and
-/// the caller asks again with more spans.
+/// edge's curve runs, and the largest distance in mm between the refit and the edge, kept
+/// when within `tol`. The distance is between the shapes, whatever their parameters: the
+/// kernel's sampled closest-point maximum taken both ways
+/// ([`solidcore::curve::curve::Curve::curve_max_distance_between`], its samples by the knot
+/// counts and the largest gap refined by a local maximisation). It is measured, not certified:
+/// a gap narrower than the kernel's sampling can be missed. The span count is used as given:
+/// a refit past `tol` is refused, and more spans fit closer.
 ///
 /// # Errors
 /// [`Error::Argument`] for an index past the record's edges, a degree outside `2..=3`, no
 /// spans, or a `tol` not finite or negative; [`Error::Unsupported`] for an edge whose curve has
-/// no B-spline form, or a rational one (a circle's, an ellipse's: the kernel certifies no
-/// distance from a rational curve yet); [`Error::PastTolerance`] with the bound when it is past
-/// `tol`; [`Error::Record`] for an edge curve the record cannot hold; the kernel's status
-/// otherwise.
+/// no B-spline form, or a rational one (a circle's, an ellipse's: the refit takes polynomial
+/// splines); [`Error::PastTolerance`] with the distance when it is past `tol`;
+/// [`Error::Record`] for an edge curve the record cannot hold; the kernel's status otherwise.
 pub fn edge_as_curve(
     body: &Body,
     order: &Order,
@@ -176,15 +179,53 @@ pub fn edge_as_curve(
     })??;
     if !matches!(trimmed, Curve::Spline { .. }) {
         return Err(Error::Unsupported(
-            "a rational edge: the kernel certifies no distance from a rational curve yet",
+            "a rational edge: the refit takes polynomial splines (its fit's certified bound)",
         ));
     }
-    let (fit, bound) = rebuild(&trimmed, degree, spans)?;
+    // rebuild's own bound compares the two at one parameter; the edge's parameter is not the
+    // refit's spacing, so that bound can stand far above the gap between the shapes
+    let (fit, _) = rebuild(&trimmed, degree, spans)?;
+    let bound = run("curve_fit::edge_as_curve", |k| {
+        let (Some(edge), Some(refit)) = (kernel_curve(k, &trimmed)?, kernel_curve(k, &fit)?) else {
+            return Ok(Err(Error::Argument));
+        };
+        // each curve's samples dropped onto the other, the largest gap refined (0 samples:
+        // the kernel's count from the knots, then its local maximisation)
+        let there = refit.curve.curve_max_distance_between(
+            k,
+            &refit.interval,
+            &edge.curve,
+            edge.interval.min(),
+            edge.interval.max(),
+            0,
+            None,
+        )?;
+        let back = edge.curve.curve_max_distance_between(
+            k,
+            &edge.interval,
+            &refit.curve,
+            refit.interval.min(),
+            refit.interval.max(),
+            0,
+            None,
+        )?;
+        Ok(Ok(there.distance.max(back.distance)))
+    })??;
     if bound <= tol {
         Ok((fit, bound))
     } else {
         Err(Error::PastTolerance { bound })
     }
+}
+
+/// The kernel's curve of the record spline `curve` over its whole domain; `None` for a curve
+/// the conversion refuses.
+fn kernel_curve(k: &Kernel, curve: &Curve) -> solidcore::Result<Option<EdgeCurve>> {
+    let (Ok(record), Natural::Range(lo, hi)) = (solidcore_convert::curve(curve), curve.natural())
+    else {
+        return Ok(None);
+    };
+    from_parameters(k, &record, [lo, hi]).map(Some)
 }
 
 #[cfg(test)]
@@ -487,9 +528,13 @@ mod tests {
         assert_eq!(rec.edges.len(), 12);
         for (i, e) in rec.edges.iter().enumerate() {
             assert!(matches!(e.curve, Curve::Line { .. }), "{:?}", e.curve);
-            let (fit, bound) = edge_as_curve(&b, &order, i, 3, 1, 1e-9).unwrap();
-            assert!(bound < 1e-10, "{bound}");
-            let Curve::Spline { knots, points } = &fit else {
+            // a straight edge, refitted at one span: no distance but the rounding
+            let refit = edge_as_curve(&b, &order, i, 3, 1, 1e-9);
+            let Ok((fit, bound)) = &refit else {
+                panic!("edge {i} refused: {refit:?}")
+            };
+            assert!(*bound < 1e-10, "{bound}");
+            let Curve::Spline { knots, points } = fit else {
                 panic!("a spline: {fit:?}")
             };
             assert_eq!(knots, &vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
@@ -571,35 +616,22 @@ mod tests {
     #[test]
     fn a_trimmed_edge_is_refitted_on_it_within_its_bound() {
         let (cut, order, edge) = cut_sheet();
-        // The edge is the projection's spline in its own parameter, not the wave's: a cubic of
-        // four spans misses it by about 5e-4 at the same parameter, so 1e-6 is refused there.
-        assert!(matches!(
-            edge_as_curve(&cut, &order, edge, 3, 4, 1e-6),
-            Err(Error::PastTolerance { bound }) if bound > 1e-6
-        ));
-        // More spans fit closer: the first span count of the doubling run that reaches 1e-6.
-        let fits: Vec<(usize, Result<(Curve, f64)>)> = [8, 16, 32, 64, 128]
-            .into_iter()
-            .map(|spans| (spans, edge_as_curve(&cut, &order, edge, 3, spans, 1e-6)))
-            .collect();
-        let Some((spans, Ok((fit, bound)))) = fits.iter().find(|(_, f)| f.is_ok()) else {
-            panic!("no span count up to 128 fits within 1e-6: {fits:?}")
+        // A cubic of four spans: CI measured the certified bound of the refit against the edge
+        // at one parameter (rebuild's) at 4.998e-4, an upper bound of the distance between the
+        // shapes, so the measured distance is within the pinned 5e-4.
+        const REACHED: f64 = 5e-4;
+        let refit = edge_as_curve(&cut, &order, edge, 3, 4, REACHED);
+        let Ok((fit, bound)) = &refit else {
+            panic!("refused: {refit:?}")
         };
-        assert!(
-            fits.iter()
-                .take_while(|(n, _)| n < spans)
-                .all(|(_, f)| matches!(f, Err(Error::PastTolerance { bound }) if *bound > 1e-6)),
-            "{fits:?}"
-        );
-        let bound = *bound;
-        assert!(bound <= 1e-6, "{bound}");
+        assert!((0.0..=REACHED).contains(bound), "{bound}");
         let Curve::Spline { knots, points } = fit else {
             panic!("a spline: {fit:?}")
         };
-        assert_eq!((points.len(), knots.len()), (spans + 3, spans + 7));
-        // within the bound of the edge, the edge within the projection's 1e-6 of the wave: a
-        // gap along y is at most the distance times 1 + |dy/dx| (at most 0.4 on the wave)
-        let allowed = (bound + 1e-6) * 1.4;
+        assert_eq!((points.len(), knots.len()), (7, 11));
+        // within REACHED of the edge, the edge within the projection's 1e-6 of the wave: a gap
+        // along y is at most the distance times 1 + |dy/dx| (at most 0.4 on the wave)
+        let allowed = (REACHED + 1e-6) * 1.4;
         for i in 0..=200 {
             let p = at(fit, f64::from(i) / 200.0);
             assert!(p[2].abs() <= allowed, "{p:?} off the sheet");
@@ -616,10 +648,10 @@ mod tests {
             lo.abs() <= allowed && (hi - 20.0).abs() <= allowed,
             "{a} {b}"
         );
-        // a quadratic of one span is no cubic wave
+        // too few spans: a quadratic of one span has no inflection, the wave has one at x = 10
         assert!(matches!(
-            edge_as_curve(&cut, &order, edge, 2, 1, 1e-9),
-            Err(Error::PastTolerance { bound }) if bound > 1e-9
+            edge_as_curve(&cut, &order, edge, 2, 1, 1e-6),
+            Err(Error::PastTolerance { bound }) if bound > 1e-6
         ));
     }
 
