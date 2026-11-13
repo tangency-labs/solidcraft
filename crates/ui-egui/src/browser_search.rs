@@ -232,7 +232,7 @@ fn kinds_present(app: &SolveApp) -> Vec<Kind> {
         Kind::Component => !doc.occurrences.is_empty(),
         Kind::Body => !app.session.model.state().bodies.is_empty(),
         Kind::Sketch => doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Sketch { .. })),
-        Kind::Construction => doc.features.iter().any(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. })),
+        Kind::Construction => doc.features.iter().any(|f| f.kind.is_construction()),
         Kind::Joint => !doc.assembly.joints.is_empty(),
     };
     Kind::ALL.into_iter().filter(|k| has(*k) || app.tree.search.kind == Some(*k)).collect()

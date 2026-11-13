@@ -10,7 +10,7 @@
     "ui.browser_search_found_more": "{count}+ found",
     "ui.browser_search_hint": "Search the design",
     "ui.browser_search_none": "No matches",
-    "ui.browser_search_tip": "Find components, bodies, sketches, construction planes and joints by name. * stands for any text and ? for any one character. Ctrl+F",
+    "ui.browser_search_tip": "Find components, bodies, sketches, joints, and construction planes, axes and points by name. * stands for any text and ? for any one character. Ctrl+F",
     "ui.browser_select_all": "Select all {count}",
     "ui.browser_select_all_tip": "Select everything the search found"
   },
@@ -25,7 +25,7 @@
     "ui.browser_search_found_more": "تم العثور على {count}+",
     "ui.browser_search_hint": "البحث في التصميم",
     "ui.browser_search_none": "لا توجد نتائج",
-    "ui.browser_search_tip": "البحث عن المكوّنات والأجسام والرسومات والمستويات المساعدة والمفاصل بالاسم. الرمز * يمثل أي نص والرمز ? يمثل أي حرف واحد. Ctrl+F",
+    "ui.browser_search_tip": "البحث عن المكوّنات والأجسام والرسومات والمفاصل والمستويات والمحاور والنقاط المساعدة بالاسم. الرمز * يمثل أي نص والرمز ? يمثل أي حرف واحد. Ctrl+F",
     "ui.browser_select_all": "تحديد الكل ({count})",
     "ui.browser_select_all_tip": "تحديد كل ما عثر عليه البحث"
   },
@@ -40,7 +40,7 @@
     "ui.browser_search_found_more": "Nalezeno: {count}+",
     "ui.browser_search_hint": "Hledat v návrhu",
     "ui.browser_search_none": "Žádné shody",
-    "ui.browser_search_tip": "Najde komponenty, tělesa, náčrty, konstrukční roviny a klouby podle názvu. * zastupuje libovolný text a ? jeden libovolný znak. Ctrl+F",
+    "ui.browser_search_tip": "Najde komponenty, tělesa, náčrty, klouby a konstrukční roviny, osy a body podle názvu. * zastupuje libovolný text a ? jeden libovolný znak. Ctrl+F",
     "ui.browser_select_all": "Vybrat vše ({count})",
     "ui.browser_select_all_tip": "Vybrat vše, co hledání našlo"
   },
@@ -55,7 +55,7 @@
     "ui.browser_search_found_more": "{count}+ gefunden",
     "ui.browser_search_hint": "Design durchsuchen",
     "ui.browser_search_none": "Keine Treffer",
-    "ui.browser_search_tip": "Komponenten, Körper, Skizzen, Konstruktionsebenen und Gelenke nach Namen finden. * steht für beliebigen Text, ? für ein beliebiges Zeichen. Strg+F",
+    "ui.browser_search_tip": "Komponenten, Körper, Skizzen, Gelenke sowie Konstruktionsebenen, -achsen und -punkte nach Namen finden. * steht für beliebigen Text, ? für ein beliebiges Zeichen. Strg+F",
     "ui.browser_select_all": "Alle {count} auswählen",
     "ui.browser_select_all_tip": "Alles auswählen, was die Suche gefunden hat"
   },
@@ -70,7 +70,7 @@
     "ui.browser_search_found_more": "{count}+ encontrados",
     "ui.browser_search_hint": "Buscar en el diseño",
     "ui.browser_search_none": "Sin coincidencias",
-    "ui.browser_search_tip": "Busca componentes, cuerpos, bocetos, planos de construcción y uniones por nombre. * representa cualquier texto y ? un solo carácter cualquiera. Ctrl+F",
+    "ui.browser_search_tip": "Busca componentes, cuerpos, bocetos, uniones y planos, ejes y puntos de construcción por nombre. * representa cualquier texto y ? un solo carácter cualquiera. Ctrl+F",
     "ui.browser_select_all": "Seleccionar todo ({count})",
     "ui.browser_select_all_tip": "Selecciona todo lo que encontró la búsqueda"
   },
@@ -85,7 +85,7 @@
     "ui.browser_search_found_more": "{count}+ trouvés",
     "ui.browser_search_hint": "Rechercher dans la conception",
     "ui.browser_search_none": "Aucun résultat",
-    "ui.browser_search_tip": "Trouver les composants, corps, esquisses, plans de construction et liaisons par leur nom. * remplace n'importe quel texte et ? un seul caractère. Ctrl+F",
+    "ui.browser_search_tip": "Trouver les composants, corps, esquisses, liaisons, et les plans, axes et points de construction par leur nom. * remplace n'importe quel texte et ? un seul caractère. Ctrl+F",
     "ui.browser_select_all": "Tout sélectionner ({count})",
     "ui.browser_select_all_tip": "Sélectionner tout ce que la recherche a trouvé"
   },
@@ -100,7 +100,7 @@
     "ui.browser_search_found_more": "{count}+ atopados",
     "ui.browser_search_hint": "Buscar no deseño",
     "ui.browser_search_none": "Sen coincidencias",
-    "ui.browser_search_tip": "Busca compoñentes, corpos, bosquexos, planos de construción e unións polo nome. * representa calquera texto e ? un só carácter calquera. Ctrl+F",
+    "ui.browser_search_tip": "Busca compoñentes, corpos, bosquexos, unións e planos, eixes e puntos de construción polo nome. * representa calquera texto e ? un só carácter calquera. Ctrl+F",
     "ui.browser_select_all": "Seleccionar todo ({count})",
     "ui.browser_select_all_tip": "Selecciona todo o que atopou a busca"
   },
@@ -115,7 +115,7 @@
     "ui.browser_search_found_more": "נמצאו: {count}+",
     "ui.browser_search_hint": "חיפוש בתכן",
     "ui.browser_search_none": "אין התאמות",
-    "ui.browser_search_tip": "חיפוש רכיבים, גופים, סקיצות, מישורי עזר ומפרקים לפי שם. הסימן * מייצג טקסט כלשהו והסימן ? מייצג תו אחד כלשהו. Ctrl+F",
+    "ui.browser_search_tip": "חיפוש רכיבים, גופים, סקיצות, מפרקים, ומישורי עזר, צירי עזר ונקודות עזר לפי שם. הסימן * מייצג טקסט כלשהו והסימן ? מייצג תו אחד כלשהו. Ctrl+F",
     "ui.browser_select_all": "בחירת הכול ({count})",
     "ui.browser_select_all_tip": "בחירת כל מה שהחיפוש מצא"
   },
@@ -130,7 +130,7 @@
     "ui.browser_search_found_more": "{count}+ trovati",
     "ui.browser_search_hint": "Cerca nel progetto",
     "ui.browser_search_none": "Nessuna corrispondenza",
-    "ui.browser_search_tip": "Trova componenti, corpi, schizzi, piani di costruzione e giunti per nome. * sta per qualsiasi testo e ? per un singolo carattere qualsiasi. Ctrl+F",
+    "ui.browser_search_tip": "Trova componenti, corpi, schizzi, giunti e piani, assi e punti di costruzione per nome. * sta per qualsiasi testo e ? per un singolo carattere qualsiasi. Ctrl+F",
     "ui.browser_select_all": "Seleziona tutti ({count})",
     "ui.browser_select_all_tip": "Seleziona tutto ciò che la ricerca ha trovato"
   },
@@ -145,7 +145,7 @@
     "ui.browser_search_found_more": "{count}+ 件",
     "ui.browser_search_hint": "デザインを検索",
     "ui.browser_search_none": "一致するものはありません",
-    "ui.browser_search_tip": "コンポーネント、ボディ、スケッチ、構築平面、ジョイントを名前で検索します。* は任意の文字列、? は任意の 1 文字を表します。Ctrl+F",
+    "ui.browser_search_tip": "コンポーネント、ボディ、スケッチ、ジョイント、構築平面・軸・点を名前で検索します。* は任意の文字列、? は任意の 1 文字を表します。Ctrl+F",
     "ui.browser_select_all": "すべて選択 ({count})",
     "ui.browser_select_all_tip": "検索で見つかったものをすべて選択します"
   },
@@ -160,7 +160,7 @@
     "ui.browser_search_found_more": "{count}+개 찾음",
     "ui.browser_search_hint": "디자인 검색",
     "ui.browser_search_none": "일치하는 항목 없음",
-    "ui.browser_search_tip": "구성 요소, 바디, 스케치, 구성 평면, 조인트를 이름으로 찾습니다. *는 임의의 텍스트, ?는 임의의 한 글자를 뜻합니다. Ctrl+F",
+    "ui.browser_search_tip": "구성 요소, 바디, 스케치, 조인트, 구성 평면·축·점을 이름으로 찾습니다. *는 임의의 텍스트, ?는 임의의 한 글자를 뜻합니다. Ctrl+F",
     "ui.browser_select_all": "{count}개 모두 선택",
     "ui.browser_select_all_tip": "검색에서 찾은 항목을 모두 선택합니다"
   },
@@ -175,7 +175,7 @@
     "ui.browser_search_found_more": "{count}+ encontrados",
     "ui.browser_search_hint": "Pesquisar no projeto",
     "ui.browser_search_none": "Nenhuma correspondência",
-    "ui.browser_search_tip": "Encontra componentes, corpos, esboços, planos de construção e juntas pelo nome. * representa qualquer texto e ? um único caractere qualquer. Ctrl+F",
+    "ui.browser_search_tip": "Encontra componentes, corpos, esboços, juntas e planos, eixos e pontos de construção pelo nome. * representa qualquer texto e ? um único caractere qualquer. Ctrl+F",
     "ui.browser_select_all": "Selecionar tudo ({count})",
     "ui.browser_select_all_tip": "Seleciona tudo o que a pesquisa encontrou"
   },
@@ -190,7 +190,7 @@
     "ui.browser_search_found_more": "Найдено: {count}+",
     "ui.browser_search_hint": "Поиск по дизайну",
     "ui.browser_search_none": "Ничего не найдено",
-    "ui.browser_search_tip": "Поиск компонентов, тел, эскизов, вспомогательных плоскостей и сопряжений по имени. * — любой текст, ? — любой один символ. Ctrl+F",
+    "ui.browser_search_tip": "Поиск компонентов, тел, эскизов, сопряжений и вспомогательных плоскостей, осей и точек по имени. * — любой текст, ? — любой один символ. Ctrl+F",
     "ui.browser_select_all": "Выбрать все ({count})",
     "ui.browser_select_all_tip": "Выбрать всё, что нашёл поиск"
   },
@@ -205,7 +205,7 @@
     "ui.browser_search_found_more": "{count}+ bulundu",
     "ui.browser_search_hint": "Tasarımda ara",
     "ui.browser_search_none": "Eşleşme yok",
-    "ui.browser_search_tip": "Bileşenleri, gövdeleri, eskizleri, yapı düzlemlerini ve bağlantıları adlarına göre bulun. * herhangi bir metnin, ? herhangi bir karakterin yerine geçer. Ctrl+F",
+    "ui.browser_search_tip": "Bileşenleri, gövdeleri, eskizleri, bağlantıları ve yapı düzlemlerini, eksenlerini ve noktalarını adlarına göre bulun. * herhangi bir metnin, ? herhangi bir karakterin yerine geçer. Ctrl+F",
     "ui.browser_select_all": "Tümünü seç ({count})",
     "ui.browser_select_all_tip": "Aramanın bulduğu her şeyi seç"
   },
@@ -220,7 +220,7 @@
     "ui.browser_search_found_more": "Знайдено: {count}+",
     "ui.browser_search_hint": "Пошук у проєкті",
     "ui.browser_search_none": "Нічого не знайдено",
-    "ui.browser_search_tip": "Пошук компонентів, тіл, ескізів, конструкційних площин і з'єднань за назвою. * — будь-який текст, ? — будь-який один символ. Ctrl+F",
+    "ui.browser_search_tip": "Пошук компонентів, тіл, ескізів, з'єднань і конструкційних площин, осей та точок за назвою. * — будь-який текст, ? — будь-який один символ. Ctrl+F",
     "ui.browser_select_all": "Вибрати всі ({count})",
     "ui.browser_select_all_tip": "Вибрати все, що знайшов пошук"
   },
@@ -235,7 +235,7 @@
     "ui.browser_search_found_more": "Tìm thấy {count}+",
     "ui.browser_search_hint": "Tìm trong thiết kế",
     "ui.browser_search_none": "Không có kết quả",
-    "ui.browser_search_tip": "Tìm thành phần, thân khối, phác thảo, mặt phẳng dựng hình và khớp nối theo tên. * thay cho văn bản bất kỳ và ? thay cho một ký tự bất kỳ. Ctrl+F",
+    "ui.browser_search_tip": "Tìm thành phần, thân khối, phác thảo, khớp nối và mặt phẳng, trục, điểm dựng hình theo tên. * thay cho văn bản bất kỳ và ? thay cho một ký tự bất kỳ. Ctrl+F",
     "ui.browser_select_all": "Chọn tất cả {count}",
     "ui.browser_select_all_tip": "Chọn mọi thứ tìm kiếm đã tìm thấy"
   },
@@ -250,7 +250,7 @@
     "ui.browser_search_found_more": "找到 {count}+ 个",
     "ui.browser_search_hint": "搜索设计",
     "ui.browser_search_none": "没有匹配项",
-    "ui.browser_search_tip": "按名称查找组件、实体、草图、构造平面和关节。* 代表任意文本，? 代表任意一个字符。Ctrl+F",
+    "ui.browser_search_tip": "按名称查找组件、实体、草图、关节以及构造平面、轴和点。* 代表任意文本，? 代表任意一个字符。Ctrl+F",
     "ui.browser_select_all": "全选 {count} 个",
     "ui.browser_select_all_tip": "选择搜索找到的所有内容"
   }
