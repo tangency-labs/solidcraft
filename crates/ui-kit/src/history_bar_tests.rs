@@ -444,22 +444,6 @@ fn steps_out_of_view_read_the_focus_and_popups_once_per_run() {
             source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(0.0, -100.0),
-
-/// A strip narrower than its steps, scrolled to its end, shows the marker after the last step
-/// inside its clip: the marker is part of the scroll range, not cut off past it.
-#[test]
-fn scrolled_to_its_end_the_strip_shows_the_marker_after_the_last_step() {
-    let labels: Vec<&'static str> = (0..40).map(|i| &*Box::leak(format!("Step {i}").into_boxed_str())).collect();
-    let mut rig = Rig::new(&labels, labels.len());
-    rig.rect = Rect::from_min_size(pos2(0.0, 100.0), vec2(300.0, 40.0));
-    rig.frame(Vec::new());
-    let over = rig.rect.center();
-    for _ in 0..30 {
-        rig.time.set(rig.time.get() + 0.1);
-        let wheel = Event::MouseWheel {
-            source: egui::MouseWheelSource::Unknown,
-            unit: egui::MouseWheelUnit::Point,
-            delta: vec2(0.0, -2000.0),
             modifiers: Modifiers::NONE,
             phase: egui::TouchPhase::Move,
         };
@@ -522,7 +506,27 @@ fn a_focused_or_dragged_step_out_of_view_stays_alive_and_an_open_popup_keeps_eve
     // Under an open popup every step is alive.
     egui::Popup::open_id(&rig.ctx, egui::Id::unique("test popup"));
     assert_eq!(alive(&rig), rig.labels, "every step is drawn under an open popup");
+}
 
+/// A strip narrower than its steps, scrolled to its end, shows the marker after the last step
+/// inside its clip: the marker is part of the scroll range, not cut off past it.
+#[test]
+fn scrolled_to_its_end_the_strip_shows_the_marker_after_the_last_step() {
+    let labels: Vec<&'static str> = (0..40).map(|i| &*Box::leak(format!("Step {i}").into_boxed_str())).collect();
+    let mut rig = Rig::new(&labels, labels.len());
+    rig.rect = Rect::from_min_size(pos2(0.0, 100.0), vec2(300.0, 40.0));
+    rig.frame(Vec::new());
+    let over = rig.rect.center();
+    for _ in 0..30 {
+        rig.time.set(rig.time.get() + 0.1);
+        let wheel = Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -2000.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        rig.frame(vec![Event::PointerMoved(over), wheel]);
     }
     rig.frame(Vec::new());
     let marker = solidcraft_ui_registry::rect_of("test:marker").expect("the marker is drawn");
