@@ -2902,6 +2902,26 @@ fn selected_edges_show_their_length_at_the_bottom_left() {
 }
 
 #[test]
+fn the_selection_length_stays_clear_of_the_navigation_bar_in_a_narrow_view() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let x = edge_between(&h, Vec3::ZERO, Vec3::new(40.0, 0.0, 0.0));
+    let y = edge_between(&h, Vec3::ZERO, Vec3::new(0.0, 30.0, 0.0));
+    let mut side_by_side = false;
+    for width in [1280.0, 900.0, 700.0, 600.0, 520.0] {
+        h.call("ui.resize", json!({"width": width, "height": 720}));
+        h.app.session.selection = vec![x.clone(), y.clone()];
+        h.frame();
+        let nav = h.app.viewport.layout.as_ref().unwrap().navigation;
+        let readout = crate::scenario::rect_of("viewport:selection_length").unwrap();
+        assert!(!readout.intersects(nav), "{width}: {readout:?} overlaps the navigation bar {nav:?}");
+        side_by_side |= nav.is_positive() && nav.left() < readout.right() && readout.left() < nav.right();
+    }
+    assert!(side_by_side, "no width put the readout and the navigation bar in the same columns");
+}
+
+#[test]
 fn a_circle_picked_as_both_rim_halves_is_one_edge() {
     let mut h = Harness::new();
     h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();

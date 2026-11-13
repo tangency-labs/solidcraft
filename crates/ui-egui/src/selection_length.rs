@@ -110,6 +110,11 @@ pub(crate) fn paint(app: &SolveApp, painter: &Painter, free: Rect) {
     let galley = painter.layout_no_wrap(text, FontId::proportional(t.font_body), t.text);
     let size = galley.size() + vec2(16.0, 8.0);
     let r = Rect::from_min_size(pos2(free.left() + t.space_12, free.bottom() - t.space_12 - size.y), size);
+    // Above the navigation bar where they meet, as in a narrow window or beside a panel.
+    let r = match app.viewport.layout.as_ref().map(|l| l.navigation).filter(|n| n.is_positive() && n.intersects(r.expand(4.0))) {
+        Some(nav) => r.translate(vec2(0.0, nav.top() - 6.0 - r.bottom())),
+        None => r,
+    };
     painter.rect(r, t.radius_sm, t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     crate::scenario::publish_target("viewport:selection_length", r);
     painter.galley(r.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, t.text);
