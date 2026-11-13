@@ -70,16 +70,21 @@ parseable interchange format. Values retain their shortest round-trip decimal
 form in millimetres, without precision rounding or locale substitution.
 `DatumIdentifier::text` returns `[A]` for A.
 
-`layout` returns paper `Item` strokes/fills, size and compartment bounds, in
-millimetres from the frame's local lower-left corner. It does not create a paper
-scene group or choose a layer. Existing writers can consume these primitives once
+`layout(style, format_number)` returns paper `Item` strokes/fills, size and compartment bounds, in
+millimetres from the frame's local lower-left corner. It formats the tolerance value and optional
+projected height with the caller-provided `format_number: impl Fn(f64) -> Result<(String, f64)>`,
+applying the drawing's precision, decimal marker (`.` or `,`) and digit grouping (U+202F). Positive values
+rounding to zero are rejected, while explicitly zero tolerance at maximum material is retained.
+Formatted numeric text is capped at 128 UTF-8 bytes as a resource limit.
+It does not create a paper scene group or choose a layer. Existing writers can consume these primitives once
 the sheet annotation layer groups and places them. No view scale enters the API.
+`Frame::formatted_compartments(format_number)` provides the formatted cells before layout.
 A datum layout is its boxed label only; its connecting line and triangle belong
 to the deferred leader/attachment layer.
 
 All geometry is original code: lines, analytic circular arcs and filled runout
-arrowheads, plus a small original single-stroke alphabet for values and datum
-letters. Characteristic and modifier Unicode characters are transcriptions only;
+arrowheads, plus a small original single-stroke alphabet for values, decimal point,
+comma, narrow space (U+202F) and datum letters. Characteristic and modifier Unicode characters are transcriptions only;
 no font glyph is used to draw a symbol. No standard's figures, fonts, text or
 commercial CAD assets/code were copied.
 
@@ -117,7 +122,7 @@ or CAD assets were copied.
 | All fourteen characteristic constructions (twelve under ASME) | `crates/geom/src/gdt/geometry/provisional.rs`, `Pen::characteristic`, one named match arm per characteristic | Current ISO 7083 characteristic grids; ASME Y14.5 construction requirements |
 | Circled M/L/P dimensions and placement | Same module, `MODIFIER_*` constants | Family-specific circle, internal-letter and spacing proportions |
 | ASME diameter prefix | Same module, `ASME_DIAMETER_*` constants | ASME Y14.5/Y14.2 construction requirements |
-| Original alphabet, decimal mark, widths and inter-character advance | Same module, `Pen::letter`, `LETTER_WIDTH_H`, `DECIMAL_WIDTH_H`, `CHARACTER_GAP_H` | ISO 3098 lettering construction/spacing and ASME Y14.2 requirements |
+| Original alphabet, decimal mark, comma, narrow space, widths and inter-character advance | Same module, `Pen::letter`, `LETTER_WIDTH_H`, `DECIMAL_WIDTH_H`, `NARROW_SPACE_WIDTH_H`, `CHARACTER_GAP_H` | ISO 3098 lettering construction/spacing and ASME Y14.2 requirements |
 | ASME frame/boxed-label proportions; current ISO boxed-label conventions | `crates/geom/src/gdt/geometry.rs`, `frame`, `datum`, `inset`, `Pen::stroke` | ASME Y14.5/Y14.2 and ISO 5459:2024 label dimensions |
 
 All construction coordinates and metrics in the provisional module are normalized

@@ -291,8 +291,24 @@ impl Frame {
         Ok(self.compartments()?.join(" | "))
     }
 
-    pub fn layout(&self, style: Style) -> Result<Layout> {
-        geometry::frame(self, style)
+    /// Compartments formatted with the caller's number formatting policy for paper presentation.
+    /// Rejects positive tolerance and projected height values that round to zero while permitting
+    /// explicitly zero tolerance at maximum material.
+    pub fn formatted_compartments(&self, format_number: impl Fn(f64) -> Result<(String, f64)>) -> Result<Vec<String>> {
+        self.validate()?;
+        let mut cells = vec![self.characteristic.text().into(), self.zone.formatted_text(&format_number)?];
+        cells.extend(self.datums.iter().map(|d| {
+            let mut text = d.identifier.clone();
+            if let Some(material) = d.material {
+                text.push_str(material.text());
+            }
+            text
+        }));
+        Ok(cells)
+    }
+
+    pub fn layout(&self, style: Style, format_number: impl Fn(f64) -> Result<(String, f64)>) -> Result<Layout> {
+        geometry::frame(self, style, format_number)
     }
 }
 
@@ -312,6 +328,34 @@ impl Zone {
             text.push_str(&format!("Ⓟ{height}"));
         }
         text
+    }
+
+    fn formatted_text(&self, format_number: &impl Fn(f64) -> Result<(String, f64)>) -> Result<String> {
+        let (val_text, val_rounded) = format_number(if self.value_mm == 0.0 { 0.0 } else { self.value_mm })?;
+        require(val_rounded.is_finite() && val_rounded >= 0.0, "formatted tolerance must be finite and non-negative")?;
+        if self.value_mm == 0.0 {
+            require(val_rounded == 0.0, "explicit zero tolerance must not round to positive")?;
+        } else {
+            require(val_rounded > 0.0, "formatted positive tolerance must not round to zero")?;
+        }
+        require(!val_text.is_empty() && val_text.len() <= 128, "formatted tolerance must be bounded text")?;
+
+        let mut text = match self.shape {
+            ZoneShape::Width => String::new(),
+            ZoneShape::Diameter => "⌀".into(),
+            ZoneShape::SphericalDiameter => "S⌀".into(),
+        };
+        text.push_str(&val_text);
+        if let Some(material) = self.material {
+            text.push_str(material.text());
+        }
+        if let Some(height) = self.projected_height_mm {
+            let (h_text, h_rounded) = format_number(height)?;
+            require(h_rounded.is_finite() && h_rounded > 0.0, "formatted projected height must not round to zero")?;
+            require(!h_text.is_empty() && h_text.len() <= 128, "formatted projected height must be bounded text")?;
+            text.push_str(&format!("Ⓟ{h_text}"));
+        }
+        Ok(text)
     }
 }
 

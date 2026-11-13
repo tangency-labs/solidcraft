@@ -25,6 +25,7 @@ use super::Pen;
 pub(super) const CHARACTER_GAP_H: f64 = 0.2;
 const LETTER_WIDTH_H: f64 = 0.6;
 const DECIMAL_WIDTH_H: f64 = 0.2;
+const NARROW_SPACE_WIDTH_H: f64 = 0.2;
 const MODIFIER_RADIUS_H: f64 = 0.6;
 const MODIFIER_WIDTH_H: f64 = 2.0 * MODIFIER_RADIUS_H;
 const MODIFIER_CENTER_H: (f64, f64) = (0.6, 0.5);
@@ -35,11 +36,12 @@ const ASME_DIAMETER_CENTER_H: (f64, f64) = (0.45, 0.5);
 const ASME_DIAMETER_RADIUS_H: f64 = 0.4;
 const ASME_DIAMETER_SLASH_H: [(f64, f64); 2] = [(0.05, 0.0), (0.85, 1.0)];
 
-pub(super) fn glyph_width(c: char) -> Result<f64> {
+pub(in crate::gdt) fn glyph_width(c: char) -> Result<f64> {
     match c {
         'Ⓜ' | 'Ⓛ' | 'Ⓟ' => Ok(MODIFIER_WIDTH_H),
         '⌀' => Ok(ASME_DIAMETER_WIDTH_H),
-        '.' => Ok(DECIMAL_WIDTH_H),
+        '.' | ',' => Ok(DECIMAL_WIDTH_H),
+        '\u{202f}' => Ok(NARROW_SPACE_WIDTH_H),
         '0'..='9' | 'A'..='Z' => Ok(LETTER_WIDTH_H),
         _ => Err(Invalid("unsupported character in the bounded symbol alphabet")),
     }
@@ -64,6 +66,7 @@ impl Pen {
                 self.arc(origin + Vec2::new(x, y) * self.h, ASME_DIAMETER_RADIUS_H * self.h, 0.0, TAU);
                 self.path(&ASME_DIAMETER_SLASH_H, origin, self.h, false);
             }
+            '\u{202f}' => {}
             _ => self.letter(c, origin, self.h)?,
         }
         Ok(())
@@ -167,6 +170,12 @@ impl Pen {
                 self.arc(origin + Vec2::new(0.1, 0.05) * h, 0.05 * h, 0.0, TAU);
                 return Ok(());
             }
+            ',' => {
+                self.arc(origin + Vec2::new(0.1, 0.05) * h, 0.05 * h, 0.0, TAU);
+                self.path(&[(0.12, 0.05), (0.1, -0.04), (0.06, -0.12)], origin, h, false);
+                return Ok(());
+            }
+            '\u{202f}' => return Ok(()),
             'A' => &[&[(0.0, 0.0), (0.3, 1.0), (0.6, 0.0)], &[(0.15, 0.5), (0.45, 0.5)]],
             'B' => &[&[(0.0, 0.0), (0.0, 1.0), (0.4, 1.0), (0.6, 0.8), (0.4, 0.5), (0.0, 0.5)], &[(0.4, 0.5), (0.6, 0.3), (0.4, 0.0), (0.0, 0.0)]],
             'C' => &[&[(0.6, 0.85), (0.45, 1.0), (0.15, 1.0), (0.0, 0.8), (0.0, 0.2), (0.15, 0.0), (0.45, 0.0), (0.6, 0.15)]],

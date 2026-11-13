@@ -31,12 +31,17 @@ fn valid_characteristic(characteristic: Characteristic) -> Frame {
     f
 }
 
+fn diagnostic_number(n: f64) -> Result<(String, f64)> {
+    Ok((if n == 0.0 { "0".into() } else { n.to_string() }, if n == 0.0 { 0.0 } else { n }))
+}
+
 fn assert_bad(f: &Frame) {
     assert!(f.validate().is_err(), "{f:?}");
     assert!(f.text().is_err());
     assert!(f.compartments().is_err());
+    assert!(f.formatted_compartments(diagnostic_number).is_err());
     assert!(f.warnings().is_err());
-    assert!(f.layout(Style::default()).is_err());
+    assert!(f.layout(Style::default(), diagnostic_number).is_err());
 }
 
 fn assert_paper(layout: Layout) {
@@ -68,7 +73,7 @@ fn datum_free_position_is_accepted_and_reported_for_context_checking() {
     assert_eq!(f.validate(), Ok(()));
     assert_eq!(f.text().unwrap(), "⌖ | ⌀0.1Ⓜ");
     assert_eq!(f.warnings().unwrap(), vec![Warning::DatumFreePositionNeedsPatternContext]);
-    assert_paper(f.layout(Style::default()).unwrap());
+    assert_paper(f.layout(Style::default(), diagnostic_number).unwrap());
 }
 
 #[test]
@@ -78,7 +83,7 @@ fn all_fourteen_iso_characteristics_validate_and_draw() {
         let f = valid_characteristic(characteristic);
         assert_eq!(f.validate(), Ok(()), "{characteristic:?}");
         texts.insert(characteristic.text());
-        assert_paper(f.layout(Style::default()).unwrap());
+        assert_paper(f.layout(Style::default(), diagnostic_number).unwrap());
     }
     assert_eq!(texts.len(), 14);
 }
@@ -164,7 +169,7 @@ fn all_hostile_numeric_tolerances_are_rejected_at_every_boundary() {
         f.zone.value_mm = value;
         assert_eq!(f.validate(), Ok(()));
         assert!(f.text().unwrap().contains(&value.to_string()));
-        assert_paper(f.layout(Style::default()).unwrap());
+        assert_paper(f.layout(Style::default(), diagnostic_number).unwrap());
     }
 }
 
@@ -212,7 +217,7 @@ fn feature_and_zone_shape_are_validated_together() {
                 f.zone.shape = shape;
                 assert_eq!(f.validate().is_ok(), allowed.contains(&(feature, shape)), "{characteristic:?}, {feature:?}, {shape:?}");
                 if f.validate().is_ok() {
-                    assert_paper(f.layout(Style::default()).unwrap());
+                    assert_paper(f.layout(Style::default(), diagnostic_number).unwrap());
                 }
             }
         }
@@ -245,7 +250,7 @@ fn material_modifiers_require_a_supported_size_feature() {
         for material in [MaterialModifier::Maximum, MaterialModifier::Least] {
             f.zone.material = Some(material);
             assert_eq!(f.validate(), Ok(()));
-            assert_paper(f.layout(Style::default()).unwrap());
+            assert_paper(f.layout(Style::default(), diagnostic_number).unwrap());
         }
         f.feature = Feature::Surface;
         assert_bad(&f);
@@ -273,7 +278,7 @@ fn projected_height_uses_asme_convention_and_checks_its_value() {
     assert_bad(&f); // ISO does not put the height in the frame.
     f.standard = Standard::AsmeY14_5_2018;
     assert_eq!(f.text().unwrap(), "⌖ | ⌀0.1ⓂⓅ12.5 | A | B | C");
-    assert_paper(f.layout(Style::default()).unwrap());
+    assert_paper(f.layout(Style::default(), diagnostic_number).unwrap());
     for value in [0.0, -1.0, 1e-10, f64::NAN, f64::INFINITY, 10001.0] {
         f.zone.projected_height_mm = Some(value);
         assert_bad(&f);
@@ -316,7 +321,7 @@ fn serde_preserves_semantics_but_layout_revalidates_untrusted_records() {
 
 #[test]
 fn paper_geometry_has_five_compartments_with_a_square_symbol_cell() {
-    let layout = position().layout(Style::default()).unwrap();
+    let layout = position().layout(Style::default(), diagnostic_number).unwrap();
     let cells = &layout.compartments;
     assert_eq!(cells.len(), 5);
     assert_eq!(cells[0].size(), Vec2::new(7.0, 7.0));
@@ -360,7 +365,7 @@ fn datum_cell_clearance_accounts_for_frame_and_letter_ink() {
 
 #[test]
 fn characteristic_geometry_contains_exact_circles_and_cross_lines() {
-    let layout = position().layout(Style { text_height_mm: 5.0 }).unwrap();
+    let layout = position().layout(Style { text_height_mm: 5.0 }, diagnostic_number).unwrap();
     let center = Vec2::new(5.0, 5.0);
     assert!(layout.items.iter().any(|item| match item {
         Item::Stroke { path, closed: true, width_mm, pattern: None } =>
@@ -381,7 +386,7 @@ fn iso_diameter_grid_has_a_six_d_circle_and_three_by_nine_d_diagonal() {
     // The ISO 7083:2021 diameter dimensions were checked independently.
     // h=5, d=0.5. The tolerance text starts at (12.25,2.5); the circle centre is
     // (14,5), radius 3d, diagonal endpoints differ by 3d in x and 9d in y.
-    let layout = position().layout(Style { text_height_mm: 5.0 }).unwrap();
+    let layout = position().layout(Style { text_height_mm: 5.0 }, diagnostic_number).unwrap();
     assert!(layout.items.iter().any(|item| matches!(item,
         Item::Stroke { path, closed: true, width_mm, pattern: None } if *width_mm == 0.5 && path.iter().any(|seg|
             matches!(seg, Seg2::Arc { center, radius, sweep, .. }
@@ -410,8 +415,8 @@ fn iso_diameter_proportions_are_not_assigned_to_the_asme_preview() {
     let mut asme = iso.clone();
     asme.standard = Standard::AsmeY14_5_2018;
     assert_eq!(iso.text().unwrap(), asme.text().unwrap());
-    let iso = iso.layout(Style::default()).unwrap();
-    let asme = asme.layout(Style::default()).unwrap();
+    let iso = iso.layout(Style::default(), diagnostic_number).unwrap();
+    let asme = asme.layout(Style::default(), diagnostic_number).unwrap();
     assert!((iso.compartments[1].size().x - 17.5).abs() < 1e-10);
     assert!((asme.compartments[1].size().x - 18.2).abs() < 1e-10);
     assert_eq!(iso.items.iter().filter(|item| matches!(item, Item::Fill { .. })).count(), 2);
@@ -426,11 +431,11 @@ fn style_limits_reject_nonfinite_and_too_small_or_large_heights() {
     for h in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 1.799, 20.001, f64::MAX] {
         let s = Style { text_height_mm: h };
         assert!(s.validate().is_err());
-        assert!(position().layout(s).is_err());
+        assert!(position().layout(s, diagnostic_number).is_err());
         assert!(d.layout(s).is_err());
     }
     for h in [1.8, 2.5, 3.5, 5.0, 7.0, 10.0, 14.0, 20.0] {
-        assert_paper(position().layout(Style { text_height_mm: h }).unwrap());
+        assert_paper(position().layout(Style { text_height_mm: h }, diagnostic_number).unwrap());
         let layout = d.layout(Style { text_height_mm: h }).unwrap();
         assert_eq!(layout.size_mm, Vec2::new(2.0 * h, 2.0 * h));
         assert_paper(layout);
@@ -440,8 +445,8 @@ fn style_limits_reject_nonfinite_and_too_small_or_large_heights() {
 #[test]
 fn geometry_scales_with_lettering_and_is_independent_of_model_scale() {
     // No view scale exists in this API. Above the minimum clearance, all distances scale with h.
-    let a = position().layout(Style { text_height_mm: 5.0 }).unwrap();
-    let b = position().layout(Style { text_height_mm: 10.0 }).unwrap();
+    let a = position().layout(Style { text_height_mm: 5.0 }, diagnostic_number).unwrap();
+    let b = position().layout(Style { text_height_mm: 10.0 }, diagnostic_number).unwrap();
     assert!((b.size_mm - a.size_mm * 2.0).len() < 1e-10);
     assert_eq!(a.items.len(), b.items.len());
     let assert_scaled_paths = |pa: &[Seg2], pb: &[Seg2]| {
@@ -480,7 +485,7 @@ fn maximum_records_remain_small_and_all_ink_is_within_the_declared_margin() {
         datum.identifier = name.into();
         datum.material = Some(MaterialModifier::Maximum);
     }
-    let layout = f.layout(Style { text_height_mm: 20.0 }).unwrap();
+    let layout = f.layout(Style { text_height_mm: 20.0 }, diagnostic_number).unwrap();
     assert!(layout.items.len() < 300);
     let bounds = crate::Aabb2 { min: Vec2::ZERO, max: layout.size_mm }.inflated(1.0);
     for item in &layout.items {
@@ -506,7 +511,7 @@ fn provisional_characteristics_do_not_cross_the_frame_ink() {
                 if frame.validate().is_err() {
                     continue; // Concentricity/symmetry are not in the supported ASME edition.
                 }
-                let layout = frame.layout(Style { text_height_mm: h }).unwrap();
+                let layout = frame.layout(Style { text_height_mm: h }, diagnostic_number).unwrap();
                 let mut checked = 0;
                 for item in &layout.items {
                     if let Item::Stroke { path, .. } = item
@@ -535,4 +540,107 @@ fn provisional_characteristics_do_not_cross_the_frame_ink() {
             }
         }
     }
+}
+
+#[test]
+fn formatted_layout_uses_caller_decimal_marker_and_precision() {
+    let mut f = position();
+    f.zone.value_mm = 0.1;
+    let format_comma = |n: f64| Ok((format!("{n:.2}").replace('.', ","), (n * 100.0).round() / 100.0));
+    let compartments = f.formatted_compartments(format_comma).unwrap();
+    assert_eq!(compartments, vec!["⌖", "⌀0,10Ⓜ", "A", "B", "C"]);
+    let layout = f.layout(Style::default(), format_comma).unwrap();
+    assert_paper(layout);
+
+    // text() and compartments() remain lossless.
+    assert_eq!(f.text().unwrap(), "⌖ | ⌀0.1Ⓜ | A | B | C");
+    assert_eq!(f.compartments().unwrap(), vec!["⌖", "⌀0.1Ⓜ", "A", "B", "C"]);
+}
+
+#[test]
+fn formatted_layout_supports_grouping_with_narrow_no_break_space() {
+    let mut f = position();
+    f.zone.value_mm = 1234.5;
+    let format_grouped = |n: f64| {
+        let s = format!("{n:.1}").replace('.', ",");
+        let grouped = if s.len() > 5 { format!("{}\u{202f}{}", &s[..1], &s[1..]) } else { s };
+        Ok((grouped, n))
+    };
+    let compartments = f.formatted_compartments(format_grouped).unwrap();
+    assert_eq!(compartments[1], "⌀1\u{202f}234,5Ⓜ");
+    let layout = f.layout(Style::default(), format_grouped).unwrap();
+    assert_paper(layout);
+}
+
+#[test]
+fn positive_tolerance_rounding_to_zero_is_rejected_while_explicit_zero_is_retained() {
+    let format_zero = |_| Ok(("0".into(), 0.0));
+    let mut f = position();
+    f.zone.value_mm = 0.001;
+    assert!(f.formatted_compartments(format_zero).is_err());
+    assert!(f.layout(Style::default(), format_zero).is_err());
+
+    // Explicit zero tolerance is permitted at maximum material.
+    f.zone.value_mm = 0.0;
+    f.zone.material = Some(MaterialModifier::Maximum);
+    assert_eq!(f.validate(), Ok(()));
+    let compartments = f.formatted_compartments(format_zero).unwrap();
+    assert_eq!(compartments[1], "⌀0Ⓜ");
+    assert_paper(f.layout(Style::default(), format_zero).unwrap());
+
+    // Formatter specifying precision or comma on explicit zero is retained.
+    let format_comma_zero = |_| Ok(("0,00".into(), 0.0));
+    let compartments = f.formatted_compartments(format_comma_zero).unwrap();
+    assert_eq!(compartments[1], "⌀0,00Ⓜ");
+    assert_paper(f.layout(Style::default(), format_comma_zero).unwrap());
+}
+
+#[test]
+fn projected_height_formatting_and_zero_rounding_rejection() {
+    let mut f = position();
+    f.standard = Standard::AsmeY14_5_2018;
+    f.zone.value_mm = 0.2;
+    f.zone.projected_height_mm = Some(12.5);
+    let format_comma = |n: f64| Ok((format!("{n:.1}").replace('.', ","), n));
+    let compartments = f.formatted_compartments(format_comma).unwrap();
+    assert_eq!(compartments[1], "⌀0,2ⓂⓅ12,5");
+    assert_paper(f.layout(Style::default(), format_comma).unwrap());
+
+    // Lossless text preserves default representation.
+    assert_eq!(f.text().unwrap(), "⌖ | ⌀0.2ⓂⓅ12.5 | A | B | C");
+
+    // Projected height rounding to zero is rejected.
+    let format_zero_height = |n: f64| {
+        if n > 1.0 { Ok(("0".into(), 0.0)) } else { Ok((n.to_string(), n)) }
+    };
+    assert!(f.formatted_compartments(format_zero_height).is_err());
+    assert!(f.layout(Style::default(), format_zero_height).is_err());
+}
+
+#[test]
+fn comma_and_narrow_space_glyphs_render_valid_paper_geometry() {
+    assert_eq!(geometry::provisional::glyph_width(','), Ok(0.2));
+    assert_eq!(geometry::provisional::glyph_width('\u{202f}'), Ok(0.2));
+    assert_eq!(geometry::provisional::glyph_width('.'), Ok(0.2));
+
+    let mut f = position();
+    f.zone.value_mm = 12.34;
+    let format_comma_grouped = |_| Ok(("12\u{202f}345,67".into(), 12345.67));
+    let layout = f.layout(Style::default(), format_comma_grouped).unwrap();
+    assert_paper(layout);
+}
+
+#[test]
+fn invalid_formatted_number_bounds_and_characters_are_rejected() {
+    let long_text = format!("0.{}", "0".repeat(127)); // 129 bytes
+    assert!(position().formatted_compartments(|n| Ok((long_text.clone(), n))).is_err());
+    assert!(position().layout(Style::default(), |n| Ok((long_text.clone(), n))).is_err());
+
+    assert!(position().formatted_compartments(|n| Ok(("".into(), n))).is_err());
+    assert!(position().layout(Style::default(), |n| Ok(("".into(), n))).is_err());
+
+    assert!(position().layout(Style::default(), |n| Ok(("0#1".into(), n))).is_err());
+
+    assert!(position().formatted_compartments(|_| Err(Invalid("format error"))).is_err());
+    assert!(position().layout(Style::default(), |_| Err(Invalid("format error"))).is_err());
 }

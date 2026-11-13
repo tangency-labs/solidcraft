@@ -7,7 +7,7 @@ use crate::{Aabb2, paper::Item};
 
 use super::{DatumIdentifier, Frame, Result, Standard, require};
 
-mod provisional;
+pub(super) mod provisional;
 
 /// Paper lettering height, independent of view scale. Strokes are h/10; frames are 2h high.
 /// Heights outside 1.8–20 mm are rejected as a resource/layout policy, not a standards rule.
@@ -39,8 +39,8 @@ pub struct Layout {
     pub items: Vec<Item>,
 }
 
-pub(super) fn frame(frame: &Frame, style: Style) -> Result<Layout> {
-    let cells = frame.compartments()?;
+pub(super) fn frame(frame: &Frame, style: Style, format_number: impl Fn(f64) -> Result<(String, f64)>) -> Result<Layout> {
+    let cells = frame.formatted_compartments(format_number)?;
     style.validate()?;
     let h = style.text_height_mm;
     let mut pen = Pen { h, standard: frame.standard, items: Vec::new() };
