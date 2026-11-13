@@ -178,8 +178,8 @@ pub const MAX_FACE_LIST: usize = 1 << 16;
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::boolean::{BooleanStage, PlacedEntity, RelateSide};
-use crate::error::{Result, SolidError};
+use crate::error::boolean::{BooleanFailure, BooleanStage, PlacedEntity, RelateSide};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -1218,9 +1218,10 @@ pub struct TopologyIntersector<O> {
 ///
 /// # Errors
 ///
-/// [`SolidError::BooleanFailure`] (`StageFailed`, imprint) when a grown vertex tolerance
-/// would reach the far vertex of one of the edges (a tube may not reach an entity it does
-/// not bound); those of the topology walks and the curve evaluations.
+/// [`BooleanFailure::MergedVertexReaches`] when a grown vertex tolerance would reach the far
+/// vertex of one of the edges (a tube may not reach an entity it does not bound), naming the
+/// tolerance needed and the tolerance that fits; those of the topology walks and the curve
+/// evaluations.
 fn certified_vertex_gaps<O: ClassObject>(
     k: &Kernel,
     brep: &impl IntersectorBrep<O>,
@@ -1264,7 +1265,10 @@ fn certified_vertex_gaps<O: ClassObject>(
             let far = if start == Some(ovid) { end } else { start };
             if let Some(far) = far.filter(|&f| f != ovid) {
                 let f = ob.vertex(far)?;
-                reach.push((point.distance(f.point), f.tolerance));
+                // the distance less its rounding: a lower bound
+                let apart =
+                    point.distance(f.point) - gamma(8) * (point.length() + f.point.length());
+                reach.push((apart, f.tolerance));
             }
         }
         for f in vertex::faces(ob, ovid)? {
@@ -1292,15 +1296,35 @@ fn certified_vertex_gaps<O: ClassObject>(
             .iter()
             .all(|&(apart, far_tol)| tolerance + far_tol < apart)
         {
-            return Err(SolidError::boolean_stage_failed(
+            let fits_below = room_left(&reach);
+            return Err(Failure::new(
                 OP_CERTIFIED_GAPS,
-                BooleanStage::Imprint,
-                "a merged vertex's tolerance would reach the far vertex of one of its edges",
-            ));
+                BooleanFailure::MergedVertexReaches {
+                    needed: tolerance,
+                    fits_below,
+                },
+            )
+            .into_error());
         }
         out.push((v, tolerance));
     }
     Ok(out)
+}
+
+/// Not upstream (#15718): the tolerance a vertex's ball may have without reaching any of
+/// the vertices in `reach` (each a lower bound of its distance, and its own tolerance):
+/// the smallest distance less tolerance, or `None` when that is not positive or any value
+/// is NaN (no tolerance fits).
+pub(crate) fn room_left(reach: &[(f64, f64)]) -> Option<f64> {
+    let mut fits = f64::INFINITY;
+    for &(apart, far_tol) in reach {
+        let room = apart - far_tol;
+        if room.is_nan() {
+            return None;
+        }
+        fits = fits.min(room);
+    }
+    (fits > 0.0).then_some(fits)
 }
 
 /// What [`test_and_split_two_edges`] returns.

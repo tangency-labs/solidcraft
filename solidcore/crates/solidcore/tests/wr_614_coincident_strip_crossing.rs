@@ -550,6 +550,42 @@ fn wr_614_union_below_the_collapse_offsets_is_two_touching_solids() {
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
+/// The narrow strip at d = 1e-6, on the collapse boundary (B's corner P0 and A's corner C
+/// 20.02 d = 2.002e-5 apart, just past the intersection tolerance 2e-5, so two points): the
+/// vertex the imprint makes at one corner needs a tolerance covering its certified gaps whose
+/// ball reaches the other, which it does not bound. No valid body holds both, so each
+/// Boolean is refused at the imprint, naming the tolerance needed and the one that fits,
+/// computed from the distances (never by building again). Here no tolerance fits (`None`):
+/// an earlier imprint at this offset made an edge 4 mm long with
+/// tolerance 8 (its curve dropped 4 mm off its face), and its vertex is one the ball
+/// would reach. That imprint is a separate defect; the refusal reports it as it finds it.
+#[test]
+fn wr_614_strip_at_its_collapse_boundary_is_refused_naming_the_size() {
+    use solidcore::error::boolean::BooleanFailure;
+    use solidcore::error::Reason;
+    use solidcore::SolidError;
+    for op in ["union", "intersection", "difference"] {
+        let mut k = Kernel::default();
+        let (a, b) = strip_cubes(&mut k, 1e-6);
+        let r = match op {
+            "union" => boolean_union(&mut k, a, b),
+            "intersection" => boolean_intersection(&mut k, a, b),
+            _ => boolean_difference(&mut k, a, b),
+        };
+        let Err(SolidError::Failed(f)) = &r else {
+            panic!("{op}: a refusal, got {:?}", r.map(|b| shape(&b)));
+        };
+        let Reason::Boolean(BooleanFailure::MergedVertexReaches { needed, fits_below }) = f.reason
+        else {
+            panic!("{op}: a merged vertex that reaches, got {f:?}");
+        };
+        assert!(
+            needed > 0.0 && needed < 1e-4 && fits_below.is_none(),
+            "{op}: needed {needed}, fits below {fits_below:?}"
+        );
+    }
+}
+
 /// Two boxes whose faces cross at 45 deg near x = 0 while both faces extend toward +x
 /// (away from the crossing on A's side, so A's inward binormal points away from the
 /// crossing) keep their crossing: one manifold solid of the exact union's volume,

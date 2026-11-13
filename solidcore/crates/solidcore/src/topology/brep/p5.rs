@@ -1029,9 +1029,10 @@ pub(crate) fn delete_topological_vertex_joining(
 ///
 /// # Errors
 ///
-/// [`SolidError::Failed`] (a topology failure) when a grown vertex tolerance would reach
-/// the far vertex of one of its edges (a tube may not reach an entity it does not bound);
-/// those of the topology walks and the curve evaluations.
+/// [`TopologyFailure::JoinedVertexReaches`](crate::error::topology::TopologyFailure::JoinedVertexReaches)
+/// at the vertex when a grown vertex tolerance would reach the far vertex of one of its
+/// edges (a tube may not reach an entity it does not bound), naming the tolerance needed and
+/// the one that fits; those of the topology walks and the curve evaluations.
 pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     use crate::curve::curve::CurveKind;
     use crate::nurbs::math::gamma;
@@ -1076,19 +1077,30 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
         return Ok(());
     }
     for &(v, point, tolerance) in &grow {
+        let mut reach = Vec::new();
         for other in vertex::edges(b, v, None)? {
             let far = crate::topology::edge::other_vertex(b, other, Some(v))?;
             if let Some(far) = far.filter(|&f| f != v) {
                 let f = b.vertex(far)?;
-                // (a NaN distance passes no test and refuses)
-                let clear = tolerance + f.tolerance < point.distance(f.point);
-                if !clear {
-                    return Err(SolidError::topology_failed(
-                        OP,
-                        "a joined edge's vertex tolerance would reach the far vertex of one of its edges",
-                    ));
-                }
+                // the distance less its rounding: a lower bound
+                let apart =
+                    point.distance(f.point) - gamma(8) * (point.length() + f.point.length());
+                reach.push((apart, f.tolerance));
             }
+        }
+        // (a NaN distance passes no test and refuses)
+        let clear = reach
+            .iter()
+            .all(|&(apart, far_tol)| tolerance + far_tol < apart);
+        if !clear {
+            return Err(SolidError::topology_at(
+                OP,
+                crate::error::topology::TopologyFailure::JoinedVertexReaches {
+                    needed: tolerance,
+                    fits_below: crate::boolean::topology_intersector::p1::room_left(&reach),
+                },
+                crate::EntityRef::Vertex(v),
+            ));
         }
     }
     crate::topology::edge::set_tolerance(b, e, edge_gap, true, false)?;
