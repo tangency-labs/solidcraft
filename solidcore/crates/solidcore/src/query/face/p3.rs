@@ -91,8 +91,8 @@
 //!   read every control point of the surface it is given), and a cell whose subpatch's
 //!   control points reach no higher than the box so far is skipped unsolved. A cell whose
 //!   subpatch gives no solution is divided, and at the limits counts with that bound, its
-//!   control-point hull raised by the subpatch's rounding (a typed error when that has no
-//!   finite bound).
+//!   control-point hull raised by the subpatch's rounding (its loose box when that has no
+//!   finite bound, a typed error when neither has).
 //!   Not the fork's (#14460): a cell is divided only the ways a knot lies inside it while
 //!   either way has one, halved both ways only once it lies within one span each way.
 //!   The step-off loops keep upstream's bounds (20 rounds in the sector
@@ -962,16 +962,23 @@ fn patch_base<'s>(k: &Kernel, surface: &'s Surface) -> Result<Option<&'s BSpline
 /// How far, along a unit direction, a control point of a subpatch [`cell_patch`] takes
 /// of `base` may lie from the exact subpatch's, so that [`patch_hull_max`] plus it bounds
 /// the base surface over the cell although the subpatch was computed in floating point.
-/// Each point of the subpatch comes from at most `2 (p + q)` knot insertions (`p` at each
-/// end of the cell along u, `q` along v: `N_SrfExtractPatch`), each a convex combination
-/// of homogeneous points whose coordinates are at most `W M` (`M` the largest coordinate of
-/// the base's Euclidean control points, `W` its largest weight), `gamma(6)` of that each
-/// (as `eval::sphere`'s cut counts them); its weight likewise, at most `W` and at least the
-/// smallest weight `w`. Dividing back to the Euclidean point,
-/// `|ΔP| <= (gamma(6n) W M + M gamma(6n) W) / (w (1 - gamma(6n))) + u M`, which
-/// `3 gamma(6n + 5) M W / w` holds with the dot product with `dir` (3 products, 2 sums)
-/// counted too. `None` when it is not finite (no net, a weight not positive, a NaN, an
-/// overflow): then no bound holds.
+/// `M` is the largest coordinate of the base's Euclidean control points, `W` and `w` its
+/// largest and smallest weights, `u` the unit roundoff, in Higham's standard model.
+/// - Each point of the subpatch comes from at most `n = 2 (p + q)` knot insertions (`p` at
+///   each end of the cell along u, `q` along v: `N_SrfExtractPatch`). Each insertion is
+///   `alf P1 + (1 - alf) P0` of homogeneous points no larger than `W M` (a convex
+///   combination does not grow them), with `alf = (t - a) / (b - a)`: `alf` carries
+///   `gamma(3)` (two differences, one division), `1 - alf` that plus one rounding, and the
+///   two products and the sum two more, so one insertion adds at most
+///   `(3 alf + 3 alf + (1 - alf) + 2) u W M <= 9 u W M`; `n` of them `gamma(9n) W M`. The
+///   weight likewise, at most `W` and at least `w`.
+/// - Dividing back to the Euclidean point:
+///   `|ΔP| <= (gamma(9n) W M + M gamma(9n) W) / (w (1 - gamma(9n))) + u M`.
+/// - The dot product with a unit `dir` (3 products, 2 sums) adds `gamma(5) M`; for the unit
+///   axis directions the tight box passes it is exact.
+///
+/// `3 gamma(9n + 5) M W / w` holds all three. `None` when it is not finite (no net, a weight
+/// not positive, a NaN, an overflow).
 fn sub_patch_rounding(base: &BSplineSurface) -> Option<f64> {
     let net = base.control_point_net().ok()?;
     let mut largest = 0.0_f64;
@@ -997,7 +1004,7 @@ fn sub_patch_rounding(base: &BSplineSurface) -> Option<f64> {
         most / least
     };
     let insertions = 2 * (base.degree(SurfParamType::U) + base.degree(SurfParamType::V));
-    let rounding = 3.0 * gamma(insertions.saturating_mul(6).saturating_add(5)) * largest * ratio;
+    let rounding = 3.0 * gamma(insertions.saturating_mul(9).saturating_add(5)) * largest * ratio;
     rounding.is_finite().then_some(rounding)
 }
 
@@ -1095,14 +1102,16 @@ fn loose_top(
 
 /// A bound on `S . dir` over a cell [`face_directed_max`] leaves unsolved at its limits:
 /// its subpatch's control-point hull (`hull`, from [`patch_hull_max`]) raised by the
-/// subpatch's rounding ([`sub_patch_rounding`]), or without a subpatch the surface's loose
-/// box over the cell ([`loose_top`]).
+/// subpatch's rounding ([`sub_patch_rounding`]); without a subpatch, or when that rounding
+/// has no finite bound (a weight not positive, a NaN or an overflow anywhere in the base's
+/// net), the surface's loose box over the cell ([`loose_top`]), the bound the search
+/// already takes for an unsolved cell without a subpatch.
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] when the hull's rounding has no finite bound (a weight not
-/// positive, a NaN or an overflow in the base's net), rather than a box that may not hold
-/// the face; those of [`loose_top`].
+/// [`SolidError::InvalidInput`] when the loose box is not finite either: then no bound on
+/// the cell exists to name, and a box that may not hold the face is refused rather than
+/// returned; those of [`loose_top`].
 fn unsolved_cell_top(
     k: &Kernel,
     lb: &LazyBrep<'_>,
@@ -1112,19 +1121,25 @@ fn unsolved_cell_top(
     hull: Option<f64>,
     dir: Vec3,
 ) -> Result<f64> {
-    let Some(hull) = hull else {
-        return loose_top(k, lb, f, surface, cell, dir);
+    let rounded = match hull {
+        Some(hull) => patch_base(k, surface)?
+            .and_then(sub_patch_rounding)
+            .map(|rounding| hull + rounding)
+            .filter(|top| top.is_finite()),
+        None => None,
     };
-    let top = patch_base(k, surface)?
-        .and_then(sub_patch_rounding)
-        .map(|rounding| hull + rounding)
-        .filter(|top| top.is_finite());
-    top.ok_or_else(|| {
-        SolidError::invalid_input(
+    if let Some(top) = rounded {
+        return Ok(top);
+    }
+    let loose = loose_top(k, lb, f, surface, cell, dir)?;
+    if loose.is_finite() {
+        Ok(loose)
+    } else {
+        Err(SolidError::invalid_input(
             OP_TIGHT,
             "a trimmed-face cell left unsolved at the search's limits has no finite bound",
-        )
-    })
+        ))
+    }
 }
 
 /// The greatest `S . dir` over the trimmed region of the face's surface, raised to `best`,
@@ -3289,10 +3304,10 @@ mod tests {
     }
 
     /// The rounding of a subpatch's hull is a small finite bound for the crown, and none
-    /// (a typed error for an unsolved cell, never a box) when it overflows: a rational net
-    /// with coordinates near `1e100` and weights `1e-300` and 1.
+    /// when it overflows (a rational net with coordinates near `1e100` and weights `1e-300`
+    /// and 1): an unsolved cell then counts with the surface's loose box, not the hull.
     #[test]
-    fn sub_patch_rounding_is_finite_or_refused() {
+    fn sub_patch_rounding_overflow_falls_back_to_the_loose_box() {
         let crown = crowned_height_field(0.0);
         let SurfaceKind::BSpline(bs) = crown.kind() else {
             panic!("the crown is a B-spline");
@@ -3321,11 +3336,10 @@ mod tests {
         let (k, b, f) = crowned_trimmed_face(0.0, true);
         let lb: LazyBrep<'_> = (&b).into();
         let cell = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let refused = unsolved_cell_top(&k, &lb, f, &wild, &cell, Some(1.0), Vec3::Z);
-        assert!(
-            matches!(refused, Err(SolidError::InvalidInput { .. })),
-            "{refused:?}"
-        );
+        // the cell then counts with the surface's loose box over it, which holds the
+        // patch's highest control value 1e100, not with the hull 1 alone
+        let top = unsolved_cell_top(&k, &lb, f, &wild, &cell, Some(1.0), Vec3::Z).unwrap();
+        assert!(top >= 1e100, "loose top {top}");
     }
 
     /// The surface's global maximum lies inside the trim (no peak outside): both paths
