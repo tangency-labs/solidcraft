@@ -11,8 +11,6 @@ use crate::{KernelError, Result, guard};
 mod planar_regularize;
 #[path = "planar_sources.rs"]
 mod planar_sources;
-#[path = "shell_groups.rs"]
-pub(crate) mod shell_groups;
 
 /// A solid body (one or more closed shells), or a mesh body (triangles only, like an imported
 /// 3MF or STL: it renders, measures and exports, but B-rep features cannot use it). Cheap to
@@ -1528,40 +1526,54 @@ impl Body {
             .collect()
     }
 
-    /// Whether this body and `other` share material or touch (within a fine mesh tolerance).
+    /// Whether this body and `other` share material or touch (within a fine tolerance).
     pub fn meets(&self, other: &Body) -> Result<bool> {
         self.require_brep("contact test")?;
         other.require_brep("contact test")?;
         let tol = (self.size().max(other.size()) * 1e-4).max(1e-6);
-        let (a, b) = (self.mesh(&MeshTolerance::chord(tol))?, other.mesh(&MeshTolerance::chord(tol))?);
-        shell_groups::meshes_meet(&a, &b, 2.0 * tol)
+        let grown = |x: &Body| x.exact_bounds().map(|bb| bb.inflated(tol));
+        if !grown(self)?.meets(&grown(other)?) {
+            return Ok(false);
+        }
+        let (a, _) = self.ops_body().ok_or_else(|| KernelError::Invalid("contact: operand cannot be converted to exact B-rep".into()))?;
+        let (b, _) = other.ops_body().ok_or_else(|| KernelError::Invalid("contact: operand cannot be converted to exact B-rep".into()))?;
+        a.meets(b, tol).map_err(|e| KernelError::Failed(format!("contact: {e}")))
     }
 
-    /// The same contact test for several tools, reusing this unchanged body's
-    /// fine mesh at each required tolerance. No contact threshold is relaxed.
+    /// The same contact test for several tools.
     pub fn meets_each(&self, others: &[Body]) -> Result<Vec<bool>> {
         if others.len() > 1024 {
             return Err(KernelError::Invalid("too many contact tools".into()));
         }
         self.require_brep("contact test")?;
-        let size = self.size();
-        let mut meshes = std::collections::HashMap::new();
-        let mut contacts = Vec::with_capacity(others.len());
         for other in others {
             other.require_brep("contact test")?;
-            let tol = (size.max(other.size()) * 1e-4).max(1e-6);
-            let key = tol.to_bits();
-            if !meshes.contains_key(&key) {
-                // Bound retained meshes even when hostile inputs request many tolerances.
-                if meshes.len() == 16 {
-                    meshes.clear();
-                }
-                meshes.insert(key, self.mesh(&MeshTolerance::chord(tol))?);
-            }
-            let mesh = meshes.get(&key).ok_or_else(|| KernelError::Internal("contact mesh disappeared".into()))?;
-            contacts.push(shell_groups::meshes_meet(mesh, &other.mesh(&MeshTolerance::chord(tol))?, 2.0 * tol)?);
         }
-        Ok(contacts)
+        let (self_ops, _) = self.ops_body().ok_or_else(|| KernelError::Invalid("contact: operand cannot be converted to exact B-rep".into()))?;
+        let self_bounds = self.exact_bounds()?;
+        let size = self.size();
+
+        let mut results = vec![false; others.len()];
+        let mut candidates = Vec::new();
+        let mut candidate_indices = Vec::new();
+
+        for (i, other) in others.iter().enumerate() {
+            let tol = (size.max(other.size()) * 1e-4).max(1e-6);
+            if self_bounds.inflated(tol).meets(&other.exact_bounds()?.inflated(tol)) {
+                let (other_ops, _) =
+                    other.ops_body().ok_or_else(|| KernelError::Invalid("contact: operand cannot be converted to exact B-rep".into()))?;
+                candidates.push((other_ops, tol));
+                candidate_indices.push(i);
+            }
+        }
+
+        if !candidates.is_empty() {
+            let res = self_ops.meets_each(&candidates).map_err(|e| KernelError::Failed(format!("contact: {e}")))?;
+            for (idx, ans) in candidate_indices.into_iter().zip(res) {
+                results[idx] = ans;
+            }
+        }
+        Ok(results)
     }
 }
 

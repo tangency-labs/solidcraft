@@ -1094,6 +1094,15 @@ fn similar_spheres_meet() {
 }
 
 #[test]
+fn similar_spheres_meet_each() {
+    let a = sphere(Vec3::ZERO, 10.0).unwrap();
+    let cases = [(12.0, true), (4.0, true), (20.0, true), (20.5, false), (50.0, false)];
+    let others: Vec<_> = cases.iter().map(|(x, _)| sphere(Vec3::new(*x, 0.0, 0.0), 10.0).unwrap()).collect();
+    let expected: Vec<_> = cases.iter().map(|(_, meet)| *meet).collect();
+    assert_eq!(a.meets_each(&others).unwrap(), expected);
+}
+
+#[test]
 fn chamfer_top_loop_mitres() {
     let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
     let edges = [Vec3::new(0.0, 15.0, 20.0), Vec3::new(20.0, 0.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(20.0, 30.0, 20.0)];
