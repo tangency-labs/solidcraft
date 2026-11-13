@@ -307,14 +307,18 @@ pub(crate) fn rolled_rail_turns_back(
 /// along `nP × nS` and `nP × nX` (n the surfaces' normals at the vertex). T is smooth when nX
 /// lies within δ (the tangency tolerance) of nS, and the angle β between the two lines in P is
 /// then the angle between the projections of nS and nX onto P. With φ the angle between nP
-/// and nS, the worst direction of the offset (square to the nP, nS plane) gives
-/// `tan β = tan δ / sin φ`, so β can exceed δ many times over where P meets S at a shallow
-/// angle (δ 0.02, φ 20°: β 0.058). A turned-back N
-/// lies at β from antiparallel and a continuing one at β from parallel, so the classes divide
-/// at square; 45 degrees is the line midway between antiparallel and square, which every
-/// tolerance-tangent input with `sin φ >= tan δ` meets (`β <= 45°`), with the edge curves'
-/// own fitting error taken out of the remaining margin. Rounding of the dot product and the
-/// lengths (a few ulps relative) moves the decision only within ~1e-15 rad of 45 degrees.
+/// and nS, the worst direction of the offset (part square to the nP, nS plane, part tilted
+/// towards nP, which also shrinks the projection) gives
+/// `tan β = sin δ / sqrt(sin²φ cos²δ - cos²φ sin²δ)`, so β can exceed δ many times over where
+/// P meets S at a shallow angle (δ 0.02, φ 20°: β 0.0585). A turned-back N lies at β from
+/// antiparallel and a continuing one at β from parallel, so the classes divide at square;
+/// 45 degrees is the line midway between antiparallel and square, which every
+/// tolerance-tangent input with `sin φ >= tan δ sqrt(1 + cos²φ)` (about `√2 tan δ`: φ above
+/// 2.43° at δ 0.03) meets (`β <= 45°`), with the edge curves' own fitting error taken out of
+/// the remaining margin. Below that, a T counted smooth may be classed not turned back: the
+/// vertex then takes the type it had before the turned-back case was recognised. Rounding of
+/// the dot product and the lengths (a few ulps relative) moves the decision only within
+/// ~1e-15 rad of 45 degrees.
 fn turns_back(te: Vec3, tn: Vec3) -> bool {
     let d = te.dot(tn);
     d < 0.0 && d <= -(TURNED_BACK_COS * te.length() * tn.length())
@@ -744,41 +748,81 @@ mod tests {
     }
 
     /// E and N at a T tangent only within the tolerance: P = z = 0 meets S (normal at `phi`
-    /// from P's) along E, and X (normal `delta` off S's, square to the nP, nS plane, the worst
-    /// way) along N, turned back. The lines in P then differ by `atan(tan delta / sin phi)`.
-    fn tolerance_tangent(phi: f64, delta: f64) -> (Vec3, Vec3) {
+    /// from P's) along E, and X along N, turned back. X's normal is `delta` off S's in the
+    /// direction at `theta` from the one square to the nP, nS plane, towards the one in that
+    /// plane (which tilts it towards or away from nP).
+    fn tolerance_tangent(phi: f64, delta: f64, theta: f64) -> (Vec3, Vec3) {
         let n_p = Vec3::new(0.0, 0.0, 1.0);
         let n_s = Vec3::new(phi.sin(), 0.0, phi.cos());
-        let n_x = n_s * delta.cos() + Vec3::new(0.0, 1.0, 0.0) * delta.sin();
+        let square = Vec3::new(0.0, 1.0, 0.0);
+        let in_plane = Vec3::new(phi.cos(), 0.0, -phi.sin());
+        let off = square * theta.cos() + in_plane * theta.sin();
+        let n_x = n_s * delta.cos() + off * delta.sin();
         (n_p.cross(n_s), -n_p.cross(n_x))
+    }
+
+    /// `sin phi / (tan delta sqrt(1 + cos² phi))`: at least 1 where every offset direction
+    /// keeps N within 45 degrees of antiparallel (the worst case's closed form).
+    fn margin(phi: f64, delta: f64) -> f64 {
+        phi.sin() / (delta.tan() * (1.0 + phi.cos() * phi.cos()).sqrt())
+    }
+
+    /// The offset directions swept: 720 about S's normal.
+    fn thetas() -> impl Iterator<Item = f64> {
+        (0..720).map(|i| f64::from(i) * std::f64::consts::TAU / 720.0)
     }
 
     /// The review's case: tangency tolerance 0.03, X's normal 0.02 off S's at the vertex, P
     /// meeting S at 20 degrees. N lies 0.058 off antiparallel, past the tolerance (so a test
-    /// at the tolerance would fall back to the rail type #16027 replaced), and is turned back.
-    /// So is every tolerance-tangent T down to `sin phi = tan delta`, and an exactly tangent
-    /// one at any phi; the same geometry continuing (N reversed) is not.
+    /// at the tolerance would fall back to the vertex type #16027 replaced), and is turned
+    /// back. So is every tolerance-tangent T on the safe side of the bound
+    /// `sin phi >= tan delta sqrt(1 + cos² phi)`, in every swept offset direction, and an
+    /// exactly tangent one at any phi; the same geometry continuing (N reversed) is not.
+    /// Just inside the bound some direction is not turned back: the old vertex type.
     #[test]
     fn a_t_tangent_only_within_tolerance_still_turns_back() {
-        let (te, tn) = tolerance_tangent(20.0_f64.to_radians(), 0.02);
+        let (te, tn) = tolerance_tangent(20.0_f64.to_radians(), 0.02, 0.0);
         let off = (-te.dot(tn) / (te.length() * tn.length())).acos();
-        assert!(off > 0.03 && (off - 0.0584).abs() < 1e-3, "{off}");
+        assert!(off > 0.03 && (off - 0.0585).abs() < 1e-3, "{off}");
         assert!(turns_back(te, tn));
         assert!(!turns_back(te, -tn));
         for delta in [0.0, 1e-6, 0.01, 0.03, 0.1] {
-            for phi_deg in [1.0, 5.0, 20.0, 45.0, 90.0, 135.0, 175.0] {
+            for phi_deg in [1.0, 2.5, 5.0, 9.0, 20.0, 45.0, 90.0, 135.0, 175.0] {
                 let phi = f64::to_radians(phi_deg);
-                if phi.sin() < 1.001 * f64::tan(delta) {
+                if margin(phi, delta) < 1.001 {
                     continue;
                 }
-                let (te, tn) = tolerance_tangent(phi, delta);
-                assert!(turns_back(te, tn), "delta {delta}, phi {phi_deg}");
-                assert!(!turns_back(te, -tn), "delta {delta}, phi {phi_deg}");
+                for theta in thetas() {
+                    let (te, tn) = tolerance_tangent(phi, delta, theta);
+                    assert!(
+                        turns_back(te, tn),
+                        "delta {delta}, phi {phi_deg}, theta {theta}"
+                    );
+                    assert!(
+                        !turns_back(te, -tn),
+                        "delta {delta}, phi {phi_deg}, theta {theta}"
+                    );
+                }
             }
         }
-        // at the bound itself (sin phi = 1.001 tan delta), the worst case
-        let delta = 0.03_f64;
-        let (te, tn) = tolerance_tangent((1.001 * delta.tan()).asin(), delta);
-        assert!(turns_back(te, tn));
+        // at the bound and just inside it (phi 2.43 degrees at delta 0.03)
+        for delta in [0.03_f64, 0.1] {
+            let bound = |m: f64| {
+                // sin phi = m tan delta sqrt(1 + cos² phi), solved for sin² phi
+                let t2 = (m * delta.tan()).powi(2);
+                (t2 * 2.0 / (1.0 + t2)).sqrt().asin()
+            };
+            let outside = bound(1.001);
+            assert!((margin(outside, delta) - 1.001).abs() < 1e-9);
+            assert!(thetas().all(|theta| {
+                let (te, tn) = tolerance_tangent(outside, delta, theta);
+                turns_back(te, tn)
+            }));
+            let inside = bound(0.99);
+            assert!(thetas().any(|theta| {
+                let (te, tn) = tolerance_tangent(inside, delta, theta);
+                !turns_back(te, tn)
+            }));
+        }
     }
 }
