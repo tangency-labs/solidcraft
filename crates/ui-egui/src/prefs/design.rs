@@ -90,6 +90,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "value_boxes_in_view",
                     "Show values beside their handles in the view",
                 ),
+                (
+                    setting::parameters_cancel_reverts,
+                    "prefs.parameters_cancel_reverts_tip",
+                    "parameters_cancel_reverts",
+                    "Cancel in Parameters takes back applied changes",
+                ),
             ] {
                 ui.horizontal_wrapped(|ui| {
                     let response = setting(app, ui).backing_on_hover_text(app.tr(help));

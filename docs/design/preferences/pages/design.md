@@ -49,3 +49,4 @@ profile" tag. Source today: Design page (`prefs/design.rs`).
   locations moves to General > Files; "Show moved parts' old place as a ghost"
   (`Prefs.drive_joints_ghost`) moves to Tools.
 * `parameters_apply_live` has no control on this board either.
+* "Cancel in Parameters takes back applied changes" (`Prefs.parameters_cancel_reverts`, default `true`) is a checkbox on the Design page today, after "Show values beside their handles"; the board does not draw it.
