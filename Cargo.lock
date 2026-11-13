@@ -5701,6 +5701,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ui-kit-gallery"
+version = "0.41.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "log",
+ "serde_json",
+ "solidcraft-look",
+ "solidcraft-theme",
+ "solidcraft-ui-kit",
+ "solidcraft-ui-text",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

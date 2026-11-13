@@ -186,6 +186,10 @@ to commands, with no geometry math.
    `NavCaps` saying whether it can orbit (off for flat 2D pages) and pick. New canvases must use
    `navigation::handle`; never read drags, the wheel or pinch to move the camera yourself. The
    `hand_rolled_camera_input_is_rejected` test fails if a page does.
+7. **Build UI from the kit.** See the component gallery at
+   [docs.solidcraft.io/kit/](https://docs.solidcraft.io/kit/) before adding UI: every `ui_kit`
+   component live, with how to call it and its do's and don'ts (`cargo run -p ui-kit-gallery`
+   opens it on the desktop).
 
 Labels, parameter docs, messages and docs use the terms in the
 [glossary](https://docs.solidcraft.io/reference/glossary.html): one term for each idea. A change that adds a new

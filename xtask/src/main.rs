@@ -503,6 +503,7 @@ fn wasm_check() -> Result<(Command, usize), String> {
         .map(|c| c.name.clone())
         .collect();
     set.push("solidcraft-web".into());
+    set.push("ui-kit-gallery".into());
     let mut c = cargo();
     c.args(["check", "--target", "wasm32-unknown-unknown", "--profile", "ci"]);
     for p in &set {
