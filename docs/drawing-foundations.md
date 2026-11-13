@@ -111,6 +111,64 @@ affected contract revision and dependent child issues.
 | D06: public commands | [#2068][section-pr] proposes `inspect.section_curves`; transient `drawing.view` remains future. W01a registers neither | Review #2068's distinct output schema before W04 integration; live registry/claim check in W04/W07; preserve existing viewport commands |
 | D07: later Drawing choices | Storage/undo, PDF/fonts, standards/profile semantics and release rules remain in the RFC decision register | Their relevant later packages decide them; none blocks this representation slice or standalone section work |
 
+## M2 checkpoint (W23)
+
+The Drawing plan's M2 is single-part integration, tracked in [#4894][m2-issue]
+as W23. Its engine half is one test that runs the checkpoint in order, by
+commands alone: `the_milestone_plate_runs_the_m2_checkpoint_by_commands_alone`
+in `crates/engine/src/cmd/drawing_export_tests.rs`. Two tests beside it cover the
+rest of W23-1 and W23-2. In one, the plate saved and opened again exports the
+same SVG. In the other, each model edit of cases 85 to 87 moves the views to
+their hand sizes, and undo brings the sheet back.
+
+The plate is the W23a fixture's case 84 ([fixture contract][w23a]): 100 × 80 ×
+20 mm, with `Bore1` and `Bore2` Ø10. `examples/acceptance/drawing_m2.json`
+builds it and its drawing. The drawing has a top view at 1:2 on A3 and the
+views below and right of it: 50 × 40, 50 × 10 and 10 × 40 mm on paper. Its
+dimensions measure the length, the width and `Bore1`.
+
+| Step | What the run does | What it checks |
+| --- | --- | --- |
+| 1. Made | Exports Sheet 1 as SVG and as PNG at 150 dpi | The SVG is 420 × 297 mm and the PNG 2481 × 1754 pixels. Each dimension's text in the engine equals its text on the sheet: 100.00, 80.00 and Ø10.00 |
+| 2. Deferred | `drawing.set {updates: deferred}`, then `drawing.update` | Both files have the same bytes as the automatic drawing's |
+| 3. Driving size | `width` 80 → 100 with the drawing closed (case 85) | Held: `drawing.status` says held with 3 waiting, and the files keep their bytes. The export lists 3 views and 3 dimensions out of date. The engine reads 100.00 and the sheet still shows 80.00. Updated: the views are 50 × 50, 50 × 10 and 10 × 50 mm, and the sheet shows 100.00 |
+| 4. Lost reference | `timeline.delete Bore1` (case 87), then an update | `Bore1`'s dimension is lost with its last value 10 and drawn nowhere. The sheet still exports, and the export lists the dimension as lost and not drawn |
+| 5. Repair | A new `Bore3` Ø10 where `Bore1` was, then `drawing.dimension.repair` to its rim | The new hole doesn't take the dimension. The repair is one undo step, and the dimension reads Ø10.00 in the engine and on the sheet again |
+| 6. Undo and redo | `edit.undo`, then `edit.redo`, of the repair | The files have the bytes from before the repair, then from after it |
+| 7. Save and reopen | `file.save`, then `doc.open` and `drawing.open` in a new session | The drawing is held with 3 waiting: its setting is saved, its last update isn't. Updated, the files and texts are those of step 6 |
+| 8. Undo everything | `edit.undo` of the repair, the new hole, the delete and the width | Updated, the files have step 1's bytes and the texts are step 1's |
+
+**What it proves.** The engine, the sheet and the files agree at every step. A
+model edit reaches a deferred drawing only when the drawing is updated, and
+meanwhile the drawing says what waits. A lost reference keeps its last value. It never moves to another
+feature by itself, even one in the same place. Undo, redo, save and reopen give
+the same files byte for byte.
+
+**What it doesn't prove.** M2 isn't complete with this run alone:
+- The screen and the browser (W23-4) wait for the drawing page ([#5349][ui-pr]).
+- DXF and PDF aren't in the run. On `drawings`, a sheet's DXF export waits
+  for the shared DXF writer ([#5319][dxf-file]), and PDF has no writer yet.
+- SVG and PNG draw text as filled outlines. So the run reads the sheet's text
+  from `drawing.scene`, the scene both writers draw, not from the files.
+- The run is one part. The assembly sheet's recipes are [#11881][w23-assembly],
+  and assemblies belong to M3.
+- `Bore1` at Ø12 (case 86) is in the W23-2 test, not in the ordered run.
+
+**Results.** These are to be filled in from the W23 run:
+- `drawings` commit: _[to fill]_
+- The checkpoint test's time in `--profile ci`: _[to fill]_ s
+- Tests run and passed in the area: _[to fill]_ of _[to fill]_
+- Planted faults caught: _[to fill]_ of 4
+- Engine clippy with `-D warnings`: _[to fill]_
+
+**Limits found, as proposed issues.** None has been raised yet:
+1. A deferred drawing that is opened again waits for an update, even when it
+   was current when saved. Saving the sheet's last update with the drawing
+   would let it open as it was ([#3890][storage]).
+2. A lost dimension draws nothing on the sheet, wherever its text was placed.
+   Only the export's reply lists it, so a reader of the paper can't see that
+   it is lost. A lost note keeps its text on the sheet.
+
 ## Completion and handoff
 
 Each subsequent child issue should state supported cases, owned paths, contract
@@ -136,3 +194,9 @@ instructions govern any later change to those areas.
 [w09-pr]: https://github.com/tangency-labs/solidcraft/pull/2086
 [section-pr]: https://github.com/tangency-labs/solidcraft/pull/2068
 [solidcore]: https://github.com/tangency-labs/solidcraft/issues/1597
+[m2-issue]: https://github.com/tangency-labs/solidcraft/issues/4894
+[w23a]: ../tests/oracle/W23a-workshop-acceptance.md
+[ui-pr]: https://github.com/tangency-labs/solidcraft/pull/5349
+[w23-assembly]: https://github.com/tangency-labs/solidcraft/pull/11881
+[storage]: https://github.com/tangency-labs/solidcraft/issues/3890
+[dxf-file]: https://github.com/tangency-labs/solidcraft/issues/5319
