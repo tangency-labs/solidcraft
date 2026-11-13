@@ -376,6 +376,20 @@ fn half_bytes(rgb: &[[f32; 3]]) -> Vec<u8> {
     rgb.iter().flat_map(|p| [p[0], p[1], p[2], 1.0]).flat_map(|c| half(c).to_le_bytes()).collect()
 }
 
+/// What the studio's textures hold: the specular mips, the irradiance map and the BRDF table.
+pub(crate) struct Tables {
+    levels: Vec<Equirect>,
+    diffuse: Equirect,
+    dfg: Vec<[f32; 3]>,
+}
+
+/// Draw and prefilter the room and build the environment-BRDF table: about 0.23 s of CPU (M-series,
+/// release), so the renderer builds them beside its pipelines ([`Environment::set`]).
+pub(crate) fn tables() -> Tables {
+    let (levels, diffuse) = prefilter(room());
+    Tables { levels, diffuse, dfg: dfg() }
+}
+
 /// The prefiltered studio and the environment-BRDF table on the GPU, with the sampler that
 /// reads them. The textures are made with the viewport (zero until written) and filled once,
 /// the first time a queue is at hand ([`Environment::upload`]).
@@ -389,6 +403,7 @@ pub(crate) struct Environment {
     pub dfg: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     uploaded: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ready: std::sync::Arc<std::sync::Mutex<Option<Tables>>>,
 }
 
 impl Environment {
@@ -426,16 +441,24 @@ impl Environment {
             dfg_t,
             sampler,
             uploaded: Default::default(),
+            ready: Default::default(),
         }
     }
 
-    /// Draw and prefilter the room, build the environment-BRDF table and write them,
-    /// once (later calls return at once).
+    /// Hand over the tables built ahead ([`tables`]), for [`Environment::upload`] to write.
+    pub fn set(&self, tables: Tables) {
+        if let Ok(mut ready) = self.ready.lock() {
+            *ready = Some(tables);
+        }
+    }
+
+    /// Write the tables, once (later calls return at once): those [`Environment::set`] handed
+    /// over, else built now.
     pub fn upload(&self, queue: &wgpu::Queue) {
         if self.uploaded.swap(true, std::sync::atomic::Ordering::Relaxed) {
             return;
         }
-        let (levels, diffuse) = prefilter(room());
+        let Tables { levels, diffuse, dfg } = self.ready.lock().ok().and_then(|mut r| r.take()).unwrap_or_else(tables);
         let write = |t: &wgpu::Texture, mip: u32, width: usize, height: usize, rgb: &[[f32; 3]]| {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo { texture: t, mip_level: mip, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
@@ -448,7 +471,7 @@ impl Environment {
             write(&self.specular_t, k as u32, level.width, level.height(), &level.rgb);
         }
         write(&self.diffuse_t, 0, diffuse.width, diffuse.height(), &diffuse.rgb);
-        write(&self.dfg_t, 0, DFG_SIZE, DFG_SIZE, &dfg());
+        write(&self.dfg_t, 0, DFG_SIZE, DFG_SIZE, &dfg);
     }
 
     /// The group-0 layout entries for the studio (bindings 3 to 6).

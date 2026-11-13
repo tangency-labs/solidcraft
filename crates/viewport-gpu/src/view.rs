@@ -3473,6 +3473,7 @@ impl Renderer {
             let oit = jobs.spawn(oit);
             let blits = jobs.spawn(blits);
             let resets = jobs.spawn(resets);
+            let studio = jobs.spawn(crate::environment::tables);
             let (tri, tri_marks, tri_planned, planned_marks, tri_instanced, instanced_marks) = tris.join();
             let (tri_cap, planned_cap, instanced_cap) = caps.join();
             let (tri_instanced_flat, flat_marks) = flat.join();
@@ -3487,6 +3488,7 @@ impl Renderer {
             let (depth_reset, section_stencil) = resets.join();
             let (pbr, pbr_palette, pbr_instanced) = pbr.join();
             let oit = oit.join();
+            environment.set(studio.join());
             Renderer {
                 product_depth: None,
                 product_highlights: false,
