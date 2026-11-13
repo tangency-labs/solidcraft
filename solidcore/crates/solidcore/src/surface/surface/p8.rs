@@ -102,6 +102,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::gamma;
 use crate::surface::plane::Coincidence;
 use crate::surface::surface::p7::SpGlobalSolver;
 use crate::surface::surface_cache::p1::SurfaceCache;
@@ -473,7 +474,9 @@ fn boundary_intersections(
 
 /// Not upstream: a cone (a cylinder is a cone of semi-angle 0) or a sphere as the points
 /// at distance `|radius(p)|` from its axis (from its centre for a sphere), the radius
-/// affine in the height along the axis.
+/// affine in the height along the axis; it may stand for a surface within `gap` of it,
+/// every point of either within `gap` of the other (a torus with no hole and the sphere of
+/// its minor radius, `gap` its major radius).
 #[derive(Clone, Copy)]
 struct Revolved {
     /// A point of the axis, the sphere's centre.
@@ -484,7 +487,13 @@ struct Revolved {
     radius: f64,
     /// The radius's change per unit of height along `axis` (0 for a sphere).
     slope: f64,
+    /// How far the surface it stands for may lie from it (0 when it is that surface).
+    gap: f64,
 }
+
+/// Not upstream: the most an axis [`Revolved`] reads may be off unit length; its rounding
+/// terms take `|axis|^2 <= 1.01`.
+const REVOLVED_AXIS_SLACK: f64 = 1.0e-3;
 
 impl Revolved {
     /// The cone's axis, radius and slope.
@@ -494,16 +503,18 @@ impl Revolved {
             axis: Some(c.rev.position.z_axis()),
             radius: c.base_radius(),
             slope: c.tan_semi_angle(),
+            gap: 0.0,
         }
     }
 
-    /// The sphere of centre and radius `ball`.
-    const fn ball(ball: (Point3, f64)) -> Self {
+    /// The sphere of centre and radius `ball`, standing for a surface within `gap` of it.
+    const fn ball(ball: (Point3, f64), gap: f64) -> Self {
         Self {
             origin: ball.0,
             axis: None,
             radius: ball.1,
             slope: 0.0,
+            gap,
         }
     }
 
@@ -512,25 +523,62 @@ impl Revolved {
         self.axis.map_or(v, |a| v - a * v.dot(a))
     }
 
-    /// The radius at the height of `p`.
-    fn radius_at(&self, p: Point3) -> f64 {
-        self.radius
-            + self
-                .axis
-                .map_or(0.0, |a| self.slope * (p - self.origin).dot(a))
+    /// A bound on how far the axis is off unit length (0 for a sphere): its computed
+    /// length's distance from 1 plus that length's rounding, `gamma(4)`. NaN past
+    /// [`REVOLVED_AXIS_SLACK`].
+    fn axis_slack(&self) -> f64 {
+        self.axis.map_or(0.0, |a| {
+            let length = a.length();
+            let slack = (length - 1.0).abs() + gamma(4) * length;
+            if slack <= REVOLVED_AXIS_SLACK {
+                slack
+            } else {
+                f64::NAN
+            }
+        })
+    }
+
+    /// The length of the part of `to - from` across the axis, and a bound on its distance
+    /// from the exact length across the exact unit axis. With `v` the computed difference
+    /// (rounded by `gamma(1) |v|`), the projection's dot product rounds by `gamma(3) |v|` and
+    /// its product and difference by `gamma(2) |v|` (each times `|axis|^2 <= 1.01`), an axis
+    /// `eta` off unit length moves it by at most `3 eta |v|`, and its length rounds by
+    /// `gamma(3)`: at most `(6 gamma(6) + 3 eta) |v|` in all, counted as `8 gamma(6) + 4 eta`
+    /// of `v`'s computed length (itself rounded by `gamma(3)`).
+    fn across_length(&self, to: Point3, from: Point3) -> (f64, f64) {
+        let v = to - from;
+        let error = (8.0 * gamma(6) + 4.0 * self.axis_slack()) * v.length();
+        (self.across(v).length(), error)
+    }
+
+    /// The radius at the height of `p`, and a bound on its rounding: the height
+    /// `(p - origin) . axis` is off by at most `(2 gamma(5) + 2 eta) |p - origin|` (the
+    /// difference, the dot product, the axis `eta` off unit length), times `|slope|`; the
+    /// product and the sum round by `gamma(3)` of their terms.
+    fn radius_at(&self, p: Point3) -> (f64, f64) {
+        let Some(a) = self.axis else {
+            return (self.radius, 0.0);
+        };
+        let d = p - self.origin;
+        let rise = self.slope * d.dot(a);
+        let error = self.slope.abs() * (2.0 * gamma(5) + 2.0 * self.axis_slack()) * d.length()
+            + gamma(3) * (self.radius.abs() + rise.abs());
+        (self.radius + rise, error)
     }
 }
 
 /// Not upstream: an upper bound on the distance from any point of either surface inside
-/// `region` to the other surface, from the definitions alone (no sampling). NaN or
-/// infinite where it cannot bound: an undefined region, a region reaching an axis (or a
-/// centre), or a radius changing sign in it (a cone's apex).
+/// `region` to the other surface, from the definitions alone (no sampling), its rounding
+/// counted. NaN or infinite where it cannot bound: an undefined region, a region reaching
+/// an axis (or a centre), a radius changing sign in it (a cone's apex), or rounding as
+/// large as a quantity whose sign it needs.
 ///
 /// With `d_x(p)` the distance from `p` to the axis of `x` (to its centre) and `r_x(p)` its
 /// radius at `p`'s height, a point of `a` has `d_a = |r_a|`, and its distance to `b` is at
 /// most `|d_b - |r_b||` (the generator of `b` in the half plane through `p` is part of `b`,
 /// and the gap along the radius is at least the gap to that line). On `a` that is
-/// `|G + |r_a| - |r_b||` with `G = d_b - d_a`. Over the box with centre `c`:
+/// `|G + |r_a| - |r_b||` with `G = d_b - d_a`. Over the box with centre `c` (any point of
+/// the box serves, so the centre's own rounding costs nothing):
 /// - `|r_a| - |r_b|` is affine where both radii keep their signs, so `|G(c) + |r_a| - |r_b||`
 ///   is convex and largest at a corner.
 /// - `G(p) - G(c)` is at most `L · e_a + sin θ · e` (mean value theorem), with `e` the largest
@@ -539,6 +587,11 @@ impl Revolved {
 ///   (`∇d_x = u_x`): `|u_b - u_a| ≤ 2 |w| / ρ` for the radial vectors' difference `w` (affine
 ///   in `p`, at most `|w(c)| + sin θ · e`) and `ρ`, the larger lower bound on the two radial
 ///   distances in the box; both must be positive (`e_b` may stand for `e_a`).
+///
+/// Every computed length and radius carries its error bound ([`Revolved::across_length`],
+/// [`Revolved::radius_at`]): an upper bound adds it, a lower bound subtracts it, a sign is
+/// read only where the value clears its error, and each sum, product and quotient of bounds
+/// is widened by its own `gamma`. The stand-ins' gaps are not in it (the caller's).
 ///
 /// The bound is symmetric in `a` and `b`. Two cylinders through the same points whose axes
 /// part by `δ` stay within `≈ δ · s / R` of each other over a patch of width `s` at radius
@@ -549,58 +602,84 @@ fn revolved_separation_bound(a: Revolved, b: Revolved, region: &Extent3d) -> f64
     }
     let c = region.mid();
     let corners = region.corners();
-    let (qa, qb) = (a.across(c - a.origin), b.across(c - b.origin));
+    let point = Revolved::ball((c, 0.0), 0.0);
     let (mut e, mut e_a, mut e_b) = (0.0_f64, 0.0_f64, 0.0_f64);
     for &p in &corners {
-        let v = p - c;
-        e = e.max(v.length());
-        e_a = e_a.max(a.across(v).length());
-        e_b = e_b.max(b.across(v).length());
+        let ((all, all_err), (on_a, on_a_err), (on_b, on_b_err)) = (
+            point.across_length(p, c),
+            a.across_length(p, c),
+            b.across_length(p, c),
+        );
+        e = e.max(all + all_err);
+        e_a = e_a.max(on_a + on_a_err);
+        e_b = e_b.max(on_b + on_b_err);
     }
+    // |x × y| / (|x| |y|): the cross product rounds by 2 gamma(2) |x| |y|, its length by
+    // gamma(3), and each axis is off unit length by at most its slack
     let sin_theta = match (a.axis, b.axis) {
-        (Some(x), Some(y)) => x.cross(y).length(),
+        (Some(x), Some(y)) => {
+            (x.cross(y).length() + 3.0 * gamma(3)) * (1.0 + gamma(8))
+                / ((1.0 - a.axis_slack()) * (1.0 - b.axis_slack()))
+        }
         _ => 0.0,
     };
-    // both radial directions are defined over the whole box
-    let (rho_a, rho_b) = (qa.length() - e_a, qb.length() - e_b);
+    let ((la, la_err), (lb, lb_err)) = (a.across_length(c, a.origin), b.across_length(c, b.origin));
+    // both radial directions are defined over the whole box: the radial distances' lower
+    // bounds, less the rounding of their two subtractions
+    let lower = |l: f64, err: f64, reach: f64| l - err - reach - gamma(2) * (l + err + reach);
+    let (rho_a, rho_b) = (lower(la, la_err, e_a), lower(lb, lb_err, e_b));
     if rho_a.is_nan() || rho_b.is_nan() || rho_a <= 0.0 || rho_b <= 0.0 {
         return f64::NAN;
     }
     let rho = rho_a.max(rho_b);
-    let lip = 2.0 * ((qb - qa).length() + sin_theta * e) / rho;
-    let g = qb.length() - qa.length();
-    // the radii's signs at the centre hold at every corner, or there is no bound
-    let (sa, sb) = (a.radius_at(c).signum(), b.radius_at(c).signum());
+    // |w(c)|: the computed radial vectors each off by their error, the difference and its
+    // length rounded by gamma(5)
+    let (qa, qb) = (a.across(c - a.origin), b.across(c - b.origin));
+    let w = (qb - qa).length() * (1.0 + gamma(5)) + la_err + lb_err;
+    let lip = 2.0 * (w + sin_theta * e) * (1.0 + gamma(4)) / rho;
+    let g = lb - la;
+    let g_err = la_err + lb_err + gamma(1) * g.abs();
+    // the radii's signs at the centre (each clearing its rounding) hold at every corner, or
+    // there is no bound
+    let ((rca, rca_err), (rcb, rcb_err)) = (a.radius_at(c), b.radius_at(c));
+    if rca.is_nan() || rcb.is_nan() || rca.abs() <= rca_err || rcb.abs() <= rcb_err {
+        return f64::NAN;
+    }
+    let (sa, sb) = (rca.signum(), rcb.signum());
     let mut at_corners = 0.0_f64;
     for &p in &corners {
-        let (ra, rb) = (a.radius_at(p) * sa, b.radius_at(p) * sb);
-        if ra.is_nan() || rb.is_nan() || ra <= 0.0 || rb <= 0.0 {
+        let ((ra, ra_err), (rb, rb_err)) = (a.radius_at(p), b.radius_at(p));
+        let (ra, rb) = (ra * sa, rb * sb);
+        if ra.is_nan() || rb.is_nan() || ra <= ra_err || rb <= rb_err {
             return f64::NAN;
         }
-        at_corners = at_corners.max((g + ra - rb).abs());
+        let error = g_err + ra_err + rb_err + gamma(2) * (g.abs() + ra + rb);
+        at_corners = at_corners.max((g + ra - rb).abs() + error);
     }
-    at_corners + lip * e_a.min(e_b) + sin_theta * e
+    (at_corners + lip * e_a.min(e_b) + sin_theta * e) * (1.0 + gamma(4))
 }
 
 /// Not upstream: the most boxes [`revolved_within`] reads before it gives up.
 const REVOLVED_MAX_BOXES: usize = 256;
 
-/// Not upstream: whether the box surely holds no point within `tol` of the surface: the
+/// Not upstream: whether the box surely holds no point within `margin` of the surface: the
 /// distances from its points to the axis (the centre) and the radii at their heights do not
-/// overlap. A NaN anywhere answers no (the box is kept).
-fn revolved_misses(s: Revolved, region: &Extent3d, tol: f64) -> bool {
+/// overlap, each widened by its rounding ([`Revolved::across_length`],
+/// [`Revolved::radius_at`]) and the comparison by `gamma(4)` of its terms. A NaN anywhere
+/// answers no (the box is kept).
+fn revolved_misses(s: Revolved, region: &Extent3d, margin: f64) -> bool {
     let c = region.mid();
-    let q = s.across(c - s.origin).length();
+    let (q, q_err) = s.across_length(c, s.origin);
     let mut reach = 0.0_f64;
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for p in region.corners() {
-        let (across, r) = (s.across(p - c).length(), s.radius_at(p));
-        if across.is_nan() || r.is_nan() {
+        let ((across, across_err), (r, r_err)) = (s.across_length(p, c), s.radius_at(p));
+        if across.is_nan() || across_err.is_nan() || r.is_nan() || r_err.is_nan() {
             return false;
         }
-        reach = reach.max(across);
-        lo = lo.min(r);
-        hi = hi.max(r);
+        reach = reach.max(across + across_err);
+        lo = lo.min(r - r_err);
+        hi = hi.max(r + r_err);
     }
     // |r| over the box: the radius is affine, so it runs between its corner values
     let (r_lo, r_hi) = if lo > 0.0 {
@@ -610,18 +689,30 @@ fn revolved_misses(s: Revolved, region: &Extent3d, tol: f64) -> bool {
     } else {
         (0.0, hi.max(-lo))
     };
-    (q - reach).max(0.0) > r_hi + tol || q + reach < r_lo - tol
+    let rounding = gamma(4) * (q + q_err + reach + r_hi + margin);
+    q - q_err - reach - rounding > r_hi + margin || q + q_err + reach + rounding < r_lo - margin
 }
 
-/// Not upstream: whether the surfaces `a` and `b` stay within `tol` of each other at every
-/// point of either inside `region`. The box is halved across the axes (along the side the
-/// surfaces vary most over) until [`revolved_separation_bound`] is within `tol` on each part
-/// that may hold a point of either surface (not [`revolved_misses`]); at most
+/// Not upstream: whether the surfaces `a` and `b` stand for stay within `tol` of each other
+/// at every point of either inside `region`. Their gaps come off the tolerance first (a
+/// point of the one is within its gap of `a`, and `b` within its gap of the other); the box
+/// is then halved across the axes (along the side the surfaces vary most over) until
+/// [`revolved_separation_bound`] is within what is left on each part that may hold a point
+/// of either surface (not [`revolved_misses`], widened by the gap); at most
 /// [`REVOLVED_MAX_BOXES`] boxes are read, and a part still undecided then answers no. A part
 /// holding a point of one surface farther than `tol` from the other never passes, as the
-/// bound is never below the separation it bounds.
+/// bound is never below the separation it bounds. A NaN, infinite or negative tolerance
+/// answers no.
 fn revolved_within(a: Revolved, b: Revolved, tol: f64, region: &Extent3d) -> bool {
+    if tol.is_nan() || tol.is_infinite() || tol < 0.0 {
+        return false;
+    }
     if !region.is_defined() || region.has_negative_volume() {
+        return false;
+    }
+    let gaps = a.gap.abs() + b.gap.abs();
+    let budget = tol - gaps - gamma(2) * (tol + gaps);
+    if budget.is_nan() || budget < 0.0 {
         return false;
     }
     let mut todo = vec![*region];
@@ -631,12 +722,14 @@ fn revolved_within(a: Revolved, b: Revolved, tol: f64, region: &Extent3d) -> boo
         if read > REVOLVED_MAX_BOXES {
             return false;
         }
-        if revolved_misses(a, &part, tol) && revolved_misses(b, &part, tol) {
+        if revolved_misses(a, &part, tol + a.gap.abs())
+            && revolved_misses(b, &part, tol + b.gap.abs())
+        {
             continue;
         }
-        // a NaN bound is no bound: the part is halved
+        // only a finite bound within the budget decides the part; anything else halves it
         let bound = revolved_separation_bound(a, b, &part);
-        let undecided = bound.is_nan() || bound > tol;
+        let undecided = bound.is_nan() || bound.is_infinite() || bound > budget;
         if !undecided {
             continue;
         }
@@ -751,9 +844,11 @@ impl Surface {
     ///
     /// Two cones, or two spheres, that fail that comparison are still the same surface
     /// inside `region` when an enclosed bound on their separation over the parts of
-    /// `region` that may hold them keeps them within `tol_3d` there (not upstream): two arcs drawn through the same end points about centres a little apart
-    /// (cylinders whose axes part by 8.4e-5) stay within 1e-10 of each other over the
-    /// sliver they share, though not over their whole circles.
+    /// `region` that may hold them, its rounding counted, keeps them within `tol_3d` there
+    /// (not upstream; a hole-less torus spends its major radius of `tol_3d` first, and a
+    /// NaN `tol_3d` answers no): two arcs drawn through the same end points about centres
+    /// a little apart (cylinders whose axes part by 8.4e-5) stay within 1e-10 of each other
+    /// over the sliver they share, though not over their whole circles.
     #[must_use]
     pub fn same_analytic_surface(
         &self,
@@ -764,11 +859,13 @@ impl Surface {
         let tol = tol_3d.abs();
         let reach = region.size().length();
         // The sphere a surface is, as (centre, radius): a sphere, or a torus with no hole.
+        // With it, how far the surface may lie from that sphere: a torus's major radius.
         let ball = |s: &Self| match s.kind() {
-            SurfaceKind::Sphere(p) => Some((p.base.position.origin(), p.radius)),
-            SurfaceKind::Torus(t) if t.major_radius.abs() <= tol => {
-                Some((t.base.position.origin(), t.minor_radius))
-            }
+            SurfaceKind::Sphere(p) => Some(((p.base.position.origin(), p.radius), 0.0)),
+            SurfaceKind::Torus(t) if t.major_radius.abs() <= tol => Some((
+                (t.base.position.origin(), t.minor_radius),
+                t.major_radius.abs(),
+            )),
             _ => None,
         };
         let same_ball = |a: (Point3, f64), b: (Point3, f64)| {
@@ -823,7 +920,7 @@ impl Surface {
                     return Some(
                         ball(self)
                             .zip(ball(other))
-                            .is_some_and(|(x, y)| same_ball(x, y)),
+                            .is_some_and(|((x, _), (y, _))| same_ball(x, y)),
                     );
                 }
                 Some(
@@ -835,9 +932,9 @@ impl Surface {
             }
             // A sphere against a sphere or a hole-less torus; any other pair is left to the
             // caller.
-            _ => ball(self).zip(ball(other)).map(|(x, y)| {
+            _ => ball(self).zip(ball(other)).map(|((x, gx), (y, gy))| {
                 same_ball(x, y)
-                    || revolved_within(Revolved::ball(x), Revolved::ball(y), tol, region)
+                    || revolved_within(Revolved::ball(x, gx), Revolved::ball(y, gy), tol, region)
             }),
         }
     }
@@ -4351,5 +4448,102 @@ mod tests {
             a2.base_coincidence_check(&loose, &b2, 1e-6, false).unwrap()
         );
         assert_eq!(missed, fresh);
+    }
+
+    /// A sphere of `radius` about `centre`, as a surface.
+    fn sphere(centre: Point3, radius: f64) -> Surface {
+        let k = Kernel::default();
+        Surface::from(
+            crate::surface::sphere::Sphere::new(
+                &k,
+                centre,
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+                radius,
+                crate::surface::sphere::SphereOptions::default(),
+            )
+            .unwrap(),
+        )
+    }
+
+    /// A z-axis torus about `centre` with radii `major` and `minor`, as a surface.
+    fn torus(centre: Point3, major: f64, minor: f64) -> Surface {
+        let k = Kernel::default();
+        Surface::from(
+            crate::surface::torus::Torus::new(
+                &k,
+                centre,
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0),
+                major,
+                minor,
+                crate::surface::torus::TorusOptions::default(),
+            )
+            .unwrap(),
+        )
+    }
+
+    /// The box of half width `half` about `p`.
+    fn around(p: Point3, half: f64) -> Extent3d {
+        let h = Vec3::new(half, half, half);
+        Extent3d::from_points(p - h, p + h)
+    }
+
+    #[test]
+    fn spheres_apart_meet_regionally_where_the_bound_keeps_them_close() {
+        // radius 10 about centres 0.01 apart: within 5e-6 near (0, 10, 0), 0.01 at (10, 0, 0)
+        let (a, b) = (
+            sphere(Point3::new(0.0, 0.0, 0.0), 10.0),
+            sphere(Point3::new(0.01, 0.0, 0.0), 10.0),
+        );
+        let near = around(Point3::new(0.0, 10.0, 0.0), 1e-3);
+        assert_eq!(a.same_analytic_surface(&b, 1e-4, &near), Some(true));
+        let far = around(Point3::new(10.0, 0.0, 0.0), 1e-3);
+        assert_eq!(a.same_analytic_surface(&b, 1e-4, &far), Some(false));
+    }
+
+    #[test]
+    fn rounding_that_hides_the_separation_refuses() {
+        // R - 1 rounds to R at R = 2^54: the point (R, 0, 0) of the first sphere is 1 from
+        // the second, which a bound without its rounding would call 0
+        let r = 2.0_f64.powi(54);
+        let (a, b) = (
+            sphere(Point3::new(0.0, 0.0, 0.0), r),
+            sphere(Point3::new(1.0, 0.0, 0.0), r),
+        );
+        let at = Point3::new(r, 0.0, 0.0);
+        let point = Extent3d::from_points(at, at);
+        assert_eq!(a.same_analytic_surface(&b, 0.25, &point), Some(false));
+        assert_eq!(b.same_analytic_surface(&a, 0.25, &point), Some(false));
+    }
+
+    #[test]
+    fn a_nan_tolerance_refuses() {
+        let (a, b) = (
+            sphere(Point3::new(0.0, 0.0, 0.0), 10.0),
+            sphere(Point3::new(1.0, 0.0, 0.0), 10.0),
+        );
+        let at = Point3::new(10.0, 0.0, 0.0);
+        let point = Extent3d::from_points(at, at);
+        assert_eq!(a.same_analytic_surface(&b, f64::NAN, &point), Some(false));
+        let near = around(Point3::new(0.0, 10.0, 0.0), 1e-3);
+        assert_eq!(a.same_analytic_surface(&b, f64::NAN, &near), Some(false));
+    }
+
+    #[test]
+    fn a_hole_less_torus_spends_its_major_radius_of_the_tolerance() {
+        // the torus's minor-radius sphere is within 0.000495 of the sphere near (0, 10, 0),
+        // but the torus itself 0.001495 away: past the tolerance
+        let tol = 0.001;
+        let s = sphere(Point3::new(0.0, 0.0, 0.0), 10.0);
+        let t = torus(Point3::new(0.01, 0.0005, 0.0), 0.001, 10.0);
+        let near = around(Point3::new(0.0, 10.0, 0.0), 1e-4);
+        assert_eq!(s.same_analytic_surface(&t, tol, &near), Some(false));
+        assert_eq!(t.same_analytic_surface(&s, tol, &near), Some(false));
+        // a major radius of 1e-5 leaves room: within 5e-6 + 1e-5 there
+        let thin = torus(Point3::new(0.01, 0.0, 0.0), 1e-5, 10.0);
+        assert_eq!(s.same_analytic_surface(&thin, tol, &near), Some(true));
     }
 }
