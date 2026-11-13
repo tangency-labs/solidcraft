@@ -519,7 +519,10 @@ changed body even when no body name was added or removed. Sketch replies keep ne
 IDs under `created` and omit only identical top-level `points`, `curves`,
 `constraints` and `dimensions` lists. When a sketch command creates more points than
 its new curves have ends (the poles of an offset's splines), `created.points` becomes
-`created.point_count`: refer to those curves by their ids. Other fields and errors are unchanged;
+`created.point_count`: refer to those curves by their ids. A `sketch.move_points` reply gives
+`moved_count` and `reached` (true when every point reached its target) instead of the `moved`
+list, and lists only the moves that missed under `not_reached` (`point`, `to`, `at`).
+Other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the
 engine's reply directly, without an additional design-inspection request.
 
