@@ -25,13 +25,15 @@
 //! | [`OffsetFailure::Missing`]             | `SM_ERR_NULL_POINTER`                     |
 //! | [`OffsetFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`                    |
 //! | [`OffsetFailure::Inconsistent`]        | `SM_ERR_ASSERT_FAILURE`                   |
+//! | [`OffsetFailure::Reconstruction`]      | `SM_ERR` (solidcore-native)               |
 //!
 //! Deviations: not upstream. Entity ids are those of the operation's input B-rep. The
 //! last four describe, in a phrase, the failures of offset routines that returned a bare
 //! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
 //! says which routine and its entity, where the site named one, which face. The files
 //! with open work elsewhere (`offset_executive/{p1,p2,step_gaps,reach}`,
-//! `offset_faces`, `offset_geometry_creation`) do not use them yet.
+//! `offset_faces`, `offset_geometry_creation`) do not use them yet, but for the kept-edge
+//! curve `p1.rs` types (#13622's `kept_edge_curves`).
 
 use super::{
     EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_BAD_INTERSECTIONS,
@@ -192,6 +194,16 @@ pub enum OffsetFailure {
     /// A consistency check of an offset routine's own data did not hold, as the phrase
     /// says.
     Inconsistent(&'static str),
+    /// A local operation's crossed-boundary reconstruction
+    /// (`crate::topology::brep::local_operation`, issue #13622) could not certify the
+    /// body it would build: the moved face crosses an edge that keeps its surfaces, the
+    /// boundary around the crossing is reconstructed from certified clips and completed
+    /// trims only, and nothing uncertain is ever built. The input B-rep is left as it
+    /// came in.
+    Reconstruction {
+        /// What the reconstruction could not certify.
+        why: ReconstructionRefusal,
+    },
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -219,6 +231,91 @@ pub enum Unsoundness {
     /// The body is a manifold solid whose volume's enclosure still holds 0 after its
     /// budget: its sign is not proved.
     VolumeUndecided,
+    /// An edge the operation kept as it was is not proved clear of a face it moved: a
+    /// certified distance bound between the edge's whole curve and the moved face's
+    /// trimmed region does not exceed their tolerances (the edge may cross the face, which
+    /// the body's check cannot see, or the bound is unavailable).
+    KeptEdgeNotClear,
+}
+
+/// What a crossed-boundary reconstruction could not certify
+/// ([`OffsetFailure::Reconstruction`], issue #13622). Every one refuses: the boundary
+/// is reconstructed from certified clips and completed trims, never guessed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum ReconstructionRefusal {
+    /// The moved face's surface is not planar: the cut of the body, the clip point and
+    /// the endpoint contact are certified on a plane only (the endpoint certificate's
+    /// documented scope, `crate::offset::offset_executive::clearance::endpoint_contact`),
+    /// so a moved face of another kind is refused where its surface meets an edge.
+    SurfaceUncertified {
+        /// The moved face, of the operation's result.
+        face: FaceId,
+    },
+    /// The moved face's surface meets an edge's curve where a clip is needed, and the
+    /// meeting could not be certified: its point is not certified in-or-on the face's
+    /// trimmed region, the curve's kind has no exact clip on the plane, or the endpoint
+    /// certificate proved nothing there.
+    ClipUncertified {
+        /// The edge whose clip is uncertified (of the operation's result where known).
+        edge: EdgeId,
+    },
+    /// The completed boundary failed its validation ([`BoundaryFault`] says what).
+    BoundaryInvalid {
+        /// What failed.
+        fault: BoundaryFault,
+    },
+    /// A gap the reconstruction measures exceeds the bounds its construction certifies
+    /// (`docs/validity-and-tolerances.md` §8 and invariant 9): the tolerance is never
+    /// grown to cover it, and no recomputation of the repaired geometry closes it, so
+    /// the operation is refused.
+    GapBeyondConstruction {
+        /// The gap measured.
+        gap: f64,
+        /// The construction bound it exceeds (the body's zone tolerance: the model's
+        /// resolution, below which an exact construction leaves no gap).
+        bound: f64,
+    },
+    /// The gap pass (`crate::offset::offset_executive::step_gaps`) deferred the vanish of
+    /// an edge the crossed-boundary reconstruction owns (issue #13622's hook: the
+    /// vanishing edge's original is in the reconstruction's eligibility set and its
+    /// correspondence is complete and unambiguous), and the reconstruction could not
+    /// discharge the obligation: its classification does not certify the edge's
+    /// removal, or the correspondence is missing or ambiguous, or a corresponding
+    /// result edge was not severed. Nothing uncertain is built: the operation is
+    /// refused, the input B-rep left as it came in.
+    VanishUnresolved {
+        /// The original edge whose vanish is unresolved.
+        edge: EdgeId,
+    },
+}
+
+/// What the completed boundary failed after a crossed-boundary reconstruction
+/// ([`ReconstructionRefusal::BoundaryInvalid`], issue #13622's stage-2 validation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BoundaryFault {
+    /// A loop of an affected face does not walk closed.
+    LoopNotClosed {
+        /// The loop use that does not close.
+        loopuse: crate::topology::LoopuseId,
+    },
+    /// Consecutive uses of a loop do not meet at one vertex within their tolerances.
+    LoopDiverges {
+        /// The loop use whose chain diverges.
+        loopuse: crate::topology::LoopuseId,
+    },
+    /// A bridge edge the reconstruction inserted is gone or is no longer a four-use
+    /// manifold edge between its end vertices.
+    BridgeMissing {
+        /// The bridge edge.
+        edge: EdgeId,
+    },
+    /// A clip point is no longer certified in-or-on its moved face's completed trims.
+    ClipOutsideRegion {
+        /// The rebuilt edge whose clip left the region.
+        edge: EdgeId,
+    },
 }
 
 /// How loops of an offset face touch without crossing ([`OffsetFailure::WallsTouch`]).
@@ -286,6 +383,18 @@ impl OffsetFailure {
             | Self::Missing(_)
             | Self::InvalidValue(_)
             | Self::Inconsistent(_) => None,
+            Self::Reconstruction { why } => match why {
+                ReconstructionRefusal::SurfaceUncertified { face } => Some(EntityRef::Face(face)),
+                ReconstructionRefusal::ClipUncertified { edge }
+                | ReconstructionRefusal::VanishUnresolved { edge } => Some(EntityRef::Edge(edge)),
+                ReconstructionRefusal::BoundaryInvalid { fault } => match fault {
+                    BoundaryFault::BridgeMissing { edge }
+                    | BoundaryFault::ClipOutsideRegion { edge } => Some(EntityRef::Edge(edge)),
+                    BoundaryFault::LoopNotClosed { loopuse }
+                    | BoundaryFault::LoopDiverges { loopuse } => Some(EntityRef::Loopuse(loopuse)),
+                },
+                ReconstructionRefusal::GapBeyondConstruction { .. } => None,
+            },
         }
     }
 
@@ -323,6 +432,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
+            | Self::Reconstruction { .. }
             | Self::Unsound { .. } => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
@@ -352,6 +462,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
+            | Self::Reconstruction { .. }
             | Self::Unsound { .. }
             | Self::Failed(_)
             | Self::Missing(_)
@@ -369,6 +480,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
+            | Self::Reconstruction { .. }
             | Self::TangentEndOffCurve
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -400,6 +512,7 @@ impl OffsetFailure {
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::LoopGapUncertified { .. }
+            | Self::Reconstruction { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
                 ErrorKind::InvalidInput
@@ -498,6 +611,10 @@ impl core::fmt::Display for Unsoundness {
             Unsoundness::VolumeUndecided => f.write_str(
                 "the local operation's body is a manifold solid whose volume's sign could \
                  not be proved",
+            ),
+            Unsoundness::KeptEdgeNotClear => f.write_str(
+                "an edge the local operation kept as it was is not proved clear of a face \
+                 it moved",
             ),
         }
     }
@@ -620,6 +737,60 @@ impl core::fmt::Display for OffsetFailure {
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::InvalidValue(what) => write!(f, "invalid input: {what}"),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::Reconstruction { why } => match why {
+                ReconstructionRefusal::SurfaceUncertified { face } => write!(
+                    f,
+                    "the surface of moved face {} is not planar, so where it meets an edge's \
+                     curve cannot be certified: refused, the input unchanged",
+                    face.index()
+                ),
+                ReconstructionRefusal::ClipUncertified { edge } => write!(
+                    f,
+                    "the moved face meets edge {} where a clip is needed, and the meeting is \
+                     not certified: refused, the input unchanged",
+                    edge.index()
+                ),
+                ReconstructionRefusal::BoundaryInvalid { fault } => match fault {
+                    BoundaryFault::LoopNotClosed { loopuse } => write!(
+                        f,
+                        "a loop of the reconstructed boundary does not walk closed (loop \
+                             use {}): refused, the input unchanged",
+                        loopuse.index()
+                    ),
+                    BoundaryFault::LoopDiverges { loopuse } => write!(
+                        f,
+                        "consecutive uses of a reconstructed loop do not meet at one vertex \
+                             within their tolerances (loop use {}): refused, the input unchanged",
+                        loopuse.index()
+                    ),
+                    BoundaryFault::BridgeMissing { edge } => write!(
+                        f,
+                        "the bridge edge {} the reconstruction inserted is gone or is no \
+                             longer a four-use manifold edge between its end vertices: refused, \
+                             the input unchanged",
+                        edge.index()
+                    ),
+                    BoundaryFault::ClipOutsideRegion { edge } => write!(
+                        f,
+                        "the clip point of rebuilt edge {} is no longer certified in-or-on \
+                         its moved face's completed trims: refused, the input unchanged",
+                        edge.index()
+                    ),
+                },
+                ReconstructionRefusal::GapBeyondConstruction { gap, bound } => write!(
+                    f,
+                    "a gap the reconstruction measures ({gap:e}) exceeds the bound its \
+                     construction certifies ({bound:e}): the tolerance is never grown to cover \
+                     it, so the operation is refused, the input unchanged"
+                ),
+                ReconstructionRefusal::VanishUnresolved { edge } => write!(
+                    f,
+                    "the gap pass deferred the vanish of edge {} for the crossed-boundary \
+                     reconstruction, and the reconstruction could not certify its removal: \
+                     refused, the input unchanged",
+                    edge.index()
+                ),
+            },
         }
     }
 }
@@ -856,6 +1027,15 @@ mod tests {
             (O::InvalidValue("x"), ErrorKind::InvalidInput, true, false),
             // a consistency check of the kernel's own data that did not hold: its fault
             (O::Inconsistent("x"), ErrorKind::Failed, true, true),
+            // a crossed-boundary reconstruction that could not certify its boundary
+            (
+                O::Reconstruction {
+                    why: ReconstructionRefusal::SurfaceUncertified { face },
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -878,6 +1058,7 @@ mod tests {
                 O::Missing(_) => 16,
                 O::InvalidValue(_) => 17,
                 O::Inconsistent(_) => 18,
+                O::Reconstruction { .. } => 19,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
