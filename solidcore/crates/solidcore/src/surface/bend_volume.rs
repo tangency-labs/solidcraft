@@ -1836,17 +1836,15 @@ mod tests {
         let pb = Extent3d::from_bounds(-1.0, -1.0, 0.0, 2.0, 1.0, 1.0);
         b.trim_param_bounding_box_simple(&pb, &mut t).unwrap();
         assert_eq!(t, Extent3d::from_bounds(0.01, -1.0, 0.0, 2.0, 1.0, 1.0));
-        // entirely below the tolerance or beyond the period
+        // entirely below the tolerance
         let below = Extent3d::from_bounds(-1.0, -1.0, 0.0, 0.0, 1.0, 1.0);
         assert!(b.trim_param_bounding_box_simple(&below, &mut t).is_err());
         assert_eq!(t, Extent3d::new());
-        let beyond = Extent3d::from_bounds(1.0, 4.0, 0.0, 2.0, 5.0, 1.0);
-        assert!(b.trim_param_bounding_box_simple(&beyond, &mut t).is_err());
-        // an end beyond the period wraps; the inverted result leaves the box alone
+        // a box crossing the period's seam takes the whole period (WR-60)
         let across = Extent3d::from_bounds(1.0, 0.0, 0.0, 2.0, 4.0, 1.0);
         let mut t = pb;
         b.trim_param_bounding_box_simple(&across, &mut t).unwrap();
-        assert_eq!(t, pb);
+        assert_eq!(t, Extent3d::from_bounds(1.0, -PI, 0.0, 2.0, PI, 1.0));
     }
 
     #[test]
@@ -1945,31 +1943,15 @@ mod tests {
 
         let b = bend(1.0);
         // WR-59 trigger (`b_box_unit_both_poles`): d = 1, u in [0.5, 1.5], v in [-2, 2].
+        // Upstream's pseudo box takes `sin(theta_end)` and misses the corner and the pole.
         let pb = Extent3d::from_bounds(0.5, -2.0, -1.0, 1.5, 2.0, 1.0);
-        let mut bx_def = Extent3d::new();
-        let mut pseudo_def = PseudoBox::new();
-        b.evaluate_bounding_box_simple(&pb, Some(&mut bx_def), Some(&mut pseudo_def));
-
         let corner = b.evaluate_simple(v(1.5, 2.0, 0.0), 0).unwrap()[0];
         let pole = b.evaluate_simple(v(1.5, PI / 2.0, 0.0), 0).unwrap()[0];
-        assert!((pseudo_def.intervals()[0].min() - 0.5 * 2.0_f64.sin()).abs() < 1e-12);
-        assert!((pseudo_def.intervals()[1].max() - 1.5 * 2.0_f64.sin()).abs() < 1e-12);
-        assert!(!pseudo_def.contains_point(corner, EFF_ZERO));
-        assert!(!pseudo_def.contains_point(pole, EFF_ZERO));
-
-        let fixes = UpstreamFixes {
-            bend_volume_bbox_contains_wide_angle_and_inf_u: true,
-            ..Default::default()
-        };
         let mut bx_fix = Extent3d::new();
         let mut pseudo_fix = PseudoBox::new();
-        b.evaluate_bounding_box_simple_with_fixes(
-            &pb,
-            Some(&mut bx_fix),
-            Some(&mut pseudo_fix),
-            &fixes,
-        );
-        assert_eq!(bx_fix, bx_def);
+        b.evaluate_bounding_box_simple(&pb, Some(&mut bx_fix), Some(&mut pseudo_fix));
+        assert!(bx_fix.contains_point(corner, EFF_ZERO));
+        assert!(bx_fix.contains_point(pole, EFF_ZERO));
         assert!((pseudo_fix.intervals()[0].min() - 1.5 * 2.0_f64.cos()).abs() < 1e-12);
         assert_eq!(pseudo_fix.intervals()[0].max(), 1.5);
         assert_eq!(pseudo_fix.intervals()[1].min(), -1.5);
@@ -1984,12 +1966,7 @@ mod tests {
         let b_narrow = bend(2.5);
         let pb_narrow = Extent3d::from_bounds(0.8, 0.5, -0.5, 2.2, 2.5, 0.5);
         let mut pseudo_narrow = PseudoBox::new();
-        b_narrow.evaluate_bounding_box_simple_with_fixes(
-            &pb_narrow,
-            None,
-            Some(&mut pseudo_narrow),
-            &fixes,
-        );
+        b_narrow.evaluate_bounding_box_simple(&pb_narrow, None, Some(&mut pseudo_narrow));
         assert!((pseudo_narrow.intervals()[0].min() - 0.8 * 0.4_f64.cos()).abs() < 1e-12);
         assert!((pseudo_narrow.intervals()[0].max() - 2.2).abs() < 1e-12);
         assert!((pseudo_narrow.intervals()[1].max() - 2.2 * 0.4_f64.sin()).abs() < 1e-12);
@@ -1998,34 +1975,19 @@ mod tests {
         // Off-center wide angle (half_angle = 1.8 in (pi / 2, pi)).
         let b_wide = bend(1.5);
         let pb_wide = Extent3d::from_bounds(0.6, -0.9, 0.0, 1.8, 4.5, 2.0);
-        let mut pseudo_wide_def = PseudoBox::new();
         let mut pseudo_wide_fix = PseudoBox::new();
-        b_wide.evaluate_bounding_box_simple(&pb_wide, None, Some(&mut pseudo_wide_def));
-        b_wide.evaluate_bounding_box_simple_with_fixes(
-            &pb_wide,
-            None,
-            Some(&mut pseudo_wide_fix),
-            &fixes,
-        );
+        b_wide.evaluate_bounding_box_simple(&pb_wide, None, Some(&mut pseudo_wide_fix));
         let wide_corner = b_wide.evaluate_simple(v(1.8, 4.5, 1.0), 0).unwrap()[0];
-        assert!(!pseudo_wide_def.contains_point(wide_corner, EFF_ZERO));
         assert!(pseudo_wide_fix.contains_point(wide_corner, EFF_ZERO));
         assert_grid_contained(&b_wide, &pb_wide, &pseudo_wide_fix);
 
         // Full primary period (half_angle == pi) and super-period (half_angle > pi).
         for half_span in [PI, 4.0] {
             let pb_full = Extent3d::from_bounds(0.5, -half_span, 0.0, 1.5, half_span, 1.0);
-            let mut pseudo_full_def = PseudoBox::new();
             let mut pseudo_full_fix = PseudoBox::new();
-            b.evaluate_bounding_box_simple(&pb_full, None, Some(&mut pseudo_full_def));
-            b.evaluate_bounding_box_simple_with_fixes(
-                &pb_full,
-                None,
-                Some(&mut pseudo_full_fix),
-                &fixes,
-            );
+            b.evaluate_bounding_box_simple(&pb_full, None, Some(&mut pseudo_full_fix));
             let seam_pt = b.evaluate_simple(v(1.5, PI, 0.5), 0).unwrap()[0];
-            assert!(!pseudo_full_def.contains_point(seam_pt, EFF_ZERO));
+            assert!(pseudo_full_fix.contains_point(seam_pt, EFF_ZERO));
             assert_eq!(pseudo_full_fix.intervals()[0].min(), -1.5);
             assert_eq!(pseudo_full_fix.intervals()[0].max(), 1.5);
             assert_eq!(pseudo_full_fix.intervals()[1].min(), -1.5);
@@ -2033,54 +1995,22 @@ mod tests {
             assert_grid_contained(&b, &pb_full, &pseudo_full_fix);
         }
 
-        // Inside-out parameter box leaves pseudo box untouched under opt-in.
+        // Inside-out parameter box leaves pseudo box untouched.
         let empty = Extent3d::new();
         let mut untouched = PseudoBox::new();
-        b.evaluate_bounding_box_simple_with_fixes(&empty, None, Some(&mut untouched), &fixes);
+        b.evaluate_bounding_box_simple(&empty, None, Some(&mut untouched));
         assert!(untouched.has_negative_volume());
     }
 
     #[test]
-    fn wr59_unbounded_u_downward_angles_and_flag_lookup() {
+    fn wr59_unbounded_u_downward_angles() {
         let b = bend(1.0);
         // WR-59 unbounded-u trigger (`b_box_unit_inf_u_down`): u in [1, inf), v in [-1, -0.2].
+        // Upstream takes the y maximum from cosines (0.98, above the image).
         let inf_down = Extent3d::from_bounds(1.0, -1.0, 0.0, INFINITE_PARAMETER, -0.2, 1.0);
-        let mut bx_def = Extent3d::new();
-        let mut pseudo_def = PseudoBox::new();
-        b.evaluate_bounding_box_simple(&inf_down, Some(&mut bx_def), Some(&mut pseudo_def));
-        assert!((bx_def.v_max() - (-0.2_f64).cos()).abs() < 1e-12);
-        assert!(bx_def.v_max() > 0.0);
-        assert!(pseudo_def.intervals()[1].max() < INFINITE_PARAMETER);
-
-        let mut k = Kernel::default();
-        assert_eq!(
-            k.fixes
-                .flag_mut("bend_volume_bbox_contains_wide_angle_and_inf_u")
-                .copied(),
-            Some(false)
-        );
-        let mut bx_k_def = Extent3d::new();
-        let mut pseudo_k_def = PseudoBox::new();
-        b.evaluate_bounding_box_simple_with_kernel(
-            &k,
-            &inf_down,
-            Some(&mut bx_k_def),
-            Some(&mut pseudo_k_def),
-        );
-        assert_eq!(bx_k_def, bx_def);
-        assert_eq!(pseudo_k_def, pseudo_def);
-
-        *k.fixes
-            .flag_mut("bend_volume_bbox_contains_wide_angle_and_inf_u")
-            .unwrap() = true;
         let mut bx_fix = Extent3d::new();
         let mut pseudo_fix = PseudoBox::new();
-        b.evaluate_bounding_box_simple_with_kernel(
-            &k,
-            &inf_down,
-            Some(&mut bx_fix),
-            Some(&mut pseudo_fix),
-        );
+        b.evaluate_bounding_box_simple(&inf_down, Some(&mut bx_fix), Some(&mut pseudo_fix));
         assert!((bx_fix.v_max() - (-0.2_f64).sin()).abs() < 1e-12);
         assert!(bx_fix.v_max() < 0.0);
         assert_eq!(bx_fix.v_min(), -INFINITE_PARAMETER);
@@ -2100,17 +2030,14 @@ mod tests {
 
         // Third-quadrant downward angles: sin(-3) > sin(-2), while cos(-2) > cos(-3).
         let inf_q3 = Extent3d::from_bounds(2.0, -3.0, 0.0, INFINITE_PARAMETER, -2.0, 1.0);
-        let mut bx_q3_def = Extent3d::new();
         let mut bx_q3_fix = Extent3d::new();
-        b.evaluate_bounding_box_simple(&inf_q3, Some(&mut bx_q3_def), None);
-        b.evaluate_bounding_box_simple_with_kernel(&k, &inf_q3, Some(&mut bx_q3_fix), None);
-        assert!((bx_q3_def.v_max() - 2.0 * (-2.0_f64).cos()).abs() < 1e-12);
+        b.evaluate_bounding_box_simple(&inf_q3, Some(&mut bx_q3_fix), None);
         assert!((bx_q3_fix.v_max() - 2.0 * (-3.0_f64).sin()).abs() < 1e-12);
 
         // Wide-angle unbounded u propagates +-INFINITE_PARAMETER on both pseudo-box axes.
         let inf_wide = Extent3d::from_bounds(0.5, -2.0, 0.0, INFINITE_PARAMETER, 2.0, 1.0);
         let mut pseudo_inf_wide = PseudoBox::new();
-        b.evaluate_bounding_box_simple_with_kernel(&k, &inf_wide, None, Some(&mut pseudo_inf_wide));
+        b.evaluate_bounding_box_simple(&inf_wide, None, Some(&mut pseudo_inf_wide));
         assert_eq!(pseudo_inf_wide.intervals()[0].min(), -INFINITE_PARAMETER);
         assert_eq!(pseudo_inf_wide.intervals()[0].max(), INFINITE_PARAMETER);
         assert_eq!(pseudo_inf_wide.intervals()[1].min(), -INFINITE_PARAMETER);
@@ -2123,29 +2050,10 @@ mod tests {
         let stale = Extent3d::from_bounds(9.0, 8.0, 7.0, 19.0, 18.0, 17.0);
 
         // WR-60 trigger (`trim_unit_across_period`): d = 1, v in [2.0, 4.5] crosses pi.
+        // Upstream clamps the two ends apart, gets an inverted box and leaves `stale`.
         let across = Extent3d::from_bounds(1.0, 2.0, 0.0, 2.0, 4.5, 1.0);
-        let mut t_def = stale;
-        b.trim_param_bounding_box_simple(&across, &mut t_def)
-            .unwrap();
-        assert_eq!(t_def, stale);
-
-        let mut k = Kernel::default();
-        assert_eq!(
-            k.fixes
-                .flag_mut("bend_volume_trim_param_box_across_period")
-                .copied(),
-            Some(false)
-        );
-        let mut t_k_def = stale;
-        b.trim_param_bounding_box_simple_with_kernel(&k, &across, &mut t_k_def)
-            .unwrap();
-        assert_eq!(t_k_def, stale);
-
-        *k.fixes
-            .flag_mut("bend_volume_trim_param_box_across_period")
-            .unwrap() = true;
         let mut t_fix = stale;
-        b.trim_param_bounding_box_simple_with_kernel(&k, &across, &mut t_fix)
+        b.trim_param_bounding_box_simple(&across, &mut t_fix)
             .unwrap();
         assert!(!t_fix.has_negative_volume());
         assert_eq!(t_fix, Extent3d::from_bounds(1.0, -PI, 0.0, 2.0, PI, 1.0));
@@ -2158,14 +2066,8 @@ mod tests {
         // Shifted periodic intervals that do not cross +-pi shift cleanly into [-pi, pi].
         let shifted_pos =
             Extent3d::from_bounds(-0.5, 2.0 * PI - 0.5, -1.0, 2.0, 2.0 * PI + 0.5, 3.0);
-        let mut t_shift_def = stale;
-        assert!(b
-            .trim_param_bounding_box_simple(&shifted_pos, &mut t_shift_def)
-            .is_err());
-        assert!(t_shift_def.has_negative_volume());
-
         let mut t_shift_fix = stale;
-        b.trim_param_bounding_box_simple_with_kernel(&k, &shifted_pos, &mut t_shift_fix)
+        b.trim_param_bounding_box_simple(&shifted_pos, &mut t_shift_fix)
             .unwrap();
         assert!((t_shift_fix.u_min() - 0.01).abs() < 1e-12);
         assert!((t_shift_fix.u_max() - 2.0).abs() < 1e-12);
@@ -2176,7 +2078,7 @@ mod tests {
         let shifted_neg =
             Extent3d::from_bounds(0.5, -2.0 * PI - 0.4, 0.0, 1.5, -2.0 * PI + 0.6, 1.0);
         let mut t_neg_fix = stale;
-        b.trim_param_bounding_box_simple_with_kernel(&k, &shifted_neg, &mut t_neg_fix)
+        b.trim_param_bounding_box_simple(&shifted_neg, &mut t_neg_fix)
             .unwrap();
         assert!((t_neg_fix.v_min() - (-0.4)).abs() < 1e-12);
         assert!((t_neg_fix.v_max() - 0.6).abs() < 1e-12);
@@ -2184,7 +2086,7 @@ mod tests {
         // Boundary graze within EFF_ZERO snaps to pi instead of expanding to [-pi, pi].
         let graze = Extent3d::from_bounds(0.5, PI - 0.2, 0.0, 1.5, PI + 0.5 * EFF_ZERO, 1.0);
         let mut t_graze = stale;
-        b.trim_param_bounding_box_simple_with_kernel(&k, &graze, &mut t_graze)
+        b.trim_param_bounding_box_simple(&graze, &mut t_graze)
             .unwrap();
         assert!((t_graze.v_min() - (PI - 0.2)).abs() < 1e-12);
         assert!((t_graze.v_max() - PI).abs() <= EFF_ZERO);
@@ -2195,7 +2097,7 @@ mod tests {
             Extent3d::from_bounds(1.0, -INFINITE_PARAMETER, 0.0, 2.0, INFINITE_PARAMETER, 1.0),
         ] {
             let mut t_wide = stale;
-            b.trim_param_bounding_box_simple_with_kernel(&k, &wide, &mut t_wide)
+            b.trim_param_bounding_box_simple(&wide, &mut t_wide)
                 .unwrap();
             assert_eq!(t_wide, Extent3d::from_bounds(1.0, -PI, 0.0, 2.0, PI, 1.0));
         }
@@ -2204,13 +2106,13 @@ mod tests {
         let below = Extent3d::from_bounds(-2.0, -1.0, 0.0, 0.005, 1.0, 1.0);
         let mut t_err = stale;
         assert!(b
-            .trim_param_bounding_box_simple_with_kernel(&k, &below, &mut t_err)
+            .trim_param_bounding_box_simple(&below, &mut t_err)
             .is_err());
         assert!(t_err.has_negative_volume());
 
         let mut t_empty = stale;
         assert!(b
-            .trim_param_bounding_box_simple_with_kernel(&k, &Extent3d::new(), &mut t_empty)
+            .trim_param_bounding_box_simple(&Extent3d::new(), &mut t_empty)
             .is_err());
         assert!(t_empty.has_negative_volume());
     }
