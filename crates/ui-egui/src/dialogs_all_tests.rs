@@ -1274,6 +1274,37 @@ fn dogbone_editor_keeps_a_pick_it_cannot_bring_back() {
     }
 }
 
+/// The dialog shows a kept pick with a button that drops it (a kept point the command refuses
+/// would fail every OK): after the click, OK sends the edge that came back and no kept face, and
+/// the button is gone.
+#[test]
+fn dogbone_editor_drops_a_kept_pick_on_request() {
+    use solidcraft_engine::doc::FeatureKind;
+
+    let (mut h, id) = resized_pocket_dogbone_editor(json!({"edges":[[10,5,15]],"faces":[[20,10,10]],"diameter":3}));
+    let mut f = h.app.session.doc.feature(id).unwrap().clone();
+    let FeatureKind::Dogbone { faces, .. } = &mut f.kind else { panic!("{:?}", f.kind) };
+    faces[0].0 = Vec3::new(20.0, 10.0, 12.0);
+    f.face_names.clear();
+    let (kind, inputs, extra) = crate::dialogs_dogbone::for_feature(&h.app, &f).unwrap();
+    let d = h.app.dialog.as_mut().unwrap();
+    (d.kind, d.inputs, d.extra) = (kind, inputs, extra);
+    h.frames(2);
+    assert!(h.widget("Remove stored picks").is_some(), "the kept pick must show with its button");
+    h.step(&json!({"widget":"Remove stored picks"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Remove stored picks").is_none(), "nothing kept is left to remove");
+    let d = h.app.dialog.as_ref().unwrap();
+    for key in ["kept_edges", "kept_faces", "kept_body"] {
+        assert!(!d.extra.contains_key(key), "{key} must be dropped: {:?}", d.extra);
+    }
+    let commands = apply_commands(&h.app, d).unwrap();
+    let [(command, params)] = commands.as_slice() else { panic!("{commands:?}") };
+    assert_eq!(command, "solid.dogbone");
+    assert!(params.get("faces").is_none(), "the kept face must not reach the command: {params}");
+    assert_eq!(params["edges"].as_array().map(Vec::len), Some(1), "{params}");
+}
+
 #[test]
 fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     use solidcraft_engine::doc::{Document, MeshData, naming};

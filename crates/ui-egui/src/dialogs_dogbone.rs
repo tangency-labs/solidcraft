@@ -51,7 +51,19 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "solid.dogbone").then(|| (Kind::Dogbone(Dogbone::default()), vec![SelInput::new("ui.dogbone.corners", EDGES | PLANAR_FACES, true)]))
 }
 
-pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut Dogbone) -> bool {
+pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut Dogbone, extra: &mut Map<String, Value>) -> bool {
+    // The stored picks Edit Feature could not bring back go to the command with the picked ones,
+    // so the dialog says how many there are, and drops them on request: a kept point the command
+    // refuses would otherwise fail every Apply of this feature.
+    let kept = kept_picks(extra);
+    if kept > 0 {
+        crate::ui_kit::text(ui, &app.tr("ui.dogbone.kept").replace("{count}", &kept.to_string()), crate::ui_kit::Text::Hint("dogbone_kept"));
+        if crate::ui_kit::button(ui, app.tr("ui.dogbone.drop_kept"), crate::ui_kit::Button::Normal).clicked() {
+            for key in [KEPT_EDGES, KEPT_FACES, KEPT_BODY] {
+                extra.remove(key);
+            }
+        }
+    }
     let mut enter = expr_row(ui, app.tr("ui.dogbone.diameter"), &mut c.diameter);
     choice_row(
         ui,
@@ -69,6 +81,11 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut Dogbone) -> bool {
     }
     enter |= expr_row(ui, app.tr("ui.dogbone.max_angle"), &mut c.max_angle);
     enter
+}
+
+/// How many stored picks (edges and faces) the dialog's `extra` keeps for the command.
+fn kept_picks(extra: &Map<String, Value>) -> usize {
+    [KEPT_EDGES, KEPT_FACES].iter().filter_map(|key| extra.get(*key).and_then(Value::as_array)).map(Vec::len).sum()
 }
 
 pub fn commands(app: &SolveApp, c: &Dogbone, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
