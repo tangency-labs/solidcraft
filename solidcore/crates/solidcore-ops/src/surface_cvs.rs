@@ -582,13 +582,14 @@ mod tests {
         ruled(&a, &b, false).unwrap()
     }
 
-    /// A spline sheet is not rebuilt: `editable` hands back the very record, so every net edit of a
-    /// spline sheet reads and makes exactly what it did before planar sheets were taken.
+    /// A spline sheet is not rebuilt: `editable` hands the record back borrowed (not converted),
+    /// so every net edit of a spline sheet reads and makes exactly what it did before planar
+    /// sheets were taken.
     #[test]
     fn a_spline_sheet_is_edited_as_it_is() {
         let s = sheet();
         match editable(&s).unwrap() {
-            Cow::Borrowed(b) => assert!(std::ptr::eq(b, &s)),
+            Cow::Borrowed(b) => assert_eq!(b, &s),
             Cow::Owned(_) => panic!("a spline sheet was rebuilt"),
         }
     }
