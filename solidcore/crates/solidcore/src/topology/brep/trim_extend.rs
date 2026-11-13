@@ -383,7 +383,7 @@ fn outward(v0: Point3, v1: Point3, normal: Vec3) -> Result<(Vec3, Vec3)> {
 
 /// Face `f` of `b` with its edge `e` moved as `how` says and its neighbours carried (module
 /// docs): the grown trim's curves and the plane that holds them. `b` is only read.
-fn grown(k: &Kernel, b: &Brep, f: FaceId, e: EdgeId, how: Move) -> Result<Grown> {
+pub(crate) fn grown(k: &Kernel, b: &Brep, f: FaceId, e: EdgeId, how: Move) -> Result<Grown> {
     let surface = b
         .face(f)?
         .surface
