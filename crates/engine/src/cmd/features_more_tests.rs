@@ -3117,6 +3117,8 @@ fn a_slot_arc_split_by_a_balls_seam_selects_and_rounds_like_its_mirror() {
     assert_eq!(ball.whole_edge(other_half), both);
     let mirror = record_edge_near(&ball.body, mirror_pick);
     assert_eq!(ball.whole_edge(mirror), vec![mirror]);
+    // The rounds guard the leaving direction `whole_edge` now shares with the blend chain walk
+    // and the round running on across the seam vertex (#13752), not the grouping above.
     let before = body_volume(&s, "Ball");
     let removed = |pick: Vec3| {
         let mut s = slotted_ball();

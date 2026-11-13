@@ -2694,14 +2694,18 @@ fn a_floor_arc_split_by_a_balls_seam_is_one_whole_edge() {
 }
 
 /// A real corner, two tangent arcs of different radii, and an authored split keep their edges
-/// apart; a cylinder's rim, split by the side's seams, is gathered whole and the walk ends.
+/// apart, each stopped by the edge that is not a seam at their vertex (the arcs' by the line
+/// between their two sides); a cylinder's rim, split by the side's seams, is gathered whole and
+/// the walk ends. No body built here reaches the face pair or the tangency rule alone: see
+/// `runs_on`.
 #[test]
 fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
     let block = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
     for e in 0..block.record().edges.len() {
         assert_eq!(whole_edge(&block, e), vec![e], "box edge {e}");
     }
-    // An arc of radius 10 running on tangentially into one of radius 20 at (10, 0).
+    // An arc of radius 10 running on tangentially into one of radius 20 at (10, 0). Their sides
+    // are two surfaces, so the upright line between them is not a seam and stops the walk.
     let outline = Loop2 {
         segs: vec![
             Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: -PI / 2.0, sweep: PI / 2.0 },

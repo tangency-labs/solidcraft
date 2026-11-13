@@ -1304,7 +1304,7 @@ impl Dialog {
                 let picked = match (&d.kind, sel) {
                     (Kind::Fillet { chain, .. }, _) => fillet_edges(s, sel, *chain),
                     // One item per edge: a click selects all the pieces of an edge a seam splits,
-                    // and Measure takes the first of them listed.
+                    // the clicked one first, and Measure takes that one.
                     (Kind::Measure { .. }, _)
                         if crate::viewport::grouped_selection(s, sel).iter().any(|x| inp.items.iter().any(|y| selection::same_item(x, y))) =>
                     {

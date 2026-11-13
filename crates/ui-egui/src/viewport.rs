@@ -4543,6 +4543,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     (app.dialog.is_some(), app.tool.is_some()).hash(&mut h);
     // Which input is active decides what a round edge or face under the cursor stands for.
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
+    // And whether Measure is open, which lights one piece of an edge a seam splits.
+    measuring_mesh_edges(app).hash(&mut h);
     solidcraft_theme::is_dark().hash(&mut h);
     solidcraft_theme::vision().hash(&mut h);
     // Two themes may share a light/dark base while drawing different geometry colours.
@@ -5391,7 +5393,9 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             if let Some(b) = st.body(body) {
                 // Lit over the drawn edges (finer away from Normal display quality).
                 let m = drawn(b);
-                for i in edge_pieces(b, &m, *index) {
+                // Measure measures the piece picked of an edge a seam splits: light that piece.
+                let pieces = if measuring_mesh_edges(app) { m.circular_rim(*index) } else { edge_pieces(b, &m, *index) };
+                for i in pieces {
                     let selected = sel.iter().any(|x| matches!(x, Sel::Edge { body: b, index: j, .. } if b == body && *j == i));
                     if let Some(e) = if i == *index { edge_of(&m, i, *mid) } else { m.edges.get(i) } {
                         // A hovered edge that is picked keeps its selection highlight and only
@@ -7030,7 +7034,11 @@ pub(crate) fn grouped_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Ve
         Sel::Edge { body, index, .. } => {
             if let Some(b) = st.body(body) {
                 let m = b.mesh();
-                return edge_pieces(b, &m, *index)
+                // The picked piece first, then the others in order, as a face pick keeps its
+                // own: Measure takes the first piece of an edge a click selected.
+                let mut pieces = edge_pieces(b, &m, *index);
+                pieces.sort_by_key(|i| usize::from(i != index));
+                return pieces
                     .into_iter()
                     .filter_map(|i| m.edges.get(i).map(|e| Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) }))
                     .collect();
@@ -12638,8 +12646,9 @@ mod tests {
     }
 
     /// Measure keeps measuring the piece picked of an open edge a seam splits: a pick in its
-    /// dialog is that piece, two picks are two items. A click elsewhere selects the edge whole,
-    /// which Measure takes as one item, one of its pieces (#16122 leaves Measure as it was).
+    /// dialog is that piece, two picks are two items, and hovering lights the piece a pick takes.
+    /// A click elsewhere selects the edge whole, the clicked piece first, which Measure takes as
+    /// its one item (#16122 leaves Measure as it was).
     #[test]
     fn measure_keeps_the_picked_piece_of_an_arc_a_seam_splits() {
         let mut app = slotted_ball_app();
@@ -12657,11 +12666,72 @@ mod tests {
         assert_eq!(d.items(), vec![edge(plus[1])]);
         d.pick(&app.session, edge(plus[0]));
         assert_eq!(edge_indices(&d.items()), plus, "the two halves are two items, as before");
-        select(&mut app, Some(edge(plus[1])), false, false);
-        assert_eq!(edge_indices(&app.session.selection), plus);
-        let d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
-        assert_eq!(d.items().len(), 1, "{:?}", d.items());
-        assert!(plus.contains(&edge_indices(&d.items())[0]));
+        // With Measure open, hovering a half lights that half; with it closed, the whole arc.
+        let mid = polyline_mid(&m.edges[plus[1]]);
+        app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: plus[1], mid, point: mid });
+        let lines = |pieces: &[usize]| pieces.iter().map(|&i| 2 * (m.edges[i].len() - 1) * crate::gpu::LINE_SIZE).sum::<usize>();
+        assert_eq!(build_highlight(&app).merged().lines.len(), lines(&plus));
+        let closed = highlight_key(&app);
+        app.dialog = Some(crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap());
+        assert_ne!(highlight_key(&app), closed);
+        assert_eq!(build_highlight(&app).merged().lines.len(), lines(&plus[1..]));
+        app.dialog = None;
+        app.viewport.hover = None;
+        for &half in plus.iter().rev() {
+            select(&mut app, Some(edge(half)), false, false);
+            assert_eq!(app.session.selection.first(), Some(&edge(half)), "the clicked piece first");
+            assert_eq!(edge_indices(&app.session.selection), plus);
+            let d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
+            assert_eq!(d.items(), vec![edge(half)], "Measure takes the clicked half");
+        }
+    }
+
+    /// The ball of [`slotted_ball_app`], whole, with a hole of radius 1 drilled down right
+    /// through it at (6, 0.5). The ball's seam (on y = 0) crosses the hole off its middle, so each
+    /// of the hole's rims is cut into pieces of different lengths, which are one edge to the user.
+    fn drilled_ball_app() -> SolveApp {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"name": "Sketch1", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 0], [0, 25]]})).unwrap();
+        s.execute("sketch.arc.three_point", &json!({"start": [0, 0], "through": [12.5, 12.5], "end": [0, 25]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.revolve", &json!({"sketch": "Sketch1", "axis": "Z", "angle": "360 deg", "operation": "new", "body_name": "Ball"})).unwrap();
+        s.execute("sketch.create", &json!({"name": "Sketch2", "plane": {"origin": [0, 0, -1], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [6, 0.5], "radius": 1})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"sketch": "Sketch2", "distance": 30, "operation": "cut"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        app
+    }
+
+    /// A click on a piece of an edge a seam splits into pieces of different lengths, then
+    /// Measure: Measure measures the piece clicked, as it did before a click took the whole edge.
+    #[test]
+    fn measure_after_a_click_takes_the_clicked_piece_of_an_edge_split_unequally() {
+        let mut app = drilled_ball_app();
+        let st = app.session.world_state().unwrap();
+        let b = st.body("Ball").unwrap();
+        let m = b.mesh();
+        let top_rim = mesh_edges_where(&m, |p| p.len() > 1 && p.iter().all(|q| ((q.x - 6.0).hypot(q.y - 0.5) - 1.0).abs() < 1e-4 && q.z > 12.5));
+        let edge = |index: usize| Sel::Edge { body: b.name.clone(), index, point: polyline_mid(&m.edges[index]) };
+        let length = |i: usize| m.edges[i].windows(2).map(|w| w[0].dist(w[1])).sum::<f64>();
+        let whole = edge_indices(&grouped_selection(&app.session, &edge(top_rim[0])));
+        assert_eq!(whole, top_rim, "the top rim's pieces are one edge");
+        let shortest = *whole.iter().min_by(|a, c| length(**a).total_cmp(&length(**c))).unwrap();
+        let longest = *whole.iter().max_by(|a, c| length(**a).total_cmp(&length(**c))).unwrap();
+        assert!(length(longest) - length(shortest) > 0.1, "{:?}", whole.iter().map(|&i| length(i)).collect::<Vec<_>>());
+        let mut measured = Vec::new();
+        for piece in [longest, shortest] {
+            select(&mut app, Some(edge(piece)), false, false);
+            assert_eq!(edge_indices(&app.session.selection), whole);
+            let d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
+            assert_eq!(edge_indices(&d.items()), vec![piece], "Measure takes the clicked piece");
+            let result = app.session.measure_items(&d.items());
+            measured.push(result["items"][0]["length_mm"].as_f64().unwrap());
+        }
+        assert!((measured[0] - length(longest)).abs() < 0.05 && (measured[1] - length(shortest)).abs() < 0.05, "{measured:?}");
+        assert!(measured[0] - measured[1] > 0.1, "{measured:?}");
     }
 
     /// A box's corners and the pieces Split Face makes of a box's edges are single edges to
@@ -12701,6 +12771,50 @@ mod tests {
             .execute("solid.split_face", &json!({"body": "B", "faces": [[hi.x, y, z]], "plane": {"origin": [0, 0, z], "normal": [0, 0, 1]}}))
             .unwrap();
         assert!(check(&mut app) > corners, "the split adds edges");
+        // A post with a slot cut across its top, its side split through its axis 30 degrees round
+        // from x (clear of its own seam): each arc left of its top is cut in two at the split
+        // line. Its pieces stay apart there, though the side's pieces are one surface.
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"name": "Sketch1", "plane": "XY"})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": 10})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"sketch": "Sketch1", "distance": 20})).unwrap();
+        s.execute("sketch.create", &json!({"name": "Sketch2", "plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})).unwrap();
+        s.execute("sketch.rectangle.center", &json!({"center": [0, 0], "corner": [5, 20]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"sketch": "Sketch2", "distance": 10, "operation": "cut"})).unwrap();
+        let name = s.world_state().unwrap().bodies[0].name.clone();
+        s.execute(
+            "solid.split_face",
+            &json!({"body": name, "faces": [[0, 10, 5]], "plane": {"origin": [0, 0, 0], "normal": [0.5, -0.8660254037844386, 0]}}),
+        )
+        .unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        let st = app.session.world_state().unwrap();
+        let b = &st.bodies[0];
+        let m = b.mesh();
+        for side in [1.0, -1.0] {
+            let arc = mesh_edges_where(&m, |p| p.len() > 2 && p.iter().all(|q| (q.z - 20.0).abs() < 1e-6 && q.x * side > 5.0 - 1e-6));
+            assert!(arc.len() >= 2, "the split line cuts the arc at x = {}: {arc:?}", 5.0 * side);
+            for &piece in &arc {
+                let item = Sel::Edge { body: b.name.clone(), index: piece, point: polyline_mid(&m.edges[piece]) };
+                let whole = grouped_selection(&app.session, &item);
+                let off: Vec<f64> = whole
+                    .iter()
+                    .flat_map(|x| if let Sel::Edge { index, .. } = x { m.edges[*index].clone() } else { Vec::new() })
+                    .map(|q| q.x * 0.5 - q.y * 0.8660254037844386)
+                    .collect();
+                assert!(off.iter().all(|d| *d >= -1e-6) || off.iter().all(|d| *d <= 1e-6), "piece {piece} joins {whole:?} across the split");
+                let mid = polyline_mid(&m.edges[piece]);
+                app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: piece, mid, point: mid });
+                let lines = edge_indices(&whole).iter().map(|&i| 2 * (m.edges[i].len() - 1) * crate::gpu::LINE_SIZE).sum::<usize>();
+                assert_eq!(build_highlight(&app).merged().lines.len(), lines, "hovering {piece}");
+                select(&mut app, Some(item), false, false);
+                assert_eq!(edge_indices(&app.session.selection), edge_indices(&whole));
+                select(&mut app, None, false, false);
+            }
+        }
     }
 
     #[test]

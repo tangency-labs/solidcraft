@@ -182,9 +182,15 @@ fn runs_on(faces: &Faces, keep: &[Vec<Vec3>], a: usize, v: u32) -> Option<usize>
         next = Some((i, fo));
     }
     let (b, fb) = next?;
+    // Defensive: in a manifold record the faces round `v` already put both edges between the same
+    // two faces when every other edge there is a seam, so no body the kernel builds reaches this;
+    // a damaged or imported record might.
     if !same_pair(faces, &fa, &fb) {
         return None;
     }
+    // Defensive too: two smooth surfaces crossing each other meet along a smooth curve, so a turn
+    // between two pieces of one face pair needs the surfaces to touch there (or a record whose
+    // curves leave their surfaces); no body the kernel builds reaches it.
     let (da, db) = (crate::blend::leaving(record, a, v)?, crate::blend::leaving(record, b, v)?);
     (da.dot(db) <= -crate::smooth_edges::ANGLE.cos()).then_some(b)
 }
