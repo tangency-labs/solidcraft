@@ -979,7 +979,7 @@ fn macro_path(trees: &[TokenTree], at: usize) -> String {
 
 /// What a `use` tree (after `prefix`) brings in: (the path it names, the name it brings in).
 /// `a::b::{self, c as d}` brings in `a::b` as `b` and `a::b::c` as `d`; `a::b::*` brings in all
-/// of `a::b`, as `*`, unless `b` is a type (its name capitalised), whose variants are no macros.
+/// of `a::b`, as `*`.
 fn use_tree(trees: &[TokenTree], prefix: &[String], out: &mut Vec<(String, String)>) {
     let mut path = prefix.to_vec();
     let mut i = 0;
@@ -1001,9 +1001,7 @@ fn use_tree(trees: &[TokenTree], prefix: &[String], out: &mut Vec<(String, Strin
                 }
             }
             TokenTree::Punct(p) if p.as_char() == '*' => {
-                if let Some(last) = path.last()
-                    && !last.starts_with(|c: char| c.is_ascii_uppercase())
-                {
+                if !path.is_empty() {
                     out.push((path.join("::"), "*".to_string()));
                 }
                 return;
@@ -1314,15 +1312,15 @@ mod tests {
         assert!(found_in_calls(&[forwarder, &format!("wrap!({block});\n")]));
         let paths = format!("std::println!({block});\ncrate::plain!({block});\nworkspace_crate::plain!({block});\nuse std::{{self, println}};\n");
         assert!(!found_in_calls(&[plain, &paths]));
-        // A glob or `#[macro_use]` from a dependency may bring in a macro of any name; a glob of
-        // an enum's variants, of the workspace's own modules or of the standard library's may not.
+        // A glob or `#[macro_use]` from a dependency may bring in a macro of any name, whatever
+        // the module is called; a glob of the workspace's own modules or of the standard
+        // library's may not.
         assert!(found_in_calls(&[&format!("use dependency::prelude::*;\nprintln!({block});\n")]));
+        assert!(found_in_calls(&[&format!("use dependency::Prelude::*;\nprintln!({block});\n")]));
         assert!(found_in_calls(&[&format!("use dependency::{{other, prelude::*}};\nprintln!({block});\n")]));
         assert!(found_in_calls(&[&format!("#[macro_use]\nextern crate dependency;\nprintln!({block});\n")]));
         assert!(found_in_calls(&[&format!("#[macro_use(println)]\nextern crate dependency;\nprintln!({block});\n")]));
-        let globs = format!(
-            "use dependency::Kind::*;\nuse super::*;\nuse local_module::*;\nuse std::fmt::*;\n#[macro_use]\nmod macros;\nprintln!({block});\n"
-        );
+        let globs = format!("use super::*;\nuse local_module::*;\nuse Kind::*;\nuse std::fmt::*;\n#[macro_use]\nmod macros;\nprintln!({block});\n");
         assert!(!found_in_calls(&[&globs]));
         // A string with no code block is no doc wherever it goes.
         assert!(!found_in_calls(&["dependency::documented!(\"Plain    words.\");\n#[dependency::documented(\"Plain.\")]\nfn f() {}\n"]));
