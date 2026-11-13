@@ -2220,6 +2220,29 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// `doc.open` makes a `Group #N` history folder exactly when `folder: true` is given, whether
+    /// the import is fresh or reused from the cache, and whatever an earlier open asked for (#15870).
+    #[test]
+    fn a_reused_import_has_a_folder_exactly_when_asked() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-reuse-import-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache = solidcraft_io::ImportCache::new(dir.join("imports"));
+        // One cylinder placed twice: an Import feature and two rigid joints, so `folder: true` makes a folder.
+        let path = format!("{}/../../tests/step-conformance/cylinder_twice.step", env!("CARGO_MANIFEST_DIR"));
+        let open = |folder: bool| {
+            let (s, reply) = open_step(&path, &json!({"folder": folder}), Some(&cache), solidcraft_kernel::Validation::default()).unwrap();
+            let folders: Vec<_> = s.doc.timeline_groups.iter().map(|f| (f.id, f.name.clone(), f.features.len(), f.joints.len())).collect();
+            assert_eq!(reply.get("group").and_then(Value::as_u64), folders.first().map(|f| f.0), "the reply names the folder: {reply}");
+            (folders.into_iter().map(|(_, name, features, joints)| (name, features, joints)).collect::<Vec<_>>(), reply["import_reused"].clone())
+        };
+        let one = vec![("Group #1".to_string(), 1, 2)];
+        assert_eq!(open(false), (vec![], json!(false)), "no folder, fresh import");
+        assert_eq!(open(true), (one.clone(), json!(false)), "a folder, fresh import");
+        assert_eq!(open(true), (one, json!(true)), "a folder, reused import");
+        assert_eq!(open(false), (vec![], json!(true)), "no folder, reused import");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn import_digest_is_of_original_bytes_for_open_and_insert() {
         use sha2::{Digest, Sha256};
