@@ -132,7 +132,6 @@ crates/kernel/src/body.rs:Body::meets_each decides whether tools meet a body by 
 crates/kernel/src/distance.rs:DistanceShape::on_face decides whether a point lies on a face by its mesh
 crates/kernel/src/helix.rs:sweep_helix_mesh models a thread as a triangle mesh for faceted booleans
 crates/kernel/src/intersection.rs:meeting_edges samples meeting edges from a mesh
-crates/kernel/src/lip.rs:face_at picks the planar face at a point by a mesh
 crates/kernel/src/measure.rs:measure counts a B-rep body's merged topology on a mesh
 crates/kernel/src/offset_backend.rs:face_points takes a point per face from mesh triangles
 crates/kernel/src/offset_backend.rs:faces_under picks the face under each point by the nearest mesh triangle
