@@ -84,6 +84,10 @@ struct Edit {
     /// A driven dimension that nothing else fixes any more, which the value makes driving (its
     /// constraint id; `param` names the parameter it gets).
     driven: Option<String>,
+    /// The window's parameter rows (#16319): what was typed for each user parameter the value
+    /// names, by name. OK sets those the value still names with it, in one undo step; Cancel
+    /// drops them.
+    params: std::collections::BTreeMap<String, String>,
 }
 
 /// A reference click not yet acted on (see [`Edit::pending`]).
@@ -269,6 +273,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             caret: None,
             sketch: None,
             driven: None,
+            params: Default::default(),
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -310,6 +315,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             caret: None,
             sketch: None,
             driven: None,
+            params: Default::default(),
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -569,6 +575,7 @@ fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
             caret: None,
             sketch: Some(d.sketch),
             driven: None,
+            params: Default::default(),
         })
     });
     true
@@ -672,6 +679,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             caret: None,
             sketch: None,
             driven,
+            params: Default::default(),
         })
     });
     true
@@ -707,6 +715,31 @@ fn make_driving(app: &mut SolveApp, constraint: &str, typed: &str) -> Result<ser
                 .ok_or("The dimension value is unavailable")?;
             change_value(app, &param, typed)
         });
+    let forget = result.is_ok();
+    let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": checkpoint, "forget": forget}));
+    if forget {
+        app.session.undo.truncate(depth + 1);
+    }
+    result
+}
+
+/// The window's value with its changed parameter rows (#16319): the parameters first, in one
+/// `parameters.change` (the command Change Parameters uses), then the value as OK applies it
+/// alone, unless it is the expression the dimension already has. One undo step takes both back;
+/// when either is refused the design goes back to the checkpoint taken first.
+fn with_parameters(app: &mut SolveApp, e: &Edit, changes: serde_json::Map<String, serde_json::Value>) -> Result<serde_json::Value, String> {
+    let depth = app.session.undo.len();
+    let checkpoint = app.run("edit.checkpoint", json!({}))?["checkpoint"].clone();
+    let unchanged = e.driven.is_none() && app.session.doc.param(&e.param).is_some_and(|p| p.expr.trim() == e.expr.trim());
+    let result = app.run("parameters.change", json!({"changes": changes})).map_err(|err| shown_error("parameters.change", &err)).and_then(|_| {
+        if unchanged {
+            Ok(json!({}))
+        } else if let Some(constraint) = &e.driven {
+            make_driving(app, constraint, &e.expr)
+        } else {
+            change_value(app, &e.param, &e.expr)
+        }
+    });
     let forget = result.is_ok();
     let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": checkpoint, "forget": forget}));
     if forget {
@@ -1045,6 +1078,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             caret: None,
             sketch: None,
             driven: None,
+            params: Default::default(),
         })
     });
 }
@@ -1356,6 +1390,8 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
                 } else {
                     Err("The sketch changed; place the dimension again".into())
                 }
+            } else if let Some(changes) = window::parameter_changes(&app.session.doc, &e.param, &e.expr, &e.params) {
+                with_parameters(app, &e, changes)
             } else if let Some(constraint) = &e.driven {
                 make_driving(app, constraint, &e.expr)
             } else {

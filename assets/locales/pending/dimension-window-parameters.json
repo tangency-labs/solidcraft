@@ -1,0 +1,34 @@
+{
+  "en": {
+    "dialog.dimension_parameter": "{name} =",
+    "dialog.dimension_parameters_note": "A parameter changed here changes everywhere it is used"
+  },
+  "ar": {
+    "dialog.dimension_parameter": "{name} =",
+    "dialog.dimension_parameters_note": "المعامل الذي يُغيَّر هنا يتغيّر في كل مكان يُستخدم فيه"
+  },
+  "de": {
+    "dialog.dimension_parameter": "{name} =",
+    "dialog.dimension_parameters_note": "Ein hier geänderter Parameter ändert sich überall, wo er verwendet wird"
+  },
+  "he": {
+    "dialog.dimension_parameter": "{name} =",
+    "dialog.dimension_parameters_note": "פרמטר שמשתנה כאן משתנה בכל מקום שבו הוא בשימוש"
+  },
+  "ja": {
+    "dialog.dimension_parameter": "{name} =",
+    "dialog.dimension_parameters_note": "ここで変更したパラメータは、使用されているすべての箇所で変更されます"
+  },
+  "ko": {
+    "dialog.dimension_parameter": "{name} =",
+    "dialog.dimension_parameters_note": "여기서 변경한 매개 변수는 사용되는 모든 곳에서 변경됩니다"
+  },
+  "vi": {
+    "dialog.dimension_parameter": "{name} =",
+    "dialog.dimension_parameters_note": "Tham số thay đổi ở đây sẽ thay đổi ở mọi nơi nó được dùng"
+  },
+  "zh": {
+    "dialog.dimension_parameter": "{name} =",
+    "dialog.dimension_parameters_note": "在此更改的参数会在所有使用它的地方更改"
+  }
+}
