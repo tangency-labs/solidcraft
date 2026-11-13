@@ -208,7 +208,7 @@ pub(crate) fn classify_point(body: &Body, p: [f64; 3]) -> Result<PointClass> {
     if !finite(&p) {
         return Err(Error::Argument);
     }
-    with_body("classify_point", body, |k, b| Ok(locate_points(k, b, &[p]).pop().map_or(Err(Error::Status(SM_ERR)), point_class)))?
+    with_body("classify_point", body, |k, b| Ok(point_class(locate_points(k, b, &[p]).pop().unwrap_or(Err(LocateFailure::Unclassified)))))?
 }
 
 /// [`classify_point`] for each of `points`, through one classification of the body
