@@ -266,8 +266,21 @@ pub(crate) struct SectionSeed {
     /// For a rolled rail, the direction from the filleted edge's point to the rolled-over
     /// edge's point: the side of a seam of the surface (a closed boss's, running up the
     /// rolled-over edge) on which the face beyond lies, as the drop's
-    /// `DropPointOptions::tgt_seam_side`. `None` for every other rail.
+    /// `DropPointOptions::tgt_seam_side`. `None` for every other rail, and where the two points
+    /// coincide within the body's tolerance (no direction: [`seam_side_hint`]).
     pub seam_side: Option<Vec3>,
+    /// Whether `point` is the rolled-over edge's point of a rolled rail (with or without a
+    /// `seam_side`): the section is then solved on the surface extended past that edge.
+    pub rolled: bool,
+}
+
+/// The seam-side hint of a rolled rail's seed ([`SectionSeed::seam_side`]): the direction from
+/// the filleted edge's point `point` to the rolled-over edge's point `on`, `None` where the two
+/// lie within `tol` of each other (a zero or near-zero vector names no side), or the distance
+/// is not a number.
+fn seam_side_hint(on: Point3, point: Point3, tol: f64) -> Option<Vec3> {
+    let side = on - point;
+    (side.length() > tol).then_some(side)
 }
 
 /// Where a ball of radius 0 touches each of `solver`'s faces at the point `point` of its
@@ -292,7 +305,9 @@ pub(crate) fn section_seeds(
     let mut seeds = [SectionSeed {
         point,
         seam_side: None,
+        rolled: false,
     }; 2];
+    let tol = target.tolerance();
     for (rail, seed) in seeds.iter_mut().enumerate() {
         let Some(onto) = solver.rolled_faces.get(rail).copied().flatten() else {
             continue;
@@ -307,7 +322,8 @@ pub(crate) fn section_seeds(
         {
             *seed = SectionSeed {
                 point: p,
-                seam_side: Some(p - point),
+                seam_side: seam_side_hint(p, point, tol),
+                rolled: true,
             };
         }
     }
@@ -352,4 +368,34 @@ fn offset_folds(
     let b = (g11 * r2 - g12 * r1) / det;
     let kappa = (duu * (a * a) + duv * (2.0 * a * b) + dvv * (b * b)).dot(n);
     Ok(1.0 - kappa * offset <= 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::seam_side_hint;
+    use crate::math::{Point3, Vec3};
+
+    /// A rolled rail's seam-side hint is the direction to the rolled-over edge's point, and no
+    /// hint at all where that point is the filleted edge's own within the tolerance (the zero
+    /// vector the hint was before names no side of a seam), or the distance is not a number.
+    #[test]
+    fn a_seam_side_hint_is_never_a_zero_vector() {
+        let tol = 1e-6;
+        let point = Point3::new(1.0, 2.0, 3.0);
+        assert_eq!(
+            seam_side_hint(Point3::new(1.0, 2.5, 3.0), point, tol),
+            Some(Vec3::new(0.0, 0.5, 0.0))
+        );
+        assert_eq!(seam_side_hint(point, point, tol), None);
+        assert_eq!(
+            seam_side_hint(Point3::new(1.0, 2.0, 3.0 + 0.5 * tol), point, tol),
+            None
+        );
+        assert_eq!(
+            seam_side_hint(Point3::new(1.0, 2.0, 3.0 + 2.0 * tol), point, tol),
+            Some(Vec3::new(0.0, 0.0, 3.0 + 2.0 * tol - 3.0))
+        );
+        let nan = Point3::new(f64::NAN, 2.0, 3.0);
+        assert_eq!(seam_side_hint(nan, point, tol), None);
+    }
 }

@@ -199,7 +199,7 @@ pub struct TurnedBack {
 /// corner's vertex `vertex`: `None` unless E's far vertex holds a smooth edge (within
 /// `tangency_tol_rad`) between E's other face and `rolled`, and an edge between `rolled` and
 /// the face of E it shares whose tangent leaving that vertex points back along E's arriving
-/// tangent (negative dot product; at a smooth T the two are parallel).
+/// tangent within `tangency_tol_rad` (`turns_back`; at a smooth T the two are parallel).
 ///
 /// # Errors
 /// Those of the topology walks, the evaluations and the tangency test.
@@ -285,7 +285,7 @@ pub(crate) fn rolled_rail_turns_back(
         let Some(tn) = tangent_leaving(k, target, n, far)? else {
             continue;
         };
-        if te.dot(tn) < 0.0 {
+        if turns_back(te, tn, tangency_tol_rad) {
             return Ok(Some(TurnedBack {
                 far,
                 edge: n,
@@ -294,6 +294,17 @@ pub(crate) fn rolled_rail_turns_back(
         }
     }
     Ok(None)
+}
+
+/// Not upstream (solidcore-native, [`TurnedBack`]): whether N's tangent `tn` leaving T's vertex
+/// points back along E's tangent `te` arriving there, within the angle tolerance
+/// `tangency_tol_rad`: `te·tn <= -cos(tol) |te| |tn|`, and at a negative dot product whatever
+/// the tolerance (as `Heading::along` in the surface/surface intersection). At a smooth T the
+/// two are parallel, so the premise of [`TurnedBack`] is checked, not assumed. A zero vector,
+/// and NaN, do not turn back: every comparison with NaN fails.
+fn turns_back(te: Vec3, tn: Vec3, tangency_tol_rad: f64) -> bool {
+    let d = te.dot(tn);
+    d < 0.0 && d <= -(tangency_tol_rad.cos() * te.length() * tn.length())
 }
 
 /// Not upstream (solidcore-native, [`TurnedBack`]): the tangent of the edge `edge` leaving its
@@ -680,5 +691,40 @@ impl FilletCorner {
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::turns_back;
+    use crate::math::Vec3;
+
+    /// The turn-back test takes N's tangent within the angle tolerance of E's reversed, and
+    /// nothing short of it: a tangent merely past square to E (a negative dot product, the old
+    /// test) is not turned back. Zero vectors and NaN are not either.
+    #[test]
+    fn turning_back_needs_the_angle_tolerance() {
+        let tol = 1e-3_f64;
+        let te = Vec3::new(2.0, 0.0, 0.0);
+        let at = |deg: f64| {
+            let t = deg.to_radians();
+            Vec3::new(-3.0 * t.cos(), 3.0 * t.sin(), 0.0)
+        };
+        // straight back, and just inside the tolerance
+        assert!(turns_back(te, at(0.0), tol));
+        assert!(turns_back(te, at((0.5 * tol).to_degrees()), tol));
+        // just outside it, and a tangent only past square (dot < 0): the old test took both
+        assert!(!turns_back(te, at((2.0 * tol).to_degrees()), tol));
+        assert!(te.dot(at(80.0)) < 0.0);
+        assert!(!turns_back(te, at(80.0), tol));
+        // along E, square to it, zero and NaN
+        assert!(!turns_back(te, -at(0.0), tol));
+        assert!(!turns_back(te, at(90.0), tol));
+        assert!(!turns_back(te, Vec3::new(0.0, 0.0, 0.0), tol));
+        assert!(!turns_back(Vec3::new(0.0, 0.0, 0.0), at(0.0), tol));
+        let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
+        assert!(!turns_back(te, nan, tol));
+        assert!(!turns_back(nan, at(0.0), tol));
+        assert!(!turns_back(te, at(0.0), f64::NAN));
     }
 }

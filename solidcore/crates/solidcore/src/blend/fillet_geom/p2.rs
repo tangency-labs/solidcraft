@@ -168,6 +168,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
@@ -178,6 +179,7 @@ use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::SurfaceIntersection;
 use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled_in_place;
 use crate::topology::brep_cache::CacheObject;
@@ -1054,8 +1056,9 @@ struct Candidate {
     curve_3d: Curve,
     uv_curve1: Option<Curve>,
     uv_curve2: Option<Curve>,
-    /// Not upstream: the curve runs through a closed candidate's closure (`through_closure`).
-    through: bool,
+    /// Not upstream: where the curve runs through a closed candidate's closure
+    /// (`through_closure`), the closure's point; `None` otherwise.
+    through: Option<Point3>,
 }
 
 /// `sm_SrfSrfIntersection`: the intersection curve of two surfaces through `start`
@@ -1269,6 +1272,52 @@ fn through_closure(k: &Kernel, curve: &Curve, ivl: &Extent1d, from: f64, to: f64
         let _ = joined.reverse_parameterization(k, &span)?;
     }
     Ok(joined)
+}
+
+/// Not upstream (solidcore-native, with [`through_closure`]): whether `surface` is closed over
+/// `domain` in a direction whose seam holds the closure's point `closure` (a curve run through
+/// its closure crosses that seam there, so on that surface it has no one UV curve): for each
+/// closed direction, the point dropped onto the surface and moved along that direction to the
+/// domain's start lies within `tol` of it. `false` for no closure, for a surface closed in
+/// neither direction, for a point the surface does not take and where the distance is not a
+/// number.
+///
+/// # Errors
+/// Those of the closure tests, the drop (but its not finding the point) and the evaluations.
+fn on_closed_seam(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &Extent2d,
+    closure: Option<Point3>,
+    tol: f64,
+) -> Result<bool> {
+    let Some(closure) = closure else {
+        return Ok(false);
+    };
+    let closed_u = surface
+        .is_closed(k, domain, SurfParamType::U, None, false)?
+        .0;
+    let closed_v = surface
+        .is_closed(k, domain, SurfParamType::V, None, false)?
+        .0;
+    if !closed_u && !closed_v {
+        return Ok(false);
+    }
+    let dropped =
+        surface.drop_point::<NoObject>(k, closure, domain, &DropPointOptions::default())?;
+    if !dropped.success {
+        return Ok(false);
+    }
+    let uv = dropped.result_uv;
+    for (closed, seam) in [
+        (closed_u, Point2::new(domain.u_interval().min(), uv.y)),
+        (closed_v, Point2::new(uv.x, domain.v_interval().min())),
+    ] {
+        if closed && surface.evaluate_point(k, seam)?.distance(closure) <= tol {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The face-aware surface cache context of a [`srf_srf_intersection_with_context`]: the
@@ -1600,7 +1649,7 @@ pub fn srf_srf_intersection_with_context(
                 curve_3d: new_3d_curve,
                 uv_curve1: new_uv_curve1,
                 uv_curve2: new_uv_curve2,
-                through: false,
+                through: None,
             });
             continue;
         }
@@ -1608,7 +1657,7 @@ pub fn srf_srf_intersection_with_context(
         // Not upstream: on a closed curve, the curve between the points that leaves the start
         // in the start direction, when the caller asks for it (`closure_ends`); a candidate
         // with no way between them that does is passed over as one off the points is
-        let mut through = false;
+        let mut through = None;
         if let (Some(start_pnt), Some(end_pnt), Some(heading)) = (start, end, wanted_heading) {
             match closure_ends(
                 k,
@@ -1625,24 +1674,25 @@ pub fn srf_srf_intersection_with_context(
                         curve_3d: new_3d_curve,
                         uv_curve1: new_uv_curve1,
                         uv_curve2: new_uv_curve2,
-                        through: false,
+                        through: None,
                     });
                     continue;
                 }
                 Some(ClosureEnds::Span(from, to)) => (param1, param2) = (from, to),
                 Some(ClosureEnds::Through(from, to)) => {
                     // its UV curves are made by `DropCurve` below, as missing ones are
+                    let closure = new_3d_curve.evaluate_point(k, trim_ivl.min())?;
                     new_3d_curve = through_closure(k, &new_3d_curve, &trim_ivl, from, to)?;
                     new_uv_curve1 = None;
                     new_uv_curve2 = None;
                     trim_ivl = new_3d_curve.natural_interval();
-                    through = true;
+                    through = Some(closure);
                 }
             }
         }
 
         // when given an endPoint - trim intersection curves to endPoints
-        if end.is_some() && !through {
+        if end.is_some() && through.is_none() {
             // see if intersection curve needs to be reversed
             if param1 > param2 {
                 reverse_curves = true;
@@ -1746,14 +1796,16 @@ pub fn srf_srf_intersection_with_context(
     let trim_ivl = curve_3d.natural_interval();
     // Not upstream: a curve through a closed candidate's closure crosses the seam of a closed
     // surface it lies on (the closure of a plane/cylinder circle is the cylinder's seam), where
-    // its UV image is no one curve on the surface's domain: on that surface it has none
+    // its UV image is no one curve on the surface's domain: on that surface it has none. Only
+    // there: on a surface not closed across the closure's point, a missing UV curve is the
+    // drop's failure, as for any other curve (`on_closed_seam`)
     let through = best.through;
 
     // generate surf1 UVTrimCurve if it's missing (some intersectors don't make them)
     if uv_curve1.is_none() {
         let uv_curves = surface_drop_curve(k, surf1, &domain1, &curve_3d, &trim_ivl, approx_tol)?;
         let first = uv_curves.into_iter().next();
-        if first.is_none() && !through {
+        if first.is_none() && !on_closed_seam(k, surf1, &domain1, through, approx_tol)? {
             return Err(SolidError::blend_failed(
                 OP_SRF_SRF,
                 "the curve drops onto the first surface as no UV curve",
@@ -1766,7 +1818,7 @@ pub fn srf_srf_intersection_with_context(
     if uv_curve2.is_none() {
         let uv_curves = surface_drop_curve(k, surf2, &domain2, &curve_3d, &trim_ivl, approx_tol)?;
         let first = uv_curves.into_iter().next();
-        if first.is_none() && !through {
+        if first.is_none() && !on_closed_seam(k, surf2, &domain2, through, approx_tol)? {
             return Err(SolidError::blend_failed(
                 OP_SRF_SRF,
                 "the curve drops onto the second surface as no UV curve",
@@ -3947,7 +3999,68 @@ fn find_stepoff_uv(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::axis2_placement::Axis2Placement;
     use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::surface::cone::Cone;
+
+    /// The cylinder of radius 10 about z, height 40, its seam at `seam_deg` degrees about z.
+    fn seamed_cylinder(k: &Kernel, seam_deg: f64) -> Surface {
+        let t = seam_deg.to_radians();
+        let frame = Axis2Placement::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(t.cos(), t.sin(), 0.0),
+            Vec3::new(-t.sin(), t.cos(), 0.0),
+        );
+        let mut cylinder = Cone::create_canonical_cylinder(k, &frame, 10.0).unwrap();
+        let mut domain = Extent2d::default();
+        domain.set_min_max_coords(0.0, 0.0, 360.0, 40.0).unwrap();
+        cylinder.adjust_step_uv_domain(k, &domain).unwrap();
+        Surface::from(cylinder)
+    }
+
+    /// The point at `deg` degrees on the cylinder's circle at height 5.
+    fn on_circle(deg: f64) -> Point3 {
+        let t = deg.to_radians();
+        Point3::new(10.0 * t.cos(), 10.0 * t.sin(), 5.0)
+    }
+
+    /// A curve through a closed candidate's closure may go without a UV curve only on a
+    /// surface closed across the closure's point: on the cylinder's seam, not beside it, not on
+    /// a plane (closed in neither direction) and not without a closure. The old test took a
+    /// missing UV curve on every surface the moment the curve ran through a closure.
+    #[test]
+    fn a_curve_through_its_closure_needs_a_seam_there_to_go_without_a_uv_curve() {
+        let k = Kernel::default();
+        let tol = 1e-6;
+        let cylinder = seamed_cylinder(&k, 5.0);
+        let domain = cylinder.natural_uv_domain_with_nurb(&k).unwrap();
+        // on the seam, and within the tolerance of it
+        assert!(on_closed_seam(&k, &cylinder, &domain, Some(on_circle(5.0)), tol).unwrap());
+        let t = 5.0_f64.to_radians();
+        let near = on_circle(5.0) + Vec3::new(t.cos(), t.sin(), 0.0) * (0.5 * tol);
+        assert!(on_closed_seam(&k, &cylinder, &domain, Some(near), tol).unwrap());
+        // beside it (10 degrees off and more, and 1e-3 along the circle) and no closure at all
+        for deg in [15.0, -5.0, 180.0, 5.0 + 1e-4_f64.to_degrees()] {
+            assert!(
+                !on_closed_seam(&k, &cylinder, &domain, Some(on_circle(deg)), tol).unwrap(),
+                "{deg} degrees"
+            );
+        }
+        assert!(!on_closed_seam(&k, &cylinder, &domain, None, tol).unwrap());
+        // a plane through the seam's point: closed in neither direction
+        let frame = Axis2Placement::new(
+            Point3::new(0.0, 0.0, 5.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let mut plane = Plane::create_canonical(&frame).unwrap();
+        let mut pd = Extent2d::default();
+        pd.set_min_max_coords(-30.0, -30.0, 30.0, 30.0).unwrap();
+        plane.adjust_step_uv_domain(&pd).unwrap();
+        let plane = Surface::from(plane);
+        let plane_domain = plane.natural_uv_domain_with_nurb(&k).unwrap();
+        assert!(!on_closed_seam(&k, &plane, &plane_domain, Some(on_circle(5.0)), tol).unwrap());
+    }
 
     #[test]
     fn a_side_edge_chain_keeps_every_default_guess_after_the_corner_section() {
