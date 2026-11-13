@@ -72,7 +72,7 @@ fn flat_pair() -> ((Body, Order, usize), (Body, Order, usize)) {
         line([10.0, 0.0, 0.0], [10.0, 10.0, 0.0]),
     );
     let ea = edge_through(&a, &ao, [10.0, 5.0, 0.0]);
-    let r = 10.0 / 2.0_f64.sqrt();
+    let r = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
     let (b, bo) = sheet(
         line([15.0, 0.0, 0.0], [15.0, 10.0, 0.0]),
         line([15.0 + r, 0.0, r], [15.0 + r, 10.0, r]),
@@ -81,7 +81,7 @@ fn flat_pair() -> ((Body, Order, usize), (Body, Order, usize)) {
     ((a, ao, ea), (b, bo, eb))
 }
 
-fn side<'a>(s: &'a (Body, Order, usize), continuity: Continuity) -> BlendSide<'a> {
+fn side(s: &(Body, Order, usize), continuity: Continuity) -> BlendSide<'_> {
     BlendSide {
         body: &s.0,
         order: &s.1,
@@ -331,7 +331,7 @@ fn a_round_of_radius_5_between_sheets_at_a_right_angle_touches_each_5_from_the_c
 #[test]
 fn a_chordal_fillet_of_chord_5_root_2_is_the_radius_5_round() {
     let (a, b) = corner();
-    let chord = 5.0 * 2.0_f64.sqrt();
+    let chord = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
     let f = fillet_sheets(&a, &b, &fillet_how(Section::Chord(chord), false)).unwrap();
     assert!(has_edge_through(&f.fillet, [5.0, 5.0, 0.0]));
     assert!(has_edge_through(&f.fillet, [0.0, 5.0, 5.0]));
