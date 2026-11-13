@@ -1,0 +1,92 @@
+{
+  "en": {
+    "cmd.drawing.center_line.add": "Add Center Line",
+    "cmd.drawing.center_line.edit": "Edit Center Line",
+    "cmd.drawing.center_line.inspect": "Inspect Center Line",
+    "cmd.drawing.center_line.remove": "Remove Center Line",
+    "cmd.drawing.center_mark.add": "Add Center Mark",
+    "cmd.drawing.center_mark.edit": "Edit Center Mark",
+    "cmd.drawing.center_mark.inspect": "Inspect Center Mark",
+    "cmd.drawing.center_mark.remove": "Remove Center Mark"
+  },
+  "ar": {
+    "cmd.drawing.center_line.add": "إضافة خط المركز",
+    "cmd.drawing.center_line.edit": "تعديل خط المركز",
+    "cmd.drawing.center_line.inspect": "فحص خط المركز",
+    "cmd.drawing.center_line.remove": "إزالة خط المركز",
+    "cmd.drawing.center_mark.add": "إضافة علامة المركز",
+    "cmd.drawing.center_mark.edit": "تعديل علامة المركز",
+    "cmd.drawing.center_mark.inspect": "فحص علامة المركز",
+    "cmd.drawing.center_mark.remove": "إزالة علامة المركز"
+  },
+  "he": {
+    "cmd.drawing.center_line.add": "הוספת קו מרכז",
+    "cmd.drawing.center_line.edit": "עריכת קו מרכז",
+    "cmd.drawing.center_line.inspect": "בדיקת קו מרכז",
+    "cmd.drawing.center_line.remove": "הסרת קו מרכז",
+    "cmd.drawing.center_mark.add": "הוספת סימון מרכז",
+    "cmd.drawing.center_mark.edit": "עריכת סימון מרכז",
+    "cmd.drawing.center_mark.inspect": "בדיקת סימון מרכז",
+    "cmd.drawing.center_mark.remove": "הסרת סימון מרכז"
+  },
+  "ja": {
+    "cmd.drawing.center_line.add": "中心線を追加",
+    "cmd.drawing.center_line.edit": "中心線を編集",
+    "cmd.drawing.center_line.inspect": "中心線を確認",
+    "cmd.drawing.center_line.remove": "中心線を削除",
+    "cmd.drawing.center_mark.add": "中心マークを追加",
+    "cmd.drawing.center_mark.edit": "中心マークを編集",
+    "cmd.drawing.center_mark.inspect": "中心マークを確認",
+    "cmd.drawing.center_mark.remove": "中心マークを削除"
+  },
+  "vi": {
+    "cmd.drawing.center_line.add": "Thêm đường tâm",
+    "cmd.drawing.center_line.edit": "Sửa đường tâm",
+    "cmd.drawing.center_line.inspect": "Kiểm tra đường tâm",
+    "cmd.drawing.center_line.remove": "Xóa đường tâm",
+    "cmd.drawing.center_mark.add": "Thêm dấu tâm",
+    "cmd.drawing.center_mark.edit": "Sửa dấu tâm",
+    "cmd.drawing.center_mark.inspect": "Kiểm tra dấu tâm",
+    "cmd.drawing.center_mark.remove": "Xóa dấu tâm"
+  },
+  "zh": {
+    "cmd.drawing.center_line.add": "添加中心线",
+    "cmd.drawing.center_line.edit": "编辑中心线",
+    "cmd.drawing.center_line.inspect": "检查中心线",
+    "cmd.drawing.center_line.remove": "移除中心线",
+    "cmd.drawing.center_mark.add": "添加中心标记",
+    "cmd.drawing.center_mark.edit": "编辑中心标记",
+    "cmd.drawing.center_mark.inspect": "检查中心标记",
+    "cmd.drawing.center_mark.remove": "移除中心标记"
+  },
+  "en-GB": {
+    "cmd.drawing.center_line.add": "Add Centre Line",
+    "cmd.drawing.center_line.edit": "Edit Centre Line",
+    "cmd.drawing.center_line.inspect": "Inspect Centre Line",
+    "cmd.drawing.center_line.remove": "Remove Centre Line",
+    "cmd.drawing.center_mark.add": "Add Centre Mark",
+    "cmd.drawing.center_mark.edit": "Edit Centre Mark",
+    "cmd.drawing.center_mark.inspect": "Inspect Centre Mark",
+    "cmd.drawing.center_mark.remove": "Remove Centre Mark"
+  },
+  "de": {
+    "cmd.drawing.center_line.add": "Mittellinie hinzufügen",
+    "cmd.drawing.center_line.edit": "Mittellinie bearbeiten",
+    "cmd.drawing.center_line.inspect": "Mittellinie prüfen",
+    "cmd.drawing.center_line.remove": "Mittellinie entfernen",
+    "cmd.drawing.center_mark.add": "Mittelpunktmarkierung hinzufügen",
+    "cmd.drawing.center_mark.edit": "Mittelpunktmarkierung bearbeiten",
+    "cmd.drawing.center_mark.inspect": "Mittelpunktmarkierung prüfen",
+    "cmd.drawing.center_mark.remove": "Mittelpunktmarkierung entfernen"
+  },
+  "ko": {
+    "cmd.drawing.center_line.add": "중심선 추가",
+    "cmd.drawing.center_line.edit": "중심선 편집",
+    "cmd.drawing.center_line.inspect": "중심선 검사",
+    "cmd.drawing.center_line.remove": "중심선 제거",
+    "cmd.drawing.center_mark.add": "중심 마크 추가",
+    "cmd.drawing.center_mark.edit": "중심 마크 편집",
+    "cmd.drawing.center_mark.inspect": "중심 마크 검사",
+    "cmd.drawing.center_mark.remove": "중심 마크 제거"
+  }
+}
