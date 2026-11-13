@@ -132,18 +132,6 @@ pub fn quiet_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &s
     icon_button_presentation(ui, rect, icon, label, None, true, false)
 }
 
-/// The quiet action as a toggle: while on it has the selected fill and ink, as `compact_button`
-/// does, and reports the state to assistive technology.
-pub fn quiet_icon_toggle_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, on: bool) -> Response {
-    let t = Tokens::get();
-    if on {
-        ui.painter().rect_filled(rect, t.control_radius, t.selected_bg);
-    }
-    let response = icon_button_presentation(ui, rect, icon, label, on.then_some(t.form_primary), true, false);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, solidcraft_ui_text::tr_label(label)));
-    response
-}
-
 /// Directional counterpart of an existing master, with the same hit target and accessibility.
 pub fn mirrored_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
     icon_button_presentation(ui, rect, icon, label, None, false, true)

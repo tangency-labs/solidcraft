@@ -2070,10 +2070,6 @@ pub const ELEMENTS: &[Element] = &[
         });
         shortcut_binding(ui, "", "Not assigned", true);
     }),
-    element!("quiet_icon_toggle_at", |ui, _| {
-        let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
-        quiet_icon_toggle_at(ui, rect, "zoom", "Search", true);
-    }),
     element!("keyboard", |ui, _| {
         assert_eq!(keyboard(ui.ctx(), true), Action::None);
         ui.allocate_space(vec2(row_height(), row_height()));

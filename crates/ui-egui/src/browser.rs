@@ -1553,7 +1553,7 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
     if crate::browser_search::bar_shown(app) {
         // The panel host draws the title row (#15184), so the field is the first row under it.
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), crate::ui_kit::row_height() + Tokens::get().space_8), Sense::hover());
-        crate::browser_search::header_field(app, ui, rect);
+        crate::browser_search::field_row(app, ui, rect);
     }
     if app.tree.search.on() {
         // Under the header and never scrolled with the rows, but clipped to the card's height, so it

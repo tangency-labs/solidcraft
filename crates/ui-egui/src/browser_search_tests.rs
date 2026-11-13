@@ -344,6 +344,14 @@ fn the_header_action_shows_the_bar_and_ends_the_search() {
     assert!(h.app.tree.search.text.is_empty());
     assert_eq!(count("Origin"), 1);
     assert_eq!(header_action_on(&h), Some(false), "the magnifier is off again");
+    // The magnifier stays in the header while the field is open, so a second press ends the search too.
+    click(&mut h, "browser:magnifier");
+    h.call("ui.text", json!({"text": "washer"}));
+    h.frames(2);
+    assert!(h.app.tree.search.on());
+    click(&mut h, "browser:magnifier");
+    assert!(handle_at("browser:search").is_none() && !h.app.tree.search.on());
+    assert_eq!(header_action_on(&h), Some(false));
 }
 
 /// The panel host names each header action `<panel>:<action>`: History's controls keep the names
