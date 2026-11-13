@@ -28,6 +28,12 @@
     "reason": "status 1001 instead of the refusal naming the size that fits"
   },
   {
+    "case": "fillets/15768-fillet-ledge-concave-edge-beside-bore-r0-5",
+    "issue": "tangency-labs/solidcraft#15768",
+    "reason": "a closed solid at the closed-form volume, but the end cap stays a face of its own beside the bore wall: the fillet clean-up keeps the split side edge piece by its input id (WR-459), where the mirror image merges it",
+    "fails": "faces 28 (rig 27), edges 75 (rig 73), vertices 49 (rig 48)"
+  },
+  {
     "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
     "issue": "tangency-labs/solidcraft#12645",
     "reason": "solid.fillet builds `corner: g2` with `fit: exact` only"
