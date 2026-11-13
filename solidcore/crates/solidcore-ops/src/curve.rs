@@ -1,25 +1,27 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
-//! blend from one curve's end to another's, circles and arcs, a curve extended at an end, and two
-//! curves joined end to end.
+//! blend from one curve's end to another's, circles and arcs, a curve extended at an end, two
+//! curves joined end to end, and the point of a curve nearest a given point.
 //! The curve is the record's ([`Curve`]); the knots, the map's carrying of the control points,
-//! the views' meeting, the curvature, the blend, the circles and the extension are the
-//! kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
+//! the views' meeting, the curvature, the blend, the circles, the extension and the nearest point
+//! are the kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
 //! [`solidcore::nurbs::crv_basic::Curve::transform`],
 //! [`solidcore::intersect::views::curves_from_views`],
 //! [`solidcore::query::continuity::curve_comb`], [`solidcore::curve::blend::blend_curve`],
 //! [`solidcore::curve::ellipse::Ellipse::arc`],
 //! [`solidcore::curve::ellipse::Ellipse::circle_from_3_points`],
 //! [`solidcore::nurbs::crv_basic::Curve::extend_by_dist`],
-//! [`solidcore::nurbs::b_spline_curve::BSplineCurve::join_with`]). Ops checks the inputs and
+//! [`solidcore::nurbs::b_spline_curve::BSplineCurve::join_with`],
+//! [`solidcore::curve::curve::Curve::drop_point`]). Ops checks the inputs and
 //! converts.
 
 use solidcore::curve::arc::ArcDefinition;
 use solidcore::curve::blend::{self as kblend, BlendEnd};
 use solidcore::curve::curve::Curve as KCurve;
 use solidcore::curve::ellipse::Ellipse;
-use solidcore::curve::from_parameters::{from_parameters, EdgeCurve};
+use solidcore::curve::from_parameters::{from_parameters, record_parameter, EdgeCurve};
 use solidcore::geom::certified::Verdict;
+use solidcore::geom::global_solver::SolverOperation;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -685,6 +687,83 @@ pub fn curve_surface_deviation(
                 Err(e) => return Err(e),
             },
         )
+    })?
+}
+
+/// The point of a free curve nearest a given point ([`closest_point`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurvePoint {
+    /// The curve's parameter there, the record's.
+    pub parameter: f64,
+    /// The curve's point there.
+    pub point: [f64; 3],
+    /// Its distance from the given point: the kernel solve's (not certified). A solution
+    /// within the tolerance of an end is snapped to that end and keeps the solve's distance, so
+    /// it is the distance to `point` within the tolerance.
+    pub distance: f64,
+}
+
+/// The record parameter range [`closest_point`] drops over: a line's segment from its start
+/// (0) to its end (1), a circle's or ellipse's one turn from its frame's x axis, any other
+/// curve's own range; `None` for an unbounded range.
+fn own_range(curve: &Curve) -> Option<[f64; 2]> {
+    match (curve, curve.natural()) {
+        (Curve::Line { .. }, _) => Some([0.0, 1.0]),
+        (_, Natural::Periodic) => Some([0.0, std::f64::consts::TAU]),
+        (_, Natural::Range(lo, hi)) => (lo.is_finite() && hi.is_finite()).then_some([lo, hi]),
+    }
+}
+
+/// The point of `curve` nearest `p` over the record's own range (a line between its two
+/// points, a circle or ellipse its whole turn, a polyline or spline its whole range): the
+/// curve as the kernel's ([`from_parameters`]), the kernel's global minimising drop of `p` onto
+/// it ([`KCurve::drop_point`], no guess; a solution within `tolerance` of an end snapped to
+/// that end), the curve's point at the parameter it finds ([`KCurve::evaluate_point`]) and that
+/// parameter as the record's
+/// ([`solidcore::curve::from_parameters::record_parameter`]: radians on a circle or ellipse).
+/// `None` where the drop finds no point.
+///
+/// # Errors
+/// [`Error::Argument`] for a point not finite or past the coordinate bound, a tolerance not
+/// finite and positive, or a curve the record or the kernel's constructors refuse; the kernel's
+/// status otherwise (a traced intersection curve, which has no constructor yet).
+pub fn closest_point(curve: &Curve, p: [f64; 3], tolerance: f64) -> Result<Option<CurvePoint>> {
+    if !coord_ok(&p) || !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Error::Argument);
+    }
+    if check_curve(curve, &mut Budget::input()).is_err() {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::closest_point", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let dropped = match made.curve.drop_point(
+            k,
+            &made.interval,
+            point(p),
+            None,
+            tolerance,
+            None,
+            SolverOperation::Minimize,
+        ) {
+            Ok(dropped) => dropped,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        if !dropped.success {
+            return Ok(Ok(None));
+        }
+        let at = made.curve.evaluate_point(k, dropped.parameter)?;
+        Ok(Ok(Some(CurvePoint {
+            parameter: record_parameter(&record, range, dropped.parameter, at),
+            point: [at.x, at.y, at.z],
+            distance: dropped.distance,
+        })))
     })?
 }
 
