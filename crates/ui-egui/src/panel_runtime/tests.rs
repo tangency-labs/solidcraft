@@ -2552,6 +2552,8 @@ struct RawPanelHost {
     time: f64,
     capacity: LogicalRect,
     native_pixels_per_point: Option<f32>,
+    /// The window's screen position, as a desktop backend reports it.
+    inner_origin: Option<egui::Pos2>,
     foreign_cover: Option<egui::Rect>,
     foreign_responses: Vec<egui::Response>,
     foreign_takes_focus: bool,
@@ -2586,6 +2588,7 @@ impl RawPanelHost {
             time: 0.0,
             capacity: capacity(),
             native_pixels_per_point: None,
+            inner_origin: None,
             foreign_cover: None,
             foreign_responses: Vec::new(),
             foreign_takes_focus: false,
@@ -2631,6 +2634,10 @@ impl RawPanelHost {
         };
         if let Some(dpi) = self.native_pixels_per_point {
             input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(dpi);
+        }
+        if let Some(origin) = self.inner_origin {
+            let size = egui::vec2(self.capacity.size.width, self.capacity.size.height);
+            input.viewports.entry(egui::ViewportId::ROOT).or_default().inner_rect = Some(egui::Rect::from_min_size(origin, size));
         }
         // Match SolveApp's native boundary before egui validates pointer and wheel events.
         crate::finite_input(&mut input);
@@ -13921,4 +13928,237 @@ fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monit
     adapter.prepare(&create).unwrap();
     adapter.commit(&create);
     assert_ne!(adapter.viewport_id(&host), Some(previous));
+}
+
+/// Two panels on a native-capable fixture host; `moving` is docked Right.
+fn drag_out_fixture() -> (LayoutService, HostLayout, HostDragOut) {
+    let mut service = fixture_service(true).unwrap();
+    apply_fixture(
+        &mut service,
+        vec![
+            fixture_open("fixture.log", "one", "one", Zone::Left, 0).unwrap(),
+            fixture_open("fixture.log", "moving", "moving", Zone::Right, 1).unwrap(),
+        ],
+    );
+    let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, Direction::Ltr, &fixture_metric_policy(&service));
+    let window = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 930.0 } };
+    (service, host, HostDragOut { window, screen_origin: Point { x: 100.0, y: 50.0 } })
+}
+
+#[test]
+fn drag_out_targets_a_desktop_window_only_outside_the_app_and_opens_it_where_it_was_shown() {
+    let (mut service, host, drag_out) = drag_out_fixture();
+    let scope = fixture_scope(&service);
+    let before = service.inspect();
+    let header = HostPointerTarget::Header { instance: id("moving") };
+    let card = host.sections.iter().find(|card| card.instance == id("moving")).unwrap().outer;
+    let outside = Point { x: 1500.0, y: 400.0 };
+    let release = |interaction: &mut HostInteraction, service: &LayoutService, at| {
+        interaction.update(service, &fixture_scope(service), &host, HostPointerEvent::Release { at })
+    };
+
+    // Off (the default): a drag past the edge keeps the panel in the app, as on main.
+    let mut interaction = HostInteraction::default();
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    assert!(interaction.update(&service, &scope, &host, HostPointerEvent::Move { at: outside }).preview.is_none());
+    assert!(interaction.window_landing().is_none());
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+
+    // On: the Window target, its corner placed so the grabbed point stays under the pointer.
+    interaction.set_drag_out(Some(drag_out));
+    let start = fixture_press(&service, &host, &mut interaction, header.clone());
+    let preview = fixture_move(&service, &host, &mut interaction, outside);
+    assert_eq!((preview.target.clone(), preview.rejection.clone()), (Some(HostDropTargetId::Window), None));
+    let corner = Point { x: 100.0 + outside.x - (start.x - card.origin.x), y: 50.0 + outside.y - (start.y - card.origin.y) };
+    assert_eq!(preview.window, Some(corner));
+    assert_eq!(interaction.window_landing(), Some((&id("moving"), corner)));
+    assert_eq!(service.inspect(), before, "a preview never changes the layout");
+    // A landing that was never shown is never committed.
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+    assert_eq!(service.inspect(), before);
+
+    // Shown, then left for a dock target inside the app: the shown window is forgotten.
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    fixture_move(&service, &host, &mut interaction, outside);
+    let shown = LogicalRect { origin: corner, size: Size { width: 376.0, height: 488.0 } };
+    interaction.confirm_window_shown(shown);
+    let inside = middle(host.sections.iter().find(|card| card.instance == id("one")).unwrap().outer);
+    assert!(fixture_move(&service, &host, &mut interaction, inside).window.is_none());
+    fixture_move(&service, &host, &mut interaction, outside);
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+
+    // Escape cancels a shown Window target.
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    fixture_move(&service, &host, &mut interaction, outside);
+    interaction.confirm_window_shown(shown);
+    interaction.update(&service, &scope, &host, HostPointerEvent::Escape);
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+    assert_eq!(service.inspect(), before);
+
+    // A confirmation for another place is ignored; after a real one, moving on
+    // still opens the window where it was shown, not under the release.
+    fixture_press(&service, &host, &mut interaction, header);
+    fixture_move(&service, &host, &mut interaction, outside);
+    interaction.confirm_window_shown(LogicalRect { origin: Point { x: 0.0, y: 0.0 }, ..shown });
+    interaction.confirm_window_shown(shown);
+    let further = Point { x: outside.x + 30.0, y: outside.y + 20.0 };
+    assert_ne!(fixture_move(&service, &host, &mut interaction, further).window, Some(corner));
+    // Released back over the app, the Window target does not apply.
+    assert!(release(&mut interaction, &service, Point { x: 700.0, y: 400.0 }).candidate.is_none());
+    fixture_press(&service, &host, &mut interaction, HostPointerTarget::Header { instance: id("moving") });
+    fixture_move(&service, &host, &mut interaction, outside);
+    interaction.confirm_window_shown(shown);
+    fixture_move(&service, &host, &mut interaction, further);
+    let candidate = release(&mut interaction, &service, further).candidate.expect("the shown Window target commits");
+    assert_eq!(candidate.window_landing(), Some(&(id("moving"), shown)));
+    fixture_commit(&mut service, &host, candidate);
+    let popped = service.layout().containing(&id("moving")).unwrap();
+    let SectionLocation::Window { return_to, .. } = &popped.location else { panic!("{popped:?}") };
+    assert_eq!(return_to.zone, Zone::Right, "closing the window docks the panel where it was");
+}
+
+#[test]
+fn drag_out_refuses_a_panel_that_cannot_pop_out_and_a_host_without_native_windows() {
+    for case in ["no-popout", "no-native"] {
+        let mut service = if case == "no-popout" {
+            let mut service = allocation_service(|spec| spec.features.popout = false);
+            service = LayoutService::new(
+                service.registry().clone(),
+                service.layout().clone(),
+                HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true },
+            )
+            .unwrap();
+            service
+        } else {
+            fixture_service(false).unwrap()
+        };
+        apply_fixture(&mut service, vec![fixture_open("fixture.log", "moving", "moving", Zone::Right, 0).unwrap()]);
+        let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, Direction::Ltr, &fixture_metric_policy(&service));
+        let window = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 930.0 } };
+        let mut interaction = HostInteraction::default();
+        interaction.set_drag_out(Some(HostDragOut { window, screen_origin: Point { x: 0.0, y: 0.0 } }));
+        fixture_press(&service, &host, &mut interaction, HostPointerTarget::Header { instance: id("moving") });
+        let preview = fixture_move(&service, &host, &mut interaction, Point { x: 1500.0, y: 400.0 });
+        assert!(preview.rejection.is_some() && preview.window.is_none(), "{case}");
+        assert!(interaction.window_landing().is_none(), "{case}");
+    }
+}
+
+#[test]
+fn a_popped_out_panel_drags_back_by_its_grip_onto_a_shown_dock_target_only() {
+    let (mut service, _, _) = drag_out_fixture();
+    let reservations = fixture_complete_reservations(&service);
+    let destination = super::workspace::popout_destination(&service, &id("moving"), Point { x: 0.0, y: 30.0 }, &reservations).unwrap();
+    apply_fixture(&mut service, vec![Mutation::Move { instance: id("moving"), destination }]);
+    assert_eq!(service.layout().containing(&id("moving")).unwrap().location.zone(), Zone::Window);
+    let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, Direction::Ltr, &fixture_metric_policy(&service));
+    let scope = fixture_scope(&service);
+    let before = service.inspect();
+    assert!(HostInteraction::default().begin_window_move(&service, &scope, &host, &id("one")).is_err(), "a docked panel has no grip drag");
+
+    // Released where no target was shown: nothing changes, the window stays.
+    let mut drag = HostInteraction::default();
+    drag.begin_window_move(&service, &scope, &host, &id("moving")).unwrap();
+    let target = middle(host.sections.iter().find(|card| card.instance == id("one")).unwrap().outer);
+    assert!(drag.update(&service, &scope, &host, HostPointerEvent::Release { at: target }).candidate.is_none());
+    assert_eq!(service.inspect(), before);
+
+    // Over the app the host shows a dock target; release docks the panel there.
+    drag.begin_window_move(&service, &scope, &host, &id("moving")).unwrap();
+    let preview = fixture_move(&service, &host, &mut drag, target);
+    assert!(preview.rejection.is_none() && preview.window.is_none() && preview.target.is_some());
+    assert_eq!(service.inspect(), before);
+    let candidate = drag.update(&service, &scope, &host, HostPointerEvent::Release { at: target }).candidate.expect("a shown dock target commits");
+    assert!(candidate.window_landing().is_none());
+    fixture_commit(&mut service, &host, candidate);
+    assert!(service.layout().containing(&id("moving")).unwrap().location.zone().docked());
+    assert!(service.layout().sections.iter().all(|section| section.location.zone() != Zone::Window), "the window's host is released");
+}
+
+#[test]
+fn a_dropped_window_opens_at_the_shown_place_kept_on_its_monitor() {
+    use super::native::{DesktopNativeAdapter, NativeMonitor};
+
+    let mut adapter = DesktopNativeAdapter::default();
+    let host = HostId::new("drop-test").unwrap();
+    let create = [HostEffect::CreateNative { host: host.clone(), section: SectionId::new("drop-section").unwrap() }];
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
+    let monitor = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2000.0, 1600.0));
+    adapter.update_monitors(|| vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }]);
+    let ctx = egui::Context::default();
+    let instance = InstanceId::new("drop-panel").unwrap();
+    let bounds = (Size { width: 200.0, height: 100.0 }, Size { width: 900.0, height: 900.0 });
+    let preferred = Size { width: 360.0, height: 440.0 };
+    // On the monitor: the landing is the window's outer rectangle at the corner.
+    let shown = adapter.landing(&ctx, &instance, egui::pos2(100.0, 80.0), preferred, bounds).unwrap();
+    assert_eq!(shown.min, egui::pos2(100.0, 80.0));
+    adapter.place(&ctx, &instance, shown);
+    let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), preferred, bounds).unwrap();
+    assert_eq!(builder.position, Some(shown.min));
+    assert_eq!(builder.inner_size, Some(egui::vec2(360.0, 440.0)));
+    // Past the monitor's edge: shown and opened at the same kept-on-screen place.
+    let edge = adapter.landing(&ctx, &instance, egui::pos2(900.0, 700.0), preferred, bounds).unwrap();
+    assert!(edge.max.x <= 1000.0 && edge.max.y <= 800.0, "{edge:?}");
+    adapter.place(&ctx, &instance, edge);
+    let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), preferred, bounds).unwrap();
+    assert_eq!(builder.position, Some(edge.min));
+}
+
+#[test]
+fn raw_host_drags_a_panel_out_to_a_desktop_window_and_back_by_its_grip_keeping_its_editor() {
+    let mut h = PanelMountHarness::new(true).unwrap();
+    open_editor(&mut h);
+    let key = editor_key(&h);
+    h.probe.edit(&key, |state| state.draft = "torn-off draft".into()).unwrap();
+    let mut raw = RawPanelHost::new(h, 1.0);
+    raw.inner_origin = Some(egui::pos2(200.0, 100.0));
+    raw.host.set_drag_out(true);
+    raw.frame(Vec::new(), false);
+    let docked = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.clone();
+    let start = raw.at(HostControlTarget::Pointer(HostPointerTarget::Header { instance: id("editor") }));
+    let card = raw.host.frame().unwrap().layout.sections.iter().find(|card| card.instance == id("editor")).unwrap().outer;
+    let outside = egui::pos2(1500.0, 400.0);
+
+    // Out: the host offers the window's place, opens it only once shown, and hands
+    // the shown rectangle to the desktop adapter.
+    raw.pointer(start, true, false);
+    raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+    let (instance, corner) = raw.host.window_landing_preview().expect("past the edge, the Window target is offered");
+    assert_eq!(instance, id("editor"));
+    // On the screen, the grabbed point of the header stays under the pointer.
+    assert_eq!(corner, Point { x: 200.0 + outside.x - (start.x - card.origin.x), y: 100.0 + outside.y - (start.y - card.origin.y) });
+    let shown = LogicalRect { origin: corner, size: Size { width: 376.0, height: 488.0 } };
+    raw.host.confirm_window_shown(shown);
+    raw.frame(
+        vec![egui::Event::PointerButton { pos: outside, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
+        false,
+    );
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.zone(), Zone::Window);
+    assert_eq!(raw.host.take_window_landing(), Some((id("editor"), shown)));
+    let state = raw.content.probe.state(&key).unwrap();
+    assert_eq!((state.draft.as_str(), state.transaction_live), ("torn-off draft", true));
+
+    // Back: the grip's screen positions become this host's drop target; release docks.
+    let target = egui::pos2(200.0 + 20.0, 100.0 + 500.0);
+    raw.host.queue_window_drag(WindowDragEvent::Begin { instance: id("editor"), at: Point { x: target.x, y: target.y } });
+    raw.frame(Vec::new(), false);
+    let preview = raw.host.frame().unwrap().preview.clone().expect("the app shows where the panel would dock");
+    assert!(preview.rejection.is_none() && preview.window.is_none(), "{preview:?}");
+    raw.host.queue_window_drag(WindowDragEvent::Release { at: Point { x: target.x, y: target.y } });
+    raw.frame(Vec::new(), false);
+    raw.frame(Vec::new(), false);
+    let location = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.clone();
+    assert!(location.zone().docked(), "{location:?} (was {docked:?})");
+    let state = raw.content.probe.state(&key).unwrap();
+    assert_eq!((state.draft.as_str(), state.transaction_live), ("torn-off draft", true));
+    assert_eq!((state.applies, state.cancels), (0, 0));
+
+    // With the preference off, grip drags are ignored.
+    raw.host.set_drag_out(false);
+    let before = raw.content.runtime.layout().inspect();
+    raw.host.queue_window_drag(WindowDragEvent::Begin { instance: id("editor"), at: Point { x: target.x, y: target.y } });
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.content.runtime.layout().inspect(), before);
 }

@@ -335,6 +335,19 @@ controller and document stay with the panel. The desktop adapter remembers the
 panel's window size and monitor for the current app session and checks that the
 OS created the window before presenting content. On the web, the same action
 places the panel in the shared Floating zone.
+
+With the Layout preference **Drag panels out of the app into their own windows**
+(desktop only, off by default), the area outside the app window is one more
+drop target, `Window`, for a title or tab drag. It is not a fallback for a
+missed target: it follows the same prepare, preview and commit path as the dock
+targets, and uses the same destination as **Pop out to window**. While it is
+selected, the app shows an outline window at the exact screen place the panel's
+window will open; release opens it there, and only after that outline was shown.
+Release over the app, Escape, focus loss or a changed app window cancels. A
+popped-out window then has a grip: dragging it over the app shows the normal dock
+target, and release docks the panel there. With the preference off, a drag past
+the app's edge keeps the panel in the app.
+
 Panels in the workspace use the ribbon's theme fill and backdrop blur. The
 system's Reduce Transparency setting keeps the panels opaque. Explicit opacity
 overrides use the panel contrast check. Captured `paint_alpha` and `contrast`

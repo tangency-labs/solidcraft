@@ -334,6 +334,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.live_panel_drag_preview,
                 "live_panel_drag_preview",
             );
+            #[cfg(not(target_arch = "wasm32"))]
+            layout_check(
+                ui,
+                app.tr("prefs.panel_drag_out"),
+                app.tr("prefs.panel_drag_out_help"),
+                &mut app.preferences.panel_drag_out,
+                "panel_drag_out",
+            );
             layout_check(
                 ui,
                 app.tr("prefs.history_in_browser"),

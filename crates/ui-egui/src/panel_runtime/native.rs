@@ -13,6 +13,8 @@ use super::NativeHostAdapter;
 
 const MAX_MONITORS: usize = 64;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
+/// A window's frame and title bar before the OS has reported its own.
+const DEFAULT_DECORATION: egui::Vec2 = egui::vec2(16.0, 48.0);
 
 /// Physical monitor bounds and DPI from the desktop window service.
 pub struct NativeMonitor {
@@ -148,24 +150,12 @@ impl DesktopNativeAdapter {
             })
             .or_else(|| state.monitors.iter().find(|m| m.primary))
             .or_else(|| state.monitors.first());
-        let Some(monitor) = monitor else {
+        let decoration = saved.map_or(DEFAULT_DECORATION, |saved| saved.decoration);
+        let Some((size, position)) = monitor.and_then(|monitor| fit(monitor, ctx.zoom_factor() * monitor.scale, size, min, decoration, offset))
+        else {
             return Some(builder.with_inner_size(size));
         };
-        let scale = ctx.zoom_factor() * monitor.scale;
-        if !scale.is_finite() || scale <= 0.0 {
-            return Some(builder.with_inner_size(size));
-        }
-        let area = monitor.bounds.size() / scale;
-        if !area.is_finite() {
-            return Some(builder.with_inner_size(size));
-        }
-        let decoration = saved.map_or(egui::vec2(16.0, 48.0), |saved| saved.decoration);
-        let size = size.min((area - decoration).max(min));
-        let travel = (area - size - decoration).max(egui::Vec2::ZERO);
-        let offset = offset.unwrap_or(travel / 2.0).clamp(egui::Vec2::ZERO, travel);
-        let position = (monitor.bounds.min.to_vec2() / scale + offset).to_pos2();
-        let builder = builder.with_inner_size(size);
-        Some(if position.is_finite() { builder.with_position(position) } else { builder })
+        Some(builder.with_inner_size(size).with_position(position))
     }
 
     /// Ask the integration to create the OS window first. Immediate viewports
@@ -216,21 +206,95 @@ impl DesktopNativeAdapter {
         };
         let outer = outer.filter(|rect| rect.is_finite() && rect.is_positive() && rect.size().max_elem() <= MAX_LOGICAL);
         let decoration = outer.map_or(egui::Vec2::ZERO, |rect| (rect.size() - size).max(egui::Vec2::ZERO));
-        let monitor = outer.zip(scale).and_then(|(outer, scale)| {
-            let scale = ctx.zoom_factor() * scale;
-            if !scale.is_finite() || scale <= 0.0 {
-                return None;
-            }
-            let center = (outer.center().to_vec2() * scale).to_pos2();
-            let monitor = state.monitors.iter().find(|monitor| monitor.bounds.contains(center))?;
-            let offset = outer.min.to_vec2() - monitor.bounds.min.to_vec2() / scale;
-            Some(MonitorPlacement { name: monitor.name.clone(), origin: monitor.bounds.min, offset })
-        });
-        if state.placement.len() >= MAX_INSTANCES && !state.placement.contains_key(instance) {
-            state.placement.pop_first();
-        }
-        state.placement.insert(instance.clone(), Placement { size, decoration, monitor });
+        let monitor = outer.zip(scale).and_then(|(outer, scale)| monitor_placement(&state.monitors, outer, |_| ctx.zoom_factor() * scale));
+        state.remember(instance, Placement { size, decoration, monitor });
     }
+
+    /// The outer screen rectangle a panel's window opens at when a drag puts its
+    /// corner at `corner`: its remembered size, else `preferred`, within `bounds`,
+    /// kept on the monitor under it exactly as `builder` keeps it.
+    pub fn landing(
+        &self,
+        ctx: &egui::Context,
+        instance: &InstanceId,
+        corner: egui::Pos2,
+        preferred: Size,
+        bounds: (Size, Size),
+    ) -> Option<egui::Rect> {
+        let state = self.0.borrow();
+        let saved = state.placement.get(instance);
+        let (min, max) = (egui::vec2(bounds.0.width, bounds.0.height), egui::vec2(bounds.1.width, bounds.1.height));
+        let size = saved.map_or_else(|| egui::vec2(preferred.width, preferred.height), |saved| saved.size).clamp(min, max);
+        let decoration = saved.map_or(DEFAULT_DECORATION, |saved| saved.decoration);
+        let wanted = egui::Rect::from_min_size(corner, size + decoration);
+        let scale = |monitor: &NativeMonitor| ctx.zoom_factor() * monitor.scale;
+        // The monitor under the window's centre, else the nearest one.
+        let area = |monitor: &NativeMonitor| egui::Rect::from_min_size(monitor.bounds.min / scale(monitor), monitor.bounds.size() / scale(monitor));
+        let nearest =
+            state.monitors.iter().min_by(|a, b| area(a).distance_sq_to_pos(wanted.center()).total_cmp(&area(b).distance_sq_to_pos(wanted.center())));
+        let placed = nearest.and_then(|monitor| fit(monitor, scale(monitor), size, min, decoration, Some(corner - area(monitor).min)));
+        let rect = placed.map_or(wanted, |(size, corner)| egui::Rect::from_min_size(corner, size + decoration));
+        (rect.is_finite() && rect.is_positive() && rect.size().max_elem() <= MAX_LOGICAL).then_some(rect)
+    }
+
+    /// Open the panel's next window at `outer`, the rectangle a drag showed.
+    pub fn place(&self, ctx: &egui::Context, instance: &InstanceId, outer: egui::Rect) {
+        let mut state = self.0.borrow_mut();
+        let decoration = state.placement.get(instance).map_or(DEFAULT_DECORATION, |saved| saved.decoration);
+        let size = outer.size() - decoration;
+        if !outer.is_finite() || size.min_elem() <= 0.0 || size.max_elem() > MAX_LOGICAL {
+            return;
+        }
+        let monitor = monitor_placement(&state.monitors, outer, |monitor| ctx.zoom_factor() * monitor.scale);
+        state.remember(instance, Placement { size, decoration, monitor });
+    }
+}
+
+impl DesktopState {
+    fn remember(&mut self, instance: &InstanceId, placement: Placement) {
+        if self.placement.len() >= MAX_INSTANCES && !self.placement.contains_key(instance) {
+            self.placement.pop_first();
+        }
+        self.placement.insert(instance.clone(), placement);
+    }
+}
+
+/// A window's inner size and outer corner on `monitor`: as large as fits, at
+/// `offset` from the monitor's corner where it fits, else centred.
+fn fit(
+    monitor: &NativeMonitor,
+    scale: f32,
+    size: egui::Vec2,
+    min: egui::Vec2,
+    decoration: egui::Vec2,
+    offset: Option<egui::Vec2>,
+) -> Option<(egui::Vec2, egui::Pos2)> {
+    let area = monitor.bounds.size() / scale;
+    if !scale.is_finite() || scale <= 0.0 || !area.is_finite() {
+        return None;
+    }
+    let size = size.min((area - decoration).max(min));
+    let travel = (area - size - decoration).max(egui::Vec2::ZERO);
+    let offset = offset.unwrap_or(travel / 2.0).clamp(egui::Vec2::ZERO, travel);
+    let corner = (monitor.bounds.min.to_vec2() / scale + offset).to_pos2();
+    corner.is_finite().then_some((size, corner))
+}
+
+/// The monitor under the centre of `outer` (logical points), and the window's
+/// offset on it. `scale` gives a monitor's points-to-pixels factor.
+fn monitor_placement(monitors: &[NativeMonitor], outer: egui::Rect, scale: impl Fn(&NativeMonitor) -> f32) -> Option<MonitorPlacement> {
+    monitors.iter().find_map(|monitor| {
+        let scale = scale(monitor);
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+        let center = (outer.center().to_vec2() * scale).to_pos2();
+        monitor.bounds.contains(center).then(|| MonitorPlacement {
+            name: monitor.name.clone(),
+            origin: monitor.bounds.min,
+            offset: outer.min.to_vec2() - monitor.bounds.min.to_vec2() / scale,
+        })
+    })
 }
 
 impl NativeHostAdapter for DesktopNativeAdapter {
