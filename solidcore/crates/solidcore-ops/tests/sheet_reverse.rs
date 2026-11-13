@@ -13,7 +13,7 @@
 use solidcore_ops::face_surface::FaceSurface;
 use solidcore_ops::surface::{reverse_sheet, ruled};
 use solidcore_ops::{make_box, Body, Error};
-use solidcore_record::brep::{Brep, Curve, Shell};
+use solidcore_record::brep::{Brep, Curve, Loop, Shell};
 
 /// A bumped sheet: the ruled sheet between two cubics.
 fn sheet() -> Brep {
@@ -58,10 +58,27 @@ fn shell_normal(r: &Brep, face: u32, uv: [f64; 2]) -> [f64; 3] {
 fn turned_over_each_face_s_normal_is_the_other_way_at_the_same_point() {
     let before = sheet();
     let after = reverse_sheet(&before).unwrap();
-    assert_eq!(
-        after.faces, before.faces,
-        "the surfaces, domains and loops are kept"
-    );
+    // Each face keeps its surface and domain; each loop runs the other way round: its edges in
+    // reverse order (as a cycle, from wherever it starts), each used the other way.
+    assert_eq!(after.faces.len(), before.faces.len());
+    for (fb, fa) in before.faces.iter().zip(&after.faces) {
+        assert_eq!((&fa.surface, &fa.nurbs, fa.domain), (&fb.surface, &fb.nurbs, fb.domain), "the surface and domain are kept");
+        assert_eq!(fa.loops.len(), fb.loops.len());
+        for (lb, la) in fb.loops.iter().zip(&fa.loops) {
+            let (Loop::Edges { edges: eb }, Loop::Edges { edges: ea }) = (lb, la) else {
+                assert_eq!(lb, la, "a vertex loop is kept");
+                continue;
+            };
+            let was: Vec<(u32, bool)> = eb.iter().map(|e| (e.edge, e.forward)).collect();
+            let back: Vec<(u32, bool)> = ea.iter().rev().map(|e| (e.edge, !e.forward)).collect();
+            let same_cycle = (0..was.len().max(1)).any(|k| {
+                let mut turned = back.clone();
+                turned.rotate_left(k.min(turned.len()));
+                turned == was
+            });
+            assert!(same_cycle, "the loop runs the other way: {was:?} then {back:?}");
+        }
+    }
     assert_eq!(after.edges.len(), before.edges.len(), "the edges are kept");
     let (b, a) = (sides(&before), sides(&after));
     assert_eq!(b.len(), a.len());

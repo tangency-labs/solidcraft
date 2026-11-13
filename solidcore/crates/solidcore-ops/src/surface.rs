@@ -375,8 +375,10 @@ pub fn ruled(a: &Curve, b: &Curve, reversed: bool) -> Result<Record> {
 /// `sheet` turned over: each face reversed (the kernel's `flip_face_orientation`: the face's
 /// other use made the upward one, and each loop's other loop use its primary), so each face's
 /// normal in its shell is the other way. The record reads the other way: each face's `forward`
-/// in its shell is negated, its surface, domain, loops and edges as they were (the edges still
-/// shared between faces). Turning a sheet over twice gives it back.
+/// in its shell is negated and each loop runs the other way round (its edges in reverse order,
+/// each used the other way, with their pcurves as the kernel gives them); each face's surface
+/// and domain and the edges are as they were (still shared between faces). Turning a sheet over
+/// twice gives it back.
 ///
 /// # Errors
 /// [`Error::Unsupported`] for a closed body (a manifold solid: turned over, it would be inside
