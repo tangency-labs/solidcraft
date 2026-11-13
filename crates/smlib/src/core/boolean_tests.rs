@@ -577,3 +577,37 @@ fn a_boolean_failure_from_another_operation_keeps_its_status() {
     assert!(matches!(status(geom(GeomFailure::CoincidentPoints)), Error::Status(0)));
     assert!(matches!(status(geom(GeomFailure::ToleranceTooSmall { tolerance: 0.0 })), Error::Status(1007)));
 }
+
+/// A bar joined to a round hub, the bar's end cut concave on nearly the hub's cylinder (r 11):
+/// 2.5e-5 smaller and its axis 3.14e-5 off, so over the bar's width the two cylinders stay
+/// within 1e-5 of each other (tolerance 2e-5), and the tops of both are in one plane. The
+/// merge takes the two cylinder faces as coincident. Part of the bar's end arc runs inside
+/// the hub's top face, within tolerance of the hub's own circle: the imprint made a second
+/// edge in the hub's top face beside that circle (WR-580, in the first body), the circle's
+/// piece stayed without a mate and the repair of coincident surfaces copied it into the
+/// bar's cylinder face: a loop of zero area, not a manifold solid. Now the hub's own circle
+/// is the intersection's edge there, and the join is the hub's cylinder plus the bar's strip
+/// below the hub's circle. The sliver between the two cylinders is at most 1e-5 by the arc's
+/// length (under 22) by the bar's height: 2.2e-3.
+#[test]
+fn a_bar_joined_to_a_hub_on_nearly_the_same_cylinder_is_one_solid() {
+    const R: f64 = 11.0;
+    const LENGTH: f64 = 60.0;
+    for half in [6.0_f64, 8.5] {
+        let hub = crate::Brep::make_cylinder([0.0, 0.0, -10.0], R, 15.0).unwrap();
+        let blank = crate::Brep::make_box([-half, -LENGTH, -5.0], [2.0 * half, LENGTH - 5.0, 10.0]).unwrap();
+        let cutter = crate::Brep::make_cylinder([0.5e-5, -3.1e-5, -6.0], R - 2.5e-5, 12.0).unwrap();
+        let bar = blank.boolean(&cutter, BooleanOp::Subtract).unwrap().unwrap();
+        let r = hub.boolean(&bar, BooleanOp::Union).unwrap().unwrap();
+        let report = r.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{half}: {report}");
+        assert!(super::is_manifold_solid(&r.body).unwrap(), "{half}: not a manifold solid");
+        assert_eq!(solid_count(&r.body).unwrap(), 1, "{half}");
+        assert_eq!(counts(&r.body).unwrap(), [7, 16, 11], "{half}");
+        // the strip |x| <= half from the bar's far end up to the hub's circle
+        let under_circle = half * (R * R - half * half).sqrt() + R * R * (half / R).asin();
+        let want = PI * R * R * 15.0 + 10.0 * (2.0 * half * LENGTH - under_circle);
+        let v = r.volume(1e-9).unwrap();
+        assert!((v - want).abs() < 3e-3, "{half}: volume {v}, closed form {want}");
+    }
+}
