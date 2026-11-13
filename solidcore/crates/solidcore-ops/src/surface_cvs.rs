@@ -12,7 +12,11 @@ use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::{
     falloff_weight as kernel_falloff, Direction, FalloffShape, Surface as NurbSurface,
 };
+use solidcore::nurbs::crv_basic::Boundary;
 use solidcore::nurbs::srf_deviation::certified_distance;
+use solidcore::nurbs::srf_match::match_boundary;
+pub use solidcore::nurbs::srf_match::{MatchOrder, MatchRows, SeamBounds};
+use solidcore::SolidError;
 use solidcore::Vec3;
 use solidcore_record::brep::{
     knot_domain, Brep, Curve2, Loop, Natural, Surface, MAX_SPLINE_DEGREE,
@@ -324,6 +328,107 @@ pub fn rebuild(
         sheet_of(k, BSplineSurface::from_gw_nurb(&fit))
     }))?;
     Ok((made, bound))
+}
+
+/// `sheet` with the control rows next to its record edge `edge` moved so the edge meets record
+/// edge `target` of `other` at `order` (the kernel's
+/// [`solidcore::nurbs::srf_match::match_boundary`]: at most `rows.rows` rows from the edge move,
+/// the rows the order does not fix following by `rows.blend`, G2's row along the normal only, the
+/// sheet refined first where its knots cannot carry the target), and the seam after, measured at
+/// the edge's stations. Both sheets are one untrimmed face (as [`control_net`] reads them), each
+/// edge a side of its face's box. Refused when the seam would be worse than before in a measure
+/// the order holds: past both what it was and `held`, the caller's floor for that measure (the
+/// gap, the angle, the curvature jump), so rounding at a seam already held is not "worse".
+///
+/// # Errors
+/// As [`control_net`] for either sheet; [`Error::Argument`] for an edge past its record's list
+/// or not a side of its face's box, a floor in `held` negative or not finite, and the kernel's
+/// refusals of the input (rows outside 1..=3 or below the order plus one, a blend outside 0..=1,
+/// knots not clamped, a target degenerate at a station); [`Error::Unsupported`] for a match that
+/// would leave the seam worse; the kernel's status otherwise.
+pub fn match_edge(
+    sheet: &Brep,
+    edge: usize,
+    other: &Brep,
+    target: usize,
+    order: MatchOrder,
+    rows: MatchRows,
+    held: SeamBounds,
+) -> Result<(Brep, SeamBounds)> {
+    if ![held.gap, held.angle, held.curvature]
+        .iter()
+        .all(|t| t.is_finite() && *t >= 0.0)
+    {
+        return Err(Error::Argument);
+    }
+    let side = side_of(sheet, edge)?;
+    let target_side = side_of(other, target)?;
+    let ((u, v), points) = untrimmed(sheet)?;
+    let surface = kernel_surface(u, v, points)?;
+    let ((tu, tv), tpoints) = untrimmed(other)?;
+    let target_surface = kernel_surface(tu, tv, tpoints)?;
+    let matched = run("surface_cvs::match_edge", |_| {
+        Ok(
+            match match_boundary(&surface, side, &target_surface, target_side, order, rows) {
+                Ok(m) => Ok(m),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })??;
+    let (before, after) = (matched.before, matched.after);
+    let worse = |now: f64, was: f64, floor: f64| now > was.max(floor);
+    let k = order.order();
+    if worse(after.gap, before.gap, held.gap)
+        || (k >= 1 && worse(after.angle, before.angle, held.angle))
+        || (k >= 2 && worse(after.curvature, before.curvature, held.curvature))
+    {
+        return Err(Error::Unsupported(
+            "the match would leave the seam worse than it was",
+        ));
+    }
+    let made = record(run("surface_cvs::match_edge", |k| {
+        sheet_of(k, BSplineSurface::from_gw_nurb(&matched.surface))
+    }))?;
+    Ok((made, after))
+}
+
+/// The side of its face's box record edge `edge` of the one-face untrimmed `sheet` runs along:
+/// its use's pcurve all on `u = umin` (left), `u = umax` (right), `v = vmin` (bottom) or
+/// `v = vmax` (top).
+///
+/// # Errors
+/// As [`untrimmed`]; [`Error::Argument`] for an edge the face does not use, or one not on a side.
+fn side_of(sheet: &Brep, edge: usize) -> Result<Boundary> {
+    untrimmed(sheet)?;
+    let [face] = sheet.faces.as_slice() else {
+        return Err(Error::Argument);
+    };
+    let [[u0, u1], [v0, v1]] = face.domain;
+    let [Loop::Edges { edges }] = face.loops.as_slice() else {
+        return Err(Error::Argument);
+    };
+    let Some(used) = edges
+        .iter()
+        .find(|e| usize::try_from(e.edge).is_ok_and(|i| i == edge))
+    else {
+        return Err(Error::Argument);
+    };
+    let Curve2::Spline { points: uv, .. } = &used.pcurve else {
+        return Err(Error::Argument);
+    };
+    let on = |k: usize, at: f64| uv.iter().all(|p| p.get(k) == Some(&at));
+    if on(0, u0) {
+        Ok(Boundary::Left)
+    } else if on(0, u1) {
+        Ok(Boundary::Right)
+    } else if on(1, v0) {
+        Ok(Boundary::Bottom)
+    } else if on(1, v1) {
+        Ok(Boundary::Top)
+    } else {
+        Err(Error::Argument)
+    }
 }
 
 /// Whether the first and last `degree + 1` of `knots` are each one value.
