@@ -1,0 +1,90 @@
+{
+  "openxr": {
+    "api_layers": [],
+    "graphics": {
+      "note": "XR_KHR_vulkan_enable2 available - wgpu can adopt the OpenXR instance via wgpu-hal",
+      "vulkan_supported": true
+    },
+    "instance_extensions": [
+      { "name": "XR_EXT_debug_utils" },
+      { "name": "XR_EXT_win32_appcontainer_compatible" },
+      { "name": "XR_EXT_palm_pose" },
+      { "name": "XR_EXT_active_action_set_priority" },
+      { "name": "XR_EXT_local_floor" },
+      { "name": "XR_EXT_future" },
+      { "name": "XR_FB_display_refresh_rate" },
+      { "name": "XR_FB_color_space" },
+      { "name": "XR_FB_touch_controller_pro" },
+      { "name": "XR_FB_haptic_amplitude_envelope" },
+      { "name": "XR_FB_touch_controller_proximity" },
+      { "name": "XR_FB_haptic_pcm" },
+      { "name": "XR_KHR_composition_layer_cube" },
+      { "name": "XR_KHR_composition_layer_depth" },
+      { "name": "XR_KHR_composition_layer_cylinder" },
+      { "name": "XR_KHR_composition_layer_equirect" },
+      { "name": "XR_KHR_opengl_enable" },
+      { "name": "XR_KHR_vulkan_enable" },
+      { "name": "XR_KHR_D3D11_enable" },
+      { "name": "XR_KHR_D3D12_enable" },
+      { "name": "XR_KHR_visibility_mask" },
+      { "name": "XR_KHR_composition_layer_color_scale_bias" },
+      { "name": "XR_KHR_win32_convert_performance_counter_time" },
+      { "name": "XR_KHR_convert_timespec_time" },
+      { "name": "XR_KHR_vulkan_enable2" },
+      { "name": "XR_KHR_maintenance1" },
+      { "name": "XR_LOGITECH_mx_ink_stylus_interaction" },
+      { "name": "XR_META_performance_metrics" },
+      { "name": "XR_META_detached_controllers" },
+      { "name": "XR_META_headset_id" },
+      { "name": "XR_META_touch_controller_plus" },
+      { "name": "XR_OCULUS_audio_device_guid" },
+      { "name": "XR_OCULUS_external_camera" },
+      { "name": "XR_OCULUS_recenter_event" },
+      { "name": "XR_OCULUS_ovrsession_handle" },
+      { "name": "XR_EXT_haptic_parametric" }
+    ],
+    "runtime": {
+      "runtime_name": "Oculus",
+      "runtime_version": "1.208.0"
+    },
+    "systems": [
+      {
+        "graphics_properties": {
+          "max_layer_count": 16,
+          "max_swapchain_image_height": 4096,
+          "max_swapchain_image_width": 4096
+        },
+        "system_id": "SystemId(24)",
+        "system_name": "Meta Quest 3S",
+        "tracking_properties": {
+          "orientation_tracking": true,
+          "position_tracking": true
+        },
+        "vendor_id": 4294955582
+      }
+    ],
+    "view_configurations": [
+      {
+        "type": "primary_stereo",
+        "views": [
+          {
+            "max_height": 3744,
+            "max_sample_count": 4,
+            "max_width": 3648,
+            "recommended_height": 1872,
+            "recommended_sample_count": 1,
+            "recommended_width": 1824
+          },
+          {
+            "max_height": 3744,
+            "max_sample_count": 4,
+            "max_width": 3648,
+            "recommended_height": 1872,
+            "recommended_sample_count": 1,
+            "recommended_width": 1824
+          }
+        ]
+      }
+    ]
+  }
+}
