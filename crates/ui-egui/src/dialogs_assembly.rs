@@ -2509,8 +2509,8 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 
 /// The Joints folder at the end of the Browser: a row per joint (double-click edits, the menu
 /// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
-pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Option<u64> {
-    use crate::browser::{Row, draw_row, is_open, toggle};
+pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, depth: usize) -> Option<u64> {
+    use crate::browser::{Row, Spec, is_open, node_row, toggle};
     let joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
@@ -2524,10 +2524,10 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
     let start_open = crate::browser::rows_start_open(app);
     let open = is_open(app, key, start_open);
     let folder_shown = !app.session.folder_hidden(key);
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(key),
-        &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);
@@ -2542,10 +2542,11 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
     for (id, name, kind, suppressed) in joints {
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
-        let r = draw_row(
-            ui,
-            ui.scope_id().with(("joint", id)),
-            &Row {
+        let joint_key = format!("joint:{id}");
+        let r = node_row(
+            rows,
+            Spec { key: &joint_key, ..Default::default() },
+            Row {
                 depth: depth + 1,
                 eye: Some(visible),
                 icon: "joint",
@@ -2567,14 +2568,14 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
         // The slower second click on the only selected joint renames it and keeps it selected.
         } else if r.clicked && !(r.slow_rename && app.tree.picked_joints == [id]) {
-            pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
+            pick_joint(app, id, rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
         if r.slow_rename {
-            crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), &r);
+            crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), r.name_at());
         } else if r.double {
             dialog = edit_joint(app, id);
         }
-        crate::browser::inline_rename(app, ui, &r, &name);
+        crate::browser::inline_rename(app, rows.ui(), r.name_at(), &name);
         // The same menus as the rest of the browser.
         if let Some(at) = r.secondary {
             if !app.tree.picked_joints.contains(&id) {
@@ -2618,15 +2619,19 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// The folder starts closed and has no eye of its own (the root folder's eye hides every joint
 /// glyph); it isn't drawn for a placement no joint attaches. `key` is the placement's row key.
 /// Returns the joint whose row is under the pointer.
-pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) -> Option<u64> {
-    use crate::browser::{Row, draw_row, is_open, toggle};
+pub fn component_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, path: &[u64], key: &str, depth: usize) -> Option<u64> {
+    use crate::browser::{Row, Spec, is_open, node_row, toggle};
     let joints = placement_joints(&app.session.doc, path);
     if joints.is_empty() {
         return None;
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
-    let r = draw_row(ui, ui.scope_id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
+    let r = node_row(
+        rows,
+        Spec { key: &key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, &key, false);
     }
@@ -2641,10 +2646,11 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         let id = j.id;
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
-        let r = draw_row(
-            ui,
-            ui.scope_id().with((&key, "joint", id)),
-            &Row {
+        let joint_key = format!("{key}/joint:{id}");
+        let r = node_row(
+            rows,
+            Spec { key: &joint_key, ..Default::default() },
+            Row {
                 depth: depth + 1,
                 eye: Some(visible),
                 icon: "joint",
@@ -2665,7 +2671,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
         } else if r.clicked {
-            pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
+            pick_joint(app, id, rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
         if r.double {
             dialog = edit_joint(app, id);

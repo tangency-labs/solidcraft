@@ -6,6 +6,11 @@
 //! its surface's whole box, sequences the kernel's calls and carries the faces' and sides'
 //! attributes onto the new sheet; it computes nothing.
 //!
+//! A face on a surface that goes on past its trims (a plane: [`Surface::reaches_past_trims`])
+//! is extended by growing its trim within it instead, as the kernel's
+//! [`extend_trim`] makes it: the edge moved outward by the distance, its neighbours carried
+//! along their tangents to meet it, its holes kept; every continuation is the plane itself.
+//!
 //! The edge is a record index ([`Order`]); which edge a pick means is the application's.
 
 use solidcore::geom::extent2d::Extent2d;
@@ -16,6 +21,7 @@ use solidcore::surface::side::BoxSide;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::sheet::{one_surface, sheet_of, sheet_on, Pieces};
+use solidcore::topology::brep::trim_extend::extend_trim;
 use solidcore::topology::face::{p1 as face_p1, p2 as face_p2, p4 as face_p4};
 use solidcore::topology::{Brep, EdgeId, FaceId};
 use solidcore::{EntityRef, SolidError};
@@ -236,7 +242,9 @@ fn extension(
 /// the attributes of the faces and sides they continue, each face facing the way it did.
 ///
 /// - A sheet of one face: the edge all of one side of the face, its surface's whole box; the
-///   face continued on its surface extended.
+///   face continued on its surface extended. A face on a surface that goes on past its trims (a
+///   plane) is extended by growing its trim ([`extend_trim`]: the edge, on its outer loop, moved
+///   `distance` outward, its neighbours carried along their tangents), the same for every `how`.
 /// - A sheet of several faces that are the pieces of one surface, as the kernel splits a
 ///   surface into faces ([`one_surface`]: a skin through a section with a double knot is two
 ///   faces): the edge all of one side of its face, that side on the side of the surface's whole
@@ -246,15 +254,17 @@ fn extension(
 ///
 /// # Errors
 /// - [`Error::Argument`]: a distance not finite and positive, an edge past the record's list or
-///   not the sheet's;
+///   not the sheet's (on a plane, not on its face's outer loop);
 /// - [`Error::Unsupported`] (with what): a sheet of several faces that are not one surface's
 ///   pieces, a face with holes or that is not its surface's whole box, the edge not all of one
 ///   side, or between two faces, a side whose collapse is undecided, a surface with no exact
-///   extension;
+///   extension; on a plane, the trim refused ([`extend_trim`]: a neighbour that never meets the
+///   moved edge, neighbours that cross, a moved edge crossing the others);
 /// - [`Error::TooFar`]: a weight would vanish, a pole, the apex or a full turn be reached, or
 ///   the length not be measurable to the kernel's stop within the distance (with the longest
 ///   that works, when the kernel names one);
-/// - [`Error::NotExact`]: the distance not met to the kernel's stop, no shorter one named;
+/// - [`Error::NotExact`]: the distance not met to the kernel's stop, no shorter one named; on a
+///   plane, a spline edge's offset not within a tenth of the tolerance;
 /// - [`Error::NoEffect`]: the distance below the side's resolution (the shortest extension its
 ///   knot can carry is proved longer): no extension, the sheet would be returned as it is;
 /// - the kernel's errors.
@@ -300,6 +310,25 @@ fn one_face(
     let Some(surf) = face_p2::surface(b, f)?.cloned() else {
         return Ok(Err(Error::Unsupported("a face with no surface")));
     };
+    // a surface that goes on past its trims (a plane) grows the trim within itself, the
+    // same for every continuation; its face's holes are kept
+    if surf.reaches_past_trims() {
+        // the trim grows past an edge of its outer loop, not of a hole
+        if !face_p4::edges(b, f, None, true, None)?.contains(&picked) {
+            return Ok(Err(Error::Argument));
+        }
+        let made = match extend_trim(k, b, f, picked, distance) {
+            Ok(made) => made,
+            Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
+            Err(e) => return Ok(Err(refused(e))),
+        };
+        let mut r = made.brep;
+        copy_attributes(b, EntityRef::Face(f), &mut r, EntityRef::Face(made.face))?;
+        for (from, to) in made.edges {
+            copy_attributes(b, EntityRef::Edge(from), &mut r, EntityRef::Edge(to))?;
+        }
+        return finish(k, r, Expect::FACES);
+    }
     if face_p2::loops(b, f, false, None)?.len() != 1 {
         return Ok(Err(Error::Unsupported("a face with holes")));
     }

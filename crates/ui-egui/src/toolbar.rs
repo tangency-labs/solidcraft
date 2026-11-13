@@ -1608,11 +1608,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             // an earlier, shorter list (#874); they still shrink to fit their content.
                             let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
                             egui::ScrollArea::vertical().id_salt("panel_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
-                                for (index, (heading, c)) in grouped.iter().enumerate() {
+                                for (heading, c) in &grouped {
                                     if let Some(heading) = heading {
-                                        if *panel == "CONSTRUCT" && index > 0 {
-                                            ui.separator();
-                                        }
                                         ribbon::section_heading(ui, &group_heading_text(heading), row_w);
                                     }
                                     let pinned = crate::toolbar_custom::pinned_on(app, &tab, c.id).is_some();
@@ -3520,14 +3517,19 @@ mod dropdown_tests {
         }
     }
 
-    /// Both layouts keep the original order by default and expose every tool with grouping on.
+    /// Both layouts group Construct under Planes, Axes and Points by default, and keep the
+    /// original ungrouped order when `construct_menu_groups` is turned off.
     #[test]
     fn construct_dropdown_groups_are_visible_in_list_and_grid() {
-        for (grid, grouped) in [(false, false), (true, false), (false, true), (true, true)] {
+        for (grid, grouped) in [(false, true), (true, true), (false, false), (true, false)] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.app.preferences.ribbon_icon_grid = grid;
-            h.app.preferences.construct_menu_groups = grouped;
+            if !grouped {
+                h.app.preferences.construct_menu_groups = false;
+            } else {
+                assert!(h.app.preferences.construct_menu_groups);
+            }
             h.call("ui.resize", json!({"width":1600,"height":1200}));
             h.app.ui.tab = "MODEL".into();
             h.frames(4);
