@@ -133,6 +133,26 @@ fn a_notes_leader_is_refused_on_a_part_its_view_leaves_out() {
     assert!(run(&mut s, INSPECT, json!({"note": kept}))["warnings"].is_null());
 }
 
+/// A note on a part its view was set to leave out after it was added keeps its status, but the sheet
+/// doesn't draw it and says why, in the inspect warning's words, until the hide is undone.
+#[test]
+fn a_note_on_a_part_its_view_now_leaves_out_isnt_drawn() {
+    let (mut s, _, view, [first, _]) = placed();
+    let v = ids::encode(view);
+    let note = on_edge(&mut s, view, first)["note"].clone();
+    let read = |s: &mut Session| {
+        let scene = run(s, "drawing.scene", json!({"sheet": "Sheet 1"}));
+        scene["notes"].as_array().unwrap().iter().find(|n| n["note"] == note).cloned().unwrap()
+    };
+    assert_eq!(read(&mut s)["drawn"], json!(true));
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[first]]}}));
+    let now = format!("view {v} doesn't draw this part now: its hide leaves out occurrence path [{first}]");
+    let hidden = read(&mut s);
+    assert_eq!((&hidden["status"], &hidden["drawn"], &hidden["why"]), (&json!("ok"), &json!(false), &json!(now)), "{hidden}");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(read(&mut s)["drawn"], json!(true));
+}
+
 /// The same edge through each copy names its own: the two placements' leaders end 100 mm apart.
 #[test]
 fn two_copies_are_told_apart_by_path() {
