@@ -406,8 +406,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 relations.mates.vertices.record(vertex, other)?;
             }
         }
-        if let Some((edges, faces)) = &self.0.cleanup_kept {
-            relations.kept_edges.clone_from(edges);
+        if let Some(faces) = &self.0.cleanup_kept {
             relations.kept_faces.clone_from(faces);
         }
         let before = p1::edges(self.0.target, None)?;
@@ -805,12 +804,10 @@ impl FilletSession<'_> {
                 &refusal,
             ));
         }
-        // WR-459: the clean-up after filleting leaves the target's own edges and faces.
+        // WR-459: the clean-up after filleting leaves the edges between the target's own
+        // faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
-            Some((
-                p1::edges(self.objects.target, None)?.into_iter().collect(),
-                p1::faces(self.objects.target, None)?.into_iter().collect(),
-            ))
+            Some(p1::faces(self.objects.target, None)?.into_iter().collect())
         } else {
             None
         };

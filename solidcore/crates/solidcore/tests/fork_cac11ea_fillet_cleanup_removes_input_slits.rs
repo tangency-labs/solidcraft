@@ -92,7 +92,6 @@ fn cleaned() -> ((usize, usize), (usize, usize), f64) {
     let before = (one_face_edges(&b).len(), p1::edges(&b, None).unwrap().len());
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     let relations = CleanupRelations {
-        kept_edges: p1::edges(&b, None).unwrap().into_iter().collect(),
         kept_faces: p1::faces(&b, None).unwrap().into_iter().collect(),
         ..CleanupRelations::default()
     };

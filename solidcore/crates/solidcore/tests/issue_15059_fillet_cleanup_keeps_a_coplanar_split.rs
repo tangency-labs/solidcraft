@@ -14,7 +14,7 @@
 //! The volume is the closed form's either way, `S^3 - (1 - pi / 4) r^2 S`, within the
 //! relative accuracy the volume is asked to (`brep_volume`'s 1e-6). The clean-up alone
 //! (`boolean_post_process` over every edge, as `fork_cac11ea` runs it) does the same: with
-//! every edge and face kept the edge stays, with nothing kept it goes.
+//! every face kept the edge stays, with nothing kept it goes.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -165,7 +165,6 @@ fn the_clean_up_alone_keeps_the_split_only_when_told() {
         let mut b = prism(&mut k);
         let relations = if keep {
             CleanupRelations {
-                kept_edges: p1::edges(&b, None).unwrap().into_iter().collect(),
                 kept_faces: p1::faces(&b, None).unwrap().into_iter().collect(),
                 ..CleanupRelations::default()
             }
