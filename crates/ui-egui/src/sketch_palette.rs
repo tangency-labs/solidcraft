@@ -46,7 +46,7 @@ pub const TOGGLES: [(&str, &str); 10] = [
 /// Does the sketch hold any geometry of its own: a drawn curve or a 3D curve? Projected curves
 /// and the origin are held in place and do not count.
 pub fn has_geometry(sketch: &solidcraft_engine::sketch::Sketch) -> bool {
-    !sketch.curves.is_empty() || !sketch.wires.is_empty()
+    sketch.curves.iter().any(|c| c.link.is_none()) || sketch.wires.iter().any(|w| w.link.is_none())
 }
 
 /// Nothing the user added: no curve, 3D curve, constraint or dimension, pattern, projection,
@@ -1014,6 +1014,26 @@ mod tests {
         assert!(h.widget("Fully constrained").is_none());
         assert_eq!(crate::scenario::count_of("sketch_palette:constrained_fraction"), Some(0.0));
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,5]})).unwrap();
+        h.settle();
+        assert_ne!(line(&h), "No geometry yet", "a drawn rectangle is geometry");
+    }
+
+    /// A new sketch on a face holds only the face's projected outline, which is fixed: it says
+    /// there is no geometry yet rather than "Fully constrained", until a curve is drawn.
+    #[test]
+    fn a_new_sketch_on_a_face_is_not_reported_fully_constrained() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
+        h.settle();
+        let line = |h: &crate::scenario::Harness| {
+            let st = h.app.session.world_state().unwrap();
+            let ss = h.app.session.active_sketch.and_then(|s| st.sketch(s)).unwrap();
+            assert!(ss.sketch.curves.iter().any(|c| c.link.is_some()), "the face outline is projected");
+            dof_text(ss.report.dof, ss.report.ok(), has_geometry(&ss.sketch))
+        };
+        assert_eq!(line(&h), "No geometry yet");
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[15,10]})).unwrap();
         h.settle();
         assert_ne!(line(&h), "No geometry yet", "a drawn rectangle is geometry");
     }
