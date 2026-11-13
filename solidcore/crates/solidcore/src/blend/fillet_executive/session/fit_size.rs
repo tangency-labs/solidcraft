@@ -477,8 +477,7 @@ pub fn largest_size_on_its_faces(
 ///
 /// # Errors
 ///
-/// Those of the section solve and the evaluations; a missing offset surface, edge use or
-/// edge curve.
+/// Those of the section solve and the evaluations.
 fn rolls_through(
     k: &Kernel,
     target: &mut Brep,
@@ -490,20 +489,19 @@ fn rolls_through(
 ) -> Result<Option<bool>> {
     let base = solver.base();
     let tol = base.approx_tol_3d;
-    let own = base
-        .surface(0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
-        .surface
-        .offset_distance()
-        .abs();
-    let edgeuse = base
-        .edgeuse(0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
-    let e = eu::edge(target, edgeuse)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-    let curve = edge::evaluation_curve(target, e)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
-        .clone();
+    // without its offset surface, edge use or edge curve, it cannot be told
+    let Some(own) = base.surface(0)?.map(|s| s.surface.offset_distance().abs()) else {
+        return Ok(None);
+    };
+    let Some(edgeuse) = base.edgeuse(0)? else {
+        return Ok(None);
+    };
+    let Some(e) = eu::edge(target, edgeuse)? else {
+        return Ok(None);
+    };
+    let Some(curve) = edge::evaluation_curve(target, e)? else {
+        return Ok(None);
+    };
     let side = if rail == 0 {
         SrfIndex::First
     } else {
@@ -516,14 +514,14 @@ fn rolls_through(
         let Some(pnt) = ball_section_at(k, target, solver, &curve, t, None)? else {
             return Ok(None);
         };
-        let on = solver
-            .base()
-            .surface(rail)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
-            .surface
-            .base_surface()
-            .evaluate_point(k, pnt.uv_pos(side))?;
-        Ok(Some(on))
+        let Some(slot) = solver.base().surface(rail)? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            slot.surface
+                .base_surface()
+                .evaluate_point(k, pnt.uv_pos(side))?,
+        ))
     })();
     set_ball_radius(solver, own)?;
     let contact = contact?;
