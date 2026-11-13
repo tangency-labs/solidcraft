@@ -388,6 +388,10 @@ fn vertex_construction_point_sketch_point_and_midpoint_picks_all_make_pairs() {
         ],
     );
     assert_eq!((path(&d).len(), d.error.as_deref()), (4, None));
+    assert!(member(&mut d).refs.iter().all(Option::is_some), "each point's reference is fixed as it is picked");
+    // The woken middle is forgotten (256 woken points later, in a long session): it stays the
+    // middle, not the vertex nearest it.
+    app.viewport.snapped.clear();
     let c = apply_commands(&app, &d).unwrap();
     let pairs = &c[0].1["pairs"];
     assert_eq!(pairs[0], json!({"a": vertex(0., 0., 0.), "b": {"construct_point": "Apex"}}));
