@@ -22,6 +22,7 @@ macro_rules! planned {
 
 mod bom;
 pub(crate) mod browser;
+mod cell_grid;
 pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
@@ -367,6 +368,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
+    v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
     v.extend(plugin::COMMANDS.iter());
