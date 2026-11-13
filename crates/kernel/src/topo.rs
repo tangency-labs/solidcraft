@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 use solidcore_record::Vec3;
-use solidcore_record::brep::{Brep, Loop};
+use solidcore_record::brep::{self as rec, Brep, Loop};
 use solidcraft_geom::{Mesh, UnitVec3};
 
 use crate::Result;
@@ -104,22 +104,82 @@ pub fn seam_flags(b: &Body, _mesh: &Mesh) -> Vec<bool> {
         .collect()
 }
 
-/// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.mesh(..)`: faces of no
-/// area in it don't count.
-pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
+/// Approximate 3D area of face `f` from its surface geometry or loops, to detect degenerate/zero-area faces.
+fn face_area_approx(record: &Brep, f: usize) -> f64 {
+    let Some(face) = record.faces.get(f) else { return 0.0 };
+    match &face.surface {
+        rec::Surface::Cylinder { radius, .. } => {
+            let [[u0, u1], [v0, v1]] = face.domain;
+            let du = if (u1 - u0).abs() > 1e-9 { (u1 - u0).abs() } else { std::f64::consts::TAU };
+            let dv = (v1 - v0).abs();
+            (radius * du * dv).max(0.0)
+        }
+        rec::Surface::Cone { radius_at_origin, half_angle, .. } => {
+            let [[u0, u1], [v0, v1]] = face.domain;
+            let du = if (u1 - u0).abs() > 1e-9 { (u1 - u0).abs() } else { std::f64::consts::TAU };
+            let r_mid = (radius_at_origin + 0.5 * (v0 + v1) * half_angle.tan()).abs();
+            let slant_h = (v1 - v0).abs() / half_angle.cos().abs().max(1e-6);
+            (r_mid * du * slant_h).max(0.0)
+        }
+        rec::Surface::Sphere { radius, .. } => {
+            let [[u0, u1], [v0, v1]] = face.domain;
+            let du = if (u1 - u0).abs() > 1e-9 { (u1 - u0).abs() } else { std::f64::consts::TAU };
+            let dv_area = (v1.sin() - v0.sin()).abs();
+            let dv = if dv_area > 1e-9 { dv_area } else { 2.0 };
+            (radius * radius * du * dv).max(0.0)
+        }
+        rec::Surface::Torus { major_radius, minor_radius, .. } => {
+            let [[u0, u1], [v0, v1]] = face.domain;
+            let du = if (u1 - u0).abs() > 1e-9 { (u1 - u0).abs() } else { std::f64::consts::TAU };
+            let dv = if (v1 - v0).abs() > 1e-9 { (v1 - v0).abs() } else { std::f64::consts::TAU };
+            (major_radius * minor_radius * du * dv).max(0.0)
+        }
+        rec::Surface::BallPatch { radius, .. } => std::f64::consts::PI * radius * radius * 0.5,
+        _ => {
+            let mut total_area = 0.0;
+            for lp in &face.loops {
+                let Loop::Edges { edges } = lp else { continue };
+                let mut pts = Vec::new();
+                for u in edges {
+                    let mut edge_pts = edge_points(record, u.edge);
+                    if !u.forward {
+                        edge_pts.reverse();
+                    }
+                    if !pts.is_empty() {
+                        pts.pop();
+                    }
+                    pts.extend(edge_pts);
+                }
+                if pts.len() >= 3 {
+                    let mut a = Vec3::ZERO;
+                    for i in 0..pts.len() {
+                        let p = pts[i];
+                        let q = pts[(i + 1) % pts.len()];
+                        a += p.cross(q);
+                    }
+                    total_area += 0.5 * a.len();
+                }
+            }
+            if total_area > 0.0 {
+                total_area
+            } else if face.loops.is_empty() {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
+/// Merged face/edge/vertex counts (see module docs). Faces of zero area don't count.
+pub fn merged_topology(b: &Body) -> Result<TopoCounts> {
     let record = b.record();
     let nf = record.faces.len();
     let tol = (b.size() * 1e-4).max(1e-6);
     let faces = Faces::new(record, tol * 10.0);
     // Zero-area faces (a revolved profile edge lying on the axis) don't count.
-    let mut area = vec![0.0f64; nf];
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        if let (Some([p, q, r]), Some(a)) = (mesh.tri(t), area.get_mut(*f as usize)) {
-            *a += (q - p).cross(r - p).len() * 0.5;
-        }
-    }
     let tiny = (b.size() * 1e-6).powi(2);
-    let is_deg = |f: usize| area.get(f).is_some_and(|a| *a < tiny);
+    let is_deg = |f: usize| face_area_approx(record, f) < tiny;
 
     // Edge → faces, edge → vertices. Vertices and edges lying on each other count once (two
     // tangent holes touch along a line that both bodies' pieces carry): welded by position,

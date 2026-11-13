@@ -49,6 +49,16 @@ impl TriMesh {
         out
     }
 
+    /// Triangle count.
+    pub(crate) fn face_count(&self) -> usize {
+        self.triangles.len()
+    }
+
+    /// Vertex count.
+    pub(crate) fn vertex_count(&self) -> usize {
+        self.positions.len()
+    }
+
     /// Distinct undirected triangle sides.
     pub(crate) fn edge_count(&self) -> usize {
         let mut set = std::collections::HashSet::new();

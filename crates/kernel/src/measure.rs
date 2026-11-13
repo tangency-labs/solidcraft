@@ -56,21 +56,22 @@ const ACCURACY: f64 = solidcraft_smlib::MEASURE_ACCURACY;
 /// measured from its triangles, exactly.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
     let _span = solidcraft_profile::span("kernel", "measure");
-    if let Some((pos, tris)) = b.triangle_mesh() {
+    if let Some(mb) = &b.mesh {
         // Exact for a mesh body; topology counts are facets, sides and vertices.
-        let m = b.mesh(&crate::MeshTolerance::chord(1.0))?;
+        let m = mb.to_mesh();
         let mm = m.measure();
-        let edges = b.mesh.as_ref().map(|m| m.edge_count()).unwrap_or(0);
-        let merged =
-            TopoCounts { faces: tris.len(), edges, vertices: pos.len(), face_types: [("mesh".to_string(), tris.len())].into_iter().collect() };
+        let edges = mb.edge_count();
+        let faces = mb.face_count();
+        let vertices = mb.vertex_count();
+        let merged = TopoCounts { faces, edges, vertices, face_types: [("mesh".to_string(), faces)].into_iter().collect() };
         return Ok(BodyMeasure {
             volume: mm.volume,
             area: mm.area,
             centroid: mm.centroid,
             bbox: m.bounds(),
-            faces: tris.len(),
+            faces,
             edges,
-            vertices: pos.len(),
+            vertices,
             shells: 1,
             merged,
             measured_by: "mesh",
@@ -78,7 +79,6 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         });
     }
     let m = measure_mass(b)?;
-    let topo = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
     Ok(BodyMeasure {
         volume: m.volume,
         area: m.area,
@@ -88,7 +88,7 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         edges: b.edge_count(),
         vertices: b.vertex_count(),
         shells: b.shell_count(),
-        merged: merged_topology(b, &topo)?,
+        merged: merged_topology(b)?,
         measured_by: m.measured_by,
         notes: m.notes,
     })
