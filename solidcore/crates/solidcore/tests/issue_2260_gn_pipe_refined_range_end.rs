@@ -53,7 +53,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "bend_volume_trim_param_box_across_period",
     "boolean2d_plane_covers_far_faces",
     "boolean_cleanup_removes_slits",
-    "boolean_lists_virtual_surface_copies",
     "boolean_new_face_closure_both_sides",
     "boolean_outer_shell_first",
     "boolean_skips_faces_apart",

@@ -213,7 +213,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.boolean2d_plane_covers_far_faces = true;
     k.fixes.boolean_cleanup_removes_slits = true;
-    k.fixes.boolean_lists_virtual_surface_copies = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.boolean_skips_faces_apart = true;
