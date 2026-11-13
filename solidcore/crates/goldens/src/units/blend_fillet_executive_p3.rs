@@ -590,9 +590,6 @@ impl ExecutiveAccess<Handle> for Access {
         }
         Ok(Vec::new())
     }
-    fn edge_is_manifold(&self, _: Handle) -> SolidResult<bool> {
-        missing()
-    }
     fn vertices(&self, handle: Handle) -> SolidResult<Vec<Handle>> {
         let brep = self
             .breps
@@ -869,7 +866,6 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         vertex_corner_map: BTreeMap::new(),
         edgeuse_solver_map: BTreeMap::new(),
         self_intersection_handler: None,
-        blend_curve_at_thirds: false,
         mark_corner_patches: false,
         cliff_overflow: false,
         open_ends: Vec::new(),

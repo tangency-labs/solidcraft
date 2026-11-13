@@ -269,7 +269,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
-        feature.remap_clone(&ids, &names, &BTreeMap::new(), &mapped)?;
+        feature.remap_clone(&ids, &names, &BTreeMap::new(), &mapped, &BTreeMap::new(), &copy.doc)?;
         if let FeatureKind::Sketch { plane, sketch } = &mut feature.kind {
             // 3D wires carry their own coordinate space, independently of the sketch plane.
             for wire in &mut sketch.wires {

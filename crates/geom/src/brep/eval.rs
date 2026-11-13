@@ -9,13 +9,13 @@
 //! Call on validated records. Evaluation of a well-formed record never panics: a point that
 //! cannot be had (a vanishing weight, a Newton step that does not converge) is `None`.
 use super::normal_section::normal_section;
-use super::pcurve::Error;
 use super::{Curve, Curve2, Frame, Surface};
 use crate::bspline::MAX_SPLINE_DEGREE;
 use crate::prelude::*;
 use crate::tess::partials::{Partials, tabulate, trig_derivative};
 use crate::tess::uv::{self, Domain};
 use crate::tess::{EvalCurve, EvalSurface, MAX_EVAL_KNOTS, MAX_EVAL_POINTS, from_kernel, from_kernel3, to_kernel};
+use solidcore_ops::pcurve::Error;
 use solidcore_record::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -114,6 +114,7 @@ impl SurfaceEval {
             }
             // A label with no (u, v) of its own: its face evaluates its NURBS form.
             Surface::BallPatch { .. } => Err(unsupported("a ball patch's label (evaluate its NURBS form)")),
+            Surface::Blend { .. } => Err(unsupported("a blend's label (evaluate its NURBS form)")),
             Surface::Spline { u_knots, v_knots, points } => {
                 let rows: Vec<Vec<[f64; 4]>> = points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect();
                 eval(nurbs(u_knots, v_knots, &rows)?)
@@ -616,7 +617,7 @@ pub fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>], field
         let at = |k: f64| {
             let f = k / FLUX_PIECES as f64;
             // Exactly the ends at f = 0 and 1, whatever the interval's rounding.
-            super::pcurve::eval(c, if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
+            solidcore_ops::pcurve::eval(c, if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
         };
         for k in 0..FLUX_PIECES {
             let (a, m, z) = (at(k as f64)?, at(k as f64 + 0.5)?, at(k as f64 + 1.0)?);

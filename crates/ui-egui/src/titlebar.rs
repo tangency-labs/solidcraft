@@ -127,6 +127,21 @@ mod tests {
         v
     }
 
+    /// SolidCraft's name leaves Home where it has always been: 88 pt right of the name's start
+    /// (Home centred at 124 from the bar's content edge, the name starting at 36), the kit's least
+    /// place for Home.
+    #[test]
+    fn home_keeps_its_place_after_solidcrafts_name() {
+        let mut w = Win::new(1600.0);
+        w.app.home.open = false;
+        w.frame(vec![]);
+        let out = w.frame(vec![]);
+        let name = texts(&out).into_iter().find(|(text, _)| text == "SolidCraft").map(|(_, rect)| rect).expect("the name is drawn");
+        let home = crate::scenario::rect_of("titlebar:home").expect("Home is drawn");
+        assert_eq!(home.center().x - name.left(), 88.0);
+        assert!(name.right() < home.left());
+    }
+
     #[test]
     fn every_bar_control_uses_translucent_hover_chrome() {
         let previous = solidcraft_theme::is_dark();

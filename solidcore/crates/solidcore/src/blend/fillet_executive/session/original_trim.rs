@@ -228,7 +228,10 @@ impl OriginalSurfaceTrimAccess<FilletObject, FaceId> for TrimAccess<'_, '_> {
                     "Fillet Error: the faces a fillet's rails enclose on the body reach past its rails (the trim leaks)",
                 ),
             );
-            return Err(SolidError::sm_err(OP_TRIM_LEAK));
+            return Err(SolidError::blend_failed(
+                OP_TRIM_LEAK,
+                "the faces the rails enclose reach past the rails",
+            ));
         }
         Ok(())
     }

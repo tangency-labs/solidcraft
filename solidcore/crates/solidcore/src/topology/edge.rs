@@ -63,7 +63,7 @@
 //!   it: two surfaces are the same when their faces are.
 //! - **Null pointers.** Where upstream dereferences a null pointer (no primary edge
 //!   use, vertex use, mate, shell, face, curve, ...) the port returns
-//!   [`SolidError::InvalidInput`]. Statuses are [`SolidError::Upstream`] with the
+//!   [`SolidError::InvalidInput`]. Statuses are a [`TopologyFailure`](crate::error::topology::TopologyFailure) with the
 //!   upstream code (`SM_ERR`, `SM_ERR_INVALID_INPUT`). A collection upstream fills with
 //!   null entries (`GetShells`, `GetRegions`, `GetVertices`, `GetVertexuses`) holds
 //!   `None`s.
@@ -170,8 +170,6 @@ pub const CLASS_STRING: &str = "SmEdge";
 
 /// `SmBrep_TYPE` (the `SM_CAST_PTR(SmBrep, ..)` of `Notify`).
 const BREP_TYPE: i64 = 16011;
-// `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
 
 /// `SmEdge::IsKindOf`: `SmEdge_TYPE` or a base class type.
 #[must_use]
@@ -183,12 +181,10 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-fn status(code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code,
-        entity: None,
-    }
+/// A value the edge routine computes with that has no defined result, as the phrase
+/// says (upstream `SM_ERR_INVALID_INPUT`).
+fn invalid_value(what: &'static str) -> SolidError {
+    SolidError::topology_invalid_value(OP, what)
 }
 
 impl Edge {
@@ -507,14 +503,14 @@ impl<'c> OdeEdgeLength<'c> {
 
         let pv = self.curve.evaluate(k, t, 1, true, true)?;
         let (Some(&p0), Some(&p1)) = (pv.first(), pv.get(1)) else {
-            return Err(null("SmODEEdgeLengthIFEO::Evaluate: short evaluation"));
+            return Err(null("edge length integrand: short evaluation"));
         };
         let p0 = p0 - self.origin_of_computation;
 
         let ipnt = p0; // Point to integrate
         let Some(out) = dydx.get_mut(..28) else {
             return Err(null(
-                "SmODEEdgeLengthIFEO::Evaluate: derivative array shorter than 28",
+                "edge length integrand: derivative array shorter than 28",
             ));
         };
         let mut put = |i: usize, v: f64| {
@@ -810,7 +806,10 @@ pub fn find_radial_sector_between(
 
     // no work - no candidate edgeuses after culling
     if cands.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "no radial edge use is left after culling",
+        ));
     }
 
     // Special case: one possible answer and a region
@@ -849,7 +848,10 @@ pub fn find_radial_sector_between(
                 Ok(c) => c,
                 Err(err) => {
                     failed(err)?;
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::topology_failed(
+                        OP,
+                        "an edge use could not be classified",
+                    ));
                 }
             };
 
@@ -902,7 +904,10 @@ pub fn find_radial_sector_between(
     }
 
     // No valid answers found is a valid case.
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::topology_failed(
+        OP,
+        "no radial sector lies between the faces",
+    ))
 }
 
 /// `FindRadialSectorOfCurve`: the radial sector of this edge containing `curve` (over
@@ -1001,7 +1006,9 @@ pub fn reset_primary_edgeuse(
     // Given EU must be one of ours.
     let pos = new_primary.and_then(|p| list.iter().position(|&x| x == p));
     let (Some(pos), Some(new_primary)) = (pos, new_primary) else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(invalid_value(
+            "the new primary edge use is not one of the edge's",
+        ));
     };
 
     // Do the update.
@@ -1117,7 +1124,7 @@ pub fn insert_manifold_edge_end(
 
     // check state: ThisEdge expected to be a manifold edge with 4 Edgeuses
     let [a0, a1, a2, a3] = list.as_slice() else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(invalid_value("the edge does not have four edge uses"));
     };
     let (top1, bot1, bot2, top2) = if is_start_vertex {
         (*a0, *a1, *a2, *a3)
@@ -2270,34 +2277,25 @@ pub fn set_orientation(b: &mut Brep, e: EdgeId, orientation: OrientType) -> Resu
 
 /// `ReverseOrientation`: reverses the curve's parameterisation, then installs the
 /// reversed interval, flips every edge use's orientation and deletes its UV trim.
-/// By default a failed curve reversal's status is ignored, as upstream: the edge
-/// gets the default interval and its uses are still flipped. With the opt-in
-/// [`crate::kernel::UpstreamFixes::edge_reversal_keeps_failed_edge`] (WR-260) a
-/// failed reversal returns before changing the interval or edge uses, and an edge
-/// without curve keeps its interval (upstream installs the default one; fork
-/// tangency-labs/smlib 47507b6).
+/// A failed curve reversal returns before changing the interval or edge uses, and an
+/// edge without curve keeps its interval (WR-260; fork tangency-labs/smlib 47507b6).
+/// Upstream ignores the failed reversal's status, installs the default interval and
+/// still flips the uses, and gives an edge without curve the default interval.
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] without edge uses (upstream walks a null list) and
-/// those of [`eu1::set_uv_trim_curve`]; [`SolidError::Unported`] from the curve (with
-/// the opt-in fix, every error of the curve reversal).
+/// those of [`eu1::set_uv_trim_curve`]; every error of the curve reversal.
 pub fn reverse_orientation(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     // locals
     let old_ivl = b.edge(e)?.interval;
-    let mut new_ivl = Extent1d::new();
 
-    // reverse Curve Parameterization
-    if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
-        match c.reverse_parameterization(k, &old_ivl) {
-            Ok(n) => new_ivl = n,
-            Err(err) if k.fixes.edge_reversal_keeps_failed_edge => return Err(err),
-            Err(err) => failed(err)?,
-        }
-    } else if k.fixes.edge_reversal_keeps_failed_edge {
-        // nothing reversed the interval: the edge keeps it (WR-260 addendum)
-        new_ivl = old_ivl;
-    }
+    // reverse Curve Parameterization; nothing reversed the interval without a curve,
+    // so the edge keeps it (WR-260 addendum)
+    let new_ivl = match b.edge_mut(e)?.curve.as_mut() {
+        Some(c) => c.reverse_parameterization(k, &old_ivl)?,
+        None => old_ivl,
+    };
     b.edge_mut(e)?.interval = new_ivl;
 
     // invert EU orientations, and any uv trim curves.
@@ -2362,7 +2360,10 @@ pub fn orient_edge_sequence(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> Resul
     } else if v11 == v01 {
         reverse_orientation(k, b, e1)?;
     } else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the first two edges do not share a vertex",
+        ));
     }
 
     // Now the rest of them.
@@ -2378,7 +2379,10 @@ pub fn orient_edge_sequence(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> Resul
         } else if v01 == v11 {
             reverse_orientation(k, b, *c)?;
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "an edge does not continue from the previous one",
+            ));
         }
     }
     Ok(())
@@ -3708,8 +3712,7 @@ mod tests {
 
     #[test]
     fn issue_521_failed_reversal_preserves_edge_interval_uses_and_trims() {
-        let mut k = Kernel::default();
-        k.fixes.edge_reversal_keeps_failed_edge = true;
+        let k = Kernel::default();
         let (mut b, e, eus, _) = wire();
         let hermite = crate::curve::hermite_curve::HermiteCurve::new(
             Vec3::ZERO,
@@ -3742,45 +3745,15 @@ mod tests {
         assert_eq!(format!("{b:?}"), before);
     }
 
-    #[test]
-    fn failed_reversal_installs_default_interval_by_default() {
-        // WR-260: upstream ignores the failed reversal's status.
-        let k = Kernel::default();
-        let (mut b, e, eus, _) = wire();
-        b.edge_mut(e).unwrap().curve =
-            Some(C::from(crate::curve::hermite_curve::HermiteCurve::new(
-                Vec3::ZERO,
-                Vec3::X,
-                Vec3::X,
-                Vec3::Y,
-                3,
-            )));
-        for &eu in &eus {
-            b.edgeuse_mut(eu).unwrap().uv_trim_curve = b.edge(e).unwrap().curve.clone();
-        }
-        reverse_orientation(&k, &mut b, e).unwrap();
-        assert_eq!(b.edge(e).unwrap().interval, Extent1d::new());
-        for eu in eus {
-            assert!(b.edgeuse(eu).unwrap().uv_trim_curve.is_none());
-        }
-    }
-
     /// WR-260 addendum (fork tangency-labs/smlib 47507b6): reversing an edge without
-    /// curve installs the default interval upstream; with
-    /// `edge_reversal_keeps_failed_edge` the edge keeps its own.
+    /// curve keeps its interval, where upstream installs the default one.
     #[test]
-    fn reversing_an_edge_without_curve_keeps_its_interval_with_the_opt_in() {
-        let mut k = Kernel::default();
+    fn reversing_an_edge_without_curve_keeps_its_interval() {
+        let k = Kernel::default();
         let (mut b, e, _, _) = wire();
         b.edge_mut(e).unwrap().curve = None;
         let ivl = b.edge(e).unwrap().interval;
         assert_ne!(ivl, Extent1d::new());
-        reverse_orientation(&k, &mut b, e).unwrap();
-        assert_eq!(b.edge(e).unwrap().interval, Extent1d::new());
-
-        k.fixes.edge_reversal_keeps_failed_edge = true;
-        let (mut b, e, _, _) = wire();
-        b.edge_mut(e).unwrap().curve = None;
         reverse_orientation(&k, &mut b, e).unwrap();
         assert_eq!(b.edge(e).unwrap().interval, ivl);
     }

@@ -161,7 +161,7 @@ diagnostics without preparing or evaluating geometry. `details_findings` and
 | `method_section` | Section with a GPU/CPU tag; unsupported contents stay faded with a readable reason. |
 | `read_only_text` | Bounded, selectable code box for read-only diagnostic JSON. |
 
-`crates/ui-egui/src/ui_kit/` contains the tokenised controls used by feature dialogs,
+`crates/ui-kit/src/` (the shared crate `solidcraft-ui-kit`, which `ui-egui` uses as `ui_kit`) contains the tokenised controls used by feature dialogs,
 preferences, manager cards, prompts, context menus and the sketch palette. Import through
 `crate::ui_kit::{...}`. Most controls are crate-visible; the container API is public so platform apps use the same hosts.
 
@@ -341,16 +341,18 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | --- | --- | --- |
 | compare: `comparison_divider`, `comparison_divider_chrome`, `comparison_badge` | Clamped vertical image wipe handle and bounded corner labels. The caller owns commands, shared framing and navigation suppression while the handle captures input; the paint-only chrome can be raised above source callbacks. | `control_height/radius/border`, `space_2/6/8/16/24`, `font_label`, `form_ink`, `panel`, active `TabAccent` |
 | assistant: `assistant_header`, `assistant_controls`, `assistant_badge`, `assistant_bubble`, `assistant_prose`, `assistant_tool_frame/row/detail/status`, `AssistantToolState`, `assistant_approval/actions`, `assistant_composer/footer`, `assistant_input`, `assistant_send`, `assistant_empty`, `assistant_banner`/`banner`, `AssistantTone` | Shared Assistant presentation: 40 pt header, 22 pt state pill, right-aligned user messages limited to 86% width, unboxed assistant prose, bordered tool groups and command detail, tinted approval heading, rounded focused composer with one unframed growing editor and pinned footer, centred setup copy and semantic notices. Closures preserve existing permission choices, protocol routing, queue actions and scenario handles. | `form_header_height/close_size`, `font_label/small/body`, `dialog_body/footer/rule`, `control_fill/border/radius`, `form_ink/dim/primary/success/error`, `accent_soft/selected_ink`, `warning`, radii and spacing |
-| history: `StripHeading`, `HistoryChip`, `HistoryStyle`, `history_drop_bar`, `history_marker`, `HistorySeam`, `history_seam` | Shared strip headings use semibold `font_heading`, `text`, a centred baseline and `space_12` trailing gap. One painter family for bottom chips, 38 pt vertical icon chips and single-line 26 pt name rows (the browser's shared `TREE_ROW_HEIGHT`). Selected items use the active tab tint/ink/border; all variants retain multi-tone feature artwork using one shared kind-to-accent rule (Sketch green, Surface orange, Mesh yellow, Form purple, solids base blue); rolled-back items have 42% opacity; a reference row (a sketch listed under another feature, #6489) has its name in secondary text. Error/warning badges, suppression strikes, horizontal/vertical drop bars and rollback line/hollow circle are shared. No connector lines. | `control_height`, `space_2/3/4/6/8/10/12/14/16/24`, radii, typography, `TabAccent`, `timeline_item`, `control_border`, `text/dim`, `form_error/fill` |
-| tree: `tree_row`, `Row`, `TreeAction` | Shared Browser rows with disclosure, visibility (an eye column at the row's end, clear of a floating scroll bar, with a gap between the disclosure and the activation radio; or beside the disclosure with `eye_left`), activation, selection, appearance swatches, optional subtitle and trailing actions. Compact scene rows are 28 pt, with inline right-aligned summaries, circular swatches, trailing eyes and full-width selection tint. Actions use quiet icons and can appear on hover. Disabled actions retain their reasons and cannot select or fold the row. Browser automation records the same row geometry. | `TREE_ROW_HEIGHT`, `font_label/small`, spacing, control radius/border, `text/dim`, workspace selection tint |
+| history: `StripHeading`, `HistoryChip`, `HistoryStyle`, `history_drop_bar`, `history_marker` | Shared strip headings use semibold `font_heading`, `text`, a centred baseline and `space_12` trailing gap. One painter family for bottom chips, 38 pt vertical icon chips and single-line 26 pt name rows (the browser's shared `TREE_ROW_HEIGHT`). Selected items use the active tab tint/ink/border; all variants retain multi-tone feature artwork using one shared kind-to-accent rule (Sketch green, Surface orange, Mesh yellow, Form purple, solids base blue); rolled-back items have 42% opacity; a reference row (a sketch listed under another feature, #6489) has its name in secondary text. Error/warning badges, suppression strikes, horizontal/vertical drop bars and rollback line/hollow circle are shared. No connector lines. | `control_height`, `space_2/3/4/6/8/10/12/14/16/24`, radii, typography, `TabAccent`, `timeline_item`, `control_border`, `text/dim`, `form_error/fill` |
+| tree: `tree_row`, `Row`, `TreeAction` | Shared Browser rows with disclosure, visibility (an eye column at the row's end, clear of a floating scroll bar, with a gap between the disclosure and the activation radio; or beside the disclosure with `eye_left`), activation, selection, appearance swatches, optional subtitle and trailing actions. Compact scene rows are 28 pt, with inline right-aligned summaries, circular swatches, trailing eyes and full-width selection tint. Actions use quiet icons and can appear on hover. Disabled actions retain their reasons and cannot select or fold the row. Browser automation records the same row geometry. The activation radio publishes `radio:<handle>`. | `TREE_ROW_HEIGHT`, `font_label/small`, spacing, control radius/border, `text/dim`, workspace selection tint |
+| browser: `Browser`, `BrowserState`, `Node`, `Rows`, `Event`, `FoldMemory`, `order_before`, `cancel_drag` | The Browser panel drawn from the host's rows, emitted each frame (open branches only; `next_visible`/`skip` let a host skip off-screen rows). It draws with `tree_row` and returns events (`Select` with `Only`/`Toggle`/`Range`/`RangeAdd`, `Click` for rows that are no item, `Open`, `Fold`, `Eye` and the eye drag's `EyeGesture`, `Activate`, `Rename`, `Move` with `Before`/`Into`, `Action`, `NameAction`, `Menu`, `Revealed`); it never changes host state. Click selects only that row, Cmd/Ctrl toggles, Shift takes the range of the row's kind from the anchor. A slower second click, F2 or `request_rename` renames a row its way: `Rename::Inline` in the panel's editor (Enter or leaving keeps the name, Escape cancels, `refuse_rename` reopens it), `Rename::Host` by `Event::RenameRequested` to the host's own editor (`RowOut` gives the row's widget id and name area). A selected row drags the selection of its kind, or the set and typed `Payload` the host gives with `Rows::drag_with` on `RowOut::drag_started` (items no row draws included); a drag carries its `Source` (scope, presentation) and lands where the host's rule over source and target accepts it (without rules, within its scope); a row's own rule (`Node::accept`) replaces the panel's for it; a row taking drops before and inside takes `Before` in its top 30 %, and inside it when the rules refuse before it there (a drop over its middle never lands before it); other payloads pass through. `events_per_row` hands each row's events back in its `RowOut` as it is drawn, with its click, secondary click and the drop zone under a drag; `scroll(false)` lays the rows out in the host's layout; `active(false)` draws and emits nothing, ending an eye drag it holds (`EyeGesture::End`) and cancelling a row drag it began. `end_gestures` does the same from the context for a presentation not drawn at all. `RowOut` also has the row's widget `response` and `on_control`; `Rows::pass` keeps a row the host lays out itself in the order, so ranges across it are whole. Rows' menus are the host's (`Event::Menu`) or kit `Item`s. `BrowserState` keeps the anchor, rename timer, editor, drag, reveal, search text and keyboard cursor per presentation; folds stay the host's (`FoldMemory` is the shared store). Optional header (title, count, fold chevron, search); search and keyboard arrows are off by default. Publishes `browser:search`, `browser:header`, `browser:menu:<item>`, `rename:<handle>` and the rows' handles. | `tree_row` tokens, `form_header_height`, `font_heading/body`, `field`, `accent`, `radius_sm`, `space_4/6/12/24` |
 | search: `CommandSearch`, `MenuItem::search_row` | Ribbon search composition: one persistent ribbon editor expands from 28 to 40 pt and to 520 pt wide with its right edge anchored, magnifier and S/Esc keycap, 38 pt two-line menu row with 26 pt icon tile, accent bold substring, path, shortcut/kind keycap, counts, JSON detail box and footer. The ordinary 30 pt menu row cannot fit a second line; this variant keeps its enabled/selected states and scenario IDs. Ranking and dispatch stay with the caller. | `form_card_width × 2 − space_8` (520 pt), `control_height`, `space_2/3/4/6/8/10/12/14/16/24`, `radius_xl/control_radius`, `control_fill`, `dialog_body/footer/rule/border`, `form_ink/dim/primary/error/error_fill/success/success_fill`, `selected_ink`, `accent_soft`, typography |
+| icons: `IconSet`, `IconData`, `IconExtension`, `install`, `paint_icon`, `paint_on`, `paint_ink` (`_flipped`, `_mirrored`), `paint_app_bar`, `paint_accented`, `paint_danger`, `resolve`, `primary`, `render` | The kit ships no artwork. The host compiles its SVG masters, colour roles, accents and aliases into a `static` `IconSet` and `install`s it once, before the first frame and in its test contexts (SolidCraft: `solidcraft_look::icons::install`). A host that draws another host's icons plus a few masters of its own installs `IconSet::extended(data, extension)`: the other host's `IconData` (the same static tables, not a copy) with an `IconExtension` of its masters, aliases and default accents, drawn in the data's colour roles and accents and taking precedence for a name both have. The painters rasterise a master per (master, look, pixel size) in the set's roles for the theme, accent and colour vision, with theme-file overrides (`set_theme_palette`); an unknown name draws the set's `placeholder` master, and nothing is drawn before a set is installed. The code-drawn glyphs (`glyphs`: transport, caption, badge, pin, cross, breadcrumb, compass axis tip and radius, agent pointer, brand mark) are host painters too, in a `Glyphs` the host installs beside the set (SolidCraft: `solidcraft_look::glyphs::GLYPHS`). | `app_bar_text`, colour vision, the set's palette |
 | menu: `Menu`, `MenuItem` | Shared popup, 30 pt rows, 28 pt icon column, clipped labels, right-aligned mono shortcuts, submenu chevrons, checked/unchecked and document swatches, inert 40% disabled rows and danger ink; headings and separators; ribbon drag/pin targets retained | `dialog_body/border/rule`, `radius_xl`, `control_height/radius`, `form_ink/dim/primary/error`, `accent_soft`, typography and spacing |
 | radial: `radial_menu` | Eight rounded annular sectors, parallel 4 pt gaps, 9 pt circular corner joins, tab-accent artwork and hover, centre label/key; existing hold/flick/release dispatch | `dialog_body/border`, `form_ink/dim`, `TabAccent`, icon palette, font/spacing tokens |
 | panel: `Window`, `WindowPage` | Shared card frame, header, optional page list, bounded content and footer with a left action | `form_header/footer_height`, `form_card_width`, `form_label_width`, `control_height`, `dialog_footer/rule`, `selected_bg/ink`, spacing |
 | confirm: `Confirm`, `Tone` | Modal warning/danger/info, title/message, mono detail and ghost/cancel/primary actions | `warning`, `form_error/fill`, `accent_soft`, `form_primary`, `on_accent`, `tab_on_fill_dark`, `font_subtitle`, spacing |
 | status: `completion_text` | Compact strip readout with an optional green completion tick and caller-supplied result identity | `font_small`, `control_height`, `form_ink/success/dim`, `space_4/14` |
 | metrics: `row_height`, `table_row_height`, `header_height` | Shared control/header heights | `control_height`, `space_8`, `form_header_height` |
-| layout: `scope`, `row` | Form styling and aligned label/control columns | `form_label_width`, `form_gap_y`, `control_*`, `font_label`, `dialog_label`, `space_4/8` |
+| layout: `scope`, `row`, `value_row` | Form styling and aligned label/control columns; `value_row` shows read-only text that wraps in the control column and grows its row to hold every line (one line keeps the 28 pt row) | `form_label_width`, `form_gap_y`, `control_*`, `font_label`, `dialog_label`, `space_4/8` |
 | `caption`, `warning_caption` | Dim caption aligned beneath a control; the warning one says what is wrong with its value | `font_small`, `text_dim`, `warning`, label-column tokens |
 | `status_line`, `StatusTone` | Full-width, wrapping status or refusal text in dim, warning or error ink. Translates source labels; already translated messages also work. Place directly in the form, outside `row`, so its height grows with the whole message. Rect: `dialog:status:TEXT`. | `font_label`, `text_dim`, `warning`, `error` |
 | `figure_rows`, `FigureSlot` | A caller-painted figure in the label column beside a stack of captioned expression fields (the Hole dialog's section); the caller gets each field's rect and hover/focus state to draw leaders and light the part it sizes. Fields keep their `dialog:<label>` handles; the block publishes `dialog:figure:<id>` and its picture `dialog:figure_picture:<id>` | `control_height`, `form_label_width`, `font_small`, `form_dim`, `space_2/4`, label gap |
@@ -382,9 +384,9 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `slider` + `Slider` options | One token-painted track/thumb over native slider/value interaction; optional step, caller formatting, whole-step manipulation and hidden value editor | `control_height`, `space_24/8/4/2`, form control/font tokens |
 | `placement_field` | Stable focus ID; drawing tool owns Enter/Tab validation and completion | `control_fill`, `font_body`, `text`, `control_height`, spacing |
 | `color_field`, `color_field_with_opacity`, `mixed_color_field`, `color_popover` | Document RGB swatch and kit popover; global U8/F/Hex segments, active-format copy, gamma-byte or linear RGB fields or one Hex editor, painter-drawn HSV square/hue and current strip; outside click dismisses. The opacity-aware field edits the caller's separate `f64` opacity, never premultiplied RGB. Six Hex digits preserve exact opacity; eight set alpha to `aa / 255`. RGB-only callers reject non-FF alpha without applying RGB. Incomplete text remains editable without changing the last valid colour. The mixed-aware wrapper adds a non-editable label and reports accepting the first colour as an edit, so the caller can set all selected targets. | `control_*`, `form_*`, `border`, `on_accent`, `space_*` |
-| choice: `segmented`, `Segments` | Equal text choices; `states` supplies mixed selection, `enabled` keeps unsupported choices faded and inert, `disabled_reasons` also disables choices and supplies hover explanations, `compact` clips instead of falling back to a dropdown, `primary` uses accent/on-accent for the selected segment | `control_*`, `selected_bg/ink`, `font_label`, `space_4/8` |
+| choice: `segmented`, `Segments` | Equal text choices; `states` supplies mixed selection, `enabled` keeps unsupported choices faded and inert, `disabled_reasons` also disables choices and supplies hover explanations, `compact` clips instead of falling back to a dropdown, `primary` uses accent/on-accent for the selected segment, `glyphs` draws a symbol per segment in place of its label (the label stays the hover text and accessible name) | `control_*`, `selected_bg/ink`, `font_label`, `space_4/8` |
 | `segmented_icons`, `IconSegment` | Equal icon choices and mixed states | segment tokens, icon palette |
-| `checkbox`, `checkbox_indeterminate`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices | `space_14/3/2`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
+| `checkbox`, `checkbox_indeterminate`, `checkbox_icon`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices; `checkbox_icon` adds a command icon between box and label (Customize Toolbar) | `space_14/3/2`, `space_16`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
 | `text_emphasis` | Bold/italic with translated accessible names | form control/font tokens |
 | `tool_choices`, `ToolChoice`, `toggle_icon` | Wrapped command modes or independent icon toggles | sketch mode/icon tokens, `accent` |
 | `list_picker` | Selectable row with caller identity and native checked state | `control_height`, form selection tokens |
@@ -417,37 +419,12 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `progress` | Clamped determinate progress | `space_3/6`, `dialog_rule`, `accent` |
 | `steps` | A running operation's steps: ticked when done, a text-high spinner on the current one with how far it is, a ring for those to come | `font_label`, `control_height`, `form_ink/dim/primary`, `space_2/8` |
 
-History contents are selected from measured panel width. A 56 pt thin strip shows icons
-and four vertical transport controls: beginning, back, forward and end. The minimum named
-width is 130 pt; it adds horizontal transport and the same six-dot window grip as Assistant.
-When the remaining header space fits its measured text, **History** appears between grip
-and transport. No names-mode flag
-or command selects these layouts. The seam snaps between 56 and 130 pt; widths from 130
-through 624 pt remain continuous and persist as `timeline_left_width`.
-
-Drag the grip or title to dock along the bottom, at the full-height left edge, or beneath
-the browser. Either card's right edge resizes their shared width. This position divides
-available column height equally. Folding either card leaves its header visible and gives the remainder to
-the other. If both are folded, their headers sit together at the top of the column.
-Expansion and collapse share a smooth cubic transition capped at 120 ms, respecting
-the interface’s instant-animation setting. Their collapse controls share the same active-tab blue hover tint. Browser resizing also resizes History.
-The `view.history_layout` command validates width, docking and collapse requests without
-altering the design or opening dialogs. Floating mode preserves viewport projection.
-
-The seam handle overlays the strip's right edge without taking layout space. Its grip is
-visible at rest; the arrow appears only on hover. Click, double-click the edge, or use
-Enter/Space on the focused handle to resize between thin and minimum named widths. Drag
-freely above the named minimum; resizing draws no dotted guide or name label. Header/title dragging
-and the edge width gesture are separate from feature/folder and rollback dragging.
-The rollback marker is 12 pt high.
-Its 2 pt line uses the active tab fill and ends in a 10 pt hollow circle with a 2 pt accent
-border and the card/panel surface inside. The circle overlaps the line end by 1 pt. The bottom
-strip uses the same painter, rotated. Folder selection, range selection, context menus,
-sketch-pattern children, drag reordering and command JSON retain their existing behavior and handles.
-`history_icons`, `history_names`, `history_marker` and the `history_seam_rest/hover/drag` states
-have light/dark gallery references. The CPU
-board test captures both strip widths with expanded and collapsed browsers
-(`SOLIDCRAFT_HISTORY_EVIDENCE`).
+History uses the shared panel header, sizing, docking and collapse controls. The
+bottom position is a fixed-height row with transport and features. Side and floating
+positions use the vertical content with names and folder controls as available space
+allows. Feature and folder selection, context menus and rollback stay with History.
+The `view.history_layout` compatibility command updates the shared layout without
+altering the design or opening dialogs.
 
 `text(ui, text, options)` supports the existing text behaviors and the new error band:
 
@@ -506,7 +483,7 @@ slot/tile/add/appearance targets retain their identities.
 | Bar 3 | Hover / press and open / latched; focus outline 2 with offset 1 | `navigation_visual`, `navigation_fill`, `NAV_FOCUS_WIDTH/OFFSET`; `nav_hover`, `nav_press`, `selected_bg`, `form_primary` |
 | Bar 5 | Width 244, padding 5, radius 10; shared menu shadow (0,14), blur 36; row 30, radius 6, inset 8, icon 17, gap 9; heading 22, text 11, tracking .07em | `NAV_POPUP_*`, `NAV_MENU_*`, `NAV_ROW_GAP`, `NAV_HEADING_*`, `navigation_popup_frame`, `Container::menu_frame` |
 | Bar 6 | Left / Centre / Right, 12 edge inset | `Position`, `NAV_EDGE`; legacy bottom / bottom_left / bottom_right deserialize as centre / left / right |
-| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `navigation_bar_view::measure` |
+| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `nav_bar_layout::measure` |
 | Bar 8 | Idle fade 45%, hidden 0%, restored 100%; hide-mode fade in 120ms | `navigation_opacity`, `NAV_IDLE_OPACITY/FADE_SECONDS` |
 | Bar 9 | Tooltip delay 800ms, gap 6, padding (8,5), radius 6; 12 medium text, 11 mono key, 15 key line height | `NAV_TOOLTIP_DELAY/POPUP_GAP`, `navigation_tooltip`; `nav_tip/tip_ink/tip_key_border` |
 | Bar 10 | Render hides Look at and Visual style; flat canvases hide Orbit, Spin, Look at, Projection and Visual style, retaining Home and Display | `Slot::available`, `canvas_caps` |
@@ -567,7 +544,7 @@ The kit sets type through `ui_kit::type_face`: the weights (`medium`, `semibold`
 `RichTextExt`), the family and fallback names a host installs its faces under, the script checks
 and the on-demand CJK font state. It holds no font data. Host contract: before the kit draws, the
 context's fonts bind the weight families. A host with faces of its own binds them in its
-definitions (SolidCraft's `fonts.rs` installs IBM Plex at four weights; `with_weight_families`
+definitions (SolidCraft's look, `solidcraft_look::fonts`, installs IBM Plex at four weights; `with_weight_families`
 binds any it leaves out); a host with none calls `type_face::install_weight_families(ctx)` once,
 which replaces the definitions with egui's defaults, and the kit draws every weight with those
 faces. Without either, egui finds no face for the weight families and draws no glyphs for
@@ -1049,7 +1026,7 @@ these shared pieces; the pages themselves arrive in later steps. Sizes follow
 | `toggle_tile(ui, &Card, width)` | The same picture with a 15 pt checkbox in the top-right corner (`Card::selected` is "on"). Reports `Checkbox`. | as above, `control_border` |
 | `settings_picture_choices`, `settings_picture_choices_sized`, `PictureChoice`, `PictureChoiceSize` | A labelled, wrapping radio group with stable option handles and one search result for the row or matching choice. Returns the picked index. The sized variant accepts the card width, figure aspect and caption visibility used by independent Preferences pages. | card tokens, `space_10/12/16/24` |
 | `preset_card(ui, name, word, selected, enabled, &icon, width)` | A 70 pt card with a 38 pt icon box (`icon` paints into it in the ink it is given), a name, one word and an accent check. Used for Performance, Quality and Custom. | as above, `pref_well` |
-| `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip and exposes it as the widget's label. | `form_dim`, `form_ink` |
+| `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip on hover and in a popover after a click, Enter or Space; a click outside or Escape closes it. Exposes `text` as the button's label. | `form_dim`, `form_ink` |
 | `shortcut_binding(ui, chord, editable)` | Complete mono keycaps using the command-search painter; one focusable recorder target per binding, or a read-only label. Empty chords show dim Not assigned. `shortcut_binding_width` measures the same font and padding, including literal plus keys. Gallery: `shortcut_binding`. | `font_small/label`, `control_height`, `form_dim`, `form_primary`, `space_4/8/10`, `radius_sm` |
 | `theme_browser(ui, id, count, grid, reveal, item)` | The Appearance theme list: a carousel (one clipped row, an edge fade in the container fill, round arrows on a side with more cards, an arrow moves by the cards that fit, drag and horizontal wheel scroll while vertical wheel input goes to the page) or a 5-across grid with its own vertical scroll. `reveal` scrolls an index into view. The box and fades use the `settings_card_frame` fill and stroke. | `dialog_border`, `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
 
@@ -1062,9 +1039,9 @@ search and reveal their own bounds. Labelled rows retain ownership of their sear
 
 ### Figures
 
-`ui_kit/preferences_figures.rs` paints the illustrations of the Preferences boards. The geometry of
+`crates/ui-kit/src/preferences_figures.rs` paints the illustrations of the Preferences boards. The geometry of
 each comes from its SVG in `docs/design/preferences/figures/`: `tools/preferences-figures/generate.py`
-compiles those files into `ui_kit/preferences_figure_data.rs`, one constant and one painter per
+compiles those files into `crates/ui-kit/src/preferences_figure_data.rs`, one constant and one painter per
 figure (`paint_tess_normal`, `paint_orbit_origin`, ...; `FIGURES` lists them all), and
 `preferences_figure_ops.rs` paints the operations with egui shapes. A figure is a list of rectangles,
 circles, polygons, soft shadows and tiny captions in the figure's own coordinates. Nothing is
@@ -1079,8 +1056,9 @@ of each element is a role read from `Tokens`: `figure_ground`, `figure_line`, `f
 `figure_axis_x/y/z`, `figure_ok`, `figure_warn`, plus `form_ink`, `form_dim`, `dialog_border`,
 `control_border` and `control_fill` (`docs/design/preferences/tokens.md`). The new tokens, with light
 and dark values, are in `crates/theme/src/palettes.rs`; theme files cannot override them yet and keep
-the built-in values. The colour vision samples read `axis_z`, `sketch_projected`, `axis_x`, `bend_up`
-and `bend_down`, so they follow the colour vision mode.
+the built-in values. The colour vision figures (`paint_colour_vision`) read `axis_z`,
+`sketch_projected`, `axis_x`, `bend_up` and `bend_down`, so they follow the colour vision mode; the
+host composes them into its own sample with its own names.
 
 Theme thumbnails (`paint_theme_thumbnail`, `paint_theme_system`) take a `ThemeSample` (12 colours,
 `ThemeSample::from_tokens(&tokens)`), not the dialog's tokens, because a card shows its own theme.

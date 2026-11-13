@@ -160,6 +160,12 @@ pub fn watch<R>(progress: Arc<Progress>, f: impl FnOnce() -> R) -> R {
     stop.within(|| solidcraft_kernel::watch::watching(kernel, f))
 }
 
+/// Whether the watch over this thread's evaluations asked them to stop. Work done after that may
+/// have been cut short: it is not kept.
+pub fn cancelled() -> bool {
+    CURRENT.with(|c| c.borrow().as_ref().is_some_and(|cur| cur.progress.is_cancelled()))
+}
+
 /// Entered at the start of an evaluation; the guard leaves it.
 pub(crate) struct Evaluation {
     outer: bool,
@@ -327,6 +333,7 @@ mod tests {
             width: "3 mm".into(),
             height: "4 mm".into(),
             operation: crate::Operation::NewBody,
+            centred: false,
         };
         doc.add_feature(block, Some("Block")).unwrap();
         let mut model = crate::Model::default();

@@ -5,9 +5,9 @@
 //! from the actual Rust B-rep. Curve/surface values and adjacency are not recorded.
 //! Geometric merges remain deferred at the exact missing dependency call.
 //! Family 2's lists may hold surface operands (`Operand::surface`, planes and spheres):
-//! upstream copies them with the base copy constructor, so a surface list fails with
-//! `SM_ERR` (WR-196) and a list with B-reps ignores its surfaces; the fixture
-//! `surface-operands.json` compares both.
+//! solidcore copies them whole, where upstream's base copy constructor slices them and a
+//! surface list fails with `SM_ERR` (WR-196); a list with B-reps ignores its surfaces.
+//! The fixture `surface-operands.json` covers both.
 //! Family 6 runs `NonManifoldBoolean` through `DependencyMerge::with_engine` on a
 //! context-only engine with explicit members and at most one operand: it records the NER
 //! status, the restored manifold flag, the lamina mode
@@ -304,7 +304,7 @@ fn options(mask: u8) -> MergeOptions {
 fn status(error: &SolidError) -> i64 {
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        SolidError::Upstream { .. } | SolidError::Failed(_) => error.sm_status().map_or(-1, i64::from),
         _ => -1,
     }
 }
@@ -1235,8 +1235,8 @@ mod tests {
         }
     }
 
-    /// Surface operands: a surface list is refused (the base-sliced copy, WR-196) and
-    /// surfaces next to B-reps are ignored (a real result).
+    /// Surface operands: a surface list is copied whole (WR-196) and either builds or is
+    /// refused for its geometry, and surfaces next to B-reps are ignored (a real result).
     #[test]
     fn surface_operand_fixtures_end_as_expected() {
         let path = concat!(

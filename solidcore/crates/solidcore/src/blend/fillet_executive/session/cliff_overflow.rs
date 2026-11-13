@@ -81,6 +81,7 @@ impl FilletSession<'_> {
         self.executive.error.code = refusal.code as i32;
         self.executive.error.comment = refusal.comment.into();
         self.executive.error.no_room = refusal.reason;
+        self.executive.error.no_room_without_site = true;
     }
 
     /// Note `note`'s refusal, if any, and pass `result` on.
@@ -94,19 +95,18 @@ impl FilletSession<'_> {
     /// The fork's `sm_HoldsItsLaw`: whether a variable round on planar faces holds its
     /// radius law between the filleted edge's ends.
     ///
-    /// A rolling ball of radius r between two planes meeting at the interior angle a stands
-    /// off the edge by `r (1 / sin(a/2) - 1)` where its section crosses the wedge's
-    /// bisector. That point must lie on the fillet surface, at seven points along the edge,
-    /// to twenty times the solver's tolerance and a ten-thousandth of the radius; of the two
-    /// angles the planes make, and the bisector either way, the one that fits. Rounds of
-    /// other solvers, with other than a circular section, on faces that are not both
-    /// planes, with other than one fillet geometry, or along an edge that is not straight,
-    /// pass.
+    /// The round's point on the touch circle of the ball at each of seven points along the
+    /// edge, in the wedge's bisector plane, must lie on the fillet surface, to twenty times
+    /// the solver's tolerance and a ten-thousandth of the radius; of the two angles the
+    /// planes make, and the bisector either way, the one that fits. Rounds of other solvers,
+    /// with other than a circular section, on faces that are not both planes, with other
+    /// than one fillet geometry, or along an edge that is not straight, pass.
     ///
-    /// With `fixes.fillet_gn_section_generator` (the fork's tangency-labs/smlib@8bedf89 =
-    /// d01d7b0's 6007a3d, WR-685) the point is on the round's touch circle, not the great
-    /// circle: the ball's centre `r / sin(a/2)` off the edge on the bisector, the circle
-    /// square to the centres' line, its centre moved along that line by `-r dr/ds` (`s` the
+    /// The point is on the round's touch circle, not the great circle (the fork's
+    /// tangency-labs/smlib@8bedf89 = d01d7b0's 6007a3d, WR-685; its first `sm_HoldsItsLaw`
+    /// took the great circle's point `r (1 / sin(a/2) - 1)` off the edge): the ball's
+    /// centre `r / sin(a/2)` off the edge on the bisector, the circle square to the
+    /// centres' line, its centre moved along that line by `-r dr/ds` (`s` the
     /// centres' arc length) and its radius `r sqrt(1 - (dr/ds)^2)`, its point in the
     /// bisector plane on the edge's side; the law's value and slope are read with `SER`.
     pub(super) fn holds_its_law(&self, k: &Kernel, solver: FilletObject) -> Result<bool> {
@@ -128,7 +128,7 @@ impl FilletSession<'_> {
         for (rail, normal) in normals.iter_mut().enumerate() {
             let offset = base
                 .surface(rail)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
             let planar = offset.surface.base_surface().is_planar(k, EFF_ZERO)?;
             if !planar.is_planar {
                 return Ok(true);
@@ -146,10 +146,12 @@ impl FilletSession<'_> {
         let fillet = fillet.clone_for_evaluation()?;
         let eu = base
             .edgeuse(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
         let target = &*self.objects.target;
-        let e = eu1::edge(target, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-        let curve = edge::curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let e = eu1::edge(target, eu)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+        let curve = edge::curve(target, e)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
         if !curve.is_linear(k, EFF_ZERO, false)?.linear {
             return Ok(true);
         }
@@ -160,78 +162,25 @@ impl FilletSession<'_> {
         let mut law = vr.law.clone();
         // the fork's tangency-labs/smlib@8bedf89 (= d01d7b0's 6007a3d; WR-685): the round
         // touches each ball along its touch circle, not its great circle
-        let touch_circle = k.fixes.fillet_gn_section_generator;
         let mut holds = true;
         let mut i = 1;
         while i < 8 && holds {
             let t = interval.evaluate(f64::from(i) / 8.0);
             i += 1;
-            if touch_circle {
-                let edge_pv = curve.evaluate(k, t, 1, true, false)?;
-                let [pnt, edge_d, ..] = *edge_pv.as_slice() else {
-                    return Err(SolidError::sm_err(OP));
-                };
-                let [r, dr, _] = law.evaluate(t, &vr.law_interval, vr.law_orientation)?;
-                let radius = r.abs();
-                let slope = if r < 0.0 { -dr } else { dr }; // d|r|/dT
-                                                            // The ball's centre on the wedge's bisector, r / sin(a/2) off the edge, and
-                                                            // the touch circle's point on the bisector plane toward the edge. The planes'
-                                                            // normals are both outward (or inward), the bisector along their sum and the
-                                                            // angle pi less theirs, or one of each, the bisector along their difference.
-                let mut fits = false;
-                let mut c = 0;
-                while c < 4 && !fits {
-                    let bisector = if c < 2 { n0 + n1 } else { n0 - n1 };
-                    let angle = if c < 2 { PI - phi } else { phi };
-                    let sign = if c % 2 == 1 { -1.0 } else { 1.0 };
-                    c += 1;
-                    let len = bisector.length();
-                    if len <= EFF_ZERO_SQRT || angle <= EFF_ZERO_SQRT {
-                        continue;
-                    }
-                    let out = bisector * (sign / len); // edge to centre
-                    let off = 1.0 / (angle / 2.0).sin();
-                    let centre = pnt + out * (radius * off);
-                    let along = edge_d + out * (slope * off); // dC/dT
-                    let speed = along.length();
-                    if speed <= EFF_ZERO {
-                        continue;
-                    }
-                    let along = along / speed;
-                    let rate = slope / speed; // dr/ds
-                    if rate.abs() >= 1.0 {
-                        continue;
-                    }
-                    let to_edge = -out - along * (-out).dot(along);
-                    let to_edge_len = to_edge.length();
-                    if to_edge_len <= EFF_ZERO {
-                        continue;
-                    }
-                    let middle = centre
-                        + along * (-radius * rate)
-                        + to_edge * (radius * (1.0 - rate * rate).sqrt() / to_edge_len);
-                    let dropped = fillet.drop_point::<NoObject>(
-                        k,
-                        middle,
-                        &domain,
-                        &DropPointOptions::default(),
-                    )?;
-                    fits = dropped.success && dropped.gap <= tol + 1.0e-4 * radius;
-                }
-                holds = fits;
-                continue;
-            }
-            let pnt = curve.evaluate_point(k, t)?;
-            // SmVariableRadiusFS::GetFilletRadius: SER inside a `double` function, but a law
-            // continued past its curve to an unusable radius stays refused (a corner may
-            // have narrowed the law to its setback, putting this station past its curve)
-            let radius = law
-                .fillet_radius(t, &vr.law_interval, vr.law_orientation)?
-                .abs();
-            // The section's middle: along the wedge's bisector, r (1 / sin(a/2) - 1) off the
-            // edge. The planes' normals are both outward (or inward), the bisector along
-            // their sum and the angle pi less theirs, or one of each, the bisector along
-            // their difference.
+            let edge_pv = curve.evaluate(k, t, 1, true, false)?;
+            let [pnt, edge_d, ..] = *edge_pv.as_slice() else {
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the edge curve has no point and derivative",
+                ));
+            };
+            let [r, dr, _] = law.evaluate(t, &vr.law_interval, vr.law_orientation)?;
+            let radius = r.abs();
+            let slope = if r < 0.0 { -dr } else { dr }; // d|r|/dT
+                                                        // The ball's centre on the wedge's bisector, r / sin(a/2) off the edge, and the
+                                                        // touch circle's point on the bisector plane toward the edge. The planes' normals
+                                                        // are both outward (or inward), the bisector along their sum and the angle pi
+                                                        // less theirs, or one of each, the bisector along their difference.
             let mut fits = false;
             let mut c = 0;
             while c < 4 && !fits {
@@ -243,16 +192,33 @@ impl FilletSession<'_> {
                 if len <= EFF_ZERO_SQRT || angle <= EFF_ZERO_SQRT {
                     continue;
                 }
-                let stand_off = radius * (1.0 / (angle / 2.0).sin() - 1.0);
-                let middle = pnt + bisector * (sign * stand_off / len);
+                let out = bisector * (sign / len); // edge to centre
+                let off = 1.0 / (angle / 2.0).sin();
+                let centre = pnt + out * (radius * off);
+                let along = edge_d + out * (slope * off); // dC/dT
+                let speed = along.length();
+                if speed <= EFF_ZERO {
+                    continue;
+                }
+                let along = along / speed;
+                let rate = slope / speed; // dr/ds
+                if rate.abs() >= 1.0 {
+                    continue;
+                }
+                let to_edge = -out - along * (-out).dot(along);
+                let to_edge_len = to_edge.length();
+                if to_edge_len <= EFF_ZERO {
+                    continue;
+                }
+                let middle = centre
+                    + along * (-radius * rate)
+                    + to_edge * (radius * (1.0 - rate * rate).sqrt() / to_edge_len);
                 let dropped = fillet.drop_point::<NoObject>(
                     k,
                     middle,
                     &domain,
                     &DropPointOptions::default(),
                 )?;
-                // the solver's tolerance, and its circular sections' relative accuracy (a
-                // non-rational cubic across the round, within about 2e-5 of the radius)
                 fits = dropped.success && dropped.gap <= tol + 1.0e-4 * radius;
             }
             holds = fits;
@@ -304,7 +270,7 @@ impl FilletSession<'_> {
     pub(super) fn subtract_removal_region(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::subtract_removal_region");
         if self.objects.intermediate.is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(OP, "the intermediate body"));
         }
         let solvers = self.executive.solvers.clone();
         for &solver in &solvers {
@@ -314,7 +280,10 @@ impl FilletSession<'_> {
                     reason: Some(NoRoomReason::CliffLawNotHeld),
                     comment: "Fillet Error: a variable round traced on its faces' continuations does not hold its radius law",
                 });
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "a variable round does not hold its radius law on its faces' continuations",
+                ));
             }
         }
 
@@ -331,9 +300,10 @@ impl FilletSession<'_> {
             tol = smos_max(tol, base.approx_tol_3d);
             let eu = base
                 .edgeuse(0)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
             blended_edges.push(
-                eu1::edge(self.objects.target, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?,
+                eu1::edge(self.objects.target, eu)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?,
             );
             faces_of.insert(solver, self.fillet_faces(solver)?);
         }
@@ -343,7 +313,7 @@ impl FilletSession<'_> {
             .objects
             .intermediate
             .take()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the intermediate body"))?;
 
         // WR-674: a round left open where its edge runs on tangentially is built alone, both
         // its ends such ends, and not with a cliff overflow
@@ -362,7 +332,10 @@ impl FilletSession<'_> {
                 reason: Some(NoRoomReason::TangentContinuationEndUnsupported),
                 comment: "Fillet Error: a round ending where its edge runs on tangentially is built only alone, with both its ends such ends",
             });
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "a round that ends where its edge runs on tangentially is built only alone",
+            ));
         }
         let mut section_ends = Vec::new();
 
@@ -384,27 +357,29 @@ impl FilletSession<'_> {
             // the fillet's point nearest the middle of the filleted edge
             let eu = base
                 .edgeuse(0)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
-            let fil_edge = eu1::edge(target, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+            let fil_edge = eu1::edge(target, eu)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
             let edge_mid = edge::curve(target, fil_edge)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
                 .evaluate_point(k, edge::interval(target, fil_edge)?.evaluate(0.5))?;
             let vertex_point = vertex::point(target, v)?;
             let end_surface = if end.section {
                 // WR-674: the section through the vertex, normal to the filleted edge
-                let end =
-                    section_end(k, target, fil_edge, v)?.ok_or_else(|| SolidError::sm_err(OP))?;
+                let end = section_end(k, target, fil_edge, v)?.ok_or_else(|| {
+                    SolidError::blend_failed(OP, "no section through the end vertex")
+                })?;
                 let normal = end.normal;
                 section_ends.push(end);
                 Surface::from(Plane::from_normal(vertex_point, normal))
             } else {
                 face::p2::surface(target, end_face)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
                     .clone_for_evaluation()?
             };
             let entry = faces_of
                 .get_mut(&end.solver)
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's fillet faces"))?;
             let mut faces: Vec<Option<FaceId>> = entry.iter().map(|&(_, f)| f).collect();
             let cut = cut_fillet_at_open_end(
                 k,
@@ -441,7 +416,10 @@ impl FilletSession<'_> {
                 tol,
                 &mut note,
             ),
-            (true, _, _) => Err(SolidError::null_pointer(OP)),
+            (true, _, _) => Err(SolidError::blend_missing(
+                OP,
+                "the two section ends of the round",
+            )),
             (false, _, _) => close_removal_region(
                 k,
                 &mut region,
@@ -475,7 +453,10 @@ impl FilletSession<'_> {
                 comment:
                     "Fillet Error: a cliff overflow's removal region does not close into a solid",
             });
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the cliff overflow's removal region does not close into a solid",
+            ));
         }
 
         // the fillet edges' attribute stays with the executive's own B-reps
@@ -539,7 +520,10 @@ impl FilletSession<'_> {
                         reason: Some(NoRoomReason::CliffSubtractionLeavesNoSolid),
                         comment: "Fillet Error: subtracting a cliff overflow's removal region leaves no solid",
                     });
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "subtracting the cliff overflow's removal region leaves no solid",
+                    ));
                 }
                 let mut result = outcome.result;
                 if let Err(e) = super::replace_application_attributes(
@@ -563,7 +547,10 @@ impl FilletSession<'_> {
                     reason: None,
                     comment: "Fillet Error: subtracting a cliff overflow's removal region failed",
                 });
-                Err(SolidError::sm_err(OP))
+                Err(SolidError::blend_failed(
+                    OP,
+                    "subtracting the cliff overflow's removal region failed",
+                ))
             }
         }
     }

@@ -2,40 +2,19 @@
 # (coverage_tests.rs). This list only shrinks: when you give a command its contract and output
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
-doc.open
-doc.recover
-doc.recovery_discard
-doc.recovery_list
 face.delete
-file.insert_step
-motion.export_animation
 render.aging.describe
 render.backends
 render.effects.describe
-render.preflight
 render.scene
-render.start
-sheet.export_dxf
-solid.coil
 solid.draft
-solid.emboss
 solid.hole
 solid.loft
 solid.mirror
-solid.move
 solid.offset_face
-solid.pattern.circular
 solid.pattern.path
 solid.pattern.rectangular
-solid.press_pull
-solid.replace_face
 solid.shell
 solid.thread
-surface.blend
-surface.extend
 surface.extrude
-surface.loft
-surface.patch
 surface.revolve
-surface.ruled
-surface.trim

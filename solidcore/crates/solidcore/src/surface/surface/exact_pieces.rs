@@ -625,17 +625,22 @@ fn net_partials(
     out.ok_or_else(|| SolidError::port_invariant(OP, "a box of a UV curve without parts"))
 }
 
+/// Whether `e` is the certificate's own `SM_ERR` (a wide box's non-positive weight): an
+/// [`SolidError::Upstream`], or a typed failure that replaced one (its
+/// [`SolidError::upstream_status`], #13790).
+fn is_certificate_sm_err(e: &SolidError) -> bool {
+    e.upstream_status() == Some(crate::error::SM_ERR)
+        && e.operation() == "blend::fillet_section::certificate"
+}
+
 /// Converts only `nurbs_partials_over_piece`'s wide-box non-positive-weight `SM_ERR` into
 /// `Ok(None)` so the caller subdivides the span; all other errors (`PortInvariant`,
 /// `Unsupported`, `Cancelled`, `Unported`) propagate untouched.
 fn partials_or_subdivide(r: Result<Partials<Ivl>>) -> Result<Option<Partials<Ivl>>> {
     match r {
         Ok(p) => Ok(Some(p)),
-        Err(SolidError::Upstream {
-            operation: "blend::fillet_section::certificate",
-            code: crate::error::SM_ERR,
-            ..
-        }) => Ok(None),
+        // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
+        Err(e) if is_certificate_sm_err(&e) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -1487,11 +1492,7 @@ fn eval_offset_on_net(
     let mono_v = ev.w1.y.lo > 0.0 || ev.w1.y.hi < 0.0;
     let jump_opt = match offset_crossed_knot_jumps(net, d, &pu, &pv, mono_u, mono_v) {
         Ok(j) => Some(j),
-        Err(SolidError::Upstream {
-            operation: "blend::fillet_section::certificate",
-            code: crate::error::SM_ERR,
-            ..
-        }) => None,
+        Err(e) if is_certificate_sm_err(&e) => None,
         Err(e) => return Err(e),
     };
     let bound = match jump_opt {
@@ -1605,7 +1606,7 @@ fn lift_offset_surface(
     let base_dom = base.natural_uv_domain_with_nurb(k)?;
     let bs_base = exact_nurbs_surface(k, base)?.ok_or_else(unsupported_base)?;
     let base_net = Nurbs::of(&bs_base).map_err(|e| match e {
-        SolidError::Upstream { .. } => unsupported_base(),
+        e if e.upstream_status().is_some() => unsupported_base(),
         other => other,
     })?;
     let ext_srf = off
@@ -1621,7 +1622,7 @@ fn lift_offset_surface(
             }
             let bs_ext = exact_nurbs_surface(k, &e_srf)?.ok_or_else(unsupported_base)?;
             let ext_net = Nurbs::of(&bs_ext).map_err(|e| match e {
-                SolidError::Upstream { .. } => unsupported_base(),
+                e if e.upstream_status().is_some() => unsupported_base(),
                 other => other,
             })?;
             let ext_dom = e_srf.natural_uv_domain_with_nurb(k)?;
@@ -1893,7 +1894,7 @@ impl LiftSurface {
         };
         let bs = exact_nurbs_surface(k, surface)?.ok_or_else(unsupported_srf)?;
         let net = Nurbs::of(&bs).map_err(|e| match e {
-            SolidError::Upstream { .. } => unsupported_srf(),
+            e if e.upstream_status().is_some() => unsupported_srf(),
             other => other,
         })?;
         let dom = surface.natural_uv_domain_with_nurb(k)?;
@@ -2702,7 +2703,6 @@ mod tests {
         use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
 
         let mut k = Kernel::default();
-        k.fixes.fillet_gn_section_generator = true;
         k.fixes.fillet_round_as_definition = true;
 
         let (l, r) = (10.0, 2.0);
@@ -2991,5 +2991,29 @@ mod tests {
             3,
         ));
         assert!(certified_lift(&k, &bsp_srf, &uv_extrap, &c3_extrap, ivl, 1e-12).is_ok());
+    }
+
+    /// #13790: a typed `SM_ERR` that replaced the certificate's `Upstream` subdivides the
+    /// span as the `Upstream` does.
+    #[test]
+    fn certificate_sm_err_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        let op = "blend::fillet_section::certificate";
+        assert!(is_certificate_sm_err(&SolidError::sm_err(op)));
+        assert!(matches!(
+            partials_or_subdivide(Err(SolidError::sm_err(op))),
+            Ok(None)
+        ));
+        for typed in replaced_upstream(op, crate::error::SM_ERR, None) {
+            assert!(is_certificate_sm_err(&typed), "{typed:?}");
+            assert!(matches!(partials_or_subdivide(Err(typed)), Ok(None)));
+        }
+        for other in replaced_upstream(op, 1006, None)
+            .into_iter()
+            .chain(native_failures(op, crate::error::SM_ERR))
+        {
+            assert!(!is_certificate_sm_err(&other), "{other:?}");
+            assert!(partials_or_subdivide(Err(other)).is_err());
+        }
     }
 }

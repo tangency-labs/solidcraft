@@ -52,22 +52,14 @@ pub(super) fn source(s: &Session, p: &Value, cmd: &str) -> Result<MotionTrace> {
     let (occurrence, local) = super::traced_point(s, p, cmd)?;
     let point = match p.get("point_ref") {
         Some(v) => {
-            let mut reference = v.clone();
             // The origin parser uses an occurrence's first placement. A trace can name a
             // different nested instance; convert its world pick to that canonical frame.
-            let id = occurrence.last().copied().unwrap_or(0);
-            let placed = placed_world(s, &occurrence)?;
-            let inverse = solidcraft_doc::mat_inverse(&placed).ok_or_else(|| bad(cmd, "invalid occurrence placement"))?;
-            let canonical = joints::occurrence_world(&s.doc, id);
-            for key in ["face", "circle", "edge", "point", "corner"] {
-                if let Some(at) = reference.get(key).and_then(crate::params::vec3) {
-                    let at = apply_point(&canonical, apply_point(&inverse, at));
-                    reference[key] = json!([at.x, at.y, at.z]);
-                }
-            }
-            if let Some(z) = reference.get("z").and_then(crate::params::vec3) {
-                let z = solidcraft_doc::apply_vector(&canonical, solidcraft_doc::apply_vector(&inverse, z));
-                reference["z"] = json!([z.x, z.y, z.z]);
+            placed_world(s, &occurrence)?;
+            let mut reference = super::super::joints::in_first_placement(s, v, &occurrence, cmd)?;
+            // The trace's `occurrence` names the placement, and the reference now sits in its
+            // part's first placement: a pick's `path` would anchor it on the copy a second time.
+            if let Some(m) = reference.as_object_mut() {
+                m.remove("path");
             }
             let o = super::super::joints::origin_param(s, Some(&reference), cmd)?;
             if o.occurrence != occurrence.last().copied().unwrap_or(0) {
@@ -75,7 +67,7 @@ pub(super) fn source(s: &Session, p: &Value, cmd: &str) -> Result<MotionTrace> {
             }
             o
         }
-        None => JointOrigin { occurrence: occurrence.last().copied().unwrap_or(0), snap: Snap::Point { point: local, z: None, x: None } },
+        None => JointOrigin::new(occurrence.last().copied().unwrap_or(0), Snap::Point { point: local, z: None, x: None }),
     };
     let referenced = apply_point(&joints::resolve_origin(&s.doc, &s.model.state(), &point)?, Vec3::ZERO);
     if referenced.dist(local) > 1e-4 {

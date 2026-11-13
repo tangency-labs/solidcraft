@@ -11,6 +11,8 @@
 //! motorcycle laid earlier, or another motorcycle head-on (both stop where they meet). The
 //! traces cut the face into patches that are rectangles with corners cut by free boundary.
 
+use super::comp;
+
 /// A trace: the iso-line `axis` = `at` (0: u = at, running along v; 1: v = at, running along u)
 /// from `from` to `to` in the other parameter (`from < to`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -68,9 +70,9 @@ pub(crate) fn traces(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], sc
     let mut lo = [f64::MAX; 2];
     let mut hi = [f64::MIN; 2];
     for q in &p {
-        for d in 0..2 {
-            lo[d] = lo[d].min(q[d]);
-            hi[d] = hi[d].max(q[d]);
+        for ((l, h), qd) in lo.iter_mut().zip(hi.iter_mut()).zip(q) {
+            *l = l.min(*qd);
+            *h = h.max(*qd);
         }
     }
     let extent = (hi[0] - lo[0]).max(hi[1] - lo[1]);
@@ -108,7 +110,7 @@ pub(crate) fn traces(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], sc
                 continue;
             };
             for d in 0..2 {
-                let (before, after) = (a[d] - b[d], c[d] - b[d]);
+                let (before, after) = (comp(&a, d) - comp(&b, d), comp(&c, d) - comp(&b, d));
                 let flat = |x: f64| x.abs() <= eps;
                 // A (non-strict) minimum higher on one side, or maximum lower on one side.
                 let min = (before > eps || flat(before)) && (after > eps || flat(after)) && !(flat(before) && flat(after));
@@ -120,7 +122,9 @@ pub(crate) fn traces(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], sc
                 };
                 // Concave: the face lies beyond the extremum.
                 let mut probe = b;
-                probe[d] += sign * extent * 1e-6;
+                if let Some(x) = probe.get_mut(d) {
+                    *x += sign * extent * 1e-6;
+                }
                 if !inside(probe) {
                     continue;
                 }
@@ -143,16 +147,18 @@ pub(crate) fn traces(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], sc
             }
             let (Some(a), Some(b)) = (p.get(ia), p.get(ib)) else { continue };
             // The segment crosses the line other = o[e] at parameter s along d.
-            let (lo_e, hi_e) = (a[e].min(b[e]), a[e].max(b[e]));
-            if m.o[e] < lo_e || m.o[e] > hi_e {
+            let (ae, be, oe) = (comp(a, e), comp(b, e), comp(&m.o, e));
+            let (ad, bd, od) = (comp(a, m.d), comp(b, m.d), comp(&m.o, m.d));
+            let (lo_e, hi_e) = (ae.min(be), ae.max(be));
+            if oe < lo_e || oe > hi_e {
                 continue;
             }
             // A segment along the line itself is reached at its nearer end ahead.
-            let ahead = |x: f64| (x - m.o[m.d]) * m.sign;
-            let t = if (b[e] - a[e]).abs() <= eps {
-                [ahead(a[m.d]), ahead(b[m.d])].into_iter().filter(|t| *t > eps).fold(f64::INFINITY, f64::min)
+            let ahead = |x: f64| (x - od) * m.sign;
+            let t = if (be - ae).abs() <= eps {
+                [ahead(ad), ahead(bd)].into_iter().filter(|t| *t > eps).fold(f64::INFINITY, f64::min)
             } else {
-                ahead(a[m.d] + (m.o[e] - a[e]) / (b[e] - a[e]) * (b[m.d] - a[m.d]))
+                ahead(ad + (oe - ae) / (be - ae) * (bd - ad))
             };
             if t > eps && t < m.reach {
                 m.reach = t;
@@ -177,8 +183,8 @@ pub(crate) fn traces(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], sc
         for (j, n) in motos.iter().enumerate().skip(i + 1) {
             if m.d != n.d {
                 // Crossing: m's line is other = m.o[1 - m.d]; n travels along n.d = 1 - m.d.
-                let x_on_m = (n.o[m.d] - m.o[m.d]) * m.sign;
-                let x_on_n = (m.o[n.d] - n.o[n.d]) * n.sign;
+                let x_on_m = (comp(&n.o, m.d) - comp(&m.o, m.d)) * m.sign;
+                let x_on_n = (comp(&m.o, n.d) - comp(&n.o, n.d)) * n.sign;
                 if x_on_m > eps && x_on_m < m.reach && x_on_n > eps && x_on_n < n.reach {
                     // The later one stops on the earlier one's trace (a tie stops both).
                     if x_on_m >= x_on_n {
@@ -188,9 +194,9 @@ pub(crate) fn traces(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], sc
                         events.push(Event { t: x_on_n, who: j, at: x_on_n, cause: Some((i, x_on_m)), partner: None });
                     }
                 }
-            } else if m.sign != n.sign && (m.o[1 - m.d] - n.o[1 - n.d]).abs() <= eps.max(snap) {
+            } else if m.sign != n.sign && (comp(&m.o, 1 - m.d) - comp(&n.o, 1 - n.d)).abs() <= eps.max(snap) {
                 // Head-on on one line: they meet halfway if each would get there.
-                let gap = (n.o[m.d] - m.o[m.d]) * m.sign;
+                let gap = (comp(&n.o, m.d) - comp(&m.o, m.d)) * m.sign;
                 let half = 0.5 * gap;
                 if gap > eps && half < m.reach && half < n.reach {
                     events.push(Event { t: half, who: i, at: half, cause: None, partner: Some(j) });
@@ -244,18 +250,20 @@ pub(crate) fn traces(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], sc
         .zip(&stop)
         .filter_map(|(m, s)| {
             let (len, how) = (*s)?;
-            let (a, b) = (m.o[m.d], m.o[m.d] + m.sign * len);
-            let (from, to) = (a.min(b) / scale[m.d], a.max(b) / scale[m.d]);
+            let (a, b) = (comp(&m.o, m.d), comp(&m.o, m.d) + m.sign * len);
+            let (from, to) = (a.min(b) / comp(&scale, m.d), a.max(b) / comp(&scale, m.d));
             // The trace runs along d, so it lies on the iso-line of the other parameter.
             let axis = 1 - m.d;
             let mut endp = m.o;
-            endp[m.d] = b;
+            if let Some(x) = endp.get_mut(m.d) {
+                *x = b;
+            }
             let end = match how {
                 Stop::Boundary => End::Boundary(m.hit.0, m.hit.1),
                 Stop::Trace(c) => End::Trace(*out_index.get(c)?),
                 Stop::HeadOn(j) => End::HeadOn(*out_index.get(j)?),
             };
-            Some(Trace { axis, at: m.o[axis] / scale[axis], from, to, start: m.node, a: uv(m.o), b: uv(endp), end })
+            Some(Trace { axis, at: comp(&m.o, axis) / comp(&scale, axis), from, to, start: m.node, a: uv(m.o), b: uv(endp), end })
         })
         .collect()
 }

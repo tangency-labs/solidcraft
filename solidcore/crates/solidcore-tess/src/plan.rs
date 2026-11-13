@@ -32,6 +32,14 @@ pub struct FacePlan {
 }
 
 impl FacePlan {
+    /// The rule of node `k` if the plan names it a pole of higher order.
+    pub(crate) fn pole(&self, k: usize) -> Option<crate::PoleRule> {
+        self.poles
+            .iter()
+            .find(|p| p.node as usize == k)
+            .map(|p| p.rule)
+    }
+
     /// Triangle `t` is on this face's own nodes (the evaluated mesh keeps only those).
     fn has_nodes(&self, t: &[u32; 3]) -> bool {
         t.iter().all(|&i| (i as usize) < self.uv.len())
@@ -51,26 +59,126 @@ pub struct TessPlan {
     pub edge_faces: Vec<Vec<u32>>,
 }
 
+/// One face's nodes as the mesh has them ([`TessPlan::nodes`]).
+pub(crate) struct FaceNodes {
+    /// Each node's position.
+    pub(crate) positions: Vec<Vec3>,
+    /// Each node's normal (turned with the face).
+    pub(crate) normals: Vec<Vec3>,
+    /// The kernel's form of the face's surface, where a node needed it.
+    pub(crate) kernel: Option<solidcore::eval::EvalSurface>,
+    /// The first node the kernel's evaluator refuses, and why.
+    pub(crate) failure: Option<String>,
+}
+
 impl TessPlan {
+    /// Face `f`'s node positions and normals as [`TessPlan::evaluate`] gives them, before its
+    /// pole rules: each node evaluated on the face's surface (a shared edge node's own point
+    /// kept), the kernel's form of the surface where a node needed it, and the first node the
+    /// kernel's evaluator refuses, if one does (the face is then left out of the mesh).
+    pub(crate) fn nodes(&self, f: &FacePlan) -> FaceNodes {
+        let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
+        // At a degenerate point (a cone's apex, a sphere's pole) the kernel's exact limit
+        // normal, from the second partials; the kernel's form of the face is made only when a
+        // vertex of it needs one.
+        let mut kernel: Option<solidcore::eval::EvalSurface> = None;
+        let (mut positions, mut normals) = (
+            Vec::with_capacity(f.uv.len()),
+            Vec::with_capacity(f.uv.len()),
+        );
+        // The first node the kernel's evaluator refuses, with its reason: the face is refused
+        // there, not meshed with a normal made up for it. Its pole nodes have their own rule
+        // in [`TessPlan::evaluate`] ([`crate::pole::apply`]).
+        let mut failure: Option<String> = None;
+        for (k, uv) in f.uv.iter().enumerate() {
+            let (p, n) = match surface {
+                Some(s) => {
+                    solidcore_convert::record_pair(if let Some(pn) = s.regular(uv[0], uv[1]) {
+                        pn
+                    } else {
+                        let ks = kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
+                        ks.eval(uv[0], uv[1]).unwrap_or_else(|e| {
+                            if failure.is_none() && !f.poles.iter().any(|p| p.node as usize == k) {
+                                failure = Some(format!(
+                                    "node {k} at ({}, {}): {}",
+                                    uv[0],
+                                    uv[1],
+                                    crate::eval_message(e)
+                                ));
+                            }
+                            s.eval(uv[0], uv[1])
+                        })
+                    })
+                }
+                None => (Vec3::ZERO, f.normals.get(k).copied().unwrap_or(Vec3::Z)),
+            };
+            let p = f.fixed.get(k).copied().unwrap_or(p);
+            positions.push(p);
+            normals.push(if f.flip { -n } else { n });
+        }
+        FaceNodes {
+            positions,
+            normals,
+            kernel,
+            failure,
+        }
+    }
+
     /// Evaluate on the CPU into an indexed mesh (vertices are shared within a face, not
     /// across faces, so creases keep their own normals), with the faces left out of it.
     #[must_use]
     pub fn evaluate(&self) -> (Mesh, Vec<crate::RefusedFace>) {
         let mut out = Mesh::default();
+        let mut refused = Vec::new();
         for f in &self.faces {
             let base = out.positions.len();
             let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
-            for (k, uv) in f.uv.iter().enumerate() {
-                let (p, n) = match surface {
-                    Some(s) => solidcore_convert::record_pair(s.eval(uv[0], uv[1])),
-                    None => (Vec3::ZERO, f.normals.get(k).copied().unwrap_or(Vec3::Z)),
-                };
-                let p = f.fixed.get(k).copied().unwrap_or(p);
-                out.positions.push(p);
-                out.normals.push(if f.flip { -n } else { n });
+            let FaceNodes {
+                mut positions,
+                mut normals,
+                mut kernel,
+                failure,
+            } = self.nodes(f);
+            if let Some(reason) = failure {
+                refused.push(crate::RefusedFace {
+                    face: f.face as usize,
+                    reason,
+                });
+                continue;
             }
-            for t in &f.triangles {
-                if f.has_nodes(t) {
+            // At the poles of higher order the plan names: one copy per triangle with its limit
+            // normal, or the mean of the triangles' normals, by the kernel's evaluator.
+            let mut triangles = std::borrow::Cow::Borrowed(&f.triangles);
+            if let Some(s) = surface
+                && !f.poles.is_empty()
+            {
+                let at_poles: Vec<usize> = f
+                    .poles
+                    .iter()
+                    .map(|p| p.node as usize)
+                    .filter(|&k| k < f.fixed.len())
+                    .collect();
+                let k = kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
+                match crate::pole::apply(k, f, &at_poles, positions.clone(), normals.clone()) {
+                    Ok((p, n, t)) => {
+                        (positions, normals) = (p, n);
+                        triangles = std::borrow::Cow::Owned(t);
+                    }
+                    // A normal the rule cannot give refuses the face, nothing substituted.
+                    Err(reason) => {
+                        refused.push(crate::RefusedFace {
+                            face: f.face as usize,
+                            reason,
+                        });
+                        continue;
+                    }
+                }
+            }
+            let nodes = positions.len();
+            out.positions.extend(positions);
+            out.normals.extend(normals);
+            for t in triangles.iter() {
+                if t.iter().all(|&i| (i as usize) < nodes) {
                     let at = |i: u32| u32::try_from(base + i as usize).unwrap_or(u32::MAX);
                     out.triangles.push([at(t[0]), at(t[1]), at(t[2])]);
                     out.tri_face.push(f.face);
@@ -79,7 +187,7 @@ impl TessPlan {
         }
         out.edges.clone_from(&self.edges);
         out.edge_faces.clone_from(&self.edge_faces);
-        (out, Vec::new())
+        (out, refused)
     }
 
     /// Which of the body's `faces` faces have triangles in [`TessPlan::evaluate`]'s mesh,

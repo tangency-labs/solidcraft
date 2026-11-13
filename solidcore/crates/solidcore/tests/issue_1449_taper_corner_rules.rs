@@ -246,8 +246,8 @@ fn half_disc_cone_volume() -> f64 {
     sum * h / 3.0
 }
 
-/// A half disc drafted outward: SMLib's tangent rule does not close (WR-402, without
-/// `taper_pivot_nearest_corner`); the curvature-keeping rule continues the arc's cone to
+/// A half disc drafted outward: SMLib's tangent rule does not close without WR-402's
+/// nearest-corner pivot, which closes it; the curvature-keeping rule continues the arc's cone to
 /// the diameter's plane (4 faces, the exact volume); the tangent planes fix continues the
 /// cone's ends as flat pieces (6 faces, the volume WR-402's fix gives, 6555.9139).
 #[test]
@@ -257,7 +257,7 @@ fn a_half_disc_keeps_its_cone_or_gets_tangent_planes() {
     let TaperExtrude::Solid(b) = taper(&mut k, &d, -3.0, OffsetCornerType::LinearExtension) else {
         panic!("refused");
     };
-    assert!(!is_manifold_solid(&b).unwrap());
+    assert!(is_manifold_solid(&b).unwrap());
 
     let (faces, v) = built(&mut k, &d, -3.0, OffsetCornerType::CurveExtension);
     assert_eq!(faces, 4);

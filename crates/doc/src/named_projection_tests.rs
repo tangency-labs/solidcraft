@@ -1,7 +1,7 @@
 use crate::{Document, ModelBody, ModelState};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -348,4 +348,285 @@ fn an_edge_named_by_a_piece_of_a_face_that_is_whole_again_is_found() {
     // A piece told apart by a face the side never touches (the opposite side) is still refused.
     let gone = whole.replace("F2:side:l4", "F2:side:l4#[F2:side:l2]");
     assert!(crate::name_lookup::locate_edge(body, &gone, near).is_err(), "{gone}");
+}
+
+/// #13464: a mesh's flat patch outline drops a corner part way along a side, even when single
+/// precision has moved it off the line (as an STL's corners are), and when the loop starts there.
+#[test]
+fn a_mesh_outline_drops_a_rounded_corner_part_way_along_a_side() {
+    let single = |x: f64| f64::from(x as f32);
+    // a, c and d make a triangle; b lies on its side a–c up to single-precision rounding.
+    let a = Vec3::new(0.0, 0.0, 0.0);
+    let b = Vec3::new(single(0.3), single(0.33), 0.0);
+    let c = Vec3::new(1.0, single(1.1), 0.0);
+    let d = Vec3::new(0.0, 2.0, 0.0);
+    let off = (b - a).cross(c - a).len() / (c - a).len();
+    assert!(off > 0.0 && off < 1e-7, "b is off the line only by rounding: {off}");
+    // b first, so the outline's loop starts at it.
+    let mesh =
+        solidcraft_geom::Mesh { positions: vec![b, c, d, a], triangles: vec![[0, 1, 2], [0, 2, 3]], tri_face: vec![0, 0], ..Default::default() };
+    let loops = crate::project3d::flat_outline(&mesh, Vec3::new(0.3, 0.8, 0.0));
+    assert_eq!(loops.len(), 1, "{loops:?}");
+    let corners = loops.first().unwrap();
+    assert_eq!(corners.len(), 4, "three corners and the first again: {corners:?}");
+    assert!(!corners.iter().any(|p| p.dist(b) < 1e-12), "the corner on the side is gone: {corners:?}");
+    for p in [a, c, d] {
+        assert!(corners.iter().any(|q| q.dist(p) < 1e-12), "{p:?} is a corner: {corners:?}");
+    }
+}
+
+/// #13464: far from the origin, a small flat patch keeps its corners. A tolerance that grew with
+/// the distance from the origin alone took every corner of a 1 × 1 square at x = 1 000 000 for one
+/// on a straight side, and the face projected to nothing.
+#[test]
+fn a_small_mesh_patch_far_from_the_origin_keeps_its_corners() {
+    let x = 1_000_000.0;
+    let corners = [Vec3::new(x, 0.0, 0.0), Vec3::new(x + 1.0, 0.0, 0.0), Vec3::new(x + 1.0, 1.0, 0.0), Vec3::new(x, 1.0, 0.0)];
+    let mesh =
+        solidcraft_geom::Mesh { positions: corners.to_vec(), triangles: vec![[0, 1, 2], [0, 2, 3]], tri_face: vec![0, 0], ..Default::default() };
+    let loops = crate::project3d::flat_outline(&mesh, Vec3::new(x + 0.5, 0.5, 0.0));
+    assert_eq!(loops.len(), 1, "{loops:?}");
+    assert_eq!(loops.first().map(Vec::len), Some(5), "four corners and the first again: {loops:?}");
+}
+
+/// A ring turned from a rectangle on YZ about Z: each side of the rectangle makes one round face.
+fn ring() -> Document {
+    let doc = Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "YZ", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [10., 0.]},
+                        {"fixed": false, "id": "p2", "pos": [20., 0.]},
+                        {"fixed": false, "id": "p3", "pos": [20., 5.]},
+                        {"fixed": false, "id": "p4", "pos": [10., 5.]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                        {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"l": 4, "p": 4}
+                }
+            },
+            {
+                "id": 2, "name": "Revolve1", "type": "revolve", "body_names": ["Ring"], "angle": "360 deg",
+                "axis": {"axis": "Z", "type": "world"}, "convention": "sketch_normal",
+                "operation": "new_body", "profiles": {"type": "all"}, "sketch": 1
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    crate::format::read(&doc.to_json()).unwrap()
+}
+
+#[test]
+fn numbered_edge_projection_recovers_the_edge_between_whole_faces() {
+    // 0.30.1 split each round face of a revolve into numbered pieces; the edge between two of
+    // them is now the edge between the two whole faces, at the same place.
+    let doc = ring();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let at = Vec3::new(0., -20., 5.);
+    let source = LinkSource::Edge { body: "Ring".into(), at };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &state, &Plane::XY, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    let link = sketch.add_link(LinkKind::Project, source, &resolved.geom).unwrap();
+    let numbered = "F2:side:l2#2|F2:side:l3#2";
+    sketch.links[0].edge_name = Some(numbered.into());
+    let curves = sketch.link_curves(&link).len();
+    let saved = sketch.clone();
+
+    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut sketch).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert!(!sketch.links[0].lost);
+    assert_eq!(sketch.links[0].edge_name.as_deref(), Some(numbered));
+    assert_eq!(sketch.link_curves(&link).len(), curves);
+
+    // Edges picked by fillets, holes and joints keep the name as picked.
+    let body = state.body("Ring").unwrap();
+    assert!(crate::naming::locate_edge(body, numbered, at).is_err(), "ordinary lookup stays strict");
+
+    // The saved point on another edge (the inner rim): not this edge, so it asks to reselect.
+    let mut elsewhere = saved;
+    elsewhere.links[0].source = LinkSource::Edge { body: "Ring".into(), at: Vec3::new(0., -10., 5.) };
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut elsewhere).unwrap_err();
+    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == numbered), "{error}");
+}
+
+/// A drafted face's edge is a circle seen at a slant: an ellipse. The sketch takes it as the
+/// ellipse it is, not as the point set a spline of its own would be (#15061).
+#[test]
+fn a_drafted_face_projects_its_edge_as_one_ellipse() {
+    let mut initial = ModelState::default();
+    // A cylinder drafted three degrees: its top rim is a circle seen at a slant, an ellipse of
+    // axis ratio 1/cos(3 deg).
+    let cylinder = solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 20.0, 30.0).unwrap();
+    let drafted = solidcraft_kernel::draft(&cylinder, &[Vec3::new(0.0, 0.0, 30.0)], &Plane::XZ, Vec3::Y, 3f64.to_radians()).unwrap();
+    let faces = drafted.faces(0.01).unwrap();
+    // The drafted face leans off the base plane; the sketch lies in the face's own plane, so
+    // the edge comes to the sketch as the ellipse it is.
+    let lean = faces.iter().filter_map(|f| f.plane_normal).find(|n| n.z > 0.9).unwrap();
+    let angle = 3f64.to_radians();
+    let lean_sign = if lean.y >= 0.0 { 1.0 } else { -1.0 };
+    let normal = Vec3::new(0.0, lean_sign * angle.sin(), angle.cos());
+    let plane = Plane::from_normal(Vec3::new(0.0, 0.0, 30.0), normal).unwrap();
+    let mut body = ModelBody::new("Drafted".into(), drafted, 1);
+    body.names = crate::naming::NameCell::known(Arc::new(vec![String::new(); faces.len()]));
+    initial.bodies.extend([body]);
+    let doc = Document::default();
+    let source = LinkSource::Face { body: "Drafted".into(), at: Vec3::new(0.0, 0.0, 30.0) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    // The edge comes to the sketch as one ellipse, not as the point set of a spline.
+    assert!(
+        resolved.geom.iter().any(|g| matches!(g, LinkGeom::Ellipse { .. })),
+        "a drafted face's edge is an ellipse, not a point set: {:?}",
+        resolved
+            .geom
+            .iter()
+            .map(|g| match g {
+                LinkGeom::Ellipse { .. } => "ellipse".to_string(),
+                LinkGeom::Spline { pts, .. } => format!("spline with {} points", pts.len()),
+                other => format!("{other:?}"),
+            })
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !resolved.geom.iter().any(|g| matches!(g, LinkGeom::Spline { pts, .. } if pts.len() > 10)),
+        "no projected spline may carry a point set: {:?}",
+        resolved.geom
+    );
+}
+
+fn lens_body(radius: f64, height: f64) -> ModelBody {
+    // Two equal arcs meeting at two sharp corners (x = ±half_w, y = 0), so both top vertices
+    // share the exact same three incident faces: bottom/top and the two arc walls.
+    let half_w = 10.0;
+    let d = (radius * radius - half_w * half_w).sqrt();
+    let doc = Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [-half_w, 0.]},
+                        {"fixed": false, "id": "p2", "pos": [half_w, 0.]},
+                        {"fixed": false, "id": "c1", "pos": [0., -d]},
+                        {"fixed": false, "id": "c2", "pos": [0., d]}
+                    ],
+                    "curves": [
+                        {"type": "arc", "id": "a1", "a": 2, "b": 1, "c": 3, "reversed": false, "construction": false},
+                        {"type": "arc", "id": "a2", "a": 1, "b": 2, "c": 4, "reversed": false, "construction": false}
+                    ],
+                    "constraints": [],
+                    "counters": {"a": 2, "p": 4}
+                }
+            },
+            {
+                "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Lens"],
+                "extent": {"convention": "total_distance", "direction": "positive", "distance": format!("{height} mm")},
+                "operation": "new_body", "profiles": {"type": "all"}, "sketch": 1
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    model.state().body("Lens").cloned().unwrap()
+}
+
+#[test]
+fn vertex_names_disambiguate_shared_incident_faces_with_tilde() {
+    let body = lens_body(12.0, 5.0);
+    let names = crate::naming::vertex_names(&body);
+    let record = body.body.record();
+    let numbered: Vec<(usize, &str)> = names.iter().enumerate().filter(|(_, n)| n.contains('~')).map(|(i, n)| (i, n.as_str())).collect();
+    assert_eq!(numbered.len(), 4, "two top and two bottom vertices share identical face sets: {names:?}");
+    for &(i, name) in &numbered {
+        let p = record.vertices[i].point;
+        let pt = Vec3::new(p[0], p[1], p[2]);
+        let hit = crate::naming::locate_vertex(&body, name, pt).unwrap();
+        assert_eq!(hit.vertex, i);
+        assert!(hit.point.dist(pt) < 1e-6);
+    }
+}
+
+#[test]
+fn named_vertex_projection_moves_past_closer_neighbor_and_fails_when_removed() {
+    let at_height = |h: f64| {
+        // Right trapezoid whose bottom-right corner at x = 10 sits near x = 10, y = 0, z = h:
+        // when z increases by 20, the other corner at x = 0, y = 0, z = h - 18 would be closer to
+        // saved `at` if resolved by distance, while topological naming follows the picked corner.
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 4.0, h)).unwrap();
+        let mut names = vec![String::new(); body.faces(0.01).unwrap().len()];
+        for f in body.faces(0.01).unwrap() {
+            let n = f.plane_normal.unwrap();
+            names[f.index] = if n.z > 0.9 {
+                "F2:top"
+            } else if n.z < -0.9 {
+                "F2:bottom"
+            } else if n.x > 0.9 {
+                "F2:side:right"
+            } else if n.x < -0.9 {
+                "F2:side:left"
+            } else if n.y > 0.9 {
+                "F2:side:back"
+            } else {
+                "F2:side:front"
+            }
+            .into();
+        }
+        let mut mb = ModelBody::new("Block".into(), body, 2);
+        mb.names = crate::naming::NameCell::known(Arc::new(names));
+        mb
+    };
+
+    let doc = Document::default();
+    let mut initial = ModelState::default();
+    initial.bodies.push(at_height(5.0));
+    let plane = Plane::XZ;
+    let source = LinkSource::Vertex { body: "Block".into(), at: Vec3::new(10.0, 0.0, 5.0) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    let vertex_name = crate::project::resolved_vertex_name(&initial, &resolved).unwrap();
+    assert_eq!(vertex_name, "F2:side:front|F2:side:right|F2:top");
+
+    let mut sketch = Sketch::default();
+    let link_id = sketch.add_link(LinkKind::Project, resolved.source, &resolved.geom).unwrap();
+    sketch.links[0].vertex_name = Some(vertex_name.clone());
+
+    // Grow height from 5 to 40 (well past 0.25 * diagonal and past closer neighbors).
+    let mut taller = ModelState::default();
+    taller.bodies.push(at_height(40.0));
+    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &taller, &plane, &mut sketch).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert!(!sketch.links[0].lost);
+    let p_idx = sketch.link_points(&link_id)[0];
+    let pt = sketch.points[p_idx].pos;
+    // Plane::XZ has local y_dir = -Z, so z = 40 projects to local y = -40.
+    assert!((pt.x - 10.0).abs() < 1e-6 && (pt.y + 40.0).abs() < 1e-6, "vertex followed to height 40: {pt:?}");
+
+    // If the top face is gone, the named vertex fails with Reselect instead of snapping elsewhere.
+    let mut renamed = taller;
+    renamed.bodies[0].names = crate::naming::NameCell::known(Arc::new(vec!["other".into(); 6]));
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &renamed, &plane, &mut sketch).unwrap_err();
+    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == &vertex_name), "{error}");
+}
+
+#[test]
+fn mesh_body_has_no_vertex_names() {
+    let mb = ModelBody::new(
+        "MeshPart".into(),
+        solidcraft_kernel::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 2, 3]]).unwrap(),
+        1,
+    );
+    assert!(crate::naming::vertex_names(&mb).is_empty());
 }

@@ -95,3 +95,61 @@ fn mirrored_bodies_read_back_from_their_records_valid() {
         assert!((got - want).abs() < 1e-6 * want, "{what}: volume {got}, expected {want}");
     }
 }
+
+/// A long body mirrored in SMLib measures as its source does, exactly. SMLib's mirror gives each
+/// line as a B-spline over the line's whole parameter range (control points 1,234,567 edge
+/// lengths out): a box 50 x 900 x 50 mirrored in x = 0 could not be measured ("invalid B-rep
+/// record: flat arrays", past 1e9 from an edge of 810 mm; #14413). Every straight edge comes
+/// back as the line between its vertices.
+#[test]
+fn a_long_mirrored_body_measures_as_its_source() {
+    let mirror = [[-1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    for (what, corner, size) in [
+        ("short box", Vec3::new(100., 0., 0.), Vec3::new(50., 500., 50.)),
+        ("box along y", Vec3::new(100., 0., 0.), Vec3::new(50., 900., 50.)),
+        ("box along y, far from the plane", Vec3::new(3000., -450., 0.), Vec3::new(50., 1100., 50.)),
+        ("box along x", Vec3::new(100., 0., 0.), Vec3::new(2000., 50., 50.)),
+        ("box along z", Vec3::new(100., 0., 0.), Vec3::new(50., 50., 2000.)),
+    ] {
+        let body = crate::box_solid(corner, corner + size).unwrap();
+        let mirrored = transform_matrix(&body, mirror).unwrap();
+        assert!(
+            mirrored.record().edges.iter().all(|e| matches!(e.curve, solidcore_record::brep::Curve::Line { .. }) && e.nurbs.is_none()),
+            "{what}: a straight edge is not a line"
+        );
+        let (want, got) = (crate::measure(&body).unwrap(), crate::measure(&mirrored).unwrap_or_else(|e| panic!("{what}: {e}")));
+        assert!((got.volume - want.volume).abs() < 1e-9 * want.volume, "{what}: volume {}, expected {}", got.volume, want.volume);
+        let (lo, hi) = (got.bbox.min, got.bbox.max);
+        let (wlo, whi) = (want.bbox.min, want.bbox.max);
+        let expected = (Vec3::new(-whi.x, wlo.y, wlo.z), Vec3::new(-wlo.x, whi.y, whi.z));
+        assert!(lo.dist(expected.0) < 1e-9 && hi.dist(expected.1) < 1e-9, "{what}: box {lo:?}..{hi:?}, expected {expected:?}");
+        let read_back = Body::from_record(mirrored.record().clone()).unwrap();
+        assert!(matches!(crate::validity(&read_back).smlib, Some(crate::SmlibCheck::Valid)), "{what}: {:?}", crate::validity(&read_back).smlib);
+    }
+}
+
+/// A scaling or shear of a box maps its record as a rigid motion does: its faces stay planes, on
+/// the same parameters, and the volume is the determinant's (#14422). A reflection, or a body
+/// with a cylinder, still goes through SMLib and keeps the right volume.
+#[test]
+fn a_box_scaled_or_sheared_keeps_its_planes() {
+    let planes = |b: &Body| b.record().faces.iter().all(|f| matches!(f.surface, solidcore_record::brep::Surface::Plane { .. }));
+    let volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
+    let source = crate::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap();
+    assert!(planes(&source));
+    for (matrix, want) in [
+        ([[2., 0., 0., 0.], [0., 3., 0., 0.], [0., 0., 0.5, 0.], [0., 0., 0., 1.]], 3000.),
+        ([[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1.0001, 0.], [5., 0., 0., 1.]], 1000.1),
+        ([[1., 0., 0., 0.], [0.5, 1., 0., 0.], [0., 0., 2., 0.], [0., 0., 0., 1.]], 2000.),
+    ] {
+        let scaled = transform_matrix(&source, matrix).unwrap();
+        assert_topology(&source, &scaled, matrix);
+        assert!(planes(&scaled));
+        assert!((volume(&scaled) - want).abs() < 1e-6, "{} vs {want}", volume(&scaled));
+        assert!(scaled.record().tolerance >= source.record().tolerance);
+    }
+    let mirrored = transform_matrix(&source, [[-2., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]]).unwrap();
+    assert!((volume(&mirrored) - 2000.).abs() < 1e-6);
+    let stretched = transform_matrix(&periodic_cylinder(), [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 2., 0.], [0., 0., 0., 1.]]).unwrap();
+    assert!((volume(&stretched) - 4000. * std::f64::consts::PI).abs() < 5., "{}", volume(&stretched));
+}

@@ -10,6 +10,7 @@
 use solidcore::Vec3;
 use solidcore::eval::plan::EvalSurface;
 
+use super::comp;
 use super::size::Rules;
 
 /// One loop of a face: parameters (unwrapped along the loop) and the 3D node each stands for.
@@ -28,8 +29,9 @@ const MAX_SEAM_NODES: usize = 4096;
 /// loop: zero unless it winds around the surface).
 pub(crate) fn drift(l: &Loop, d: usize, per: f64) -> f64 {
     let (Some(first), Some(last)) = (l.uv.first(), l.uv.last()) else { return 0.0 };
-    let close = super::uv::unwrap(first[d], last[d], Some(per)) - last[d];
-    last[d] - first[d] + close
+    let (first_d, last_d) = (comp(first, d), comp(last, d));
+    let close = super::uv::unwrap(first_d, last_d, Some(per)) - last_d;
+    last_d - first_d + close
 }
 
 /// Whether any loop winds around the closed direction `d`.
@@ -261,12 +263,9 @@ pub(crate) fn cut(s: &EvalSurface, loops: &[Loop], d: usize, per: f64, rules: &R
     let area: f64 = out
         .iter()
         .map(|l| {
-            let n = l.uv.len();
-            (0..n)
-                .map(|i| {
-                    let (a, b) = (l.uv[i], l.uv[(i + 1) % n]);
-                    a[0] * b[1] - b[0] * a[1]
-                })
+            l.uv.iter()
+                .zip(l.uv.iter().cycle().skip(1))
+                .map(|(a, b)| a[0] * b[1] - b[0] * a[1])
                 .sum::<f64>()
         })
         .sum();
@@ -283,7 +282,7 @@ fn cut_position(loops: &[Loop], per: f64) -> Option<f64> {
     xs.sort_by(f64::total_cmp);
     let mut best = (0.0, f64::NEG_INFINITY);
     for (i, x) in xs.iter().enumerate() {
-        let next = xs.get(i + 1).copied().unwrap_or(xs[0] + per);
+        let Some(next) = xs.get(i + 1).copied().or_else(|| xs.first().map(|f| f + per)) else { continue };
         if next - x > best.1 {
             best = (0.5 * (x + next), next - x);
         }
@@ -293,7 +292,7 @@ fn cut_position(loops: &[Loop], per: f64) -> Option<f64> {
 
 /// Whether a path jumps over the strip in one segment.
 fn crosses(uv: &[[f64; 2]], x0: f64, x1: f64) -> bool {
-    uv.windows(2).any(|w| (w[0][0] <= x0 && w[1][0] >= x1) || (w[1][0] <= x0 && w[0][0] >= x1))
+    uv.windows(2).any(|w| matches!(w, [a, b] if (a[0] <= x0 && b[0] >= x1) || (b[0] <= x0 && a[0] >= x1)))
 }
 
 /// The runs of an open path (starting and ending outside the strip) inside the strip, each
@@ -339,7 +338,7 @@ fn seam_nodes(s: &EvalSurface, swap: bool, x: f64, y0: f64, y1: f64, rules: &Rul
     let mut ys = vec![y0, y1];
     let mut i = 0;
     while i + 1 < ys.len() {
-        let (a, b) = (ys[i], ys[i + 1]);
+        let (Some(&a), Some(&b)) = (ys.get(i), ys.get(i + 1)) else { break };
         if ys.len() < MAX_SEAM_NODES && !super::uv::fine_between(s, rules, h, uv(a), uv(b)) && b - a > 1e-12 * (1.0 + a.abs()) {
             ys.insert(i + 1, 0.5 * (a + b));
         } else {

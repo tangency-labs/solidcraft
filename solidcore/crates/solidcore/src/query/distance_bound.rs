@@ -162,8 +162,11 @@ impl Piece {
         ];
         let mut out = Vec::new();
         for (i, uv) in rects.into_iter().enumerate() {
-            let pick =
-                |a: &[Bernstein2; 4]| a.get(i).cloned().ok_or_else(|| SolidError::sm_err(OP));
+            let pick = |a: &[Bernstein2; 4]| {
+                a.get(i).cloned().ok_or_else(|| {
+                    SolidError::query_failed(OP, "a split patch has fewer than four quarters")
+                })
+            };
             out.push(Self::new(
                 [pick(&x)?, pick(&y)?, pick(&z)?, pick(&w)?],
                 err,
@@ -171,7 +174,8 @@ impl Piece {
                 uv,
             )?);
         }
-        out.try_into().map_err(|_| SolidError::sm_err(OP))
+        out.try_into()
+            .map_err(|_| SolidError::query_failed(OP, "a split patch has fewer than four quarters"))
     }
 }
 
@@ -408,7 +412,9 @@ pub fn surface_distance_lower_bound(
     let off = |lower: f64| (lower - slack).max(0.0);
     loop {
         // (the box is inside the patches' range, so some patch overlaps it)
-        let nearest = heap.pop().ok_or_else(|| SolidError::sm_err(OP))?;
+        let nearest = heap
+            .pop()
+            .ok_or_else(|| SolidError::query_failed(OP, "no patch overlaps the UV box"))?;
         if nearest.lower >= want_net || made >= MAX_PATCHES {
             return Ok(off(nearest.lower));
         }
@@ -557,7 +563,7 @@ pub(crate) fn pieces_about(
         let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) =
             (uk.first(), uk.last(), vk.first(), vk.last())
         else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(OP, "a patch has no knots"));
         };
         // the part of the patch inside the UV box, in the patch's [0, 1]^2
         let (mut a0, mut a1, mut b0, mut b1) = (0.0, 1.0, 0.0, 1.0);
@@ -1570,7 +1576,6 @@ mod tests {
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
         let mut k = Kernel::default();
-        k.fixes.fillet_gn_section_generator = true;
         k.fixes.fillet_round_as_definition = true;
         let bilinear = |p: [Point3; 4]| {
             BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap()

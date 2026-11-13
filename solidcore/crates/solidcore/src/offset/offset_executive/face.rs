@@ -21,7 +21,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::offset::offset_geometry_creation::{
     FaceOffsetBrep, LocalOperationGeometryCreation, OffsetGeometryCreation, SsiData,
 };
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::{edgeuse::p1 as faceuse_ops, face::p2 as face_ops, Brep, FaceId, FaceuseId};
 
 const OP: &str = "offset::offset_executive::face";
@@ -181,7 +181,20 @@ pub(super) fn build_local(
 ) -> Result<(Option<Surface>, SsiData<Curve>)> {
     let mut backend = FaceBrep {
         original,
-        surfaces: surfaces.iter().cloned().map(Some).collect(),
+        // (not upstream) a bare B-spline net keeps its exact data: a fresh, unowned
+        // surface over an exact copy, not the copy constructor's near-coincident knot
+        // fix-up (the local operation's own-frame move promises knots unchanged). Any
+        // other provided surface takes the ordinary copy as it did.
+        surfaces: surfaces
+            .iter()
+            .map(|surface| match surface.kind() {
+                SurfaceKind::BSpline(net) if surface.procedural_definition().is_none() => {
+                    Surface::from(net.clone_exact())
+                }
+                _ => surface.clone(),
+            })
+            .map(Some)
+            .collect(),
         curves: Vec::new(),
     };
     let creator = LocalOperationGeometryCreation::from_handles(

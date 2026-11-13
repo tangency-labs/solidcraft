@@ -41,7 +41,7 @@ fn loops_touching_at_a_shared_vertex_bound_the_face() {
     let uvs: Vec<[f64; 2]> = outer.iter().chain(&left).chain(&right).copied().collect();
     let fixed: Vec<Vec3> = uvs.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect();
     let ranges = vec![0..4, 4..7, 7..10];
-    let fill = cdt::Fill { seeds: &[], refine: None, shape: false, lenient: false };
+    let fill = cdt::Fill { seeds: &[], refine: None, shape: false, lenient: false, flat: None };
     let Some((_, triangles)) = cdt::triangulate(&uvs, &ranges, fill) else { panic!("triangulates") };
     assert!(closed_boundary(&ranges, &fixed, &uvs, &triangles), "the triangles follow both holes through their shared vertex");
 }
@@ -120,8 +120,8 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
     let size = size::face_size(&s, &uv::domain(&s), &rules);
     let loops = std::slice::from_ref(&l);
     let mut stats = PlanStats::default();
-    assert!(plan_face(0, "spline", &s, loops, &rules, size, 0.0, &mut stats, Lenient::No).is_err());
-    let Ok(fp) = plan_face(0, "spline", &s, loops, &rules, size, 0.0, &mut stats, Lenient::Yes) else { panic!("a lenient fill") };
+    assert!(plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::No, Purpose::Display).is_err());
+    let Ok(Planned::Face(fp)) = plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::Yes, Purpose::Display) else { panic!("a lenient fill") };
     assert!(!fp.triangles.is_empty());
     assert!(fp.uv.len() > fp.fixed.len(), "{} points, {} on the boundary", fp.uv.len(), fp.fixed.len());
     // Each point inside the face on the surface where its parameters put it.
@@ -138,7 +138,7 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
 fn a_face_filled_leniently_is_named_in_the_stats() {
     let (s, l, rules) = a_face_crossing_itself();
     let size = size::face_size(&s, &uv::domain(&s), &rules);
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size, 0.0, None) else { panic!("filled leniently") };
+    let Ok((Planned::Face(fp), stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None, Purpose::Display) else { panic!("filled leniently") };
     assert!(!fp.triangles.is_empty());
     assert_eq!((stats.planar, stats.structured, stats.delaunay), (0, 0, 0));
     let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
@@ -155,7 +155,7 @@ fn a_face_untangling_cannot_resolve_is_filled_leniently_and_named() {
     let (s, l, rules) = a_face_crossing_itself();
     let size = size::face_size(&s, &uv::domain(&s), &rules);
     let why = "face 7 (spline): boundary crosses itself: edges [1, 2] run closer together than their chords can follow";
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size, 0.0, Some(why)) else { panic!("filled leniently") };
+    let Ok((Planned::Face(fp), stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, Some(why), Purpose::Display) else { panic!("filled leniently") };
     assert!(!fp.triangles.is_empty());
     let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
     assert_eq!(lenient.face, 7);
@@ -208,7 +208,8 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
     let fixed: Vec<Vec3> = Vec::new();
     let tol = 0.5;
     let start = uv.len();
-    sag::refine(&s, tol, &sag::Poles::new(&s, 1e-9), &fixed, &mut uv, &mut tris, 20_000);
+    let face = poles::Face::new(s.clone(), 0.0);
+    sag::refine(&face, tol, &sag::Poles::new(&face, 1e-9), &fixed, &mut uv, &mut tris, 20_000);
     assert!(uv.len() - start < 1_000, "{} points added: refinement ran to its budget", uv.len() - start);
     for t in &tris {
         let [p, q, r] = t.map(|i| uv[i as usize]);
@@ -248,7 +249,8 @@ fn triangles_standing_across_a_curved_sheet_are_flipped_along_it() {
             .sum()
     };
     let before = area(&tris);
-    sag::flip(&s, 0.1, &sag::Poles::new(&s, 1e-9), &[], &uv, &mut tris);
+    let face = poles::Face::new(s.clone(), 0.0);
+    sag::flip(&face, 0.1, &sag::Poles::new(&face, 1e-9), &[], &uv, &mut tris);
     let after = area(&tris);
     let sides: Vec<(u32, u32)> = tris.iter().flat_map(|t| (0..3).map(move |k| (t[k].min(t[(k + 1) % 3]), t[k].max(t[(k + 1) % 3])))).collect();
     assert!(sides.contains(&(2, 3)) && !sides.contains(&(0, 1)), "{tris:?}");
@@ -269,13 +271,252 @@ fn a_box_is_two_triangles_a_face() {
 }
 
 /// SolidCraft's coil from SMLib, its lower half: the counts the bake-off recorded for
-/// `793-coil-split-by-a-plane-across-its-axis` at the display and export tolerances.
+/// `793-coil-split-by-a-plane-across-its-axis` at the display and export tolerances, plus what
+/// shaping adds (18 triangles on its flat cut face, and at display 10 on its curved faces).
 #[test]
 fn the_spline_coil_keeps_its_triangles() {
     let name = "smlib_coil_lower_half";
     let (b, size) = (crate::fixtures::fixture(name), crate::fixtures::size_of(name));
-    for (t, want) in [(crate::MeshTolerance::display_of(size), 30_630), (crate::MeshTolerance::export_of(size), 30_662)] {
+    for (t, want) in [(crate::MeshTolerance::display_of(size), 30_658), (crate::MeshTolerance::export_of(size), 30_680)] {
         let Ok((p, _)) = plan(&b, &t, size) else { panic!("plans") };
         assert_eq!(p.evaluate().0.triangles.len(), want);
     }
 }
+
+
+mod refusals {
+    use crate::fixtures::{fixture, size_of};
+    use crate::{MeshTolerance, Result, TessPlan, plan};
+    use solidcore_record::brep::{self, Loop};
+
+    fn ok<T>(r: Result<T>) -> T {
+        match r {
+            Ok(v) => v,
+            Err(e) => panic!("{e}"),
+        }
+    }
+
+    /// An edge bent sharply at a corner no halving reaches (a spline turning back on itself at a
+    /// third of its parameter) is halved at the corner until the depth bound: there its chords
+    /// follow it to a hair, but no segment across the corner turns less than a quarter turn. The
+    /// plan names it with that bound, its sag within the tolerance, and how far it exceeds its
+    /// rules. Ported from solidcore-tess's own planner.
+    #[test]
+    fn an_edge_stopped_at_its_depth_bound_is_named_within_its_tolerance() {
+        let mut b = fixture("box_10x6x4");
+        b.edges[2].curve = brep::Curve::Spline { knots: vec![0.0, 0.0, 1.0 / 3.0, 1.0, 1.0], points: vec![[10.0, 0.0, 4.0], [10.0, 2.0, 20.0], [10.0, 6.0, 4.0]] };
+        b.edges[2].nurbs = None;
+        let (_, stats) = ok(plan(&b, &MeshTolerance::chord(0.01), size_of("box_10x6x4")));
+        let [capped] = stats.edges_capped.as_slice() else { panic!("{:?}", stats.edges_capped) };
+        assert_eq!((capped.edge, capped.cap), (2, crate::EdgeCap::Depth), "{capped:?}");
+        assert!(capped.within && capped.sag <= capped.tol, "{capped:?}");
+        assert!(capped.excess > 1.0, "{capped:?}");
+    }
+
+    /// A torus (radii 6 and 1.5) at a chord of 2e-4 mm, no facet angle: its sag refinement adds
+    /// all the points it may with triangles still off the surface, and the face is still meshed
+    /// and named in `PlanStats::over_tolerance` with that bound and the sag its triangles reach,
+    /// past the tolerance. Ported from solidcore-tess's own planner.
+    #[test]
+    fn a_face_whose_refinement_reaches_its_bound_is_named_with_its_sag() {
+        let tol = 2e-4;
+        let b = fixture("torus_6_1_5");
+        let (p, stats) = ok(plan(&b, &MeshTolerance::chord(tol), size_of("torus_6_1_5")));
+        assert!(stats.unmeshed.is_empty(), "{stats:?}");
+        let [o] = stats.over_tolerance.as_slice() else { panic!("{:?}", stats.over_tolerance) };
+        assert_eq!((o.face, o.caps.as_slice()), (0, [crate::Cap::Refine].as_slice()), "{o:?}");
+        assert!(o.sag > tol && o.sag < 10.0 * tol && o.tol == tol && !o.within, "{o:?}");
+        assert!(!p.faces[0].triangles.is_empty());
+    }
+
+    fn meshed_faces(p: &TessPlan) -> Vec<u32> {
+        p.faces.iter().filter(|f| !f.triangles.is_empty()).map(|f| f.face).collect()
+    }
+
+    /// Face `face`'s first pcurve in `b`, moved `du` along u: off its edge.
+    fn move_pcurve(b: &mut brep::Brep, face: usize, du: f64) -> u32 {
+        let Loop::Edges { edges } = &mut b.faces[face].loops[0] else { panic!("an edge loop") };
+        let oe = &mut edges[0];
+        match &mut oe.pcurve {
+            brep::Curve2::Spline { points, .. } => {
+                for p in points.iter_mut() {
+                    p[0] += du;
+                }
+            }
+            brep::Curve2::RationalSpline { homogeneous, .. } => {
+                for p in homogeneous.iter_mut() {
+                    p[0] += du * p[2];
+                }
+            }
+        }
+        oe.edge
+    }
+
+    /// A cylinder face without its NURBS form (a label alone, an unvalidated record): the mesher
+    /// takes the label as the revolution it is, on the label's own parameters, which its edges'
+    /// pcurves (made for the form) do not follow, so the face is left out, naming it, through
+    /// `plan()`; its two end discs are meshed.
+    #[test]
+    fn a_face_whose_surface_does_not_evaluate_is_refused_through_plan() {
+        let mut b = fixture("cylinder_r10_h5");
+        assert!(b.faces[0].nurbs.is_some());
+        b.faces[0].nurbs = None;
+        let (p, stats) = ok(plan(
+            &b,
+            &MeshTolerance::chord(0.01),
+            size_of("cylinder_r10_h5"),
+        ));
+        let reasons: Vec<(usize, &str)> = stats
+            .unmeshed
+            .iter()
+            .map(|r| (r.face, r.reason.as_str()))
+            .collect();
+        assert_eq!(reasons.len(), 1, "{stats:?}");
+        assert_eq!(reasons[0].0, 0);
+        assert!(reasons[0].1.contains("face 0 (cylinder): edge "), "{}", reasons[0].1);
+        assert_eq!(meshed_faces(&p), vec![1, 2]);
+    }
+
+    /// A box one of whose faces has a pcurve 1 mm off its edge: that face is refused, naming the
+    /// face and the edge, and the other five are meshed. The pcurve's error was the whole body's.
+    #[test]
+    fn a_face_whose_pcurve_is_off_its_edge_is_refused_and_the_rest_meshed() {
+        let mut b = fixture("box_10x6x4");
+        let edge = move_pcurve(&mut b, 2, 1.0);
+        let (p, stats) = ok(plan(&b, &MeshTolerance::chord(0.01), size_of("box_10x6x4")));
+        assert_eq!(stats.unmeshed.len(), 1, "{stats:?}");
+        let refused = &stats.unmeshed[0];
+        assert_eq!(refused.face, 2);
+        assert!(
+            refused.reason.contains(&format!(
+                "face 2 (plane): edge {edge}: node 0: its pcurve is"
+            )),
+            "{}",
+            refused.reason
+        );
+        assert_eq!(meshed_faces(&p), vec![0, 1, 3, 4, 5]);
+        assert_eq!(p.faces.len(), 6);
+        let (m, refused) = p.evaluate();
+        assert!(refused.is_empty(), "{refused:?}");
+        assert!(!m.triangles.is_empty() && !m.tri_face.contains(&2));
+    }
+
+    /// An edge that bounds no face (a free edge beside a box) and cannot be sampled is left out of
+    /// the plan and named in the stats with why; the box is meshed whole, not refused as a body.
+    #[test]
+    fn a_free_edge_that_cannot_be_sampled_is_named_and_the_body_meshed() {
+        let mut b = fixture("box_10x6x4");
+        let mut free = b.edges[3].clone();
+        free.uses.clear();
+        free.interval = [1.0, 0.0];
+        b.edges.push(free);
+        let ei = b.edges.len() - 1;
+        let (p, stats) = ok(plan(&b, &MeshTolerance::chord(0.01), size_of("box_10x6x4")));
+        assert!(stats.unmeshed.is_empty(), "{stats:?}");
+        assert_eq!(stats.unsampled_edges.len(), 1, "{stats:?}");
+        assert_eq!(stats.unsampled_edges[0].edge, ei);
+        assert!(
+            stats.unsampled_edges[0]
+                .reason
+                .contains(&format!("tessellation: edge {ei}: interval [1, 0]")),
+            "{}",
+            stats.unsampled_edges[0].reason
+        );
+        assert_eq!(meshed_faces(&p), (0..6u32).collect::<Vec<u32>>());
+        assert!(p.edges[ei].is_empty());
+        assert!(p.edge_faces[ei].is_empty());
+        assert!(p.edges[..ei].iter().all(|n| n.len() >= 2));
+    }
+
+    /// A box with an edge whose interval is reversed: the edge cannot be sampled, and both faces it
+    /// bounds are refused, each naming itself and the edge, with no nodes for the edge. The other
+    /// four faces are meshed. The edge's error was the whole body's.
+    #[test]
+    fn an_edge_that_cannot_be_sampled_refuses_both_its_faces_by_name() {
+        let mut b = fixture("box_10x6x4");
+        let ei = 3;
+        b.edges[ei].interval = [1.0, 0.0];
+        let mut faces: Vec<usize> = b.edges[ei].uses.iter().map(|u| u.face as usize).collect();
+        faces.sort_unstable();
+        faces.dedup();
+        assert_eq!(faces.len(), 2);
+        let (p, stats) = ok(plan(&b, &MeshTolerance::chord(0.01), size_of("box_10x6x4")));
+        let refused: Vec<usize> = stats.unmeshed.iter().map(|r| r.face).collect();
+        assert_eq!(refused, faces, "{stats:?}");
+        for r in &stats.unmeshed {
+            assert!(
+                r.reason.contains(&format!(
+                    "face {} (plane): tessellation: edge {ei}: interval [1, 0]",
+                    r.face
+                )),
+                "{}",
+                r.reason
+            );
+        }
+        let meshed: Vec<u32> = (0..6u32)
+            .filter(|f| !faces.contains(&(*f as usize)))
+            .collect();
+        assert_eq!(meshed_faces(&p), meshed);
+        assert!(p.edges[ei].is_empty());
+        assert!(
+            p.edges
+                .iter()
+                .enumerate()
+                .all(|(e, n)| e == ei || n.len() >= 2)
+        );
+    }
+
+    /// A face with a loop of edges too short to bound anything (here none): the face is refused,
+    /// naming the loop, and the rest of the body is meshed. The loop was left out, and the face
+    /// meshed without it.
+    #[test]
+    #[ignore = "SolidCraft's mesher fills a face past a loop with no nodes; refusing it, as solidcore-tess did, is still to come"]
+    fn a_face_with_a_loop_of_fewer_than_two_nodes_is_refused_naming_the_loop() {
+        let mut b = fixture("box_10x6x4");
+        b.faces[4].loops.push(Loop::Edges { edges: Vec::new() });
+        let (p, stats) = ok(plan(&b, &MeshTolerance::chord(0.01), size_of("box_10x6x4")));
+        let reasons: Vec<(usize, &str)> = stats
+            .unmeshed
+            .iter()
+            .map(|r| (r.face, r.reason.as_str()))
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![(
+                4,
+                "the operation failed: not supported yet: tessellation: face 4 (plane): loop 1 has 0 nodes (0 edge uses)"
+            )]
+        );
+        assert_eq!(meshed_faces(&p), vec![0, 1, 2, 3, 5]);
+    }
+}
+
+/// A sliver far below the display tolerance, bounded by two edges whose pcurves lie apart in
+/// (u, v) (a gap within the edges' tolerance), sampled coarsely: six boundary nodes that are
+/// three points in space, each twice. Its sides cross, so it is filled leniently, and every
+/// Delaunay triangle has two corners on one point: the fill was left empty and the
+/// face not drawn ("1 face(s) could not be meshed", a crankshaft's oil drilling in an engine
+/// assembly). It is now fanned from its own boundary nodes, each triangle on three distinct
+/// nodes, and still named as filled leniently.
+#[test]
+fn a_sliver_whose_vertices_come_twice_is_still_drawn() {
+    let (s, _, rules) = a_face_crossing_itself();
+    let uv = vec![[0.40, 0.40], [0.40, 0.46], [0.42, 0.50], [0.42, 0.40], [0.45, 0.46], [0.45, 0.50]];
+    let mut pts: Vec<Vec3> = uv.iter().filter_map(|q| s.derivs(q[0], q[1]).map(|(p, _, _)| p)).collect();
+    assert_eq!(pts.len(), uv.len());
+    // At this tolerance the sliver is three points in space, each sampled twice along the loop
+    // with (u, v) apart: nodes 0 and 1 are one point, 2 and 3 another, 4 and 5 the third.
+    pts[1] = pts[0];
+    pts[3] = pts[2];
+    pts[5] = pts[4];
+    let l = seam::Loop { uv, pts: pts.clone() };
+    let size = size::face_size(&s, &uv::domain(&s), &rules);
+    let Ok((Planned::Face(fp), stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None, Purpose::Display) else { panic!("planned") };
+    assert!(!fp.triangles.is_empty(), "the face has triangles");
+    assert_eq!(stats.lenient.len(), 1, "{:?}", stats.lenient);
+    for t in &fp.triangles {
+        let p = t.map(|i| fp.fixed.get(i as usize).copied());
+        assert!(p[0] != p[1] && p[1] != p[2] && p[2] != p[0], "a triangle on one node twice: {t:?}");
+    }
+}
+
