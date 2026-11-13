@@ -139,7 +139,9 @@ pub fn rebuild(curve: &Curve, degree: usize, spans: usize) -> Result<(Curve, f64
 /// edge's interval, a trimmed or intersection edge's included) refitted as a clamped spline of
 /// `degree` (2 or 3) with `spans` uniform spans on `[0, 1]` ([`rebuild`]), running the way the
 /// edge's curve runs, and the kernel's certified bound of how far it is from the edge, kept
-/// when within `tol`.
+/// when within `tol`. The bound compares the two at the same parameter (the edge's mapped onto
+/// `[0, 1]`). The span count is used as given, never raised: a fit past `tol` is refused, and
+/// the caller asks again with more spans.
 ///
 /// # Errors
 /// [`Error::Argument`] for an index past the record's edges, a degree outside `2..=3`, no
@@ -569,17 +571,37 @@ mod tests {
     #[test]
     fn a_trimmed_edge_is_refitted_on_it_within_its_bound() {
         let (cut, order, edge) = cut_sheet();
-        let (fit, bound) = edge_as_curve(&cut, &order, edge, 3, 4, 1e-6).unwrap();
+        // The edge is the projection's spline in its own parameter, not the wave's: a cubic of
+        // four spans misses it by about 5e-4 at the same parameter, so 1e-6 is refused there.
+        assert!(matches!(
+            edge_as_curve(&cut, &order, edge, 3, 4, 1e-6),
+            Err(Error::PastTolerance { bound }) if bound > 1e-6
+        ));
+        // More spans fit closer: the first span count of the doubling run that reaches 1e-6.
+        let fits: Vec<(usize, Result<(Curve, f64)>)> = [8, 16, 32, 64, 128]
+            .into_iter()
+            .map(|spans| (spans, edge_as_curve(&cut, &order, edge, 3, spans, 1e-6)))
+            .collect();
+        let Some((spans, Ok((fit, bound)))) = fits.iter().find(|(_, f)| f.is_ok()) else {
+            panic!("no span count up to 128 fits within 1e-6: {fits:?}")
+        };
+        assert!(
+            fits.iter()
+                .take_while(|(n, _)| n < spans)
+                .all(|(_, f)| matches!(f, Err(Error::PastTolerance { bound }) if *bound > 1e-6)),
+            "{fits:?}"
+        );
+        let bound = *bound;
         assert!(bound <= 1e-6, "{bound}");
-        let Curve::Spline { knots, points } = &fit else {
+        let Curve::Spline { knots, points } = fit else {
             panic!("a spline: {fit:?}")
         };
-        assert_eq!((points.len(), knots.len()), (7, 11));
+        assert_eq!((points.len(), knots.len()), (spans + 3, spans + 7));
         // within the bound of the edge, the edge within the projection's 1e-6 of the wave: a
         // gap along y is at most the distance times 1 + |dy/dx| (at most 0.4 on the wave)
         let allowed = (bound + 1e-6) * 1.4;
         for i in 0..=200 {
-            let p = at(&fit, f64::from(i) / 200.0);
+            let p = at(fit, f64::from(i) / 200.0);
             assert!(p[2].abs() <= allowed, "{p:?} off the sheet");
             assert!(
                 (-allowed..=20.0 + allowed).contains(&p[0]),
@@ -588,7 +610,7 @@ mod tests {
             assert!((p[1] - wave_y(p[0])).abs() <= allowed, "{p:?} off the wave");
         }
         // from one side of the sheet to the other
-        let (a, b) = (at(&fit, 0.0)[0], at(&fit, 1.0)[0]);
+        let (a, b) = (at(fit, 0.0)[0], at(fit, 1.0)[0]);
         let (lo, hi) = (a.min(b), a.max(b));
         assert!(
             lo.abs() <= allowed && (hi - 20.0).abs() <= allowed,
