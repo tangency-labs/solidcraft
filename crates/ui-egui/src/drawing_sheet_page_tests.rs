@@ -221,6 +221,28 @@ fn sheet_colour_is_screen_only() {
     assert_eq!(bad["ok"], false, "{bad}");
 }
 
+/// The backdrop has no effect on the design, undo steps or exported SVG.
+#[test]
+fn sheet_backdrop_is_a_screen_only_preference() {
+    let (mut h, _) = plate_sheet();
+    assert_eq!(h.app.preferences.drawing_sheet_backdrop, "datum_cloud");
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let svg = |h: &mut Harness| h.app.run("drawing.export", json!({"sheet": "Sheet 1"})).unwrap()["svg"].as_str().unwrap().to_owned();
+    let first = svg(&mut h);
+    for (_, id, _) in SheetBackdrop::ALL {
+        assert_eq!(h.call("ui.prefs", json!({"drawing_sheet_backdrop": id}))["ok"], true);
+        h.frames(2);
+        assert_eq!(h.app.preferences.drawing_sheet_backdrop, id);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(svg(&mut h), first);
+    }
+    let bad = h.call("ui.prefs", json!({"drawing_sheet_backdrop": "invalid"}));
+    assert_eq!(bad["ok"], false);
+    assert_eq!(h.app.preferences.drawing_sheet_backdrop, "none");
+}
+
 /// Every choice, in either theme, stands off the stage behind it, and White is never pure white.
 #[test]
 fn every_sheet_colour_stands_off_the_backdrop() {
