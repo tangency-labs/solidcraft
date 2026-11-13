@@ -79,6 +79,7 @@ pub use component_link::resolve_design_links;
 mod config;
 mod design_link;
 mod file;
+mod forms_prototype;
 mod frame;
 mod frame_end_cap;
 pub(crate) mod inspect;
@@ -376,6 +377,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
+    v.extend(forms_prototype::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());

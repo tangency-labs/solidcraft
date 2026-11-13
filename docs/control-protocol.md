@@ -796,6 +796,19 @@ drawing and answering while it runs:
   in the background. The agent can do the same for its own request with `control.cancel` (above).
 - `file.export` and `file.save_mesh` change nothing in the design. They run on a copy of the
   design as it was when they were asked for, and nothing waits behind them.
+- In the native desktop host, `engine.execute` (or `command`) of
+  `form.prototype.validate` runs the canonical read-only Form CAD checker on a prepared,
+  immutable source, independently of `agent_off_thread`. It copies no editing session,
+  preview mesh or history when the request arrives. A ready source is pinned immediately;
+  its answer may arrive after later edits, without changing them. If its source is still
+  preparing, the request waits and fails if that source or document changes before it can
+  be pinned. Preparation failures are reported, including when display fitting is disabled
+  or has failed. Explicit command tolerance remains independent of GUI fit settings.
+  At most four answer jobs run at once, with at most 256 Form checks awaiting preparation
+  or a free slot. Saturation and worker-start failure never run the check synchronously.
+  A cancelled chat receives one cancellation reply; its active check drains before its
+  slot is reused. Folder scope and parameter-check level/echo apply as for the command run
+  directly. Existing ingress file/design-switch barriers still apply.
 - Batches with `timings` or `profile` still run on the window thread, so the times they report
   measure the real work.
 
@@ -806,12 +819,40 @@ operations panel, and its result lands after their edits (`ui.prefs {"file_opera
 true}` brings back the card over the design that makes everything wait for the file).
 
 Timeouts and `control.pending` work as described above. A slow command is still answered when it
-is done, from a later frame. With the preference off, commands run on the window thread, and the
-window waits for each one.
+is done, from a later frame. With the preference off, modelling commands run on the window
+thread; the native read-query exceptions above remain asynchronous. Headless hosts and browser
+programmatic calls keep direct command execution. The browser's interactive **Check Form CAD**
+action runs in a dedicated worker for bounded independent Forms. The desktop app supports
+checks that need the surrounding design or exceed the browser worker's limits.
 
 Product images use `render.preflight/start/status/cancel/export` through `engine.execute`.
 Keep the returned session-scoped job ID for subsequent calls; status does not block or
 render. See [render jobs](render-jobs.md) for capture, cancellation and export semantics.
+
+Form panel **Extrude Faces** and **Extrude Edges** actions interpret their distance
+as a displacement of the original evaluated cap or rim points, matching Shift-drag
+(`form.prototype.extrude_drag` with `surface: true`). They remain one-shot actions:
+native preparation runs on the existing Form command worker, then one qualified
+result creates one Undo checkpoint. No Apply/Cancel tool preview is opened. Failure
+or discarded work retains the source, selection and pivot; accepted work clears
+the selection as before. Programmatic `form.prototype.topology` extrusion and
+`form.prototype.extrude_drag` with omitted or false `surface` keep their raw-control
+semantics.
+
+`form.refined_weld` takes `features: [first, second]` and an optional
+`name`. Supply `edges: [[a,b],[c,d]]` to specify corresponding rim sides,
+or omit `edges` to match the only opening on each Form automatically.
+Both sources must be saved, independently editable
+refined Forms with one already coincident free rim each, in the same direct
+component frame. The command builds one qualified Stitch feature and keeps both
+upstream Form features. Each rim side must correspond to one complete native
+coedge. The joined body uses the first body's name and preserves both sources'
+qualified face names. Edit either source with `form.edit`. Finish refuses an
+edit that would break an active seam, including after the timeline marker.
+`form.refined_weld.remove` takes the seam `feature` ID, checks named downstream
+dependencies and restores the two source bodies. Each successful call is one
+document Undo action. Ordinary `surface.stitch` retains its existing behavior.
+
 
 While an interactive native file picker is open, `ui.inspect` reports `file_picker_busy: true`.
 Engine commands, `ui.file` and `ui.home` requests wait for its answer; window resizing,
@@ -909,6 +950,35 @@ no box selection.
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | `force?` (quit without asking about unsaved designs) | `quitting` (the window closes), `asking` (a "save changes?" prompt is open) |
 
+For an active Form, `ui.inspect.forms_prototype.vertices` contains each visible editing
+handle's logical `index`, evaluated `world: [x, y, z]` in millimetres, and `screen: [x, y]`.
+The world and screen positions are captured together during the last viewport paint.
+Commands can complete before that paint; poll until the released extrusion is inactive
+and the CAD display and context are settled before measuring a finished gesture. These
+positions describe the evaluated editing handles; CAD fitting has its own tolerance checks.
+
+On desktop, `ui.inspect.forms_prototype.display.queued` means that the current
+preview is waiting for the native CAD-preview worker. `display.busy` includes
+both queued and running work. That worker remains bounded across editor resets:
+closing an editor discards its result without freeing the slot before its fit
+actually exits. A waiting editor schedules its latest source and tolerance when
+the slot becomes available.
+
+`ui.inspect.forms_prototype.transform_feedback` is `null` when no current drag
+readout is available. Otherwise it contains `semantics: "submitted-request"`,
+`request`, the frozen world-axis `basis`, `soft`, `phase`, and localized `text`.
+The request is `{kind: "move", delta_mm: [x,y,z]}` in world coordinates,
+`{kind: "rotate", axis: 0|1|2, angle_rad: number}` about that basis axis, or
+`{kind: "scale", factors: [x,y,z]}` along those basis axes. Phases are
+`requested` (queued extrusion), `fitting` (request accepted; CAD preview pending),
+and `accepted` (request accepted and its CAD preview ready). Values describe the
+submitted transform, not measured displacement: symmetry, pinned points and
+soft influence can alter the resulting point motion. Inspection reads the
+current qualified state without advancing work or changing the design; the
+published `forms_transform_feedback` viewport target and a screenshot establish
+that the readout was painted. Release, cancellation, refusal, stale source and
+the disabled preference suppress feedback when no active request remains.
+
 `dialog` (in `ui.inspect`, `ui.start` and `ui.editFeature`) is `null`, the recovery prompt
 described above, or the open feature dialog as an object that doesn't change with the form's internals:
 
@@ -973,6 +1043,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `fillet_legacy_radius` (default false: a new Solid Fillet opens at the radius the tool ships with, 2 mm, shown in the design's units ("0.07874 in" in an inch design); true: it opens at the number 2 read in the design's units ("2 in"), as before, #12418)
 - `forget_stand_up: true` (action: forget all remembered stand-up answers; also available beside the memory checkbox in Preferences › Design)
+- `forms_compact_editor` (Design, default false) puts sculpting tools first, keeps primitive setup and detailed CAD checks in collapsible sections, and shows only the active insertion tool's controls.
+- `forms_drag_feedback` (Design, default true): show the submitted snapped move, rotation angle or scale factors in the frozen gesture axes. Every phase labels these as request values; acceptance and CAD fitting status are separate. Symmetry, pinned constraints and soft weights can change individual point motion, so accepted requests are not measured cap or CAD displacement. False restores the previous viewport display.
+- `forms_preserve_selection` (Design, default false): enable to keep the selected entities and custom pivot when changing a Form selection filter. With the preference off, clicking a filter button clears the selection and pivot. The Form summary counts selected points, edges, faces and whole surfaces independently of the active filter.
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
 - `graphics_adapter` (exact card name, or empty for Automatic; applies after restart; `WGPU_ADAPTER_NAME` takes precedence)
 - `graphics_backend` (native Graphics API: `auto` by default; Windows: `dx12`, `vulkan`, `gl`; macOS: `metal`; Linux: `vulkan`, `gl`. Saved before graphics initialization and applied on restart. Existing manual comma lists are preserved until an explicit API change. `{"button":"restart_graphics"}` asks about unsaved designs, then restarts with the saved API; unavailable in the browser or under an explicit launch override.)

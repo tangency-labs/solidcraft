@@ -58,6 +58,7 @@ fn indexed_raycast_answers_as_the_scan_does() {
         };
         let want = m.raycast(o, d);
         assert_eq!(index.raycast(&m, o, d), want, "ray {k} from {o:?} along {d:?}");
+        assert_eq!(index.raycast_bounded(&m, o, d, &mut 1_000_000).unwrap(), want, "bounded ray {k} from {o:?} along {d:?}");
         hits += usize::from(want.is_some());
     }
     assert!(hits > 1000, "the rays should mostly hit ({hits})");
@@ -71,6 +72,70 @@ fn indexed_raycast_of_another_mesh_falls_back_to_the_scan() {
     let (o, d) = (Vec3::new(4.5, 4.2, 9.0), Vec3::new(0.0, 0.0, -1.0));
     assert!(b.raycast(o, d).is_some());
     assert_eq!(index.raycast(&b, o, d), b.raycast(o, d));
+    assert_eq!(index.raycast_bounded(&b, o, d, &mut 1_000_000).unwrap(), b.raycast(o, d));
+}
+
+#[test]
+fn bounded_raycast_charges_node_boxes_and_triangles_and_never_returns_a_partial_hit() {
+    let m = mesh(1, 0, &mut Lcg(1));
+    let index = MeshIndex::new(&m);
+    let (o, d) = (Vec3::new(0.5, 0.5, 2.0), -Vec3::Z);
+    let expected = index.raycast(&m, o, d);
+    assert_eq!(expected, Some((2.0, 0)), "the lower triangle wins a shared-edge tie");
+    for mut budget in 0..3 {
+        assert!(index.raycast_bounded(&m, o, d, &mut budget).is_err());
+    }
+    let mut remaining = 6;
+    for _ in 0..2 {
+        assert_eq!(index.raycast_bounded(&m, o, d, &mut remaining).unwrap(), expected);
+    }
+    assert_eq!(remaining, 0, "each query examines one root box and two triangles");
+    assert!(index.raycast_bounded(&m, o, d, &mut remaining).is_err());
+    assert_eq!(remaining, 0);
+    let mut miss_budget = 1;
+    assert_eq!(index.raycast_bounded(&m, Vec3::new(10.0, 10.0, 2.0), d, &mut miss_budget).unwrap(), None);
+    assert_eq!(miss_budget, 0, "a missed root box still consumes work");
+}
+
+#[test]
+fn bounded_raycast_preserves_spatial_pruning_and_the_mismatched_mesh_scan_budget() {
+    let grid = mesh(32, 0, &mut Lcg(1));
+    let index = MeshIndex::new(&grid);
+    let (o, d) = (Vec3::new(0.25, 0.25, 10.0), -Vec3::Z);
+    let mut remaining = 1_000_000;
+    assert_eq!(index.raycast_bounded(&grid, o, d, &mut remaining).unwrap(), index.raycast(&grid, o, d));
+    assert!(1_000_000 - remaining < grid.triangles.len(), "the traversal must prune instead of becoming a full scan");
+    let other = mesh(1, 0, &mut Lcg(1));
+    assert_eq!(index.raycast_bounded(&other, o, d, &mut 2).unwrap(), other.raycast(o, d));
+    assert!(index.raycast_bounded(&other, o, d, &mut 1).is_err(), "the scan fallback must charge all triangles, even after finding a hit");
+    let mut bad = other.clone();
+    bad.triangles.push([u32::MAX; 3]);
+    assert!(index.raycast_bounded(&bad, o, d, &mut 2).is_err(), "invalid triangle records still require scan work");
+    assert_eq!(index.raycast_bounded(&bad, o, d, &mut 3).unwrap(), bad.raycast(o, d));
+}
+
+#[test]
+fn bounded_raycast_handles_empty_indices_and_hostile_rays_without_budget_wraparound() {
+    let empty = Mesh::default();
+    let empty_index = MeshIndex::new(&empty);
+    assert_eq!(empty_index.raycast_bounded(&empty, Vec3::ZERO, Vec3::Z, &mut 0).unwrap(), None);
+    let m = mesh(1, 0, &mut Lcg(1));
+    let index = MeshIndex::new(&m);
+    for (o, d) in [
+        (Vec3::new(f64::NAN, 0.0, 2.0), -Vec3::Z),
+        (Vec3::new(f64::INFINITY, 0.0, 2.0), -Vec3::Z),
+        (Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 1.0)),
+        (Vec3::ZERO, Vec3::new(f64::INFINITY, 0.0, 1.0)),
+        (Vec3::ZERO, Vec3::ZERO),
+    ] {
+        let mut remaining = 0;
+        assert_eq!(index.raycast_bounded(&m, o, d, &mut remaining).unwrap(), index.raycast(&m, o, d));
+        assert_eq!(empty_index.raycast_bounded(&m, o, d, &mut remaining).unwrap(), m.raycast(o, d));
+        assert_eq!(remaining, 0);
+    }
+    let invalid = Mesh { positions: vec![Vec3::ZERO], triangles: vec![[0, 5, 9]], ..Default::default() };
+    let index = MeshIndex::new(&invalid);
+    assert_eq!(index.raycast_bounded(&invalid, Vec3::Z, -Vec3::Z, &mut 0).unwrap(), index.raycast(&invalid, Vec3::Z, -Vec3::Z));
 }
 
 /// Distance from point `p` to the ray from `o` along unit `d` (from its start on), and how far along.

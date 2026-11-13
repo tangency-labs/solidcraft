@@ -1,0 +1,38 @@
+{
+  "de": {
+    "cmd.form.refined_weld": "Verfeinerte Formen verschweißen",
+    "cmd.form.refined_weld.remove": "Schweißnaht verfeinerter Formen entfernen"
+  },
+  "en": {
+    "cmd.form.refined_weld": "Weld Refined Forms",
+    "cmd.form.refined_weld.remove": "Remove Refined Form Weld"
+  },
+  "ja": {
+    "cmd.form.refined_weld": "細分化したフォームを接合",
+    "cmd.form.refined_weld.remove": "細分化フォームの接合を削除"
+  },
+  "ko": {
+    "cmd.form.refined_weld": "세분화된 자유형 형상 접합",
+    "cmd.form.refined_weld.remove": "세분화된 자유형 형상 접합 제거"
+  },
+  "zh": {
+    "cmd.form.refined_weld": "焊接细分造型",
+    "cmd.form.refined_weld.remove": "移除细分造型焊接"
+  },
+  "ar": {
+    "cmd.form.refined_weld": "دمج الأشكال المُنقَّحة",
+    "cmd.form.refined_weld.remove": "إزالة دمج الأشكال المُنقَّحة"
+  },
+  "fr": {
+    "cmd.form.refined_weld": "Joindre des formes raffinées",
+    "cmd.form.refined_weld.remove": "Supprimer la jonction des formes raffinées"
+  },
+  "he": {
+    "cmd.form.refined_weld": "איחוי צורות חופשיות שעברו עידון",
+    "cmd.form.refined_weld.remove": "הסרת איחוי של צורות חופשיות שעברו עידון"
+  },
+  "vi": {
+    "cmd.form.refined_weld": "Hàn các hình đã chia nhỏ",
+    "cmd.form.refined_weld.remove": "Xóa mối hàn giữa các hình đã chia nhỏ"
+  }
+}

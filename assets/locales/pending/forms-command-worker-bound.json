@@ -1,0 +1,26 @@
+{
+  "de": {
+    "forms.prototype.command_worker_busy": "Eine andere Formoperation läuft noch. Nach ihrem Abschluss erneut versuchen."
+  },
+  "en": {
+    "forms.prototype.command_worker_busy": "Another Form operation is still running. Try again when it finishes."
+  },
+  "ja": {
+    "forms.prototype.command_worker_busy": "別のフォーム操作がまだ実行中です。完了してから再試行してください。"
+  },
+  "ko": {
+    "forms.prototype.command_worker_busy": "다른 Form 작업이 아직 실행 중입니다. 완료되면 다시 시도하세요."
+  },
+  "zh": {
+    "forms.prototype.command_worker_busy": "另一个形状操作仍在运行。请在其完成后重试。"
+  },
+  "ar": {
+    "forms.prototype.command_worker_busy": "لا تزال هناك عملية أخرى على شكل قيد التشغيل. أعد المحاولة بعد انتهائها."
+  },
+  "he": {
+    "forms.prototype.command_worker_busy": "פעולה אחרת של צורה חופשית עדיין מתבצעת. יש לנסות שוב כשהיא תסתיים."
+  },
+  "vi": {
+    "forms.prototype.command_worker_busy": "Một thao tác tạo hình khác đang chạy. Hãy thử lại khi thao tác đó hoàn tất."
+  }
+}

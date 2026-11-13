@@ -117,6 +117,9 @@ pub struct CheckpointResult {
     /// dropped (`forget`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restored: Option<bool>,
+    /// True when restoring reattaches or removes a transient Form editor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form_restored: Option<bool>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

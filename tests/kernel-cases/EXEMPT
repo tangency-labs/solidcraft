@@ -92,6 +92,42 @@ file.save_mesh                    saving a display mesh
 file.send_to_slicer               hands the file to a slicer
 file.slicers                      a listing of slicers
 file.verify                       signature checks: tested in crates/io/src/design/provenance.rs and the engine/UI signature tests
+form.blend.export                  Forms interchange: blender_surface_export_evaluates_refinement_matching_profiles_and_staged_forms_without_finishing in crates/engine/src/cmd/forms_prototype.rs
+form.blend.import                  Forms interchange: blender_import_stages_independent_forms_and_export_retains_saved_source_and_world_frame in crates/engine/src/cmd/forms_prototype.rs
+form.edit                          Forms editing: hierarchical_face_drag_keeps_one_undo_step_and_reopens_from_design in crates/engine/src/cmd/forms_prototype.rs
+form.pipe                          Forms construction: pipe_path_preview_saved_recompute_sculpt_freeze_and_regeneration_are_undoable in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.close              Forms editing and history in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.commit             Forms finishing: matched_open_tools_cap_for_join_and_cut_and_reopen_without_changing_the_source_cage in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.create             Forms primitives and editing in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.extrude_drag       Forms extrusion: surface_extrusion_targets_evaluated_caps_absolutely_and_preserves_one_history_action in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.finish_options    Forms finishing and validation in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.insert_edge       Forms topology: local_refinement_insertion_detail_and_drag_extrusion_are_atomic in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.insert_loop       Forms topology: insert_loop_contract_accepts_legacy_edges_and_requires_one_unambiguous_seed in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.insert_points     Forms topology: exact_insert_points_ignore_preview_quality_and_keep_reverse_parameter_undo_and_reopen in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.inspect           Forms state query in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.match             Forms matching: associative_match_preview_cancel_history_and_upstream_recompute in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.parameters        Forms primitives: changing_a_primitive_preserves_the_previous_sculpt_in_undo in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.project           Forms shaping: projection_targets_the_surface_and_undoes_atomically in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.quality           Forms display density in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.redo              Forms history: history_availability_tracks_real_edit_undo_redo_and_cancelled_tool_preview in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.refine            Forms topology: local_refinement_insertion_detail_and_drag_extrusion_are_atomic in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.set_surface_vertices  Forms pulling: surface_pulling_uses_authored_work_budget_independently_of_cached_preview_density in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.set_vertices      Forms editing and history in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.symmetry          Forms symmetry: mirrored_local_refinement_pulls_deletion_and_base_creases_preserve_symmetry in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.tool.apply        Forms tool lifecycle in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.tool.begin        Forms tool lifecycle in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.tool.cancel       Forms tool lifecycle in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.tool.preview      Forms tool lifecycle in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.topology          Forms topology: logical_topology_keeps_the_evaluator_and_is_one_atomic_history_step in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.transform         Forms placement: prepared_form_transforms_match_the_commands_and_preserve_live_document_state in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.undo              Forms history: history_availability_tracks_real_edit_undo_redo_and_cancelled_tool_preview in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.unweld            Forms topology: unweld_and_draft_weld_stage_objects_and_restore_complete_editor_history in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.validate          Forms validation: form_checking_resolves_matched_support_and_rebuilt_surface_without_installing_them in crates/engine/src/cmd/forms_prototype.rs
+form.prototype.weld              Forms topology: unweld_and_draft_weld_stage_objects_and_restore_complete_editor_history in crates/engine/src/cmd/forms_prototype.rs
+form.refined_weld                 Saved Forms topology: refined_weld_retains_both_finished_sources_through_save_edit_remove_and_undo in crates/engine/src/cmd/forms_prototype.rs
+form.refined_weld.remove          Saved Forms topology: refined_weld_retains_both_finished_sources_through_save_edit_remove_and_undo in crates/engine/src/cmd/forms_prototype.rs
+form.repair                       Forms repair: retained_support_repair_is_explicit_cancelable_and_recoverable_without_document_mutation in crates/engine/src/cmd/forms_prototype.rs
+form.surface                      Forms construction: form_surface_guides_keep_the_rim_preview_cancel_and_saved_editing in crates/engine/src/cmd/forms_prototype.rs
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library

@@ -1056,6 +1056,24 @@ preference_settings! {
     }
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
+    /// Focus the Form editor on sculpting controls and the active insertion tool.
+    forms_compact_editor: bool = false, PAGE_DESIGN => check_tr("prefs.forms_compact_editor");
+    /// Show submitted Form transforms and their request status beside the viewport.
+    forms_drag_feedback: bool = true, PAGE_DESIGN => check_tr("prefs.forms_drag_feedback");
+    /// Use qualified native CAD faces for Form clicks on desktop.
+    forms_exact_face_picking: bool = false, PAGE_DESIGN => check_tr("prefs.forms_exact_face_picking");
+    /// Toggle Form elements without holding a selection modifier.
+    forms_greedy_selection: bool = false, PAGE_DESIGN => check_tr("prefs.forms_greedy_selection");
+    /// Keep selected Form entities and the custom pivot when changing pick filters.
+    forms_preserve_selection: bool = false, PAGE_DESIGN => check_tr("prefs.forms_preserve_selection");
+    /// Drag empty viewport space to select logical Form elements. False keeps click-only selection.
+    forms_region_selection: bool = true, PAGE_DESIGN => check_tr("prefs.forms_region_selection");
+    forms_match_adjacent:bool = false, PAGE_DESIGN => check_tr("prefs.forms_match_adjacent");
+    /// Keep subdivision feedback during a drag; false requests fitted CAD while interacting.
+    forms_mesh_while_dragging: bool = true, PAGE_DESIGN => check_tr("prefs.forms_mesh_while_dragging");
+    forms_surface_partition:bool = true, PAGE_DESIGN => check_tr("prefs.forms_surface_partition");
+    /// Fit tolerance for new interactive Forms; saved features retain their tolerance.
+    forms_cad_tolerance: f64 = 0.05, PAGE_DESIGN, accept(0.000001..=1.0);
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
@@ -4215,6 +4233,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::dimension_text_scale(&p) {
         p.dimension_text_scale = Prefs::default().dimension_text_scale;
     }
+    if !accepted::forms_cad_tolerance(&p) {
+        p.forms_cad_tolerance = Prefs::default().forms_cad_tolerance;
+    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
@@ -4417,6 +4438,9 @@ fn prepare_preferences(
     }
     if !accepted::dimension_text_scale(&new) {
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
+    }
+    if !accepted::forms_cad_tolerance(&new) {
+        return Err("`forms_cad_tolerance` must be 0.000001…1 mm".into());
     }
     let new = migrate(new);
     crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib: {e}"))?;
@@ -4851,6 +4875,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn compact_form_editor_is_opt_in_and_resets_with_design() {
+        assert!(!super::Prefs::default().forms_compact_editor);
+        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_compact_editor":true})).unwrap();
+        assert!(prefs.forms_compact_editor);
+        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_compact_editor"], true);
+        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+        assert!(!prefs.forms_compact_editor);
+    }
+    #[test]
+    fn form_drag_feedback_defaults_on_preserves_legacy_and_resets_with_design() {
+        assert!(super::Prefs::default().forms_drag_feedback);
+        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_drag_feedback":false})).unwrap();
+        assert!(!prefs.forms_drag_feedback);
+        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_drag_feedback"], false);
+        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+        assert!(prefs.forms_drag_feedback);
+    }
+    #[test]
+    fn form_filter_selection_preference_is_opt_in_and_resets_with_design() {
+        assert!(!super::Prefs::default().forms_preserve_selection);
+        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_preserve_selection":true})).unwrap();
+        assert!(prefs.forms_preserve_selection);
+        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_preserve_selection"], true);
+        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+        assert!(!prefs.forms_preserve_selection);
+    }
+    #[test]
+    fn form_region_selection_defaults_on_preserves_legacy_and_resets_on_design_page() {
+        assert!(super::Prefs::default().forms_region_selection);
+        let mut p = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_region_selection":false})).unwrap();
+        assert!(!p.forms_region_selection);
+        assert_eq!(serde_json::to_value(&p).unwrap()["forms_region_selection"], false);
+        super::reset_preferences(&mut p, super::PAGE_DESIGN);
+        assert!(p.forms_region_selection);
+    }
     /// Profile operations switches the profiler when it changes, and only then: an agent's
     /// diagnostics.profile in between is not undone next frame.
     #[test]
@@ -7501,6 +7561,23 @@ mod tests {
         }
         let read = lenient(&json!({"dimension_text_scale":9.0,"dimension_colour":[256,0,0]}));
         assert_eq!((read.dimension_text_scale, read.dimension_colour), (1.0, None), "bad values cost only their settings");
+    }
+
+    #[test]
+    fn saved_form_tolerance_migrates_before_unrelated_preference_updates() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        let default = Prefs::default().forms_cad_tolerance;
+        for invalid in [0.0, 1.01] {
+            h.app.preferences = lenient(&json!({"forms_cad_tolerance":invalid,"dimension_text_scale":1.5}));
+            assert_eq!(h.app.preferences.forms_cad_tolerance, default);
+            assert_eq!(h.app.preferences.dimension_text_scale, 1.5);
+            let out = h.call("ui.prefs", json!({"dimension_text_scale":1.2}));
+            assert!(out["error"].is_null(), "{out}");
+            assert_eq!(h.app.preferences.dimension_text_scale, 1.2);
+        }
+        let valid = lenient(&json!({"forms_cad_tolerance":0.01}));
+        assert_eq!(valid.forms_cad_tolerance, 0.01);
     }
 
     /// The theme strip's Import… reads the theme file through `vfs`, like the other imports: in the

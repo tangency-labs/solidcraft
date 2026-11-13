@@ -154,6 +154,49 @@ fn child() {
             assert_eq!(replay.doc.sketch(id).ok(), s.doc.sketch(id).ok(), "the replay drags the sketch to the same place");
             println!("SKETCH_DRAG_JOURNAL_OK");
         }
+        "form_replay" => {
+            s.execute("form.prototype.create", &json!({"primitive":"face","segments":[2,2,1],"levels":0})).unwrap();
+            let commands = [
+                ("form.prototype.tool.begin".into(), json!({})),
+                ("form.prototype.tool.preview".into(), json!({"topology":{"tool":"subdivide","faces":[0]}})),
+                ("form.prototype.tool.apply".into(), json!({})),
+            ];
+            let prepared = s.scratch().compute_commands(&commands, None).unwrap();
+            s.accept_commands(prepared).unwrap();
+            let control = s.forms_prototype.as_ref().unwrap().control_positions()[0];
+            let prepared = s
+                .prepare_form_transform(
+                    crate::forms_prototype::FormTargetSpace::Control,
+                    json!({"vertices":[0],"positions":[[control.x,control.y,control.z+0.25]]}),
+                )
+                .unwrap()
+                .compute()
+                .unwrap();
+            assert!(s.accept_form_transform(prepared).unwrap().0);
+            s.execute("form.prototype.finish_options", &json!({"tolerance":"0.05 mm"})).unwrap();
+            s.execute("form.prototype.inspect", &json!({})).unwrap();
+            let journal = read_live_journal(STATE.get().unwrap());
+            assert_eq!(journal.base, json!("new"));
+            let ids: Vec<_> = journal.replay.iter().filter_map(|c| c["command"].as_str()).collect();
+            assert_eq!(
+                ids,
+                [
+                    "solid.box",
+                    "form.prototype.create",
+                    "form.prototype.tool.begin",
+                    "form.prototype.tool.preview",
+                    "form.prototype.tool.apply",
+                    "form.prototype.set_vertices",
+                    "form.prototype.finish_options",
+                ]
+            );
+            let mut replay = Session::default();
+            for command in &journal.replay {
+                replay.execute(command["command"].as_str().unwrap(), &command["params"]).unwrap();
+            }
+            assert_eq!(crate::recovery::capture_bytes(&replay).unwrap(), crate::recovery::capture_bytes(&s).unwrap());
+            println!("FORM_JOURNAL_OK");
+        }
         "render" => {
             s.execute("render.settings.set", &json!({"name":"Studio","set":{"exposure_ev":2}})).unwrap();
             s.execute("render.settings.get", &json!({"name":"Studio"})).unwrap();
@@ -303,6 +346,14 @@ fn live_sketch_drag_frames_keep_the_replay() {
     let directory = fresh_dir("sketch-drag");
     let (output, ok) = run_child(&directory, "sketch_drag");
     assert!(ok && output.contains("SKETCH_DRAG_JOURNAL_OK"), "{output}");
+    let _ = fs::remove_dir_all(directory);
+}
+
+#[test]
+fn live_form_commands_and_accepted_workers_replay_the_same_draft() {
+    let directory = fresh_dir("form-replay");
+    let (output, ok) = run_child(&directory, "form_replay");
+    assert!(ok && output.contains("FORM_JOURNAL_OK"), "{output}");
     let _ = fs::remove_dir_all(directory);
 }
 

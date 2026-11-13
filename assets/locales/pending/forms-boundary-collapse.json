@@ -1,0 +1,50 @@
+{
+  "de": {
+    "forms.collapse.desktop_required": "Das Kollabieren verfeinerter Formen benötigt die Desktop-App.",
+    "forms.collapse.help": "Wähle die beiden freien Endpunkte einer ebenen Blattkante. Ihr Mittelpunkt bleibt auf der ursprünglichen Fläche.",
+    "forms.collapse.source_unavailable": "Das Kollabieren benötigt eine unabhängige Form mit ursprünglichen Blattflächen und ohne vorherigen Kollaps.",
+    "forms.collapse.topology_unavailable": "Dieses Werkzeug benötigt die ursprüngliche unbeschnittene Form vor dem Kollabieren."
+  },
+  "en": {
+    "forms.collapse.desktop_required": "Refined Collapse needs the desktop app.",
+    "forms.collapse.help": "Select the two free endpoints of one planar leaf side. Its midpoint stays on the original surface.",
+    "forms.collapse.source_unavailable": "Refined Collapse needs an independent Form with original leaf charts and no previous Collapse.",
+    "forms.collapse.topology_unavailable": "This tool needs the original untrimmed Form before Collapse."
+  },
+  "ja": {
+    "forms.collapse.desktop_required": "細分化フォームの縮退にはデスクトップアプリが必要です。",
+    "forms.collapse.help": "平面リーフの一辺の自由な両端点を選択します。中点は元の曲面上に残ります。",
+    "forms.collapse.source_unavailable": "縮退していない元のリーフを持つ独立したフォームが必要です。",
+    "forms.collapse.topology_unavailable": "このツールには縮退前のトリムされていないフォームが必要です。"
+  },
+  "ko": {
+    "forms.collapse.desktop_required": "세분화된 형상을 축소하려면 데스크톱 앱이 필요합니다.",
+    "forms.collapse.help": "평면 리프 한 변의 자유 끝점 두 개를 선택하세요. 중점은 원래 표면에 유지됩니다.",
+    "forms.collapse.source_unavailable": "원래 리프가 있고 이전 축소가 없는 독립 형상이 필요합니다.",
+    "forms.collapse.topology_unavailable": "이 도구에는 축소하기 전의 트림되지 않은 형상이 필요합니다."
+  },
+  "zh": {
+    "forms.collapse.desktop_required": "塌缩细分造型需要桌面应用。",
+    "forms.collapse.help": "选择一个平面叶片侧边上的两个自由端点。中点保留在原曲面上。",
+    "forms.collapse.source_unavailable": "细分塌缩需要保留原始叶片且尚未塌缩的独立造型。",
+    "forms.collapse.topology_unavailable": "此工具需要塌缩前未修剪的原始造型。"
+  },
+  "ar": {
+    "forms.collapse.desktop_required": "تتطلب عملية طيّ النقاط في شكل مُنقَّح تطبيق سطح المكتب.",
+    "forms.collapse.help": "حدّد الطرفين الحرّين لأحد جوانب الرقعة النهائية المستوية. تبقى نقطة منتصف الجانب على السطح الأصلي.",
+    "forms.collapse.source_unavailable": "يتطلب طيّ النقاط في شكل مُنقَّح شكلًا مستقلًا يحتفظ برقعه النهائية الأصلية ولم تُطوَ نقاطه من قبل.",
+    "forms.collapse.topology_unavailable": "تتطلب هذه الأداة الشكل الأصلي غير المقصوص قبل طيّ النقاط."
+  },
+  "he": {
+    "forms.collapse.desktop_required": "מיזוג נקודות בצורה שעברה עידון דורש את יישום שולחן העבודה.",
+    "forms.collapse.help": "יש לבחור את שני קצותיו החופשיים של צד אחד בתא עידון מישורי. נקודת האמצע תישאר על המשטח המקורי.",
+    "forms.collapse.source_unavailable": "המיזוג דורש צורה חופשית עצמאית שמיפויי המשטח המקוריים של תאי העידון שלה נשמרו ושטרם בוצע בה מיזוג.",
+    "forms.collapse.topology_unavailable": "כלי זה דורש את הצורה החופשית המקורית, ללא גזימה, כפי שהייתה לפני המיזוג."
+  },
+  "vi": {
+    "forms.collapse.desktop_required": "Gộp điểm trên hình đã chia nhỏ cần ứng dụng máy tính.",
+    "forms.collapse.help": "Chọn hai đầu mút tự do của một cạnh trên ô mặt phẳng. Trung điểm của cạnh vẫn nằm trên bề mặt ban đầu.",
+    "forms.collapse.source_unavailable": "Để gộp điểm, hình đã chia nhỏ phải độc lập, còn giữ các miền tham số mặt ban đầu và chưa từng gộp điểm.",
+    "forms.collapse.topology_unavailable": "Công cụ này cần hình ban đầu chưa bị cắt xén bởi thao tác gộp điểm."
+  }
+}

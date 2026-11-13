@@ -1,0 +1,56 @@
+{
+  "de": {
+    "forms.fill.cap_rim_editing": "Bearbeiten Sie die Randkanten oder Randpunkte, um die Abdeckung zu formen.",
+    "forms.fill.cap_topology_unavailable": "Dieser Vorgang ist bei einer Form mit einer abgeleiteten Abdeckung nicht verfügbar.",
+    "forms.fill.new_cap": "Neue Abdeckung",
+    "forms.fill.new_cap_help": "Erstellt eine neue Fläche an einer vierseitigen Öffnung. Bearbeiten Sie die Randkanten oder Randpunkte, um die Abdeckung zu formen."
+  },
+  "en": {
+    "forms.fill.cap_rim_editing": "Edit the rim edges or points to reshape this cap.",
+    "forms.fill.cap_topology_unavailable": "This operation is unavailable on a Form with a derived cap.",
+    "forms.fill.new_cap": "New cap",
+    "forms.fill.new_cap_help": "Builds a new surface on one four-sided opening. Edit its rim edges or points to reshape the cap."
+  },
+  "ja": {
+    "forms.fill.cap_rim_editing": "キャップの形状を変えるには、境界のエッジまたは点を編集します。",
+    "forms.fill.cap_topology_unavailable": "派生キャップがあるフォームでは、この操作は利用できません。",
+    "forms.fill.new_cap": "新しいキャップ",
+    "forms.fill.new_cap_help": "四辺の開口部に新しいサーフェスを作成します。キャップの形状を変えるには、境界のエッジまたは点を編集します。"
+  },
+  "ko": {
+    "forms.fill.cap_rim_editing": "이 캡의 모양을 바꾸려면 경계 모서리나 점을 편집하세요.",
+    "forms.fill.cap_topology_unavailable": "파생 캡이 있는 폼에서는 이 작업을 사용할 수 없습니다.",
+    "forms.fill.new_cap": "새 캡",
+    "forms.fill.new_cap_help": "네 변으로 둘러싸인 개구부에 새 곡면을 만듭니다. 캡의 모양을 바꾸려면 경계 모서리나 점을 편집하세요."
+  },
+  "zh": {
+    "forms.fill.cap_rim_editing": "编辑边界上的边或点以调整此封盖的形状。",
+    "forms.fill.cap_topology_unavailable": "带有派生封盖的形状无法执行此操作。",
+    "forms.fill.new_cap": "新建封盖",
+    "forms.fill.new_cap_help": "为一个四边开口创建新曲面。编辑边界上的边或点以调整封盖的形状。"
+  },
+  "ar": {
+    "forms.fill.cap_rim_editing": "عدّل حواف الفتحة أو نقاطها لتغيير شكل رقعة الإغلاق.",
+    "forms.fill.cap_topology_unavailable": "هذه العملية غير متاحة لشكل يحتوي على رقعة إغلاق مشتقّة.",
+    "forms.fill.new_cap": "رقعة إغلاق جديدة",
+    "forms.fill.new_cap_help": "ينشئ سطحًا جديدًا على فتحة واحدة ذات أربعة أضلاع. عدّل حواف الفتحة أو نقاطها لتغيير شكل رقعة الإغلاق."
+  },
+  "fr": {
+    "forms.fill.cap_rim_editing": "Modifiez les arêtes ou les points du contour pour remodeler la surface de fermeture.",
+    "forms.fill.cap_topology_unavailable": "Cette opération est indisponible sur une forme munie d’une surface de fermeture dérivée.",
+    "forms.fill.new_cap": "Nouvelle surface de fermeture",
+    "forms.fill.new_cap_help": "Construit une surface sur une ouverture à quatre côtés. Modifiez les arêtes ou les points du contour pour la remodeler."
+  },
+  "he": {
+    "forms.fill.cap_rim_editing": "יש לערוך את הקצוות או הנקודות בשפה כדי לשנות את צורת המכסה.",
+    "forms.fill.cap_topology_unavailable": "פעולה זו אינה זמינה לצורה חופשית עם מכסה נגזר.",
+    "forms.fill.new_cap": "מכסה חדש",
+    "forms.fill.new_cap_help": "יצירת משטח חדש על פתח בעל ארבעה צדדים. יש לערוך את הקצוות או הנקודות בשפה כדי לשנות את צורת המכסה."
+  },
+  "vi": {
+    "forms.fill.cap_rim_editing": "Chỉnh sửa cạnh hoặc điểm trên vành để đổi hình dạng của mặt bịt này.",
+    "forms.fill.cap_topology_unavailable": "Thao tác này không dùng được cho hình có mặt bịt tạo từ vành.",
+    "forms.fill.new_cap": "Mặt bịt mới",
+    "forms.fill.new_cap_help": "Tạo bề mặt mới trên một lỗ hở có bốn cạnh. Chỉnh sửa cạnh hoặc điểm trên vành để đổi hình dạng của mặt bịt."
+  }
+}

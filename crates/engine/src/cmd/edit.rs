@@ -73,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&CHECKPOINT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
-        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
+        .params("→ {checkpoint: id}: remember the design, active editors and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
     CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", crate::checked!("edit.restore_checkpoint", restore_checkpoint)).icon("restore")
         .noundo()
         .doc_only()
@@ -329,20 +329,29 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
 
 fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {
     let checkpoint = s.checkpoint();
-    reply("edit.checkpoint", crate::schema::edit::CheckpointResult { checkpoint, restored: None, param_warnings: Vec::new() })
+    reply("edit.checkpoint", crate::schema::edit::CheckpointResult { checkpoint, restored: None, form_restored: None, param_warnings: Vec::new() })
 }
 
 fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "edit.restore_checkpoint";
     let id = p.get("checkpoint").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`checkpoint` must be an id from edit.checkpoint"))?;
-    let done =
-        |restored: bool| reply(cmd, crate::schema::edit::CheckpointResult { checkpoint: id, restored: Some(restored), param_warnings: Vec::new() });
+    let done = |restored: bool, form_restored: bool| {
+        reply(
+            cmd,
+            crate::schema::edit::CheckpointResult {
+                checkpoint: id,
+                restored: Some(restored),
+                form_restored: form_restored.then_some(true),
+                param_warnings: Vec::new(),
+            },
+        )
+    };
     if bool_(p, "forget") == Some(true) {
         s.drop_checkpoint(id);
-        return done(false);
+        return done(false, false);
     }
-    s.restore_checkpoint(id)?;
-    done(true)
+    let form_restored = s.restore_checkpoint_with_form(id)?;
+    done(true, form_restored)
 }
 
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -2093,6 +2102,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let mut params = p.get("params").cloned().unwrap_or_else(|| json!({}));
     let idx = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
     let old = s.doc.feature(id).cloned().ok_or_else(|| bad(cmd, "feature"))?;
+    if matches!(old.kind, FeatureKind::Stitch { form_seam: Some(_), .. }) {
+        return Err(bad(cmd, "remove the refined Weld and create a new seam to change its source rims"));
+    }
     if let FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. } = &old.kind
         && matches!(cid, "solid.extrude" | "surface.extrude")
         && let Some(parameters) = params.as_object_mut()
@@ -2188,6 +2200,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && before.at.dist(after.at.0) < 1e-8
     {
         *after = before.clone();
+    }
+    // A thickness edit keeps the saved construction when its source list stays the same.
+    if let (
+        FeatureKind::Thicken { bodies: previous, symmetric: true, form_half_walls: Some(saved), form_planar_walls: before, .. },
+        FeatureKind::Thicken { bodies: current, symmetric: true, form_half_walls, form_planar_walls: after, .. },
+    ) = (&old.kind, &mut new.kind)
+        && previous == current
+        && before == after
+    {
+        *form_half_walls = Some(saved.clone());
     }
     // A perforation keeps its outline through an edit that names no sketch (the Perforate dialog has no outline).
     if let (FeatureKind::SheetPerforate { sketch: Some(before), profiles: picked, .. }, FeatureKind::SheetPerforate { sketch, profiles, .. }) =

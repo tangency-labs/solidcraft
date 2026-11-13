@@ -554,6 +554,24 @@ mod tests {
     }
 
     #[test]
+    fn active_form_refuses_the_properties_window_without_queuing_it() {
+        let mut h = Harness::new();
+        h.app.run("form.prototype.create", json!({"primitive":"box"})).unwrap();
+        for command in ["document.metadata", "document.metadata.set"] {
+            h.app.start(command);
+            let (message, _, error) = h.app.status.as_ref().unwrap();
+            assert!(*error);
+            assert_eq!(message, h.app.tr("forms.context.finish_before_properties"));
+            assert!(h.app.design_properties.is_none());
+        }
+        assert!(h.app.run("document.metadata", json!({})).unwrap()["metadata"].is_object());
+        h.app.run("form.prototype.close", json!({})).unwrap();
+        assert!(h.app.design_properties.is_none());
+        h.app.start("document.metadata");
+        assert!(h.app.design_properties.is_some());
+    }
+
+    #[test]
     fn the_window_edits_properties_in_one_undo_step_and_keeps_other_tools_data() {
         let mut h = Harness::new();
         h.app.run("document.metadata.set", json!({"values": {"author": "Jane", "com.acme.tool": {"id": 7}}})).unwrap();

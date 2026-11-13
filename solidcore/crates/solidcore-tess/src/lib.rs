@@ -47,6 +47,7 @@ mod vec;
 pub use curve::curve_points;
 pub use iso::{MAX_ISOPARMS, isoparms};
 pub use mesh::Mesh;
+pub use mesher::guided::{DisplayGuide, DisplayGuidePoint, GuidedMesh, mesh_with_guides};
 pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;
 pub use plan::{FacePlan, TessPlan};
@@ -60,7 +61,7 @@ pub use tolerance::{DISPLAY_ANGLE, MeshTolerance};
 
 /// The plan evaluator's curve and surface forms a [`TessPlan`] holds (its `surfaces`), so a
 /// client that builds or reads a plan names them through this crate, not the kernel's.
-pub use solidcore::eval::plan::{EvalCurve, EvalSurface};
+pub use solidcore::eval::plan::{EvalCurve, EvalSurface, SurfaceJet, nurbs_derivs};
 /// The vector conversions between the record and the evaluator that plan surfaces are built with.
 pub use solidcore_convert::{record_vec3, vec3};
 

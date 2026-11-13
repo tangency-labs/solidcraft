@@ -2045,7 +2045,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         // They recompute the history from the changed feature on: off the frame, as the timeline does.
-        "timeline.suppress" | "timeline.roll_to" if item.params.is_some() => drop(app.run_heavy(&item.id, p)),
+        "timeline.suppress" | "timeline.roll_to" | "form.refined_weld.remove" if item.params.is_some() => drop(app.run_heavy(&item.id, p)),
         "component.move_sketches.to_parts" => sketches_to_parts(app, p),
         id if item.params.is_some() => {
             let _ = app.run(id, p);

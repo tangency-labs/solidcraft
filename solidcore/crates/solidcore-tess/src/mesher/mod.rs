@@ -49,6 +49,7 @@ pub(crate) mod coons;
 pub(crate) mod cutgrid;
 pub(crate) mod edges;
 pub(crate) mod grid;
+pub(crate) mod guided;
 pub(crate) mod motorcycle;
 pub(crate) mod pieces;
 pub(crate) mod poles;
@@ -277,9 +278,13 @@ pub(crate) struct Prepared {
 /// facet may turn more than (where it sags above the angle's floor), for `purpose`. Faces and
 /// edges are the record's, in its order.
 pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<(TessPlan, PlanStats)> {
+    plan_with_stations(b, tol, turn, purpose, &[])
+}
+
+fn plan_with_stations(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>, stations: &[Vec<f64>]) -> Result<(TessPlan, PlanStats)> {
     let faces = &b.faces;
     let Prepared { rules, forward, edge_faces, evals, sizes, mut nodes, unsampled_edges, kept_strict, mut boundaries, params, why, tangled } =
-        prepare(b, tol, turn, purpose)?;
+        prepare(b, tol, turn, purpose, stations)?;
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
     // One face for `purpose`: its plan, oriented, with its poles of higher order; or the boundary
     // sides the mesh path's shaping split.
@@ -480,7 +485,7 @@ fn on_edges(f: &brep::Face, nodes: &[edges::Nodes], sides: &[SplitSide]) -> Vec<
 /// ([`Prepared`]), with chord tolerance `tol` and the facet angle `turn`, for `purpose`: on the
 /// mesh path every face, planar ones included, asks for the spec's side where its surface asks
 /// for no less, and every edge follows the caller's size function too.
-pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<Prepared> {
+pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>, stations: &[Vec<f64>]) -> Result<Prepared> {
     let faces = &b.faces;
     let forward = forward_faces(b);
     // The faces each edge bounds, each once, in the order of the edge's uses.
@@ -586,6 +591,11 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
             }
         }
     }
+    for (edge, parameters) in stations.iter().enumerate() {
+        if !parameters.is_empty() {
+            edges::insert_parameters(b, edge, nodes.get_mut(edge).ok_or_else(|| unsupported("missing guided edge"))?, parameters)?;
+        }
+    }
     let indexed: Vec<usize> = (0..faces.len()).collect();
     let face_boundary = |fi: usize, nodes: &[edges::Nodes]| {
         let (Some(face), Some(eval), Some(map)) = (faces.get(fi), evals.get(fi), params.get(fi)) else {
@@ -615,6 +625,9 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         });
     }
     let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why)?;
+    if !stations.is_empty() && nodes.iter().any(|nodes| !nodes.snapped.is_empty()) {
+        return Err(unsupported("guided charts require original exact edge nodes, without tolerance-snapped contacts"));
+    }
     Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, params, why, tangled })
 }
 

@@ -428,3 +428,129 @@ fn a_fill_is_the_same_to_the_last_bit_every_time() {
     let (a, b) = (centre(&mut g0), centre(&mut g0));
     assert_eq!(a.patches, b.patches, "about a centre");
 }
+
+#[test]
+fn a_zero_unknown_g0_patch_measures_guides_before_accepting_the_initial_surface() {
+    let corners = [Vec3::new(0.0, 0.0, 2.0), Vec3::new(10.0, 0.0, 2.0), Vec3::new(10.0, 10.0, 2.0), Vec3::new(0.0, 10.0, 2.0)];
+    let edges = (0..4)
+        .map(|i| IsoEdge { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![corners[i], corners[(i + 1) % 4]], weights: None })
+        .collect::<Vec<_>>();
+    let (sides, _) = loop_sides(&edges, 1f64.to_radians());
+    let quilt = Quilt::new(&edges, &sides, false, &[Vec::new(), Vec::new()], 1).unwrap();
+    assert_eq!(quilt.unknowns, 0);
+    let points = [Vec3::new(5.0, 5.0, 3.0)];
+    let (quilt, report, _) = solve(quilt, &[], &IsoSpec { points: &points, ..spec() }).unwrap();
+    assert!((report.point_deviation - 1.0).abs() < 1e-10, "an unsolved guide cannot be reported as zero error");
+    assert!((quilt.patches[0].eval(0.5, 0.5, 0, 0).unwrap().z - 2.0).abs() < 1e-10);
+    let fill = iso_fill(&edges, &mut |_, ts| Ok(vec![None; ts.len()]), &IsoSpec { points: &points, ..spec() }).unwrap();
+    assert!(fill.achieved.point_deviation <= spec().tol);
+    assert!(fill.patches[0].surface.eval(0.5, 0.5).unwrap().dist(points[0]) <= spec().tol);
+    assert!(fill.patches[0].surface.degree().iter().all(|p| *p >= 2));
+    for guide in [points[0], Vec3::new(5.7, 4.6, 3.0)] {
+        let fill = iso_fill(&edges, &mut |_, ts| Ok(vec![None; ts.len()]), &IsoSpec { points: &[guide], ..spec() }).unwrap();
+        let p = &fill.patches[0];
+        assert!(fill.achieved.point_deviation <= spec().tol);
+        assert!(!any_fold(&fill));
+        for (side, edge) in edges.iter().enumerate() {
+            for i in 0..=24 {
+                let t = i as f64 / 24.0;
+                let (uv, _) = station_on(side, t);
+                assert!(p.surface.eval(uv[0], uv[1]).unwrap().dist(eval_edge_h(edge, t).unwrap().project().unwrap()) < 1e-10);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_crowned_fill_cannot_report_a_pre_crown_guide_measurement() {
+    let corners = [Vec3::ZERO, Vec3::X * 10.0, Vec3::new(10.0, 10.0, 0.0), Vec3::Y * 10.0];
+    let edges = (0..4)
+        .map(|i| IsoEdge { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![corners[i], corners[(i + 1) % 4]], weights: None })
+        .collect::<Vec<_>>();
+    let result = iso_fill(&edges, &mut |_, ts| Ok(vec![None; ts.len()]), &IsoSpec { points: &[Vec3::new(5.0, 5.0, 3.0)], crown: 0.05, ..spec() });
+    assert!(matches!(result, Err(SplineError::Invalid(message)) if message.contains("crowned fill")));
+}
+
+#[test]
+fn a_square_g1_cap_leaves_incompatible_corner_conditions_out_and_stays_regular() {
+    let corners = [Vec3::new(0.0, 0.0, 2.0), Vec3::new(10.0, 0.0, 2.0), Vec3::new(10.0, 10.0, 2.0), Vec3::new(0.0, 10.0, 2.0)];
+    let edges = (0..4)
+        .map(|i| IsoEdge { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![corners[i], corners[(i + 1) % 4]], weights: None })
+        .collect::<Vec<_>>();
+    let normals = [-Vec3::Y, Vec3::X, Vec3::Y, -Vec3::X];
+    for guide in [Vec3::new(5.0, 5.0, 7.0), Vec3::new(5.3, 4.8, 3.0)] {
+        let mut across = |k: usize, ts: &[f64]| Ok(vec![Some(Across { normal: normals[k], leave: Vec3::Z, bend: None, jet: None }); ts.len()]);
+        let fill = iso_fill(&edges, &mut across, &IsoSpec { points: &[guide], ..spec() }).unwrap();
+        assert!(fill.achieved.point_deviation <= spec().tol);
+        assert!(fill.achieved.normal_deviation <= spec().angle_tol);
+        assert!(!any_fold(&fill), "a corner conflict must not pinch the surface");
+        let p = &fill.patches[0];
+        for (side, normal) in normals.iter().enumerate() {
+            for i in 0..37 {
+                let t = CLASH_SHARE + (1.0 - 2.0 * CLASH_SHARE) * (i as f64 + 0.37) / 37.0;
+                let (uv, _) = station_on(side, t);
+                let (_, u, v) = p.surface.derivs(uv).unwrap();
+                let actual = u.cross(v).normalized().unwrap();
+                assert!(actual.dot(*normal).abs().clamp(0.0, 1.0).acos() <= spec().angle_tol, "side {side}, t={t}");
+            }
+        }
+        for uv in [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]] {
+            let (angle, u, v) = corner_angle(p, uv);
+            assert!((angle - 90.0).abs() < 1e-6 && u > 1.0 && v > 1.0, "{angle}, {u}, {v}");
+        }
+        for (side, edge) in edges.iter().enumerate() {
+            for i in 0..=24 {
+                let t = i as f64 / 24.0;
+                let (uv, _) = station_on(side, t);
+                assert!(p.surface.eval(uv[0], uv[1]).unwrap().dist(eval_edge_h(edge, t).unwrap().project().unwrap()) < 1e-10);
+            }
+        }
+    }
+    let corner = Asked::near(1, [(Some(0), 0.02), (None, 1.0)]);
+    assert_eq!(corner.order(), 0, "G1 is incompatible with both fixed corner tangents");
+    assert!(!corner.held);
+    let transition = Asked::near(1, [(Some(0), 1.5 * CLASH_SHARE), (None, 1.0)]);
+    assert_eq!(transition.order(), 1);
+    assert!(transition.fade > 0.0 && transition.fade < 1.0 && transition.held);
+}
+
+#[test]
+fn exact_quad_cap_reproduces_a_rational_quarter_cylinder_with_split_directed_sides() {
+    use crate::bspline::CurveN;
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let arc = [HPoint::weighted(Vec3::X, 1.0), HPoint::weighted(Vec3::new(1.0, 1.0, 0.0), w), HPoint::weighted(Vec3::Y, 1.0)];
+    let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let cut = 0.375;
+    let curve = |[a, b]: [f64; 2], z: f64, reverse: bool| {
+        let (k, h) = segment(2, &knots, &arc, a, b).unwrap();
+        let values = |p: HPoint| [p.x, p.y, p.z + p.w * z, p.w];
+        let spline = if reverse {
+            CurveN { degree: 2, knots: k.iter().rev().map(|&t| (b - t) / (b - a)).collect(), ctrl: h.into_iter().rev().map(values).collect() }
+        } else {
+            CurveN { degree: 2, knots: k.iter().map(|&t| (t - a) / (b - a)).collect(), ctrl: h.into_iter().map(values).collect() }
+        };
+        (if reverse { [1.0 - b, 1.0 - a] } else { [a, b] }, spline)
+    };
+    let line = |a: Vec3, b: Vec3| {
+        ([0.0, 1.0], CurveN { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], ctrl: vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]] })
+    };
+    let mut bottom = [curve([0.0, cut], 0.0, false), curve([cut, 1.0], 0.0, false)];
+    let right = [line(Vec3::Y, Vec3::Y + Vec3::Z * 2.0)];
+    let top = [curve([cut, 1.0], 2.0, true), curve([0.0, cut], 2.0, true)];
+    let left = [line(Vec3::X + Vec3::Z * 2.0, Vec3::X)];
+    let cap = quad_cap([&bottom, &right, &top, &left]).unwrap();
+    for i in 0..=100 {
+        let u = i as f64 / 100.0;
+        let h = arc[0] * (1.0 - u).powi(2) + arc[1] * (2.0 * u * (1.0 - u)) + arc[2] * u.powi(2);
+        let point = h.project().unwrap();
+        for v in [0.0, 0.2, 0.5, 0.8, 1.0] {
+            assert!(cap.eval(u, v).unwrap().dist(point + Vec3::Z * (2.0 * v)) < 1e-11, "u={u}, v={v}");
+        }
+    }
+    assert!(quad_cap([&bottom, &left, &top, &right]).is_err(), "crossed rim order is invalid");
+    bottom[1].0[0] += 1e-5;
+    assert!(quad_cap([&bottom, &right, &top, &left]).is_err(), "a missing rim interval must not be interpolated");
+    bottom[1].0[0] = cut;
+    bottom[1].1.ctrl[1][3] = f64::INFINITY;
+    assert!(quad_cap([&bottom, &right, &top, &left]).is_err(), "hostile homogeneous data is refused");
+}

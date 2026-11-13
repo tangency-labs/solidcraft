@@ -1,5 +1,6 @@
 //! New-design defaults, with inline precision specimens.
 use super::*;
+use solidcraft_ui_kit::BackingTooltipExt as _;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -195,6 +196,31 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         export_name(app, ui, label_width);
         origin_plane_names(app, ui, label_width);
+        ui_kit::settings_section(ui, "forms", app.tr("prefs.forms"), |ui| {
+            let response = setting::forms_compact_editor(app, ui).backing_on_hover_text(app.tr("prefs.forms_compact_editor_help"));
+            crate::scenario::publish_target("prefs:forms_compact_editor", response.rect);
+            let response = setting::forms_drag_feedback(app, ui).backing_on_hover_text(app.tr("prefs.forms_drag_feedback_help"));
+            crate::scenario::publish_target("prefs:forms_drag_feedback", response.rect);
+            if cfg!(not(target_arch = "wasm32")) {
+                let response = setting::forms_exact_face_picking(app, ui).backing_on_hover_text(app.tr("prefs.forms_exact_face_picking_help"));
+                crate::scenario::publish_target("prefs:forms_exact_face_picking", response.rect);
+            }
+            setting::forms_greedy_selection(app, ui);
+            let response = setting::forms_preserve_selection(app, ui).backing_on_hover_text(app.tr("prefs.forms_preserve_selection_help"));
+            crate::scenario::publish_target("prefs:forms_preserve_selection", response.rect);
+            let response = setting::forms_region_selection(app, ui).backing_on_hover_text(app.tr("forms.prototype.region_help"));
+            crate::scenario::publish_target("prefs:forms_region_selection", response.rect);
+            setting::forms_match_adjacent(app, ui);
+            setting::forms_surface_partition(app, ui);
+            let response = setting::forms_mesh_while_dragging(app, ui).backing_on_hover_text(app.tr("prefs.forms_mesh_while_dragging_help"));
+            crate::scenario::publish_target("prefs:forms_mesh_while_dragging", response.rect);
+            ui_kit::settings_form(ui, label_width, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("prefs.forms_cad_tolerance"), app.tr("prefs.forms_cad_tolerance_help"), |ui| {
+                    let response = ui_kit::settings_number(ui, &mut app.preferences.forms_cad_tolerance, 0.000001..=1.0, 0.001);
+                    crate::scenario::publish_target("prefs:forms_cad_tolerance", response.rect);
+                });
+            });
+        });
         ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
             let response = setting::update_changed_links(app, ui);
             crate::scenario::publish_target("prefs:update_changed_links", response.rect);

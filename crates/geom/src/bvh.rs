@@ -148,6 +148,63 @@ impl Bvh {
         best
     }
 
+    /// The same traversal as nearest, charging every box examination and item
+    /// test before doing it. A discovered hit is not returned when work remains
+    /// and the caller's shared budget is exhausted.
+    fn nearest_bounded(
+        &self,
+        o: Vec3,
+        d: Vec3,
+        remaining: &mut usize,
+        mut hit: impl FnMut(u32) -> Option<f64>,
+    ) -> Result<Option<(f64, u32)>, &'static str> {
+        if ![o.x, o.y, o.z, d.x, d.y, d.z].iter().all(|value| value.is_finite()) {
+            return Ok(None);
+        }
+        let inv = Vec3::new(1.0 / d.x, 1.0 / d.y, 1.0 / d.z);
+        let test_box = |index: usize, remaining: &mut usize| -> Result<Option<f64>, &'static str> {
+            let Some(node) = self.nodes.get(index) else { return Ok(None) };
+            ray_work(remaining)?;
+            Ok(ray_box(o, d, inv, &node.bounds, 0.0))
+        };
+        let Some(root) = test_box(0, remaining)? else { return Ok(None) };
+        let mut best: Option<(f64, u32)> = None;
+        let mut stack = vec![(0usize, root)];
+        while let Some((index, distance)) = stack.pop() {
+            if best.is_some_and(|(best, _)| distance > best) {
+                continue;
+            }
+            // This node's box examination already paid for this visit, even
+            // when an earlier sibling subsequently made its distance obsolete.
+            let Some(node) = self.nodes.get(index) else { continue };
+            if node.count > 0 {
+                let start = node.first as usize;
+                let end = start.checked_add(node.count as usize).ok_or("bounded raycast leaf index overflowed")?;
+                for &item in self.order.get(start..end).unwrap_or(&[]) {
+                    ray_work(remaining)?;
+                    if let Some(distance) = hit(item)
+                        && best.is_none_or(|(best, first)| distance < best || (distance == best && item < first))
+                    {
+                        best = Some((distance, item));
+                    }
+                }
+                continue;
+            }
+            let left = node.first as usize;
+            let right = left.checked_add(1).ok_or("bounded raycast child index overflowed")?;
+            let a = test_box(left, remaining)?;
+            let b = test_box(right, remaining)?;
+            match (a, b) {
+                (Some(a), Some(b)) if a <= b => stack.extend([(right, b), (left, a)]),
+                (Some(a), Some(b)) => stack.extend([(left, a), (right, b)]),
+                (Some(a), None) => stack.push((left, a)),
+                (None, Some(b)) => stack.push((right, b)),
+                (None, None) => {}
+            }
+        }
+        Ok(best)
+    }
+
     /// Calls `item(i, j)` for pairs of items, `i` from this hierarchy and `j` from `other`, in
     /// leaves whose boxes, and every pair of boxes above them, `enter` accepts. `enter` is asked
     /// again for a pair of boxes when it is taken up, so a bound that tightens while items are
@@ -194,6 +251,11 @@ impl Bvh {
             }
         }
     }
+}
+
+fn ray_work(remaining: &mut usize) -> Result<(), &'static str> {
+    *remaining = remaining.checked_sub(1).ok_or("mesh raycast exceeded its work budget")?;
+    Ok(())
 }
 
 fn finite(b: &Aabb3) -> bool {
@@ -290,6 +352,34 @@ impl MeshIndex {
         self.triangles
             .nearest(o, dir, |i| mesh.triangles.get(i as usize).and_then(|t| mesh.tri(t)).and_then(|p| frame.hit(p)))
             .map(|(t, i)| (t, i as usize))
+    }
+
+    /// [`Self::raycast`] with one unit charged per examined BVH box and triangle test.
+    /// Empty indices and invalid rays do no traversal work. A different triangle
+    /// count preserves the old scan fallback, charging every scanned triangle.
+    /// Exhaustion is an error, never a partial nearest-hit answer.
+    pub fn raycast_bounded(&self, mesh: &Mesh, o: Vec3, dir: Vec3, remaining: &mut usize) -> Result<Option<(f64, usize)>, &'static str> {
+        if ![o.x, o.y, o.z, dir.x, dir.y, dir.z].iter().all(|value| value.is_finite()) {
+            return Ok(None);
+        }
+        let Some(frame) = crate::mesh::RayFrame::new(o, dir) else { return Ok(None) };
+        if mesh.triangles.len() != self.triangle_count {
+            let mut best: Option<(f64, usize)> = None;
+            for (index, triangle) in mesh.triangles.iter().enumerate() {
+                ray_work(remaining)?;
+                if let Some(distance) = mesh.tri(triangle).and_then(|points| frame.hit(points))
+                    && best.is_none_or(|(best, _)| distance < best)
+                {
+                    best = Some((distance, index));
+                }
+            }
+            return Ok(best);
+        }
+        self.triangles
+            .nearest_bounded(o, dir, remaining, |index| {
+                mesh.triangles.get(index as usize).and_then(|triangle| mesh.tri(triangle)).and_then(|points| frame.hit(points))
+            })
+            .map(|hit| hit.map(|(distance, index)| (distance, index as usize)))
     }
 
     /// Calls `f(edge, first point)` for every edge segment that may come within `a + b·t` of the

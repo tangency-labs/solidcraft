@@ -13,6 +13,7 @@ workspace = true
 trust-unknown-source = []
 
 [dependencies]
+solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
@@ -29,6 +30,8 @@ solidcraft-profile = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }
+flate2 = { workspace = true }
+ruzstd = { workspace = true }
 quick-xml = { workspace = true }
 gltf = { workspace = true }
 serde = { workspace = true }

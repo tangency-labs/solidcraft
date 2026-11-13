@@ -83,14 +83,14 @@ pub const HIT_TOLERANCE: f32 = 9.0;
 
 thread_local! {
     /// The last triad drawn: centre and arrow length in mm (for scenarios and tests).
-    static LAST: RefCell<Option<(Vec3, f64)>> = const { RefCell::new(None) };
+    static LAST: RefCell<Option<(Vec3, f64, [Vec3;3])>> = const { RefCell::new(None) };
 }
 
 /// A world point on a handle of the last triad drawn: "x"/"y"/"z" on an arrow, "xy"/"yz"/"xz"
 /// in a square, "rx"/"ry"/"rz" on a ring, "ball". `by` moves it, `turn` (degrees) turns a ring
 /// point about its axis.
 pub fn handle_point(name: &str, by: Vec3, turn: f64) -> Option<Vec3> {
-    let (c, l) = LAST.with(|x| *x.borrow())?;
+    let (c, l, dirs) = LAST.with(|x| *x.borrow())?;
     let axis = |s: &str| match s {
         "x" => Some(0),
         "y" => Some(1),
@@ -99,16 +99,16 @@ pub fn handle_point(name: &str, by: Vec3, turn: f64) -> Option<Vec3> {
     };
     let p = match name {
         "ball" => c,
-        "xy" => c + (Vec3::X + Vec3::Y) * (0.35 * l),
-        "yz" => c + (Vec3::Y + Vec3::Z) * (0.35 * l),
-        "xz" => c + (Vec3::X + Vec3::Z) * (0.35 * l),
+        "xy" => c + (dirs[0] + dirs[1]) * (0.35 * l),
+        "yz" => c + (dirs[1] + dirs[2]) * (0.35 * l),
+        "xz" => c + (dirs[0] + dirs[2]) * (0.35 * l),
         r if r.starts_with('r') => {
             let i = axis(&r[1..])?;
-            let (e1, e2) = ring_basis(i);
+            let (e1, e2) = (dirs[(i + 1) % 3], dirs[(i + 2) % 3]);
             let th = turn.to_radians();
             return Some(c + (e1 * th.cos() + e2 * th.sin()) * (RING * l) + by);
         }
-        a => c + DIRS[axis(a)?] * (0.75 * l),
+        a => c + dirs[axis(a)?] * (0.75 * l),
     };
     Some(p + by)
 }
@@ -116,21 +116,12 @@ pub fn handle_point(name: &str, by: Vec3, turn: f64) -> Option<Vec3> {
 /// Ring radius as a share of the arrow length.
 const RING: f64 = 0.62;
 
-/// In-plane directions of the ring about an axis (right-handed: e1 × e2 = axis).
-fn ring_basis(i: usize) -> (Vec3, Vec3) {
-    match i {
-        0 => (Vec3::Y, Vec3::Z),
-        1 => (Vec3::Z, Vec3::X),
-        _ => (Vec3::X, Vec3::Y),
-    }
-}
-
 /// Where round a ring (degrees) a press takes that ring, clear of the handles over it.
 #[cfg(test)]
 pub(crate) fn ring_grip(proj: &Proj, t: &Triad, ring: usize) -> Option<f64> {
     let l = mm_per_px(proj, t.center)? * LEN_PX;
     let sh = shapes(proj, t, l)?;
-    let (e1, e2) = ring_basis(ring);
+    let (e1, e2) = (DIRS[(ring + 1) % 3], DIRS[(ring + 2) % 3]);
     (0..72).map(|k| f64::from(k) * 5.0).find(|a| {
         let th = a.to_radians();
         proj.to_screen(t.center + (e1 * th.cos() + e2 * th.sin()) * (RING * l)).is_some_and(|p| hit(&sh, p) == Some(Handle::Ring(ring)))
@@ -194,17 +185,20 @@ struct Shapes {
 }
 
 fn shapes(proj: &Proj, t: &Triad, l: f64) -> Option<Shapes> {
+    oriented_shapes(proj, t, l, DIRS)
+}
+fn oriented_shapes(proj: &Proj, t: &Triad, l: f64, dirs: [Vec3; 3]) -> Option<Shapes> {
     let c = t.center;
     let ball = proj.to_screen(c)?;
     let mut s = Shapes { arrows: Vec::new(), planes: Vec::new(), rings: Vec::new(), ball };
     if t.translate {
-        for (i, d) in DIRS.iter().enumerate() {
+        for (i, d) in dirs.iter().enumerate() {
             if let (Some(a), Some(b)) = (proj.to_screen(c + *d * (0.18 * l)), proj.to_screen(c + *d * l)) {
                 s.arrows.push((i, a, b));
             }
         }
         for i in 0..3 {
-            let (e1, e2) = ring_basis(i);
+            let (e1, e2) = (dirs[(i + 1) % 3], dirs[(i + 2) % 3]);
             let q: Ring<Pos2> = [(0.25, 0.25), (0.45, 0.25), (0.45, 0.45), (0.25, 0.45)]
                 .iter()
                 .filter_map(|(a, b)| proj.to_screen(c + e1 * (a * l) + e2 * (b * l)))
@@ -216,7 +210,7 @@ fn shapes(proj: &Proj, t: &Triad, l: f64) -> Option<Shapes> {
     }
     if t.rotate {
         for i in 0..3 {
-            let (e1, e2) = ring_basis(i);
+            let (e1, e2) = (dirs[(i + 1) % 3], dirs[(i + 2) % 3]);
             let pts: Vec<Pos2> = (0..=64)
                 .map(|k| k as f64 / 64.0 * std::f64::consts::TAU)
                 .filter_map(|th| proj.to_screen(c + (e1 * th.cos() + e2 * th.sin()) * (RING * l)))
@@ -262,6 +256,19 @@ fn snap(v: f64, step: f64, free: bool) -> f64 {
     if free || step <= 0.0 { v } else { (v / step).round() * step }
 }
 
+/// Screen-aligned axes in the plane normal to the gizmo's view ray.
+pub(crate) fn view_plane_basis(proj: &Proj, at: Pos2) -> Option<[Vec3; 2]> {
+    let (right, _, _) = proj.cam.basis();
+    solidcore_ops::form_transform::view_plane_basis(proj.ray(at).1, right)
+}
+
+fn snap_plane(delta: Vec3, basis: [Vec3; 2], step: f64, free: bool) -> Vec3 {
+    if free || step <= 0.0 {
+        return delta;
+    }
+    solidcore_ops::form_transform::SnapFrame::plane(basis).and_then(|frame| frame.quantise(delta, step)).unwrap_or(delta)
+}
+
 /// Discard a suspended pointer gesture without reporting a final model change.
 pub(crate) fn cancel(ctx: &egui::Context, id: egui::Id) {
     ctx.data_mut(|d| d.remove::<State>(id));
@@ -269,7 +276,10 @@ pub(crate) fn cancel(ctx: &egui::Context, id: egui::Id) {
 
 /// Hit-test before registering the dynamic egui drag widget or changing the camera.
 pub(crate) fn contains_pointer(proj: &Proj, t: &Triad, p: Pos2) -> bool {
-    mm_per_px(proj, t.center).and_then(|scale| shapes(proj, t, scale * LEN_PX)).is_some_and(|sh| hit(&sh, p).is_some())
+    contains_oriented(proj, t, p, DIRS)
+}
+pub(crate) fn contains_oriented(proj: &Proj, t: &Triad, p: Pos2, dirs: [Vec3; 3]) -> bool {
+    mm_per_px(proj, t.center).and_then(|scale| oriented_shapes(proj, t, scale * LEN_PX, dirs)).is_some_and(|sh| hit(&sh, p).is_some())
 }
 
 /// The region the triad's handles occupy on screen: where a press takes one of them. A value
@@ -316,11 +326,34 @@ pub fn take_click(ui: &egui::Ui, id: egui::Id) -> Option<Handle> {
 
 /// Draw the triad and run a drag on it. `step` is the distance snap step.
 pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::Id, t: &Triad, step: f64) -> Option<Drag> {
+    show_oriented(ui, painter, proj, id, t, step, DIRS)
+}
+pub(crate) fn show_oriented(
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    id: egui::Id,
+    t: &Triad,
+    step: f64,
+    dirs: [Vec3; 3],
+) -> Option<Drag> {
+    show_mode(ui, painter, proj, id, t, step, (dirs, false))
+}
+pub(crate) fn show_mode(
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    id: egui::Id,
+    t: &Triad,
+    step: f64,
+    axes: ([Vec3; 3], bool),
+) -> Option<Drag> {
+    let (dirs, scale) = axes;
     let tk = Tokens::get();
     ui.data_mut(|d| d.remove::<Handle>(id.with("click")));
     let l = mm_per_px(proj, t.center)? * LEN_PX;
-    LAST.with(|x| *x.borrow_mut() = Some((t.center, l)));
-    let sh = shapes(proj, t, l)?;
+    LAST.with(|x| *x.borrow_mut() = Some((t.center, l, dirs)));
+    let sh = oriented_shapes(proj, t, l, dirs)?;
     // Handles by name for scenarios ("move_x", "move_rz", "move_ball"…).
     for n in ["x", "y", "z", "xy", "yz", "xz", "rx", "ry", "rz", "ball"] {
         if let Some(q) = handle_point(n, Vec3::ZERO, 60.0).and_then(|p| proj.to_screen(p)) {
@@ -328,8 +361,13 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         }
     }
     let state: Option<State> = ui.data(|d| d.get_temp(id));
-    let pointer = ui.input(|i| i.pointer.hover_pos());
-    let hovered = if state.is_none() { pointer.filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(|p| hit(&sh, p)) } else { None };
+    let (pointer, press) = ui.input(|i| {
+        let press = i.pointer.primary_down().then(|| i.pointer.press_origin()).flatten();
+        (i.pointer.hover_pos(), press)
+    });
+    // egui starts a drag after the pointer has moved. Pick the handle under the
+    // original press so that a fast first move cannot switch the constraint.
+    let hovered = if state.is_none() { press.or(pointer).filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(|p| hit(&sh, p)) } else { None };
     let active = state.map(|s| s.handle).or(hovered);
     let hot = |h: Handle| active == Some(h);
     let col = |h: Handle, i: usize| if hot(h) { tk.accent } else { tk.axes()[i.min(2)] };
@@ -341,10 +379,20 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         painter.extend(projected_polygon(q, c.gamma_multiply(if hot(Handle::Plane(*i)) { 0.7 } else { 0.35 }), Stroke::new(1.0, c)));
     }
     for (i, a, b) in &sh.arrows {
-        arrow(painter, *a, *b, col(Handle::Axis(*i), *i), hot(Handle::Axis(*i)));
+        if scale {
+            let color = col(Handle::Axis(*i), *i);
+            painter.line_segment([*a, *b], Stroke::new(2.0, color));
+            painter.rect_filled(Rect::from_center_size(*b, vec2(10.0, 10.0)), 1.0, color);
+        } else {
+            arrow(painter, *a, *b, col(Handle::Axis(*i), *i), hot(Handle::Axis(*i)));
+        }
     }
     let bc = if hot(Handle::Ball) { tk.accent } else { Color32::from_gray(235) };
-    painter.circle(sh.ball, 6.0, bc, Stroke::new(1.5, Color32::from_gray(60)));
+    if scale {
+        painter.rect_filled(Rect::from_center_size(sh.ball, vec2(12.0, 12.0)), 1.0, bc);
+    } else {
+        painter.circle(sh.ball, 6.0, bc, Stroke::new(1.5, Color32::from_gray(60)));
+    }
     // The handle under the press itself, owned as `hovered` is (this layer, inside the view): a
     // press and release in one frame can end with the pointer somewhere else, even off the triad.
     let pressed = || {
@@ -377,7 +425,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     }
     let view = proj.ray(sh.ball).1;
     let plane_normal = |h: Handle| match h {
-        Handle::Plane(i) | Handle::Ring(i) => DIRS[i],
+        Handle::Plane(i) | Handle::Ring(i) => dirs[i],
         _ => view,
     };
     let mut started = false;
@@ -393,10 +441,10 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
             let c = t.center;
             let mut s = State { handle: h, center: c, grab: c, t0: 0.0, last: 0.0, turned: 0.0 };
             match h {
-                Handle::Axis(i) => s.t0 = along(proj, from, c, DIRS[i])?,
+                Handle::Axis(i) => s.t0 = along(proj, from, c, dirs[i])?,
                 Handle::Ring(i) => {
-                    let q = on_plane(proj, from, c, DIRS[i])? - c;
-                    let (e1, e2) = ring_basis(i);
+                    let q = on_plane(proj, from, c, dirs[i])? - c;
+                    let (e1, e2) = (dirs[(i + 1) % 3], dirs[(i + 2) % 3]);
                     s.last = q.dot(e2).atan2(q.dot(e1));
                 }
                 _ => s.grab = on_plane(proj, from, c, plane_normal(h))?,
@@ -424,12 +472,12 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     };
     let change = match st.handle {
         Handle::Axis(i) => {
-            let v = along(proj, p, st.center, DIRS[i]).map(|v| v - st.t0).unwrap_or(0.0);
-            Change::Translate(DIRS[i] * snap(v, step, free))
+            let v = along(proj, p, st.center, dirs[i]).map(|v| v - st.t0).unwrap_or(0.0);
+            Change::Translate(dirs[i] * snap(v, step, free))
         }
         Handle::Ring(i) => {
-            if let Some(q) = on_plane(proj, p, st.center, DIRS[i]).map(|q| q - st.center) {
-                let (e1, e2) = ring_basis(i);
+            if let Some(q) = on_plane(proj, p, st.center, dirs[i]).map(|q| q - st.center) {
+                let (e1, e2) = (dirs[(i + 1) % 3], dirs[(i + 2) % 3]);
                 let th = q.dot(e2).atan2(q.dot(e1));
                 let mut d = th - st.last;
                 while d > std::f64::consts::PI {
@@ -445,7 +493,12 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         }
         h => {
             let d = on_plane(proj, p, st.center, plane_normal(h)).map(|q| q - st.grab).unwrap_or(Vec3::ZERO);
-            Change::Translate(Vec3::new(snap(d.x, step, free), snap(d.y, step, free), snap(d.z, step, free)))
+            let basis = match h {
+                Handle::Plane(i) => Some([dirs[(i + 1) % 3], dirs[(i + 2) % 3]]),
+                Handle::Ball => view_plane_basis(proj, sh.ball),
+                _ => None,
+            };
+            Change::Translate(basis.map_or(d, |basis| snap_plane(d, basis, step, free)))
         }
     };
     if done {
@@ -560,6 +613,17 @@ pub fn axis_angle(m: &[[f64; 3]; 3]) -> (Vec3, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapped_drag_stays_in_an_oriented_plane() {
+        let normal = Vec3::new(0.6, 0.8, 0.0);
+        let along = Vec3::new(0.8, -0.6, 0.0);
+        let delta = along * 1.4 + Vec3::Z * 0.6;
+        let snapped = snap_plane(delta, [along, Vec3::Z], 1.0, false);
+        assert!(snapped.dot(normal).abs() < 1e-12);
+        assert!(snapped.dist(along + Vec3::Z) < 1e-12);
+        assert_eq!(snap_plane(delta, [along, Vec3::Z], 1.0, true), delta);
+    }
 
     #[test]
     fn plane_squares_stay_within_the_triad() {

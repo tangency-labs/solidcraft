@@ -197,6 +197,8 @@ pub struct ViewportState {
     /// The preset's navigation for the left-button drag under way (Alias: Shift+Alt), taken
     /// when the button went down, so the drag neither selects nor moves sketch geometry.
     pub primary_nav: Option<NavMode>,
+    /// A Shift press on Form geometry belongs to the Form through release.
+    pub(crate) form_shift_press: bool,
     /// A primary press that started with the Zoom shortcut owns the pointer until release.
     pub(crate) zoom_shortcut_drag: bool,
     /// Button-free gesture and its last owned pointer position, kept through pauses.
@@ -4443,6 +4445,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     // Two themes may share a light/dark base while drawing different geometry colours.
     crate::theme_files::color_key(&Tokens::base()).hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
+    refined_weld_dialog(app).hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
     app.viewport.refused_ring.hash(&mut h);
     // Where a Move dialog has moved its bodies; while its triad is dragged, only that it is.
@@ -4693,6 +4696,10 @@ struct WholeBody {
     colour: [u8; 4],
 }
 
+fn refined_weld_dialog(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::RefinedWeld)))
+}
+
 /// Light the whole of `b` from what the model already has on the GPU, copying no triangle: its
 /// plan or its opaque runs (tinted over the model's own colours), its block's vertices recoloured
 /// in the highlight's palette (faded and see-through bodies), or its placements; in Wireframe,
@@ -4790,6 +4797,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     let replaced = |name: &str| moving(name) || (app.preview.effective_replaced().iter().any(|n| n == name) && chain_of(chained, name).is_none());
     let shown = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), if product { b.mesh() } else { shown_mesh(app, b, &active_bodies) });
     let drawn = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), drawn_mesh(app, b));
+    let weld = refined_weld_dialog(app);
     let items = app.highlighted();
     let sketches = selected_sketches(app, &items);
     let mut sel = Vec::new();
@@ -5036,6 +5044,8 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             Sel::Body { name } => {
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
+                    && !moving(name)
+                    && !(weld && replaced(name))
                 {
                     if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {

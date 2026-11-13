@@ -6,6 +6,110 @@ use super::*;
 use crate::{RuledCorners, RuledMode, SheetSection};
 use solidcore_record::Seg2;
 
+/// Qualify the portable result, which can differ from the native body checked
+/// before export. A bad edge lift must leave the source and timeline intact.
+fn qualify_refined_thicken(body: &Body) -> Result<()> {
+    if body.is_surface() || body.is_mesh() {
+        return Err(DocError::Invalid("Thicken did not produce a closed solid from the refined Form".into()));
+    }
+    let validity = kernel::validity(body);
+    if let Err(error) = validity.record {
+        return Err(DocError::Invalid(format!("Thicken produced an invalid solid from the refined Form ({error})")));
+    }
+    match validity.smlib {
+        Some(kernel::SmlibCheck::Valid) => Ok(()),
+        Some(kernel::SmlibCheck::Invalid(error)) => {
+            Err(DocError::Invalid(format!("Thicken produced an invalid solid from the refined Form ({error})")))
+        }
+        Some(kernel::SmlibCheck::NotSupported(error)) => {
+            Err(DocError::Invalid(format!("Thicken could not validate the refined Form solid ({error})")))
+        }
+        None => Err(DocError::Invalid("Thicken could not validate the refined Form solid".into())),
+    }
+}
+
+/// Choose the half-wall construction only when the direct symmetric output
+/// fails the portable and native checks used during timeline evaluation.
+pub fn refined_symmetric_uses_half_walls(body: &Body, thickness: f64) -> Result<bool> {
+    if !body.is_surface() {
+        return Err(DocError::Invalid("Thicken requires an open refined Form surface".into()));
+    }
+    let direct = kernel::thicken(body, thickness, true)?;
+    Ok(qualify_refined_thicken(&direct).is_err())
+}
+
+fn trace_half_walls(source: &Traced, thickness: f64) -> Result<Traced> {
+    let (wall, side_history) = kernel::thicken_opposite_sides(&source.body, thickness)?;
+    qualify_refined_thicken(&wall)?;
+    let lineage = source.lineage.as_ref().and_then(|input| crate::lineage::Lineage::from_history(side_history, &[input, input]));
+    Ok(Traced { body: wall, lineage, recipe: None })
+}
+
+/// Sew two saved Form producers while retaining both editable sources.
+pub(super) fn eval_refined_weld(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    feature: &Feature,
+    state: &mut ModelState,
+    history: &[FeatureResult],
+) -> Result<()> {
+    let invalid = |why: &str| DocError::Invalid(why.into());
+    let FeatureKind::Stitch { bodies, tolerance, form_seam: Some(seam) } = &feature.kind else {
+        return Err(invalid("expected a qualified refined Weld"));
+    };
+    let [first_name, second_name] = bodies.as_slice() else {
+        return Err(invalid("refined Weld needs exactly two source bodies"));
+    };
+    if first_name == second_name || val(vals, tolerance, Kind::Length)? != 0.0 {
+        return Err(invalid("refined Weld requires distinct source bodies and its fixed sewing tolerance"));
+    }
+    let prior = &*state;
+    let source = |id: crate::FeatureId, name: &crate::BodyName| {
+        let producer = doc
+            .feature(id.0)
+            .filter(|source| source.component == feature.component)
+            .ok_or_else(|| invalid("refined Weld sources must be in the same component as the seam"))?;
+        let FeatureKind::Form { tolerance, operation: Operation::NewBody, .. } = &producer.kind else {
+            return Err(invalid("refined Weld requires unchanged standalone Form producers"));
+        };
+        let result = history
+            .iter()
+            .find(|r| r.id == id.0 && !r.skipped && !r.stale && r.error.is_none())
+            .ok_or_else(|| invalid("refined Weld source is unavailable before the seam"))?;
+        let mut bodies = result.state.bodies.iter().filter(|body| body.feature == id.0);
+        let original = bodies.next().filter(|_| bodies.next().is_none()).ok_or_else(|| invalid("refined Weld source produced an ambiguous body"))?;
+        let current = prior.bodies.iter().find(|body| body.name == name.0).ok_or_else(|| invalid("refined Weld source body is missing"))?;
+        if current.feature != id.0
+            || current.component != feature.component
+            || original.component != feature.component
+            || current.source_name.is_some()
+            || current.transferred
+            || current.source_transform != original.source_transform
+            || !current.body.same(&original.body)
+        {
+            return Err(invalid("refined Weld source body changed between its Form feature and the seam"));
+        }
+        Ok((current, val(vals, tolerance, Kind::Length)?))
+    };
+    let [first, second] = seam.sources();
+    let (a, a_tolerance) = source(first, first_name)?;
+    let (b, b_tolerance) = source(second, second_name)?;
+    let prepared = crate::forms::prepare_refined_weld(doc, seam, [a_tolerance, b_tolerance])?;
+    if !prepared.matches_operands([&a.body, &b.body]) {
+        return Err(invalid("refined Weld qualified records do not match the evaluated Form bodies"));
+    }
+    let name = a.name.clone();
+    let traced = Traced::step(prepared.body, &[&a.traced(), &b.traced()]);
+    if traced.lineage.is_none() {
+        return Err(invalid("refined Weld could not retain both source body lineages"));
+    }
+    let result = a.remade(traced);
+    let slot = state.bodies.iter_mut().find(|body| body.name == name).ok_or_else(|| invalid("missing first refined Weld body"))?;
+    *slot = result;
+    state.bodies.retain(|body| body.name != second_name.0);
+    Ok(())
+}
+
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
         FeatureKind::Patch { sketch, profiles, profiles_3d, body, edges, crown, continuity, points } => {
@@ -48,7 +152,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::Stitch { bodies, tolerance } => {
+        FeatureKind::Stitch { bodies, tolerance, form_seam: None } => {
             let tol = val(vals, tolerance, Kind::Length)?;
             let idx: Vec<usize> = bodies
                 .iter()
@@ -66,15 +170,53 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             st.bodies.retain(|b| !gone.contains(&b.name));
             Ok(())
         }
-        FeatureKind::Thicken { bodies, thickness, symmetric, operation, targets } => {
+        FeatureKind::Thicken { bodies, thickness, symmetric, form_half_walls, form_planar_walls, operation, targets } => {
             let t = val(vals, thickness, Kind::Length)?;
+            if form_half_walls.as_ref().is_some_and(|saved| saved.len() != bodies.len() || !*symmetric)
+                || form_planar_walls.as_ref().is_some_and(|saved| saved.len() != bodies.len())
+            {
+                return Err(DocError::Invalid("Thicken has invalid saved source constructions".into()));
+            }
+            let saved_for = |choices: &Option<Vec<bool>>, index| choices.as_ref().and_then(|saved| saved.get(index)).copied().unwrap_or(false);
             let mut tools = Vec::new();
-            for n in bodies {
+            for (index, n) in bodies.iter().enumerate() {
                 let b = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                // Kept face, offset and edge walls. Carry that history so a sketch can attach
-                // to the solid's faces and follow the thickness (#7641).
-                let thickened = kernel::thicken(&b.body, t, *symmetric)?;
-                tools.push(Traced::step(thickened, &[&b.traced()]));
+                let form = doc.feature(b.feature).and_then(|feature| match &feature.kind {
+                    FeatureKind::Form { definition, .. } => Some(definition),
+                    _ => None,
+                });
+                let refined_form = form.is_some_and(|definition| definition.hierarchy.is_some());
+                if refined_form && !b.body.is_surface() {
+                    return Err(DocError::Invalid("Thicken requires an open refined Form surface".into()));
+                }
+                let source = b.traced();
+                let planar = saved_for(form_planar_walls, index);
+                let halves = saved_for(form_half_walls, index);
+                let traced = if planar {
+                    if halves || form.is_none() {
+                        return Err(DocError::Invalid("Thicken has invalid saved source constructions".into()));
+                    }
+                    let (body, history) = crate::forms::build_planar_wall(&source.body, t, *symmetric)?;
+                    let lineage = source.lineage.as_ref().and_then(|input| crate::lineage::Lineage::from_history(history, &[input, input]));
+                    Traced { body, lineage, recipe: None }
+                } else if halves {
+                    trace_half_walls(&source, t)?
+                } else {
+                    let thickened = kernel::thicken(&source.body, t, *symmetric)?;
+                    if refined_form && let Err(original) = qualify_refined_thicken(&thickened) {
+                        if !*symmetric || form_half_walls.is_some() {
+                            return Err(original);
+                        }
+                        trace_half_walls(&source, t)
+                            .map_err(|fallback| DocError::Invalid(format!("{original}; could not join the two half walls ({fallback})")))?
+                    } else {
+                        Traced::step(thickened, &[&source])
+                    }
+                };
+                if (planar || refined_form) && traced.lineage.is_none() {
+                    return Err(DocError::Invalid("Thicken could not retain exact history from the Form".into()));
+                }
+                tools.push(traced);
             }
             if tools.is_empty() {
                 return Err(DocError::Invalid("pick the surfaces to thicken".into()));

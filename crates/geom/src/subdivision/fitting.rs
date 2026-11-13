@@ -1,0 +1,695 @@
+//! Tensor B-spline fitting of original logical subdivision patches.
+//! Reported deviation is a sampled check on the next refinement level, not a bound.
+use super::{Cage, Result, bad};
+use crate::bspline::NurbsSurface;
+use crate::prelude::*;
+use solidcore_ops::form_subdivision::{converged_limit, crease_limit, smooth_limit};
+use solidcore_record::Vec3;
+use std::collections::{BTreeMap, BTreeSet};
+
+mod regular;
+pub(super) mod root_grid;
+
+fn grid_samples_exceed_budget(roots: usize, width: usize) -> bool {
+    roots.saturating_mul(width.saturating_mul(width)) > 500_000
+}
+
+#[derive(Clone, Debug)]
+pub struct Fit {
+    pub root_basis: Option<RootBasis>,
+    pub patches: Vec<NurbsSurface>,
+    pub patch_roots: Vec<usize>,
+    /// Source parameter rectangles, retained independently of logical face owners.
+    pub charts: Vec<PatchChart>,
+    pub sampled_deviation: f64,
+    pub subdivision_level: usize,
+}
+
+impl Fit {
+    /// Continue the original tensor fit through the ordered quad children of
+    /// Catmull–Clark refinement. Evaluation-only trailing faces are excluded.
+    pub fn continued_quad_patches(&self, core_faces: usize, levels: usize) -> Result<Self> {
+        if levels > super::hierarchy::MAX_DEPTH || core_faces == 0 {
+            return Err(bad("invalid continued tensor depth or face count"));
+        }
+        let children = 1usize << (2 * levels);
+        let old = self.patches.get(..core_faces).ok_or_else(|| bad("missing original tensor patches"))?;
+        if old.iter().enumerate().any(|(i, patch)| patch.domain() != [[0.0, 1.0], [0.0, 1.0]] || self.charts.get(i) != Some(&PatchChart::whole(i))) {
+            return Err(bad("continued tensors require complete original quad charts"));
+        }
+        let coefficients = old.iter().fold(0usize, |sum, patch| sum.saturating_add(patch.homogeneous().len()));
+        if coefficients.saturating_mul(children) > 1_000_000 {
+            return Err(bad("continued tensor restriction exceeds its coefficient budget"));
+        }
+        let mut patches = Vec::with_capacity(core_faces * children);
+        for patch in old {
+            for child in 0..children {
+                let mut corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+                for level in (0..levels).rev() {
+                    let i = (child >> (2 * level)) & 3;
+                    let a = corners[i];
+                    let midpoint = |b: [f64; 2]| [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+                    corners = [a, midpoint(corners[(i + 1) % 4]), midpoint(corners[(i + 2) % 4]), midpoint(corners[(i + 3) % 4])];
+                }
+                patches.push(patch.restricted_chart(corners).map_err(|e| bad(&e.to_string()))?);
+            }
+        }
+        Ok(Self {
+            root_basis: None,
+            patch_roots: (0..patches.len()).collect(),
+            charts: (0..patches.len()).map(PatchChart::whole).collect(),
+            patches,
+            sampled_deviation: self.sampled_deviation,
+            subdivision_level: self.subdivision_level,
+        })
+    }
+}
+
+/// One exact fitted patch's rectangle in its source quad chart.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatchChart {
+    pub face: usize,
+    pub domain: [f64; 4],
+}
+impl PatchChart {
+    pub fn whole(face: usize) -> Self {
+        Self { face, domain: [0.0, 0.0, 1.0, 1.0] }
+    }
+}
+/// An oriented source-chart interval of one logical edge. Its parameter starts
+/// at the lower logical vertex ID and is independent of display subdivision.
+#[derive(Clone, Debug)]
+pub struct EdgeChart {
+    pub face: usize,
+    pub uv: [[f64; 2]; 2],
+    pub range: [f64; 2],
+}
+
+/// Fixed dyadic interpolation stations for linear control-response calculations.
+/// Every neighboring root uses the same symmetric stations, including on reversal.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RootBasis {
+    pub level: usize,
+    pub indices: Vec<usize>,
+}
+impl RootBasis {
+    pub fn validate(&self) -> Result<()> {
+        self.parameters().map(|_| ())
+    }
+    fn parameters(&self) -> Result<Vec<f64>> {
+        if !(2..=6).contains(&self.level) || !(4..=33).contains(&self.indices.len()) {
+            return Err(bad("root interpolation basis budget exceeded"));
+        }
+        let span = 1usize << self.level;
+        if self.indices.first() != Some(&0)
+            || self.indices.last() != Some(&span)
+            || self.indices.windows(2).any(|p| p[0] >= p[1])
+            || self.indices.iter().any(|i| *i > span || self.indices.binary_search(&(span - i)).is_err())
+        {
+            return Err(bad("root interpolation requires distinct symmetric dyadic stations"));
+        }
+        Ok(self.indices.iter().map(|i| *i as f64 / span as f64).collect())
+    }
+    /// Fit at fixed stations, without a tolerance check. This is linear in the controls
+    /// and can also be applied to scalar influence cages packed into X/Y/Z coordinates.
+    pub fn fit(&self, cage: &Cage) -> Result<Vec<NurbsSurface>> {
+        let parameters = self.parameters()?;
+        let width = (1usize << self.level) + 1;
+        let exact = regular::patches(cage)?;
+        cage.patch_grids(self.level)?
+            .iter()
+            .enumerate()
+            .map(|(root, grid)| {
+                if let Some(Some(patch)) = exact.get(root) {
+                    return Ok(patch.clone());
+                }
+                let mut samples = Vec::with_capacity(self.indices.len() * self.indices.len());
+                for &i in &self.indices {
+                    for &j in &self.indices {
+                        samples.push(*grid.get(i * width + j).ok_or_else(|| bad("invalid fixed root sample"))?);
+                    }
+                }
+                fit_grid_parameters(&samples, &parameters)
+            })
+            .collect()
+    }
+    /// Independently validate the fitted geometry on the next subdivision grid.
+    pub fn fit_checked(&self, cage: &Cage, tolerance: f64) -> Result<Fit> {
+        if !tolerance.is_finite() || !(1e-6..=1.0).contains(&tolerance) {
+            return Err(bad("CAD fit tolerance must be 0.000001..1 mm"));
+        }
+        let patches = self.fit(cage)?;
+        let fine = cage.patch_grids(self.level + 1)?;
+        let width = (1usize << (self.level + 1)) + 1;
+        let mut deviation = 0.0_f64;
+        for (patch, grid) in patches.iter().zip(fine) {
+            for i in 0..width {
+                for j in 0..width {
+                    let point = patch.eval(i as f64 / (width - 1) as f64, j as f64 / (width - 1) as f64).map_err(|e| bad(&e.to_string()))?;
+                    deviation = deviation.max(point.dist(*grid.get(i * width + j).ok_or_else(|| bad("invalid fixed root validation sample"))?));
+                }
+            }
+        }
+        if deviation > tolerance {
+            return Err(bad(&format!("fixed root sampled deviation {deviation:.6} mm exceeds {tolerance:.6} mm")));
+        }
+        Ok(Fit {
+            root_basis: Some(self.clone()),
+            patch_roots: (0..patches.len()).collect(),
+            charts: (0..patches.len()).map(PatchChart::whole).collect(),
+            patches,
+            sampled_deviation: deviation,
+            subdivision_level: self.level,
+        })
+    }
+}
+
+impl Cage {
+    /// Limit positions, using closed masks for smooth/fully sharp corners and bounded
+    /// local refinement for semi-sharp corners and darts.
+    pub fn limit_vertices(&self) -> Result<Vec<Vec3>> {
+        if self.faces.iter().any(|f| f.len() != 4) {
+            return Ok(self.step()?.limit_vertices()?.into_iter().take(self.points.len()).collect());
+        }
+        let topology = self.topology()?;
+        let sharp_edges: BTreeSet<_> = self.edge_creases.iter().filter(|c| c.sharpness >= 10.0).map(|c| super::key(c.edge[0], c.edge[1])).collect();
+        let sharp_vertices: BTreeSet<_> = self.vertex_creases.iter().filter(|c| c.sharpness >= 10.0).map(|c| c.vertex).collect();
+        let edge_values: BTreeMap<_, _> = self.edge_creases.iter().map(|c| (super::key(c.edge[0], c.edge[1]), c.sharpness)).collect();
+        let vertex_values: BTreeMap<_, _> = self.vertex_creases.iter().map(|c| (c.vertex, c.sharpness)).collect();
+        let mut out = Vec::with_capacity(self.points.len());
+        for (v, &p) in self.points.iter().enumerate() {
+            let edges = topology.incident.get(v).ok_or_else(|| bad("invalid vertex"))?;
+            let mut boundary = Vec::new();
+            let mut neighbors = Vec::with_capacity(edges.len());
+            let mut faces = BTreeSet::new();
+            let mut sharp_neighbors = Vec::new();
+            let mut has_finite = vertex_values.get(&v).is_some_and(|s| *s > 0.0 && *s < 10.0);
+            let mut positive_edges = 0;
+            for &ei in edges {
+                let edge = topology.edges.get(ei).ok_or_else(|| bad("invalid edge"))?;
+                let q = self.point(if edge.a == v { edge.b } else { edge.a })?;
+                let s = if edge.faces.len() == 1 { 10.0 } else { edge_values.get(&super::key(edge.a, edge.b)).copied().unwrap_or(0.0) };
+                if s > 0.0 {
+                    positive_edges += 1;
+                    if s < 10.0 {
+                        has_finite = true;
+                    }
+                }
+                neighbors.push(q);
+                faces.extend(edge.faces.iter().copied());
+                if edge.faces.len() == 1 {
+                    boundary.push(q);
+                }
+                if edge.faces.len() == 1 || sharp_edges.contains(&super::key(edge.a, edge.b)) {
+                    sharp_neighbors.push(q);
+                }
+            }
+            if has_finite || positive_edges == 1 {
+                out.push(self.corner_limit(v)?);
+                continue;
+            }
+            if sharp_neighbors.len() > 2 || sharp_vertices.contains(&v) {
+                out.push(p);
+                continue;
+            }
+            if let [a, b] = sharp_neighbors.as_slice() {
+                out.push(crease_limit(p, [*a, *b]));
+                continue;
+            }
+            if let [a, b] = boundary.as_slice() {
+                out.push(crease_limit(p, [*a, *b]));
+                continue;
+            }
+            let mut diagonals = Vec::with_capacity(faces.len());
+            for f in faces {
+                let face = self.faces.get(f).ok_or_else(|| bad("invalid face"))?;
+                let corner = face.iter().position(|&i| i == v).ok_or_else(|| bad("vertex is not on its face"))?;
+                diagonals.push(self.point(face[(corner + 2) % 4])?);
+            }
+            out.push(smooth_limit(p, neighbors, diagonals, edges.len()));
+        }
+        Ok(out)
+    }
+
+    // Refining only the incident fan preserves exactly the next incident fan: its
+    // vertices are the old corner, radial edge points and incident face centres.
+    // Outer vertices are discarded before their artificial boundary rules can reach it.
+    fn corner_fan(&self, vertex: usize) -> Result<(Cage, usize)> {
+        self.point(vertex)?;
+        let faces: Vec<_> = self.faces.iter().filter(|f| f.contains(&vertex)).cloned().collect();
+        let used: BTreeSet<_> = faces.iter().flatten().copied().collect();
+        if used.len() > 256 || faces.is_empty() {
+            return Err(bad("corner fan budget exceeded"));
+        }
+        let ids: BTreeMap<_, _> = used.iter().enumerate().map(|(i, &v)| (v, i)).collect();
+        let points = used.into_iter().map(|v| self.point(v)).collect::<Result<Vec<_>>>()?;
+        let faces = faces.into_iter().map(|f| f.into_iter().map(|v| ids[&v]).collect()).collect();
+        let edge_creases = self
+            .edge_creases
+            .iter()
+            .filter(|e| e.edge.contains(&vertex))
+            .map(|e| super::EdgeCrease { edge: e.edge.map(|v| ids[&v]), sharpness: e.sharpness })
+            .collect();
+        let vertex_creases = self
+            .vertex_creases
+            .iter()
+            .filter(|v| v.vertex == vertex)
+            .map(|v| super::VertexCrease { vertex: ids[&vertex], sharpness: v.sharpness })
+            .collect();
+        Ok((Cage { points, faces, edge_creases, vertex_creases }, ids[&vertex]))
+    }
+    fn corner_limit(&self, vertex: usize) -> Result<Vec3> {
+        let (mut fan, mut index) = self.corner_fan(vertex)?;
+        let mut previous = fan.point(index)?;
+        for step in 0..96 {
+            let next = fan.step()?;
+            let point = next.point(index)?;
+            if step > 12 && converged_limit(point, previous) {
+                return Ok(point);
+            }
+            (fan, index) = next.corner_fan(index)?;
+            previous = point;
+        }
+        Err(bad("crease corner limit did not converge within its evaluation budget"))
+    }
+
+    fn patch_grids(&self, level: usize) -> Result<Vec<Vec<Vec3>>> {
+        if self.faces.iter().any(|f| f.len() != 4) {
+            return Err(bad("CAD fitting currently requires quad root patches"));
+        }
+        self.refined_budget_at(level, 7, super::MAX_EVAL_FACES)?;
+        let n = 1_usize << level;
+        let width = n + 1;
+        if grid_samples_exceed_budget(self.faces.len(), width) {
+            return Err(bad("patch sample budget exceeded"));
+        }
+        let tags: Vec<_> = (0..self.faces.len()).map(|f| (f, [[0, 0], [n, 0], [n, n], [0, n]])).collect();
+        sample_grids(self.clone(), tags, level, n, self.faces.len())
+    }
+
+    pub fn fit_patches(&self, tolerance: f64) -> Result<Fit> {
+        if !tolerance.is_finite() || !(1e-6..=1.0).contains(&tolerance) {
+            return Err(bad("CAD fit tolerance must be 0.000001..1 mm"));
+        }
+        if self.faces.iter().any(|f| f.len() != 4) {
+            self.validate()?;
+            let mut fit = self.step()?.fit_patches(tolerance)?;
+            fit.root_basis = None;
+            let roots: Vec<_> = self.faces.iter().enumerate().flat_map(|(i, f)| std::iter::repeat_n(i, f.len())).collect();
+            for root in &mut fit.patch_roots {
+                *root = *roots.get(*root).ok_or_else(|| bad("invalid non-quad patch root"))?;
+            }
+            fit.subdivision_level += 1;
+            return Ok(fit);
+        }
+        // Prefer a compact common root basis. Tiled fitting remains a bounded
+        // fallback for cages whose interior detail needs more tensor controls.
+        if let Ok(fit) = self.fit_root_patches(tolerance) {
+            return Ok(fit);
+        }
+        let tiled = self.fit_tiled_patches(tolerance, 2..=6);
+        if tiled.is_err()
+            && let Ok(Some(fit)) = regular::fit_neighborhood(self, tolerance)
+        {
+            return Ok(fit);
+        }
+        tiled
+    }
+    fn fit_tiled_patches(&self, tolerance: f64, levels: std::ops::RangeInclusive<usize>) -> Result<Fit> {
+        let mut last = f64::INFINITY;
+        for level in levels {
+            let grids = self.patch_grids(level)?;
+            let fine = match self.patch_grids(level + 1) {
+                Ok(g) => g,
+                Err(e) => {
+                    return Err(bad(&format!("CAD fit validation budget: {e}; best sampled deviation {last:.6} mm, requested {tolerance:.6} mm")));
+                }
+            };
+            let n = (1_usize << level) + 1;
+            let check = 2 * n - 1;
+            // Keep CAD surface evaluators small at the highest sampling density.
+            // Tiles share the same limit samples along every boundary; their physical
+            // faces still map to the original editable face through patch_roots.
+            let span = (n - 1).min(16);
+            let tiles = (n - 1) / span;
+            let mut patches = Vec::with_capacity(grids.len() * tiles * tiles);
+            let mut patch_roots = Vec::with_capacity(patches.capacity());
+            let mut charts = Vec::with_capacity(patches.capacity());
+            let mut worst = 0.0_f64;
+            for (root, (grid, reference)) in grids.iter().zip(fine).enumerate() {
+                for u in 0..tiles {
+                    for v in 0..tiles {
+                        let mut samples = Vec::with_capacity((span + 1) * (span + 1));
+                        for i in 0..=span {
+                            for j in 0..=span {
+                                samples.push(*grid.get((u * span + i) * n + v * span + j).ok_or_else(|| bad("invalid tile sample"))?);
+                            }
+                        }
+                        let patch = fit_grid(&samples, span + 1)?;
+                        for i in 0..=2 * span {
+                            for j in 0..=2 * span {
+                                let p = patch.eval(i as f64 / (2 * span) as f64, j as f64 / (2 * span) as f64).map_err(|e| bad(&e.to_string()))?;
+                                let k = (2 * u * span + i) * check + 2 * v * span + j;
+                                worst = worst.max(p.dist(*reference.get(k).ok_or_else(|| bad("invalid validation grid"))?));
+                            }
+                        }
+                        patches.push(patch);
+                        patch_roots.push(root);
+                        charts.push(PatchChart {
+                            face: root,
+                            domain: [u as f64 / tiles as f64, v as f64 / tiles as f64, (u + 1) as f64 / tiles as f64, (v + 1) as f64 / tiles as f64],
+                        });
+                    }
+                }
+            }
+            if worst <= tolerance {
+                return Ok(Fit { root_basis: None, patches, patch_roots, charts, sampled_deviation: worst, subdivision_level: level });
+            }
+            last = worst;
+        }
+        Err(bad(&format!("sampled CAD fit deviation {last:.6} mm exceeds {tolerance:.6} mm at the supported refinement budget")))
+    }
+}
+
+pub(super) fn sample_grids(
+    mut cage: Cage,
+    mut tags: Vec<(usize, [[usize; 2]; 4])>,
+    steps: usize,
+    span: usize,
+    roots: usize,
+) -> Result<Vec<Vec<Vec3>>> {
+    let width = span + 1;
+    if grid_samples_exceed_budget(roots, width) {
+        return Err(bad("patch sample budget exceeded"));
+    }
+    for _ in 0..steps {
+        let mut next = Vec::with_capacity(tags.len() * 4);
+        for (root, uv) in tags {
+            let center = [(uv[0][0] + uv[1][0] + uv[2][0] + uv[3][0]) / 4, (uv[0][1] + uv[1][1] + uv[2][1] + uv[3][1]) / 4];
+            for i in 0..4 {
+                let a = uv[i];
+                let b = uv[(i + 1) % 4];
+                let c = uv[(i + 3) % 4];
+                next.push((root, [a, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], center, [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2]]));
+            }
+        }
+        cage = cage.step()?;
+        tags = next;
+    }
+    let limit = cage.limit_vertices()?;
+    let mut grids = vec![vec![None; width * width]; roots];
+    for (face, (root, uv)) in cage.faces.iter().zip(tags) {
+        let grid = grids.get_mut(root).ok_or_else(|| bad("invalid root patch"))?;
+        for (&vertex, uv) in face.iter().zip(uv) {
+            let slot = grid.get_mut(uv[0] * width + uv[1]).ok_or_else(|| bad("patch parameter outside its grid"))?;
+            *slot = Some(*limit.get(vertex).ok_or_else(|| bad("invalid limit vertex"))?);
+        }
+    }
+    grids.into_iter().map(|g| g.into_iter().map(|p| p.ok_or_else(|| bad("incomplete patch sample grid"))).collect()).collect()
+}
+
+fn fit_grid(samples: &[Vec3], n: usize) -> Result<NurbsSurface> {
+    let parameters: Vec<_> = (0..n).map(|i| i as f64 / (n - 1) as f64).collect();
+    fit_grid_parameters(samples, &parameters)
+}
+fn fit_grid_parameters(samples: &[Vec3], parameters: &[f64]) -> Result<NurbsSurface> {
+    let fit = solidcore_ops::form_cage::fit_cubic_tensor(samples, parameters).map_err(|error| bad(&error.to_string()))?;
+    let points = fit.controls.into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect::<Vec<_>>();
+    NurbsSurface::new([3, 3], [fit.knots.clone(), fit.knots], &points, &vec![1.0; points.len()]).map_err(|e| bad(&e.to_string()))
+}
+
+impl Cage {
+    /// Exact source chart pieces of an edge, parameterized from its lower ID.
+    pub fn edge_charts(&self, edge: [usize; 2]) -> Result<Vec<EdgeChart>> {
+        self.edge_charts_many(&[edge])?.pop().ok_or_else(|| bad("source edge chart is missing"))
+    }
+    pub fn edge_charts_many(&self, edges: &[[usize; 2]]) -> Result<Vec<Vec<EdgeChart>>> {
+        if edges.is_empty() || edges.len() > 65_536 {
+            return Err(bad("source edge chart request exceeds its topology budget"));
+        }
+        if self.faces.iter().any(|face| face.len() != 4) {
+            // The fitter quadrangulates every face once when any root is an
+            // n-gon. Preserve that exact child chart order and the two dyadic
+            // halves of each original edge; logical IDs remain unchanged.
+            let topology = self.topology()?;
+            let paths = edges
+                .iter()
+                .map(|edge| {
+                    let midpoint = topology.lookup.get(&super::key(edge[0], edge[1])).copied().ok_or_else(|| bad("select a visible source edge"))?;
+                    Ok(vec![edge[0].min(edge[1]), self.points.len() + midpoint, edge[0].max(edge[1])])
+                })
+                .collect::<Result<Vec<_>>>()?;
+            edge_charts(&self.step()?, &paths, None, None)
+        } else {
+            let paths: Vec<_> = edges.iter().map(|e| vec![e[0].min(e[1]), e[0].max(e[1])]).collect();
+            edge_charts(self, &paths, None, None)
+        }
+    }
+}
+type ChartCorners = (usize, [[f64; 2]; 4]);
+type PathSpan = (usize, usize, [usize; 2]);
+pub(in crate::subdivision) fn edge_charts(
+    cage: &Cage,
+    paths: &[Vec<usize>],
+    owners: Option<&[Option<usize>]>,
+    origins: Option<&[ChartCorners]>,
+) -> Result<Vec<Vec<EdgeChart>>> {
+    if paths.is_empty() || paths.len() > 65_536 || paths.iter().map(Vec::len).sum::<usize>() > 262_144 {
+        return Err(bad("source edge chart request exceeds its topology budget"));
+    }
+    if owners.is_some_and(|o| o.len() != cage.faces.len()) || origins.is_some_and(|o| o.len() != cage.faces.len()) {
+        return Err(bad("source chart ownership does not match the evaluator"));
+    }
+    let mut spans = BTreeMap::<_, Vec<PathSpan>>::new();
+    for (path_index, path) in paths.iter().enumerate() {
+        if !(2..=1025).contains(&path.len()) || path.first() >= path.last() {
+            return Err(bad("logical edge needs a bounded path oriented from its lower vertex ID"));
+        }
+        let mut unique = BTreeSet::new();
+        for (index, pair) in path.windows(2).enumerate() {
+            let key = super::key(pair[0], pair[1]);
+            if pair[0] == pair[1] || pair.iter().any(|&v| v >= cage.points.len()) || !unique.insert(key) {
+                return Err(bad("logical edge has an invalid or repeated evaluator segment"));
+            }
+            spans.entry(key).or_default().push((path_index, index, [pair[0], pair[1]]));
+        }
+    }
+    let mut result = vec![Vec::new(); paths.len()];
+    let mut covered = vec![BTreeSet::new(); paths.len()];
+    let corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    for (face_id, face) in cage.faces.iter().enumerate() {
+        if owners.is_some_and(|owners| owners[face_id].is_none()) {
+            continue;
+        }
+        for side in 0..face.len() {
+            let (a, b) = (face[side], face[(side + 1) % face.len()]);
+            let Some(entries) = spans.get(&super::key(a, b)) else { continue };
+            if face.len() != 4 {
+                return Err(bad("source edge charts require quad faces"));
+            }
+            let (root, uv) = origins.map_or((face_id, corners), |origins| origins[face_id]);
+            for &(path, span, directed) in entries {
+                let pair = if directed == [a, b] { [side, (side + 1) % 4] } else { [(side + 1) % 4, side] };
+                let count = (paths[path].len() - 1) as f64;
+                result[path].push(EdgeChart { face: root, uv: [uv[pair[0]], uv[pair[1]]], range: [span as f64 / count, (span + 1) as f64 / count] });
+                covered[path].insert(span);
+            }
+        }
+    }
+    if covered.iter().zip(paths).any(|(covered, path)| covered.len() != path.len() - 1) {
+        return Err(bad("logical edge is not on the visible source topology"));
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::prelude::*;
+    #[test]
+    fn fitted_tile_charts_and_hierarchical_edge_parameters_preserve_source_intervals() {
+        let cage = super::super::primitive("box", 10.0, 1).unwrap();
+        let fit = cage.fit_tiled_patches(1.0, 5..=5).unwrap();
+        assert_eq!(fit.patches.len(), 24);
+        assert_eq!(fit.charts.len(), fit.patches.len());
+        for root in 0..6 {
+            let tiles: Vec<_> = fit.charts.iter().filter(|chart| chart.face == root).map(|chart| chart.domain).collect();
+            assert_eq!(tiles, vec![[0.0, 0.0, 0.5, 0.5], [0.0, 0.5, 0.5, 1.0], [0.5, 0.0, 1.0, 0.5], [0.5, 0.5, 1.0, 1.0]]);
+        }
+        let h = super::super::hierarchy::Hierarchy::new(cage).unwrap().subdivide(&[0], [2, 2]).unwrap();
+        let layout = h.layout().unwrap();
+        let (edge, path) = layout.paths.iter().find(|(_, path)| path.len() > 2).unwrap();
+        let forward = h.edge_charts(*edge, true).unwrap();
+        let reverse = h.edge_charts([edge[1], edge[0]], true).unwrap();
+        assert_eq!(forward.len(), reverse.len());
+        for (a, b) in forward.iter().zip(reverse) {
+            assert_eq!(a.face, b.face);
+            assert_eq!(a.range, b.range);
+            assert_eq!(a.uv, b.uv);
+            assert!(a.uv[0][0] == a.uv[1][0] || a.uv[0][1] == a.uv[1][1]);
+        }
+        assert!(forward.iter().any(|c| c.range == [0.0, 1.0 / (path.len() - 1) as f64]));
+        let evaluated = h.edge_charts(*edge, false).unwrap();
+        assert!(evaluated.iter().all(|c| c.uv.iter().flatten().all(|&v| v == 0.0 || v == 1.0)));
+    }
+
+    #[test]
+    fn regular_tensor_patches_match_dense_subdivision_even_beside_an_open_boundary() {
+        let mut plane = super::super::primitives::Parameters { kind: "face".into(), dimensions: [2.0; 3], segments: [4; 3], ..Default::default() }
+            .build()
+            .unwrap();
+        for (i, p) in plane.points.iter_mut().enumerate() {
+            p.z = 0.2 * p.x * p.y + 0.1 * p.x * p.x + (i % 3) as f64 * 0.07;
+        }
+        let torus =
+            super::super::primitives::Parameters { kind: "torus".into(), radii: [3.0, 0.8], segments: [2; 3], ..Default::default() }.build().unwrap();
+        for cage in [plane, torus] {
+            let patches = super::regular::patches(&cage).unwrap();
+            assert!(patches.iter().any(Option::is_some));
+            let grids = cage.patch_grids(5).unwrap();
+            let mut count = 0;
+            for (patch, grid) in patches.iter().zip(grids) {
+                if let Some(patch) = patch {
+                    assert_eq!(patch.count(), [4, 4]);
+                    for i in 0..33 {
+                        for j in 0..33 {
+                            let actual = patch.eval(i as f64 / 32.0, j as f64 / 32.0).unwrap();
+                            assert!(actual.dist(grid[i * 33 + j]) < 1e-10, "exact regular patch drift: {:?}", actual - grid[i * 33 + j]);
+                        }
+                    }
+                    count += 1;
+                }
+            }
+            assert!(count > 0);
+        }
+    }
+    #[test]
+    fn fixed_root_basis_is_linear_and_rechecks_the_geometry_independently() {
+        use solidcore_record::Vec3;
+        let cage = super::super::primitive("box", 2.0, 1).unwrap();
+        let fit = cage.fit_root_patches_at(0.02, 3).unwrap();
+        let basis = fit.root_basis.as_ref().unwrap();
+        assert!(basis.level >= 3);
+        let checked = basis.fit_checked(&cage, 0.02).unwrap();
+        assert_eq!(checked.patches, fit.patches);
+        let transform = |p: Vec3| Vec3::new(1.4 * p.x + 3.0, 0.8 * p.y - 2.0, 1.1 * p.z + 4.0);
+        let mut moved = cage.clone();
+        for p in &mut moved.points {
+            *p = transform(*p);
+        }
+        for (a, b) in basis.fit(&moved).unwrap().iter().zip(&fit.patches) {
+            for (p, q) in a.homogeneous().iter().zip(b.homogeneous()) {
+                assert!(p.project().unwrap().dist(transform(q.project().unwrap())) < 1e-10);
+            }
+        }
+        let mut influence = cage.clone();
+        influence.points.fill(Vec3::ZERO);
+        influence.points[0].x = 1.0;
+        let response = basis.fit(&influence).unwrap();
+        let mut pulled = cage.clone();
+        pulled.points[0] += Vec3::new(0.3, 0.2, -0.1);
+        for ((a, b), response) in basis.fit(&pulled).unwrap().iter().zip(&fit.patches).zip(response) {
+            for ((p, q), r) in a.homogeneous().iter().zip(b.homogeneous()).zip(response.homogeneous()) {
+                let expected = q.project().unwrap() + Vec3::new(0.3, 0.2, -0.1) * r.project().unwrap().x;
+                assert!(p.project().unwrap().dist(expected) < 1e-10);
+            }
+        }
+        let encoded = serde_json::to_string(basis).unwrap();
+        assert_eq!(serde_json::from_str::<super::RootBasis>(&encoded).unwrap(), *basis);
+        for invalid in [
+            super::RootBasis { level: usize::MAX, indices: vec![] },
+            super::RootBasis { level: 3, indices: vec![0, 1, 4, 9] },
+            super::RootBasis { level: 3, indices: vec![0, 2, 2, 8] },
+        ] {
+            assert!(invalid.fit(&cage).is_err());
+        }
+        assert!(cage.fit_root_patches_at(0.02, usize::MAX).is_err());
+    }
+    #[test]
+    fn root_fits_keep_one_surface_per_face_and_validate_between_samples() {
+        let c = super::super::primitive("box", 40.0, 2).unwrap();
+        for cage in [
+            c.clone(),
+            c.extrude_faces(&[0], solidcore_record::Vec3::Z * 8.0).unwrap(),
+            c.extrude_faces(&[0], solidcore_record::Vec3::X * 8.0).unwrap(),
+        ] {
+            let fit = cage.fit_root_patches(0.01).unwrap();
+            assert_eq!(fit.patches.len(), cage.faces.len());
+            assert!(fit.sampled_deviation <= 0.01);
+            assert!(fit.patches.iter().all(|p| p.count().iter().all(|&n| n <= 33)));
+            eprintln!(
+                "root fit: {} faces, level{}, controls{:?}, deviation{}",
+                fit.patches.len(),
+                fit.subdivision_level,
+                fit.patches.iter().map(|p| p.count()).max(),
+                fit.sampled_deviation
+            );
+        }
+    }
+    #[test]
+    fn compact_sphere_fit_matches_full_cage_samples_and_preserves_shared_seams() {
+        let cage = super::super::primitives::Parameters { kind: "sphere".into(), dimensions: [10.0; 3], segments: [4, 4, 2], ..Default::default() }
+            .build()
+            .unwrap();
+        let fit = super::regular::fit_neighborhood(&cage, 0.01).unwrap().unwrap();
+        assert!(fit.root_basis.is_none(), "a compact fit cannot reuse the full-cage fixed basis");
+        assert!(fit.sampled_deviation <= 0.01);
+        assert_eq!(fit.patches.len(), cage.faces.len());
+        assert_eq!(fit.patch_roots, (0..cage.faces.len()).collect::<Vec<_>>());
+        let full_reference = cage.patch_grids(4).unwrap();
+        for (patch, grid) in fit.patches.iter().zip(full_reference) {
+            for u in 0..=16 {
+                for v in 0..=16 {
+                    let point = patch.eval(u as f64 / 16.0, v as f64 / 16.0).unwrap();
+                    assert!(point.dist(grid[u * 17 + v]) <= fit.sampled_deviation + 1e-10);
+                }
+            }
+        }
+        for charts in cage.edge_charts_many(&cage.edges().unwrap()).unwrap() {
+            let [a, b] = charts.as_slice() else { panic!("closed Sphere needs both source charts") };
+            let point = |chart: &super::EdgeChart, t: f64| {
+                let [u, v] = std::array::from_fn(|axis| chart.uv[0][axis] * (1.0 - t) + chart.uv[1][axis] * t);
+                fit.patches[chart.face].eval(u, v).unwrap()
+            };
+            for i in 0..=32 {
+                let t = i as f64 / 32.0;
+                assert!(point(a, t).dist(point(b, t)) < 1e-10);
+            }
+        }
+    }
+    #[test]
+    fn smooth_cube_limit_and_shared_fitted_edges() {
+        let c = super::super::primitive("box", 2.0, 1).unwrap();
+        for p in c.limit_vertices().unwrap() {
+            assert!((p.x.abs() - 0.5).abs() < 1e-12);
+            assert!((p.y.abs() - 0.5).abs() < 1e-12);
+            assert!((p.z.abs() - 0.5).abs() < 1e-12);
+        }
+        let fit = c.fit_patches(0.02).unwrap();
+        assert_eq!(fit.patches.len(), 6);
+        assert!(fit.sampled_deviation <= 0.02);
+        for (fi, f) in c.faces.iter().enumerate() {
+            for i in 0..4 {
+                let (a, b) = (f[i], f[(i + 1) % 4]);
+                let other = c
+                    .faces
+                    .iter()
+                    .enumerate()
+                    .find_map(|(fj, g)| if fj == fi { None } else { (0..4).find(|&j| g[j] == b && g[(j + 1) % 4] == a).map(|j| (fj, j)) })
+                    .unwrap();
+                let uv = |edge, t| match edge {
+                    0 => (t, 0.),
+                    1 => (1., t),
+                    2 => (1. - t, 1.),
+                    _ => (0., 1. - t),
+                };
+                for k in 0..=20 {
+                    let t = k as f64 / 20.;
+                    let (u, v) = uv(i, t);
+                    let (s, w) = uv(other.1, 1. - t);
+                    assert!(fit.patches[fi].eval(u, v).unwrap().dist(fit.patches[other.0].eval(s, w).unwrap()) < 1e-10);
+                }
+            }
+        }
+    }
+}

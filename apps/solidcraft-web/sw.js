@@ -238,13 +238,30 @@ async function launchOrKept(event) {
 /** A page's files come from the build it started, else the network. */
 async function asset(event) {
   const build = await startedBy(event.clientId).catch(() => null);
+  const options = { cacheName: build, ignoreSearch: true };
+  if (build && build !== NETWORK) {
+    const kept = await caches.match(event.request, options);
+    if (kept) return kept;
+  }
+  // Imports by a dedicated worker can arrive without a page's build record.
+  // All three assets share a content digest, so a complete retained build
+  // can answer for that exact bundle without mixing glue and Wasm.
+  const prefix = url("workers/");
+  const workerFile = event.request.url.startsWith(prefix) && event.request.url.slice(prefix.length).split(/[?#]/)[0];
+  if (workerFile && /^[a-f0-9]{64}\/solidcraft-compute-worker(?:_loader\.js|\.js|_bg\.wasm)$/.test(workerFile)) {
+    for (const name of await caches.keys()) {
+      if (name === build || !name.startsWith(CACHE_PREFIX) || !(await has(name, COMPLETE))) continue;
+      const part = await caches.match(event.request, { cacheName: name, ignoreSearch: true });
+      if (part) return part;
+    }
+    return fetch(event.request);
+  }
   // A page whose build is not known, or whose build's copy is gone, would get another build's files
   // (a mixed page that never starts). It fails visibly instead: reloading starts a whole build.
   if (!build || (build !== NETWORK && !(await caches.has(build)))) {
     return new Response("This page's version of the app is no longer kept. Reload the page.", { status: 503, headers: { "Content-Type": "text/plain" } });
   }
-  const kept = build === NETWORK ? null : await caches.match(event.request, { cacheName: build, ignoreSearch: true });
-  return kept || fetch(event.request);
+  return fetch(event.request);
 }
 
 self.addEventListener("fetch", (event) => {

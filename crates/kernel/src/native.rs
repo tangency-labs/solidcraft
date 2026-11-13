@@ -182,27 +182,45 @@ fn in_smlib_order(back: &solidcore_record::brep::Brep, order: &solidcraft_smlib:
     Some(out)
 }
 
-/// Whether two records of one body number its faces, edges and vertices alike: the same loops of
-/// the same edges, the same edge ends, and each vertex where the other's is.
+/// Whether two records number faces and edges alike: the same loops and a
+/// consistent vertex bijection, with each corresponding vertex in place.
 fn same_numbering(a: &solidcore_record::brep::Brep, b: &solidcore_record::brep::Brep) -> bool {
     use solidcore_record::brep::Loop;
     if a.faces.len() != b.faces.len() || a.edges.len() != b.edges.len() || a.vertices.len() != b.vertices.len() {
+        return false;
+    }
+    // Face/edge history does not number vertices. Canonical export may visit
+    // their ends in a different order even when the native face/edge order is
+    // unchanged. Infer a vertex bijection solely from the paired topology;
+    // positions verify that correspondence, never choose it.
+    let mut vertices = vec![None; a.vertices.len()];
+    let mut reverse = vec![None; b.vertices.len()];
+    let mut bind = |x: u32, y: u32| {
+        let (Some(to), Some(from)) = (vertices.get_mut(x as usize), reverse.get_mut(y as usize)) else { return false };
+        if to.is_some_and(|v| v != y) || from.is_some_and(|v| v != x) {
+            return false;
+        }
+        *to = Some(y);
+        *from = Some(x);
+        true
+    };
+    if !a.edges.iter().zip(&b.edges).all(|(x, y)| x.vertices.into_iter().zip(y.vertices).all(|(x, y)| bind(x, y))) {
         return false;
     }
     let loops_alike = a.faces.iter().zip(&b.faces).all(|(fa, fb)| {
         fa.loops.len() == fb.loops.len()
             && fa.loops.iter().zip(&fb.loops).all(|pair| match pair {
                 (Loop::Edges { edges: x }, Loop::Edges { edges: y }) => same_cycle(x, y),
-                (Loop::Vertex { vertex: x }, Loop::Vertex { vertex: y }) => x == y,
+                (Loop::Vertex { vertex: x }, Loop::Vertex { vertex: y }) => bind(*x, *y),
                 _ => false,
             })
     });
-    let ends_alike = a.edges.iter().zip(&b.edges).all(|(x, y)| x.vertices == y.vertices);
-    let at_same_place = a.vertices.iter().zip(&b.vertices).all(|(x, y)| {
+    let at_same_place = a.vertices.iter().zip(vertices).all(|(x, y)| {
+        let Some(y) = y.and_then(|i| b.vertices.get(i as usize)) else { return false };
         let d = (0..3).map(|k| (x.point[k] - y.point[k]).powi(2)).sum::<f64>().sqrt();
         d <= x.tolerance + y.tolerance + a.tolerance + b.tolerance
     });
-    loops_alike && ends_alike && at_same_place
+    loops_alike && at_same_place
 }
 
 /// Whether two loops walk the same edges: in the same order from some edge on, or in the
@@ -249,6 +267,28 @@ mod tests {
     use solidcore_record::Vec3;
     use solidcraft_geom::prelude::*;
     use std::sync::Arc;
+
+    #[test]
+    fn face_edge_numbering_verifies_vertex_permutations_without_geometric_matching() {
+        let body = crate::box_solid(Vec3::ZERO, Vec3::new(4.0, 3.0, 2.0)).unwrap();
+        let original = body.record();
+        let mut permuted = original.clone();
+        let count = permuted.vertices.len();
+        permuted.vertices.rotate_right(1);
+        for edge in &mut permuted.edges {
+            for vertex in &mut edge.vertices {
+                *vertex = ((*vertex as usize + 1) % count) as u32;
+            }
+        }
+        assert!(same_numbering(original, &permuted));
+        // A coordinate match cannot rescue inconsistent endpoint topology.
+        let mut inconsistent = permuted.clone();
+        inconsistent.edges[0].vertices[0] = inconsistent.edges[0].vertices[1];
+        assert!(!same_numbering(original, &inconsistent));
+        permuted.vertices[0].point[0] += 1.0;
+        assert!(!same_numbering(original, &permuted));
+    }
+
     fn equal(a: &Body, b: &Body) {
         assert_eq!(a.face_count(), b.face_count());
         assert_eq!(a.face_sources, b.face_sources);

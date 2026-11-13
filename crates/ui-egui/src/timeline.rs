@@ -245,6 +245,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Chamfer { .. } => "chamfer",
         FeatureKind::Box { .. } => "box",
         FeatureKind::Cylinder { .. } => "cylinder",
+        FeatureKind::Form { .. } => "surface_patch",
         FeatureKind::Sphere { .. } => "sphere",
         FeatureKind::Torus { .. } => "torus",
         FeatureKind::Cone { .. } => "cone",
@@ -484,7 +485,11 @@ pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, 
 pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let doc = &app.session.doc;
     let (Some(feature), Some(index)) = (doc.feature(id), doc.feature_index(id)) else { return Vec::new() };
-    let mut v = vec![Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id }))];
+    let refined_weld = matches!(&feature.kind, FeatureKind::Stitch { form_seam: Some(_), .. });
+    let mut v = Vec::new();
+    if !refined_weld {
+        v.push(Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id })));
+    }
     if matches!(feature.kind, FeatureKind::Sketch { .. }) {
         v.extend(
             crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().filter(|item| item.id == "ui.redefineSketch"),
@@ -517,7 +522,11 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(Item::action("ui.copyMessage", label, "copy").with(json!({ "feature": id })));
     }
     v.push(Item::sep());
-    v.push(Item::action("ui.deleteFeatures", &delete_label(targets.len()), "delete").with(json!({ "features": targets })));
+    if refined_weld && targets.as_slice() == [id] {
+        v.push(Item::action("form.refined_weld.remove", app.tr("cmd.form.refined_weld.remove"), "delete").with(json!({ "feature": id })));
+    } else {
+        v.push(Item::action("ui.deleteFeatures", &delete_label(targets.len()), "delete").with(json!({ "features": targets })));
+    }
     let marker = doc.marker.unwrap_or(doc.features.len());
     // The features the bar shows (`timeline_scope`), as it draws them.
     let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));

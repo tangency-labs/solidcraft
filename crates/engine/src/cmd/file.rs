@@ -1141,6 +1141,9 @@ fn write(
 ) -> Result<Value> {
     // A path outside the agent's folders says so first, whatever its name.
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    if s.forms_prototype.is_some() {
+        return Err(bad(cmd, "finish or cancel the active Form before saving the design"));
+    }
     check_design_name(cmd, path)?;
     // A move not captured yet isn't in the document a file holds: refuse, rather than write the
     // file without it and say nothing (#9736). The app asks the Capture Position question first.
@@ -1594,6 +1597,9 @@ impl Session {
         cache: bool,
         provenance: Option<&solidcraft_io::ProvenanceSave<'_>>,
     ) -> solidcraft_io::Result<Vec<u8>> {
+        if self.forms_prototype.is_some() {
+            return Err(solidcraft_io::IoError::Invalid("finish or cancel the active Form before saving the design".into()));
+        }
         let design = self.design_at(path);
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
@@ -2159,15 +2165,16 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "doc.recover";
     let dir = recovery_dir(p, cmd)?;
     let id = str_(p, "id").ok_or_else(|| bad(cmd, "`id` is required (see doc.recovery_list)"))?;
-    let (mut doc, entry) = crate::recovery::load(&dir, id)?;
+    let (bytes, entry) = crate::recovery::load_package(&dir, id)?;
+    let (mut doc, draft) = solidcraft_io::read_recovery_container(&bytes)?;
     if let Some(stem) = entry.path.as_deref().and_then(|path| default_name_for(&doc.name, path)) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at_validating(doc, None, entry.path.as_deref(), s.validation()));
-    s.mark_unsaved();
+    let recovered = crate::recovery::restore_validating(doc, draft.as_deref(), entry.path.as_deref(), s.validation())?;
     if bool_(p, "discard").unwrap_or(false) {
         crate::recovery::remove(&dir, id)?;
     }
+    s.replace_design(recovered);
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
     let reply =
         RecoverResult { id: id.to_string(), path: entry.path, name: entry.name, features: s.doc.features.len(), errors, param_warnings: Vec::new() };
@@ -3065,6 +3072,24 @@ mod tests {
         assert!(editing.active_sketch.is_some());
         assert!(saved_preview(&editing).is_none());
         assert!(saved_geometry(&editing, &editing.doc).is_none());
+    }
+
+    #[test]
+    fn ordinary_save_refusals_name_the_requested_command_while_a_form_is_active() {
+        let mut session = Session::default();
+        session.execute("form.prototype.create", &json!({"size":8,"levels":0})).unwrap();
+        let path = std::env::temp_dir().join(format!("solidcraft-active-form-save-{}.solidcraft", std::process::id()));
+        let form = session.forms_prototype.as_ref().unwrap().definition();
+        for command in ["file.save", "file.save_as"] {
+            let error = session.execute(command, &json!({"path":path})).unwrap_err();
+            assert!(matches!(error, EngineError::BadParams { cmd, msg } if cmd == command && msg.contains("active Form")));
+        }
+        let chain = solidcraft_io::ProvenanceChain::default();
+        let provenance = solidcraft_io::ProvenanceSave { source: None, chain: &chain, author: None, tool: None, note: None, created: None };
+        let error = session.design_container_signed(None, solidcraft_io::DesignCompression::Fast, false, false, &provenance).unwrap_err();
+        assert!(matches!(error, solidcraft_io::IoError::Invalid(msg) if msg.contains("active Form")));
+        assert!(!path.exists());
+        assert_eq!(session.forms_prototype.as_ref().unwrap().definition(), form);
     }
 
     #[test]

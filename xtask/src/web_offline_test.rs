@@ -8,7 +8,7 @@
 //! protocol through these steps (twenty-two page launches, which failures are numbered by):
 //!
 //! 1. online, build v1: the page loads, the service worker takes over and keeps every file;
-//! 2. offline: v1 starts from the kept copy;
+//! 2. offline: v1 starts from the kept copy, including a worker with module and Wasm imports;
 //! 3. the other copy (build v2) is opened and kept; offline, v1 still starts (copies at
 //!    different paths keep their own builds);
 //! 4. build v2 deployed, but only `build.json` and `sw.js` download: v1 still starts (never a
@@ -25,7 +25,7 @@
 //! 10. network hangs: after waiting for it a few seconds, v3 starts from the kept copy;
 //! 11. build v4 deployed, but the check for it is held back while v4's worker takes over (as
 //!     when another tab updates, which starts once the launch is waiting for the check): the kept
-//!     v3 starts and works, its copy retired but not deleted;
+//!     v3 starts and can still start its own worker, its copy retired but not deleted;
 //! 12. no open page uses the retired copies any more: a launch (v4) deletes them;
 //! 13. build v5's worker downloads, its files held back by the server, while a launch finds v6
 //!     deployed and downloads it: v6 starts, v5's download (let go afterwards) isn't dropped
@@ -119,8 +119,19 @@ pub fn run_api(site: &str) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(100));
     }
     println!("web-api-test: {result}");
+    let form_check = cdp.eval(FORM_CHECK_TEST)?;
+    println!("web-api-test: {form_check}");
     let keys = cdp.eval(KEYS_TEST)?;
     println!("web-api-test: {keys}");
+    // A fresh shell lets the preview test observe the Worker it starts.
+    let mut preview_tab = browser.new_tab()?;
+    preview_tab.call("Emulation.setDeviceMetricsOverride", json!({"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}))?;
+    preview_tab.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}?embed=editor", server.port)}))?;
+    wait_for(&mut preview_tab, "!!window.solidcraft && !document.getElementById('solidcraft_loading')", "the preview test page is ready", |value| {
+        value == true
+    })?;
+    let preview = preview_tab.eval(FORM_PREVIEW_TEST)?;
+    println!("web-api-test: {preview}");
     Ok(())
 }
 
@@ -184,6 +195,134 @@ fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
     cdp.call("Input.dispatchKeyEvent", json!({"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
     Ok("chords, a drag let go outside, a lost release and blur leave none held".into())
 }
+
+// Drive the normal Form panel and hold one *real worker reply* to make
+// supersession deterministic without depending on the time spent fitting.
+const FORM_CHECK_TEST: &str = r#"(async () => {
+    const app = window.solidcraft;
+    const Worker = window.Worker;
+    let hold = false;
+    let withheld;
+    let completed = 0;
+    window.Worker = class extends Worker {
+        constructor(...args) {
+            super(...args);
+            this.addEventListener('message', event => {
+                if (!event.isTrusted || !(event.data instanceof Uint8Array) || event.data[4] !== 2) return;
+                completed++;
+                if (hold) {
+                    event.stopImmediatePropagation();
+                    withheld = [this, event.data];
+                }
+            }, {capture: true});
+        }
+    };
+    const inspect = async () => (await app.request('ui.inspect')).forms_prototype.diagnostics;
+    const wait = async (read, done, label) => {
+        const deadline = performance.now() + 60000;
+        do {
+            const value = await read();
+            if (done(value)) return value;
+        } while (performance.now() < deadline);
+        throw new Error(label);
+    };
+    const create = async () => {
+        await app.execute('form.prototype.create', {primitive:'face', segments:[1,1,1], levels:0});
+        await app.execute('form.prototype.refine', {faces:[0], counts:[2,2]});
+    };
+    const openCheck = async () => {
+        const handles = await wait(
+            () => app.request('ui.handles', {prefix:'forms_check_cad'}),
+            values => values.some(h => h.name === 'forms_check_cad'),
+            'Form CAD check button did not appear',
+        );
+        const {x, y} = handles.find(h => h.name === 'forms_check_cad');
+        await app.request('ui.click', {x, y});
+    };
+    const current = () => wait(inspect, value => !value.pending && (value.report || value.error), 'Form CAD check did not settle');
+    try {
+        await app.request('ui.prefs', {forms_compact_editor:false, forms_cad_tolerance:0.05});
+        await app.execute('file.new');
+        await create();
+        const source = JSON.stringify(await app.execute('form.prototype.inspect'));
+        const canonical = await app.execute('form.prototype.validate', {tolerance:0.05});
+        await openCheck();
+        const checked = await current();
+        if (checked.error || completed !== 1 || JSON.stringify(checked.report) !== JSON.stringify(canonical)) {
+            throw new Error('Form browser worker disagreed with the canonical check: ' + JSON.stringify(checked));
+        }
+        if (JSON.stringify(await app.execute('form.prototype.inspect')) !== source) {
+            throw new Error('browser CAD check changed the Form source/history');
+        }
+        hold = true;
+        await openCheck();
+        await wait(async () => { await inspect(); return withheld; }, Boolean, 'expected a withheld worker reply');
+        if (!(await inspect()).pending) throw new Error('withheld check is not pending');
+        await app.execute('file.new');
+        await create(); // same parameters, new document and draft identities
+        await inspect();
+        hold = false;
+        withheld[0].dispatchEvent(new MessageEvent('message', {data:withheld[1]}));
+        for (let frame = 0; frame < 4; frame++) {
+            const state = await inspect();
+            if (state.report || state.error || state.pending) throw new Error('stale worker reply reached the replacement Form');
+        }
+        await openCheck();
+        const replacement = await current();
+        if (replacement.error || completed !== 3 || !replacement.report) throw new Error('replacement check did not acquire the drained worker');
+        return 'Refined Form CAD worker result, read-only source and stale-reply drain passed';
+    } finally {
+        window.Worker = Worker;
+        await app.execute('file.new');
+    }
+})()"#;
+
+/// Hold the worker's message after it computes the real Boolean. The page must still answer
+/// inspect while the preview waits, then display the result without committing the Form.
+const FORM_PREVIEW_TEST: &str = r#"(async () => {
+    const app = window.solidcraft;
+    const Worker = window.Worker;
+    let withheld;
+    window.Worker = class extends Worker {
+        constructor(...args) {
+            super(...args);
+            this.addEventListener('message', event => {
+                if (!event.isTrusted || !(event.data instanceof Uint8Array) || event.data[4] !== 5) return;
+                event.stopImmediatePropagation();
+                withheld = [this, event.data];
+            }, {capture: true});
+        }
+    };
+    const wait = async (read, done, label) => {
+        const deadline = performance.now() + 60000;
+        do {
+            const value = await read();
+            if (done(value)) return value;
+        } while (performance.now() < deadline);
+        throw new Error(label);
+    };
+    try {
+        await app.request('ui.prefs', {forms_compact_editor:false});
+        await app.execute('file.new');
+        await app.execute('solid.box', {corner:[-0.5,-0.5,-0.5], length:1, width:1, height:1, body_name:'Base'});
+        await app.execute('form.prototype.create', {size:8, segments:[1,1,1], levels:2});
+        await app.execute('form.prototype.finish_options', {operation:'join', tolerance:'0.05 mm'});
+        const original = JSON.stringify(await app.execute('form.prototype.inspect'));
+        // The fresh editor has Show combined result enabled by default.
+        const inspect = async () => (await app.request('ui.inspect')).forms_prototype.combination;
+        await wait(async () => { await inspect(); return withheld; }, Boolean, 'expected a worker reply for the combined preview');
+        const waiting = await inspect();
+        if (!waiting.busy || waiting.ready || waiting.error) throw new Error('combined preview did not wait for its worker');
+        withheld[0].dispatchEvent(new MessageEvent('message', {data:withheld[1]}));
+        const result = await wait(inspect, state => state.ready || state.error, 'combined preview did not settle');
+        if (result.error || !result.ready) throw new Error('combined preview did not display: ' + JSON.stringify(result));
+        if (JSON.stringify(await app.execute('form.prototype.inspect')) !== original) throw new Error('combined preview changed its source');
+        return 'Combined Form CAD preview used a worker and preserved its source';
+    } finally {
+        window.Worker = Worker;
+        await app.execute('file.new');
+    }
+})()"#;
 
 /// The browser's own tab switching keys reach it while the app has the keyboard (#5227): their
 /// default action isn't cancelled, while Tab's is (the app moves between its fields with it).
@@ -274,6 +413,14 @@ const API_TEST: &str = r#"(async () => {
     await app.request('ui.inspect');
     const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
     await app.request('ui.click', {x, y});
+    // ui.click queues pointer events across frames. Finish the dialog action before file.new
+    // can cancel it; the existing host check still verifies the complete downloaded DXF.
+    const exportDeadline = performance.now() + 240000;
+    let exportUi;
+    do {
+        exportUi = await app.request('ui.inspect');
+    } while (exportUi.dialog && performance.now() < exportDeadline);
+    check(!exportUi.dialog, 'export click closes the dialog before replacing the document');
     // Browser files exist only in the VFS: native filesystem metadata cannot find them.
     await app.execute('file.save', {path: '/upload/linked-part.sc'});
     await app.execute('file.new');
@@ -291,6 +438,12 @@ const API_TEST: &str = r#"(async () => {
     }
     check(menu.items?.some(item => item.id === 'ui.openLinkedDesign'), 'occurrence menu offers the source design');
     await app.request('ui.menuPick', {item: 'ui.openLinkedDesign'});
+    // The menu action queues the design's staged load; its reply does not finish that load.
+    const linkedDeadline = performance.now() + 240000;
+    while (performance.now() < linkedDeadline) {
+        const pendingTabs = await app.request('ui.documents');
+        if (pendingTabs.documents.length === 2 && pendingTabs.active === 1) break;
+    }
     const tabs = await app.request('ui.documents');
     check(tabs.documents.length === 2 && tabs.active === 1, 'linked source opens in another tab');
     check((await app.inspect()).bodies[0].name === 'Browser API box', 'source design is active');
@@ -414,6 +567,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
 
     server.set(Mode::Refuse);
     step("offline: build v1 starts from the kept copy", launch(&mut cdp, "v1")?);
+    if site.is_none() {
+        check_compute_bundle(&mut cdp, "v1")?;
+    }
 
     // The other copy is always online, with build v2.
     let t = launch_at(&mut cdp, ELSEWHERE, "v2")?;
@@ -544,6 +700,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
             )
             .unwrap_or_default();
         return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}; request: {how}"));
+    }
+    if site.is_none() {
+        check_compute_bundle(&mut cdp, "v3")?;
     }
     // A page whose record is lost never gets the worker's build instead: its request fails visibly.
     let lost = cdp.eval(
@@ -720,6 +879,23 @@ fn registration_script(root: &Path) -> Result<String, String> {
     html.get(start..end).map(str::to_string).ok_or_else(|| "index.html: bad registration script".into())
 }
 
+/// Start the stand-in's actual dedicated worker and run its exact cached glue and Wasm.
+fn check_compute_bundle(cdp: &mut Cdp, build: &str) -> Result<(), String> {
+    let result = cdp.eval(
+        "new Promise((resolve, reject) => {
+            const loader = document.querySelector('meta[name=solidcraft-compute-worker]').content;
+            const worker = new Worker(loader, {type: 'module'});
+            const timeout = setTimeout(() => { worker.terminate(); reject(new Error('compute bundle timed out')); }, 15000);
+            worker.onmessage = e => { clearTimeout(timeout); worker.terminate(); resolve(e.data); };
+            worker.onerror = e => { clearTimeout(timeout); worker.terminate(); reject(new Error(e.message || 'compute bundle could not start')); };
+        })",
+    )?;
+    if result != build {
+        return Err(format!("the compute bundle for {build} returned {result}"));
+    }
+    Ok(())
+}
+
 /// A stand-in app: a page and a content-named script, as Trunk builds them.
 fn stand_in(dir: &Path, build: &str, registration: &str) -> Result<(), String> {
     let write = |name: &str, text: String| std::fs::write(dir.join(name), text).map_err(|e| format!("{name}: {e}"));
@@ -730,6 +906,17 @@ fn stand_in(dir: &Path, build: &str, registration: &str) -> Result<(), String> {
     write("index.html", mark(&page, build)?)?;
     write(&format!("app-{build}.js"), format!("document.documentElement.dataset.started = \"{build}\";\n"))?;
     write("shared.js", format!("document.documentElement.dataset.shared = \"{build}\";\n"))?;
+    if matches!(build, "v1" | "v3" | "v4") {
+        write("solidcraft-compute-worker_loader.js", "import { build } from './solidcraft-compute-worker.js';\nself.postMessage(build);\n".into())?;
+        write(
+            "solidcraft-compute-worker.js",
+            format!(
+                "await WebAssembly.instantiateStreaming(fetch(new URL('./solidcraft-compute-worker_bg.wasm', import.meta.url)));\nexport const build = \"{build}\";\n"
+            ),
+        )?;
+        // A valid empty module: the Wasm magic bytes followed by binary format version 1.
+        std::fs::write(dir.join("solidcraft-compute-worker_bg.wasm"), b"\0asm\x01\0\0\0").map_err(|e| e.to_string())?;
+    }
     // More files than the browser asks for at once, as in a real build (icons, styles, wasm).
     std::fs::create_dir_all(dir.join("icons")).map_err(|e| format!("icons: {e}"))?;
     for i in 0..CONNECTIONS_PER_SERVER {

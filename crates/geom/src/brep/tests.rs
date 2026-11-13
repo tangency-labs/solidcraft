@@ -797,3 +797,265 @@ fn a_disc_scaled_and_sheared_is_a_plane_bounded_by_an_ellipse() {
     let mirror = [[-1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
     assert!(placement::mapped(&disc, &mirror).is_none());
 }
+
+mod native_ray {
+    use super::super::ray::{ClipDepth, Front, Scene};
+    use solidcore_record::brep::*;
+
+    type Wire = [[f64; 2]; 4];
+
+    #[test]
+    fn viewport_clip_encloses_both_planes_without_admitting_boundary_hits() {
+        let orthographic = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let perspective = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 2.0, 1.0], [0.0, 0.0, -2.0, 0.0]];
+        for (matrix, origin) in [(orthographic, [0.0, 0.0, -1.0]), (perspective, [0.0; 3])] {
+            let clip = ClipDepth::from_projection(matrix, origin, [0.0, 0.0, 1.0]).unwrap();
+            let [lo, hi] = clip.range();
+            assert!(lo <= 1.0 && hi >= 2.0 && hi - lo < 1.00001);
+            assert!(clip.contains([1.1, 1.9]));
+            assert!(!clip.contains([1.0, 1.9]));
+            assert!(!clip.contains([1.1, 2.0]));
+        }
+        assert!(ClipDepth::from_projection(orthographic, [1.0, 0.0, -1.0], [0.0, 0.0, 1.0]).is_none());
+    }
+
+    fn square(lo: f64, hi: f64) -> Wire {
+        [[lo, lo], [hi, lo], [hi, hi], [lo, hi]]
+    }
+
+    fn sheets(spec: &[(f64, Wire, Option<Wire>)]) -> Brep {
+        let mut record = Brep {
+            version: VERSION,
+            tolerance: 1e-7,
+            regions: vec![Region { shells: (0..spec.len() as u32).collect(), void: false }],
+            shells: Vec::new(),
+            faces: Vec::new(),
+            edges: Vec::new(),
+            vertices: Vec::new(),
+        };
+        for (native, &(z, outer, hole)) in spec.iter().enumerate() {
+            let loops = std::iter::once(outer)
+                .chain(hole.map(|mut points| {
+                    points.reverse();
+                    points
+                }))
+                .map(|wire| {
+                    let base = record.vertices.len() as u32;
+                    record.vertices.extend(wire.map(|[x, y]| Vertex { point: [x, y, z], tolerance: 1e-7 }));
+                    let edges = (0..4)
+                        .map(|i| {
+                            let next = (i + 1) % 4;
+                            let [[ax, ay], [bx, by]] = [wire[i], wire[next]];
+                            let index = record.edges.len() as u32;
+                            record.edges.push(Edge {
+                                curve: Curve::Line { start: [ax, ay, z], end: [bx, by, z] },
+                                nurbs: None,
+                                interval: [0.0, 1.0],
+                                vertices: [base + i as u32, base + next as u32],
+                                tolerance: 1e-7,
+                                uses: Vec::new(),
+                            });
+                            OrientedEdge {
+                                edge: index,
+                                forward: true,
+                                pcurve: Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![wire[i], wire[next]] },
+                            }
+                        })
+                        .collect();
+                    Loop::Edges { edges }
+                })
+                .collect();
+            record.faces.push(Face {
+                surface: Surface::Plane { origin: [0.0, 0.0, z], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] },
+                nurbs: None,
+                domain: [[outer[0][0], outer[2][0]], [outer[0][1], outer[2][1]]],
+                loops,
+            });
+            record.shells.push(Shell::Faces { faces: vec![OrientedFace { face: native as u32, forward: true }], wires: Vec::new() });
+        }
+        let canonical = record.canonical().unwrap();
+        assert_eq!(canonical.faces, (0..spec.len() as u32).collect::<Vec<_>>());
+        canonical.brep
+    }
+
+    #[test]
+    fn trim_hole_reveals_a_rear_owner_and_context_keeps_its_own_trim() {
+        let outer = square(-2.0, 2.0);
+        let hole = Some(square(-0.5, 0.5));
+        let record = sheets(&[(1.0, outer, hole), (2.0, outer, None)]);
+        let scene = Scene::prepare(&record, &[Some(55), Some(7)], &[], &mut 2_000_000).unwrap();
+        assert!(matches!(scene.front([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap(), Front::Hit { owner: 7, .. }));
+        assert!(matches!(scene.front([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap(), Front::Hit { owner: 55, .. }));
+        let rear = sheets(&[(2.0, outer, None)]);
+        let context = sheets(&[(1.0, outer, hole)]);
+        let scene = Scene::prepare(&rear, &[Some(7)], &[&context], &mut 2_000_000).unwrap();
+        assert!(matches!(scene.front([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap(), Front::Hit { owner: 7, .. }));
+        assert!(matches!(scene.front([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap(), Front::Occluded { .. }));
+    }
+
+    #[test]
+    fn context_cylinder_only_blocks_rays_that_enter_its_bounds() {
+        let rear = sheets(&[(3.0, square(-4.0, 4.0), None)]);
+        let mut context = sheets(&[(1.0, square(-2.0, 2.0), None)]);
+        context.faces[0].surface =
+            Surface::Cylinder { frame: Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 1.0 };
+        let scene = Scene::prepare(&rear, &[Some(7)], &[&context], &mut 2_000_000).unwrap();
+        let hit = |x| scene.front([x, 0.3, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap();
+        assert!(matches!(hit(2.5), Front::Hit { owner: 7, .. }));
+        assert_eq!(hit(0.5), Front::Unresolved);
+    }
+
+    #[test]
+    fn a_procedural_blend_net_cannot_clear_a_rear_owner() {
+        use solidcore_record::brep::blend::{
+            BlendDefinition, BlendDefinitionRecord, NurbsCurveRecord, NurbsSurfaceRecord, ParameterMapRecord, RadiusRecord, SupportKindRecord,
+            SupportRecord,
+        };
+        let rear = sheets(&[(2.0, square(-2.0, 2.0), None)]);
+        let mut context = sheets(&[(1.0, square(0.0, 1.0), None)]);
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        let support = |vertical| SupportRecord::Nurbs {
+            kind: SupportKindRecord::Plane,
+            form: NurbsSurfaceRecord {
+                u_degree: 1,
+                v_degree: 1,
+                u_count: 2,
+                v_count: 2,
+                u_knots: knots.clone(),
+                v_knots: knots.clone(),
+                points: [0.0, 1.0].into_iter().flat_map(|x| [0.0, 1.0].map(|v| if vertical { [x, 0.0, 1.0 + v] } else { [x, v, 1.0] })).collect(),
+                weights: None,
+            },
+        };
+        let line = |points, dim| NurbsCurveRecord { dim, points_3d: dim == 3, degree: 1, knots: knots.clone(), points, weights: None };
+        context.faces[0].surface = Surface::Blend {
+            definition: Box::new(BlendDefinition::Procedural(Box::new(BlendDefinitionRecord {
+                supports: [support(false), support(true)],
+                sides: [1.0, -1.0],
+                radius: RadiusRecord::Constant { offsets: [0.2, 0.2] },
+                order: 1,
+                thumbweight: 0.0,
+                leader: line(vec![[0.0, 0.2, 1.2], [1.0, 0.2, 1.2]], 3),
+                seeds: [line(vec![[0.0, 0.2, 0.0], [1.0, 0.2, 0.0]], 2), line(vec![[0.0, 0.2, 0.0], [1.0, 0.2, 0.0]], 2)],
+                bound: 0.2,
+                map: ParameterMapRecord { a: [0.0; 2], b: [1.0; 2], swapped: false },
+                chamfer: None,
+            }))),
+        };
+        context.faces[0].nurbs = Some(Surface::Spline {
+            u_knots: knots.clone(),
+            v_knots: knots,
+            points: vec![vec![[0.0, 0.0, 1.0], [0.0, 1.0, 1.0]], vec![[1.0, 0.0, 1.0], [1.0, 1.0, 1.0]]],
+        });
+        let scene = Scene::prepare(&rear, &[Some(7)], &[&context], &mut 2_000_000).unwrap();
+        assert_eq!(scene.front([-0.1, 0.4, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap(), Front::Unresolved);
+    }
+
+    #[test]
+    fn planar_trim_joins_block_only_with_qualified_native_vertex_closure() {
+        let rear = sheets(&[(2.0, square(-2.0, 2.0), None)]);
+        let exact = sheets(&[(1.0, square(-1.0, 1.0), None)]);
+        let shifted = |displacement: f64| {
+            let mut context = exact.clone();
+            let Loop::Edges { edges } = &mut context.faces[0].loops[0] else { return None };
+            let Curve2::Spline { points, .. } = &mut edges[0].pcurve else { return None };
+            let original = points[0];
+            points[0][0] -= original[0].signum() * displacement;
+            Some((context, original))
+        };
+        let query = |context: &Brep, [x, y]: [f64; 2]| {
+            let scene = Scene::prepare(&rear, &[Some(7)], &[context], &mut 2_000_000).unwrap();
+            scene.front([x, y, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap()
+        };
+        let (small, original) = shifted(1e-8).unwrap();
+        let near_join = original.map(|x| x - x.signum() * 1e-7);
+        assert!(matches!(query(&exact, near_join), Front::Occluded { .. }));
+        assert!(matches!(query(&small, [0.3, 0.4]), Front::Occluded { depth } if depth[0] <= 1.0 && depth[1] >= 1.0));
+        assert_eq!(query(&small, near_join), Front::Unresolved);
+        assert_eq!(query(&shifted(1e-2).unwrap().0, [0.3, 0.4]), Front::Unresolved);
+    }
+
+    #[test]
+    fn curved_side_join_proves_the_front_owner_but_keeps_the_native_tolerance_band() {
+        let rear = sheets(&[(2.0, square(-2.0, 2.0), None)]);
+        let mut exact = sheets(&[(1.0, square(0.0, 1.0), None)]);
+        let lift = |x, y| [x, y, 1.0 + x * y * 0.25];
+        exact.faces[0].surface = Surface::Spline {
+            u_knots: vec![0.0, 0.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: [0.0, 1.0].map(|u| [0.0, 1.0].map(|v| lift(u, v)).to_vec()).to_vec(),
+        };
+        for vertex in &mut exact.vertices {
+            vertex.point = lift(vertex.point[0], vertex.point[1]);
+        }
+        for edge in &mut exact.edges {
+            let [start, end] = edge.vertices.map(|vertex| exact.vertices[vertex as usize].point);
+            edge.curve = Curve::Line { start, end };
+        }
+        let shifted = |x, y| {
+            let mut result = exact.clone();
+            let Loop::Edges { edges } = &mut result.faces[0].loops[0] else { panic!("one edge loop") };
+            let Curve2::Spline { points, .. } = &mut edges[0].pcurve else { panic!("a linear pcurve") };
+            assert_eq!(points[0], [0.0, 0.0]);
+            points[0] = [x, y];
+            result
+        };
+        let query = |context: &Brep, [x, y]: [f64; 2]| {
+            let scene = Scene::prepare(&rear, &[Some(7)], &[context], &mut 2_000_000).unwrap();
+            scene.front([x, y, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap()
+        };
+        let rounded = shifted(2.0 * f64::EPSILON, 0.0);
+        let depth = lift(0.3, 0.4)[2];
+        assert!(matches!(query(&rounded, [0.3, 0.4]), Front::Occluded { depth: [lo, hi] } if lo <= depth && depth <= hi));
+        assert!(matches!(query(&rounded, [1.3, 0.4]), Front::Hit { owner: 7, .. }));
+        assert!(matches!(query(&exact, [1e-7, 1e-7]), Front::Occluded { .. }));
+        assert_eq!(query(&rounded, [1e-7, 1e-7]), Front::Unresolved);
+        let rounded_corner = shifted(2.0 * f64::EPSILON, f64::EPSILON);
+        assert!(matches!(query(&rounded_corner, [0.3, 0.4]), Front::Occluded { depth: [lo, hi] } if lo <= depth && depth <= hi));
+        assert_eq!(query(&rounded_corner, [1e-7, 1e-7]), Front::Unresolved);
+        let mut false_corner = rounded_corner;
+        false_corner.vertices[0].point[2] += 1e-2;
+        assert_eq!(query(&false_corner, [0.3, 0.4]), Front::Unresolved);
+        assert_eq!(query(&shifted(1e-2, 0.0), [0.3, 0.4]), Front::Unresolved);
+        assert_eq!(query(&shifted(1e-10, 1e-10), [0.3, 0.4]), Front::Unresolved);
+    }
+
+    #[test]
+    fn nearer_unresolved_face_blocks_a_different_owner() {
+        let record = sheets(&[(1.0, square(0.0, 1.0), None), (2.0, square(-2.0, 2.0), None)]);
+        let query = |owners| {
+            let scene = Scene::prepare(&record, owners, &[], &mut 2_000_000).unwrap();
+            scene.front([0.0, 0.25, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap()
+        };
+        assert_eq!(query(&[Some(1), Some(2)]), Front::Unresolved);
+        assert!(matches!(query(&[Some(2), Some(2)]), Front::Hit { owner: 2, depth: [lo, hi] } if lo <= 1.0 && hi >= 2.0));
+        assert!(matches!(query(&[None, Some(2)]), Front::Unresolved));
+    }
+
+    #[test]
+    fn overlapping_depth_intervals_cannot_choose_a_different_owner() {
+        let outer = square(-2.0, 2.0);
+        let record = sheets(&[(2.0, outer, None), (2.0_f64.next_up(), outer, None)]);
+        let query = |owners| {
+            let scene = Scene::prepare(&record, owners, &[], &mut 2_000_000).unwrap();
+            scene.front([0.0, 0.25, -1.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap()
+        };
+        assert_eq!(query(&[Some(1), Some(2)]), Front::Unresolved);
+        assert!(matches!(query(&[Some(1), Some(1)]), Front::Hit { owner: 1, .. }));
+    }
+
+    #[test]
+    fn reusable_scene_owns_its_exact_records_and_preserves_depth_order() {
+        use std::sync::Arc;
+        let edited = Arc::new(sheets(&[(2.0, square(-2.0, 2.0), None)]));
+        let context = Arc::new(sheets(&[(1.0, square(-0.5, 0.5), None)]));
+        let weak = Arc::downgrade(&context);
+        let scene = Scene::prepare(edited, &[Some(7)], &[context], &mut 2_000_000).unwrap();
+        assert!(weak.upgrade().is_some());
+        let front = |x| scene.front([x, 0.25, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap();
+        assert!(matches!(front(0.0), Front::Occluded { .. }));
+        assert!(matches!(front(1.0), Front::Hit { owner: 7, .. }));
+        drop(scene);
+        assert!(weak.upgrade().is_none());
+    }
+}

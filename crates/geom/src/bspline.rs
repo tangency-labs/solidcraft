@@ -18,8 +18,11 @@ use solidcore_record::Vec3;
 
 mod curve;
 mod interval;
+mod parameter_line;
+mod rim_coincidence;
 
 pub use curve::{CurvePiece, NurbsCurve};
+pub use rim_coincidence::{rational_rim_gap, rational_rim_to_native_gap};
 
 /// Highest polynomial degree accepted in either direction: the B-rep record's own bound
 /// (`Brep::validate`), so every spline a record may hold can be evaluated. A G4 blend is of
@@ -500,6 +503,14 @@ pub struct NurbsSurface {
 }
 
 impl NurbsSurface {
+    /// Point and first partial derivatives in the spline's own parameter domain.
+    pub fn derivs(&self, uv: [f64; 2]) -> Option<(Vec3, Vec3, Vec3)> {
+        if uv.iter().zip(self.domain()).any(|(&t, [a, b])| !t.is_finite() || t < a || t > b) {
+            return None;
+        }
+        crate::tess::nurbs_derivs(self.degree(), self.knots(), self.count(), self.homogeneous(), uv, |c| [c.x, c.y, c.z, c.w])
+            .map(crate::tess::from_kernel3)
+    }
     /// A surface from Cartesian points and positive weights (one per point, u fastest).
     pub fn new(degree: [usize; 2], knots: [Vec<f64>; 2], points: &[Vec3], weights: &[f64]) -> SplineResult<NurbsSurface> {
         Self::from_homogeneous(degree, knots, weighted_points(points, weights)?)
@@ -571,6 +582,7 @@ impl NurbsSurface {
         for (d, x) in [u, v].into_iter().enumerate() {
             let (p, n, kn) = (self.degree[d], self.count[d], &self.knots[d]);
             let span = find_span(kn, p, n, x).ok_or_else(|| SplineError::Invalid(format!("({u}, {v}) is outside the domain")))?;
+            let x = x.clamp(dom[d][0], dom[d][1]);
             let side = if x >= dom[d][1] { Side::Left } else { Side::Right };
             spans[d] = span;
             basis[d] = (span - p..=span).map(|i| kn.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, x, side, 0)[0])).collect();
@@ -582,6 +594,31 @@ impl NurbsSurface {
             }
         }
         acc.project().ok_or_else(|| SplineError::Invalid("the surface's weights vanish there".into()))
+    }
+
+    /// An exact rational isoparametric curve segment. `dir` is its varying
+    /// parameter; the other parameter is fixed. The returned ends are clamped.
+    pub fn iso_curve_segment(&self, dir: Dir, fixed: f64, range: [f64; 2]) -> SplineResult<(Vec<f64>, Vec<HPoint>)> {
+        let along = dir.pick(0, 1);
+        let across = 1 - along;
+        let p = self.degree[across];
+        let knots = &self.knots[across];
+        let span =
+            find_span(knots, p, self.count[across], fixed).ok_or_else(|| SplineError::Invalid("isocurve parameter is outside the surface".into()))?;
+        let [low, high] = self.domain()[across];
+        let fixed = fixed.clamp(low, high);
+        let side = if fixed == high { Side::Left } else { Side::Right };
+        let basis: Vec<_> = (span - p..=span).map(|i| knots.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, fixed, side, 0)[0])).collect();
+        let mut ctrl = Vec::with_capacity(self.count[along]);
+        for i in 0..self.count[along] {
+            let mut point = HPoint::ZERO;
+            for (j, weight) in basis.iter().enumerate() {
+                let k = span - p + j;
+                point += if along == 0 { self.point(i, k) } else { self.point(k, i) } * *weight;
+            }
+            ctrl.push(point);
+        }
+        restrict_row(self.degree[along], &self.knots[along], &ctrl, range)
     }
 
     /// The same surface with the knot `x` inserted once in direction `dir` ([`Dir::S`] = u).
@@ -615,6 +652,82 @@ impl NurbsSurface {
             }
         }
         NurbsSurface::from_homogeneous(self.degree, knots, ctrl)
+    }
+
+    /// Restrict a tensor rectangle to a unit chart. Its corners are ordered
+    /// origin, U end, opposite, V end, allowing axis swaps and reversals.
+    /// Knot insertion in homogeneous coordinates preserves the rational skin.
+    pub fn restricted_chart(&self, corners: [[f64; 2]; 4]) -> SplineResult<Self> {
+        let [origin, u, opposite, v] = corners;
+        let varying = usize::from(u[0] == origin[0]);
+        let other = 1 - varying;
+        if corners.iter().flatten().any(|x| !x.is_finite())
+            || u[varying] == origin[varying]
+            || u[other] != origin[other]
+            || v[varying] != origin[varying]
+            || v[other] == origin[other]
+            || opposite[varying] != u[varying]
+            || opposite[other] != v[other]
+        {
+            return invalid("tensor restriction needs four ordered rectangle corners");
+        }
+        let ranges = std::array::from_fn::<_, 2, _>(|axis| [origin[axis].min(opposite[axis]), origin[axis].max(opposite[axis])]);
+        let mut surface = self.clone();
+        for (axis, range) in ranges.into_iter().enumerate() {
+            let [nu, nv] = surface.count;
+            let (lines, len) = if axis == 0 { (nv, nu) } else { (nu, nv) };
+            let mut knots = Vec::new();
+            let mut rows = Vec::with_capacity(lines);
+            for line in 0..lines {
+                let row: Vec<_> = (0..len).map(|i| if axis == 0 { surface.point(i, line) } else { surface.point(line, i) }).collect();
+                let (restricted_knots, row) = restrict_row(surface.degree[axis], &surface.knots[axis], &row, range)?;
+                knots = restricted_knots;
+                rows.push(row);
+            }
+            let width = rows.first().map_or(0, Vec::len);
+            if lines.checked_mul(width).is_none_or(|count| count > MAX_SURFACE_POINTS) {
+                return Err(SplineError::TooLarge("restricted tensor control budget exceeded".into()));
+            }
+            let ctrl = if axis == 0 {
+                rows.into_iter().flatten().collect()
+            } else {
+                let mut ctrl = Vec::with_capacity(lines * width);
+                for j in 0..width {
+                    for row in &rows {
+                        ctrl.push(*row.get(j).ok_or_else(|| SplineError::Invalid("incomplete restricted control row".into()))?);
+                    }
+                }
+                ctrl
+            };
+            let mut all = surface.knots;
+            all[axis] = knots;
+            surface = Self::from_homogeneous(surface.degree, all, ctrl)?;
+        }
+        let axes = [varying, other];
+        let reversed = [u[varying] < origin[varying], v[other] < origin[other]];
+        let degree = axes.map(|axis| surface.degree[axis]);
+        let count = axes.map(|axis| surface.count[axis]);
+        let knots = std::array::from_fn(|d| {
+            let axis = axes[d];
+            let [low, high] = ranges[axis];
+            let length = high - low;
+            if reversed[d] {
+                surface.knots[axis].iter().rev().map(|&k| (high - k) / length).collect()
+            } else {
+                surface.knots[axis].iter().map(|&k| (k - low) / length).collect()
+            }
+        });
+        let mut ctrl = Vec::with_capacity(count[0] * count[1]);
+        for j in 0..count[1] {
+            for i in 0..count[0] {
+                let mut at = [0; 2];
+                for (d, index) in [i, j].into_iter().enumerate() {
+                    at[axes[d]] = if reversed[d] { count[d] - 1 - index } else { index };
+                }
+                ctrl.push(surface.point(at[0], at[1]));
+            }
+        }
+        Self::from_homogeneous(degree, knots, ctrl)
     }
 
     /// The same surface on the same domain with clamped knot vectors (`p+1` equal knots at
@@ -651,11 +764,145 @@ impl NurbsSurface {
     }
 }
 
+fn restrict_row(p: usize, knots: &[f64], ctrl: &[HPoint], [lo, hi]: [f64; 2]) -> SplineResult<(Vec<f64>, Vec<HPoint>)> {
+    let (Some(&start), Some(&end)) = (knots.get(p), knots.get(ctrl.len())) else { return invalid("invalid curve domain") };
+    if !lo.is_finite() || !hi.is_finite() || lo < start || hi > end || lo >= hi {
+        return invalid("curve restriction must be a nonempty interval inside its domain");
+    }
+    let (mut knots, mut ctrl) = (knots.to_vec(), ctrl.to_vec());
+    for x in [lo, hi] {
+        for _ in 0..=p {
+            if knots.iter().filter(|&&k| k == x).count() > p {
+                break;
+            }
+            (knots, ctrl) = insert_knot(p, &knots, &ctrl, x)?;
+        }
+    }
+    let first = knots.iter().position(|&k| k == lo).ok_or_else(|| SplineError::Invalid("missing curve restriction start".into()))?;
+    let last = knots.iter().rposition(|&k| k == hi).ok_or_else(|| SplineError::Invalid("missing curve restriction end".into()))? + 1;
+    let count = (last - first).checked_sub(p + 1).ok_or_else(|| SplineError::Invalid("invalid restricted knot count".into()))?;
+    let row = ctrl.get(first..first + count).ok_or_else(|| SplineError::Invalid("invalid restricted control count".into()))?.to_vec();
+    Ok((knots[first..last].to_vec(), row))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::prelude::*;
 
+    fn packed_rim_piece(controls: &[HPoint], range: [f64; 2], cuts: &[f64], reverse: bool, elevate: bool) -> ([f64; 2], CurveN<4>) {
+        let degree = controls.len() - 1 + usize::from(elevate);
+        let mut knots = vec![0.0; degree + 1];
+        let mut ctrl = Vec::new();
+        for pair in cuts.windows(2) {
+            let span = [pair[0], pair[1]].map(|t| range[0] * (1.0 - t) + range[1] * t);
+            let [a, b] = if reverse { [1.0 - span[1], 1.0 - span[0]] } else { span };
+            let mut piece = bezier_segment(controls, a, b).unwrap();
+            if reverse {
+                piece.reverse();
+            }
+            if elevate {
+                piece = (0..=degree)
+                    .map(|i| {
+                        if i == 0 {
+                            piece[0]
+                        } else if i == degree {
+                            piece[degree - 1]
+                        } else {
+                            let t = i as f64 / degree as f64;
+                            piece[i - 1] * t + piece[i] * (1.0 - t)
+                        }
+                    })
+                    .collect();
+            }
+            let skip = usize::from(!ctrl.is_empty());
+            ctrl.extend(piece.into_iter().skip(skip).map(|point| [point.x, point.y, point.z, point.w]));
+            knots.extend(std::iter::repeat_n(pair[1], degree + usize::from(pair[1] == 1.0)));
+        }
+        (range, CurveN { degree, knots, ctrl })
+    }
+
+    #[test]
+    fn rational_native_rim_encloses_non_bezier_knot_insertion() {
+        // One cubic interior knot has multiplicity one. Inserting it twice
+        // yields these seven independently derived dyadic homogeneous controls.
+        let [a, b, c, d, e] = [[0.0, 0.0, 0.0, 1.0], [1.0, 2.0, 0.0, 0.5], [3.0, 4.0, 0.0, 1.0], [5.0, 2.0, 0.0, 0.5], [6.0, 0.0, 0.0, 1.0]];
+        let midpoint = |x: [f64; 4], y: [f64; 4]| std::array::from_fn(|axis| 0.5 * (x[axis] + y[axis]));
+        let l = midpoint(b, c);
+        let r = midpoint(c, d);
+        let fitted = [(
+            [0.0, 1.0],
+            CurveN { degree: 3, knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0], ctrl: vec![a, b, l, midpoint(l, r), r, d, e] },
+        )];
+        let mut native = CurveN { degree: 3, knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0], ctrl: vec![a, b, c, d, e] };
+        let mut work = 100_000;
+        let upper = rational_rim_to_native_gap(&fitted, &native, [true, true], 1e-8, &mut work).unwrap().unwrap();
+        assert!(upper < 1e-10, "{upper}");
+        native.ctrl[2][1] += 0.01;
+        assert_eq!(rational_rim_to_native_gap(&fitted, &native, [false, false], 1e-4, &mut work).unwrap(), None);
+        assert!(rational_rim_to_native_gap(&fitted, &native, [false, false], 1e-4, &mut 0).is_err());
+    }
+
+    #[test]
+    fn opposite_rational_rims_qualify_across_mixed_piece_and_knot_partitions() {
+        let radius = 10.0;
+        let controls = [
+            HPoint::weighted(Vec3::new(radius, 0.0, 0.0), 1.0),
+            HPoint::weighted(Vec3::new(radius, radius, 0.0), 0.5_f64.sqrt()),
+            HPoint::weighted(Vec3::new(0.0, radius, 0.0), 1.0),
+        ];
+        let first = [
+            packed_rim_piece(&controls, [0.625, 1.0], &[0.0, 1.0], false, false),
+            packed_rim_piece(&controls, [0.0, 0.625], &[0.0, 0.4, 1.0], false, false),
+        ];
+        let shifted = |offset: [f64; 3]| {
+            let moved = controls.map(|point| HPoint {
+                x: point.x + offset[0] * point.w,
+                y: point.y + offset[1] * point.w,
+                z: point.z + offset[2] * point.w,
+                ..point
+            });
+            [
+                packed_rim_piece(&moved, [0.0, 0.3], &[0.0, 0.45, 1.0], true, true),
+                packed_rim_piece(&moved, [0.3, 0.75], &[0.0, 1.0], true, true),
+                packed_rim_piece(&moved, [0.75, 1.0], &[0.0, 1.0], true, true),
+            ]
+        };
+        let same = shifted([0.0; 3]);
+        let mut work = 2_000_000;
+        let exact = rational_rim_gap(&first, &same, [false, true], 1e-7, &mut work).unwrap().unwrap();
+        assert!(exact < 1e-8);
+        eprintln!("mixed partitions and degrees: upper bound {exact:e} mm, work {}", 2_000_000 - work);
+        assert!(rational_rim_gap(&first, &same, [true, false], 1e-7, &mut 2_000_000).unwrap().unwrap() < 1e-8);
+        assert_eq!(rational_rim_gap(&first, &same, [false, false], 1e-7, &mut 2_000_000).unwrap(), None);
+
+        let offset = [0.0002, 0.0003, 0.0004];
+        let moved = shifted(offset);
+        let expected = offset.into_iter().map(|x| x * x).sum::<f64>().sqrt();
+        let gap = rational_rim_gap(&first, &moved, [false, true], 0.0006, &mut 2_000_000).unwrap().unwrap();
+        assert!(gap >= expected - 1e-12 && gap < expected + 1e-8, "gap={gap}");
+        eprintln!("known translated rim: exact {expected:e} mm, certified upper {gap:e} mm");
+        assert_eq!(rational_rim_gap(&first, &moved, [false, true], 0.0005, &mut 2_000_000).unwrap(), None);
+    }
+
+    #[test]
+    fn rim_coincidence_refuses_interior_deviations_and_incomplete_or_unbounded_input() {
+        let line = (0..4).map(|i| HPoint::weighted(Vec3::new(f64::from(i) / 3.0, 0.0, 0.0), 1.0)).collect::<Vec<_>>();
+        let mut bowed = line.clone();
+        bowed[1].z = 0.01;
+        bowed[2].z = -0.01;
+        let first = [packed_rim_piece(&line, [0.0, 1.0], &[0.0, 1.0], false, false)];
+        let second = [packed_rim_piece(&bowed, [0.0, 1.0], &[0.0, 1.0], true, false)];
+        // The ends and midpoint agree. Their restriction interiors do not.
+        assert_eq!(rational_rim_gap(&first, &second, [false, true], 0.001, &mut 2_000_000).unwrap(), None);
+        assert!(rational_rim_gap(&first, &second, [false, true], 0.01, &mut 2_000_000).unwrap().is_some());
+        assert!(rational_rim_gap(&first, &second, [false, true], 0.01, &mut 0).is_err());
+        let missing = [([0.125, 1.0], second[0].1.clone())];
+        assert!(rational_rim_gap(&first, &missing, [false, true], 0.01, &mut 2_000_000).is_err());
+        let mut invalid = second;
+        invalid[0].1.ctrl[0][3] = 0.0;
+        assert!(rational_rim_gap(&first, &invalid, [false, true], 0.01, &mut 2_000_000).is_err());
+    }
     /// A small deterministic generator for test data.
     pub(crate) struct Lcg(pub(crate) u64);
     impl Lcg {
@@ -828,6 +1075,130 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn arbitrary_parameter_lines_retain_rational_surface_positions_in_both_directions() {
+        let surface = random_surface(117, KNOTS.to_vec(), KNOTS.to_vec(), [3, 3]);
+        for (a, b) in [
+            ([0.0, 0.0], [1.0, 1.0]),
+            ([0.0, 4e-14], [1.0, 1.0 - 4e-14]),
+            ([0.0, 0.0], [1.0, 1.0 - 4e-13]),
+            ([0.11, 0.17], [0.93, 0.81]),
+            ([0.9, 0.13], [0.07, 0.87]),
+            ([0.7, 1.0], [0.7, 0.0]),
+            ([1.0, 0.2], [0.0, 0.2]),
+        ] {
+            for (a, b) in [(a, b), (b, a)] {
+                let (knots, ctrl) = surface.parameter_line(a, b).unwrap();
+                let degree = knots.len() - ctrl.len() - 1;
+                for i in 0..=100 {
+                    let t = i as f64 / 100.0;
+                    let want = surface.eval(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t).unwrap();
+                    assert!(curve(degree, &knots, &ctrl, t).dist(want) < 1e-9, "{a:?}->{b:?}, {t}");
+                }
+            }
+        }
+        for (a, b) in [([0.5, 0.5], [0.5, 0.5]), ([f64::NAN, 0.0], [1.0, 1.0]), ([-0.1, 0.0], [1.0, 1.0])] {
+            assert!(surface.parameter_line(a, b).is_err());
+        }
+    }
+    #[test]
+    fn parameter_line_budget_accounts_for_the_varying_directions() {
+        let surface = random_surface(117, KNOTS.to_vec(), KNOTS.to_vec(), [3, 3]);
+        for (a, b) in [([0.0, 0.27], [1.0, 0.27]), ([1.0, 0.27], [0.0, 0.27])] {
+            let mut remaining = 700;
+            let expected = surface.parameter_line(a, b).unwrap();
+            assert_eq!(surface.parameter_line_bounded(a, b, &mut remaining).unwrap(), expected);
+            assert!((0..700).contains(&remaining));
+            assert!(surface.parameter_line_bounded(a, b, &mut 1).is_err());
+        }
+        assert!(surface.parameter_line_bounded([0.0, 0.0], [1.0, 1.0], &mut 700).is_err());
+    }
+    #[test]
+    fn parameter_line_keeps_distinct_coordinates_in_a_tiny_knot_domain() {
+        let width = 1e-15;
+        let points = [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::X + Vec3::Y];
+        let surface = NurbsSurface::new([1, 1], [vec![0.0, 0.0, width, width], vec![0.0, 0.0, 1.0, 1.0]], &points, &[1.0; 4]).unwrap();
+        let (a, b) = ([width / 4.0, 0.1], [3.0 * width / 4.0, 0.9]);
+        let (_, ctrl) = surface.parameter_line(a, b).unwrap();
+        assert!(ctrl.first().unwrap().project().unwrap().dist(Vec3::new(0.25, 0.1, 0.0)) < 1e-14);
+        assert!(ctrl.last().unwrap().project().unwrap().dist(Vec3::new(0.75, 0.9, 0.0)) < 1e-14);
+        assert_eq!(surface.eval(width.next_up(), 1.0_f64.next_up()).unwrap(), points[3]);
+    }
+    #[test]
+    fn a_translated_parameter_line_refuses_a_discontinuous_knot() {
+        let points: Vec<_> = [0.0, 1.0].into_iter().flat_map(|y| [0.0, 1.0, 1.125, 2.0].map(|x| Vec3::new(1e9 + x, y, 0.0))).collect();
+        let surface = NurbsSurface::new([1, 1], [vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], &points, &[1.0; 8]).unwrap();
+        assert!(
+            matches!(surface.parameter_line([0.0, 0.0], [1.0, 1.0]), Err(SplineError::Unsupported(message)) if message.contains("discontinuous"))
+        );
+    }
+    #[test]
+    fn restricted_tensor_charts_keep_rational_positions_and_two_derivatives_through_rotations() {
+        let points: Vec<_> = (0..5)
+            .flat_map(|v| {
+                (0..4).map(move |u| {
+                    let (u, v) = (f64::from(u), f64::from(v));
+                    Vec3::new(u + 0.04 * v * v, v, 0.1 * u * u - 0.05 * v * v + 0.02 * u * v)
+                })
+            })
+            .collect();
+        let weights: Vec<_> = (0..20).map(|i| 1.0 + f64::from((i * 3) % 7) * 0.13).collect();
+        let source = NurbsSurface::new(
+            [2, 3],
+            [vec![0.0, 0.0, 0.0, 0.375, 1.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 0.0, 0.625, 1.0, 1.0, 1.0, 1.0]],
+            &points,
+            &weights,
+        )
+        .unwrap();
+        let original = crate::tess::nurbs_surface(&source);
+        let rectangle = [[0.125, 0.25], [0.875, 0.25], [0.875, 0.75], [0.125, 0.75]];
+        for rotation in 0..4 {
+            let chart = std::array::from_fn(|i| rectangle[(rotation + i) % 4]);
+            let child = source.restricted_chart(chart).unwrap();
+            assert_eq!(child.domain(), [[0.0, 1.0], [0.0, 1.0]]);
+            let child = crate::tess::nurbs_surface(&child);
+            let u = std::array::from_fn::<_, 2, _>(|axis| chart[1][axis] - chart[0][axis]);
+            let v = std::array::from_fn::<_, 2, _>(|axis| chart[3][axis] - chart[0][axis]);
+            for (a, b) in [(0.02, 0.03), (0.3, 0.65), (0.5, 0.52), (0.98, 0.91)] {
+                let uv = std::array::from_fn::<_, 2, _>(|axis| chart[0][axis] + a * u[axis] + b * v[axis]);
+                let before = crate::tess::SurfaceJet::from_kernel(original.jet(uv[0], uv[1]).unwrap());
+                let after = crate::tess::SurfaceJet::from_kernel(child.jet(a, b).unwrap());
+                let first = |d: [f64; 2]| before.du * d[0] + before.dv * d[1];
+                let second =
+                    |a: [f64; 2], b: [f64; 2]| before.duu * (a[0] * b[0]) + before.duv * (a[0] * b[1] + a[1] * b[0]) + before.dvv * (a[1] * b[1]);
+                assert!(before.point.dist(after.point) < 1e-12);
+                assert!(after.du.dist(first(u)) < 1e-11 && after.dv.dist(first(v)) < 1e-11);
+                assert!(after.duu.dist(second(u, u)) < 1e-10 && after.duv.dist(second(u, v)) < 1e-10 && after.dvv.dist(second(v, v)) < 1e-10);
+            }
+        }
+        let mut invalid = rectangle;
+        invalid[2][0] = 0.9;
+        assert!(source.restricted_chart(invalid).is_err());
+    }
+
+    #[test]
+    fn trimmed_isocurves_retain_rational_surface_positions() {
+        let surface = random_surface(91, KNOTS.to_vec(), KNOTS.to_vec(), [3, 3]);
+        for dir in [Dir::S, Dir::T] {
+            for fixed in [0.0, 0.17, 0.5, 1.0] {
+                for range in [[0.0, 1.0], [0.125, 0.7], [0.3, 0.9]] {
+                    let (knots, ctrl) = surface.iso_curve_segment(dir, fixed, range).unwrap();
+                    assert!(knots[..4].iter().all(|&k| k == range[0]));
+                    assert!(knots[knots.len() - 4..].iter().all(|&k| k == range[1]));
+                    for i in 0..=20 {
+                        let t = if i == 20 { range[1] } else { range[0] + (range[1] - range[0]) * i as f64 / 20.0 };
+                        let (u, v) = if dir == Dir::S { (t, fixed) } else { (fixed, t) };
+                        assert!(curve(3, &knots, &ctrl, t).dist(surface.eval(u, v).unwrap()) < 1e-11);
+                    }
+                }
+            }
+        }
+        for range in [[0.8, 0.2], [-0.1, 1.0], [0.0, f64::NAN]] {
+            assert!(surface.iso_curve_segment(Dir::S, 0.5, range).is_err());
+        }
+        assert!(surface.iso_curve_segment(Dir::S, f64::INFINITY, [0.0, 1.0]).is_err());
+    }
+
+    #[test]
     fn boehm_insertion_keeps_the_curve() {
         let p = 3;
         let mut rng = Lcg(3);
@@ -945,63 +1316,8 @@ impl<const N: usize> CurveN<N> {
     /// (global interpolation, The NURBS Book A9.1: clamped, interior knots by averaging the
     /// parameters).
     pub fn interpolate(params: &[f64], points: &[[f64; N]], degree: usize) -> SplineResult<CurveN<N>> {
-        let m = points.len();
-        if params.len() != m || degree == 0 || degree > MAX_SPLINE_DEGREE || m <= degree {
-            return invalid(format!("{m} points, {} parameters, degree {degree}", params.len()));
-        }
-        if m > MAX_KNOTS || params.windows(2).any(|w| !(w[1] > w[0])) || params.iter().any(|t| !t.is_finite()) {
-            return invalid("the parameters must be finite and increasing");
-        }
-        let (first, last) = (params[0], params[m - 1]);
-        let mut knots = vec![first; degree + 1];
-        for j in 1..m - degree {
-            knots.push(params[j..j + degree].iter().sum::<f64>() / degree as f64);
-        }
-        knots.extend(std::iter::repeat_n(last, degree + 1));
-        // N · P = Q, dense with partial pivoting (the matrix is banded; m is small here).
-        let mut a = vec![vec![0.0f64; m]; m];
-        for (row, &t) in a.iter_mut().zip(params) {
-            let span = solidcore::eval::plan::span_of(&knots, degree, m, t);
-            let Some(b) = solidcore::eval::plan::basis_ders(&knots, span, degree, t) else { return invalid("basis") };
-            for (x, n) in row.iter_mut().skip(span - degree).zip(&b[0][..=degree]) {
-                *x = *n;
-            }
-        }
-        let mut q: Vec<[f64; N]> = points.to_vec();
-        for col in 0..m {
-            let Some(piv) = (col..m).max_by(|&x, &y| a[x][col].abs().total_cmp(&a[y][col].abs())) else { return invalid("empty") };
-            if !(a[piv][col].abs() > 1e-14) {
-                return invalid("singular interpolation system");
-            }
-            a.swap(col, piv);
-            q.swap(col, piv);
-            let (pr, pq) = (a[col].clone(), q[col]);
-            for r in col + 1..m {
-                let f = a[r][col] / pr[col];
-                if f != 0.0 {
-                    for (x, p) in a[r].iter_mut().zip(&pr).skip(col) {
-                        *x -= f * p;
-                    }
-                    for (x, p) in q[r].iter_mut().zip(pq) {
-                        *x -= f * p;
-                    }
-                }
-            }
-        }
-        let mut ctrl = vec![[0.0; N]; m];
-        for r in (0..m).rev() {
-            let mut v = q[r];
-            for (c, x) in ctrl.iter().enumerate().skip(r + 1) {
-                for (vi, xi) in v.iter_mut().zip(x) {
-                    *vi -= a[r][c] * xi;
-                }
-            }
-            ctrl[r] = v.map(|x| x / a[r][r]);
-        }
-        if ctrl.iter().flatten().any(|x| !x.is_finite()) {
-            return invalid("interpolation did not give finite control points");
-        }
-        Ok(CurveN { degree, knots, ctrl })
+        let fit = solidcore_ops::form_cage::interpolate_curve(params, points, degree).map_err(|error| SplineError::Invalid(error.to_string()))?;
+        Ok(CurveN { degree, knots: fit.knots, ctrl: fit.controls })
     }
 
     /// The point and first derivative at `t` (clamped to the curve's range).

@@ -530,6 +530,22 @@ fn switching_from_a_sketch_to_a_feature_defers_a_new_command_until_restoration()
 }
 
 #[test]
+fn starting_forms_waits_for_the_sketch_to_restore_its_history() {
+    let (mut h, sketches) = sketches_with_later_bodies();
+    h.app.edit_sketch(sketches[0]);
+    until_settled(&mut h);
+    assert_eq!(h.app.session.active_sketch, Some(sketches[0]));
+    assert!(marker(&h).is_some());
+    h.app.start("form.prototype.create");
+    assert!(h.app.session.forms_prototype.is_none(), "the Form waits for the sketch to finish");
+    assert_eq!(h.app.start_after_roll.as_ref().map(|(id, _)| id.as_str()), Some("form.prototype.create"));
+    until_settled(&mut h);
+    assert!(h.app.session.active_sketch.is_none());
+    assert!(h.app.session.forms_prototype.is_some());
+    assert_eq!(marker(&h), None);
+}
+
+#[test]
 fn switching_from_a_sketch_to_a_feature_defers_press_pull_with_its_pick_contract() {
     let (mut h, sketches) = sketches_with_later_bodies();
     let feature = h.app.session.doc.features[3].id;
@@ -1765,4 +1781,346 @@ fn the_summary_row_stays_above_the_waiting_rows_when_one_unfolds() {
     let live: Vec<_> = shown.iter().filter(|r| r.0.starts_with("agent:held:") && r.0 != "agent:held:more" && r.2 == 1.0).collect();
     let places: Vec<_> = live.iter().map(|r| r.1.split('.').next().unwrap().to_string()).collect();
     assert_eq!(places, (1..=MAX_WAITING_SHOWN).map(|n| n.to_string()).collect::<Vec<_>>(), "in queue order: {shown:?}");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn form_validation_harness(prepared: bool) -> (Harness, std::sync::Arc<solidcraft_engine::forms_prototype::validation::Input>) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.session.execute("form.prototype.create", &json!({"primitive":"face","dimensions":[8,8,1],"segments":[1,1,1],"levels":0})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = false;
+    let input = std::sync::Arc::new(solidcraft_engine::forms_prototype::validation::Input::capture(&h.app.session).unwrap());
+    if prepared {
+        crate::forms_prototype::install_validation_input_for_test(&mut h.app, input.clone());
+    }
+    (h, input)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn request_form_validation(h: &mut Harness, method: &str, params: serde_json::Value) -> std::sync::mpsc::Receiver<serde_json::Value> {
+    let (req, reply) = crate::ControlRequest::new(method, params);
+    assert!(h.app.offload_control(&egui::Context::default(), req).is_none());
+    reply
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn form_cad_control_reads_pin_the_prepared_input_without_waiting_or_mutating_later_edits() {
+    let (mut h, input) = form_validation_harness(true);
+    let expected =
+        serde_json::to_value(input.check(&solidcraft_engine::schema::forms_prototype::Validate { tolerance: Some(0.01) }).unwrap()).unwrap();
+    h.app.apply_off_thread = Some(Duration::from_secs(10));
+    let reply = request_form_validation(
+        &mut h,
+        "engine.execute",
+        json!({"command":"form.prototype.validate","params":{"tolerance":0.01},"param_check":"strict"}),
+    );
+    assert_eq!(h.app.control_answering.len(), 1, "the special read never consumes within_wait, even if already completed");
+    assert!(h.app.control_form_validation.is_empty());
+    let p = h.app.session.forms_prototype.as_ref().unwrap().control_positions()[0];
+    h.app.session.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[p.x,p.y,p.z+1.0]]})).unwrap();
+    let edited = solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap();
+    h.app.finish_control_answers_for_test().unwrap();
+    let answer = reply.recv().unwrap();
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert_eq!(answer["param_check"], "strict");
+    assert_eq!(answer["result"], expected, "an immutable old read is allowed to finish after a later edit");
+    assert_eq!(solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap(), edited);
+    assert_eq!(h.app.session.param_check, solidcraft_engine::schema::ParamCheck::Off);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn form_cad_control_waiting_preparation_refuses_changed_sources_documents_and_producer_errors() {
+    for case in 0..3 {
+        let (mut h, input) = form_validation_harness(false);
+        let reply =
+            request_form_validation(&mut h, "command", json!({"id":"form.prototype.validate","params":{"tolerance":0.01},"param_check":"warn"}));
+        assert_eq!(h.app.control_form_validation.len(), 1);
+        assert!(h.app.control_answering.is_empty());
+        match case {
+            0 => {
+                let p = h.app.session.forms_prototype.as_ref().unwrap().control_positions()[0];
+                h.app.session.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[p.x,p.y,p.z+1.0]]})).unwrap();
+            }
+            1 => {
+                h.app.session = solidcraft_engine::Session::default();
+                h.app
+                    .session
+                    .execute("form.prototype.create", &json!({"primitive":"face","dimensions":[8,8,1],"segments":[1,1,1],"levels":0}))
+                    .unwrap();
+            }
+            _ => {}
+        }
+        let stamp = solidcraft_engine::forms_prototype::validation::Stamp::current(&h.app.session).unwrap();
+        let before = solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap();
+        h.app.advance_form_validation_for_test(Some(&stamp), Some(&input), (case == 2).then_some("producer stopped"));
+        let answer = reply.recv().unwrap();
+        assert_eq!(answer["ok"], false, "case {case}: {answer}");
+        assert_eq!(answer["param_check"], "warn");
+        assert!(answer["error"].as_str().unwrap().contains(if case == 2 { "producer stopped" } else { "source changed" }));
+        assert!(h.app.control_form_validation.is_empty());
+        assert!(h.app.control_answering.is_empty());
+        assert_eq!(solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap(), before);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn form_cad_control_waiting_for_slots_keeps_the_original_ready_arc_and_ui_requests_answer() {
+    let (mut h, input) = form_validation_harness(true);
+    let expected =
+        serde_json::to_value(input.check(&solidcraft_engine::schema::forms_prototype::Validate { tolerance: Some(0.01) }).unwrap()).unwrap();
+    let held: Vec<_> = (0..4).map(|_| h.app.hold_form_answer_for_test(None)).collect();
+    let count = std::sync::Arc::strong_count(&input);
+    let reply = request_form_validation(&mut h, "engine.execute", json!({"command":"form.prototype.validate","params":{"tolerance":0.01}}));
+    assert_eq!(h.app.control_answering.len(), 4);
+    assert_eq!(h.app.control_form_validation.len(), 1);
+    assert!(std::sync::Arc::strong_count(&input) > count, "the awaiting read owns its prepared source");
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let inspect = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert_eq!(inspect.try_recv().unwrap()["ok"], true, "inspection answers while all answer slots are held");
+    assert_eq!(h.app.control_form_validation.len(), 1);
+    h.app.session.execute("form.prototype.close", &json!({})).unwrap();
+    let after = solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap();
+    for (done, _) in held {
+        done.send(Some(json!({"ok":true}))).unwrap();
+    }
+    h.app.finish_control_answers_for_test().unwrap();
+    h.app.advance_form_validation_for_test(None, None, None);
+    assert_eq!(h.app.control_answering.len(), 1, "a captured read does not retarget or refuse a later document");
+    h.app.finish_control_answers_for_test().unwrap();
+    let answer = reply.recv().unwrap();
+    assert_eq!(answer["result"], expected);
+    assert!(answer.get("param_check").is_none());
+    assert_eq!(solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap(), after);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn form_cad_control_awaiting_queue_is_bounded_and_cancelled_chats_never_launch() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let (mut h, input) = form_validation_harness(true);
+    let held: Vec<_> = (0..4).map(|_| h.app.hold_form_answer_for_test(None)).collect();
+    let turn = Arc::new(AtomicBool::new(true));
+    let mut replies = Vec::new();
+    for _ in 0..256 {
+        let (mut req, reply) = crate::ControlRequest::new("engine.execute", json!({"command":"form.prototype.validate","params":{}}));
+        req.chat_turn = Some(turn.clone());
+        assert!(h.app.offload_control(&egui::Context::default(), req).is_none());
+        replies.push(reply);
+    }
+    let overflow = request_form_validation(&mut h, "command", json!({"command":"form.prototype.validate","params":{},"param_check":"strict"}));
+    let answer = overflow.recv().unwrap();
+    assert_eq!(answer["ok"], false);
+    assert_eq!(answer["param_check"], "strict");
+    assert!(answer["error"].as_str().unwrap().contains("maximum 256"));
+    assert_eq!(h.app.control_form_validation.len(), 256);
+    assert_eq!(h.app.control_answering.len(), 4);
+    turn.store(false, Ordering::Relaxed);
+    let stamp = solidcraft_engine::forms_prototype::validation::Stamp::current(&h.app.session).unwrap();
+    h.app.advance_form_validation_for_test(Some(&stamp), Some(&input), None);
+    assert!(h.app.control_form_validation.is_empty());
+    for reply in replies {
+        assert_eq!(reply.recv().unwrap(), crate::control::cancelled_chat_response());
+    }
+    assert_eq!(h.app.control_answering.len(), 4, "none of the dropped chat reads starts a worker");
+    for (done, _) in held {
+        done.send(Some(json!({"ok":true}))).unwrap();
+    }
+    h.app.finish_control_answers_for_test().unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn form_cad_control_ticket_cancellation_drops_a_waiting_read() {
+    let (mut h, input) = form_validation_harness(true);
+    let held: Vec<_> = (0..4).map(|_| h.app.hold_form_answer_for_test(None)).collect();
+    let (req, reply) = crate::ControlRequest::new("engine.execute", json!({"command":"form.prototype.validate","params":{}}));
+    let ticket = req.ticket.clone();
+    assert!(h.app.offload_control(&egui::Context::default(), req).is_none());
+    assert_eq!(h.app.control_form_validation.len(), 1);
+
+    assert_eq!(ticket.cancel(), crate::control_job::Cancel::Stopped { writes_file: false });
+    let stamp = solidcraft_engine::forms_prototype::validation::Stamp::current(&h.app.session).unwrap();
+    h.app.advance_form_validation_for_test(Some(&stamp), Some(&input), None);
+    assert!(h.app.control_form_validation.is_empty());
+    assert_eq!(h.app.control_answering.len(), 4);
+    let cancelled = reply.try_recv().unwrap();
+    assert_eq!(cancelled["stopped"], true);
+    assert!(!cancelled["error"].as_str().unwrap().contains("file"));
+
+    for (done, _) in held {
+        done.send(Some(json!({"ok":true}))).unwrap();
+    }
+    h.app.finish_control_answers_for_test().unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn cancelled_form_cad_control_workers_drain_before_releasing_their_answer_slots() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let (mut h, _) = form_validation_harness(true);
+    let turn = Arc::new(AtomicBool::new(true));
+    let held: Vec<_> = (0..4).map(|_| h.app.hold_form_answer_for_test(Some(turn.clone()))).collect();
+    turn.store(false, Ordering::Relaxed);
+    let ctx = egui::Context::default();
+    h.app.poll_control_jobs(&ctx);
+    for (_, reply) in &held {
+        assert_eq!(reply.recv().unwrap(), crate::control::cancelled_chat_response());
+    }
+    h.app.poll_control_jobs(&ctx);
+    for (_, reply) in &held {
+        assert!(reply.try_recv().is_err(), "a chat cancellation is answered once");
+    }
+    assert_eq!(h.app.control_answering.len(), 4, "cancelled CPU jobs still own the four slots");
+    let reply = request_form_validation(&mut h, "engine.execute", json!({"command":"form.prototype.validate","params":{"tolerance":0.01}}));
+    assert_eq!(h.app.control_form_validation.len(), 1);
+    for (done, _) in held {
+        done.send(Some(json!({"ok":true}))).unwrap();
+    }
+    h.app.poll_control_jobs(&ctx);
+    assert!(h.app.control_form_validation.is_empty());
+    assert_eq!(h.app.control_answering.len(), 1);
+    h.app.finish_control_answers_for_test().unwrap();
+    assert_eq!(reply.recv().unwrap()["ok"], true);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn form_cad_control_spawn_failure_and_scope_metadata_errors_never_run_synchronously() {
+    let (mut h, _) = form_validation_harness(true);
+    let held: Vec<_> = (0..4).map(|_| h.app.hold_form_answer_for_test(None)).collect();
+    let before = solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap();
+    let root = h.dir.to_string_lossy().into_owned();
+    let reply = request_form_validation(
+        &mut h,
+        "command",
+        json!({"command":"form.prototype.validate","params":{},"allow_paths":[root],"param_check":"warn"}),
+    );
+    for (done, _) in held {
+        done.send(Some(json!({"ok":true}))).unwrap();
+    }
+    h.app.finish_control_answers_for_test().unwrap();
+    let scope = h.app.fail_form_validation_spawn_for_test().unwrap().unwrap();
+    assert!(scope.check(&root).is_ok(), "the original validated folder scope reaches the launcher");
+    let answer = reply.recv().unwrap();
+    assert_eq!(answer["ok"], false);
+    assert_eq!(answer["param_check"], "warn");
+    assert!(answer["error"].as_str().unwrap().contains("could not start"));
+    assert!(h.app.control_answering.is_empty());
+    assert!(h.app.control_form_validation.is_empty());
+    for (params, text) in [
+        (json!({"command":"form.prototype.validate","params":{},"allow_paths":false,"param_check":"strict"}), "allow_paths"),
+        (json!({"command":"form.prototype.validate","params":{},"allow_paths":false,"param_check":"loud"}), "param_check"),
+    ] {
+        let reply = request_form_validation(&mut h, "engine.execute", params).recv().unwrap();
+        assert_eq!(reply["ok"], false);
+        assert!(reply["error"].as_str().unwrap().contains(text));
+        assert!(reply.get("param_check").is_none(), "metadata errors match control::handle before dispatch_checked");
+    }
+    assert_eq!(solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap(), before);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn form_cad_control_checks_keep_canonical_schema_levels_and_headless_compatibility() {
+    use solidcraft_engine::schema::ParamCheck;
+    for (level, params) in [
+        (ParamCheck::Strict, json!({"tolerance":0.01})),
+        (ParamCheck::Strict, json!({"tolerence":0.01})),
+        (ParamCheck::Warn, json!({"tolerence":0.01})),
+        (ParamCheck::Off, json!({"tolerance":"invalid"})),
+    ] {
+        let (mut h, _) = form_validation_harness(true);
+        h.app.session.param_check = level;
+        let canonical = h.app.session.execute("form.prototype.validate", &params);
+        let before = solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap();
+        let reply = request_form_validation(
+            &mut h,
+            "engine.execute",
+            json!({"command":"form.prototype.validate","params":params,"param_check":level.name()}),
+        );
+        h.app.finish_control_answers_for_test().unwrap();
+        let answer = reply.recv().unwrap();
+        assert_eq!(answer["param_check"], level.name());
+        match canonical {
+            Ok(result) => {
+                assert_eq!(answer["ok"], true);
+                assert_eq!(answer["result"], result);
+            }
+            Err(error) => {
+                assert_eq!(answer["ok"], false);
+                assert_eq!(answer["error"], error.to_string());
+            }
+        }
+        assert_eq!(h.app.session.param_check, level);
+        assert_eq!(solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap(), before);
+    }
+    let (mut h, _) = form_validation_harness(false);
+    h.app.apply_off_thread = None;
+    let (req, reply) = crate::ControlRequest::new("engine.execute", json!({"command":"form.prototype.validate","params":{"tolerance":0.01}}));
+    let req = h.app.offload_control(&egui::Context::default(), req).expect("headless callers keep the existing direct execution path");
+    h.app.run_control(&egui::Context::default(), req);
+    assert_eq!(reply.recv().unwrap()["ok"], true);
+    assert!(h.app.control_form_validation.is_empty());
+    assert!(h.app.control_answering.is_empty());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn form_cad_control_honours_the_scoped_host_check_once_and_restores_effective_parameters() {
+    use solidcraft_engine::schema::ParamCheck;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    for panic in [false, true] {
+        let (mut h, _) = form_validation_harness(true);
+        let root = h.dir.to_string_lossy().into_owned();
+        let folder = root.clone();
+        let uid = h.app.session.uid;
+        let source = h.app.session.forms_prototype.as_ref().unwrap().source_revision();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let called = calls.clone();
+        h.app.session.set_command_check(Some(Arc::new(move |id, params, session| {
+            called.fetch_add(1, Ordering::Relaxed);
+            assert_eq!(id, "form.prototype.validate");
+            assert_eq!(params, &json!({"tolerance":0.01}));
+            assert_eq!(session.uid, uid);
+            assert_eq!(session.forms_prototype.as_ref().unwrap().source_revision(), source);
+            assert_eq!(session.param_check, ParamCheck::Strict);
+            assert!(solidcraft_engine::io::vfs::current_scope().unwrap().check(&folder).is_ok());
+            if panic {
+                panic!("deliberate host query check panic");
+            }
+            Err("host policy refused this CAD check".into())
+        })));
+        let before = solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap();
+        let answer = request_form_validation(
+            &mut h,
+            "engine.execute",
+            json!({"command":"form.prototype.validate","params":{"tolerance":0.01},"allow_paths":[root],"param_check":"strict"}),
+        )
+        .recv()
+        .unwrap();
+        assert_eq!(answer["ok"], false);
+        assert_eq!(answer["param_check"], "strict");
+        assert!(answer["error"].as_str().unwrap().contains(if panic { "host's command check failed" } else { "host policy refused" }));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(h.app.session.param_check, ParamCheck::Off);
+        assert!(h.app.control_answering.is_empty());
+        assert!(h.app.control_form_validation.is_empty());
+        assert!(solidcraft_engine::io::vfs::current_scope().is_none());
+        assert_eq!(solidcraft_engine::recovery::capture_bytes(&h.app.session).unwrap(), before);
+    }
 }

@@ -42,7 +42,7 @@
 //!   `p` is one of multiplicity `m + q − p` at degree `q`, NURBS Book §5.5), and the breaks
 //!   refinement adds are simple knots, so the fill is as smooth across them as its degree allows.
 //!   The degree is the sides' highest, and at least one more than the highest continuity order
-//!   n asked (G1 quadratic … G4 quintic), so the fill's own derivatives up to order n are
+//!   n asked (G1 quadratic … G4 quintic), and at least quadratic for guide points, so the fill's own derivatives up to order n are
 //!   continuous across the knots refinement adds.
 //! - **The start**: each patch is the bilinearly blended Coons patch of its sides (S. A. Coons,
 //!   1967), built on the Greville abscissae (a linear function is reproduced exactly there), the
@@ -163,6 +163,138 @@ const GAUSS6: [(f64, f64); 6] = [
     (0.661_209_386_466_265, 0.360_761_573_048_139),
     (0.932_469_514_203_152, 0.171_324_492_379_170),
 ];
+
+/// One exact homogeneous curve on its share of a directed quad rim side.
+/// The curve itself runs on [0, 1].
+pub type QuadCapPiece = ([f64; 2], crate::bspline::CurveN<4>);
+
+const CAP_MAX_PIECES: usize = 64;
+const CAP_MAX_AXIS_CONTROLS: usize = 256;
+const CAP_JOIN_MM: f64 = 1e-9;
+
+/// A single G0 tensor cap for four explicit, ordered source sides. The cap
+/// walks the sides around its unit square. Its boundary rows are exact
+/// embeddings of the supplied curves. No rim curve is fitted or sampled
+/// to determine its identity, shape or parameterization.
+pub fn quad_cap(sides: [&[QuadCapPiece]; 4]) -> SplineResult<NurbsSurface> {
+    if sides.iter().any(|side| side.is_empty() || side.len() > CAP_MAX_PIECES) || sides.iter().map(|side| side.len()).sum::<usize>() > CAP_MAX_PIECES
+    {
+        return invalid("quad cap needs four complete bounded sides");
+    }
+    let mut curves = Vec::with_capacity(4);
+    let mut first = None;
+    let mut previous = None;
+    for (index, side) in sides.into_iter().enumerate() {
+        let degree = side.iter().map(|(_, curve)| curve.degree).max().unwrap_or(0);
+        if !(1..=MAX_SPLINE_DEGREE).contains(&degree) {
+            return invalid("invalid quad cap curve degree");
+        }
+        let mut knots = vec![0.0; degree + 1];
+        let mut points = Vec::new();
+        let mut end = 0.0;
+        for (piece, ([a, b], curve)) in side.iter().enumerate() {
+            if *a != end
+                || !(a < b && *b <= 1.0)
+                || curve.degree > degree
+                || curve.ctrl.len() > CAP_MAX_AXIS_CONTROLS
+                || curve.knots.len() != curve.ctrl.len() + curve.degree + 1
+            {
+                return invalid("quad cap curve pieces must partition a bounded unit side");
+            }
+            let space = Space::new(curve.degree, curve.knots.clone())?;
+            if space.domain() != [0.0, 1.0] {
+                return invalid("quad cap piece has a non-unit curve domain");
+            }
+            let mut row: Vec<_> = curve.ctrl.iter().map(|&[x, y, z, w]| HPoint { x, y, z, w }).collect();
+            if row.iter().any(|p| !p.is_finite() || p.w <= 0.0 || p.project().is_none()) {
+                return invalid("quad cap curve needs positive finite homogeneous controls");
+            }
+            let start = *row.first().ok_or_else(|| SplineError::Invalid("empty quad cap curve".into()))?;
+            if previous.is_some_and(|old: HPoint| !cap_join(old, start, false)) {
+                return invalid("quad cap boundary pieces do not meet");
+            }
+            let scale = previous.map_or(1.0, |old: HPoint| old.w) / start.w;
+            for p in &mut row {
+                *p = *p * scale;
+            }
+            if row.iter().any(|p| !p.is_finite() || p.w <= 0.0 || p.project().is_none()) {
+                return invalid("quad cap weights cannot be normalized");
+            }
+            first = first.or_else(|| row.first().copied());
+            previous = row.last().copied();
+            let space = if curve.degree == degree {
+                space
+            } else {
+                let raised = Space::polynomial(degree, 0.0, 1.0)?;
+                row = crate::spline_space::embed(&space, &row, &raised)?;
+                raised
+            };
+            if points.len().saturating_add(row.len()) > CAP_MAX_AXIS_CONTROLS + usize::from(piece > 0) {
+                return Err(SplineError::TooLarge("quad cap side exceeds the control budget".into()));
+            }
+            knots.extend(space.knots()[degree + 1..space.count()].iter().map(|&k| a + (b - a) * k));
+            knots.extend(std::iter::repeat_n(*b, degree + usize::from(piece + 1 == side.len())));
+            points.extend(row.into_iter().skip(usize::from(piece > 0)));
+            end = *b;
+        }
+        if end != 1.0 {
+            return invalid("quad cap boundary side is incomplete");
+        }
+        if index >= 2 {
+            knots = knots.into_iter().rev().map(|k| 1.0 - k).collect();
+            points.reverse();
+        }
+        curves.push(Curve { space: Space::new(degree, knots)?, points });
+    }
+    if !first.zip(previous).is_some_and(|(a, b)| cap_join(a, b, true)) {
+        return invalid("quad cap boundary positions or weights do not close");
+    }
+    let [bottom, right, top, left]: [Curve; 4] = curves.try_into().map_err(|_| SplineError::Invalid("quad cap side count".into()))?;
+    let (u, [bottom, top]) = cap_rows(bottom, top)?;
+    let (v, [left, right]) = cap_rows(left, right)?;
+    let patch = coons([u, v], &bottom, &top, &left, &right, false)?;
+    if folds(&patch) {
+        return invalid("quad cap has a folded or singular chart");
+    }
+    patch.surface()
+}
+
+fn cap_join(a: HPoint, b: HPoint, compare_weights: bool) -> bool {
+    a.project().zip(b.project()).is_some_and(|(a, b)| a.dist(b) <= CAP_JOIN_MM)
+        && (!compare_weights || (a.w - b.w).abs() <= 256.0 * f64::EPSILON * a.w.max(b.w))
+}
+
+fn cap_rows(a: Curve, b: Curve) -> SplineResult<(Space, [Vec<HPoint>; 2])> {
+    let degree = a.space.degree().max(b.space.degree());
+    let mut breaks: Vec<(f64, usize)> = Vec::new();
+    for row in [&a, &b] {
+        // embed raises only a single Bezier piece. Keep the exact refusal for
+        // an opposite side that would require general spline degree elevation.
+        if row.space.degree() != degree && row.space.count() != row.space.degree() + 1 {
+            return invalid("quad cap opposite sides have incompatible spline degrees");
+        }
+        for (knot, multiplicity) in interior_knots(&row.space) {
+            if let Some((_, count)) = breaks.iter_mut().find(|(k, _)| *k == knot) {
+                *count = (*count).max(multiplicity);
+            } else {
+                breaks.push((knot, multiplicity));
+            }
+        }
+    }
+    if degree + 1 + breaks.iter().map(|(_, count)| *count).sum::<usize>() > CAP_MAX_AXIS_CONTROLS {
+        return Err(SplineError::TooLarge("quad cap tensor axis exceeds the control budget".into()));
+    }
+    breaks.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut knots = vec![0.0; degree + 1];
+    for (knot, count) in breaks {
+        knots.extend(std::iter::repeat_n(knot, count));
+    }
+    knots.extend(std::iter::repeat_n(1.0, degree + 1));
+    let space = Space::new(degree, knots)?;
+    let a = crate::spline_space::embed(&a.space, &a.points, &space)?;
+    let b = crate::spline_space::embed(&b.space, &b.points, &space)?;
+    Ok((space, [a, b]))
+}
 
 /// One edge of the loop: a B-spline from the loop's corner before it to the one after (the
 /// loop's direction), rational when it has weights.
@@ -1272,7 +1404,7 @@ struct Station {
 }
 
 impl Station {
-    /// The continuity order its conditions ask: 1 (G1) … 4 (G4).
+    /// The continuity order its conditions ask: 0 at incompatible corners, else G1 … G4.
     fn order(&self) -> usize {
         self.order
     }
@@ -1280,7 +1412,7 @@ impl Station {
 
 /// What a station asks, by how near it is to corners whose neighbours agree to less (see
 /// [`corner_orders`]): within [`CLASH_SHARE`] of such a corner the orders above the corner's
-/// agreement (at least G1) are not asked, and over the next [`CLASH_SHARE`] they come back
+/// agreement are not asked, and over the next [`CLASH_SHARE`] they come back
 /// smoothly (`fade` from 0 to 1, a smoothstep), so the fill is not strained where they start;
 /// where the corner's tangent planes disagree the station is not held to the angle tolerance.
 struct Asked {
@@ -1300,7 +1432,7 @@ impl Asked {
             if distance >= 2.0 * CLASH_SHARE {
                 continue;
             }
-            a.full = a.full.min(agreed.max(1));
+            a.full = a.full.min(agreed);
             let x = ((distance - CLASH_SHARE) / CLASH_SHARE).clamp(0.0, 1.0);
             a.fade = a.fade.min(x * x * (3.0 - 2.0 * x));
             if agreed == 0 && distance < CLASH_SHARE {
@@ -1476,7 +1608,11 @@ pub fn iso_fill(
     if order > MAX_CONTINUITY {
         return invalid(format!("a patch's continuity is at most G{MAX_CONTINUITY}"));
     }
-    let degree = if order == 0 { 1 } else { (order + 1).min(MAX_SPLINE_DEGREE) };
+    // A linear patch has no free interior until it is refined, but its new C0 knots
+    // are constrained tangent below. A tangent-continuous piecewise-linear field is
+    // still globally bilinear, so it cannot follow any off-surface guide. Quadratics
+    // allow a smooth interior without changing the exact boundary rows.
+    let degree = (order + 1).max(if spec.points.is_empty() { 1 } else { 2 }).min(MAX_SPLINE_DEGREE);
     if !(spec.corner_turn.is_finite() && spec.corner_turn >= 0.0) {
         return invalid("the corner turn must be a finite angle");
     }
@@ -1515,6 +1651,17 @@ pub fn iso_fill(
         let refine = refinable(&spans, wanted, shared, quilt.unknowns);
         if !wanted.iter().any(|w| *w) || (must && !refine) {
             let quilt = crowned(quilt, &stations, spec.crown, size)?;
+            let report = if spec.crown == 0.0 {
+                report
+            } else {
+                let located: Vec<_> = spec.points.iter().map(|point| nearest(&quilt, *point)).collect();
+                let count = quilt.patches.iter().map(|patch| station_count(&patch.spaces[0])).max().unwrap_or(0);
+                let (report, _) = measure(&quilt, &stations, spec.points, &located, count)?;
+                if report.point_deviation > spec.tol {
+                    return invalid("the crowned fill does not meet the guide tolerance");
+                }
+                report
+            };
             return finished(quilt, report);
         }
         if !refine {
@@ -1695,7 +1842,10 @@ fn stations(
 /// The fill's free control points by least squares (module docs), and what they achieve.
 fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult<(Quilt, Achieved, Along)> {
     if quilt.unknowns == 0 {
-        return Ok((quilt, Achieved::default(), Along::default()));
+        let located = spec.points.iter().map(|point| nearest(&quilt, *point)).collect::<Vec<_>>();
+        let count = quilt.patches.iter().map(|patch| station_count(&patch.spaces[0])).max().unwrap_or(0);
+        let (report, along) = measure(&quilt, stations, spec.points, &located, count)?;
+        return Ok((quilt, report, along));
     }
     let most = Quilt::most_unknowns(!quilt.spokes.is_empty());
     if quilt.unknowns > most {
@@ -1712,6 +1862,13 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
     let span = |p: &Patch| p.spaces.clone().map(|s| 1.0 / breaks(&s).len().saturating_sub(1).max(1) as f64);
     let rounds = if top >= 2 { ROUNDS_PER_ORDER * top } else { ROUNDS };
     let smooth = knot_line_rows(&quilt, spec.angle_tol)?;
+    // The fairing term resolves the conditions' null space. Its bias must be
+    // smaller than the requested guide accuracy, including on large parts or at
+    // tighter tolerances; refining the same biased problem cannot fix that bias.
+    let mut points = quilt.patches.iter().flat_map(|patch| patch.net.iter().copied()).chain(spec.points.iter().copied());
+    let first = points.next().unwrap_or(Vec3::ZERO);
+    let (lo, hi) = points.fold((first, first), |(lo, hi), point| (lo.min(point), hi.max(point)));
+    let regularization = if spec.points.is_empty() { 1e-7 } else { 1e-7f64.min(0.01 * spec.tol / lo.dist(hi).max(spec.tol)) };
     for round in 0..rounds {
         let mut rows: Vec<Row> = smooth.clone();
         for s in stations {
@@ -1748,7 +1905,8 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
             let Some(on) = quilt.patches.get(*patch) else { continue };
             on_each_axis(&mut rows, &[(*patch, on.row(uv[0], uv[1], 0, 0)?)], *p, 1.0);
         }
-        let solved = least_squares(&quilt, &rows, &energy)?;
+
+        let solved = least_squares(&quilt, &rows, &energy, regularization)?;
         quilt.set(&solved);
         located = spec.points.iter().map(|p| nearest(&quilt, *p)).collect();
         (report, along) = measure(&quilt, stations, spec.points, &located, spoke_count)?;
@@ -1834,9 +1992,10 @@ fn linkage_rows(rows: &mut Vec<Row>, patch: &Patch, s: &Station, span: f64) -> S
         })
         .collect::<SplineResult<_>>()?;
     let Some(first) = derivative.first() else { return Ok(()) };
-    rows.push(Row { terms: along(s.patch, first, n), value: 0.0, weight: 1.0 });
+    let fade = if s.full >= 1 { 1.0 } else { s.fade };
+    rows.push(Row { terms: along(s.patch, first, n), value: 0.0, weight: fade });
     for (dir, value) in [(w, s.speed), (t, s.slide)] {
-        rows.push(Row { terms: along(s.patch, first, dir), value, weight: HERMITE_WEIGHT });
+        rows.push(Row { terms: along(s.patch, first, dir), value, weight: fade * HERMITE_WEIGHT });
     }
     let Some(jet) = s.across.jet else { return Ok(()) };
     let c = linkage(patch, s, jet.order)?;
@@ -1928,7 +2087,7 @@ fn gram(s: &Space, m: usize) -> SplineResult<Vec<Vec<Vec<f64>>>> {
 
 /// The free points minimising the weighted rows' squares plus a vanishing multiple of the
 /// patches' energy, the loop's rows held: the normal equations, solved by Cholesky.
-fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>]) -> SplineResult<Vec<Vec3>> {
+fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>], regularization: f64) -> SplineResult<Vec<Vec3>> {
     let dim = 3 * quilt.unknowns;
     let slot = |p: usize, flat: usize| quilt.slots.get(p).and_then(|s| s.get(flat)).copied().flatten();
     let mut a = if quilt.spokes.is_empty() { Normal::new(dim, bandwidth(quilt, rows, energy)) } else { Normal::Blocks(BlockNormal::new(quilt)) };
@@ -1966,7 +2125,7 @@ fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>
     // The energy decides what the rows leave free; with no rows it is all there is.
     let energy_trace: f64 =
         energy.iter().enumerate().flat_map(|(p, e)| e.iter().filter(move |(x, y, _)| x == y && slot(p, *x).is_some())).map(|(_, _, e)| 3.0 * e).sum();
-    let lambda = if condition_trace > 0.0 && energy_trace > 0.0 { 1e-7 * condition_trace / energy_trace } else { 1.0 };
+    let lambda = if condition_trace > 0.0 && energy_trace > 0.0 { regularization * condition_trace / energy_trace } else { 1.0 };
     for (p, entries) in energy.iter().enumerate() {
         for &(f, g, e) in entries {
             let Some(x) = slot(p, f) else { continue };

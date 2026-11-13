@@ -187,9 +187,11 @@ fn nurbs(s: Surface, u_in: f32, v_in: f32) -> Derivs {
     let su = span_of(s.knots_u, s.pu, s.nu, u);
     let sv = span_of(s.knots_v, s.pv, s.nv, v);
     let bu0 = basis_funs(s.knots_u, su, s.pu, u);
-    let bu1 = basis_ders(s.knots_u, su, s.pu, u);
+    var bu1: array<f32, W>;
+    if (s.pu > 0u) { bu1 = basis_funs(s.knots_u, su, s.pu - 1u, u); }
     let bv0 = basis_funs(s.knots_v, sv, s.pv, v);
-    let bv1 = basis_ders(s.knots_v, sv, s.pv, v);
+    var bv1: array<f32, W>;
+    if (s.pv > 0u) { bv1 = basis_funs(s.knots_v, sv, s.pv - 1u, v); }
     var a = vec4<f32>(0.0);
     var au = vec4<f32>(0.0);
     var av = vec4<f32>(0.0);
@@ -199,8 +201,33 @@ fn nurbs(s: Surface, u_in: f32, v_in: f32) -> Derivs {
         while (i <= s.pu) {
             let c = ctrl_at(s.ctrl + 4u * ((sv + j - s.pv) * s.nu + su + i - s.pu));
             a = a + bu0[i] * bv0[j] * c;
-            au = au + bu1[i] * bv0[j] * c;
-            av = av + bu0[i] * bv1[j] * c;
+            i = i + 1u;
+        }
+        j = j + 1u;
+    }
+
+    // Differentiate control points before summing. Constant collapsed pole
+    // rows then have exactly zero tangent instead of cancelling large terms.
+    j = 0u;
+    while (j <= s.pv) {
+        var i = 0u;
+        while (i < s.pu) {
+            let ix = su + i - s.pu;
+            let k = (sv + j - s.pv) * s.nu + ix;
+            let den = data[s.knots_u + ix + s.pu + 1u] - data[s.knots_u + ix + 1u];
+            if (den > 0.0) { au = au + bu1[i] * bv0[j] * (f32(s.pu) / den) * (ctrl_at(s.ctrl + 4u * (k + 1u)) - ctrl_at(s.ctrl + 4u * k)); }
+            i = i + 1u;
+        }
+        j = j + 1u;
+    }
+    j = 0u;
+    while (j < s.pv) {
+        var i = 0u;
+        while (i <= s.pu) {
+            let iy = sv + j - s.pv;
+            let k = iy * s.nu + su + i - s.pu;
+            let den = data[s.knots_v + iy + s.pv + 1u] - data[s.knots_v + iy + 1u];
+            if (den > 0.0) { av = av + bu0[i] * bv1[j] * (f32(s.pv) / den) * (ctrl_at(s.ctrl + 4u * (k + s.nu)) - ctrl_at(s.ctrl + 4u * k)); }
             i = i + 1u;
         }
         j = j + 1u;
@@ -292,6 +319,101 @@ fn oriented(s: Surface, n: vec3<f32>) -> vec3<f32> {
     return n;
 }
 
+// A scale-free direction and the sine between the tangents. Normalize
+// components before crossing: tiny valid tangents must not become a +Z pole.
+fn stable_normal(a: vec3<f32>, b: vec3<f32>) -> vec4<f32> {
+    let sa = max(max(abs(a.x), abs(a.y)), abs(a.z));
+    let sb = max(max(abs(b.x), abs(b.y)), abs(b.z));
+    if (!(sa > 0.0) || !(sb > 0.0)) { return vec4<f32>(0.0); }
+    let ua = a / sa;
+    let ub = b / sb;
+    let n = cross(ua, ub);
+    let sn = max(max(abs(n.x), abs(n.y)), abs(n.z));
+    if (!(sn > 0.0)) { return vec4<f32>(0.0); }
+    // Scale again before squaring components so a small angle does not
+    // underflow the normal's length. A regular patch can have nearly parallel tangents.
+    let scaled = n / sn;
+    let size = length(scaled);
+    if (!(size > 0.0)) { return vec4<f32>(0.0); }
+    let sine = sn * size / (length(ua) * length(ub));
+    return vec4<f32>(scaled / size, sine);
+}
+
+fn available_step(s: Surface, uv: vec2<f32>, positive: vec2<bool>, nominal: f32) -> f32 {
+    if (s.kind == NURBS) {
+        let lo = vec2<f32>(data[s.knots_u + s.pu], data[s.knots_v + s.pv]);
+        let hi = vec2<f32>(data[s.knots_u + s.nu], data[s.knots_v + s.nv]);
+        let room = select(uv - lo, hi - uv, positive);
+        return min(room.x, room.y);
+    }
+    if (s.kind == REVOLVED) {
+        let t = select(uv.x, uv.y, s.swap != 0u);
+        let forward = select(positive.x, positive.y, s.swap != 0u);
+        return select(t - data[s.knots_u + s.pu], data[s.knots_u + s.nu] - t, forward);
+    }
+    return nominal * 64.0;
+}
+
+// A geometric pole may have different homogeneous weights along its clamped
+// boundary. Do not turn quotient roundoff into a normal after placement. Only
+// degree+1 controls of the active span are inspected, at most W per direction.
+fn collapsed_boundary(s: Surface, u: f32, v: f32) -> bool {
+    if (s.kind != NURBS) { return false; }
+    var d = 0u;
+    while (d < 2u) {
+        let k0 = select(s.knots_u, s.knots_v, d != 0u);
+        let p = select(s.pu, s.pv, d != 0u);
+        let n = select(s.nu, s.nv, d != 0u);
+        let t = select(u, v, d != 0u);
+        let along_v = d != 0u;
+        d = d + 1u;
+        var row = 0u;
+        var inward = 1u;
+        var clamped = true;
+        var j = 0u;
+        if (t == data[k0 + p]) {
+            while (j <= p) {
+                clamped = clamped && data[k0 + j] == t;
+                j = j + 1u;
+            }
+        } else if (t == data[k0 + n]) {
+            row = n - 1u;
+            inward = row - 1u;
+            while (j <= p) {
+                clamped = clamped && data[k0 + n + j] == t;
+                j = j + 1u;
+            }
+        } else { continue; }
+        if (!clamped) { continue; }
+        let po = select(s.pv, s.pu, along_v);
+        let no = select(s.nv, s.nu, along_v);
+        let ko = select(s.knots_v, s.knots_u, along_v);
+        let to = select(v, u, along_v);
+        let span = span_of(ko, po, no, to);
+        var anchor = vec3<f32>(0.0);
+        var scale = 0.0;
+        var deviation = 0.0;
+        var valid = true;
+        j = 0u;
+        while (j <= po) {
+            let i = span + j - po;
+            let index = select(i * s.nu + row, row * s.nu + i, along_v);
+            let next_index = select(i * s.nu + inward, inward * s.nu + i, along_v);
+            let h = ctrl_at(s.ctrl + 4u * index);
+            let next = ctrl_at(s.ctrl + 4u * next_index);
+            if (h.w == 0.0 || next.w == 0.0) { valid = false; break; }
+            let point = h.xyz / h.w;
+            if (j == 0u) { anchor = point; }
+            let delta = abs(point - anchor);
+            let local = abs(next.xyz / next.w - point);
+            deviation = max(deviation, max(max(delta.x, delta.y), delta.z));
+            scale = max(scale, max(max(local.x, local.y), local.z));
+            j = j + 1u;
+        }
+        if (valid && deviation <= 7.62939453125e-6 * scale) { return true; }
+    }
+    return false;
+}
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
@@ -301,30 +423,42 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let vert = vertices[i];
     let s = surfaces[vert.surface];
     let d = derivs(s, vert.u, vert.v);
-    var n = oriented(s, cross(d.du, d.dv));
-    let scale = length(d.du) * length(d.dv);
-    if (!(length(n) > 1e-6 * scale) || !d.ok) {
-        // A degenerate point (a pole): the normal from a step inside.
+    var n = oriented(s, stable_normal(d.du, d.dv).xyz);
+    if (collapsed_boundary(s, vert.u, vert.v)) { n = vec3<f32>(0.0); }
+    if (!(dot(n, n) > 0.0) || !d.ok) {
+        // The first interior normal can be ill-conditioned at a higher-order
+        // pole. Require agreement across bounded increasing interior steps.
         let h = 1e-4 * (1.0 + max(abs(vert.u), abs(vert.v)));
-        // Steps (h, h), (-h, h), (h, -h), (-h, -h), without an array indexed by k (FXC).
+        var found = false;
         var k = 0u;
-        var searching = true;
-        while (searching && k < 4u) {
-            let du = select(h, -h, (k & 1u) != 0u);
-            let dv = select(h, -h, (k & 2u) != 0u);
-            let e = derivs(s, vert.u + du, vert.v + dv);
-            let m = oriented(s, cross(e.du, e.dv));
-            if (e.ok && length(m) > 0.0) {
-                n = m;
-                searching = false;
-            }
+        while (k < 4u) {
+            let positive = vec2<bool>((k & 1u) == 0u, (k & 2u) == 0u);
+            let room = available_step(s, vec2<f32>(vert.u, vert.v), positive, h);
             k = k + 1u;
+            if (!(room > 0.0)) { continue; }
+            var step = min(h, room / 64.0);
+            var previous = vec3<f32>(0.0);
+            var attempt = 0u;
+            while (attempt < 6u) {
+                let delta = select(vec2<f32>(-step), vec2<f32>(step), positive);
+                let e = derivs(s, vert.u + delta.x, vert.v + delta.y);
+                let m = stable_normal(e.du, e.dv);
+                if (e.ok && dot(m.xyz, m.xyz) > 0.0) {
+                    if (m.w > 1e-2 || (dot(previous, previous) > 0.0 && distance(previous, m.xyz) < 1e-3)) {
+                        n = oriented(s, m.xyz);
+                        found = true;
+                        break;
+                    }
+                    previous = m.xyz;
+                }
+                step = step * 2.0;
+                attempt = attempt + 1u;
+            }
+            if (found) { break; }
         }
     }
     var nn = vec3<f32>(0.0, 0.0, 1.0);
-    if (length(n) > 0.0) {
-        nn = normalize(n);
-    }
+    if (dot(n, n) > 0.0) { nn = n; }
     if ((vert.flags & 1u) != 0u) {
         nn = -nn;
     }

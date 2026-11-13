@@ -386,6 +386,7 @@ impl FileAction {
             Self::ClearRecent => !app.home.recent.is_empty(),
             Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
+            Self::Command("document.metadata") => app.session.forms_prototype.is_none(),
             _ => true,
         };
         !app.file_picker_busy() && !app.file_load_holds() && !behind_report && (!needs_design || design_shown(app)) && available
@@ -599,6 +600,10 @@ pub(crate) fn provenance_params(app: &SolveApp) -> Value {
 }
 
 pub fn save(app: &mut SolveApp) {
+    if app.session.forms_prototype.is_some() {
+        app.set_status(app.tr("forms.prototype.finish_before_save").to_owned(), true);
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
@@ -630,6 +635,10 @@ fn save_as_with_extension(app: &mut SolveApp, extension: &str) {
 }
 
 pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
+    if app.session.forms_prototype.is_some() {
+        app.set_status(app.tr("forms.prototype.finish_before_save").to_owned(), true);
+        return;
+    }
     // The Capture Position question first, as Save asks it: the file can't hold a move not
     // captured yet (#9736).
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
@@ -661,6 +670,10 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
 
 /// File > Download design (browser build): the open design as a `.sc` file download.
 pub(crate) fn download_design(app: &mut SolveApp) {
+    if app.session.forms_prototype.is_some() {
+        app.set_status(app.tr("forms.prototype.finish_before_save").to_owned(), true);
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::DOWNLOAD.into());
         return;
@@ -2401,6 +2414,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     for (k, repeat, mods) in keys {
         use egui::Key;
+        if crate::forms_prototype::shortcut(app, ctx, k, mods) {
+            continue;
+        }
+        if mods.is_none() && crate::forms_prototype::owns_key(app, k) {
+            continue;
+        }
         // Only Esc pressed twice in a row finishes a sketch: any other key in between resets it.
         if k != Key::Escape {
             app.last_escape = None;
@@ -2758,6 +2777,19 @@ mod header_report_tests {
         let name = offered.borrow().last().map(|(n, _)| n.clone()).unwrap();
         assert!(name.ends_with(".sc"), "Save As offers .sc: {name}");
         assert!(h.dir.join(&name).is_file() && old.is_file(), "Save As leaves the .solidcraft file as it was");
+    }
+
+    #[test]
+    fn active_form_refuses_save_as_before_requesting_a_path() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.pick_save = Some(Box::new(|_, _| panic!("unfinished Forms must be refused before a path is requested")));
+        h.app.run("form.prototype.create", json!({"primitive":"box"})).unwrap();
+        save_as_named(&mut h.app, "Draft", solidcraft_engine::io::DESIGN_EXT);
+        let (message, _, error) = h.app.status.as_ref().unwrap();
+        assert!(*error);
+        assert_eq!(message, h.app.tr("forms.prototype.finish_before_save"));
+        assert!(h.app.file_picker.is_none());
+        assert!(h.app.tree.capture_prompt.is_none());
     }
 
     /// #8329: Save As (and Save a Copy) offer the name of the file the design came from, not the

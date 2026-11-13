@@ -12,7 +12,9 @@ pub mod eval;
 pub mod form;
 pub mod normal_section;
 pub mod placement;
+pub mod ray;
 mod split;
+pub use solidcore_ops::pcurve;
 pub use split::split_edges;
 
 #[cfg(test)]

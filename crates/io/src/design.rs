@@ -32,6 +32,9 @@ use crate::{IoError, Result, design_metadata::replace};
 const VERSION: &str = "solidcraft-container/1";
 const LEGACY_VERSION: &str = "solvecraft-container/1";
 const PREVIEW_VERSION: &str = "solidcraft-preview/1";
+const FORM_DRAFT_ENTRY: &str = "recovery/form.json";
+/// Maximum expanded size of the editor source in a recovery package.
+pub const MAX_FORM_DRAFT_BYTES: usize = 64 << 20;
 const MAX_ENTRIES: usize = 10_000;
 /// The design file limit in force ([`crate::limits`]): the largest design file read or saved.
 fn max_design() -> usize {
@@ -138,7 +141,9 @@ impl std::ops::DerefMut for PackageWriter {
 /// The uncompressed size a part may have. STEP and mesh blobs may be larger than the
 /// design file because they are stored compressed when they would not fit otherwise.
 fn part_limit(name: &str) -> usize {
-    if name.ends_with(".step") {
+    if name == FORM_DRAFT_ENTRY {
+        MAX_FORM_DRAFT_BYTES
+    } else if name.ends_with(".step") {
         max_step_part()
     } else if name.ends_with(".mesh") {
         max_mesh_part()
@@ -204,7 +209,13 @@ pub fn write_design_container_with_thumbnail(
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None)
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), ContainerContents::Design)
+}
+
+/// Write an autosave. The recovery-only editor data and base design are in the
+/// same package so a single atomic replacement can never mix their revisions.
+pub fn write_recovery_container(doc: &Document, draft: Option<&[u8]>) -> Result<Vec<u8>> {
+    write_container(doc, DesignCompression::Fast, None, None, None, max_design(), ContainerContents::Recovery(draft))
 }
 
 /// Write a container with one signed provenance record appended to `save.chain` (see
@@ -219,11 +230,16 @@ pub fn write_design_container_with_provenance(
     save: &ProvenanceSave<'_>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_provenance");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save))
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), ContainerContents::Signed(save))
 }
 
-/// The common container writer. `provenance` records a signed record when present; the budget
-/// bounds the optional caches (tests pass less).
+enum ContainerContents<'a> {
+    Design,
+    Recovery(Option<&'a [u8]>),
+    Signed(&'a ProvenanceSave<'a>),
+}
+
+/// The common container writer. The budget bounds the optional caches (tests pass less).
 fn write_container(
     doc: &Document,
     compression: DesignCompression,
@@ -231,11 +247,11 @@ fn write_container(
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
     budget: usize,
-    provenance: Option<&ProvenanceSave<'_>>,
+    contents: ContainerContents<'_>,
 ) -> Result<Vec<u8>> {
     doc.render.validate().map_err(invalid)?;
     let mut writer = PackageWriter::new();
-    if provenance.is_some() {
+    if matches!(contents, ContainerContents::Signed(_)) {
         writer.track_parts(provenance::is_authoritative);
     }
     let mut features = Vec::with_capacity(doc.features.len());
@@ -334,7 +350,7 @@ fn write_container(
     for (name, bytes) in doc.newer_file.iter().flat_map(|file| &file.parts) {
         // A signed save writes the chain the caller carries; older raw records cannot be checked
         // here, so they are replaced rather than kept beside the new entry.
-        if provenance.is_some() && name.starts_with("provenance/") {
+        if matches!(contents, ContainerContents::Signed(_)) && name.starts_with("provenance/") {
             continue;
         }
         writer.part(name, bytes, true)?;
@@ -345,8 +361,10 @@ fn write_container(
     }
     // The signature binds every authoritative part written above (never the optional caches), and
     // is written before them so their budget sees its bytes.
-    if let Some(save) = provenance {
-        provenance::write(save, &mut writer, &metadata, &container_bytes, &doc.format, &doc.format_pending)?;
+    match contents {
+        ContainerContents::Recovery(Some(draft)) => writer.part(FORM_DRAFT_ENTRY, draft, true)?,
+        ContainerContents::Signed(save) => provenance::write(save, &mut writer, &metadata, &container_bytes, &doc.format, &doc.format_pending)?,
+        ContainerContents::Design | ContainerContents::Recovery(None) => {}
     }
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
     // left out, never a failed save. Encoding it is a save's longest step: not begun once cancelled.
@@ -797,6 +815,27 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
     DesignContainerReader::new(Cursor::new(bytes))?.read_document()
 }
 
+/// Whether a recovery container holds an unfinished Form draft. This reads
+/// only the bounded part directory, without hydrating design or draft data.
+pub fn has_form_recovery_draft(bytes: &[u8]) -> Result<bool> {
+    if !is_design_container(bytes) {
+        return Ok(false);
+    }
+    Ok(PackageReader::new(Cursor::new(bytes))?.has_part(FORM_DRAFT_ENTRY))
+}
+
+/// Read the document and its editor source from one recovery package.
+/// Legacy plain JSON and packages without an editor open normally.
+pub fn read_recovery_container(bytes: &[u8]) -> Result<(Document, Option<Vec<u8>>)> {
+    if !is_design_container(bytes) {
+        return Ok((crate::read_design(bytes)?, None));
+    }
+    let mut reader = PackageReader::new(Cursor::new(bytes))?;
+    let doc = read_document(&mut reader)?;
+    let draft = reader.has_part(FORM_DRAFT_ENTRY).then(|| reader.limited_part(FORM_DRAFT_ENTRY, MAX_FORM_DRAFT_BYTES)).transpose()?;
+    Ok((doc, draft))
+}
+
 /// Open from disk (or browser VFS), publishing only provisional display before
 /// authoritative blob hydration, with the model the file keeps when this build saved it for
 /// exactly this document ([`solidcraft_doc::Model::adopt`] takes it as the evaluation). Desktop
@@ -913,7 +952,9 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     }
     // A blob a typed record uses comes back from that record; others only for what is kept.
     for name in reader.part_names() {
-        let ours = matches!(name.as_str(), "document.json" | "container.json") || name.starts_with("cache/") || plugin_part(&name).is_some();
+        let ours = matches!(name.as_str(), "document.json" | "container.json" | FORM_DRAFT_ENTRY)
+            || name.starts_with("cache/")
+            || plugin_part(&name).is_some();
         let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
         if !ours && !unused_blob {
             file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
@@ -1515,6 +1556,17 @@ mod tests {
     }
 
     #[test]
+    fn form_draft_detection_reads_only_the_recovery_directory() {
+        let doc = Document::new("Recovery");
+        let draft = br#"{"test":"draft"}"#;
+        let recovery = write_recovery_container(&doc, Some(draft)).unwrap();
+        assert!(has_form_recovery_draft(&recovery).unwrap());
+        assert_eq!(read_recovery_container(&recovery).unwrap().1.as_deref(), Some(draft.as_slice()));
+        assert!(!has_form_recovery_draft(&write_design_container(&doc).unwrap()).unwrap());
+        assert!(!has_form_recovery_draft(doc.to_json().as_bytes()).unwrap());
+    }
+
+    #[test]
     fn native_cache_round_trip_and_preview_defer_original_sources() {
         let mut doc = Document::new("Native cache");
         let step = noise(2_600_000);
@@ -1674,12 +1726,14 @@ mod tests {
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, ContainerContents::Design).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
+        let bytes =
+            write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, ContainerContents::Design)
+                .unwrap();
         assert!(read_design_geometry(&bytes).is_some());
     }
 

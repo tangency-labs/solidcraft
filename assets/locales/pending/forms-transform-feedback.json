@@ -1,0 +1,90 @@
+{
+  "de": {
+    "forms.feedback.accepted": "Anforderung angenommen · {value}",
+    "forms.feedback.fitting": "Anforderung angenommen · {value} · CAD-Vorschau ausstehend",
+    "forms.feedback.move": "Verschieben {distance} · X {x}, Y {y}, Z {z}",
+    "forms.feedback.requested": "Anforderung · {value}",
+    "forms.feedback.rotate": "Drehen {axis}: {angle}",
+    "forms.feedback.scale": "Skalieren · X {x}×, Y {y}×, Z {z}×",
+    "forms.feedback.soft": "{value} · weiche Auswahl",
+    "prefs.forms_drag_feedback": "Form-Transformationsanforderungen beim Ziehen anzeigen",
+    "prefs.forms_drag_feedback_help": "Zeigt die eingerastete Verschiebung, den Winkel oder die Skalierung, die in den Achsen der Geste angefordert werden. Bedingungen und weiche Auswahl können die Bewegung einzelner Punkte ändern. Angenommene Anforderungen zeigen keine gemessene Formbewegung. Aus stellt die bisherige Anzeige wieder her."
+  },
+  "en": {
+    "forms.feedback.accepted": "Request accepted · {value}",
+    "forms.feedback.fitting": "Request accepted · {value} · CAD preview pending",
+    "forms.feedback.move": "Move {distance} · X {x}, Y {y}, Z {z}",
+    "forms.feedback.requested": "Request · {value}",
+    "forms.feedback.rotate": "Rotate {axis}: {angle}",
+    "forms.feedback.scale": "Scale · X {x}×, Y {y}×, Z {z}×",
+    "forms.feedback.soft": "{value} · soft selection",
+    "prefs.forms_drag_feedback": "Show Form transform requests while dragging",
+    "prefs.forms_drag_feedback_help": "Show the snapped move, angle or scale submitted in the gesture axes. Constraints and soft selection can change individual point motion. Accepted requests do not report measured shape movement. Off restores the previous display."
+  },
+  "ja": {
+    "forms.feedback.accepted": "要求を受理 · {value}",
+    "forms.feedback.fitting": "要求を受理 · {value} · CAD プレビュー待ち",
+    "forms.feedback.move": "移動 {distance} · X {x}、Y {y}、Z {z}",
+    "forms.feedback.requested": "要求 · {value}",
+    "forms.feedback.rotate": "回転 {axis}: {angle}",
+    "forms.feedback.scale": "拡大縮小 · X {x}×、Y {y}×、Z {z}×",
+    "forms.feedback.soft": "{value} · ソフト選択",
+    "prefs.forms_drag_feedback": "ドラッグ中にフォームの変換要求を表示",
+    "prefs.forms_drag_feedback_help": "操作の軸に沿って送信した、スナップ後の移動量、角度、倍率を表示します。拘束やソフト選択により各点の移動量は変わることがあります。受理された要求は形状の実測移動量ではありません。オフにすると従来の表示になります。"
+  },
+  "ko": {
+    "forms.feedback.accepted": "요청 수락됨 · {value}",
+    "forms.feedback.fitting": "요청 수락됨 · {value} · CAD 미리 보기 대기 중",
+    "forms.feedback.move": "이동 {distance} · X {x}, Y {y}, Z {z}",
+    "forms.feedback.requested": "요청 · {value}",
+    "forms.feedback.rotate": "회전 {axis}: {angle}",
+    "forms.feedback.scale": "배율 · X {x}×, Y {y}×, Z {z}×",
+    "forms.feedback.soft": "{value} · 소프트 선택",
+    "prefs.forms_drag_feedback": "드래그 중 Form 변환 요청 표시",
+    "prefs.forms_drag_feedback_help": "제스처 축에 따라 제출한 스냅 이동 거리, 각도 또는 배율을 표시합니다. 구속 조건과 소프트 선택에 따라 각 점의 움직임이 달라질 수 있습니다. 수락된 요청은 측정된 형상 이동을 나타내지 않습니다. 끄면 이전 표시로 돌아갑니다."
+  },
+  "zh": {
+    "forms.feedback.accepted": "请求已接受 · {value}",
+    "forms.feedback.fitting": "请求已接受 · {value} · CAD 预览待更新",
+    "forms.feedback.move": "移动 {distance} · X {x}、Y {y}、Z {z}",
+    "forms.feedback.requested": "请求 · {value}",
+    "forms.feedback.rotate": "旋转 {axis}：{angle}",
+    "forms.feedback.scale": "缩放 · X {x}×、Y {y}×、Z {z}×",
+    "forms.feedback.soft": "{value} · 软选择",
+    "prefs.forms_drag_feedback": "拖动时显示形状变换请求",
+    "prefs.forms_drag_feedback_help": "按手势坐标轴显示提交的吸附移动距离、角度或缩放比例。约束和软选择可能改变各点的运动。已接受的请求不表示测量到的形状位移。关闭后恢复原来的显示。"
+  },
+  "ar": {
+    "forms.feedback.accepted": "قُبل الطلب · {value}",
+    "forms.feedback.fitting": "قُبل الطلب · {value} · معاينة CAD قيد الانتظار",
+    "forms.feedback.move": "تحريك {distance} · X ‏{x}، Y ‏{y}، Z ‏{z}",
+    "forms.feedback.requested": "الطلب · {value}",
+    "forms.feedback.rotate": "تدوير حول {axis}: ‏{angle}",
+    "forms.feedback.scale": "تغيير المقياس · X ‏{x}×، Y ‏{y}×، Z ‏{z}×",
+    "forms.feedback.soft": "{value} · تحديد ناعم",
+    "prefs.forms_drag_feedback": "عرض طلبات تحويل الشكل أثناء السحب",
+    "prefs.forms_drag_feedback_help": "يعرض الإزاحة أو الزاوية أو المقياس بعد الالتقاط كما أُرسل ضمن محاور السحب. قد تغيّر القيود والتحديد الناعم حركة كل نقطة. القيم المقبولة تمثّل الطلبات، وقد تختلف عن الحركة المقاسة للشكل. أوقف الخيار لاستعادة العرض السابق."
+  },
+  "he": {
+    "forms.feedback.accepted": "הבקשה התקבלה · {value}",
+    "forms.feedback.fitting": "הבקשה התקבלה · {value} · בהמתנה לתצוגת CAD מקדימה",
+    "forms.feedback.move": "הזזה {distance} · X {x}, Y {y}, Z {z}",
+    "forms.feedback.requested": "בקשה · {value}",
+    "forms.feedback.rotate": "סיבוב סביב {axis}: {angle}",
+    "forms.feedback.scale": "שינוי קנה מידה · X {x}×, Y {y}×, Z {z}×",
+    "forms.feedback.soft": "{value} · בחירה רכה",
+    "prefs.forms_drag_feedback": "הצגת בקשות לשינוי צורה חופשית במהלך גרירה",
+    "prefs.forms_drag_feedback_help": "הצגת ההזזה, הזווית או קנה המידה שנשלחו לאחר הצמדה, ביחס לצירי הגרירה. אילוצים ובחירה רכה עשויים לשנות את תנועתה של כל נקודה. בקשות שהתקבלו אינן מדידה של תנועת הצורה בפועל. כיבוי ההגדרה מחזיר את התצוגה הקודמת."
+  },
+  "vi": {
+    "forms.feedback.accepted": "Đã chấp nhận yêu cầu · {value}",
+    "forms.feedback.fitting": "Đã chấp nhận yêu cầu · {value} · Đang chờ bản xem trước CAD",
+    "forms.feedback.move": "Di chuyển {distance} · X {x}, Y {y}, Z {z}",
+    "forms.feedback.requested": "Yêu cầu · {value}",
+    "forms.feedback.rotate": "Xoay quanh {axis}: {angle}",
+    "forms.feedback.scale": "Đổi tỷ lệ · X {x}×, Y {y}×, Z {z}×",
+    "forms.feedback.soft": "{value} · Chọn mềm",
+    "prefs.forms_drag_feedback": "Hiện yêu cầu biến đổi hình khi kéo",
+    "prefs.forms_drag_feedback_help": "Hiện lượng dịch chuyển đã bắt bước, góc xoay hoặc tỷ lệ gửi đi theo các trục thao tác. Ràng buộc và chế độ chọn mềm có thể thay đổi chuyển động của từng điểm. Giá trị của yêu cầu đã được chấp nhận không phải là chuyển động đo được của hình. Tắt để khôi phục cách hiển thị trước đó."
+  }
+}

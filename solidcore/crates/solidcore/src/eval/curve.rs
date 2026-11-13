@@ -153,6 +153,26 @@ impl CurveEval {
         }
     }
 
+    /// Position and derivative in the original record parameter, including a
+    /// traced intersection whose parameter is set by its leader's normal plane.
+    pub fn parameter_derivs(&self, t: f64) -> Option<(Vec3, Vec3)> {
+        if let Self::Intersection(intersection) = self {
+            return intersection.parameter_derivs(t);
+        }
+        self.derivs(t)
+    }
+
+    /// Position and derivative at a fraction of an oriented record interval.
+    pub fn interval_derivs(&self, [a, b]: [f64; 2], fraction: f64) -> Option<(Vec3, Vec3)> {
+        let span = b - a;
+        if !a.is_finite() || !b.is_finite() || span == 0.0 || !(0.0..=1.0).contains(&fraction) {
+            return None;
+        }
+        let (point, derivative) = self.parameter_derivs(a * (1.0 - fraction) + b * fraction)?;
+        let tangent = derivative * span;
+        (point.is_finite() && tangent.is_finite()).then_some((point, tangent))
+    }
+
     /// The point, unit tangent and curvature vector at `t` ([`CurveJet`]), exactly: from the
     /// record's first two derivatives on a line, conic or spline (in closed form, or the basis
     /// functions' own, weights divided out), straight on each segment of a polyline; on a traced
@@ -238,6 +258,33 @@ fn spline(knots: &[f64], ctrl: Vec<[f64; 4]>) -> Result<CurveEval, EvalError> {
 }
 
 impl Intersection {
+    fn parameter_derivs(&self, t: f64) -> Option<(Vec3, Vec3)> {
+        if !t.is_finite() {
+            return None;
+        }
+        let (lead, first) = self.leader.leader(t)?;
+        let point = self.solve(lead, first)?;
+        let second = match &self.leader {
+            CurveEval::Spline(c) => *c.derivatives(t, 2)?.get(2)?,
+            CurveEval::Polyline(_) => Vec3::ZERO,
+            _ => return None,
+        };
+        let mut normals = [Vec3::ZERO; 2];
+        for (normal, surface) in normals.iter_mut().zip(&self.surfaces) {
+            let [u, v] = surface.project(point, None, f64::INFINITY)?;
+            let (_, du, dv) = surface.derivs(u, v)?;
+            *normal = du.cross(dv).normalized()?;
+        }
+        let along = normals[0].cross(normals[1]);
+        let denominator = first.dot(along);
+        if denominator.abs() <= 1e-12 * first.len() * along.len() {
+            return None;
+        }
+        // Differentiate the leader's normal plane together with both surface constraints.
+        let derivative = along * ((first.len2() - second.dot(point - lead)) / denominator);
+        (point.is_finite() && derivative.is_finite()).then_some((point, derivative))
+    }
+
     /// The point in the leader's normal plane at `t`, found from the leader's point: a function
     /// of `t` alone, whatever was evaluated before (and so the same on every thread).
     fn point(&self, t: f64) -> Option<Vec3> {

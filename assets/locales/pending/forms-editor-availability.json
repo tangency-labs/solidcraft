@@ -1,0 +1,42 @@
+{
+  "en": {
+    "forms.context.browser_limit": "This Form's surrounding geometry exceeds the browser preview limit. Open the design in the desktop app to see the full context.",
+    "forms.context.finish_before_properties": "Finish or cancel the active Form before opening Design Properties.",
+    "forms.insert.whole_loop_trim_wall": "Whole edge loops cannot be inserted on Forms with a trimmed wall."
+  },
+  "ar": {
+    "forms.context.browser_limit": "تتجاوز العناصر الهندسية المحيطة بهذا الشكل الحر حدّ المعاينة في المتصفح. افتح التصميم في تطبيق سطح المكتب لرؤية السياق الكامل.",
+    "forms.context.finish_before_properties": "أنهِ الشكل الحر النشط أو ألغِه قبل فتح خصائص التصميم.",
+    "forms.insert.whole_loop_trim_wall": "لا يمكن إدراج حلقات حواف كاملة في الأشكال الحرة ذات الجدران المقصوصة."
+  },
+  "de": {
+    "forms.context.browser_limit": "Die umgebende Geometrie dieser Form überschreitet die Vorschaugrenze des Browsers. Öffnen Sie den Entwurf in der Desktop-App, um die gesamte Umgebung zu sehen.",
+    "forms.context.finish_before_properties": "Stellen Sie die aktive Form fertig oder brechen Sie die Bearbeitung ab, bevor Sie die Entwurfseigenschaften öffnen.",
+    "forms.insert.whole_loop_trim_wall": "In Formen mit einer getrimmten Wand lassen sich keine ganzen Kantenschleifen einfügen."
+  },
+  "he": {
+    "forms.context.browser_limit": "הגאומטריה סביב הצורה החופשית חורגת ממגבלת התצוגה המקדימה בדפדפן. יש לפתוח את העיצוב ביישום שולחן העבודה כדי לראות את כל הסביבה.",
+    "forms.context.finish_before_properties": "יש לסיים או לבטל את הצורה החופשית הפעילה לפני פתיחת מאפייני העיצוב.",
+    "forms.insert.whole_loop_trim_wall": "אי אפשר להוסיף לולאות קצוות שלמות לצורות חופשיות עם דופן גזומה."
+  },
+  "ja": {
+    "forms.context.browser_limit": "このフォームの周囲の形状がブラウザーのプレビュー上限を超えています。周囲の形状をすべて表示するには、デスクトップアプリでデザインを開いてください。",
+    "forms.context.finish_before_properties": "デザインプロパティを開く前に、現在のフォーム編集を終了またはキャンセルしてください。",
+    "forms.insert.whole_loop_trim_wall": "トリム壁のあるフォームにはエッジループ全体を挿入できません。"
+  },
+  "ko": {
+    "forms.context.browser_limit": "이 자유형 형상의 주변 형상이 브라우저 미리보기 한도를 초과합니다. 전체 주변 형상을 보려면 데스크톱 앱에서 설계를 여세요.",
+    "forms.context.finish_before_properties": "설계 속성을 열기 전에 편집 중인 자유형 형상을 완료하거나 취소하세요.",
+    "forms.insert.whole_loop_trim_wall": "절단 벽이 있는 자유형 형상에는 전체 모서리 루프를 삽입할 수 없습니다."
+  },
+  "vi": {
+    "forms.context.browser_limit": "Hình học xung quanh hình tự do này vượt giới hạn xem trước của trình duyệt. Mở thiết kế trong ứng dụng máy tính để xem toàn bộ vùng xung quanh.",
+    "forms.context.finish_before_properties": "Hoàn tất hoặc hủy chỉnh sửa hình hiện tại trước khi mở Thuộc tính thiết kế.",
+    "forms.insert.whole_loop_trim_wall": "Không thể chèn toàn bộ vòng cạnh vào hình có thành cắt xén."
+  },
+  "zh": {
+    "forms.context.browser_limit": "此造型周围的几何体超出了浏览器的预览上限。请在桌面应用中打开设计以查看完整的周围几何体。",
+    "forms.context.finish_before_properties": "请先完成或取消当前造型，再打开设计属性。",
+    "forms.insert.whole_loop_trim_wall": "无法在带有修剪壁的造型上插入完整环边。"
+  }
+}

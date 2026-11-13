@@ -91,6 +91,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             Patch {
                 continuity: Continuity,
             },
+            RefinedWeld,
             Unstitch,
             ReverseNormal,
             /// `mode`: an index into [`RULED_MODES`].
@@ -128,6 +129,7 @@ impl Surf {
             Surf::Blend { .. } => "BLEND SURFACE",
             Surf::Boundary { .. } => "BOUNDARY SURFACE",
             Surf::Patch { .. } => "PATCH",
+            Surf::RefinedWeld => "cmd.form.refined_weld",
             Surf::Unstitch => "UNSTITCH",
             Surf::ReverseNormal => "REVERSE NORMAL",
             Surf::Ruled { .. } => "RULED SURFACE",
@@ -242,6 +244,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
         Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
         Surf::Patch { .. } => vec![SelInput::new("Boundary", PROFILES | EDGES, true), SelInput::new("Pass through", VERTICES | FACES, true)],
+        Surf::RefinedWeld => vec![SelInput::new("forms.weld.sources", BODIES, true).tip("forms.weld.pick_help")],
         Surf::Unstitch => vec![SelInput::new("Body, or faces to take out", BODIES | FACES, true)],
         Surf::ReverseNormal => vec![SelInput::new("Surface, or faces to turn over", BODIES | FACES, true)],
         Surf::Ruled { .. } => {
@@ -270,6 +273,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.blend" => Surf::Blend { continuity: [Continuity::G1; 2], bulge: [0.0, 0.0], stitch: false },
         "surface.boundary" => Surf::Boundary { continuity: Continuity::G1, join: false },
         "surface.patch" => Surf::Patch { continuity: Continuity::G0 },
+        "form.refined_weld" => Surf::RefinedWeld,
         "surface.unstitch" => Surf::Unstitch,
         "surface.reverse_normal" => Surf::ReverseNormal,
         "surface.ruled" => {
@@ -380,7 +384,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
         }
         Surf::Sweep(opts) => enter |= crate::dialogs_sweep::rows(ui, opts, "ss"),
         Surf::Loft { rail_fit } => crate::dialogs_sweep::rail_fit_row(ui, "sl", rail_fit),
-        Surf::SplitFace | Surf::Unstitch | Surf::ReverseNormal => {}
+        Surf::SplitFace | Surf::RefinedWeld | Surf::Unstitch | Surf::ReverseNormal => {}
     }
     enter
 }
@@ -791,6 +795,31 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             put(&mut p, &[("tolerance", tolerance)]);
             ("surface.stitch", p)
         }
+        Surf::RefinedWeld => {
+            let names = items(inputs, 0).body_names();
+            let [a, b] = names.as_slice() else { return Err(app.tr("forms.weld.select_two").to_owned()) };
+            // World picks identify the source features. The authored seam lives
+            // in their shared component definition and applies to each instance.
+            let model = app.session.world_state().map_err(|error| error.to_string())?;
+            let source = |name: &str| {
+                model
+                    .body(name)
+                    .filter(|body| body.component == app.session.active_component && body.body.is_surface())
+                    .filter(|body| {
+                        app.session.doc.feature(body.feature).is_some_and(|feature| {
+                            matches!(&feature.kind, FeatureKind::Form { definition, operation: solidcraft_engine::doc::Operation::NewBody, .. }
+                                if definition.hierarchy.is_some())
+                        })
+                    })
+                    .map(|body| body.feature)
+                    .ok_or_else(|| app.tr("forms.weld.select_two").to_owned())
+            };
+            let features = [source(a)?, source(b)?];
+            if features[0] == features[1] {
+                return Err(app.tr("forms.weld.select_two").to_owned());
+            }
+            ("form.refined_weld", json!({"features":features}))
+        }
         Surf::Thicken { .. } => {
             need(0, "the surfaces to thicken")?;
             ("surface.thicken", json!({"bodies": items(inputs, 0).body_names()}))
@@ -1143,7 +1172,9 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             };
             (if matches!(kind, FeatureKind::Unstitch { .. }) { Surf::Unstitch } else { Surf::ReverseNormal }, vec![sels])
         }
-        FeatureKind::Stitch { bodies, .. } => (Surf::simple_restore(kind)?, vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()]),
+        FeatureKind::Stitch { bodies, form_seam: None, .. } => {
+            (Surf::simple_restore(kind)?, vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()])
+        }
         FeatureKind::Thicken { bodies, .. } => {
             (Surf::simple_restore(kind)?, vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()])
         }
@@ -1250,6 +1281,48 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refined_weld_dialog_uses_two_saved_refined_forms_in_pick_order() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let created = app.session.execute("component.create", &json!({"name":"Form skins"})).unwrap();
+        let component = created["component"].as_u64().unwrap();
+        let first = created["occurrence"].as_u64().unwrap();
+        let mut sources = Vec::new();
+        for name in ["First skin", "Second skin"] {
+            app.session.execute("form.prototype.create", &json!({"primitive":"face","dimensions":[12,12,1],"segments":[2,2,1],"levels":0})).unwrap();
+            app.session.execute("form.prototype.refine", &json!({"faces":[0],"counts":[2,2]})).unwrap();
+            let committed = app.session.execute("form.prototype.commit", &json!({"name":name,"tolerance":0.05})).unwrap();
+            let feature = committed["feature"].as_u64().unwrap();
+            let body = committed["created_bodies"][0].as_str().unwrap().to_owned();
+            sources.push((feature, Sel::Body { name: body }));
+        }
+        app.session.execute("component.activate", &json!({"component":0})).unwrap();
+        app.session.execute("occurrence.copy", &json!({"occurrence":first,"translate":[0,0,30]})).unwrap();
+        app.session.execute("component.activate", &json!({"component":component})).unwrap();
+        assert!(app.session.active_occurrence_path.is_none());
+        let dialog = crate::dialogs::Dialog::for_command(&app, "form.refined_weld").unwrap();
+        assert_eq!(dialog.command(), Some("form.refined_weld"));
+        let (kind, mut picks) = start(&app, "form.refined_weld").unwrap();
+        let Kind::Surface(k) = kind else { panic!("expected a Surface dialog") };
+        assert_eq!(k, Surf::RefinedWeld);
+        picks[0].items.push(sources[1].1.clone());
+        assert!(commands(&app, &k, &picks, &Map::new()).is_err());
+        let world = app.session.world_state().unwrap();
+        let placed = |feature| {
+            let name = world.bodies.iter().find(|body| body.feature == feature && body.definition_name() != body.name).unwrap().name.clone();
+            Sel::Body { name }
+        };
+        picks[0].items.push(placed(sources[1].0));
+        assert!(commands(&app, &k, &picks, &Map::new()).is_err(), "two instances of the same feature do not create two sources");
+        picks[0].items[1] = placed(sources[0].0);
+        let before = app.session.doc.to_json();
+        assert_eq!(
+            commands(&app, &k, &picks, &Map::new()).unwrap(),
+            vec![("form.refined_weld".to_owned(), json!({"features":[sources[1].0,sources[0].0]}))]
+        );
+        assert_eq!(app.session.doc.to_json(), before);
+    }
 
     /// Whether `text` names a continuity by its code (G0 … G4).
     fn coded(text: &str) -> bool {

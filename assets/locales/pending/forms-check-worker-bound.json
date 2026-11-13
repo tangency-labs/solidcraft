@@ -1,0 +1,26 @@
+{
+  "de": {
+    "forms.diagnostics.worker_busy": "Eine andere Form-CAD-Prüfung läuft noch. Nach ihrem Abschluss erneut versuchen."
+  },
+  "en": {
+    "forms.diagnostics.worker_busy": "Another Form CAD check is still running. Try again when it finishes."
+  },
+  "ja": {
+    "forms.diagnostics.worker_busy": "別のフォームの CAD チェックが実行中です。完了してから再試行してください。"
+  },
+  "ko": {
+    "forms.diagnostics.worker_busy": "다른 Form CAD 검사가 아직 실행 중입니다. 완료되면 다시 시도하세요."
+  },
+  "zh": {
+    "forms.diagnostics.worker_busy": "另一个 Form CAD 检查仍在运行。请在其完成后重试。"
+  },
+  "ar": {
+    "forms.diagnostics.worker_busy": "لا يزال فحص CAD لشكل آخر قيد التشغيل. أعد المحاولة بعد انتهائه."
+  },
+  "he": {
+    "forms.diagnostics.worker_busy": "בדיקת CAD אחרת של צורה חופשית עדיין מתבצעת. יש לנסות שוב כשהיא תסתיים."
+  },
+  "vi": {
+    "forms.diagnostics.worker_busy": "Một lượt kiểm tra CAD cho hình khác đang chạy. Hãy thử lại khi lượt đó hoàn tất."
+  }
+}

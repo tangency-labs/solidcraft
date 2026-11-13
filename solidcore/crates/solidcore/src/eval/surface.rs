@@ -307,6 +307,22 @@ impl SurfaceEval {
         self.derivs(uv[0], uv[1]).map(|d| d.0)
     }
 
+    /// Whether the natural orientations of two qualified coplanar supports
+    /// oppose each other. Each parameter rectangle must have a regular interior.
+    pub fn opposed_to(
+        &self,
+        domain: [[f64; 2]; 2],
+        support: &Self,
+        support_domain: [[f64; 2]; 2],
+    ) -> Option<bool> {
+        let normal = |surface: &Self, domain: [[f64; 2]; 2]| {
+            let [u, v] = domain.map(|[a, b]| a + (b - a) * 0.37);
+            let (_, du, dv) = surface.derivs(u, v)?;
+            du.cross(dv).normalized()
+        };
+        Some(normal(self, domain)?.dot(normal(support, support_domain)?) < 0.0)
+    }
+
     /// The second partial derivatives `(S_uu, S_uv, S_vv)` at (u, v): in closed form on the
     /// analytic surfaces, from the basis functions' own second derivatives on a spline; `None`
     /// for a revolution ([`EvalSurface::second`]).
