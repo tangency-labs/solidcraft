@@ -204,7 +204,8 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str, selected: bool) {
                         ui.end_row();
                         for row in rows {
                             for cell in row {
-                                spans_in(ui, cell, size, t.text, selected, false);
+                                // One grid item per cell: the text and its link buttons share it.
+                                ui.vertical(|ui| spans_in(ui, cell, size, t.text, selected, false));
                             }
                             ui.end_row();
                         }

@@ -429,7 +429,7 @@ The agent reaches the open design only through SolidCraft's own tools (the
 - **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, tables, code
   blocks (with **Copy**), bold, italic, `code` and links (web links only; each link is a button
   that opens it in your browser). A wide table scrolls sideways; one without the `|---|` line
-  under its header shows as plain text. What you type, and the agent's thoughts, stay plain text.
+  under its header, or with more than 200 rows or 2000 cells, shows as plain text. What you type, and the agent's thoughts, stay plain text.
 - **Attach view:** tick it to send a picture of the current view with your message, for agents
   that take pictures. The picture is taken when the agent starts on the message and then shows as
   a small thumbnail under it. Hold the pointer over the thumbnail for a bigger preview that stays

@@ -3707,6 +3707,28 @@ fn an_agents_markdown_is_drawn_as_blocks() {
     // A hostile reply draws too (no panic, bounded work).
     h.app.agent_chat.items.push(Item::Agent { thought: false, text: "*".repeat(50_000) + &"[".repeat(5_000) + &"`a".repeat(5_000) });
     h.frames(3);
+    // So does a table with 16 columns and as many rows as the input allows (#16256): it stays
+    // preformatted text instead of becoming a couple of million labels.
+    h.app
+        .agent_chat
+        .items
+        .push(Item::Agent { thought: false, text: format!("{}\n{}\n{}", "| a ".repeat(16) + "|", "|---".repeat(16) + "|", "|\n".repeat(100_000)) });
+    h.frames(3);
+}
+
+/// A cell with a link is still one cell of the grid (#16256): the link button sits in the cell, not
+/// in a column of its own that would push the next cell under no header.
+#[test]
+fn a_table_cell_with_a_link_stays_in_its_column() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "| Part | Mass |\n|---|---|\n| [Gear](https://example.com) | Steel |".into() });
+    h.frames(3);
+    let mass = h.widget("Mass").expect("the header of the second column");
+    let steel = h.widget("Steel").expect("the cell of the second column");
+    assert!((steel[0] - mass[0]).abs() < 20.0, "Steel ({steel:?}) is under Mass ({mass:?}), not in a third column");
+    assert!(h.widget("↗ example.com").is_some(), "the link keeps its button");
 }
 
 // ---- Attach selection (#2286) ----

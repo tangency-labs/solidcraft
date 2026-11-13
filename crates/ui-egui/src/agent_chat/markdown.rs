@@ -12,6 +12,10 @@ pub const MAX_BLOCKS: usize = 4000;
 const MAX_URL: usize = 2048;
 /// Most columns drawn as a table; a wider one stays preformatted.
 const MAX_COLUMNS: usize = 16;
+/// Most rows a table may have besides its header; a longer one stays preformatted.
+const MAX_TABLE_ROWS: usize = 200;
+/// Most cells (header included) a table may have; the view lays out every one on every frame.
+const MAX_TABLE_CELLS: usize = 2000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Span {
@@ -160,12 +164,17 @@ pub fn parse(src: &str) -> Vec<Block> {
 }
 
 /// The lines of a `|` table as a [`Block::Table`]; `None` when the second line is not the
-/// `|---|---|` line under the header, or the columns do not count 1 to [`MAX_COLUMNS`].
+/// `|---|---|` line under the header, the columns do not count 1 to [`MAX_COLUMNS`], or the table
+/// has more than [`MAX_TABLE_ROWS`] rows or [`MAX_TABLE_CELLS`] cells.
 fn table(lines: &[&str]) -> Option<Block> {
     let header = cells(lines.first()?);
     let columns = header.len();
     let rule = cells(lines.get(1)?);
     if !(1..=MAX_COLUMNS).contains(&columns) || rule.len() != columns || !rule.iter().all(|c| is_rule_cell(c)) {
+        return None;
+    }
+    // The view lays out every cell on every frame, so a big table stays text (#16256).
+    if lines.len() - 2 > MAX_TABLE_ROWS || columns * (lines.len() - 1) > MAX_TABLE_CELLS {
         return None;
     }
     let row = |line: &&str| {
@@ -409,6 +418,22 @@ mod tests {
         assert_eq!(rows[0], vec![vec![Span::Bold("x".into())], vec![t("a | b")]]);
         assert_eq!(rows[1], vec![vec![t("short")], vec![]], "a short row is filled up");
         assert_eq!(rows[2], vec![vec![t("p")], vec![t("q")]], "a long row loses what is past the header");
+    }
+
+    #[test]
+    fn a_table_past_the_row_or_cell_limit_stays_preformatted() {
+        let rule = |n: usize| "|---".repeat(n) + "|";
+        let table = |columns: usize, rows: usize| {
+            let row = "| x ".repeat(columns) + "|";
+            format!("{}\n{}\n{}", row, rule(columns), vec![row.as_str(); rows].join("\n"))
+        };
+        // At the limit it is still a table.
+        assert!(matches!(&parse(&table(2, MAX_TABLE_ROWS))[0], Block::Table { .. }));
+        assert!(matches!(&parse(&table(MAX_TABLE_CELLS / MAX_TABLE_ROWS, MAX_TABLE_ROWS - 1))[0], Block::Table { .. }));
+        // One row too many.
+        assert!(matches!(&parse(&table(2, MAX_TABLE_ROWS + 1))[0], Block::Pre(_)));
+        // Few rows, but too many cells.
+        assert!(matches!(&parse(&table(MAX_COLUMNS, MAX_TABLE_CELLS / MAX_COLUMNS + 1))[0], Block::Pre(_)));
     }
 
     #[test]
