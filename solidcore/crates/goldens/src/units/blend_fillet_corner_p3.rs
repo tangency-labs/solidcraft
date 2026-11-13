@@ -429,7 +429,11 @@ fn fsg_of(kind: u8) -> FilletSurfaceGenerator {
     match kind {
         1 => FilletSurfaceGenerator::Linear,
         2 => FilletSurfaceGenerator::circular_default(),
-        3 => FilletSurfaceGenerator::blend_curve_default(),
+        // a blend curve is the G^n section (the old generator is retired, WR-685)
+        3 => FilletSurfaceGenerator::GnSection(solidcore::blend::fillet_section::section::GnSectionFsg::new(
+            2,
+            solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT,
+        )),
         _ => FilletSurfaceGenerator::Base,
     }
 }

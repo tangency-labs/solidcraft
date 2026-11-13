@@ -27,9 +27,11 @@ pub fn domain(s: &EvalSurface) -> Domain {
     match s {
         EvalSurface::Plane { .. } => Domain { range: [None, None], period: [None, None] },
         EvalSurface::Nurbs { degree, knots, count, closed: shut, .. } => {
-            let r = |d: usize| Some((*knots[d].get(degree[d])?, *knots[d].get(count[d])?));
+            let r = |d: usize| Some((*knots.get(d)?.get(*degree.get(d)?)?, *knots.get(d)?.get(*count.get(d)?)?));
             let range = [r(0), r(1)];
-            let period = [0, 1].map(|d| range[d].filter(|_| shut[d]).map(|(a, b)| b - a).filter(|p| *p > 0.0));
+            let p = |r: Option<(f64, f64)>, shut: bool| r.filter(|_| shut).map(|(a, b)| b - a).filter(|p| *p > 0.0);
+            let [shut_u, shut_v] = *shut;
+            let period = [p(range[0], shut_u), p(range[1], shut_v)];
             Domain { range, period }
         }
         EvalSurface::Revolved { profile, swap, .. } => {
@@ -137,8 +139,8 @@ pub(crate) fn wrap_into(x: f64, (a, b): (f64, f64)) -> f64 {
 impl Domain {
     pub fn clamp(&self, uv: [f64; 2]) -> [f64; 2] {
         let mut out = uv;
-        for (d, x) in out.iter_mut().enumerate() {
-            if let (Some((a, b)), None) = (self.range[d], self.period[d]) {
+        for ((x, range), period) in out.iter_mut().zip(self.range).zip(self.period) {
+            if let (Some((a, b)), None) = (range, period) {
                 *x = x.max(a.min(b)).min(a.max(b));
             }
         }
@@ -329,36 +331,19 @@ pub fn unwrap(x: f64, near: f64, period: Option<f64>) -> f64 {
     }
 }
 
-/// Is the surface degenerate along direction `d` at `uv` (a pole: moving along `d` does not
-/// move the point)?
-pub fn degenerate(s: &EvalSurface, uv: [f64; 2], d: usize) -> bool {
-    let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else { return false };
-    let (this, other) = if d == 0 { (su, sv) } else { (sv, su) };
-    this.len() <= 1e-9 * other.len().max(1e-12)
-}
-
-/// [`degenerate`], or within `reach` mm of a pole (see [`collapsed`]): a boundary point on a
-/// patch side collapsed to within a tolerance, not to a point, where its parameter along `d` is
-/// as free as at a pole.
-pub fn degenerate_within(s: &EvalSurface, dom: &Domain, uv: [f64; 2], d: usize, reach: f64) -> bool {
-    let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else { return false };
-    let speed = [su.len(), sv.len()];
-    collapsed(speed, dom, reach).get(d).copied().unwrap_or(false)
-}
-
 /// Along each direction, whether a point whose parameter speeds (mm per unit) are `speed` is a
 /// pole, or within `reach` mm of one: moving along the direction there not at all (to 1e-9 of
 /// the other's speed), or across half its period (or its whole range) by no more than `reach`.
 pub fn collapsed(speed: [f64; 2], dom: &Domain, reach: f64) -> [bool; 2] {
     let [a, b] = speed;
     let mut out = [a <= 1e-9 * b.max(1e-12), b <= 1e-9 * a.max(1e-12)];
-    for (d, flag) in out.iter_mut().enumerate() {
-        let span = match (dom.period[d], dom.range[d]) {
+    for (((flag, period), range), speed) in out.iter_mut().zip(dom.period).zip(dom.range).zip(speed) {
+        let span = match (period, range) {
             (Some(period), _) => 0.5 * period,
             (None, Some((lo, hi))) => (hi - lo).abs(),
             (None, None) => continue,
         };
-        *flag |= speed[d] * span <= reach;
+        *flag |= speed * span <= reach;
     }
     out
 }

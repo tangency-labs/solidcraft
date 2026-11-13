@@ -379,7 +379,13 @@ pub(crate) fn flat_outline(m: &Mesh, at: Vec3) -> Vec<Vec<Vec3>> {
                 steps += 1;
             }
             if v == start && pts.len() >= 4 {
-                loops.extend(turning_corners(&pts, size * 1e-9));
+                // A corner off the line within the single precision a mesh file keeps is on it, but
+                // never one farther off than 1e-4 of the loop's own size: far from the origin a small
+                // patch's real corners stay.
+                let far = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+                let (lo, hi) = pts.iter().fold((far, -far), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+                let precision = (pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6).min(lo.dist(hi) * 1e-4);
+                loops.extend(turning_corners(&pts, precision));
             }
         }
     }
@@ -388,15 +394,18 @@ pub(crate) fn flat_outline(m: &Mesh, at: Vec3) -> Vec<Vec<Vec3>> {
 
 /// A closed loop (its first point again at its end) without the corners where it runs straight
 /// on: a mesh's outline often has a corner part way along a side, where a triangle of the patch
-/// meets it. None when fewer than three corners turn.
+/// meets it. A corner within `tol` of the line through its neighbours runs straight on. None when
+/// fewer than three corners turn.
 fn turning_corners(pts: &[Vec3], tol: f64) -> Option<Vec<Vec3>> {
     let ring = pts.get(..pts.len().saturating_sub(1))?;
     let n = ring.len();
     let turns = |i: usize| {
         let (prev, here, next) = (ring.get((i + n - 1) % n), ring.get(i), ring.get((i + 1) % n));
         let (Some(prev), Some(here), Some(next)) = (prev, here, next) else { return false };
-        let (a, b) = (*here - *prev, *next - *here);
-        a.cross(b).len() > tol * a.len().max(b.len()).max(1.0)
+        // How far the corner lies off the line from the one before it to the one after.
+        let span = *next - *prev;
+        let off = (*here - *prev).cross(span).len() / span.len().max(1e-300);
+        span.len() <= tol || off > tol
     };
     let mut out: Vec<Vec3> = (0..n).filter(|i| turns(*i)).filter_map(|i| ring.get(i).copied()).collect();
     if out.len() < 3 {

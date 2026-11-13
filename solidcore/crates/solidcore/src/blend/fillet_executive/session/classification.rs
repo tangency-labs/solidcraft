@@ -412,14 +412,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(
-                base,
-                crate::error::SolidError::Upstream {
-                    code: 1001,
-                    operation: "blend::fillet_solver::p1",
-                    ..
-                }
-            ),
+            base.upstream_status() == Some(1001) && base.operation() == "blend::fillet_solver::p1",
             "{base:?}"
         );
         objects.pseudo.brep_mut().vertex_mut(vertex).unwrap().point = Point3::UNDEF;

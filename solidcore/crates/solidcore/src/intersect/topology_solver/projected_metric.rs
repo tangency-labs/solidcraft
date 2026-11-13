@@ -27,7 +27,7 @@ fn cross(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
 }
 
 /// `N x V x N`, the projected difference in the queries' metric.
-fn projected(v: V3<Ivl>, normal: V3<Ivl>) -> V3<Ivl> {
+pub(super) fn projected(v: V3<Ivl>, normal: V3<Ivl>) -> V3<Ivl> {
     cross(cross(normal, v), normal)
 }
 
@@ -38,7 +38,7 @@ fn square(x: Ivl) -> Ivl {
 }
 
 /// The interval squared length `|v|^2`.
-fn norm_squared(v: V3<Ivl>) -> Ivl {
+pub(super) fn norm_squared(v: V3<Ivl>) -> Ivl {
     (square(v.x) + square(v.y)) + square(v.z)
 }
 

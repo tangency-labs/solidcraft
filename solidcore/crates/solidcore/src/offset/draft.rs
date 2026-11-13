@@ -54,7 +54,7 @@
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::as_b_spline;
-use crate::error::SM_ERR_INVALID_INPUT;
+use crate::error::{offset::OffsetFailure, Failure};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::certified::{above, distance, unit, unit_error};
 use crate::geom::tol::are_same;
@@ -767,12 +767,13 @@ impl DraftDefinition {
 
 /// `SM_ERR_INVALID_INPUT` for face `f` (the capi's status for a face without a surface or
 /// an outer faceuse).
-const fn invalid(f: FaceId) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: SM_ERR_INVALID_INPUT,
-        entity: Some(EntityRef::Face(f)),
-    }
+fn invalid(f: FaceId) -> SolidError {
+    Failure::new(
+        OP,
+        OffsetFailure::InvalidValue("the face has no surface or no outer face use"),
+    )
+    .at(EntityRef::Face(f))
+    .into_error()
 }
 
 /// The surface face `f` of a solid takes drafted by `draft`, with its definition

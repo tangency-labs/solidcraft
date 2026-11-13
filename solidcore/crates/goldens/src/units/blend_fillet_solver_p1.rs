@@ -48,6 +48,7 @@ use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{JacobianLoad, OffsetSurface, SurfaceId};
 use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
+use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_DEFAULT_THUMBWEIGHT};
 use solidcore::blend::fillet_solver::p1::{
     check_edge_curve_domains, compute_uv_vectors, find_next_good_interval, test_analytic_surface,
     test_manifold_tangent_rollover, test_side_edge_convexity, tol_ang_tol_rad, trim_rail,
@@ -419,7 +420,9 @@ fn trim_interval(c: &BrepCase, e: i64, t: [f64; 2]) -> Result<[f64; 2], HarnessE
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -1288,9 +1291,10 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 1 => FilletSurfaceGenerator::Linear,
                 2 => FilletSurfaceGenerator::circular_default(),
                 3 => FilletSurfaceGenerator::circular(a != 0.0, bb, c != 0.0, d != 0.0),
-                4 => FilletSurfaceGenerator::blend_curve_default(),
-                // (the shim's `(ULONG)b`)
-                _ => FilletSurfaceGenerator::blend_curve(a, bb as u32),
+                // a blend curve is the G^n section (the old generator is retired, WR-685):
+                // the default order 2, or order `b` (at least 2) at thumbweight `a`
+                4 => FilletSurfaceGenerator::GnSection(GnSectionFsg::new(2, GN_DEFAULT_THUMBWEIGHT)),
+                _ => FilletSurfaceGenerator::GnSection(GnSectionFsg::new((bb as usize).max(2), a)),
             };
             o.push(f64::from(g.fillet_surface_generator_type() as i32));
             match g {
@@ -1302,7 +1306,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 ]),
                 _ => o.extend([0.0; 4]),
             }
-            o.push(g.blend_scale().unwrap_or(0.0));
+            o.push(g.thumbweight().unwrap_or(0.0));
             o.push(g.continuity().map_or(0.0, f64::from));
             if *kind == 0 {
                 let k = Kernel::default();

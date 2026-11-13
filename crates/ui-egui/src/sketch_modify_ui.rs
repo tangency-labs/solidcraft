@@ -473,12 +473,38 @@ pub fn double_click_entities(app: &mut SolveApp) -> bool {
     let Some(Hit::SketchCurve { sketch, id, .. }) = app.viewport.hover.clone() else {
         return false;
     };
-    if app.session.active_sketch != Some(sketch) {
-        return false;
-    }
     let Some(dialog) = app.dialog.as_mut() else {
         return false;
     };
+    // Project takes the curves of the other sketches, never the one being edited: the chain
+    // joined to the curve goes into Geometry as one toggle, as for the Entities inputs below.
+    if matches!(dialog.kind, Kind::SketchProject { .. }) {
+        if app.session.active_sketch == Some(sketch) || dialog.active != 0 {
+            return false;
+        }
+        let Ok(v) = app.session.execute("sketch.chain", &json!({ "sketch": sketch, "curve": id })) else {
+            return false;
+        };
+        let Some(input) = dialog.inputs.get_mut(0) else {
+            return false;
+        };
+        let items: Vec<Sel> = v["curves"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_str())
+            .map(|id| Sel::ExternalSketchCurve { sketch, id: id.to_string() })
+            .filter(|s| !input.rejects(s))
+            .collect();
+        if items.is_empty() {
+            return false;
+        }
+        input.toggle(items);
+        return true;
+    }
+    if app.session.active_sketch != Some(sketch) {
+        return false;
+    }
     // Only the commands whose first input is the shared Entities list take a chain here; Offset
     // has its own Chain option, and the corner tools take one corner at a time.
     let entities = matches!(

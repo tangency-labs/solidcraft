@@ -669,6 +669,76 @@ fn a_line_starts_on_projected_geometry_and_in_construction_mode() {
     }
 }
 
+/// The Line tool's first click starts a line on the edges a sketch projects from the face it
+/// sits on: a rectangle drawn in a sketch and extruded, a new sketch picked on the extruded face,
+/// and a line started on each of the four edges that face projects. Reported as #14796.
+#[test]
+fn a_line_starts_on_the_projected_edges_of_a_picked_extruded_face() {
+    use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Shape};
+    for edge in 0..4 {
+        let mut h = Harness::new();
+        h.app.set_origin_shown(false);
+        // A rectangle drawn in a sketch and extruded: the extruded body has a cap face on top.
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,40]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance":10})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        h.settle();
+        // A new sketch picked on that face: the face's edges are projected into it.
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.step(&json!({"click":{"world":[20,20,10]}})).unwrap();
+        h.settle();
+        let state = h.app.session.world_state().unwrap();
+        let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let sketch = &ss.sketch;
+        let projected: Vec<usize> = (0..sketch.curves.len()).filter(|&c| sketch.curves[c].link.is_some()).collect();
+        assert_eq!(projected.len(), 4, "the picked face projects its four edges: {:?}", sketch.curves);
+        // The middle of every projected edge, in world coordinates, and their middle: the middle
+        // of the projected rectangle lies on no edge.
+        let middles: Vec<_> = projected
+            .iter()
+            .map(|&c| {
+                let (a, b) = match sketch.shape(c).unwrap() {
+                    Shape::Line { a, b } => (a, b),
+                    other => panic!("a projected edge is not a line: {other:?}"),
+                };
+                ss.plane.to_world((a + b) / 2.0)
+            })
+            .collect();
+        let start = middles[edge];
+        let n = middles.len() as f64;
+        let end = [
+            middles.iter().map(|v| v.x).sum::<f64>() / n,
+            middles.iter().map(|v| v.y).sum::<f64>() / n,
+            middles.iter().map(|v| v.z).sum::<f64>() / n,
+        ];
+        let before = sketch.curves.len();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        h.step(&json!({"click":{"world":[start.x, start.y, start.z]}})).unwrap();
+        h.step(&json!({"move":{"world":end}})).unwrap();
+        h.step(&json!({"click":{"world":end}})).unwrap();
+        h.settle();
+        let state = h.app.session.world_state().unwrap();
+        let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let sketch = &ss.sketch;
+        assert_eq!(sketch.curves.len(), before + 1, "edge {edge}: no line from the first click; {:?}", h.app.status);
+        let new = sketch.curves.last().unwrap();
+        let CurveKind::Line { a, .. } = new.kind else { panic!("edge {edge}: the new curve is not a line") };
+        let at = ss.plane.to_world(sketch.point(a).unwrap());
+        assert!(
+            (at.x - start.x).abs() < 1e-3 && (at.y - start.y).abs() < 1e-3 && (at.z - start.z).abs() < 1e-3,
+            "edge {edge}: the line starts at {at:?}, expected {start:?}"
+        );
+        let tied = sketch.constraints.iter().any(|c| match c.kind {
+            ConstraintKind::PointOnCurve { p, c } | ConstraintKind::Midpoint { p, l: c } => p == a && projected.contains(&c),
+            _ => false,
+        });
+        assert!(tied, "edge {edge}: the line's start is not tied to the projected edge it was started on: {:?}", sketch.constraints);
+    }
+}
+
 #[test]
 fn a_line_snap_whose_source_curve_is_undone_ends_without_an_error() {
     for start in [[-20.0, 10.0], [-2.5, 10.0]] {

@@ -5,11 +5,14 @@
 use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
-use solidcore_record::{Plane, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_color::AnalysisColors;
 use solidcraft_geom::Aabb3;
-use solidcraft_sketch::Sketch;
+use solidcraft_sketch::{CurveKind, Sketch};
 use solidcraft_viewport::{Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
+
+/// The grid's spacing and reach for a view, shared with the other apps that draw a grid.
+pub use solidcraft_viewport::grid::{grid_ext, grid_step};
 
 use crate::{Result, Sel, Session};
 
@@ -221,20 +224,6 @@ pub fn grid_plane(back: Vec3, last: GridPlane) -> GridPlane {
     GridPlane::Ground
 }
 
-/// Grid spacing (minor, major) for a view of the given half height.
-pub fn grid_step(half_height: f64) -> (f64, f64) {
-    let raw = (half_height / 10.0).max(1e-3);
-    let p = 10f64.powf(raw.log10().floor());
-    let minor = if raw / p < 2.0 {
-        p
-    } else if raw / p < 5.0 {
-        2.0 * p
-    } else {
-        5.0 * p
-    };
-    (minor, minor * 5.0)
-}
-
 /// How wide the cross-fade between two grid levels is, in powers of ten of the view's height
 /// (#9570): about 19% of zoom either side of the switch. The switches are at least
 /// `log10(2)` apart, so two cross-fades never overlap.
@@ -412,6 +401,142 @@ pub fn grid_lines(half_height: f64, at: f64, reach: f64, cap: i64) -> Vec<GridLi
     merged.into_iter().map(|(line, own, shared)| if shared { line } else { GridLineAt { weight: own, ..line } }).filter(|l| l.weight > 0.0).collect()
 }
 
+/// The step of the grid's lines the viewport draws at this zoom (#9843).
+///
+/// Away from a cross-fade it is the step of the level the grid is drawn at. In a cross-fade that
+/// level is the one with the bigger weight, and its lines are drawn as long as it has lines of
+/// its own: the levels 2 and 5 do not nest, so each of them fades its own lines out over its
+/// half of the cross-fade, and at the middle of it only the lines the two share (every 10 mm)
+/// are drawn. The crossings the user can see are then those, and there is no crossing at 5 mm
+/// to snap to.
+fn grid_drawn_step(half_height: f64) -> f64 {
+    let (minor, _) = grid_step(half_height);
+    let Some(b) = grid_blend(half_height) else {
+        return minor;
+    };
+    let (own_lo, own_hi) = b.own();
+    // A nested level that still draws its own lines is drawn at its own step: the crossings the
+    // user sees are the finer ones.
+    if b.nested && own_lo > 0.0 {
+        return b.lo;
+    }
+    // The level with the bigger weight is the one the grid is drawn at (`grid_step`).
+    let (level, own) = if b.s >= 0.5 { (b.hi, own_hi) } else { (b.lo, own_lo) };
+    if own > 0.0 { level } else { grid_shared_step(&b) }
+}
+
+/// The step of the lines two levels of a cross-fade share: the lines both of them draw.
+///
+/// The levels that nest (1 and 2, 5 and 10) share the lines of the coarser one. The levels that
+/// do not nest (2 and 5) share only the lines every 10 mm, which is the finer level's major
+/// step.
+fn grid_shared_step(b: &GridBlend) -> f64 {
+    if b.nested { b.hi } else { b.lo * 5.0 }
+}
+
+/// The grid a sketch's points snap to: the crossings of the lines the viewport draws, and the
+/// finer lattice between them.
+///
+/// The crossings are the lines the viewport draws, so their step is the step of the lines that
+/// are drawn ([`grid_drawn_step`]). The finer lattice is a tenth of the level the grid is drawn
+/// at, so a value that is not on a crossing (an exact inch, say) can still be placed.
+pub fn sketch_grid_step(half_height: f64) -> (f64, f64) {
+    let (minor, _) = grid_step(half_height);
+    (grid_drawn_step(half_height), minor / 10.0)
+}
+
+/// The crossing of the drawn grid's lines nearest `p`, when the pointer means that crossing:
+/// the point the user can see and means (#7114).
+///
+/// The crossing takes the pointer when the pointer means it, and the finer lattice holds it
+/// otherwise: the rule is in `sketch_grid_takes_crossing`.
+pub fn sketch_grid_crossing(p: Vec2, minor: f64, fine: f64) -> Option<Vec2> {
+    let crossing = Vec2::new((p.x / minor).round() * minor, (p.y / minor).round() * minor);
+    let taken = sketch_grid_takes_crossing(crossing.dist(p), sketch_grid_lattice(p, fine).dist(p), fine);
+    taken.then_some(crossing)
+}
+
+/// How close the pointer has to be to a point of the finer lattice for it to count as being on
+/// it exactly: a thousandth of a fine step.
+///
+/// The pointer comes from the screen, so it is never exactly on a lattice point: the harness
+/// leaves the pointer of the scenario `s12_pattern_bodies` at `14.000001516401388`, a millionth
+/// and a half off. The tolerance is a thousandth of a fine step, so it swallows that noise and
+/// the noise of any other view (both grow with the view), and it is still two hundred times
+/// smaller than the quarter of a fine step the last clause measures.
+const SKETCH_GRID_EXACT: f64 = 1e-3;
+
+/// How many fine steps the crossing of the drawn grid may take the pointer (#9843).
+///
+/// The crossing is a point of the finer lattice too, so the pointer may land on it from two fine
+/// steps away at most: the point does not move farther than that from where the pointer was.
+const SKETCH_GRID_CROSSING_STEPS: f64 = 2.0;
+
+/// Whether the crossing of the drawn grid's lines takes the pointer that is `d` away from it,
+/// when the finer lattice's point is `l` away from it.
+///
+/// The rules, in order:
+///
+/// 1. **A pointer that is on a point of the finer lattice keeps that exact value.** The drawn
+///    grid does not carry it off to the crossing beside it, so a value the user placed (`14`,
+///    an exact radius) stays where it is.
+/// 2. **The crossing takes the pointer when it is within a fine step of it.** That is the
+///    crossing's own place on the finer lattice and the one right beside it, which is the case
+///    the issue is about: the pointer is aimed at the crossing the user can see.
+/// 3. **The crossing takes the pointer further out only when the finer lattice cannot hold
+///    it, and only from two fine steps away.** A pointer that is more than a quarter of a fine
+///    step away from any point of the lattice has no exact value to hold, so the crossing is
+///    the better answer; but the crossing takes it only when it is no farther than two fine
+///    steps, so that the point does not move more than two fine steps from where the pointer
+///    was (#9843).
+/// 4. Otherwise the finer lattice holds the pointer.
+fn sketch_grid_takes_crossing(d: f64, l: f64, fine: f64) -> bool {
+    // The exact value of a lattice point wins over the crossing beside it (rule 1).
+    if l <= fine * SKETCH_GRID_EXACT && d > fine * SKETCH_GRID_EXACT {
+        return false;
+    }
+    // The crossing takes the pointer within a fine step of it, or when the lattice cannot hold
+    // it and the crossing is no farther than two fine steps (rules 2 and 3).
+    d <= fine || (l > fine / 4.0 && d <= fine * SKETCH_GRID_CROSSING_STEPS)
+}
+
+/// The point of the finer lattice between the crossings nearest `p`.
+pub fn sketch_grid_lattice(p: Vec2, fine: f64) -> Vec2 {
+    Vec2::new(sketch_grid_lattice_axis(p.x, fine), sketch_grid_lattice_axis(p.y, fine))
+}
+
+/// The point of the finer lattice between the crossings nearest `v`.
+pub fn sketch_grid_lattice_axis(v: f64, fine: f64) -> f64 {
+    (v / fine).round() * fine
+}
+
+/// The point of the grid a sketch's point lands on: the crossing of the drawn grid's lines when
+/// the pointer means one, and the finer lattice between the crossings otherwise (#7114).
+pub fn sketch_grid_point(p: Vec2, minor: f64, fine: f64) -> Vec2 {
+    match sketch_grid_crossing(p, minor, fine) {
+        Some(crossing) => crossing,
+        None => sketch_grid_lattice(p, fine),
+    }
+}
+
+/// The free coordinate of a sketch's point that lines up with another point: the crossing of the
+/// drawn grid's lines when the point can be on one, and on the finer lattice between the
+/// crossings otherwise.
+///
+/// `free` is the coordinate the pointer gives and `fixed` the one the point lines up with, on the
+/// other axis. The crossing has to run through `fixed`: a point that lines up with something off
+/// the drawn grid is on no crossing of it, so there the finer lattice holds the point.
+pub fn sketch_grid_free(free: f64, fixed: f64, minor: f64, fine: f64) -> f64 {
+    let on_line = (fixed / minor).round() * minor;
+    if (on_line - fixed).abs() > minor * 1e-6 {
+        return sketch_grid_lattice_axis(free, fine);
+    }
+    let crossing = (free / minor).round() * minor;
+    let lattice = sketch_grid_lattice_axis(free, fine);
+    let taken = sketch_grid_takes_crossing((crossing - free).abs(), (lattice - free).abs(), fine);
+    if taken { crossing } else { lattice }
+}
+
 /// How the grid fades out with the distance from the middle of the view (#4214).
 ///
 /// The grid used to stop at a fixed distance, so its edge showed as a cut across the picture. It
@@ -511,17 +636,6 @@ pub fn grid_far_reach(cam: &Camera, far: f64, c: Vec3, n: Vec3) -> f64 {
     (far - depth) / len
 }
 
-/// The grid's half size for a view of the given half height, seen at the given slant (the cosine
-/// of the angle between the view and the grid's plane): the grid reaches as far on its plane as
-/// the view is wide, which stretches as the plane is seen at a slant (#3087).
-///
-/// The picture and the window share it, so that they draw the same grid (#4214).
-pub fn grid_ext(half_height: f64, major: f64, slant: f64) -> f64 {
-    let major = major.max(1e-3);
-    let ext = (half_height * 3.0 / major).ceil() * major;
-    (ext / slant.abs().max(0.25) / major).ceil() * major
-}
-
 /// Sketch curves as world polylines with their colour.
 pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool]) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     sketch_lines_with_sampler(sk, plane, active, determined, world_curve_parts)
@@ -559,6 +673,9 @@ fn sketch_lines_in(
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
+        if c.spline_handle_of.is_some() {
+            continue;
+        }
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -615,10 +732,59 @@ fn sketch_lines_in(
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
+    if c.spline_handle_of.is_some() {
+        return false;
+    }
     if c.link.is_some() && !sk.is_text_curve(i) {
         return !sk.view.hide_projected;
     }
     !(c.construction && sk.view.hide_construction)
+}
+
+/// One tangent guide of a selected fit spline: the guide runs from `mirror` through `fit` to
+/// `handle`. `point` is the stored handle point, `None` while the spline only shows where its
+/// handles start (they are stored by the first drag of one, #6502).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SplineGuide {
+    pub fit: Vec2,
+    pub handle: Vec2,
+    pub mirror: Vec2,
+    pub point: Option<usize>,
+}
+
+/// The tangent guides spline `curve` shows while it is selected: one per fit point, from its
+/// stored handles, or else from where [`Sketch::spline_handle_preview`] would start them. Empty
+/// for a curve that is not a fit spline or cannot take handles.
+pub fn spline_tangent_guides(sk: &Sketch, curve: usize) -> Vec<SplineGuide> {
+    let Some(CurveKind::Spline { pts, control: false, handles, .. }) = sk.curves.get(curve).map(|c| &c.kind) else {
+        return Vec::new();
+    };
+    let guide = |fit: Vec2, handle: Vec2, point| SplineGuide { fit, handle, mirror: fit * 2.0 - handle, point };
+    if !handles.is_empty() {
+        return pts.iter().zip(handles).filter_map(|(fit, handle)| Some(guide(sk.point(*fit)?, sk.point(*handle)?, Some(*handle)))).collect();
+    }
+    let Some(preview) = sk.spline_handle_preview(curve) else { return Vec::new() };
+    pts.iter().zip(preview).filter_map(|(fit, handle)| Some(guide(sk.point(*fit)?, handle, None))).collect()
+}
+
+/// The full, two-sided display segment for a spline's tangent construction line.
+pub fn spline_handle_display_line(sk: &Sketch, i: usize) -> Option<(Vec2, Vec2)> {
+    let helper = sk.curves.get(i)?;
+    let parent = helper.spline_handle_of.as_deref()?;
+    let (CurveKind::Line { a, b }, parent_index) = (&helper.kind, sk.curve_index(parent)?) else {
+        return None;
+    };
+    let CurveKind::Spline { pts, handles, .. } = &sk.curves.get(parent_index)?.kind else {
+        return None;
+    };
+    let (fit_point, handle_point) = pts
+        .iter()
+        .zip(handles)
+        .find_map(|(fit, handle)| ((*fit == *a && *handle == *b) || (*fit == *b && *handle == *a)).then_some((*fit, *handle)))?;
+    let origin = sk.point(fit_point)?;
+    let handle = sk.point(handle_point)?;
+    let direction = handle - origin;
+    Some((origin - direction, handle))
 }
 
 /// Point roles shown and picked individually. Associated offsets keep their generated
@@ -646,6 +812,14 @@ impl<'a> SketchPointVisibility<'a> {
             let ends = curve.kind.ends();
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
             hidden.extend(interior.filter_map(|i| sk.points.get(i).map(|p| p.id.as_str())));
+        }
+        for handle in sk.curves.iter().flat_map(|curve| match &curve.kind {
+            CurveKind::Spline { handles, .. } => handles.as_slice(),
+            _ => &[],
+        }) {
+            if let Some(point) = sk.points.get(*handle) {
+                hidden.insert(point.id.as_str());
+            }
         }
         Self { hidden }
     }
@@ -885,7 +1059,15 @@ fn build_scene(
         // body is drawn solid, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
         let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_viewport::SEE_THROUGH;
-        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
+        sc.meshes.push(SceneMesh {
+            mesh: Arc::clone(&mesh),
+            color,
+            face_colors,
+            opacity,
+            closed: body.is_closed(),
+            hatch: Default::default(),
+            values: None,
+        });
         let at = sc.meshes.len() - 1;
         if cosmetic_threads
             && thread_budget.available()
@@ -1111,15 +1293,17 @@ impl SectionIndex {
 }
 
 /// Is a sketch drawn? The sketch being edited always is; otherwise not in a hidden component,
-/// Sketches folder or group (even one shown on its own). The sketch immediately before a
-/// rollback marker is shown regardless of its individual visibility; other hidden sketches, and
-/// ones used by a feature unless shown on their own, retain their stored visibility.
+/// Sketches folder or group (even one shown on its own), and not when hidden with its own eye.
+/// The sketch immediately before a rollback marker is shown even when a feature uses it, so a
+/// step on the History bar shows what it adds (#5202); other sketches used by a feature are
+/// shown only when shown on their own. The user's own hide wins over the marker (#12125): the
+/// browser shows the eye off, and hiding the sketch again must take it away.
 pub fn sketch_shown(s: &Session, id: u64) -> bool {
     let v = &s.visibility;
     if s.active_sketch == Some(id) || s.feature_edit_sketch == Some(id) {
         return true;
     }
-    if !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches") {
+    if !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches") || v.hidden_sketches.contains(&id) {
         return false;
     }
     if s.doc
@@ -1129,9 +1313,6 @@ pub fn sketch_shown(s: &Session, id: u64) -> bool {
         .is_some_and(|f| f.id == id && matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. }))
     {
         return true;
-    }
-    if v.hidden_sketches.contains(&id) {
-        return false;
     }
     v.shown_sketches.contains(&id) || !sketch_consumed(s, id)
 }
@@ -1169,6 +1350,7 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
     doc.features.iter().filter_map(|f| match &f.kind {
         FeatureKind::Extrude { sketch, .. }
         | FeatureKind::Revolve { sketch, .. }
+        | FeatureKind::CellGrid { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
         | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
@@ -1220,6 +1402,49 @@ pub fn construction_planes(s: &Session) -> Vec<(u64, String, Plane)> {
             _ => None,
         })
         .collect()
+}
+
+/// The planar body face each construction plane was made from, as it is now: (plane name, body
+/// name, the face's indices on that body), for a plane of the design (not a component's) whose
+/// definition reaches an attached face: an Offset Plane on a face, and planes offset, turned,
+/// flipped or moved through a point from it. The viewport draws such a plane over its face, which
+/// its origin, the plane's point nearest the world origin, can be far from (#4345). A plane on a
+/// face found again only by its picked point or name, or whose face is gone, has none.
+pub fn construction_plane_faces(s: &Session) -> Vec<(String, String, Vec<usize>)> {
+    let st = s.model.state();
+    s.doc
+        .features
+        .iter()
+        .filter(|f| !f.suppressed && f.component == 0)
+        .filter_map(|f| {
+            let solidcraft_doc::FeatureKind::ConstructionPlane { plane } = &f.kind else { return None };
+            let anchor = plane_face_anchor(&s.doc, plane, 0).filter(|a| a.path.is_empty())?;
+            let body = st.body(&anchor.target.body)?;
+            let (faces, _) = s.doc.anchored_face_indices(&st, body, &anchor.target).ok()?;
+            (!faces.is_empty()).then(|| (f.name.clone(), anchor.target.body.clone(), faces))
+        })
+        .collect()
+}
+
+/// The face anchor a plane's definition reaches: its own, its base's (offset, turned, flipped,
+/// moved through a point) or, through a construction plane it is built on, that plane's.
+fn plane_face_anchor<'a>(
+    doc: &'a solidcraft_doc::Document,
+    plane: &'a solidcraft_doc::PlaneRef,
+    depth: usize,
+) -> Option<&'a solidcraft_doc::FaceAnchor> {
+    use solidcraft_doc::PlaneRef;
+    match plane {
+        PlaneRef::Face { anchor, .. } => anchor.as_deref(),
+        PlaneRef::Offset { base, .. } | PlaneRef::ThroughPoint { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => {
+            plane_face_anchor(doc, base, depth + 1)
+        }
+        PlaneRef::Construction { feature } if depth < 32 => match &doc.feature(feature.0)?.kind {
+            solidcraft_doc::FeatureKind::ConstructionPlane { plane } => plane_face_anchor(doc, plane, depth + 1),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Construction axes, as evaluated: (feature id, name, origin, unit direction).
@@ -1533,6 +1758,111 @@ mod tests {
         s.doc_mut().features.retain(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::Extrude { .. }));
         assert_eq!(Arc::as_ptr(&s.doc), address, "doc_mut still edits in place");
         assert_eq!(shown(&s), [true; 4], "an edit through doc_mut is read again");
+    }
+
+    /// The crossing of the drawn grid's lines takes the pointer when the pointer means it, and
+    /// the finer lattice holds the pointer otherwise (#7114).
+    ///
+    /// The numbers are the ones the harness's camera gives: a half height of 80 makes the
+    /// drawn grid's step 5 and the finer lattice's step 0.5.
+    ///
+    /// A pointer that is exactly on a point of the finer lattice holds that exact value: the
+    /// drawn grid does not carry it off to the crossing beside it. That is what keeps the
+    /// radius of the circle of the scenario `s12_pattern_bodies` at 4: the click at `x=14`
+    /// lands on the lattice's own point 14 and not on the crossing 15 beside it.
+    ///
+    /// A pointer that is not on a lattice point but is within a fine step of a crossing is
+    /// aimed at that crossing: that is the case the issue is about, and the test of the issue
+    /// is the pointer at `20.3125`, a sixteenth of a cell off the crossing 20.
+    #[test]
+    fn the_crossing_of_the_drawn_grid_takes_the_pointer_that_means_it() {
+        let point = |p: Vec2, minor: f64| sketch_grid_point(p, minor, minor / 10.0);
+        let near = |a: Vec2, b: Vec2| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9;
+        // The drawn grid's step 5 and the finer lattice's step 0.5.
+        // A pointer off a crossing but within a fine step of it lands on the crossing: the
+        // pointer is at 20.3125, the crossing is at 20.0, and the distance is 0.3125.
+        assert!(near(point(Vec2::new(20.3125, 20.0), 5.0), Vec2::new(20.0, 20.0)));
+        // A pointer exactly on a point of the finer lattice keeps that exact value: the
+        // pointer at 10.5 is 0.5 from the crossing 10.0, and it stays.
+        assert!(near(point(Vec2::new(10.5, 20.0), 5.0), Vec2::new(10.5, 20.0)));
+        assert!(near(point(Vec2::new(14.5, 20.0), 5.0), Vec2::new(14.5, 20.0)));
+        assert!(near(point(Vec2::new(9.5, 20.0), 5.0), Vec2::new(9.5, 20.0)));
+        // The radius of the circle of the scenario s12_pattern_bodies: the click at 14 is on
+        // the lattice's own point and stays, a whole fine step from the crossing 15.
+        assert!(near(point(Vec2::new(14.0, 10.0), 5.0), Vec2::new(14.0, 10.0)));
+        // A pointer on a crossing is on the crossing and on the lattice at once.
+        assert!(near(point(Vec2::new(10.0, 20.0), 5.0), Vec2::new(10.0, 20.0)));
+        // With small cells the lattice holds more of the pointer: at a step of 1 the pointer
+        // at 20.5 is 0.5 from the crossing 21.0, half a cell, and the lattice holds it.
+        assert!(near(point(Vec2::new(20.5, 20.0), 1.0), Vec2::new(20.5, 20.0)));
+        // But the pointer at 20.05 is 0.05 from the crossing 20.0, within a fine step of
+        // 0.1, so the crossing takes it.
+        assert!(near(point(Vec2::new(20.05, 20.0), 1.0), Vec2::new(20.0, 20.0)));
+        assert!(near(point(Vec2::new(20.0, 20.0), 1.0), Vec2::new(20.0, 20.0)));
+        // The free coordinate of a point that lines up with another one follows the same rule.
+        let free = |v: f64, fixed: f64, minor: f64| sketch_grid_free(v, fixed, minor, minor / 10.0);
+        assert!((free(20.3125, 20.0, 5.0) - 20.0).abs() < 1e-9);
+        assert!((free(10.5, 20.0, 5.0) - 10.5).abs() < 1e-9);
+        assert!((free(14.0, 10.0, 5.0) - 14.0).abs() < 1e-9);
+    }
+
+    /// A point snaps only to a crossing the grid draws (#7114).
+    ///
+    /// At the middle of the cross-fade between the levels 2 and 5 the grid draws only the lines
+    /// the two levels share, every 10 mm: the level of 5 mm is not drawn there, so there is no
+    /// crossing at 5 mm for the point to land on. The step the sketch snaps to is the step of
+    /// the lines that are drawn, not the step of the level that is fading out.
+    #[test]
+    fn a_point_snaps_only_to_a_crossing_the_grid_draws() {
+        // The lines the viewport draws at that zoom: the ones the two levels share.
+        let drawn: Vec<f64> = grid_lines(50.0, 0.0, 40.0, 8).iter().map(|l| l.offset).collect();
+        assert!(drawn.iter().all(|o| (o / 10.0).round() * 10.0 == *o), "the lines drawn: {drawn:?}");
+        assert!(!drawn.iter().any(|o| (*o - 5.0).abs() < 1e-9), "there is no line at 5 mm");
+        // The step the sketch snaps to: the one of the lines that are drawn.
+        let (minor, fine) = sketch_grid_step(50.0);
+        assert_eq!(minor, 10.0, "the step of the lines that are drawn");
+        assert_eq!(fine, 0.5, "the finer lattice's step");
+        // A pointer at 5.3125 is not near a crossing of the drawn grid: it does not land on the
+        // crossing 5 that is not drawn.
+        let p = sketch_grid_point(Vec2::new(5.3125, 10.0), minor, fine);
+        assert!(p.dist(Vec2::new(5.0, 10.0)) > 1e-9, "the point landed on the crossing 5 that is not drawn: {p:?}");
+    }
+
+    /// The finer lattice holds the point when the grid refuses the crossing (#7114).
+    ///
+    /// The grid's helpers never give the pointer back: when there is no crossing to take it, the
+    /// point lands on the finer lattice, which holds the value the user placed.
+    #[test]
+    fn the_fine_lattice_holds_the_point_when_the_grid_refuses_the_crossing() {
+        let (minor, fine) = sketch_grid_step(50.0);
+        // At that zoom the grid draws the lines every 10 mm only: there is no crossing at 5 mm,
+        // so the point lands on the lattice's own point 5.5.
+        let p = sketch_grid_point(Vec2::new(5.3125, 10.0), minor, fine);
+        assert!(p.dist(Vec2::new(5.5, 10.0)) < 1e-9, "the point lands at {p:?}");
+        // The pointer itself is never the answer.
+        assert!(p.dist(Vec2::new(5.3125, 10.0)) > 1e-9, "the point landed on the pointer");
+    }
+
+    /// The crossing of the drawn grid does not take a pointer that is more than two fine steps
+    /// away from it (#7114).
+    ///
+    /// With the drawn step 5 and the fine step 0.5, a pointer at 21.2 is 1.2 mm from the
+    /// crossing 20 (two and a half fine steps) and 0.2 from the lattice's own point 21: the
+    /// lattice holds the pointer, so the point does not move more than two fine steps away from
+    /// where it was.
+    #[test]
+    fn the_crossing_of_the_grid_does_not_take_a_pointer_more_than_two_fine_steps_away() {
+        let p = sketch_grid_point(Vec2::new(21.2, 20.0), 5.0, 0.5);
+        assert!(p.dist(Vec2::new(21.0, 20.0)) < 1e-9, "the point lands at {p:?}");
+    }
+
+    /// The nested cross-fade: while the finer level still draws its own lines, the crossings the
+    /// user sees are the finer ones, so a point snaps to them (#9843).
+    #[test]
+    fn a_nested_cross_fade_snaps_to_the_visible_crossing() {
+        let (minor, fine) = sketch_grid_step(110.0);
+        assert_eq!(minor, 5.0, "the finer level's lines are still drawn");
+        assert_eq!(sketch_grid_point(Vec2::new(5.7, 10.0), minor, fine), Vec2::new(5.0, 10.0));
     }
 }
 

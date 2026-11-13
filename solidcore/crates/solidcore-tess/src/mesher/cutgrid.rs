@@ -378,9 +378,9 @@ fn clear_cells(gx: &[f64], gy: &[f64], segs: &[([f64; 2], [f64; 2])], rects: &Re
 /// Whether the segment `a`–`b` meets the closed box `lo`–`hi` (Liang–Barsky clipping).
 fn segment_meets_box(a: [f64; 2], b: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> bool {
     let (mut t0, mut t1) = (0.0f64, 1.0f64);
-    for d in 0..2 {
-        let delta = b[d] - a[d];
-        for (p, q) in [(-delta, a[d] - lo[d]), (delta, hi[d] - a[d])] {
+    for (((ad, bd), lod), hid) in a.into_iter().zip(b).zip(lo).zip(hi) {
+        let delta = bd - ad;
+        for (p, q) in [(-delta, ad - lod), (delta, hid - ad)] {
             if p == 0.0 {
                 if q < 0.0 {
                     return false;

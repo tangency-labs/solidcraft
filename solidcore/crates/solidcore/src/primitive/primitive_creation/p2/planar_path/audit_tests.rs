@@ -271,8 +271,6 @@ fn inputs() -> (Vec<Curve>, Vec<Curve>) {
     (vec![profile.into()], vec![path.into()])
 }
 fn enable_audited_fixes(k: &mut Kernel) {
-    k.fixes.boolean_temporary_transform_statuses = true;
-    k.fixes.primitive_path_curve_statuses = true;
     k.fixes.planar_path_profile_placement_statuses = true;
     k.fixes.planar_path_sweep_statuses = true;
     k.fixes.fillet_trim_status = true;
@@ -383,7 +381,6 @@ fn audit_483_checked_sweep_supports_wr400_open_profiles() {
     ];
     let mut k = Kernel::default();
     enable_audited_fixes(&mut k);
-    k.fixes.planar_path_uncapped_open_profiles = true;
     let mut a = FaultAccess::new(&mut k, ("", 0));
     let id = PrimitiveCreation::create_sweep_along_planar_path(
         &mut a,

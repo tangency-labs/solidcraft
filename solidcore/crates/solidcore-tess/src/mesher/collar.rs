@@ -35,9 +35,9 @@ pub(crate) fn segments(uvs: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale
         let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
         for k in r.clone() {
             let q = metric(*uvs.get(k)?);
-            for d in 0..2 {
-                lo[d] = lo[d].min(q[d]);
-                hi[d] = hi[d].max(q[d]);
+            for ((l, h), qd) in lo.iter_mut().zip(hi.iter_mut()).zip(q) {
+                *l = l.min(qd);
+                *h = h.max(qd);
             }
         }
         Some((lo, hi))

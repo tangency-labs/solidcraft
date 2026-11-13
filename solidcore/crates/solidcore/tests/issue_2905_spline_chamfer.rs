@@ -51,7 +51,6 @@ fn nearest(k: &Kernel, b: &Brep, p: Point3) -> EdgeId {
 /// A kernel with the chamfer's definition on.
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = true;
     k
 }

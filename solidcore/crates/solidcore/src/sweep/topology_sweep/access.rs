@@ -206,7 +206,7 @@ pub trait SweepAccess {
     fn infinite_region(&mut self, brep: BrepId) -> Result<RegionId> {
         self.brep(brep)?
             .infinite_region()
-            .ok_or_else(|| SolidError::null_pointer(super::OP))
+            .ok_or_else(|| SolidError::sweep_missing(super::OP, "the B-rep's infinite region"))
     }
     /// `SmFace::GetEdges`, using the existing faithful co-port.
     fn face_edges(&mut self, face: FaceRef) -> Result<Vec<EdgeId>> {
@@ -345,7 +345,7 @@ pub trait SweepAccess {
                     region.0,
                     built
                         .face
-                        .ok_or_else(|| SolidError::null_pointer(super::OP))?,
+                        .ok_or_else(|| SolidError::sweep_missing(super::OP, "the built face"))?,
                 ),
                 curve_edges: owners
                     .into_iter()
@@ -419,7 +419,7 @@ pub trait SweepAccess {
             face.0,
             output
                 .edge
-                .ok_or_else(|| SolidError::null_pointer(super::OP))?,
+                .ok_or_else(|| SolidError::sweep_missing(super::OP, "the built edge"))?,
         ))
     }
     /// `SmBrep::GetFaces`, preserving the owning list's order.
@@ -441,7 +441,7 @@ pub trait SweepAccess {
             .map(|id| {
                 brep.faceuse(id)?
                     .face
-                    .ok_or_else(|| SolidError::null_pointer(super::OP))
+                    .ok_or_else(|| SolidError::sweep_missing(super::OP, "a faceuse's face"))
             })
             .collect()
     }

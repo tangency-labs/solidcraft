@@ -1257,9 +1257,12 @@ fn merge_and_refine(
     curves: &mut [Curve],
     merge: impl FnOnce(&mut [Vec<f64>]) -> Result<Vec<Vec<f64>>>,
     mut trace: Option<&mut [EntryKnots]>,
+    mut maps: Option<&mut [Option<KnotMap>]>,
 ) -> Result<()> {
     // Merge knot vectors.
     let mut knots: Vec<Vec<f64>> = curves.iter().map(|c| c.knots().to_vec()).collect();
+    // (the maps: the vectors before the merge moves them, index for index)
+    let before = maps.is_some().then(|| knots.clone());
     let merged = merge(&mut knots);
     for (c, u) in curves.iter_mut().zip(&knots) {
         for (dst, src) in c.knots_mut().iter_mut().zip(u) {
@@ -1268,6 +1271,11 @@ fn merge_and_refine(
     }
     if let Some(t) = trace.as_deref_mut() {
         EntryKnots::observe(t, curves);
+    }
+    if let (Some(m), Some(before)) = (maps.as_deref_mut(), &before) {
+        for ((map, b), c) in m.iter_mut().zip(before).zip(curves.iter()) {
+            KnotMap::follow(map, KnotMap::positional(b, c.knots()));
+        }
     }
     let knx = merged?;
 
@@ -1280,7 +1288,81 @@ fn merge_and_refine(
             }
         }
     }
+    // refinement inserts knots and moves none: each mapped knot is still the curve's
+    if let Some(m) = maps {
+        for (map, c) in m.iter_mut().zip(curves.iter()) {
+            KnotMap::follow(map, Some(KnotMap::identity(c.knots())));
+        }
+    }
     Ok(())
+}
+
+/// Where each distinct knot of a curve went in [`make_compatible_knot_tol_mapped`]: the
+/// pairs (knot on entry, the value it holds in the compatible knot vector), in the entry
+/// order, compared bit for bit. Read off the steps' own knot vectors, never computed
+/// again: the reparametrisation and the merge rewrite a curve's knot vector index for
+/// index; a degree elevation keeps the distinct values (checked); a refinement only
+/// inserts.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct KnotMap(pub(crate) Vec<(f64, f64)>);
+
+impl KnotMap {
+    /// The distinct values of `knots` (consecutive repeats once), in order.
+    fn distinct(knots: &[f64]) -> Vec<f64> {
+        let mut out: Vec<f64> = Vec::new();
+        for &k in knots {
+            if out.last().is_none_or(|l| l.to_bits() != k.to_bits()) {
+                out.push(k);
+            }
+        }
+        out
+    }
+
+    /// Each distinct value of `knots` to itself.
+    pub(crate) fn identity(knots: &[f64]) -> Self {
+        KnotMap(Self::distinct(knots).into_iter().map(|k| (k, k)).collect())
+    }
+
+    /// The map `before[i] -> after[i]` of a rewrite in place, when every distinct value of
+    /// `before` goes to one value; `None` otherwise (the vectors' lengths differ, or one
+    /// value went to two).
+    fn positional(before: &[f64], after: &[f64]) -> Option<Self> {
+        if before.len() != after.len() {
+            return None;
+        }
+        let mut out: Vec<(f64, f64)> = Vec::new();
+        for (&b, &a) in before.iter().zip(after) {
+            match out.iter().find(|(x, _)| x.to_bits() == b.to_bits()) {
+                Some(&(_, y)) if y.to_bits() != a.to_bits() => return None,
+                Some(_) => {}
+                None => out.push((b, a)),
+            }
+        }
+        Some(KnotMap(out))
+    }
+
+    /// The value `v` went to, bit for bit.
+    #[must_use]
+    pub(crate) fn get(&self, v: f64) -> Option<f64> {
+        self.0
+            .iter()
+            .find(|(x, _)| x.to_bits() == v.to_bits())
+            .map(|&(_, y)| y)
+    }
+
+    /// `map` followed by `next` (`None` when either is, or a value `map` gives is not one
+    /// `next` takes).
+    pub(crate) fn follow(map: &mut Option<KnotMap>, next: Option<KnotMap>) {
+        *map = match (map.take(), next) {
+            (Some(m), Some(n)) => {
+                m.0.iter()
+                    .map(|&(x, y)| n.get(y).map(|z| (x, z)))
+                    .collect::<Option<Vec<_>>>()
+                    .map(KnotMap)
+            }
+            _ => None,
+        };
+    }
 }
 
 /// The knot storage a curve had on entry to [`make_compatible_knot_tol_traced`], as
@@ -1329,6 +1411,17 @@ pub(crate) fn make_compatible_knot_tol_traced(
     curves: &mut [Curve],
     knot_tol: f64,
 ) -> Result<Vec<EntryKnots>> {
+    make_compatible_knot_tol_mapped(curves, knot_tol, None)
+}
+
+/// [`make_compatible_knot_tol_traced`], also composing into `maps` (one per curve, when
+/// given) where each knot went ([`KnotMap`]; `None` where a step breaks the pairing). The
+/// curves are made exactly as without `maps`: the maps only read the steps' knot vectors.
+pub(crate) fn make_compatible_knot_tol_mapped(
+    curves: &mut [Curve],
+    knot_tol: f64,
+    mut maps: Option<&mut [Option<KnotMap>]>,
+) -> Result<Vec<EntryKnots>> {
     const OP: &str = "nurbs::crv_tool::p2::make_compatible_knot_tol";
     let mut trace: Vec<EntryKnots> = curves
         .iter()
@@ -1357,8 +1450,12 @@ pub(crate) fn make_compatible_knot_tol_traced(
     // When any curve's parameter bounds are not equal, scale all curves to the unit
     // interval.
     if differ {
-        for c in curves.iter_mut() {
+        for (i, c) in curves.iter_mut().enumerate() {
+            let before = maps.is_some().then(|| c.knots().to_vec());
             c.reparam_to_interval(UNIT_SPAN)?;
+            if let (Some(m), Some(b)) = (maps.as_deref_mut().and_then(|m| m.get_mut(i)), before) {
+                KnotMap::follow(m, KnotMap::positional(&b, c.knots()));
+            }
         }
         if knot_tol == 0.0 {
             knot_tol = 0.001;
@@ -1372,7 +1469,21 @@ pub(crate) fn make_compatible_knot_tol_traced(
     }
 
     let degrees: Vec<usize> = curves.iter().map(Curve::degree).collect();
+    let before: Option<Vec<Vec<f64>>> = maps
+        .is_some()
+        .then(|| curves.iter().map(|c| c.knots().to_vec()).collect());
     elevate_to_common_degree(curves)?;
+    // a degree elevation keeps the distinct knot values (only multiplicities grow): the
+    // identity, where the values are the same bit for bit
+    if let (Some(m), Some(before)) = (maps.as_deref_mut(), &before) {
+        for ((map, b), c) in m.iter_mut().zip(before).zip(curves.iter()) {
+            let kept = KnotMap::distinct(b)
+                .iter()
+                .map(|v| v.to_bits())
+                .eq(KnotMap::distinct(c.knots()).iter().map(|v| v.to_bits()));
+            KnotMap::follow(map, kept.then(|| KnotMap::identity(c.knots())));
+        }
+    }
     for ((e, c), p) in trace.iter_mut().zip(curves.iter()).zip(&degrees) {
         if c.degree() != *p {
             e.live = false;
@@ -1380,12 +1491,13 @@ pub(crate) fn make_compatible_knot_tol_traced(
     }
 
     if knot_tol <= COMPATIBLE_KNOT_TOL {
-        merge_and_refine(curves, compatible_knot_array, Some(&mut trace))?;
+        merge_and_refine(curves, compatible_knot_array, Some(&mut trace), maps)?;
     } else {
         merge_and_refine(
             curves,
             |k| compatible_knot_vectors_to_tol(k, knot_tol),
             Some(&mut trace),
+            maps,
         )?;
     }
     Ok(trace)
@@ -1454,7 +1566,12 @@ pub fn make_compatible_adj_knots(curves: &mut [Curve], tol: f64) -> Result<()> {
         }
     }
 
-    merge_and_refine(curves, |k| compatible_knot_vectors_to_tol(k, tol), None)
+    merge_and_refine(
+        curves,
+        |k| compatible_knot_vectors_to_tol(k, tol),
+        None,
+        None,
+    )
 }
 
 #[cfg(test)]
@@ -1464,6 +1581,70 @@ mod tests {
 
     fn pt(x: f64, y: f64, z: f64) -> CPoint {
         CPoint::new(x, y, z, NOW)
+    }
+
+    /// A polyline of degree 1 through `xs` (on the x axis) with knots `u`.
+    fn polyline(xs: &[f64], u: Vec<f64>) -> Curve {
+        Curve::new(xs.iter().map(|&x| pt(x, 0.0, 0.0)).collect(), 1, u).unwrap()
+    }
+
+    /// The maps of a set made compatible: identities on entry, as the skin starts them.
+    fn mapped(curves: &mut [Curve], tol: f64) -> Vec<Option<KnotMap>> {
+        let mut maps: Vec<Option<KnotMap>> = curves
+            .iter()
+            .map(|c| Some(KnotMap::identity(c.knots())))
+            .collect();
+        make_compatible_knot_tol_mapped(curves, tol, Some(&mut maps)).unwrap();
+        maps
+    }
+
+    /// The reparametrisation's map: knots on [0, 2] go to [0, 1] as the curve's own knot
+    /// vector says, and every mapped value is a knot of the compatible vector.
+    #[test]
+    fn the_map_follows_the_reparametrisation() {
+        let mut cs = [
+            polyline(&[0.0, 1.0, 2.0], vec![0.0, 0.0, 0.5, 1.0, 1.0]),
+            polyline(&[0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0, 2.0, 2.0]),
+        ];
+        let maps = mapped(&mut cs, 0.0);
+        let b = maps[1].as_ref().unwrap();
+        assert_eq!(b.get(0.0), Some(0.0));
+        assert_eq!(b.get(1.0), Some(0.5));
+        assert_eq!(b.get(2.0), Some(1.0));
+        for (m, c) in maps.iter().zip(&cs) {
+            for &(_, v) in &m.as_ref().unwrap().0 {
+                assert!(c.knots().iter().any(|k| k.to_bits() == v.to_bits()), "{v}");
+            }
+        }
+    }
+
+    /// The merge's map: knots within the tolerance go to one value, the one the curves'
+    /// compatible vector holds; a knot the merge does not touch maps to itself.
+    #[test]
+    fn the_map_follows_the_merge() {
+        let mut cs = [
+            polyline(&[0.0, 1.0, 2.0], vec![0.0, 0.0, 0.5, 1.0, 1.0]),
+            polyline(&[0.0, 1.0, 3.0, 4.0], vec![0.0, 0.0, 0.5005, 0.8, 1.0, 1.0]),
+        ];
+        let maps = mapped(&mut cs, 0.01);
+        let (a, b) = (maps[0].as_ref().unwrap(), maps[1].as_ref().unwrap());
+        let merged = a.get(0.5).unwrap();
+        assert_eq!(b.get(0.5005).map(f64::to_bits), Some(merged.to_bits()));
+        assert_eq!(b.get(0.8), Some(0.8));
+        assert_eq!(cs[0].knots(), cs[1].knots());
+    }
+
+    /// A degree elevation keeps the distinct knots: the map is the identity through it.
+    #[test]
+    fn the_map_is_the_identity_through_a_degree_elevation() {
+        let mut cs = [
+            polyline(&[0.0, 1.0, 2.0], vec![0.0, 0.0, 0.5, 1.0, 1.0]),
+            cubic(),
+        ];
+        let maps = mapped(&mut cs, 0.0);
+        let a = maps[0].as_ref().unwrap();
+        assert_eq!(a.get(0.5), Some(0.5));
+        assert_eq!(cs[0].degree(), 3);
     }
 
     /// Cubic with one interior knot at 0.5.

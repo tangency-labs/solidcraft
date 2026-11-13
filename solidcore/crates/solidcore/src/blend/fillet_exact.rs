@@ -547,7 +547,10 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
 
     // what was read off the surface is the surface
     if q.distance(p) > tol || q.normal(p).dot(n) < 1.0 - EFF_ZERO_SQRT {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the surface read back is not the surface",
+        ));
     }
     Ok(q)
 }
@@ -1522,8 +1525,9 @@ pub fn classify_exact_blend(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let tol = b.tolerance();
 
     let mut radius = 0.0;
@@ -1545,7 +1549,7 @@ pub fn classify_exact_blend(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             BlendQuadric::from_surface(k, off.surface.base_surface(), uv, tol)?
         };
         if face.kind == QuadricKind::None && !any_faces {
@@ -1559,7 +1563,7 @@ pub fn classify_exact_blend(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = off.surface.base_surface();
             off.surface
                 .surface
@@ -1880,7 +1884,7 @@ pub struct CollapsedOffset {
     pub partial: bool,
 }
 
-/// Not the fork's (#2401; with `fixes.fillet_gn_section_generator`): for a constant ball of
+/// Not the fork's (#2401): for a constant ball of
 /// `radius` (`None`: the solver's own) whose offset of one of its faces collapses (the face
 /// a cylinder or sphere as wide as the ball, the ball inside it: its offset is the axis or
 /// the centre, [`QuadricKind::Line`] or [`QuadricKind::Point`]), the radius of that face
@@ -1930,13 +1934,14 @@ pub fn ball_zone_open_at_an_end(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     if edge::is_closed(b, e)? {
         return Ok(None);
     }
     let curve = edge::evaluation_curve(b, e)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's evaluation curve"))?
         .clone();
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
@@ -1954,7 +1959,7 @@ pub fn ball_zone_open_at_an_end(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = off.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
@@ -1976,7 +1981,7 @@ pub fn ball_zone_open_at_an_end(
             let surface = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = surface.surface.base_surface();
             match edge_match(k, base, &curve, ivl, off, tol)? {
                 // as wide as the ball along part of the edge only: refused, naming the face's
@@ -2047,7 +2052,7 @@ pub fn ball_zone_open_at_an_end(
             let surface = ops
                 .solver()
                 .surface(c)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = surface.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
@@ -2192,13 +2197,14 @@ pub fn rail_below_resolution(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     if edge::is_closed(b, e)? {
         return Ok(None);
     }
     let curve = edge::evaluation_curve(b, e)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's evaluation curve"))?
         .clone();
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
@@ -2215,7 +2221,7 @@ pub fn rail_below_resolution(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = off.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
@@ -2380,7 +2386,7 @@ fn ball_on_face_along_arc(
     let surface = ops
         .solver()
         .surface(ring)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?
         .surface
         .base_surface();
     let mut feet = [Vec3::ZERO; 2];
@@ -2491,7 +2497,7 @@ fn keep_definition(
     }
     let support = |i: usize| -> Result<&Surface> {
         Ok(s.surface(i)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?
             .surface
             .base_surface())
     };
@@ -2519,8 +2525,13 @@ fn keep_definition(
         inputs,
     )?;
     let Some(surface) = pseudo.geom_mut(g)?.fillet_surface_mut(None)? else {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(
+            OP,
+            "the fillet geometry's surface",
+        ));
     };
+    // The round keeps its definition only where it is proved; a net the certificate refuses
+    // refuses the fillet (definitions-and-certificates.md §7.1, §7.4), never kept bare.
     round.recertify(k, surface)?;
     surface.set_exact_round(Some(round));
     Ok(())
@@ -2550,7 +2561,7 @@ fn exact_fillet_geom_of_class(
             .fsg
             .as_ref()
             .map(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::fillet_surface_generator_type)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface generator"))
     };
     match blend.spine {
         BlendSpine::Line => {

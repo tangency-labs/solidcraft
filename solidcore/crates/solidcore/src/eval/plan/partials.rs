@@ -134,11 +134,11 @@ fn nurbs_partials(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], 
     for total in 0..=MAX_PARTIAL_ORDER {
         for k in 0..=total {
             let l = total - k;
-            let mut x = xyz(a[k][l]);
+            let mut x = xyz(*a.get(k)?.get(l)?);
             for (i, j) in (0..=k).flat_map(|i| (0..=l).map(move |j| (i, j))).filter(|ij| *ij != (0, 0)) {
-                x -= d[k - i][l - j] * (binomial(k, i) * binomial(l, j) * a[i][j][3]);
+                x -= *d.get(k - i)?.get(l - j)? * (binomial(k, i) * binomial(l, j) * a.get(i)?.get(j)?[3]);
             }
-            d[k][l] = x * (1.0 / w);
+            *d.get_mut(k)?.get_mut(l)? = x * (1.0 / w);
         }
     }
     tabulate(|i, j| d.get(i)?.get(j).copied())

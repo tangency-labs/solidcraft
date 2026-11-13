@@ -8,18 +8,20 @@
 //! which the neighbouring face shares.
 
 use crate::vec::VecExt as _;
-use std::collections::HashMap;
+use crate::hash::BitsMap;
 
 use solidcore::Vec3;
-use solidcore::eval::plan::EvalSurface;
+
+use super::{comp, rot3};
 
 /// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit
 /// at `fixed`, the rest on the surface at their parameters) until none of them lies farther
 /// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `poles`: which
-/// nodes are poles, asked once per node ([`Poles`]).
-pub(crate) fn refine(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
+/// nodes are poles, asked once per node ([`Poles`]). True when it stopped at `max_points` with
+/// triangles still to look at.
+pub(crate) fn refine(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) -> bool {
     if !(tol.is_finite() && tol > 0.0) || tris.is_empty() {
-        return;
+        return false;
     }
     let at = |q: [f64; 2]| s.eval(q[0], q[1]).0;
     let mean = |qs: &[[f64; 2]]| poles.mean(qs);
@@ -35,18 +37,18 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], u
     // No side is split below this length: a surface whose parameters bend sharply (at a pole) is
     // not chased to the last bit.
     let shortest = tol * 1e-3;
-    let mut sides: HashMap<(u32, u32), Vec<u32>> = HashMap::with_capacity(tris.len() * 2);
+    let mut sides: BitsMap<(u32, u32), Vec<u32>> = BitsMap::with_capacity_and_hasher(tris.len() * 2, std::hash::BuildHasherDefault::default());
     for (ti, t) in tris.iter().enumerate() {
-        for k in 0..3 {
-            sides.entry(key(t[k], t[(k + 1) % 3])).or_default().push(ti as u32);
+        for [a, b, _] in (0..3).map(|k| rot3(*t, k)) {
+            sides.entry(key(a, b)).or_default().push(ti as u32);
         }
     }
-    let mut sag_of: HashMap<(u32, u32), f64> = HashMap::new();
+    let mut sag_of: BitsMap<(u32, u32), f64> = BitsMap::default();
     let limit = uv.len().saturating_add(max_points);
     let mut queue: Vec<u32> = (0..tris.len() as u32).rev().collect();
     while let Some(ti) = queue.pop() {
         if uv.len() >= limit {
-            break;
+            return true;
         }
         let Some(&t) = tris.get(ti as usize) else { continue };
         let p = |i: u32| pos.get(i as usize).copied();
@@ -56,8 +58,7 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], u
         };
         // Sides inside the face (two triangles on them), long enough to split, with their sag.
         let mut inner: Vec<(f64, f64, (u32, u32))> = Vec::with_capacity(3);
-        for k in 0..3 {
-            let (a, b) = (t[k], t[(k + 1) % 3]);
+        for [a, b, _] in (0..3).map(|k| rot3(t, k)) {
             let e = key(a, b);
             if sides.get(&e).is_none_or(|ts| ts.len() != 2) {
                 continue;
@@ -109,18 +110,48 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], u
         sag_of.remove(&split);
         queue.extend(split_side(tris, &mut sides, split, mi));
     }
+    false
+}
+
+/// The farthest the triangles `tris` lie from the surface `s` (mm), measured as [`refine`]
+/// measures them: at each triangle's middle and its sides' middles, along the surface's normal
+/// there; and how many of those middles the surface does not evaluate at (a side shared by two
+/// triangles counts twice).
+pub(crate) fn worst(s: &super::poles::Face, poles: &Poles, fixed: &[Vec3], uv: &[[f64; 2]], tris: &[[u32; 3]]) -> (f64, usize) {
+    let at = |q: [f64; 2]| s.eval(q[0], q[1]).0;
+    let pos: Vec<Vec3> = uv.iter().enumerate().map(|(i, q)| fixed.get(i).copied().unwrap_or_else(|| at(*q))).collect();
+    let (mut worst, mut unmeasured) = (0.0f64, 0usize);
+    // How far the flat point `c` lies from the surface at `q`, `None` where it does not evaluate.
+    let off = |q: [f64; 2], c: Vec3| s.derivs(q[0], q[1]).map(|(p, su, sv)| su.cross(sv).normalized().map_or_else(|| p.dist(c), |n| (p - c).dot(n).abs()));
+    let mut measure = |d: Option<f64>, unmeasured: &mut usize| match d {
+        Some(d) => worst = worst.max(d),
+        None => *unmeasured += 1,
+    };
+    for t in tris {
+        let p = |i: u32| pos.get(i as usize).copied();
+        let q = |i: u32| uv.get(i as usize).copied();
+        let (Some(pa), Some(pb), Some(pc), Some(qa), Some(qb), Some(qc)) = (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2])) else {
+            unmeasured += 4;
+            continue;
+        };
+        measure(off(poles.mean(&[qa, qb, qc]), (pa + pb + pc) * (1.0 / 3.0)), &mut unmeasured);
+        for ((xa, ua), (xb, ub)) in [((pa, qa), (pb, qb)), ((pb, qb), (pc, qc)), ((pc, qc), (pa, qa))] {
+            measure(off(poles.mean(&[ua, ub]), (xa + xb) * 0.5), &mut unmeasured);
+        }
+    }
+    (worst, unmeasured)
 }
 
 /// Which parameter directions the surface is collapsed along at each node of a face's
 /// triangulation (within `reach`): a property of the node's parameters, so it is asked once per
 /// node however many triangles, sides and rounds of refinement and flipping look at it. Ported
-/// from #13559, which did the same for solidcore-tess's own planner.
+/// from #13559, which did the same for solidcore-tess's own planner; the question itself is the
+/// kernel's classifier's, asked once per iso-line ([`super::poles::Face::pole`]).
 pub(crate) struct Poles<'a> {
-    s: &'a EvalSurface,
-    dom: super::uv::Domain,
+    s: &'a super::poles::Face,
     reach: f64,
     /// The answers so far, by the node's parameters bit for bit.
-    flags: std::cell::RefCell<HashMap<[u64; 2], [bool; 2]>>,
+    flags: std::cell::RefCell<BitsMap<[u64; 2], [bool; 2]>>,
     /// Pole questions asked of the surface, for the tests.
     #[cfg(test)]
     pub(crate) asked: std::cell::Cell<usize>,
@@ -128,8 +159,8 @@ pub(crate) struct Poles<'a> {
 
 impl<'a> Poles<'a> {
     /// The poles of `s`, a node within `reach` mm of one taken as one.
-    pub(crate) fn new(s: &'a EvalSurface, reach: f64) -> Self {
-        Poles { s, dom: super::uv::domain(s), reach, flags: std::cell::RefCell::new(HashMap::new()), #[cfg(test)] asked: std::cell::Cell::new(0) }
+    pub(crate) fn new(s: &'a super::poles::Face, reach: f64) -> Self {
+        Poles { s, reach, flags: std::cell::RefCell::new(BitsMap::default()), #[cfg(test)] asked: std::cell::Cell::new(0) }
     }
 
     /// Whether each direction is collapsed at the node of parameters `q`.
@@ -140,7 +171,7 @@ impl<'a> Poles<'a> {
         }
         #[cfg(test)]
         self.asked.set(self.asked.get() + 2);
-        let f = [0, 1].map(|d| super::uv::degenerate_within(self.s, &self.dom, q, d, self.reach));
+        let f = [0, 1].map(|d| self.s.pole(q, d, self.reach));
         self.flags.borrow_mut().insert(key, f);
         f
     }
@@ -151,8 +182,8 @@ impl<'a> Poles<'a> {
     fn mean(&self, qs: &[[f64; 2]]) -> [f64; 2] {
         let mut out = [0.0; 2];
         for (d, slot) in out.iter_mut().enumerate() {
-            let free: Vec<f64> = qs.iter().filter(|q| !self.at(**q)[d]).map(|q| q[d]).collect();
-            let pick: Vec<f64> = if free.is_empty() { qs.iter().map(|q| q[d]).collect() } else { free };
+            let free: Vec<f64> = qs.iter().filter(|q| !self.at(**q).get(d).copied().unwrap_or(false)).map(|q| comp(q, d)).collect();
+            let pick: Vec<f64> = if free.is_empty() { qs.iter().map(|q| comp(q, d)).collect() } else { free };
             *slot = pick.iter().sum::<f64>() / pick.len().max(1) as f64;
         }
         out
@@ -161,13 +192,15 @@ impl<'a> Poles<'a> {
 
 /// The longest side of triangle `t` when the angle opposite it is past `degrees` and the side lies
 /// inside the face (two triangles on it) and is long enough to split.
-fn flat_long_side(t: &[u32; 3], pos: &[Vec3], sides: &HashMap<(u32, u32), Vec<u32>>, shortest: f64, degrees: f64) -> Option<(u32, u32)> {
+fn flat_long_side(t: &[u32; 3], pos: &[Vec3], sides: &BitsMap<(u32, u32), Vec<u32>>, shortest: f64, degrees: f64) -> Option<(u32, u32)> {
     let p = |i: u32| pos.get(i as usize).copied();
-    let len = |k: usize| p(t[k]).zip(p(t[(k + 1) % 3])).map(|(a, b)| a.dist(b));
-    let lengths = [len(0)?, len(1)?, len(2)?];
-    let k = (0..3).max_by(|&i, &j| lengths[i].total_cmp(&lengths[j]))?;
-    let (l, a, b) = (lengths[k], lengths[(k + 1) % 3], lengths[(k + 2) % 3]);
-    let side = key(t[k], t[(k + 1) % 3]);
+    let len = |i: u32, j: u32| p(i).zip(p(j)).map(|(a, b)| a.dist(b));
+    let [t0, t1, t2] = *t;
+    let lengths = [len(t0, t1)?, len(t1, t2)?, len(t2, t0)?];
+    let k = lengths.iter().enumerate().max_by(|i, j| i.1.total_cmp(j.1))?.0;
+    let [l, a, b] = rot3(lengths, k);
+    let [ta, tb, _] = rot3(*t, k);
+    let side = key(ta, tb);
     let inside = sides.get(&side).is_some_and(|ts| ts.len() == 2) && l > shortest;
     let flat = a > 0.0 && b > 0.0 && (a * a + b * b - l * l) / (2.0 * a * b) < degrees.to_radians().cos();
     (inside && flat).then_some(side)
@@ -178,7 +211,7 @@ fn key(a: u32, b: u32) -> (u32, u32) {
 }
 
 /// Move triangle `from` to `to` in the list of side `(a, b)`.
-fn retag(sides: &mut HashMap<(u32, u32), Vec<u32>>, a: u32, b: u32, from: u32, to: u32) {
+fn retag(sides: &mut BitsMap<(u32, u32), Vec<u32>>, a: u32, b: u32, from: u32, to: u32) {
     if let Some(ts) = sides.get_mut(&key(a, b)) {
         for t in ts.iter_mut().filter(|t| **t == from) {
             *t = to;
@@ -188,14 +221,13 @@ fn retag(sides: &mut HashMap<(u32, u32), Vec<u32>>, a: u32, b: u32, from: u32, t
 
 /// Split side `e` at the new point `m`: each triangle on it becomes two, in its own winding.
 /// The triangles touched, old and new.
-fn split_side(tris: &mut Vec<[u32; 3]>, sides: &mut HashMap<(u32, u32), Vec<u32>>, e: (u32, u32), m: u32) -> Vec<u32> {
+fn split_side(tris: &mut Vec<[u32; 3]>, sides: &mut BitsMap<(u32, u32), Vec<u32>>, e: (u32, u32), m: u32) -> Vec<u32> {
     let on = sides.remove(&e).unwrap_or_default();
     let mut touched = Vec::with_capacity(4);
     for ti in on {
         let Some(&t) = tris.get(ti as usize) else { continue };
         // Turn the triangle so the side comes first, as it winds: [a, b, c].
-        let Some(k) = (0..3).find(|&k| key(t[k], t[(k + 1) % 3]) == e) else { continue };
-        let (a, b, c) = (t[k], t[(k + 1) % 3], t[(k + 2) % 3]);
+        let Some([a, b, c]) = (0..3).map(|k| rot3(t, k)).find(|[a, b, _]| key(*a, *b) == e) else { continue };
         let new = tris.len() as u32;
         if let Some(slot) = tris.get_mut(ti as usize) {
             *slot = [a, m, c];
@@ -224,7 +256,7 @@ const MIN_FLIP_ANGLE: f64 = 1e-3;
 /// in (u, v) and against the surface normal (nothing folds), and the new side and the new
 /// triangles' middles stay within `tol` of the surface, or no farther than the old side's middle.
 /// Sides with one triangle (the face's boundary) are never flipped.
-pub(crate) fn flip(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &[[f64; 2]], tris: &mut [[u32; 3]]) {
+pub(crate) fn flip(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &[[f64; 2]], tris: &mut [[u32; 3]]) {
     if !(tol.is_finite() && tol > 0.0) || tris.len() < 2 {
         return;
     }
@@ -274,10 +306,10 @@ pub(crate) fn flip(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv:
         (Some(a), Some(b), Some(c), Some(qa), Some(qb), Some(qc)) => off(mean(&[qa, qb, qc]), (a + b + c) * (1.0 / 3.0)),
         _ => f64::INFINITY,
     };
-    let mut sides: HashMap<(u32, u32), Vec<u32>> = HashMap::with_capacity(tris.len() * 2);
+    let mut sides: BitsMap<(u32, u32), Vec<u32>> = BitsMap::with_capacity_and_hasher(tris.len() * 2, std::hash::BuildHasherDefault::default());
     for (ti, t) in tris.iter().enumerate() {
-        for k in 0..3 {
-            sides.entry(key(t[k], t[(k + 1) % 3])).or_default().push(ti as u32);
+        for [a, b, _] in (0..3).map(|k| rot3(*t, k)) {
+            sides.entry(key(a, b)).or_default().push(ti as u32);
         }
     }
     let mut queue: Vec<(u32, u32)> = sides.iter().filter(|(_, ts)| ts.len() == 2).map(|(e, _)| *e).collect();
@@ -292,8 +324,7 @@ pub(crate) fn flip(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv:
         let Some(&[t1, t2]) = sides.get(&e).map(|v| v.as_slice()) else { continue };
         let (Some(&ta), Some(&tb)) = (tris.get(t1 as usize), tris.get(t2 as usize)) else { continue };
         // [a, b, c] on one side of a -> b, [b, a, d] on the other.
-        let Some(k) = (0..3).find(|&k| key(ta[k], ta[(k + 1) % 3]) == e) else { continue };
-        let (a, b, c) = (ta[k], ta[(k + 1) % 3], ta[(k + 2) % 3]);
+        let Some([a, b, c]) = (0..3).map(|k| rot3(ta, k)).find(|[a, b, _]| key(*a, *b) == e) else { continue };
         let Some(d) = tb.iter().copied().find(|&v| v != a && v != b) else { continue };
         if c == d || sides.contains_key(&key(c, d)) {
             continue;
@@ -361,6 +392,7 @@ pub(crate) fn flip(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::eval::plan::EvalSurface;
 
     /// Refining and flipping a coarse patch of a cylinder (every sag over the tolerance, so the
     /// nodes are looked at by many triangles, sides and rounds) asks the pole question once per
@@ -391,6 +423,7 @@ mod tests {
                 tris.push([a, d, b]);
             }
         }
+        let s = super::super::poles::Face::new(s, 0.0);
         let poles = Poles::new(&s, 1e-9);
         let start = uv.len();
         refine(&s, 5e-2, &poles, &[], &mut uv, &mut tris, 300);

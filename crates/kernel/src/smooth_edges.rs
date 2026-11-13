@@ -189,9 +189,8 @@ fn join(record: &Brep, faces: &[Option<FaceEval>], e: usize, length: f64, work: 
     for (t, end) in middles.chain([(t0, true), (t1, true)]) {
         let Some(left) = work.checked_sub(2) else { return unknown };
         *work = left;
-        let evaluated = solidcraft_geom::brep::pcurve::eval(pa, t)
-            .zip(solidcraft_geom::brep::pcurve::eval(pb, t))
-            .and_then(|(ua, ub)| station(fa, ua).zip(station(fb, ub)));
+        let evaluated =
+            solidcore_ops::pcurve::eval(pa, t).zip(solidcore_ops::pcurve::eval(pb, t)).and_then(|(ua, ub)| station(fa, ua).zip(station(fb, ub)));
         let (sa, sb) = match evaluated {
             Some((Some(sa), Some(sb))) => (sa, sb),
             Some(_) => continue,
@@ -583,6 +582,33 @@ mod tests {
             assert!(!mesh.smooth_edges[i] && mesh.shaded_edge_visible(i) && mesh.edge_pickable(i), "edge {i} {a:?}..{b:?} is drawn");
             assert_eq!(mesh.sharp_edges[i], bottom || square_upright || miter, "edge {i} {a:?}..{b:?}: only the box's edges are creases");
         }
+    }
+
+    /// Drawing is its own angle ([`ANGLE`], half a degree), not the tangent chain's 2°: the
+    /// upright edges of a prism whose outline turns 1° at every vertex are all drawn, and those of
+    /// one turning 0.4° are all hidden.
+    #[test]
+    fn edge_drawing_still_hides_a_join_only_under_half_a_degree() {
+        let uprights = |n: usize| {
+            let at = |k: usize| {
+                let a = std::f64::consts::TAU * k as f64 / n as f64;
+                Vec2::new(20. * a.cos(), 20. * a.sin())
+            };
+            let outer = Loop2::polygon(&(0..n).map(at).collect::<Vec<_>>());
+            let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 3.).unwrap().remove(0);
+            let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
+            let upright: Vec<bool> = mesh
+                .edges
+                .iter()
+                .zip(&mesh.smooth_edges)
+                .filter(|(line, _)| line.first().zip(line.last()).is_some_and(|(a, b)| (a.z - b.z).abs() > 1.))
+                .map(|(_, smooth)| *smooth)
+                .collect();
+            assert_eq!(upright.len(), n);
+            upright
+        };
+        assert!(uprights(360).iter().all(|smooth| !smooth), "1° is drawn");
+        assert!(uprights(900).iter().all(|smooth| *smooth), "0.4° is hidden");
     }
 
     /// A plane tangent to a cylinder (a D-shaped prism): one tangent plane, but the curvature

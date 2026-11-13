@@ -38,6 +38,10 @@ pub struct FindLimitsParams {
     /// Check the pairs of the design's contact sets instead (not with `occurrences`).
     #[serde(default)]
     pub contact_sets: Option<bool>,
+    /// Pairs left out: `[a, b]`, each an occurrence's id or name; a pair of bodies is left out
+    /// when one is under `a` and the other under `b`. Default: none.
+    #[serde(default)]
+    pub exclude_pairs: Option<Vec<[PartRef; 2]>>,
 }
 
 /// A joint by its id (a number) or its name.
@@ -94,10 +98,15 @@ pub enum Stop {
         b: String,
         /// Where they touch (world, mm).
         at: [f64; 3],
+        /// Where `a`'s touching body sits in the assembly.
+        a_part: Box<PartPlace>,
+        /// Where `b`'s touching body sits in the assembly.
+        b_part: Box<PartPlace>,
     },
     /// `loop`: a closed loop can no longer close; `limit`: the limit of another of the joint's
     /// values, or of another joint through a motion link; `turn`: no contact within one turn, so the side is a turn from the other;
-    /// `range`: no contact within the parts' reach (a distance), so the side has no limit.
+    /// `range`: no contact within the parts' reach (a distance), so the side has no limit;
+    /// `budget`: a time or work budget ran out first, so the side is the last value checked clear.
     Other(Why),
 }
 
@@ -109,6 +118,18 @@ pub enum Why {
     Limit,
     Turn,
     Range,
+    Budget,
+}
+
+/// Where a body of a reported pair sits in the assembly: in an assembly of copies, which copy.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, JsonSchema)]
+pub struct PartPlace {
+    /// The component the body is in ("" at the top level).
+    pub component: String,
+    /// The occurrences it is placed through, from the top: their names.
+    pub path: Vec<String>,
+    /// The same occurrences' ids.
+    pub path_ids: Vec<u64>,
 }
 
 /// One value's limits.
