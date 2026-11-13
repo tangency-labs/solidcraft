@@ -76,3 +76,52 @@ fn each_section_edge_of_a_skin_of_ep_curves_comes_back_as_its_section() {
     }
     assert_eq!(found, 2, "the two section edges: {:?}", record.edges);
 }
+
+/// The car walk's side slab as it was drawn: its shoulder (five points) and sill (four) in one
+/// side-view plane, y = -900, their fits as the client saved them. Skinned, the slab is one
+/// plane face whose boundary the kernel builds from those curves and C0 piecewise cubics (triple
+/// knots). Every edge, asked for as the client asks (degree 3, the edge record curve's own span
+/// count, Preferences' position tolerance of 0.01 mm), comes back within that tolerance; the
+/// uniform refit missed one of them by 6.8 mm.
+#[test]
+fn every_edge_of_the_walks_flat_slab_comes_back_within_the_position_tolerance() {
+    let shoulder = Path::Nurbs {
+        degree: 3,
+        points: [
+            [77.3, -900.0, 407.9],
+            [656.191280742273, -900.0, 1193.7305549918165],
+            [1919.9752541558773, -900.0, 363.5317439831184],
+            [3188.4434025060154, -900.0, 938.1288117582549],
+            [3770.0, -900.0, 975.8],
+        ]
+        .map(|[x, y, z]| [x, y, z, 1.0])
+        .to_vec(),
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.5318694394883184, 1.0, 1.0, 1.0, 1.0],
+    };
+    let sill = Path::Nurbs {
+        degree: 3,
+        points: [
+            [1885.5, -900.0, 484.3],
+            [2447.07720037759, -900.0, 315.9471768903195],
+            [3134.5038779137312, -900.0, 973.7758752568442],
+            [3668.2, -900.0, 547.9],
+        ]
+        .map(|[x, y, z]| [x, y, z, 1.0])
+        .to_vec(),
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    };
+    let body = loft(&[vec![shoulder], vec![sill]], 1, false).unwrap();
+    let (record, order) = body.to_record().unwrap();
+    for (i, e) in record.edges.iter().enumerate() {
+        // the client's span count: the record curve's knot intervals, a line one
+        let spans = match &e.curve {
+            Curve::Spline { .. } => spans(&e.curve),
+            _ => 1,
+        };
+        let made = edge_as_curve(&body, &order, i, 3, spans, 0.01);
+        assert!(
+            matches!(made, Ok((_, bound)) if bound <= 0.01),
+            "edge {i} ({spans} spans): {made:?}"
+        );
+    }
+}
