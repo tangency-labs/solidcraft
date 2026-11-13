@@ -4,7 +4,7 @@ Put a box around a part: the size of the raw stock it's cut from. Margin adds cl
 
 - You need at least one body.
 - The box is square to the design's X, Y and Z axes, not to the part. Model the part square to the axes, or the box comes out bigger than the stock you'd really cut.
-- The box is a new body, named Bounding. The part itself is not changed.
+- The box is a new body, named Bounding, or Bounding (2) if the design already has a body named Bounding. The part itself is not changed.
 
 #### Options
 
@@ -18,7 +18,7 @@ Put a box around a part: the size of the raw stock it's cut from. Margin adds cl
 1. Make a 3 in × 2 in × 0.75 in block.
 2. Click Bounding Solid. Bodies shows the part if it was selected; otherwise leave it empty. Set Margin to 0.0625 in. The yellow preview shows the box. Click OK.
 3. A new body, Bounding, covers the part. It is 3.125 in × 2.125 in × 0.875 in: the stock to order or saw.
-4. Hide Bounding in the Browser to see the part again.
+4. Hide the new body in the Browser to see the part again. It is Bounding, or Bounding (2) if the design already had a body named Bounding.
 
 #### Tips and common mistakes
 
