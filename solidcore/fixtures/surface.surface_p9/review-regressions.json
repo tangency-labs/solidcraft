@@ -1,0 +1,6436 @@
+{
+  "cases": [
+    {
+      "name": "review_curved_0_0_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_0_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_0_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_0_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_1_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_1_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_1_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_1_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_2_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_2_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_2_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_0_2_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_0_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_0_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_0_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_0_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_1_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_1_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_1_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_1_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_2_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_2_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_2_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_curved_1_2_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_0_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_0_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_0_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_0_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_1_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_1_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_1_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_1_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_2_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_2_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_2_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_0_2_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_0_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_0_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_0_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_0_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_1_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_1_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_1_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_1_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_2_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_2_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_2_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_pole_1_2_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_0_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_0_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_0_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_0_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_1_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_1_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_1_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_1_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_2_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_2_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_2_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_0_2_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_0_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_0_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_0_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_0_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_1_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_1_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_1_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_1_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_2_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_2_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_2_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_near_pole_1_2_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.45
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_0_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_0_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_0_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_0_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_1_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_1_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_1_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_1_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_2_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_2_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_2_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_0_2_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_0_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_0_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_0_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_0_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_1_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_1_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_1_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_1_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_2_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          0,
+          0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_2_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_2_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          0
+        ],
+        "diagonals": true
+      }
+    },
+    {
+      "name": "review_tiny_1_2_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (PR #6 boundary/tolerance/negative-side regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            5e-08,
+            0.0
+          ],
+          [
+            0.0,
+            1e-07,
+            0.0
+          ],
+          [
+            5e-08,
+            0.0,
+            0.0
+          ],
+          [
+            5e-08,
+            5e-08,
+            4.5e-08
+          ],
+          [
+            5e-08,
+            1e-07,
+            0.0
+          ],
+          [
+            1e-07,
+            0.0,
+            0.0
+          ],
+          [
+            1e-07,
+            5e-08,
+            0.0
+          ],
+          [
+            1e-07,
+            1e-07,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "domain": [
+          0,
+          0,
+          0.7,
+          0.8
+        ],
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": true
+      }
+    }
+  ]
+}

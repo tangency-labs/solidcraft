@@ -44,7 +44,7 @@ FF=$!
 # Waiting lets ffmpeg write the MP4 index so the failed take remains inspectable.
 trap 'kill -INT $FF 2>/dev/null || true; wait $FF 2>/dev/null || true' EXIT
 sleep 1
-python3 "$HERE/enclosure_ui_mcp.py" --port "$PORT" --cli "$CLI" --story "$STORY" --speed "$PAUSE" --minimum-caption "$CAPTION" --log "$OUT/steps.log" --save "$OUT/enclosure-$STORY.solidcraft"
+python3 "$HERE/enclosure_ui_mcp.py" --port "$PORT" --cli "$CLI" --story "$STORY" --speed "$PAUSE" --minimum-caption "$CAPTION" --log "$OUT/steps.log" --save "$OUT/enclosure-$STORY.sc"
 sleep "$HOLD"
 kill -INT $FF; wait $FF || true
 START=$(grep -o "start: [0-9.]*" "$OUT/ffmpeg.log" | head -1 | cut -d" " -f2)

@@ -1,7 +1,8 @@
 use super::*;
+use crate::ProductMesh;
 use crate::job::{AnisotropicFaceOptions, AnisotropicOrientation, ReflectionBody, ReflectionMode, ReflectionOptions};
-use crate::{ProductMesh, StandardView};
 use solidcraft_geom::Mesh;
+use solidcraft_viewport::StandardView;
 use std::sync::Arc;
 
 fn scene() -> ProductScene {
@@ -41,7 +42,7 @@ fn scene() -> ProductScene {
 }
 
 fn request(orientation: AnisotropicOrientation, reflect: bool) -> ImageRequest {
-    let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
+    let mut camera = solidcraft_viewport::Camera { distance: 50.0, ..Default::default() };
     camera.set_view(StandardView::Front);
     let target = AnisotropicFaceOptions {
         body_index: 0,
@@ -53,6 +54,7 @@ fn request(orientation: AnisotropicOrientation, reflect: bool) -> ImageRequest {
         roughness_y: 0.55,
     };
     let options = RaytraceOptions {
+        threads: 1,
         anisotropic_faces: [Some(target), None],
         reflections: reflect.then(|| ReflectionOptions {
             bodies: vec![ReflectionBody { body: "explicit planar reflector".into(), mode: ReflectionMode::RoughSpecular }],
@@ -64,6 +66,7 @@ fn request(orientation: AnisotropicOrientation, reflect: bool) -> ImageRequest {
         ..Default::default()
     };
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator: job::Integrator::Raytrace,
@@ -312,5 +315,99 @@ fn cancellation_after_last_shadow_is_seen_before_shading_or_sampling() {
         assert_eq!(task.pixel_one().err().unwrap().code, ErrorCode::Cancelled);
         assert_eq!(task.sample, before_sample);
         assert!(task.pixels.is_empty());
+    }
+}
+
+fn progressive_anisotropic_fixture(samples: u32, orientation: AnisotropicOrientation, equal_axes: Option<bool>) -> ImageTask {
+    let mut request = request(orientation, true);
+    request.camera.distance = 20.0;
+    request.width = 3;
+    request.height = 3;
+    let options = request.raytrace.as_mut().unwrap();
+    options.progressive = Some(job::CpuProgressiveOptions { samples_per_pixel: samples, seed: 93 });
+    options.reflections.as_mut().unwrap().samples = 1;
+    if let Some(explicit) = equal_axes {
+        if explicit {
+            let target = options.anisotropic_faces[0].as_mut().unwrap();
+            target.roughness_x = 0.4;
+            target.roughness_y = 0.4;
+        } else {
+            options.anisotropic_faces = [None, None];
+        }
+    }
+    ImageTask::new(scene(), request.clone(), CancelToken::default(), request.raytrace.unwrap()).unwrap()
+}
+
+fn progressive_anisotropic_complete(mut task: ImageTask, quantum: usize) -> (Vec<(u32, Vec<u8>)>, Vec<u8>, u64) {
+    let mut previews = Vec::new();
+    let mut real_secondary = false;
+    for _ in 0..2_000_000 {
+        let used = task.work.used();
+        let transport = task.progress().phase == Phase::Running;
+        let poll = task.step_with_previews(quantum).unwrap();
+        if quantum == 1 && transport {
+            assert!(task.work.used() - used <= 4);
+        }
+        real_secondary |= task.pending.as_ref().is_some_and(|p| p.bounce > 0);
+        match poll {
+            ImagePoll::Pending(_) => {}
+            ImagePoll::Preview { png, samples_per_pixel } => previews.push((samples_per_pixel, png)),
+            ImagePoll::Complete(png) => {
+                assert!(real_secondary, "actual anisotropic image transport must trace secondary rays");
+                return (previews, png, task.work.used());
+            }
+        }
+    }
+    panic!("bounded progressive anisotropic fixture did not finish");
+}
+
+#[test]
+fn progressive_anisotropic_images_keep_real_reflections_prefixes_and_quanta() {
+    let a = progressive_anisotropic_complete(progressive_anisotropic_fixture(8, AnisotropicOrientation::Zero, None), 1);
+    assert_eq!(a.0.iter().map(|p| p.0).collect::<Vec<_>>(), [1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(a, progressive_anisotropic_complete(progressive_anisotropic_fixture(8, AnisotropicOrientation::Zero, None), 16_384));
+    for (samples, png) in &a.0 {
+        assert_eq!(*png, progressive_anisotropic_complete(progressive_anisotropic_fixture(*samples, AnisotropicOrientation::Zero, None), 3).1);
+    }
+    let b = progressive_anisotropic_complete(progressive_anisotropic_fixture(8, AnisotropicOrientation::QuarterTurn, None), 1);
+    assert_ne!(a.1, b.1, "rotating anisotropy must affect the actual reflected object");
+    let image = ::image::load_from_memory(&a.1).unwrap().to_rgba8();
+    assert!(image.pixels().any(|p| p[0] > p[1] && p[1] > p[2]), "off-axis orange geometry must contribute through reflection");
+}
+
+#[test]
+fn progressive_equal_anisotropic_axes_keep_every_isotropic_image_byte() {
+    let isotropic = progressive_anisotropic_complete(progressive_anisotropic_fixture(8, AnisotropicOrientation::Zero, Some(false)), 1);
+    for orientation in [AnisotropicOrientation::Zero, AnisotropicOrientation::QuarterTurn] {
+        let explicit = progressive_anisotropic_complete(progressive_anisotropic_fixture(8, orientation, Some(true)), 1);
+        assert_eq!(isotropic.0, explicit.0);
+        assert_eq!(isotropic.1, explicit.1);
+    }
+}
+
+#[test]
+fn adaptive_planar_anisotropy_keeps_real_reflection_and_equal_axes_through_independent_production() {
+    use crate::job::adaptive::AdaptiveSampling;
+    let build = |orientation, equal_axes| {
+        let original = progressive_anisotropic_fixture(16, orientation, equal_axes);
+        let options = RaytraceOptions {
+            adaptive: Some(Box::new(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() })),
+            ..original.options
+        };
+        let request = ImageRequest { raytrace: Some(options.clone()), ..original.request };
+        ImageTask::new(original.scene, request, CancelToken::default(), options).unwrap()
+    };
+    let a = progressive_anisotropic_complete(build(AnisotropicOrientation::Zero, None), 1);
+    assert_eq!(a, progressive_anisotropic_complete(build(AnisotropicOrientation::Zero, None), 16384));
+    assert_eq!(a.0.iter().map(|p| p.0).collect::<Vec<_>>(), (1..32).collect::<Vec<_>>());
+    let ordinary = progressive_anisotropic_complete(progressive_anisotropic_fixture(16, AnisotropicOrientation::Zero, None), 1);
+    assert_eq!(a.1, ordinary.1, "the separate pilot stream cannot alter original production VNDF keys or PDFs");
+    let rotated = progressive_anisotropic_complete(build(AnisotropicOrientation::QuarterTurn, None), 3);
+    assert_ne!(a.1, rotated.1, "the actual reflected geometry must respond to anisotropic orientation");
+    let isotropic = progressive_anisotropic_complete(build(AnisotropicOrientation::Zero, Some(false)), 1);
+    for orientation in [AnisotropicOrientation::Zero, AnisotropicOrientation::QuarterTurn] {
+        let equal = progressive_anisotropic_complete(build(orientation, Some(true)), 3);
+        assert_eq!(equal.0, isotropic.0);
+        assert_eq!(equal.1, isotropic.1);
     }
 }

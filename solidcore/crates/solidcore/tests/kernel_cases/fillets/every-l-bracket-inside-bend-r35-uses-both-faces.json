@@ -1,0 +1,158 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  5.0,
+                  0.0,
+                  5.0
+                ],
+                [
+                  5.0,
+                  20.0,
+                  5.0
+                ]
+              ],
+              "index": 7
+            }
+          ],
+          "points": [
+            [
+              5.0,
+              10.0,
+              5.0
+            ]
+          ],
+          "tolerance": 3.001
+        },
+        "kind": "round",
+        "sizes": [
+          35.0
+        ]
+      }
+    }
+  ],
+  "case": "every-l-bracket-inside-bend-r35-uses-both-faces",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        20,
+        40
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 7,
+    "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. The inside faces run 35 from the bend (x = 5..40 on the foot's top, z = 5..40 on the upright's inner face); the r35 round is tangent to them at their far edges (x = 40, z = 40), so both are used up. Added = 20 (1-pi/4) 35^2 = 5257.7450. V = 12757.7450. Faces 8 - 2 + 1 = 7. No continuity check: with both faces it was tangent to used up, the round meets only the legs' end faces (x = 40, z = 40), square to it (creases), so no tangent seam is left to measure.",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 12757.744996762518,
+    "what": "an L-bracket's inside bend rounded r35, exactly as long as both inside faces: the round uses them up and meets the legs' ends at their edges"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "every-l-bracket-inside-bend-r35-uses-both-faces.bodies.json.gz",
+  "result": [
+    {
+      "body": "Bracket",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4175.331928433934,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 12757.744996712892
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "an L-bracket's inside bend rounded r35, exactly as long as both inside faces: the round uses them up and meets the legs' ends at their edges",
+  "why_not": []
+}

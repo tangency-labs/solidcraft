@@ -9,6 +9,7 @@
 use serde_json::Value;
 
 pub use super::acp::{AuthMethod, PermissionOption, ToolStatus};
+pub use super::acp::{ConfigChoice, ConfigOption};
 
 /// A connection test keeps authentication failures distinct from transport or protocol errors.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,7 +21,7 @@ pub enum TestError {
 impl TestError {
     pub fn message(&self) -> &str {
         match self {
-            Self::AuthRequired => crate::i18n::tr("ui.agent_chat_state_auth"),
+            Self::AuthRequired => solidcraft_ui_text::tr("ui.agent_chat_state_auth"),
             Self::Other(message) => message,
         }
     }
@@ -53,29 +54,70 @@ pub enum Event {
     /// Whether SolidCraft tools were offered by the backend.
     ToolsAvailable(bool),
     /// Ready for a message. `agent`: its name and version; `images`: it takes pictures.
-    Ready { agent: String, images: bool },
+    Ready {
+        agent: String,
+        images: bool,
+    },
     /// Text it streams (`thought`: its reasoning, shown dimmed).
-    Text { thought: bool, text: String },
+    Text {
+        thought: bool,
+        text: String,
+    },
     /// A new tool call, or news about one (`input`: its arguments, when the agent says).
-    Tool { id: String, title: Option<String>, kind: Option<String>, status: Option<ToolStatus>, input: Option<Value>, output: Option<String> },
+    Tool {
+        id: String,
+        title: Option<String>,
+        kind: Option<String>,
+        status: Option<ToolStatus>,
+        input: Option<Value>,
+        output: Option<String>,
+    },
     /// Its plan, replaced whole: each entry with its status.
     Plan(Vec<(String, String)>),
     /// It asks before running something of its own; answered with [`ChatBackend::answer_permission`].
-    Permission { key: u64, title: String, options: Vec<PermissionOption> },
+    Permission {
+        key: u64,
+        title: String,
+        /// The tool call's kind, as the agent gives it.
+        kind: Option<String>,
+        options: Vec<PermissionOption>,
+    },
     /// It needs the user to sign in; `methods` are its own ways to do so.
-    AuthRequired { methods: Vec<AuthMethod> },
+    AuthRequired {
+        methods: Vec<AuthMethod>,
+    },
     /// What it says about its login.
     AuthStatus(String),
     /// Its own modes (an ACP agent's `modes`: ask, accept edits, plan, …) and the current one.
-    Modes { current: String, available: Vec<(String, String)> },
+    Modes {
+        current: String,
+        available: Vec<(String, String)>,
+    },
     /// Its models (empty `available`: only the current one changed).
-    Models { current: String, available: Vec<super::acp::ModelInfo> },
+    Models {
+        current: String,
+        available: Vec<super::acp::ModelInfo>,
+    },
+    /// Why an endpoint's models could not be listed (`None`: they could). It comes before the
+    /// [`Event::Models`] of that listing, which then holds only the configured model.
+    ModelsNote(Option<String>),
+    /// The agent refused the model it was just sent, and says why.
+    ModelRejected(String),
+    ConfigOptions(Vec<ConfigOption>),
+    ConfigOptionFinished {
+        id: String,
+        result: Result<Vec<ConfigOption>, String>,
+    },
     /// The message is answered (`reason`: why it stopped, empty for a normal end).
-    TurnEnded { reason: String },
+    TurnEnded {
+        reason: String,
+    },
     /// Something failed; the backend is still running unless [`Event::Exited`] follows.
     Error(String),
     /// It ended; its last error output.
-    Exited { tail: Vec<String> },
+    Exited {
+        tail: Vec<String>,
+    },
 }
 
 /// What a backend gets to start.
@@ -102,6 +144,9 @@ pub trait ChatBackend {
     /// Start a fresh conversation on the running backend (no restart); [`Event::Ready`] follows.
     /// A message being answered is cancelled first.
     fn new_session(&mut self);
+    /// The user's custom instructions (#8220), added to the system note of every session that
+    /// starts after this call. The panel sets them before the first session and before New chat.
+    fn set_instructions(&mut self, _text: &str) {}
     /// Answer an [`Event::Permission`] with one of its options (`None`: cancelled).
     fn answer_permission(&mut self, key: u64, option: Option<&str>);
     /// Ask the backend to sign in by itself with one of its methods (it opens the browser).
@@ -112,6 +157,9 @@ pub trait ChatBackend {
     fn set_mode(&mut self, _mode: &str) {}
     /// An endpoint's new request timeout, in seconds, from the next request on.
     fn set_request_timeout(&mut self, _secs: u64) {}
+    /// An endpoint's new reasoning effort (empty: send nothing), from the next request on.
+    fn set_reasoning_effort(&mut self, _effort: &str) {}
+    fn set_config_option(&mut self, _id: &str, _value: &str) {}
     /// Its process, for status and tests.
     fn pid(&self) -> Option<u32> {
         None

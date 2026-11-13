@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icons/app/linux/exports/hicolor/256x256/apps/ai.storyteller.solidcraft.png" width="96" height="96" alt="SolidCraft" />
+  <img src="assets/icons/app/linux/exports/hicolor/256x256/apps/io.tangencylabs.solidcraft.png" width="96" height="96" alt="SolidCraft" />
 </p>
 
 <h1 align="center">SolidCraft</h1>
@@ -28,7 +28,7 @@
   <a href="https://docs.solidcraft.io/">Documentation</a> ·
   <a href="https://www.blacksmith.sh"><img src="https://img.shields.io/badge/CI-Blacksmith-000000?logo=githubactions&logoColor=white" alt="CI powered by Blacksmith" /></a>
   <a href="https://discord.gg/FtU4NQNVDH">Discord</a> ·
-  <a href="https://github.com/bherbruck/solidcore">SolidCore</a>
+  <a href="https://github.com/tangency-labs/solidcore">SolidCore</a>
 </p>
 
 <p align="center">
@@ -42,8 +42,8 @@
 </p>
 
 <p align="center">
-  <a href="https://trendshift.io/repositories/296178?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-296178" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/296178/daily" alt="tangency-labs%2Fsolidcraft | Trendshift" width="250" height="55"/></a>
-  <a href="https://trendshift.io/repositories/296178?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-296178" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/296178/daily?language=Rust" alt="tangency-labs%2Fsolidcraft | Trendshift (Rust)" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/296178?utm_source=trendshift-badge&utm_medium=badge&utm_campaign=badge-trendshift-296178" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/296178/daily" alt="tangency-labs%2Fsolidcraft | Trendshift" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/296178?utm_source=trendshift-badge&utm_medium=badge&utm_campaign=badge-trendshift-296178" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/296178/daily?language=Rust" alt="tangency-labs%2Fsolidcraft | Trendshift (Rust)" width="250" height="55"/></a>
 </p>
 
 ![SolidCraft: model a Raspberry Pi 4 case from an empty design: a sketch dimensioned with parameters, extrude, fillets and shell, a rim rounded in one pick, standoffs patterned on the board's mounting holes, port cut-outs, vent slots, "Pi 4" engraved in a font, a PETG material with its mass in Properties, and a height change in Parameters](docs/screenshots/demo.gif)
@@ -58,9 +58,10 @@
 - **Web:** [try it in your browser][web-app], no install.
 
 ARM64 and 32-bit builds, portable zip, .deb, .rpm, Flatpak and the other packages are on the
-[downloads page](docs/downloads.md). The downloads aren't signed yet: on Windows choose
-**More info**, then **Run anyway** in SmartScreen; on macOS right-click SolidCraft and choose **Open**
-the first time. On SolidCraft 0.11 to 0.14, download once by hand; see
+[downloads page](docs/downloads.md). The macOS app is signed with a Developer ID and notarized by
+Apple. Windows signing: free code signing provided by SignPath.io, certificate by SignPath
+Foundation ([code signing policy](https://docs.solidcraft.io/code-signing-policy.html)). Until the
+production certificate is in place, SmartScreen may warn: choose **More info**, then **Run anyway**. On SolidCraft 0.11 to 0.14, download once by hand; see
 [updating](https://docs.solidcraft.io/guide/updates.html#updating-from-011-to-014).
 
 ## What works
@@ -74,7 +75,7 @@ other is a tracked bug.
 - **Parameters and configurations** with unit-aware expressions.
 - **Assemblies** with joints, motion studies, contact sets, interference and mass properties.
 - **Sheet metal** with flanges, hems, fold/unfold and flat patterns, and plastic enclosure features.
-- **Files:** STEP, IGES, 3MF, STL, OBJ and glTF in and out where supported, URDF export, `.solidcraft` designs.
+- **Files:** STEP, IGES, 3MF, STL, OBJ and glTF in and out where supported, URDF export, `.sc` designs (`.solidcraft` files from earlier releases still open).
 - **Desktop app, browser app, headless CLI and MCP server**, all running the same commands.
 
 The full list is in [docs/capabilities.md](docs/capabilities.md) and [docs/features.md](docs/features.md);
@@ -98,7 +99,7 @@ More commands, the Windows cross-build and the browser build are in [docs/buildi
 runs its own design session, or with `--connect` it drives the running app so you can watch.
 Claude Code: `claude mcp add solidcraft -- solidcraft-cli mcp`. If a terminal doesn't find
 `solidcraft-cli` (older Windows installers don't put it on `PATH`), give its full path (by default
-`"C:\Program Files\SolidCraft\solidcraft-cli.exe"`). Tools, access rules and an example session:
+`"C:\\Program Files\\SolidCraft\\solidcraft-cli.exe"`). Tools, access rules and an example session:
 [docs/mcp.md](docs/mcp.md).
 
 ## Scripts
@@ -106,6 +107,153 @@ Claude Code: `claude mcp add solidcraft -- solidcraft-cli mcp`. If a terminal do
 A script is a JSON list of the same commands the UI runs, executed with `solidcraft-cli run`.
 Format and example: [docs/scripts.md](docs/scripts.md). Pages can also be driven through the
 [browser command API](docs/browser-api.md).
+
+## Plugins (experimental desktop runtime)
+
+Plugins add separately distributed behaviour without compiling that behaviour into SolidCraft.
+The initial runtime loads **WebAssembly components**, explicitly requested by the user. Merely
+installing a folder, enabling it in Preferences, or opening a design never executes plugin code.
+The interface is experimental: WIT package `craft:plugin@0.1.0`, capability `commands@0.1`. While
+it is 0.x a minor version may break the one before it; the host refuses a plugin that needs a
+capability it does not have, in plain words. Review a plugin again after an update. The desktop app and headless CLI use the same commands. Browser
+execution, automatic downloads and updates, custom panels, and plugin-defined parametric feature
+types are future work.
+
+### Install and inspect
+
+A package is a folder named after its id, containing `plugin.json` and a `.wasm` component.
+Preferences > Plugins lists packages under the per-user data folder: `%LOCALAPPDATA%/SolidCraft/plugins`
+on Windows, `~/Library/Application Support/SolidCraft/plugins` on macOS, and
+`${XDG_DATA_HOME:-~/.local/share}/solidcraft/plugins` on Linux. **Show in folder** opens this location.
+You can also inspect and explicitly run a package in another folder. Nothing is downloaded by the host.
+
+A minimal manifest looks like this. Plugin packages and examples are maintained outside this
+repository, as specified in [the plugin RFC](docs/rfcs/0002-plugins.md).
+
+```json
+{
+  "id": "example-box",
+  "name": "Example box",
+  "version": "0.1.0",
+  "description": "Create an ordinary editable box from dimensions.",
+  "capabilities": ["commands@0.1"],
+  "runtime": {
+    "module": "plugin.wasm",
+    "entries": ["make"],
+    "commands": ["solid.box"],
+    "limits": {"fuel": 10000000, "memory_mib": 64, "deadline_ms": 5000}
+  }
+}
+```
+
+Run `plugin.inspect` with `{"path":"/path/to/example-box"}` through the CLI's JSON scripts, MCP
+`execute`, or the desktop control channel's `engine.execute`. It reads the manifest and component
+without executing them, returning the declared commands, limits and an `approval` SHA-256 hash.
+Review the author, code and declared rights before using that hash. Inspection does not approve a
+package. Existing metadata-only packages remain listable but cannot run until they declare a runtime.
+
+### Run explicitly
+
+After reviewing the inspected package, execute:
+
+```json
+{
+  "command": "plugin.run",
+  "params": {
+    "path": "/path/to/example-box",
+    "approval": "<exact approval hash returned by plugin.inspect>",
+    "entry": "make",
+    "params": {"length": 20, "width": 10, "height": 3}
+  }
+}
+```
+
+For example, save that command in a JSON array and use `solidcraft-cli run commands.json`.
+For the running desktop app, send it as the `command` and `params` of a standalone
+`engine.execute` request (see [control protocol](docs/control-protocol.md)). The native host runs
+it on a worker and keeps the window responsive. Stop or a design change discards the pending
+result; the host does not automatically rerun external code. Desktop batches and scripts must send
+`plugin.run` separately. Headless CLI scripts may include it as a normal command.
+
+The hash binds **both the exact manifest bytes and the component bytes**, so an updated package
+requires a fresh inspection and permission review. It is a content identity, not a signature or an
+author's reputation. Agent chat asks before executing external plugin code. MCP and the control
+channel keep their existing file scopes: allow the package folder explicitly where needed. Naming
+a package never grants access to another folder.
+
+### User resource ceilings
+
+The invocation defaults remain **10,000,000 fuel, 64 MiB of guest memory and 5000 ms**.
+The default host ceilings remain **100,000,000,000 fuel and 128 MiB**. A package can declare
+larger fuel or memory budgets, but execution is refused until you explicitly raise the host
+ceilings and approve that exact package content. `plugin.inspect` is inert and reports the
+requested limits, current `host_limits`, `within_host_limits` and any `limits_error` even when
+a request is too large.
+
+In the native GUI, open **Preferences > Plugins**, enter **Max plugin fuel** and
+**Max plugin memory (MiB)**, then choose **Apply** or **OK**. Enter also accepts both values;
+**Cancel** reverts changes since the last Apply and **Restore defaults** resets this page.
+The settings persist in your user preferences and do not travel with saved designs.
+
+For standalone CLI or headless MCP sessions, create a UTF-8 JSON file, for example
+`plugin-limits.json` containing:
+
+```json
+{"max_fuel": 200000000000, "max_memory_mib": 512}
+```
+
+Pass it explicitly when starting the process:
+
+```text
+solidcraft-cli --plugin-limits plugin-limits.json run inspect-plugin.json --results
+solidcraft-cli --plugin-limits plugin-limits.json mcp --headless --allow-path /path/to/plugins
+```
+
+Missing fields use the original host ceilings. Connected desktop sessions use the GUI's
+preferences; CLI settings cannot override them. Positive integer fuel values up to `u64::MAX`
+are accepted without rounding. Guest memory is limited to 4096 MiB by the current Wasm32 ABI;
+that technical boundary requires a different runtime ABI to change. Neither setting changes
+a package's declared budget, executes it, adds permissions, or retries a failed invocation.
+Review its manifest and component, obtain the content approval hash, and explicitly invoke it.
+A changed manifest budget requires a fresh approval hash. Keep the selected ceilings within your
+machine's available resources; they are limits on guest execution, not total SolidCraft memory
+or native CAD work. The independent maximum execution deadline stays 30 seconds.
+
+### Permissions, results and saved designs
+
+A plugin can call any command in the MCP catalog whose exact id its manifest lists. Commands that
+reach past the open design are grouped: `file` (saving, exporting, importing, inserting from files,
+libraries), `doc` (opening or switching designs), `app` (settings, window, diagnostics) and `plugin`
+(inspecting or running plugins). Each group is refused unless the manifest requests it in
+`runtime.permissions.command_groups` and the user grants it; this version has no grant UI yet.
+Filesystem calls require matching manifest permissions and approved folder grants. The clock
+requires its manifest permission; otherwise it returns a fixed epoch. No WASI, socket or process
+API is linked. A design container reserves `plugins/<plugin-id>/` for a plugin's own data, kept
+and saved back untouched when the plugin is missing; plugins cannot read or write it until the
+`storage` capability arrives.
+Inspection commands can disclose model data, so review them as permissions too. In particular, the optional
+`model.mesh` permission exposes the requested body's evaluated vertices and triangles in its owning
+component's coordinates (millimetres), with explicit transfer limits. It performs no conversion.
+
+Edits run against an isolated copy of the design. Only a successful call is adopted, as **one Undo
+step**. A trap, exhausted fuel, memory limit, invalid result or refused host call discards the
+transaction, preserving the previous design and undo/redo history. The host validates produced
+native features before accepting them. A plugin that catches a refused host call cannot commit an
+earlier partial edit. CPU-heavy guest loops are bounded by fuel and a deadline; the guide explains
+the separate cost of compiling a component and executing a granted native command.
+
+The result is ordinary native features: they save, undo, redo and rebuild without the plugin.
+Removing the package disables future invocations; it does not remove the features already created.
+Changing the plugin's own parameters means another invocation in this first version; there is no
+plugin-owned timeline evaluation hook yet. Turn an installed plugin off in Preferences > Plugins
+to refuse subsequent desktop calls. Disabling it or changing resource ceilings during a pending
+call prevents adoption. CLI
+processes have their own session policy and do not read the desktop app's preferences.
+
+See the [runtime and author guide](docs/plugin-runtime.md) for the complete manifest, supported
+command boundary, limits, build options, tests and current restrictions.
+For step-by-step package checks and expected results, see the [English test guide](docs/plugin-test-guide.md). The existing
+[parametric plugin design](docs/plugins.md) remains a separate future phase.
 
 ## Contributing
 
@@ -121,11 +269,23 @@ the clean-room and licence rules, and where help is wanted most. Open work is in
 SolidCraft's continuous integration runs on [Blacksmith](https://www.blacksmith.sh), which
 sponsors its CI minutes.
 
+## Disclaimer
+
+The files in this repository are provided as is, without warranty, liability or indemnity, and
+Tangency Labs and the contributors accept no responsibility for any harmful or unlawful use of
+them: read [DISCLAIMER.md](DISCLAIMER.md).
+
 ## Licence
 
 MIT OR Apache-2.0, at your option. Developed under the
 [clean-room contribution rules](AGENTS.md); third-party code and assets retain their
 documented licences and attribution.
+
+SolidCraft's brand and interface are licensed separately, under
+[LICENSE-BRAND](LICENSE-BRAND): the UI kit, the look (interface icons, glyphs, built-in themes),
+the theme's design tokens and palettes, and the SolidCraft name, logo and app icon. Use them freely
+as part of SolidCraft. Using them in another program or product needs the maintainers' written
+permission first.
 
 SolidCraft is independent. Behaviour is designed from public documentation, general CAD
 conventions and user feedback. Reference tests use analytic values and open-source tools.
@@ -144,3 +304,4 @@ Tinkercad are trademarks of their respective owners, named only to describe comp
 [linux-appimage]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage
 [snap-store]: https://snapcraft.io/solidcraft
 [web-app]: https://solidcraft.io/app
+

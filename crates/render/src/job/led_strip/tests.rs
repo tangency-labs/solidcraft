@@ -127,8 +127,9 @@ mod consumer {
     use super::*;
     use crate::job::{CancelToken, ImageRequest, Integrator, TaskPoll};
     use crate::raytrace::{area::RectangleLight, image::ImageTask};
-    use crate::{Camera, ProductMesh, ProductScene, StandardView, surface::OpaqueSurface};
+    use crate::{ProductMesh, ProductScene};
     use solidcraft_geom::{Aabb3, Mesh};
+    use solidcraft_viewport::{Camera, StandardView, surface::OpaqueSurface};
     use std::sync::Arc;
 
     fn light(input: LedStripOptions) -> RectangleLight {
@@ -192,6 +193,7 @@ mod consumer {
         let mut camera = Camera { distance: 50.0, ..Default::default() };
         camera.set_view(StandardView::Top);
         ImageRequest {
+            studio_weights: None,
             environment: None,
             textures: None,
             integrator: Integrator::Raytrace,

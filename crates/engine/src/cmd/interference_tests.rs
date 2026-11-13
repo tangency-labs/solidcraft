@@ -70,7 +70,7 @@ fn a_piece_of_a_body_inside_another_is_still_found() {
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Block"}));
     run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [5, 5, 5], "operation": "new", "body_name": "Pieces"}));
     run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [30, 5, 5], "operation": "join", "targets": ["Pieces"]}));
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let pieces = st.bodies.iter().find(|b| b.name == "Pieces").map(|b| b.body.shell_count());
     assert_eq!(pieces, Some(2), "the two cubes are one body in two pieces");
     let i = run(&mut s, "inspect.interference", json!({}));
@@ -122,7 +122,7 @@ pub(super) fn insert_two_mesh_cubes(s: &mut Session, tag: &str) -> Vec<String> {
         run(s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
     }
     let _ = std::fs::remove_dir_all(&dir);
-    s.world_state().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect()
+    s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect()
 }
 
 /// #3249: mesh bodies (STL, 3MF, OBJ imports) are not intersected, but they used to vanish from
@@ -155,4 +155,53 @@ fn mesh_bodies_are_listed_as_unchecked_not_dropped() {
     let i = run(&mut s, "inspect.interference", json!({"bodies": ["A", meshes[0]]}));
     assert_eq!(i["checked"], 1, "{i}");
     assert_eq!(i["unchecked"][0]["a"].as_str(), Some(meshes[0].as_str()), "{i}");
+}
+
+/// A name that is no body is refused, as inspect.clearance refuses it. Dropped, a misspelled or
+/// wrongly cased body was never checked and two overlapping cubes read as no interference (#9740).
+#[test]
+fn a_body_name_that_is_no_body_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [9, 0, 0], "operation": "new_body", "body_name": "B"}));
+    let i = run(&mut s, "inspect.interference", json!({"bodies": ["A", "B"]}));
+    assert_eq!((&i["count"], &i["checked"]), (&json!(1), &json!(2)), "{i}");
+    for (names, says) in
+        [(json!(["A", "Typo"]), "no body `Typo`"), (json!(["A", "b"]), "no body `b`; did you mean `B`?"), (json!(["Typo"]), "no body `Typo`")]
+    {
+        let e = s.execute("inspect.interference", &json!({"bodies": names})).map(|r| r.to_string()).unwrap_or_else(|e| e.to_string());
+        assert!(e.contains(says), "{names}: {e}");
+    }
+    assert!(
+        !s.execute("inspect.interference", &json!({"bodies": ["Typo"]})).unwrap_err().to_string().contains("did you mean"),
+        "nothing is near `Typo`"
+    );
+}
+
+/// `exclude_pairs` leaves a pair out by body or by occurrence, and each pair reported says where
+/// its bodies sit (#5963).
+#[test]
+fn excluded_pairs_are_left_out_and_pairs_name_their_place() {
+    let mut s = Session::default();
+    for (name, x) in [("Pin", 0), ("Hole", 5)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10, "base": [x, 0, 0], "body_name": name}));
+    }
+    let i = run(&mut s, "inspect.interference", json!({}));
+    assert_eq!((i["count"].as_u64(), i["pairs_excluded"].as_u64()), (Some(1), Some(0)), "{i}");
+    let hit = &i["interferences"][0];
+    for side in ["a", "b"] {
+        let part = &hit[format!("{side}_part")];
+        let component = part["component"].as_str().unwrap_or_default();
+        assert!(["Pin", "Hole"].contains(&component), "{hit}");
+        assert_eq!(part["path"], json!([format!("{component}:1")]), "{hit}");
+    }
+    for pair in [json!(["Pin", "Hole"]), json!(["Hole:1", "Pin:1"]), json!([hit["a"], hit["b"]])] {
+        let i = run(&mut s, "inspect.interference", json!({"exclude_pairs": [pair]}));
+        assert_eq!((i["count"].as_u64(), i["pairs_excluded"].as_u64()), (Some(0), Some(1)), "{pair}: {i}");
+    }
+    for bad in [json!("Pin"), json!([["Pin"]]), json!([["Pin", "Nope"]]), json!([["root", "Pin"]])] {
+        assert!(s.execute("inspect.interference", &json!({"exclude_pairs": bad})).is_err(), "{bad}");
+    }
 }

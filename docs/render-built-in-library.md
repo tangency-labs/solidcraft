@@ -1,14 +1,18 @@
 # Built-in authored render library
 
-**Integration-batch source, not yet a validated application release.** The application-facing adapters below are prepared in the personal render branch. Their compilation, regression execution and visual acceptance must be recorded on the frozen batch. Source-resource conformance from PR #6 is separate evidence.
+The adapters below are in published source `00edaf6a`/tree `38a7f0af` and included
+in CI7's document/engine/workspace suites. Full CI7 is red; no complete material
+showcase or release acceptance is claimed. Native evidence uses an opaque Sample
+Plate, not every library recipe. See [renderer parity](render-parity.md#qualification).
+Original source-resource conformance remains separate evidence.
 
 ## Inventory and availability
 
 The Render panel now has a library section using the existing dropdown, list-picker, disclosure, number-field and theme-token components. Search is paginated; target search returns bounded name/ordinal pages rather than mesh payloads. The same operations are available through engine commands, CLI and MCP.
 
-| Source | Prepared application projection | Explicit exclusions |
+| Source | Application projection | Explicit exclusions |
 |---|---|---|
-| 48 authored PBR surfaces | Uniform opaque assignment, or GPU planar color/normal/roughness/metallic maps | Height/displacement, manufacturing geometry and true anisotropic BRDF |
+| 48 authored PBR surfaces | Uniform opaque assignment, or CPU/GPU built-in planar color/normal/roughness/metallic maps | Height/displacement, manufacturing geometry and true anisotropic BRDF |
 | 48 SELENE appearance recipes | Original uniform opaque baseline | The advanced-target properties listed in each recipe |
 | 24 HDR environment fields | Hash-verified, embedded CPU/GPU environment in a saved setup | Finite room geometry, parallax, contact floor and measured photometry |
 | Numeric rectangular/sun rigs | Exact emitter conversion at an explicit subject scale and center | Passive cards require an explicitly acknowledged emitters-only variant; calibration-blocked and externally owned sun rigs refuse |
@@ -22,12 +26,17 @@ Original authoring manifests remain unchanged, including their `runtime_ready: f
 - `render.library.describe`: exact `kind` and `id`; returns the original entry and explicit variants/omissions.
 - `render.library.targets`: bounded body-name query and page; returns current ordinals, names, revision and captured scene bounds.
 - `render.library.appearance.apply`: `id`, `variant: "uniform_opaque"`, and 1..256 exact `bodies`. Uses ordinary appearance assignment, one undo, with explicit approximation acknowledgement.
-- `render.library.surface.prepare`: `id`, exact `body_index` and `body_name`, optional origin, plane and repeat scale. Returns a GPU texture binding; does not assign a material or alter the document. The default origin is the target bounds center. Existing body IOR is retained.
+- `render.library.surface.prepare`: `id`, exact `body_index` and `body_name`, optional origin, plane and repeat scale. Returns the built-in texture binding for an admitted CPU/GPU consumer; does not itself save a material or alter the document. The default origin is the target bounds center. Existing body IOR is retained.
 - `render.library.environment.apply`: `id`, setup `name`, optional typed setup `set` patch, authored rotation/intensity and explicit `replace_environment`. Embeds the original HDR and saves the setup atomically. Requires a CPU/GPU job but no installed device or source file.
 - `render.library.studio.prepare`: `id`, explicit `variant`, `center_mm` and `subject_extent_mm`. Returns numerical GPU lighting plus limitations and a geometry-clearance review requirement.
 - `render.library.studio.apply`: a prepared rig request, setup name/patch and `replace_lighting_and_environment: true`. Saves the selected emitter projection in one undo. Existing environment and lights are replaced only with that explicit confirmation.
 
-The library browser only enables executable actions for their supported categories and selected executor. A stale target requires a fresh selection; an authored surface cannot silently replace a glass binding. GPU surface bindings remain temporary request state, as with existing optical bindings. Built-in image sources no longer depend on filesystem paths, but their body bindings are not yet document-portable.
+The browser enables actions only for supported categories and the selected method.
+A stale target requires revalidation; a surface cannot silently replace Glass.
+Built-in surfaces use stable saved body targets for CPU/GPU and retain their
+encoded resources for offline reopening. Glass and opaque coats have their own
+saved bindings. External file mappings keep the existing GPU temporary-input
+route; the separate portable external-PNG importer is not delivered here.
 
 ## Reproducible embedded sources
 
@@ -51,7 +60,7 @@ The authored HDR longitude is `phi = 2*pi*(u - 0.5)`, while the existing rendere
 
 Up to 128 exact body bindings may share immutable captured resources. Within one capture, a file/role or built-in identifier/role is read once. `RuntimeTextures` canonicalizes identical encoded content **and role** to one immutable source; the GPU packer decodes and uploads that same identity only once. A different interpretation is never deduplicated merely because its encoded bytes match.
 
-Unique encoded sources are bounded at 64 MiB and unique decoded linear pixels at 96 MiB. Geometry, packing/codec working storage, film and retained results still have to fit the unchanged GPU host/job budgets. The maxima are not simultaneously guaranteed. Reusing one finish on many bodies avoids multiplying its texture payload; using many distinct finishes can still reach admission limits. No silent texture downscaling, channel dropping or CPU fallback occurs.
+Unique encoded sources are bounded at 64 MiB. Native capture permits 512 MiB of unique decoded float4 base pixels; wasm retains 96 MiB. Quality-mode GPU upload stores exact source RGBA8 texels and complete linear RGBA16_UNORM mip tails; the full device buffer must fit its actual storage binding limit. The saved texture filtering option enables bounded anisotropic reconstruction and compact GPU mip storage. Existing GPU built-in maps keep LOD0 when the option is off. Native CPU maps keep isotropic mip filtering when the option is off; a missing footprint selects the coarsest mip. Geometry, packing/codec working storage, film and retained results still have to fit the finite GPU host/job budgets and device limits described in the [GPU production envelope](render-gpu-production-envelope.md). The maxima are not simultaneously guaranteed. Reusing one finish on many bodies avoids multiplying its texture payload; using many distinct finishes can still reach admission limits. No silent texture downscaling, channel dropping or CPU fallback occurs.
 
 ## Lighting conversion and remaining review
 
@@ -62,3 +71,32 @@ A saved HDR with an authored solar disk cannot also retain an analytic sun. Appl
 ## Prepared verification
 
 Regression sources cover catalog counts/pagination, blocked concepts, exact hashes and channel roles, absent-file HDR persistence, orientation conversion, explicit appearance approximation, unchanged engineering metadata, body identity, scalar channels, positive normal basis, actual shared source storage, GPU buffer deduplication and GPU scalar output against a linear reference. Execution results are recorded separately after the batch is frozen.
+
+## Reviewed CPU studios and rigs
+
+Native studio reviews accept the explicitly selected CPU or GPU method. The CPU
+projection preserves sampling, adaptive allocation, profile, camera, lens, optical
+bindings, maps, aging, volume and output choices. It installs the same embedded
+HDR identity/rotation/intensity, passive stage and explicit exposure. Existing CPU
+HDR sample count is retained, or starts at 16 when none was authored. Native
+three-light compositions keep their existing 1/16 radiance gain; it is not added to
+direct rig imports.
+
+Direct CPU rigs keep exact authored achromatic area radiance and world-mm full
+edges. They never retain the implicit three studio lights. The unchanged CPU area
+intensity ceiling 64 means 16 of the 19 currently executable direct rigs refuse;
+RIG-007, RIG-020 (Sun) and RIG-022 (black) fit this numerical projection. World,
+clearance, feature and resource checks still apply. A refusal never clamps a light,
+splits it, changes method or removes authored settings.
+
+A CPU Sun review without indirect lighting offers an explicit adoption action.
+It adds path depth 8, progressive 16/seed 0 only if absent, one camera sample per
+pass and traced shadows. Existing progressive/adaptive/profile intent is kept;
+the complete prospective setup must validate before adoption plus rig replacement
+publishes as one undo. Preparing, cancelling or painting a review does not save,
+start a job or save unrelated viewport navigation.
+
+The CPU authoring engine, pointer and cold-capture renderer regressions are in the
+published source tested by CI7. That scoped execution does not establish native
+image quality for every rig; the recorded native scene is the opaque Sample Plate.
+See [the qualification record](render-parity.md#historical-published-qualification).

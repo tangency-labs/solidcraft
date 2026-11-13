@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Compare — live preview and render side by side</title>
+  <path d="M9 12L55 12A5 5 0 0 1 60 17L60 47A5 5 0 0 1 55 52L9 52A5 5 0 0 1 4 47L4 17A5 5 0 0 1 9 12Z" fill="#e2e8ef"/>
+  <defs><clipPath id="cmpL"><path d="M4 12L32 12L32 52L4 52Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#cmpL)">
+  <path d="M9 12L55 12A5 5 0 0 1 60 17L60 47A5 5 0 0 1 55 52L9 52A5 5 0 0 1 4 47L4 17A5 5 0 0 1 9 12Z" fill="#b8c3cf"/>
+  </g>
+  <defs><clipPath id="cmp"><path d="M9 12L55 12A5 5 0 0 1 60 17L60 47A5 5 0 0 1 55 52L9 52A5 5 0 0 1 4 47L4 17A5 5 0 0 1 9 12Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#cmp)">
+  <path d="M4 44L20.8 28.8L36.48 41.6L45.44 35.2L60 46.4L60 52L4 52Z" fill="#8e9faf"/>
+  </g>
+  <path d="M9 12L55 12A5 5 0 0 1 60 17L60 47A5 5 0 0 1 55 52L9 52A5 5 0 0 1 4 47L4 17A5 5 0 0 1 9 12Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 5L32 59" fill="none" stroke="#ffffff" stroke-width="8.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="14.5" fill="#ffffff"/>
+  <path d="M32 5L32 59" fill="none" stroke="#236ead" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="12.8" fill="#236ead"/>
+  <path d="M23.4 32L29.8 25.6L29.8 38.4Z" fill="#ffffff" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40.6 32L34.2 25.6L34.2 38.4Z" fill="#ffffff" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

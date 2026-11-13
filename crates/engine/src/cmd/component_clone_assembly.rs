@@ -244,9 +244,36 @@ fn origin(
     occurrences: &BTreeMap<u64, u64>,
     features: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
+    doc: &Document,
 ) -> Option<JointOrigin> {
+    fn datum_side(snap: &mut solidcraft_doc::joints::Snap, occurrences: &BTreeMap<u64, u64>, doc: &Document) -> Option<()> {
+        let remap = |d: &mut solidcraft_doc::construct::DatumRef| -> Option<()> {
+            // A datum side names an exact placement by its complete occurrence path. A path that
+            // ends inside the copied tree is rewritten to the copy's own walk (the source's
+            // ancestors are not in the map); a path that leaves the copied tree refuses the
+            // origin, like any reference outside it - the caller reports the skipped record.
+            d.path = doc.occurrence_path(*occurrences.get(d.path.last()?)?)?;
+            Some(())
+        };
+        match snap {
+            solidcraft_doc::joints::Snap::Plane { plane, .. } => {
+                if let solidcraft_doc::PlaneRef::Datum { datum } = plane.as_mut() {
+                    remap(datum)?;
+                }
+            }
+            solidcraft_doc::joints::Snap::Axis { axis, .. } => {
+                if let solidcraft_doc::joints::AxisRef::Target(solidcraft_doc::joints::AxisTarget::Datum { datum }) = axis.as_mut() {
+                    remap(datum)?;
+                }
+            }
+            _ => {}
+        }
+        Some(())
+    }
     let mut out = origin.clone();
     out.occurrence = *occurrences.get(&origin.occurrence)?;
+    out.inside = origin.inside.iter().map(|o| occurrences.get(o).copied()).collect::<Option<_>>()?;
+    datum_side(&mut out.snap, occurrences, doc)?;
     for face in out.snap.face_names_mut() {
         *face = face_name(face, features, bodies)?;
     }
@@ -267,6 +294,17 @@ pub(super) fn clone_assembly(
     features: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
 ) -> Result<Vec<String>> {
+    clone_assembly_with_joint_ids(doc, source, occurrences, features, bodies).map(|(messages, _)| messages)
+}
+
+/// The copied joint identity map is also needed when extracting saved timeline folders.
+pub(super) fn clone_assembly_with_joint_ids(
+    doc: &mut Document,
+    source: &Document,
+    occurrences: &BTreeMap<u64, u64>,
+    features: &BTreeMap<u64, u64>,
+    bodies: &BTreeMap<String, String>,
+) -> Result<(Vec<String>, BTreeMap<u64, u64>)> {
     budget(&source.assembly)?;
     budget(&doc.assembly)?;
     validate_map(occurrences)?;
@@ -302,7 +340,7 @@ pub(super) fn clone_assembly(
         if !occurrences.contains_key(&old.origin.occurrence) {
             continue;
         }
-        if let Some(new) = origin(&old.origin, occurrences, features, bodies) {
+        if let Some(new) = origin(&old.origin, occurrences, features, bodies, doc) {
             let mut item = old.clone();
             item.name = unique_name(&old.name, &mut origin_names)?;
             item.origin = new;
@@ -319,7 +357,7 @@ pub(super) fn clone_assembly(
             continue;
         }
         touched_joints.insert(old.id);
-        match (origin(&old.a, occurrences, features, bodies), origin(&old.b, occurrences, features, bodies)) {
+        match (origin(&old.a, occurrences, features, bodies, doc), origin(&old.b, occurrences, features, bodies, doc)) {
             (Some(aa), Some(bb)) => {
                 let mut item = old.clone();
                 item.id = next_id(&mut item_id)?;
@@ -341,12 +379,12 @@ pub(super) fn clone_assembly(
         // profile and its follower's tip.
         let faces = item.coupling.as_mut().is_none_or(|c| {
             let sizes = c.sizes_mut().into_iter().all(|size| match size {
-                Size::Circle(o) => origin(o, occurrences, features, bodies).map(|new| *o = new).is_some(),
+                Size::Circle(o) => origin(o, occurrences, features, bodies, doc).map(|new| *o = new).is_some(),
                 _ => true,
             });
             let Coupling::Cam(cam) = c else { return sizes };
             let tip = match &mut cam.tip {
-                Some(t) => origin(t, occurrences, features, bodies).map(|new| *t = new).is_some(),
+                Some(t) => origin(t, occurrences, features, bodies, doc).map(|new| *t = new).is_some(),
                 None => true,
             };
             let profile = match &mut cam.profile {
@@ -419,7 +457,7 @@ pub(super) fn clone_assembly(
     budget(&a)?;
     doc.next_id = item_id.checked_add(1).ok_or_else(|| invalid("assembly identifier space is exhausted"))?;
     doc.assembly = a;
-    Ok(messages)
+    Ok((messages, joints))
 }
 
 #[cfg(test)]

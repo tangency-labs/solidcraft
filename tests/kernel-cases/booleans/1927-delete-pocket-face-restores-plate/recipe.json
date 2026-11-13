@@ -1,0 +1,60 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 100,
+    "height": 10,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Pocket",
+    "offset": 10
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     50,
+     50
+    ],
+    "radius": 7.5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Pocket",
+    "distance": -0.5,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "face.delete",
+   "params": {
+    "faces": [
+     [
+      50,
+      50,
+      9.5
+     ],
+     [
+      57.5,
+      50,
+      9.75
+     ]
+    ]
+   }
+  }
+ ]
+}

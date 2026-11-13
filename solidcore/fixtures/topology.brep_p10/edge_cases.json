@@ -1,0 +1,4982 @@
+{
+ "cases": [
+  {
+   "name": "closure_noinf_Defeature_LShape_I",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Defeature_LShape_I",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Defeature_inset_cube",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Defeature_inset_cube",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Defeature_brep1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Defeature_brep1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Fillet_6_sided_corner",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Fillet/6_sided_corner.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Fillet_6_sided_corner",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Fillet/6_sided_corner.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_sphere",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_sphere",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_cone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "cone.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_cone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "cone.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Boolean_BoltMBox1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Boolean_BoltMBox1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Boolean_BoltMBox2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Boolean_BoltMBox2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Boolean_extrudeHoles1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Boolean_extrudeHoles1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Boolean_extrudeHoles2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Boolean_extrudeHoles2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Fillet_eg1_srf1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Fillet/eg1_srf1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Fillet_eg1_srf1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Fillet/eg1_srf1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Fillet_eg1_srf2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Fillet/eg1_srf2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Fillet_eg1_srf2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Fillet/eg1_srf2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Fillet_Heart",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Fillet/Heart.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Fillet_Heart",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Fillet/Heart.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_noinf_Endcap",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Endcap.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_Endcap",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:932 (TestClosureSplitRegion)",
+   "inputs": {
+    "file": "Endcap.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_noedit_Defeature_LShape_I",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_edit_Defeature_LShape_I",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": true
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_noedit_Defeature_inset_cube",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_edit_Defeature_inset_cube",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": true
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_noedit_Defeature_brep1",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_edit_Defeature_brep1",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": true
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_noedit_Boolean_BoltMBox1",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_edit_Boolean_BoltMBox1",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": true
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_noedit_Boolean_BoltMBox2",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_edit_Boolean_BoltMBox2",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": true
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_noedit_Boolean_extrudeHoles1",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "remove_all_edit_Boolean_extrudeHoles1",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:3150 (RemoveAllTopology)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": true
+     }
+    }
+   }
+  },
+  {
+   "name": "project_t0_Defeature_inset_cube",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1542 (TestSmProjectAndTrim)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "project": {
+      "trim": 0,
+      "a": [
+       -100.0,
+       0.5,
+       100.0
+      ],
+      "b": [
+       100.0,
+       0.5,
+       100.0
+      ],
+      "dir": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "reference": [
+       0.0,
+       10.0,
+       100.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "project_t1_Defeature_inset_cube",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1542 (TestSmProjectAndTrim)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "project": {
+      "trim": 1,
+      "a": [
+       -100.0,
+       0.5,
+       100.0
+      ],
+      "b": [
+       100.0,
+       0.5,
+       100.0
+      ],
+      "dir": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "reference": [
+       0.0,
+       10.0,
+       100.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "project_t2_Defeature_inset_cube",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1542 (TestSmProjectAndTrim)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "project": {
+      "trim": 2,
+      "a": [
+       -100.0,
+       0.5,
+       100.0
+      ],
+      "b": [
+       100.0,
+       0.5,
+       100.0
+      ],
+      "dir": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "reference": [
+       0.0,
+       10.0,
+       100.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "project_t0_Defeature_brep1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1542 (TestSmProjectAndTrim)",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "project": {
+      "trim": 0,
+      "a": [
+       -100.0,
+       0.5,
+       100.0
+      ],
+      "b": [
+       100.0,
+       0.5,
+       100.0
+      ],
+      "dir": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "reference": [
+       0.0,
+       10.0,
+       100.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "project_tols_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "project": {
+      "trim": 0,
+      "a": [
+       -100.0,
+       0.5,
+       100.0
+      ],
+      "b": [
+       100.0,
+       0.5,
+       100.0
+      ],
+      "dir": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "reference": [
+       0.0,
+       10.0,
+       100.0
+      ],
+      "approx_tol": 0.001,
+      "angle_tol": 0.01
+     }
+    }
+   }
+  },
+  {
+   "name": "zone_tol_0.0_clamp_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_0.0_force_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_-0.001_clamp_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": -0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_-0.001_force_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": -0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_1e-12_clamp_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-12
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_1e-12_force_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-12
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_1e-07_clamp_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-07
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_1e-07_force_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-07
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_0.001_clamp_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_0.001_force_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_10.0_clamp_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 10.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_10.0_force_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 10.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_1e-06_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_0.001_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_1000.0_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1000.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_1000000.0_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1000000.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_0.0_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_-2.0_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": -2.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_0.0_clamp_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_0.0_force_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_-0.001_clamp_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": -0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_-0.001_force_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": -0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_1e-12_clamp_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-12
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_1e-12_force_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-12
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_1e-07_clamp_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-07
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_1e-07_force_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-07
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_0.001_clamp_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_0.001_force_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_10.0_clamp_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 10.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "zone_tol_10.0_force_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 10.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_1e-06_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_0.001_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_1000.0_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1000.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_1000000.0_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1000000.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_0.0_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "scale_-2.0_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": -2.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "stamp_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 12345
+     }
+    ]
+   }
+  },
+  {
+   "name": "stamp_max_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 18446744073709551000
+     }
+    ]
+   }
+  },
+  {
+   "name": "borrowed_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "healer10_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "healer10_always_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     true,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "manifold_unsure_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "manifold_flip_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_uv_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "stamp_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 12345
+     }
+    ]
+   }
+  },
+  {
+   "name": "stamp_max_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 18446744073709551000
+     }
+    ]
+   }
+  },
+  {
+   "name": "borrowed_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "healer10_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "healer10_always_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     true,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "manifold_unsure_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "manifold_flip_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_uv_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "stamp_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 12345
+     }
+    ]
+   }
+  },
+  {
+   "name": "stamp_max_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 18446744073709551000
+     }
+    ]
+   }
+  },
+  {
+   "name": "borrowed_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "healer10_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "healer10_always_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     true,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "manifold_unsure_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "manifold_flip_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_uv_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "stamp_Boolean_BoltMBox2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 12345
+     }
+    ]
+   }
+  },
+  {
+   "name": "stamp_max_Boolean_BoltMBox2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 18446744073709551000
+     }
+    ]
+   }
+  },
+  {
+   "name": "borrowed_Boolean_BoltMBox2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "healer10_Boolean_BoltMBox2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "healer10_always_Boolean_BoltMBox2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     true,
+     true
+    ],
+    "patches": [
+     {
+      "healer": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "manifold_unsure_Boolean_BoltMBox2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "manifold_flip_Boolean_BoltMBox2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_uv_Boolean_BoltMBox2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "drop_uv": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "iges_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "iges_stamp_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges",
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "iges_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "iges_stamp_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges",
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "iges_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "iges_stamp_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges",
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "iges_Fillet_6_sided_corner",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Fillet/6_sided_corner.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "iges_stamp_Fillet_6_sided_corner",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Fillet/6_sided_corner.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges",
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "iges_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "iges_stamp_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges",
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "iges_cone",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "cone.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "iges_stamp_cone",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "cone.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges",
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_face_surface_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 0,
+       "value": 999999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_face_surface_max_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 0,
+       "value": -1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_face_start_loop_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 1,
+       "index": 0,
+       "value": 1099511627776
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_start_eu_wrap_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 0,
+       "value": -1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_start_eu_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 0,
+       "value": 1099511627776
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_vertex_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 3,
+       "index": 0,
+       "value": 1099511627776
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_edge_no_object_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 4,
+       "index": 0,
+       "value": 9999999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_edge_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 4,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_loop_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 5,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_next_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_next_mate_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": -99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_next_min_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": -9223372036854775808
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_curve_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_prim_positive_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_prim_negative_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_prim_mate0_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_shell_type_7_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 0,
+       "value": 7
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_shell_type_wire_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_shell_type_vertex_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_region_start_shell_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 10,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_uv_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 11,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_vertex_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_wire_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_pole_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_9_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 9
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_num_eu_0_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_num_eu_1_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_fu_face_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 14,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_fu_face_dup_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 14,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_start_vertex_oob_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 15,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_region1_start_shell_0_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 10,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_face_surface_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 0,
+       "value": 999999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_face_surface_max_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 0,
+       "value": -1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_face_start_loop_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 1,
+       "index": 0,
+       "value": 1099511627776
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_start_eu_wrap_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 0,
+       "value": -1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_start_eu_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 0,
+       "value": 1099511627776
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_vertex_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 3,
+       "index": 0,
+       "value": 1099511627776
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_edge_no_object_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 4,
+       "index": 0,
+       "value": 9999999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_edge_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 4,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_loop_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 5,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_next_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_next_mate_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": -99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_next_min_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": -9223372036854775808
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_curve_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_prim_positive_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_prim_negative_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_prim_mate0_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_shell_type_7_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 0,
+       "value": 7
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_shell_type_wire_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_shell_type_vertex_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_region_start_shell_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 10,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_uv_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 11,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_vertex_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_wire_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_pole_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_9_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 9
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_num_eu_0_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_num_eu_1_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_fu_face_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 14,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_fu_face_dup_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 14,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_start_vertex_oob_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 15,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_region1_start_shell_0_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 10,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_face_surface_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 0,
+       "value": 999999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_face_surface_max_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 0,
+       "value": -1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_face_start_loop_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 1,
+       "index": 0,
+       "value": 1099511627776
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_start_eu_wrap_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 0,
+       "value": -1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_start_eu_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 2,
+       "index": 0,
+       "value": 1099511627776
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_vertex_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 3,
+       "index": 0,
+       "value": 1099511627776
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_edge_no_object_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 4,
+       "index": 0,
+       "value": 9999999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_edge_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 4,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_loop_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 5,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_next_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_next_mate_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": -99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_next_min_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 6,
+       "index": 0,
+       "value": -9223372036854775808
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_curve_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_prim_positive_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_prim_negative_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_prim_mate0_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_shell_type_7_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 0,
+       "value": 7
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_shell_type_wire_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_shell_type_vertex_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_region_start_shell_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 10,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_uv_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 11,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_vertex_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_wire_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_pole_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_eu_type_9_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 0,
+       "value": 9
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_num_eu_0_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_loop_num_eu_1_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 13,
+       "index": 0,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_fu_face_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 14,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_fu_face_dup_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 14,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_edge_start_vertex_oob_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 15,
+       "index": 0,
+       "value": 99999
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_region1_start_shell_0_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 10,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "make_spine_fan",
+   "upstream_ref": "crafted: triangles around a spine edge (smMergeTest.cpp:932 non-manifold edges)",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "closure_noinf_spine_fan",
+   "upstream_ref": "crafted: TestClosureSplitRegion on a spine edge",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_spine_fan",
+   "upstream_ref": "crafted: TestClosureSplitRegion on a spine edge",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "stamp_spine_fan",
+   "upstream_ref": "crafted",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 99
+     }
+    ]
+   }
+  },
+  {
+   "name": "make_spine_doubled",
+   "upstream_ref": "crafted: triangles around a spine edge (smMergeTest.cpp:932 non-manifold edges)",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "closure_noinf_spine_doubled",
+   "upstream_ref": "crafted: TestClosureSplitRegion on a spine edge",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "closure_inf_spine_doubled",
+   "upstream_ref": "crafted: TestClosureSplitRegion on a spine edge",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "stamp_spine_doubled",
+   "upstream_ref": "crafted",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 99
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,136 @@
+{
+  "area": "ladder/09-shells-and-offsets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              0.5828658658286644,
+              -16.098896995231506,
+              0.0
+            ]
+          ],
+          "tolerance": 0.060001
+        },
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "013-dome-shelled-from-base",
+  "expected": {
+    "body_count": 1,
+    "faces": 3,
+    "method": "V = (2/3) pi (20^3 - 18^3); faces: outer sphere, inner sphere, base ring",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 4540.648581988,
+    "what": "a dome r20 shelled 2 mm, open at its flat base: the rim is the circle r18 where the inner sphere meets the base plane"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 4787.787204093296,
+      "body_count": 1,
+      "edges": 4,
+      "faces": 3,
+      "vertices": 4,
+      "volume_mm3": 4540.648581985395
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 4,
+      "faces": 3,
+      "vertices": 4
+    }
+  },
+  "records": "013-dome-shelled-from-base.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4787.787204093296,
+      "body_count": 1,
+      "edges": 4,
+      "faces": 3,
+      "vertices": 4,
+      "volume_mm3": 4540.648581985395
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "revolve",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "a dome r20 shelled 2 mm, open at its flat base: the rim is the circle r18 where the inner sphere meets the base plane",
+  "why_not": []
+}

@@ -1,9 +1,12 @@
 //! `joint.sweep` against stops worked out by hand: a door swinging into a block, the four-bar's
 //! rocker meeting a stop and a Watt six-bar's output link meeting one, each checked against the
 //! linkage solved with circle intersections and a separating-axis test of the parts' outlines.
+//! `joint.find_limits` against the same stops met both ways, a slider, the four-bar's toggles
+//! and the Hinge Assembly sample.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::{four_bar, meet, occ, part, pin, run};
 use crate::Session;
@@ -154,7 +157,11 @@ fn a_sweep_refuses_what_it_cannot_do() {
         json!({"joint": "Hinge", "from": 0, "to": 90, "refine": 0}),
         json!({"joint": "Hinge", "from": 0, "to": 90, "refine": -1}),
         json!({"joint": "Hinge", "from": 0, "to": 90, "step": 0}),
-        json!({"joint": "Hinge", "from": 0, "to": 1e8, "step": 1e-6}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "budget_s": 0}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "budget_s": 1e6}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "exclude_pairs": [["Door"]]}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "exclude_pairs": [["Door", "Nope"]]}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "exclude_pairs": "Door"}),
         json!({"joint": "Hinge", "from": "nan", "to": 90}),
         json!({"joint": "Hinge", "from": 0, "to": 90, "occurrences": ["Door"]}),
         json!({"joint": "Hinge", "from": 0, "to": 90, "against": ["Block"]}),
@@ -163,6 +170,94 @@ fn a_sweep_refuses_what_it_cannot_do() {
     }
     run(&mut s, "joint.as_built", json!({"type": "rigid", "a": "Block", "b": "Door", "name": "Lock"}));
     assert!(s.execute("joint.sweep", &json!({"joint": "Lock", "from": 0, "to": 1})).is_err(), "a rigid joint does not move");
+}
+
+/// Past its sample cap a sweep stops at the last sample it took, clear, instead of failing
+/// (#5963): 4096 steps of 1e-6° from 0.
+#[test]
+fn a_sweep_past_its_sample_cap_stops_with_what_it_found() {
+    let mut s = door();
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 1e8, "step": 1e-6}));
+    assert_eq!(
+        (r["stopped_by"].as_str(), r["budget_ran_out"].as_str(), &r["budget_exceeded"]),
+        (Some("budget"), Some("samples"), &json!(true)),
+        "{r}"
+    );
+    assert!((num(&r["stopped_at"]) - 4096e-6).abs() < 1e-9, "{r}");
+    assert_eq!(r["samples"].as_array().map(Vec::len), Some(4097), "from and each sample taken");
+    // Within its caps nothing ran out.
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 90}));
+    assert_eq!((&r["budget_exceeded"], &r["budget_ran_out"], &r["budget_s"]), (&json!(false), &Value::Null, &Value::Null), "{r}");
+}
+
+/// A time budget that is spent before the first sample stops the sweep at `from`, with a
+/// result (#5963).
+#[test]
+fn a_sweep_out_of_time_stops_at_the_last_value_checked_clear() {
+    let mut s = door();
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 10, "to": 90, "budget_s": 1e-9}));
+    assert_eq!((r["stopped_by"].as_str(), r["budget_ran_out"].as_str()), (Some("budget"), Some("time")), "{r}");
+    assert_eq!((num(&r["stopped_at"]), num(&r["budget_s"])), (10.0, 1e-9), "{r}");
+    // A day is plenty: the block stops it as without a budget.
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 90, "budget_s": 86400}));
+    assert!(r["stopped_by"]["a"].is_string() && r["budget_ran_out"].is_null(), "{r}");
+}
+
+/// A pair left out with `exclude_pairs` is not checked: the door swings past the block to a post
+/// behind it, met where the door's face meets the post's first corner (as
+/// `a_door_swings_until_it_meets_the_block`). Each side of the pair met is named with its
+/// component and occurrence path (#5963).
+#[test]
+fn an_excluded_pair_is_not_checked_and_pairs_name_their_place() {
+    let mut s = door();
+    block(&mut s, "Post", [20.0, 60.0, 0.0], [10.0, 10.0, 50.0]);
+    let corner = |x: f64, y: f64| y.atan2(x) - (4.0 / x.hypot(y)).asin();
+    let expected =
+        [(20.0, 60.0), (30.0, 60.0), (20.0, 70.0), (30.0, 70.0)].iter().map(|(x, y)| corner(*x, *y)).fold(f64::INFINITY, f64::min).to_degrees();
+    let all = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 90}));
+    assert!(by_parts(&all["stopped_by"], "Door:1", "Block:1"), "{all}");
+    for pair in [json!(["Door", "Block"]), json!(["Block:1", "Door:1"])] {
+        let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 90, "exclude_pairs": [pair]}));
+        assert_eq!(num(&r["pairs"]), num(&all["pairs"]) - 1.0, "{r}");
+        let at = num(&r["stopped_at"]);
+        assert!((at - expected).abs() < 0.01 && at <= expected + 1e-9, "stopped at {at}°, the post is met at {expected}°: {r}");
+        let by = &r["stopped_by"];
+        assert!(by_parts(by, "Door:1", "Post:1"), "{by}");
+        for side in ["a", "b"] {
+            let name = by[side].as_str().unwrap_or_default();
+            let part = &by[format!("{side}_part")];
+            assert_eq!(part["path"], json!([name]), "{by}");
+            assert_eq!(part["component"].as_str(), name.split(':').next(), "{by}");
+            assert_eq!(part["path_ids"].as_array().map(Vec::len), Some(1), "{by}");
+        }
+    }
+}
+
+/// A contact drive past its sample budget fails, as it always has, unless the call asks it to
+/// stop: then it stops at the last placement checked clear (#5963). The door turns 5000° with a
+/// block well out of its reach in its contact set: far more than 4096 samples.
+#[test]
+fn a_contact_drive_stops_at_its_budget_only_when_asked() {
+    let mut s = Session::default();
+    block(&mut s, "Door", [0.0, 0.0, 0.0], [100.0, 4.0, 50.0]);
+    block(&mut s, "Far", [300.0, 0.0, 0.0], [20.0, 20.0, 50.0]);
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": 0, "point": [0, 0, 0]}, "b": {"occurrence": "Door", "point": [0, 0, 0]}, "flip": true, "name": "Hinge"}),
+    );
+    run(&mut s, "contact.create", json!({"occurrences": ["Door", "Far"]}));
+    run(&mut s, "contact.enable_sets", json!({}));
+    let before = s.doc.clone();
+    let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": 5000})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("sampling budget"), "fails by default: {e}");
+    assert_eq!(*s.doc, *before);
+    let r = run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 5000, "stop_at_budget": true}));
+    let b = &r["stopped_by_budget"];
+    let fraction = num(&b["fraction"]);
+    assert!(b["budget"] == "samples" && fraction > 0.0 && fraction < 1.0, "{r}");
+    assert!((hinge(&s).to_degrees() - 5000.0 * fraction).abs() < 1e-6, "{}° at {fraction}", hinge(&s).to_degrees());
+    assert_eq!(r["moved"], true, "{r}");
 }
 
 /// A point turned about `c` by `a` radians in the XY plane.
@@ -304,4 +399,174 @@ fn a_watt_six_bar_output_meets_a_stop() {
     assert!((at - expected).abs() < 0.01, "stopped at {at}°, the output meets the stop at {expected}°: {r}");
     let names = [r["stopped_by"]["a"].as_str(), r["stopped_by"]["b"].as_str()];
     assert!(names.contains(&Some("Output:1")) && names.contains(&Some("Stop:1")), "{r}");
+}
+
+/// The limits `joint.find_limits` found for the joint's first value: (min, max, min_by, max_by).
+fn limits(r: &Value) -> (f64, f64, Value, Value) {
+    let v = &r["values"][0];
+    (num(&v["min"]), num(&v["max"]), v["min_by"].clone(), v["max_by"].clone())
+}
+
+/// A stop (or overlap) between parts `a` and `b`.
+fn by_parts(by: &Value, a: &str, b: &str) -> bool {
+    let names = [by["a"].as_str(), by["b"].as_str()];
+    names.contains(&Some(a)) && names.contains(&Some(b))
+}
+
+/// Opened, the door meets the block as in `a_door_swings_until_it_meets_the_block`; closed the
+/// other way round, the face through its hinge line reaches the block's corner (60, 50) first,
+/// a turn back. Its own limits are left out of the search, and the design is not changed.
+#[test]
+fn find_limits_meets_the_block_both_ways_round() {
+    let mut s = door();
+    run(&mut s, "joint.limits", json!({"joint": "Hinge", "min": -30, "max": 10}));
+    let corner = |x: f64, y: f64| y.atan2(x) - (4.0 / x.hypot(y)).asin();
+    let max = [(60.0, 30.0), (80.0, 30.0), (60.0, 50.0), (80.0, 50.0)].iter().map(|(x, y)| corner(*x, *y)).fold(f64::INFINITY, f64::min).to_degrees();
+    let min = 50f64.atan2(60.0).to_degrees() - 360.0;
+    let before = s.doc.clone();
+    let r = run(&mut s, "joint.find_limits", json!({"joint": "Hinge", "refine": 0.001}));
+    assert_eq!(*s.doc, *before, "the search leaves the design as it was");
+    let (lo, hi, lo_by, hi_by) = limits(&r);
+    assert!((hi - max).abs() < 0.01 && hi <= max + 1e-9, "max {hi}°, the block is met at {max}°: {r}");
+    assert!((lo - min).abs() < 0.01 && lo >= min - 1e-9, "min {lo}°, the block is met at {min}°: {r}");
+    assert!(by_parts(&lo_by, "Door:1", "Block:1") && by_parts(&hi_by, "Door:1", "Block:1"), "{r}");
+    assert_eq!((r["values"][0]["unit"].as_str(), num(&r["values"][0]["value"]), num(&r["values"][0]["range"])), (Some("deg"), 0.0, 360.0));
+    assert!(r["touching_at_start"].as_array().is_some_and(Vec::is_empty) && r["overlapping_at_start"].as_array().is_some_and(Vec::is_empty), "{r}");
+}
+
+/// A door that meets nothing on a whole turn either way gets a turn, half each way from where
+/// it is: alone (nothing to meet, nothing swept) and with a lamp above it.
+#[test]
+fn find_limits_of_a_door_that_meets_nothing_spans_a_turn() {
+    let mut s = Session::default();
+    block(&mut s, "Door", [0.0, 0.0, 0.0], [100.0, 4.0, 50.0]);
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": 0, "point": [0, 0, 0]}, "b": {"occurrence": "Door", "point": [0, 0, 0]}, "flip": true, "name": "Hinge"}),
+    );
+    run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 30}));
+    for lamp in [false, true] {
+        if lamp {
+            block(&mut s, "Lamp", [0.0, 0.0, 80.0], [20.0, 20.0, 20.0]);
+        }
+        let r = run(&mut s, "joint.find_limits", json!({"joint": "Hinge"}));
+        let (lo, hi, lo_by, hi_by) = limits(&r);
+        assert!((lo + 150.0).abs() < 1e-6 && (hi - 210.0).abs() < 1e-6, "{lo}° … {hi}°");
+        assert_eq!((lo_by, hi_by, num(&r["pairs"])), (json!("turn"), json!("turn"), if lamp { 1.0 } else { 0.0 }), "{r}");
+    }
+}
+
+/// A slider pushed into a wall stops where they meet; the other way it meets nothing within the
+/// parts' reach, and that side has no limit.
+#[test]
+fn find_limits_of_a_slider_leaves_a_free_side_open() {
+    let mut s = Session::default();
+    block(&mut s, "Slide", [0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    block(&mut s, "Wall", [50.0, -20.0, -20.0], [10.0, 50.0, 50.0]);
+    let at = |o: &str| json!({"occurrence": o, "point": [0, 0, 0], "z": [1, 0, 0]});
+    run(&mut s, "joint.create", json!({"type": "slider", "a": at("Wall"), "b": at("Slide"), "flip": true, "name": "Rail"}));
+    let id = occ(&s, "Wall");
+    run(&mut s, "occurrence.ground", json!({"occurrence": id, "grounded": true}));
+    let r = run(&mut s, "joint.find_limits", json!({"joint": "Rail", "refine": 0.001}));
+    let v = &r["values"][0];
+    // The joint's value grows one way or the other along X: the wall is met 40 mm away.
+    let (closed, open) = if v["max"].is_null() { ("min", "max") } else { ("max", "min") };
+    assert!((num(&v[closed]).abs() - 40.0).abs() < 0.002 && num(&v[closed]).abs() <= 40.0 + 1e-9, "{r}");
+    assert!(by_parts(&v[format!("{closed}_by")], "Slide:1", "Wall:1"), "{r}");
+    assert!(v[open].is_null() && v[format!("{open}_by")] == "range", "{r}");
+    assert_eq!(v["unit"], "mm");
+    assert!(num(&v["range"]) > 60.0, "the parts reach past the wall: {r}");
+}
+
+/// The four-bar's rocker swings between its toggles, where the loop can no longer close (|Q| =
+/// 70 and |Q| = 30, about 69.3° and 139.2° from the ground line): both sides stop there.
+#[test]
+fn find_limits_of_a_four_bar_rocker_stops_at_its_toggles() {
+    let (mut s, _, q0) = four_bar();
+    let start = q0.y.atan2(q0.x - 45.0).to_degrees();
+    // |Q|² = 45² + 40² + 2·45·40·cos φ.
+    let toggle = |q: f64| ((q * q - 3625.0) / 3600.0).acos().to_degrees() - start;
+    let r = run(&mut s, "joint.find_limits", json!({"joint": "Rocker", "occurrences": ["Rocker"], "against": ["Ground"]}));
+    let (lo, hi, lo_by, hi_by) = limits(&r);
+    assert_eq!((lo_by, hi_by), (json!("loop"), json!("loop")), "{r}");
+    assert!(hi > toggle(30.0) - 1.0 && hi <= toggle(30.0) + 1e-6, "max {hi}°, the loop closes up to {}°", toggle(30.0));
+    assert!(lo < toggle(70.0) + 1.0 && lo >= toggle(70.0) - 1e-6, "min {lo}°, the loop closes down to {}°", toggle(70.0));
+}
+
+/// The Hinge Assembly sample (#5968): its leaves sit end to end along the pin, mated face to face
+/// at the pin's end, so they touch across that end and meet nothing else on a whole turn either
+/// way. A whole turn each way is what `joint.sweep` ran out of work on (from 60° to 360°); the
+/// search has the room for it.
+#[test]
+fn find_limits_of_the_hinge_sample_spans_a_turn() {
+    let sample = crate::sample::samples().into_iter().find(|x| x.name == "Hinge Assembly").expect("the hinge sample");
+    let mut s = Session::default();
+    s.run_script(&(sample.script)()).unwrap_or_else(|e| panic!("{e}"));
+    let r = run(&mut s, "joint.find_limits", json!({"joint": "Hinge"}));
+    let (lo, hi, lo_by, hi_by) = limits(&r);
+    assert!((lo + 120.0).abs() < 1e-6 && (hi - 240.0).abs() < 1e-6, "{lo}° … {hi}°: {r}");
+    assert_eq!((lo_by, hi_by), (json!("turn"), json!("turn")), "{r}");
+    let touching = r["touching_at_start"].as_array().cloned().unwrap_or_default();
+    assert!(touching.len() == 1 && touching[0].as_array().is_some_and(|p| p.contains(&json!("Leaf A:1")) && p.contains(&json!("Leaf B:1"))), "{r}");
+    assert!(r["overlapping_at_start"].as_array().is_some_and(Vec::is_empty), "{r}");
+    // The same whole turn fits `joint.sweep`'s own work now (pairs whose boxes only touch cost
+    // nothing), where it ran out going from 60° to 0° two degrees at a time.
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 60, "to": 0, "step": 2}));
+    assert!(r["stopped_by"].is_null(), "{r}");
+}
+
+/// Two parts of two bodies each: a post with a pin of radius 5 on Z and a stop block at
+/// (40…50, 10…20), and an arm turning about Z with a pin of radius 3 inside the post's (the pins
+/// are in each other where it starts, as deep wherever the arm turns) and a 4 mm plate from x 10
+/// to 60. The plate's faces, 2 mm off the axis, meet the block's corners as the door's do: the
+/// pins in each other must not hide that.
+#[test]
+fn find_limits_sees_arms_meet_behind_pins_already_in_each_other() {
+    let mut s = Session::default();
+    for (name, corner, size, radius) in [("Post", [40.0, 10.0, 0.0], [10.0, 10.0, 20.0], 5), ("Arm", [10.0, -2.0, 0.0], [50.0, 4.0, 20.0], 3)] {
+        block(&mut s, name, corner, size);
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": radius, "height": 20, "operation": "new"}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let post = occ(&s, "Post");
+    run(&mut s, "occurrence.ground", json!({"occurrence": post, "grounded": true}));
+    let at = |o: &str| json!({"occurrence": o, "point": [0, 0, 0], "z": [0, 0, 1]});
+    run(&mut s, "joint.create", json!({"type": "revolute", "a": at("Post"), "b": at("Arm"), "flip": true, "name": "Swing"}));
+    let corners = [(40.0f64, 10.0f64), (50.0, 10.0), (40.0, 20.0), (50.0, 20.0)];
+    let max = corners.iter().map(|(x, y)| y.atan2(*x) - (2.0 / x.hypot(*y)).asin()).fold(f64::INFINITY, f64::min).to_degrees();
+    let min = corners.iter().map(|(x, y)| y.atan2(*x) + (2.0 / x.hypot(*y)).asin()).fold(f64::NEG_INFINITY, f64::max).to_degrees() - 360.0;
+    let r = run(&mut s, "joint.find_limits", json!({"joint": "Swing", "refine": 0.001}));
+    let (lo, hi, lo_by, hi_by) = limits(&r);
+    // The joint's value may grow either way round Z.
+    let near = |a: f64, b: f64| (a - b).abs() < 0.05;
+    assert!((near(hi, max) && near(lo, min)) || (near(hi, -min) && near(lo, -max)), "{lo}° … {hi}°, the block is met at {max}° and {min}°: {r}");
+    assert!(by_parts(&lo_by, "Arm:1", "Post:1") && by_parts(&hi_by, "Arm:1", "Post:1"), "{r}");
+    let overlapping = r["overlapping_at_start"].as_array().cloned().unwrap_or_default();
+    assert!(overlapping.len() == 1 && by_parts(&overlapping[0], "Arm:1", "Post:1") && num(&overlapping[0]["depth_mm"]) > 1.0, "{r}");
+}
+
+#[test]
+fn find_limits_refuses_what_it_cannot_do() {
+    let mut s = door();
+    for p in [
+        json!({}),
+        json!({"joint": "Nope"}),
+        json!({"joint": 5.5}),
+        json!({"joint": "Hinge", "index": 1}),
+        json!({"joint": "Hinge", "index": -1}),
+        json!({"joint": "Hinge", "refine": 0}),
+        json!({"joint": "Hinge", "refine": 1e9}),
+        json!({"joint": "Hinge", "refine": "nan"}),
+        json!({"joint": "Hinge", "step": 0}),
+        json!({"joint": "Hinge", "step": -1}),
+        json!({"joint": "Hinge", "occurrences": ["Door"]}),
+        json!({"joint": "Hinge", "against": ["Block"]}),
+        json!({"joint": "Hinge", "occurrences": ["Door"], "against": ["Door"]}),
+        json!({"joint": "Hinge", "occurrences": ["Door", "Block"], "contact_sets": true}),
+    ] {
+        assert!(s.execute("joint.find_limits", &p).is_err(), "{p}");
+    }
+    run(&mut s, "joint.as_built", json!({"type": "rigid", "a": "Block", "b": "Door", "name": "Lock"}));
+    assert!(s.execute("joint.find_limits", &json!({"joint": "Lock"})).is_err(), "a rigid joint does not move");
 }

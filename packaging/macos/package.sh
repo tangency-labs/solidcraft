@@ -26,7 +26,7 @@ set -euo pipefail
 # shellcheck source=../env.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
 # The same reverse-DNS id as the Linux APP_ID.
-MACOS_BUNDLE_ID=ai.storyteller.solidcraft
+MACOS_BUNDLE_ID=io.tangencylabs.solidcraft
 
 # sign_code <path> [identifier] [entitlements]: Developer ID with the hardened runtime and a secure
 # timestamp, or the ad-hoc signature (Apple silicon refuses unsigned code) without an identity.
@@ -72,6 +72,19 @@ staple() {
     sleep "${STAPLE_RETRY_SLEEP:-20}"
   done
   echo "could not staple $1" >&2
+  return 1
+}
+
+# validate <path>: stapler validate looks the ticket up at Apple and can lose the connection
+# ("The network connection was lost", error 68), so try it a few times as staple does.
+validate() {
+  local i
+  for i in 1 2 3 4 5 6; do
+    if xcrun stapler validate "$1"; then return 0; fi
+    echo "stapler validate failed (attempt $i), retrying" >&2
+    sleep "${STAPLE_RETRY_SLEEP:-20}"
+  done
+  echo "could not validate the staple of $1" >&2
   return 1
 }
 
@@ -171,7 +184,7 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 # Signature over the whole bundle. Nested code is signed first: the bundle signature refuses an
 # unsigned helper in Contents/MacOS. The entitlements go on the bundle (they apply to the main
 # executable): the 3D mouse driver is loaded by the app, not by the CLI.
-sign_code "$APP/Contents/MacOS/solidcraft-cli" "$MACOS_BUNDLE_ID-cli"
+sign_code "$APP/Contents/MacOS/solidcraft-cli" "$MACOS_BUNDLE_ID.cli"
 sign_code "$APP" "" "$SCRIPT_DIR/entitlements.plist"
 codesign --verify --strict --deep --verbose=2 "$APP"
 if [ -n "$SIGN_IDENTITY" ]; then
@@ -189,7 +202,7 @@ if [ "$NOTARIZE" = 1 ]; then
   ditto -c -k --keepParent "$APP" "$WORK/SolidCraft-app.zip"
   notarize "$WORK/SolidCraft-app.zip"
   staple "$APP"
-  xcrun stapler validate "$APP"
+  validate "$APP"
 fi
 
 # ---- DMG ---------------------------------------------------------------------------------------
@@ -242,7 +255,7 @@ if [ "$NOTARIZE" = 1 ]; then
   echo "==> notarizing $DMG"
   notarize "$DMG"
   staple "$DMG"
-  xcrun stapler validate "$DMG"
+  validate "$DMG"
   # Gatekeeper's verdict on the DMG and on the app as a user gets it.
   spctl -a -t open --context context:primary-signature -vv "$DMG"
   MNT="$(mktemp -d)"
@@ -256,10 +269,10 @@ echo "==> building $CLI_ZIP"
 CLI_DIR="$WORK/solidcraft-cli-$VERSION-macos-$ARCH"
 mkdir -p "$CLI_DIR"
 cp "$WORK/bin/solidcraft-cli" "$CLI_DIR/"
-sign_code "$CLI_DIR/solidcraft-cli" "$MACOS_BUNDLE_ID-cli"
+sign_code "$CLI_DIR/solidcraft-cli" "$MACOS_BUNDLE_ID.cli"
 # Compatibility shim (docs/compatibility.md): the old CLI name forwards to solidcraft-cli.
 cp "$WORK/bin/solvecraft-cli" "$CLI_DIR/"
-sign_code "$CLI_DIR/solvecraft-cli" "$MACOS_BUNDLE_ID-cli-alias"
+sign_code "$CLI_DIR/solvecraft-cli" "$MACOS_BUNDLE_ID.cli-alias"
 copy_docs "$CLI_DIR"
 rm -f "$CLI_ZIP"
 ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"

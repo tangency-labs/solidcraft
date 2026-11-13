@@ -26,6 +26,8 @@ concurrency:
 jobs:
   publish:
     name: Request the combined docs, web, and Flatpak deployment
+    # A pre-release stays off the Flatpak feed: the feed's one branch is what `flatpak update` offers.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}

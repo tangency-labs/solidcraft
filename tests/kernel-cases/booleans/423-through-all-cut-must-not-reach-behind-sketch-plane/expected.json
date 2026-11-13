@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#423"
+ ],
+ "what": "a one-sided Through All cut from a sketch plane at x=98 toward -x, with its wall 0.0022 mm from a face of a notch beyond the plane: the cut must remove nothing at x > 98",
+ "source": "analytic",
+ "method": "frame 100x14.5x10 = 14500 with a 1.5x2x10 end notch (x 98.5..100, y 0..2) = 30 removed. The cut tool is y -0.0022..3 for the full height, from x=98 to x=0: 98*3.0022*10 = 2942.156. It never reaches x>98, so the notch is untouched: V = 14500 - 30 - 2942.156 = 11527.844. Reduced from a STEP frame (not committed)",
+ "body_count": 1,
+ "volume_mm3": 11527.844000000001,
+ "bbox": {
+  "min": [
+   0,
+   -7.25,
+   0
+  ],
+  "max": [
+   100,
+   7.25,
+   10
+  ]
+ }
+}

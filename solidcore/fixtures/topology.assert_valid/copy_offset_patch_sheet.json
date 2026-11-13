@@ -1,0 +1,100 @@
+{
+ "cases": [
+  {
+   "name": "copy_offset_issue2111_patch_sheet_0_75",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiOffsetBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 5,
+    "index": 0,
+    "value": 0.75
+   }
+  },
+  {
+   "name": "copy_offset_issue2111_patch_sheet_m0_75",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiOffsetBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 5,
+    "index": 0,
+    "value": -0.75
+   }
+  },
+  {
+   "name": "copy_offset_issue2111_patch_sheet_1_0",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiOffsetBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 5,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "copy_offset_issue2111_patch_sheet_0_5",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiOffsetBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 5,
+    "index": 0,
+    "value": 0.5
+   }
+  },
+  {
+   "name": "copy_offset_issue2111_patch_sheet_1_5",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiOffsetBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 5,
+    "index": 0,
+    "value": 1.5
+   }
+  },
+  {
+   "name": "copy_offset_issue2111_patch_sheet_m1_5",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:SmApiOffsetBrepFull",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 5,
+    "index": 0,
+    "value": -1.5
+   }
+  }
+ ]
+}

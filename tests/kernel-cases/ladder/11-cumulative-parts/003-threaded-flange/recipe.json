@@ -1,0 +1,39 @@
+{
+ "base": "../../11-cumulative-parts/002-flange",
+ "commands": [
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     15,
+     0,
+     20
+    ],
+    "modeled": true,
+    "designation": "M30"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     0,
+     28,
+     10
+    ],
+    "thread": "M8",
+    "name": "Tap"
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "features": [
+     "Tap"
+    ],
+    "axis": "Z",
+    "count": 3
+   }
+  }
+ ]
+}

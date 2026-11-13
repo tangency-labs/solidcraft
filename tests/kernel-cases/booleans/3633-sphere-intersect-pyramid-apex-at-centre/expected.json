@@ -1,0 +1,14 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3633",
+    "tangency-labs/solidcraft#3682"
+  ],
+  "what": "a sphere r=10 intersected with a square pyramid whose apex is the sphere's centre and whose sides lie in the planes of the sphere primitive's patch edges",
+  "source": "analytic",
+  "method": "the pyramid has apex (0,0,0) and base 20x20 at x=-10 (corners (-10,+-10,+-10)): a cone over a cube face, a sixth of all directions, and the base is tangent to the sphere at (-10,0,0). The intersection is a sixth of the ball: V = (4/3) pi 10^3 / 6 = 698.132. Faces: 4 planar sides + 1 spherical = 5; edges 4 radial + 4 arcs = 8; vertices: apex + 4 corners on the sphere = 5",
+  "body_count": 1,
+  "volume_mm3": 698.1317,
+  "faces": 5,
+  "edges": 8,
+  "vertices": 5
+}

@@ -1,0 +1,6 @@
+{
+  "unit": "surface.torus",
+  "cases": [
+    {"name": "fuzz01665_circle_axis_length_overflows", "origin": "fuzz-out/n2000/surface.torus/fuzz01665.json (crash: cpp: killed by signal 11)", "issue": "UB-227", "cpp": "harness: invalid argument: circle: axis length overflows", "rust": "ok", "inputs": {"op": "to_step", "torus": {"circle": {"c": [3.11, 4.26, 4.0], "d": [0.0, 360.0], "r": 2.23, "x": [1.0, 0.0, 0.0], "y": [0.0, 0.0, -1e+300]}, "major": 3.14, "minor": 2.23, "origin": [-0.0275, 4.26, 4.0], "x": [1.0, 0.0, 0.0], "y": [0.0, 1.0, 0.0]}, "u": 0.501, "v": 0.861}}
+  ]
+}

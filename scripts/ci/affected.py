@@ -13,9 +13,11 @@ Prints and optionally appends to $GITHUB_OUTPUT:
 
 A changed file maps to the package whose directory holds it. The packages that depend on those
 (directly or not, dev-dependencies included) are added. Test data under tests/ maps to the
-packages that read it, a vendored crate (vendor/, a [patch] of a crates.io dependency) to the
-packages that use it, and a root file or folder a crate embeds to that crate. Anything that can
-change every package, or that no package owns, selects the full workspace. Documentation,
+packages that read it, a vendored crates.io patch (vendor/, see VENDOR_USES) to the packages
+that use it, and a root file or folder a crate embeds to that crate. Anything that can change
+every package (the vendored kernel in `solidcore/`, a vendored tree no mapping names), or that no
+package owns,
+selects the full workspace. Documentation,
 packaging, the other workflows and the GitHub bots' scripts are ignored: when only those change,
 nothing is selected and full is false, which CI reads as "no code changed" (on pull requests and
 on pushes to main alike).
@@ -47,24 +49,17 @@ EMBEDDED_PREFIXES = {"assets/locales/": ("solidcraft-ui-egui", "xtask"), "skills
 # Test data and the package directories whose tests (or xtask) read it. Any other folder under
 # tests/ selects the full workspace.
 TEST_DATA = {
-    "tests/robustness/": ("crates/engine/",),
     "tests/hole_matrix/": ("crates/engine/",),
     "tests/projection/": ("crates/engine/",),
     "tests/taper/": ("crates/engine/",),
     "tests/oracle/": ("apps/solidcraft-cli/", "xtask/"),
     "tests/action_matrix/": ("apps/solidcraft-cli/", "crates/engine/", "xtask/"),
 }
-# Vendored crates (vendor/<crate>/, a [patch] of a crates.io dependency) and the dependency names
-# through which workspace packages reach them: the truck crates and their maths crate only through
-# truck itself (crates/kernel), egui-wgpu directly or through eframe. Another vendored crate
-# selects the full workspace.
-TRUCK = lambda dep: dep.startswith("truck-")  # noqa: E731
+# Vendored crates.io patches (vendor/<crate>/) and the dependency names through which workspace
+# packages reach them: egui-wgpu directly or through eframe. A vendored tree no entry names, such
+# as the kernel in `solidcore/`, selects the full workspace: a kernel change reaches every
+# package, so a change to it is not narrowed to the packages that depend on one crate.
 VENDOR_USES = {
-    "truck-geometry": TRUCK,
-    "truck-shapeops": TRUCK,
-    "truck-stepio": TRUCK,
-    "truck-meshalgo": TRUCK,
-    "matext4cgmath": TRUCK,
     "egui-wgpu": lambda dep: dep in ("egui-wgpu", "eframe"),
 }
 

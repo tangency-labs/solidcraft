@@ -1,0 +1,15 @@
+[package]
+name = "solidcore-ssi"
+description = "solidcore's surfaces through the ssi crate's surface/surface intersection: patches in, B-rep intersection curves out"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+solidcore = { path = "../solidcore" }
+ssi = { path = "../ssi" }
+
+[lints]
+workspace = true

@@ -32,29 +32,26 @@ pub(crate) fn defaults(doc: &Document, mut kind: crate::dialogs::Kind) -> crate:
 /// Keep named and dimensional expressions intact so they remain driving expressions.
 pub(crate) fn expression(doc: &Document, text: &str, kind: Kind) -> String {
     let text = text.trim();
+    // A definition's value is frozen the same way; the name stays (#4071).
+    if let Some((name, rhs)) = solidcraft_engine::doc::expr::definition(text)
+        && !rhs.is_empty()
+    {
+        return format!("{name} = {}", expression(doc, rhs, kind));
+    }
     let normalized = doc.with_design_unit(text, kind);
     if kind == Kind::Length && unit(doc) != "mm" && normalized == text && doc.eval(text, Kind::Unitless).is_ok() {
-        // A decimal comma is numeric only outside parentheses. Preserve function-argument
-        // commas while moving the expression inside the unit multiplication's parentheses.
-        let mut depth = 0usize;
-        let grouped: String = text
-            .chars()
-            .map(|c| match c {
-                '(' => {
-                    depth = depth.saturating_add(1);
-                    c
-                }
-                ')' => {
-                    depth = depth.saturating_sub(1);
-                    c
-                }
-                ',' if depth == 0 => '.',
-                _ => c,
-            })
-            .collect();
-        format!("({grouped}) * 1 {}", unit(doc))
+        format!("({text}) * 1 {}", unit(doc))
     } else {
         normalized
+    }
+}
+
+/// For a field whose command takes only a number, which keeps no expression to name: a typed
+/// `name = value` is refused with the way to name it, rather than defining nothing (#4071).
+pub(crate) fn no_definition(text: &str, label: &str) -> Result<(), String> {
+    match solidcraft_engine::doc::expr::definition(text) {
+        Some((name, _)) => Err(format!("{label} keeps no expression, so it cannot define `{name}`: add `{name}` in Parameters, then type `{name}`")),
+        None => Ok(()),
     }
 }
 
@@ -73,11 +70,83 @@ pub(crate) fn stored(doc: &Document, text: &str) -> String {
 }
 
 /// A computed model-space value written back to an editable field. Use all significant digits:
-/// display precision must never round a value that will be sent back to the model.
+/// display precision must never round a value that will be sent back to the model. Snapped
+/// drag writes go through [`model_drag`] instead (#9035).
 pub(crate) fn model(doc: &Document, mm: f64) -> String {
     let unit = unit(doc);
     let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
     format!("{} {unit}", mm / scale)
+}
+
+/// A snapped-drag length for an editable field: rounded to Preferences › Length decimals, but
+/// never coarser than the snap step so the written value still matches what the arrow snapped to
+/// (#9035). Alt/free drag keeps [`model`]'s full precision.
+pub(crate) fn model_drag(doc: &Document, mm: f64, step_mm: f64, decimals: u8) -> String {
+    let u = unit(doc);
+    let scale = unit_info(u).map(|(_, scale)| scale).unwrap_or(1.0);
+    if !mm.is_finite() || !scale.is_finite() || scale <= 0.0 {
+        return format!("{mm} {u}");
+    }
+    let step_u = if step_mm.is_finite() && step_mm > 0.0 { step_mm / scale } else { 0.0 };
+    let step_places = if step_u > 0.0 { (-step_u.log10()).ceil().max(0.0) as u8 } else { 0 };
+    let places = decimals.max(step_places).min(8);
+    solidcraft_engine::doc::display_units::format_length(mm, u, places)
+}
+
+/// A computed length shown in an editable field or a message, in the design's unit, to a
+/// millionth of it with trailing zeros dropped ("3 mm", not "3.000000 mm" or 2.9999999999999996):
+/// for a value the field shows but sends only once the user edits it.
+pub(crate) fn shown(doc: &Document, mm: f64) -> String {
+    let unit = unit(doc);
+    let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
+    let text = format!("{:.6}", mm / scale);
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{} {unit}", if text == "-0" || text.is_empty() { "0" } else { text })
+}
+
+/// The diameter in a radius worked out from one, `(D) / 2`: what a diameter typed into Cylinder
+/// or Sphere is kept as (#6609). `None` for any other radius, such as `(a) / (b) / 2`.
+pub(crate) fn diameter_of(radius: &str) -> Option<&str> {
+    inside(radius, "(", ") / 2")
+}
+
+/// A diameter switched to the radius (`twice` false) or a radius to the diameter, so the size
+/// stays: a number keeps its unit (`20 mm` and `10 mm`), a size switched before goes back to its
+/// text, and any other expression is wrapped (`(d) / 2`, `2 * (r)`).
+pub(crate) fn scaled(text: &str, twice: bool) -> String {
+    let text = text.trim();
+    let back = if twice { diameter_of(text) } else { inside(text, "2 * (", ")") };
+    if let Some(back) = back {
+        return back.to_string();
+    }
+    if text.is_empty() {
+        return String::new();
+    }
+    if solidcraft_engine::doc::expr::is_literal(text) {
+        // The unit is the word at the end (`1e3 mm` is a thousand millimetres).
+        let number = text.trim_end_matches(char::is_alphabetic);
+        let unit = text.get(number.len()..).unwrap_or_default();
+        if let Ok(x) = number.replace(char::is_whitespace, "").replace(',', ".").parse::<f64>() {
+            let x = if twice { x * 2.0 } else { x / 2.0 };
+            return if unit.is_empty() { format!("{x}") } else { format!("{x} {unit}") };
+        }
+    }
+    if twice { format!("2 * ({text})") } else { format!("({text}) / 2") }
+}
+
+/// The text between `open` and `close` when they wrap all of `text`: the parenthesis `open` ends
+/// with is the one `close` starts with.
+fn inside<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let inner = text.trim().strip_prefix(open)?.strip_suffix(close)?;
+    let mut depth = 0usize;
+    for c in inner.chars() {
+        match c {
+            '(' => depth = depth.saturating_add(1),
+            ')' => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+    }
+    (depth == 0 && !inner.trim().is_empty()).then_some(inner.trim())
 }
 
 /// The editable length expressions in a dialog. Counts, angles, ratios, selectors and standard
@@ -91,7 +160,14 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
     use crate::dialogs_surface::Surf;
     match kind {
         D::Extrude { distance, distance2, to_offset, start, wall, wall2, .. } => vec![distance, distance2, to_offset, start, wall, wall2],
-        D::Fillet { radius, distance2, .. } => vec![radius, distance2],
+        D::Fillet { radius, distance2, setback, .. } => {
+            // A setback not typed (or emptied) stands for the command's default and stays so.
+            let mut lengths = vec![radius, distance2];
+            if let Some(setback) = setback.as_mut().filter(|s| !s.trim().is_empty()) {
+                lengths.push(setback);
+            }
+            lengths
+        }
         D::Shell { thickness } => vec![thickness],
         D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
@@ -103,20 +179,23 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],
         D::Move { x, y, z, .. } => vec![x, y, z],
-        D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, .. } => vec![diameter, depth, cb_diameter, cb_depth, cs_diameter],
+        D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, opts, .. } => {
+            vec![diameter, depth, cb_diameter, cb_depth, cs_diameter, &mut opts.bridge]
+        }
         D::Primitive { fields, .. } => fields.iter_mut().filter(|(key, _)| *key != "revolutions").map(|(_, value)| value).collect(),
         D::Surface(k) => match k {
             Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance } => {
                 vec![distance]
             }
             Surf::Thicken { thickness, .. } => vec![thickness],
-            Surf::Stitch { tolerance } => vec![tolerance],
+            Surf::Stitch { tolerance } | Surf::Fair { tolerance, .. } => vec![tolerance],
             _ => vec![],
         },
         D::Sheet(k) => match k {
-            Sm::Flange { height, radius, distance, relief_size, own, .. } => {
+            Sm::Flange { height, radius, distance, relief_size, own, segments, .. } => {
                 let mut values = vec![height, radius, distance, relief_size];
                 values.extend(own.iter_mut().map(|(_, _, height)| height));
+                values.extend(segments.iter_mut().flat_map(|(_, list)| list.iter_mut().map(|row| &mut row.height)));
                 values
             }
             Sm::Hem { length, gap, .. } => vec![length, gap],
@@ -222,6 +301,21 @@ pub(crate) fn extra(extra: &mut serde_json::Map<String, serde_json::Value>, mut 
             {
                 *value = json!(convert(text));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_decimal_comma_survives_the_design_unit() {
+        // The unit wraps the text in parentheses, where a comma stays decimal (#9408).
+        let doc = Document { units: "in".into(), ..Document::default() };
+        for (text, inches) in [("2,5", 2.5), ("(2,5)", 2.5), ("-(10-0,5)/2", -4.75), ("2,5 + max(1,2)", 4.5)] {
+            let mm = eval(&doc, text, Kind::Length).unwrap();
+            assert!((mm - inches * 25.4).abs() < 1e-9, "{text}: {mm}");
         }
     }
 }

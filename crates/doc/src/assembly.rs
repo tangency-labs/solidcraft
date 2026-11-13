@@ -9,7 +9,8 @@
 //! and the engine maps a new feature's geometry into the active component's frame.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::{DocError, Document, FeatureKind, PlaneRef, Result};
 
@@ -84,6 +85,23 @@ pub fn mat_inverse(m: &Mat) -> Option<Mat> {
     Some(out)
 }
 
+/// Whether `m` is a placement an occurrence may have: finite, a rotation (orthonormal axes, not
+/// mirrored) and a translation within 1e9 mm, its last column `0, 0, 0, 1`. Every placement is
+/// checked against this where it enters the document (a design file, a command, an import).
+pub fn is_placement(m: &Mat) -> bool {
+    let axis = |i: usize| Vec3::new(m[i][0], m[i][1], m[i][2]);
+    let (x, y, z) = (axis(0), axis(1), axis(2));
+    m.iter().flatten().all(|v| v.is_finite())
+        && m[3][..3].iter().all(|v| v.abs() <= 1e9)
+        && [x, y, z].iter().all(|v| (v.dot(*v) - 1.0).abs() < 1e-6)
+        && x.dot(y).abs() < 1e-6
+        && x.dot(z).abs() < 1e-6
+        && y.dot(z).abs() < 1e-6
+        && x.cross(y).dot(z) > 0.0
+        && [m[0][3], m[1][3], m[2][3]].iter().all(|v| v.abs() < 1e-9)
+        && (m[3][3] - 1.0).abs() < 1e-9
+}
+
 /// A rigid transform: rotation by `angle` about `axis` through `origin`, then a translation.
 pub fn rigid(translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Mat {
     let k = axis.normalized().unwrap_or(Vec3::Z);
@@ -118,10 +136,114 @@ pub struct Occurrence {
     /// Grounded occurrences don't move.
     #[serde(default)]
     pub grounded: bool,
+    /// Moves whose translation was typed as expressions over the design's parameters, which the
+    /// occurrence follows when they change (oldest first; none in older designs).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expressed_moves: Vec<ExpressedMove>,
 }
 
 fn identity() -> Mat {
     IDENTITY
+}
+
+/// How a component counts in the bill of materials of an assembly it is placed in. It is a part
+/// property (the `bom_type` key of the component's [`Metadata`](crate::Metadata)); a component
+/// without one is [`BomType::Normal`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BomType {
+    /// A row of its own; every occurrence adds to its quantity.
+    #[default]
+    Normal,
+    /// No row of its own: what it holds counts as if placed directly in its parent.
+    Phantom,
+    /// Shown, but counted nowhere, and nothing inside it is counted either.
+    Reference,
+    /// Bought: one row, with nothing inside it counted or listed.
+    Purchased,
+    /// Made as one item that doesn't come apart (a welded frame): one row in the assembly it is
+    /// placed in. What it holds is listed in its own bill of materials, and its purchased parts
+    /// also in the parts-only list of the assembly it is placed in.
+    Inseparable,
+}
+
+impl BomType {
+    /// Every type, in the order commands and documentation list them.
+    pub const ALL: [BomType; 5] = [BomType::Normal, BomType::Phantom, BomType::Reference, BomType::Purchased, BomType::Inseparable];
+
+    /// The word the design file and commands use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BomType::Normal => "normal",
+            BomType::Phantom => "phantom",
+            BomType::Reference => "reference",
+            BomType::Purchased => "purchased",
+            BomType::Inseparable => "inseparable",
+        }
+    }
+
+    /// The type a word names, if it names one.
+    pub fn parse(word: &str) -> Option<BomType> {
+        BomType::ALL.into_iter().find(|t| t.as_str() == word)
+    }
+}
+
+/// How far an occurrence's expressed moves take it after a parameter change
+/// ([`Document::expressed_move_shifts`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExpressedShift {
+    pub occurrence: u64,
+    /// In the occurrence's parent frame (mm).
+    pub shift: Vec3,
+    /// What each of its expressed moves works out to now, in order.
+    pub at: Vec<[f64; 3]>,
+}
+
+/// How many expressed moves one occurrence keeps.
+pub const MAX_EXPRESSED_MOVES: usize = 64;
+
+/// A move of an occurrence whose translation was typed as expressions (`occurrence.move` with
+/// `translate: ["0 mm", "dy", 0]`, #8192). The occurrence keeps it and, whenever the design
+/// changes, moves on by the difference between what the expressions work out to now and what they
+/// worked out to when last applied: a parameter change moves it as the move would have, and
+/// every other move of it (a drag, another move) stays.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExpressedMove {
+    /// Per axis, the length expression typed (`None` for a number, which never changes).
+    pub translate: [Option<String>; 3],
+    /// What the translation worked out to when it was last applied (mm, along `frame`'s axes).
+    pub at: [f64; 3],
+    /// Takes the translation into the occurrence's parent frame: the identity when it was typed
+    /// in that frame (`space: local`), the parent's world rotation undone when it was typed in
+    /// world axes (`space: world`).
+    #[serde(default = "identity", skip_serializing_if = "is_identity")]
+    pub frame: Mat,
+    /// Typed in world axes (`space: world`): `frame` is worked out again when the occurrence
+    /// moves to another parent. Older designs read as local.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub world: bool,
+}
+
+impl ExpressedMove {
+    /// The translation the expressions give now, or why they can't: an unknown name, a wrong
+    /// unit, or a length too large.
+    pub fn eval(&self, params: &crate::joints::Params) -> Result<[f64; 3]> {
+        let mut out = self.at;
+        for (slot, e) in out.iter_mut().zip(&self.translate) {
+            let Some(e) = e else { continue };
+            let v = params.eval(e, crate::expr::Kind::Length).map_err(|err| DocError::Invalid(format!("translate `{e}`: {err}")))?;
+            if !v.is_finite() || v.abs() > 1e9 {
+                return Err(DocError::Invalid(format!("translate `{e}` gives {v}")));
+            }
+            *slot = v;
+        }
+        Ok(out)
+    }
+
+    /// The expressions it keeps, with the axis each moves along.
+    pub fn exprs(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        ["x", "y", "z"].into_iter().zip(&self.translate).filter_map(|(axis, e)| e.as_deref().map(|e| (axis, e)))
+    }
 }
 
 /// How deep and how many placements [`Document::placements`] walks.
@@ -150,22 +272,29 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
             map_plane_ref(m, base);
             map_geo_ref(m, point);
         }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } => {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, pivot, .. } => {
             map_plane_ref(m, base);
             *axis_origin = apply_point(m, *axis_origin);
             *axis_dir = apply_vector(m, *axis_dir);
             if let Some(g) = line {
                 map_geo_ref(m, g);
             }
+            if let Some(g) = pivot {
+                map_geo_ref(m, g);
+            }
         }
-        // Named origin planes and construction planes are the component's own.
-        PlaneRef::Origin { .. } | PlaneRef::Construction { .. } => {}
-        PlaneRef::Tangent { face, at } => {
+        // Named origin planes, construction planes and placement datums are the component's own.
+        PlaneRef::Origin { .. } | PlaneRef::Datum { .. } | PlaneRef::Construction { .. } => {}
+        PlaneRef::Tangent { face, at, reference, .. } => {
             *at = apply_point(m, *at);
             map_geo_ref(m, face);
+            if let Some(r) = reference {
+                map_geo_ref(m, r);
+            }
         }
         PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }
+        | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::AlongPath { .. }
         | PlaneRef::Perpendicular { .. } => {
@@ -211,6 +340,14 @@ pub fn map_point_expr(m: &Mat, p: &mut crate::PointExpr) {
         }
         *out = e.into();
     }
+}
+
+/// Map a displacement given as length expressions, retaining its parameter dependencies.
+/// Unlike a point, a displacement is unaffected by the frame's translation.
+pub fn map_vector_expr(m: &Mat, v: &mut crate::PointExpr) {
+    let mut rotation = *m;
+    rotation[3] = [0.0, 0.0, 0.0, 1.0];
+    map_point_expr(&rotation, v);
 }
 
 impl FeatureKind {
@@ -281,25 +418,7 @@ impl Document {
     /// Every placement of each component: (component, occurrence path ids, world transform).
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
-        let mut out = vec![(0, Vec::new(), IDENTITY)];
-        let mut stack: Vec<(u64, Vec<u64>, Mat)> = vec![(0, Vec::new(), IDENTITY)];
-        while let Some((comp, path, m)) = stack.pop() {
-            if out.len() > MAX_PLACEMENTS {
-                break;
-            }
-            // Only this branch stops past the depth limit; the others are still walked.
-            if path.len() > MAX_PLACEMENT_DEPTH {
-                continue;
-            }
-            for o in self.occurrences.iter().filter(|o| o.parent == comp) {
-                let mut p = path.clone();
-                p.push(o.id);
-                let w = mat_mul(&m, &o.transform);
-                out.push((o.component, p.clone(), w));
-                stack.push((o.component, p, w));
-            }
-        }
-        out
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
     }
 
     /// Every body as the world shows it: its world name ("Body1", or "Body1 (Occ:2)" for a
@@ -368,6 +487,19 @@ impl Document {
         false
     }
 
+    /// Is `c` (or one of its ancestors) marked out of the History bar (#10393)? The root (0)
+    /// never is: its own features always show.
+    pub fn component_history_hidden(&self, mut c: u64) -> bool {
+        for _ in 0..1000 {
+            match self.components.iter().find(|x| x.id == c) {
+                Some(x) if x.history_hidden => return true,
+                Some(x) if x.parent != 0 => c = x.parent,
+                _ => return false,
+            }
+        }
+        false
+    }
+
     /// Would putting a placement of `component` into `parent` put it inside itself: is `parent`
     /// the component, or inside it, created in it or placed in it at any depth? Placements can sit
     /// apart from where their component was created ([`Self::component_within`] follows only
@@ -376,13 +508,14 @@ impl Document {
         if self.component_within(parent, component) {
             return true;
         }
+        let tree = crate::occurrence_tree::OccurrenceTree::new(self);
         let mut stack = vec![component];
         let mut seen = std::collections::BTreeSet::new();
         while let Some(c) = stack.pop() {
             if !seen.insert(c) || seen.len() > MAX_PLACEMENTS {
                 continue;
             }
-            for o in self.occurrences.iter().filter(|o| o.parent == c) {
+            for o in tree.children(c) {
                 if o.component == parent {
                     return true;
                 }
@@ -392,7 +525,59 @@ impl Document {
         false
     }
 
-    /// Add an occurrence of an existing component into `parent`.
+    /// The occurrences whose expressed moves ([`ExpressedMove`]) work out to something else than
+    /// when they were last applied (a parameter changed), with how far each moves in its parent's
+    /// frame. A move whose expressions don't work out (a parameter turned into an angle) leaves the
+    /// occurrence where it is until they do again; so does one that would take it out of range.
+    pub fn expressed_move_shifts(&self) -> Vec<ExpressedShift> {
+        if self.occurrences.iter().all(|o| o.expressed_moves.is_empty()) {
+            return Vec::new();
+        }
+        let params = crate::joints::Params::new(self);
+        let mut out = Vec::new();
+        for o in self.occurrences.iter().filter(|o| !o.expressed_moves.is_empty()) {
+            let mut shift = Vec3::ZERO;
+            let mut at = Vec::with_capacity(o.expressed_moves.len());
+            for m in &o.expressed_moves {
+                let now = m.eval(&params).unwrap_or(m.at);
+                let d = Vec3::new(now[0] - m.at[0], now[1] - m.at[1], now[2] - m.at[2]);
+                shift += apply_vector(&m.frame, d);
+                at.push(now);
+            }
+            if o.grounded {
+                // A grounded occurrence stays put, but its moves keep up with the parameters so
+                // that ungrounding it later doesn't jump by everything that changed meanwhile.
+                if o.expressed_moves.iter().zip(&at).any(|(m, now)| m.at != *now) {
+                    out.push(ExpressedShift { occurrence: o.id, shift: Vec3::ZERO, at });
+                }
+                continue;
+            }
+            let moved = Vec3::new(o.transform[3][0], o.transform[3][1], o.transform[3][2]) + shift;
+            if shift == Vec3::ZERO || !moved.is_finite() || [moved.x, moved.y, moved.z].iter().any(|x| x.abs() > 1e9) {
+                continue;
+            }
+            out.push(ExpressedShift { occurrence: o.id, shift, at });
+        }
+        out
+    }
+
+    /// Move the occurrences as [`Document::expressed_move_shifts`] worked out.
+    pub fn apply_expressed_shifts(&mut self, shifts: &[ExpressedShift]) {
+        for s in shifts {
+            let Some(o) = self.occurrences.iter_mut().find(|o| o.id == s.occurrence) else { continue };
+            for (i, v) in [s.shift.x, s.shift.y, s.shift.z].into_iter().enumerate() {
+                if let Some(t) = o.transform[3].get_mut(i) {
+                    *t += v;
+                }
+            }
+            for (m, at) in o.expressed_moves.iter_mut().zip(&s.at) {
+                m.at = *at;
+            }
+        }
+    }
+
+    /// Add an occurrence of an existing component into `parent`, placed by `transform` (which
+    /// must pass [`is_placement`]).
     pub fn add_occurrence(&mut self, component: u64, parent: u64, transform: Mat) -> Result<u64> {
         if component == 0 || !self.components.iter().any(|c| c.id == component) {
             return Err(DocError::Unknown(format!("component {component}")));
@@ -403,11 +588,29 @@ impl Document {
         if self.occurrences.len() >= 100_000 {
             return Err(DocError::Invalid("too many occurrences".into()));
         }
+        if !is_placement(&transform) {
+            return Err(DocError::Invalid("an occurrence's placement must be a rigid motion (no scaling or mirroring) within 1e9 mm".into()));
+        }
         let id = self.next_id.max(1);
         self.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
         let cname = self.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
-        let k = self.occurrences.iter().filter(|o| o.component == component).count() + 1;
-        self.occurrences.push(crate::Occurrence { id, component, parent, name: format!("{cname}:{k}"), transform, grounded: false });
+        // The next number, or, when an occurrence already has that name (one before it was
+        // deleted, or of another component of that name), the first number none has (#9738).
+        let next = self.occurrences.iter().filter(|o| o.component == component).count() + 1;
+        let free = |k: &usize| {
+            let name = format!("{cname}:{k}");
+            !self.occurrences.iter().any(|o| o.name == name)
+        };
+        let k = std::iter::once(next).chain(1..).find(free).unwrap_or(next);
+        self.occurrences.push(crate::Occurrence {
+            id,
+            component,
+            parent,
+            name: format!("{cname}:{k}"),
+            transform,
+            grounded: false,
+            expressed_moves: Vec::new(),
+        });
         Ok(id)
     }
 }

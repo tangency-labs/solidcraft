@@ -1,8 +1,9 @@
 //! Keyboard shortcuts: every command's default key comes from its `CommandSpec`; the user can
-//! rebind or clear any of them (Preferences › Keyboard Shortcuts). A new key that another command
-//! already uses is reported and only taken over on request; keys the app itself handles (Esc, S,
-//! V, Delete, Ctrl+Z…) can't be bound. Changes are kept between runs.
+//! rebind or clear any of them, or give one several keys (Preferences › Keyboard Shortcuts). A new key that another command
+//! already uses is reported and only taken over on request; keys the app itself handles (Esc,
+//! Delete, Ctrl+Z…) can't be bound. Changes are kept between runs.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
@@ -11,15 +12,11 @@ use solidcraft_engine::{CommandSpec, command_specs};
 use crate::SolveApp;
 use crate::ui_kit;
 
-/// Repeats the last tool or dialog started (`SolveApp::repeat_last`, #3045).
-pub const REPEAT_KEY: &str = "Shift+R";
+pub(crate) const DRAG_ZOOM: &str = crate::navigation_slots::ZOOM_TOOL;
 
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
-    REPEAT_KEY,
     "Escape",
-    "S",
-    "V",
     "F2",
     "F6",
     "Delete",
@@ -30,11 +27,12 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+Shift+S",
     "Ctrl+N",
     "Ctrl+O",
+    "Ctrl+W",
     "Ctrl+Comma",
-    "Ctrl+Shift+A",
     "Ctrl+C",
     "Ctrl+X",
     "Ctrl+V",
+    "Ctrl+Shift+V",
     // View keys (`navigation::view_key`).
     "Left",
     "Right",
@@ -49,12 +47,23 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+Up",
     "Ctrl+Down",
     "Ctrl+8",
+    // Keyboard zoom (`navigation::view_key`, #717).
+    "PageUp",
+    "PageDown",
+    "Plus",
+    "Shift+Plus",
+    "Minus",
+    "Equals",
 ];
+
+/// The most keys one command keeps; more from a settings file are dropped.
+const MAX_KEYS: usize = 8;
 
 #[derive(Default)]
 pub struct Keymap {
-    /// Command id → key (`""`: no key). Only the changed ones.
-    pub custom: BTreeMap<String, String>,
+    /// Command id → its keys, the first one shown in menus and tooltips (none: no key). Only the
+    /// changed ones.
+    pub custom: BTreeMap<String, Vec<String>>,
     /// Asks for the Keyboard Shortcuts page of Preferences (File and Help menus).
     pub open: bool,
     /// Opened from Help: a list to read, not to edit.
@@ -62,9 +71,11 @@ pub struct Keymap {
     filter: String,
     /// The command waiting for a key press.
     capturing: Option<String>,
+    /// Which of its keys the press replaces; one past the last adds a key.
+    slot: usize,
     recorder: Recorder,
-    /// A key that another command uses: (command, key, the other commands).
-    conflict: Option<(String, String, Vec<String>)>,
+    /// A key that another command uses: (command, key, its slot, the other commands).
+    conflict: Option<(String, String, usize, Vec<String>)>,
     message: Option<String>,
 }
 
@@ -103,8 +114,8 @@ impl Recorder {
 
     fn preview(&self) -> Option<String> {
         match self.key {
-            Some(key) => Some(format!("{}…", display(&key_name(key, self.modifiers)))),
-            None if !self.modifiers.is_none() => Some(format!("{}…", display(&modifier_prefix(self.modifiers, None)))),
+            Some(key) => Some(format!("{}…", crate::ui_kit::chord_label(&key_name(key, self.modifiers)))),
+            None if !self.modifiers.is_none() => Some(format!("{}…", crate::ui_kit::chord_label(&modifier_prefix(self.modifiers, None)))),
             None => None,
         }
     }
@@ -175,20 +186,123 @@ impl Recorder {
 }
 
 impl Keymap {
+    /// One key is saved as a string, as before a command could have several, so older versions
+    /// still read it.
     pub fn prefs(&self) -> Value {
-        json!(self.custom)
+        Value::Object(self.custom.iter().map(|(id, keys)| (id.clone(), keys_value(keys))).collect())
     }
     pub fn load(&mut self, v: &Value) {
         self.custom =
-            v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()).unwrap_or_default();
-        // A shortcut that named a modifier key twice ("Shift+ShiftLeft", from before the shift
-        // keys were named after themselves) is the modifier itself (#4582).
-        for key in self.custom.values_mut() {
-            if let Some(named) = named_modifier_key(key) {
-                *key = named;
+            v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((k.clone(), saved_keys(k, v)?))).collect()).unwrap_or_default();
+    }
+}
+
+/// A command's keys as they are saved: `""` (none), one key, or a list of them.
+pub(crate) fn keys_value(keys: &[String]) -> Value {
+    match keys {
+        [] => json!(""),
+        [key] => json!(key),
+        _ => json!(keys),
+    }
+}
+
+/// A command's saved keys: `""` (none), one key, or a list of them.
+pub(crate) fn saved_keys(id: &str, v: &Value) -> Option<Vec<String>> {
+    let raw: Vec<&str> = match v {
+        Value::String(key) => vec![key.as_str()],
+        Value::Array(keys) => keys.iter().filter_map(Value::as_str).filter(|k| !k.is_empty()).take(MAX_KEYS).collect(),
+        _ => return None,
+    };
+    if raw.iter().any(|key| key.len() > 256) {
+        log::warn!("saved shortcut name exceeds 256 bytes; binding ignored");
+        return None;
+    }
+    let mut keys = Vec::new();
+    for key in raw.into_iter().filter(|key| !key.is_empty()) {
+        let Some(key) = canonical_key(key).filter(|key| !reserved_for(id, key)) else {
+            log::warn!("invalid or reserved saved shortcut ignored");
+            continue;
+        };
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    Some(keys)
+}
+
+/// Panel bindings own arrows only while shared chrome has actual keyboard focus.
+/// Every other application-reserved key remains protected for every command.
+fn reserved_for(id: &str, key: &str) -> bool {
+    RESERVED.contains(&key)
+        && !(solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_some()
+            && key.rsplit('+').next().is_some_and(|name| matches!(name, "Left" | "Right" | "Up" | "Down")))
+}
+
+/// Effective registered chords for the host's deferred, focus-checked input path.
+pub(crate) fn panel_shortcuts(app: &SolveApp) -> Vec<(solidcraft_engine::panels::ContextualPanelAction, egui::KeyboardShortcut)> {
+    use solidcraft_engine::panels::ContextualPanelAction;
+    ContextualPanelAction::ALL
+        .into_iter()
+        .flat_map(|action| {
+            keys(app, action.command_id()).into_iter().take(MAX_KEYS).filter_map(move |key| {
+                let mut shortcut = chord(&key)?;
+                // Ctrl is the existing primary-modifier alias; explicit Ctrl+Cmd
+                // continues to require both physical modifiers.
+                if shortcut.modifiers.command && !shortcut.modifiers.mac_cmd {
+                    shortcut.modifiers.ctrl = false;
+                }
+                Some((action, shortcut))
+            })
+        })
+        .collect()
+}
+
+/// Read the same chord that recording a key produces, independent of case and modifier order.
+/// The last token is the key; the preceding tokens are modifiers. Keep the historical primary
+/// Ctrl/Cmd alias, explicit Control+Command chords and old physical modifier-key names.
+fn canonical_key(text: &str) -> Option<String> {
+    chord(text).map(|shortcut| key_name(shortcut.logical_key, shortcut.modifiers))
+}
+
+fn chord(text: &str) -> Option<egui::KeyboardShortcut> {
+    if text.len() > 256 {
+        return None;
+    }
+    let text = text.trim();
+    if text.is_empty() || (text.starts_with('+') && text != "+") {
+        return None;
+    }
+    let (prefix, name) = if text == "+" {
+        ("", "+")
+    } else if let Some(prefix) = text.strip_suffix("++") {
+        (prefix, "+")
+    } else {
+        text.rsplit_once('+').unwrap_or(("", text))
+    };
+    let mut mods = egui::Modifiers::NONE;
+    if !prefix.is_empty() {
+        for part in prefix.split('+') {
+            match part.trim().to_ascii_lowercase().as_str() {
+                "ctrl" | "control" => mods.ctrl = true,
+                "cmd" | "command" => mods.mac_cmd = true,
+                "alt" | "option" => mods.alt = true,
+                "shift" => mods.shift = true,
+                _ => return None,
             }
         }
     }
+    mods.command = mods.ctrl || mods.mac_cmd;
+    let name = name.trim();
+    let key = match name.to_ascii_lowercase().as_str() {
+        "ctrl" | "control" if !mods.ctrl && !mods.mac_cmd => egui::Key::ControlLeft,
+        "cmd" | "command" if !mods.ctrl && !mods.mac_cmd => egui::Key::SuperLeft,
+        "alt" | "option" if !mods.alt => egui::Key::AltLeft,
+        "shift" if !mods.shift => egui::Key::ShiftLeft,
+        "esc" => egui::Key::Escape,
+        "return" => egui::Key::Enter,
+        _ => egui::Key::ALL.iter().copied().find(|key| key.name().eq_ignore_ascii_case(name)).or_else(|| egui::Key::from_name(name))?,
+    };
+    Some(egui::KeyboardShortcut::new(mods, key))
 }
 
 /// A key press as a shortcut name: `E`, `Shift+E`, `Ctrl+Alt+K`, `F5`, `Delete`.
@@ -245,16 +359,6 @@ impl Modifier {
         }
     }
 
-    /// The modifier a key is called in a shortcut name.
-    fn of_name(name: &str) -> Option<Self> {
-        match name {
-            "ShiftLeft" | "ShiftRight" => Some(Modifier::Shift),
-            "ControlLeft" | "ControlRight" | "SuperLeft" | "SuperRight" => Some(Modifier::Ctrl),
-            "AltLeft" | "AltRight" => Some(Modifier::Alt),
-            _ => None,
-        }
-    }
-
     /// The modifier's name in a shortcut.
     fn name(self) -> &'static str {
         match self {
@@ -265,74 +369,63 @@ impl Modifier {
     }
 }
 
-/// A shortcut name that ends in a modifier key, with that key named after its modifier:
-/// `Shift+ShiftLeft` is `Shift` and `Ctrl+ShiftLeft` is `Ctrl+Shift` (#4582).
-fn named_modifier_key(key: &str) -> Option<String> {
-    let mut parts: Vec<&str> = key.split('+').collect();
-    let last = parts.pop()?;
-    let modifier = Modifier::of_name(last)?;
-    let name = modifier.name();
-    // The modifier named twice ("Shift+Shift") is the modifier alone.
-    if parts.last() == Some(&name) {
-        parts.pop();
-    }
-    parts.push(name);
-    Some(parts.join("+"))
+/// The key a command runs from now, the one menus and tooltips show: its first.
+pub fn effective(app: &SolveApp, id: &str) -> Option<String> {
+    keys(app, id).into_iter().next()
 }
 
-/// The key a command runs from now.
-pub fn effective(app: &SolveApp, id: &str) -> Option<String> {
+/// Every key a command runs from now.
+pub fn keys(app: &SolveApp, id: &str) -> Vec<String> {
     match app.keymap.custom.get(id) {
-        Some(k) if k.is_empty() => None,
-        Some(k) => Some(k.clone()),
-        None => solidcraft_engine::find_command(id).and_then(|c| c.shortcut).map(str::to_string),
+        Some(keys) => keys.clone(),
+        None => solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty()).map(str::to_string).into_iter().collect(),
     }
+}
+
+/// Drag to Zoom has no default binding. Compare the keys and current modifiers using the
+/// same chord names as the shortcut recorder.
+pub(crate) fn drag_zoom_key(app: &SolveApp, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+    app.keymap.custom.get(DRAG_ZOOM).is_some_and(|keys| !keys.is_empty() && keys.contains(&key_name(key, modifiers)))
+}
+
+pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
+    input.focused && input.keys_down.iter().any(|key| drag_zoom_key(app, *key, input.modifiers))
 }
 
 /// Use the spec already available when walking the command list.
-fn effective_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Option<&'a str> {
-    app.keymap.custom.get(command.id).map(String::as_str).or(command.shortcut).filter(|key| !key.is_empty())
-}
-
-/// Presentation only: stored Ctrl bindings retain their historical primary-modifier alias.
-/// A recorded macOS Control+Command chord includes both names explicitly.
-pub fn display(key: &str) -> String {
-    display_for_platform(key, cfg!(target_os = "macos"))
-}
-
-fn display_for_platform(key: &str, mac: bool) -> String {
-    let both = key.starts_with("Ctrl+Cmd+");
-    key.split('+')
-        .map(|part| match (mac, part) {
-            (true, "Ctrl") if !both => "Cmd",
-            (true, "Alt") => "Option",
-            _ => part,
-        })
-        .collect::<Vec<_>>()
-        .join("+")
+fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
+    match app.keymap.custom.get(command.id) {
+        Some(keys) => keys.iter().map(String::as_str).collect(),
+        None => command.shortcut.filter(|k| !k.is_empty()).into_iter().collect(),
+    }
 }
 
 pub fn display_for(app: &SolveApp, id: &str) -> Option<String> {
-    effective(app, id).map(|key| display(&key))
+    effective(app, id).map(|key| crate::ui_kit::chord_label(&key))
 }
 
 /// Commands bound to `key` now.
 pub fn commands_for(app: &SolveApp, key: &str) -> Vec<&'static str> {
-    command_specs().into_iter().filter(|c| effective(app, c.id).as_deref() == Some(key)).map(|c| c.id).collect()
+    command_specs().into_iter().filter(|c| keys_for_spec(app, c).contains(&key)).map(|c| c.id).collect()
 }
 
 /// Where a command's shortcut works: in a sketch (the SKETCH tab's tools), in the model (the
 /// other tabs), or everywhere (commands on no tab: undo, views, files).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Scope {
+pub(crate) enum Scope {
+    Render,
     Sketch,
     Model,
     Everywhere,
 }
 
-fn scope(id: &str) -> Scope {
+pub(crate) fn scope(id: &str) -> Scope {
+    if id.starts_with("render.") || matches!(id, "appearance.paint" | "appearance.pick_up") {
+        return Scope::Render;
+    }
     match solidcraft_engine::find_command(id).map(|c| c.tab) {
         Some("SKETCH") => Scope::Sketch,
+        Some(tab) if tab.starts_with("RENDER") => Scope::Render,
         Some("") | None => Scope::Everywhere,
         Some(_) => Scope::Model,
     }
@@ -345,20 +438,54 @@ fn clash(a: &str, b: &str) -> bool {
     x == y || x == Scope::Everywhere || y == Scope::Everywhere
 }
 
+/// Whether a command's key runs in a sketch and in the model alike when the two keep their keys
+/// apart: one of no tab, and inspecting, views and files wherever their buttons sit (Measure's I).
+fn runs_everywhere(id: &str) -> bool {
+    scope(id) == Scope::Everywhere || ["inspect.", "view.", "file."].iter().any(|p| id.starts_with(p))
+}
+
 /// The enabled command a key press runs, if any: one of the mode the view is in (a sketch tool
-/// while a sketch is open, a model command otherwise) before any other.
+/// while a sketch is open, a model command otherwise) before any other. With Preferences ›
+/// Shortcuts › Keep model keys out of sketches on, only one of that mode or one that works
+/// everywhere: a model command's key pressed in a sketch (E, F) runs nothing, nor a sketch
+/// tool's in the model.
 pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
-    let here = if app.session.active_sketch.is_some() { Scope::Sketch } else { Scope::Model };
-    let enabled: Vec<&'static str> =
-        commands_for(app, key).into_iter().filter(|id| solidcraft_engine::find_command(id).is_some_and(|c| c.info(&app.session).enabled)).collect();
-    enabled.iter().find(|id| scope(id) == here).or(enabled.first()).copied()
+    let here = if crate::render_workspace::active(app) {
+        Scope::Render
+    } else if app.session.active_sketch.is_some() {
+        Scope::Sketch
+    } else {
+        Scope::Model
+    };
+    let enabled: Vec<&'static str> = commands_for(app, key)
+        .into_iter()
+        .filter(|id| {
+            // Shared panel bindings run only in the host's late input path.
+            solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_none()
+                && (scope(id) != Scope::Render || here == Scope::Render)
+                && (here != Scope::Render || scope(id) != Scope::Sketch)
+                && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
+        })
+        .collect();
+    let mine = enabled.iter().find(|id| scope(id) == here);
+    if app.preferences.sketch_keys_only && here != Scope::Render {
+        mine.or_else(|| enabled.iter().find(|id| runs_everywhere(id))).copied()
+    } else {
+        mine.or(enabled.first()).copied()
+    }
 }
 
 /// Run a shortcut key: its enabled command; outside a sketch, a sketch tool's key opens Create
 /// Sketch (on the selected plane or planar face, else on the plane picked next) and the tool
 /// starts in the new sketch.
 pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
-    if let Some(id) = command_for(app, key) {
+    if keeps_old_show_hide(app, key) {
+        app.start("ui.toggle_visibility");
+    } else if let Some(id) = command_for(app, key) {
+        if id == DRAG_ZOOM {
+            // The viewport reads the held chord. A key press must not latch Zoom.
+            return;
+        }
         // Pressed again while a tool of the same family is out, with Preferences › Sketch asking
         // for it (#2459): before its first point, the family's next mode (wrapping round); once a
         // point is placed, the tool keeps it. A held key's repeats change nothing.
@@ -384,6 +511,14 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
     }
 }
 
+/// V with Shift or Alt has always toggled visibility too. It still does while Show/Hide is on V
+/// and nothing else is bound to that chord.
+fn keeps_old_show_hide(app: &SolveApp, key: &str) -> bool {
+    matches!(key, "Shift+V" | "Alt+V" | "Alt+Shift+V")
+        && effective(app, "ui.toggle_visibility").as_deref() == Some("V")
+        && commands_for(app, key).is_empty()
+}
+
 /// What a family's key starts: the variant used last (#4308), unless that variant has a key of
 /// its own; then the family's key starts the command it is bound to, and the other key the
 /// variant.
@@ -395,7 +530,7 @@ fn variant_for_key(app: &SolveApp, id: &'static str) -> &'static str {
 /// Outside a sketch: the SKETCH-tab command bound to `key` that a new sketch would start. Not
 /// Normal/Construction (a mode of the drawing in progress) nor the Finish Sketch panel.
 fn sketch_tool_for(app: &SolveApp, key: &str) -> Option<&'static str> {
-    if app.session.active_sketch.is_some() {
+    if app.session.active_sketch.is_some() || crate::render_workspace::active(app) {
         return None;
     }
     commands_for(app, key).into_iter().find(|id| {
@@ -403,13 +538,25 @@ fn sketch_tool_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     })
 }
 
-/// Bind `key` to a command (`""` clears it). Refused for reserved keys, and when other commands
-/// use the key unless `replace` (they lose it). A sketch tool and a model command may share a
-/// key: each runs in its own mode.
+/// Make `key` a command's only key (`""` clears its keys). See [`bind_at`].
 pub fn bind(app: &mut SolveApp, id: &str, key: &str, replace: bool) -> Result<(), String> {
+    bind_at(app, id, None, key, replace)
+}
+
+/// Give a command `key`: as its only key (`slot` `None`), or in place of its key at `slot` (one
+/// past the last adds a key; `""` there removes that key). Refused for reserved keys, and when
+/// other commands use the key unless `replace` (they lose that key and keep their others). A
+/// sketch tool and a model command may share a key: each runs in its own mode.
+pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, replace: bool) -> Result<(), String> {
     let spec = solidcraft_engine::find_command(id).ok_or_else(|| format!("no command `{id}`"))?;
-    if RESERVED.contains(&key) {
+    let canonical = if key.is_empty() { String::new() } else { canonical_key(key).ok_or("unknown shortcut key")? };
+    let key = canonical.as_str();
+    if reserved_for(id, key) {
         return Err(format!("{key} is used by SolidCraft itself"));
+    }
+    let mut list = keys(app, id);
+    if slot.is_some_and(|n| n >= list.len()) && list.len() >= MAX_KEYS {
+        return Err(format!("a command has at most {MAX_KEYS} keys"));
     }
     if !key.is_empty() {
         let others: Vec<&'static str> = commands_for(app, key).into_iter().filter(|o| *o != id && clash(o, id)).collect();
@@ -418,15 +565,37 @@ pub fn bind(app: &mut SolveApp, id: &str, key: &str, replace: bool) -> Result<()
             return Err(format!("{key} is already used by {}", names.join(", ")));
         }
         for o in others {
-            app.keymap.custom.insert(o.to_string(), String::new());
+            let mut theirs = keys(app, o);
+            theirs.retain(|k| k != key);
+            set_keys(app, o, theirs);
         }
     }
-    if spec.shortcut.unwrap_or("") == key {
+    match slot {
+        None => list = vec![key.to_string()],
+        Some(n) if n < list.len() && key.is_empty() => drop(list.remove(n)),
+        Some(n) => match list.get_mut(n) {
+            Some(old) => *old = key.to_string(),
+            None => list.push(key.to_string()),
+        },
+    }
+    let mut unique: Vec<String> = Vec::new();
+    for k in list {
+        if !k.is_empty() && !unique.contains(&k) {
+            unique.push(k);
+        }
+    }
+    set_keys(app, spec.id, unique);
+    Ok(())
+}
+
+/// Keep a command's keys, as a change only when they aren't its default.
+fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
+    let default = solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty());
+    if keys.iter().map(String::as_str).eq(default) {
         app.keymap.custom.remove(id);
     } else {
-        app.keymap.custom.insert(id.to_string(), key.to_string());
+        app.keymap.custom.insert(id.to_string(), keys);
     }
-    Ok(())
 }
 
 pub fn reset(app: &mut SolveApp, id: Option<&str>) {
@@ -440,6 +609,13 @@ pub fn reset(app: &mut SolveApp, id: Option<&str>) {
 /// reset; a key another command uses is reported and taken over only on request.
 pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
+    let filtering = crate::ui_kit::settings_search::querying(ui);
+    // A Preferences search lists the matching shortcuts too, and one recorded from there takes
+    // the key like one on this page (#10043). Only a search field that has the keyboard keeps
+    // its keys: going back to it to type stops the recording.
+    if ctx.memory(|m| m.has_focus(crate::prefs::search_id())) && app.keymap.capturing.is_some() {
+        stop_capture(app);
+    }
     // Keep a pending chord until it has settled and all keys are released. Modifier-only
     // input never starts the timer, so modifiers can be assembled at the user's own pace.
     if let Some(id) = app.keymap.capturing.clone() {
@@ -465,10 +641,12 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             Recording::Complete(name) => {
                 app.keymap.capturing = None;
-                match bind(app, &id, &name, false) {
+                let slot = app.keymap.slot;
+                match bind_at(app, &id, Some(slot), &name, false) {
                     Ok(()) => app.keymap.message = None,
                     Err(e) if e.contains("already used") => {
-                        app.keymap.conflict = Some((id.clone(), name.clone(), commands_for(app, &name).iter().map(|s| s.to_string()).collect()));
+                        app.keymap.conflict =
+                            Some((id.clone(), name.clone(), slot, commands_for(app, &name).iter().map(|s| s.to_string()).collect()));
                         app.keymap.message = Some(e);
                     }
                     Err(e) => app.keymap.message = Some(e),
@@ -483,147 +661,162 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let mut action: Option<(String, &str)> = None;
     ui_kit::scope(ui, |ui| {
-        let actions = [
-            ui_kit::SearchAction { label: app.tr_label("Reset All"), icon: None, visible: !app.keymap.read_only, tooltip: None },
-            ui_kit::SearchAction { label: app.tr_label("Import…"), icon: Some("import_tray"), visible: !app.keymap.read_only, tooltip: None },
-            ui_kit::SearchAction {
-                label: app.tr_label("Export…"),
-                icon: Some("export_tray"),
-                visible: true,
-                tooltip: Some(app.tr_label("Keys, S box favourites and the toolbar, as a file")),
-            },
-        ];
-        let (filter, toolbar_action) = ui_kit::search_actions_row(
-            ui,
-            egui::Id::new("sc_keymap_filter"),
-            &mut app.keymap.filter,
-            crate::i18n::tr_label("Filter commands or keys"),
-            &actions,
-        );
-        crate::scenario::publish_target("keymap:filter", filter.rect);
-        crate::scenario::publish_handle("shortcut:filter", filter.rect.center());
-        if filter.clicked() {
-            action = Some((String::new(), "cancel"));
-        }
-        if let Some(index) = toolbar_action {
-            action = Some((
-                String::new(),
-                match index {
-                    0 => "reset_all",
-                    1 => "import",
-                    _ => "export",
-                },
-            ));
-        }
-        if let Some(m) = &app.keymap.message {
-            ui_kit::text(ui, m, ui_kit::Text::Report("keymap_message", true));
-        }
-        if let Some((id, key, _)) = app.keymap.conflict.clone() {
-            ui.horizontal_wrapped(|ui| {
-                let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
-                crate::scenario::publish_target("keymap:replace", replace.rect);
-                if replace.clicked() {
-                    action = Some((format!("{id}\n{key}"), "replace"));
+        if !filtering {
+            let t = solidcraft_theme::Tokens::get();
+            let edit_label = if app.keymap.read_only { app.tr_label("Edit shortcuts") } else { app.tr("install.done") };
+            let actions_width = ui_kit::ContentWidth::button(ui, edit_label)
+                + ui_kit::icon_label_width(ui, app.tr("prefs.profile_export"), Some("export_tray"), false)
+                + if app.keymap.read_only {
+                    0.0
+                } else {
+                    ui_kit::icon_label_width(ui, app.tr("prefs.shortcuts_import"), Some("import_tray"), false) + t.space_8
                 }
-                if ui_kit::button(ui, app.tr_label("Cancel"), ui_kit::Button::Normal).clicked() {
+                + t.space_8 * 2.0;
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_8;
+                let width = (ui.available_width() - actions_width).max(t.form_label_width).min(ui.available_width());
+                let filter = ui
+                    .allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui_kit::search_field(
+                            ui,
+                            egui::Id::unique("sc_keymap_filter"),
+                            &mut app.keymap.filter,
+                            solidcraft_ui_text::tr_label("Filter commands or keys"),
+                        )
+                    })
+                    .inner;
+                crate::scenario::publish_target("keymap:filter", filter.rect);
+                crate::scenario::publish_handle("shortcut:filter", filter.rect.center());
+                if filter.clicked() {
                     action = Some((String::new(), "cancel"));
                 }
+                if app.keymap.read_only {
+                    let edit = ui_kit::button(ui, app.tr_label("Edit shortcuts"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("keymap:edit", edit.rect);
+                    if edit.clicked() {
+                        app.keymap.read_only = false;
+                    }
+                } else {
+                    let done = ui_kit::button(ui, app.tr("install.done"), ui_kit::Button::Primary);
+                    crate::scenario::publish_target("keymap:done", done.rect);
+                    if done.clicked() {
+                        action = Some((String::new(), "done"));
+                    }
+                }
+                let export = ui_kit::icon_label_button(ui, app.tr("prefs.profile_export"), "export_tray", true, false)
+                    .backing_on_hover_text(app.tr_label("Keys, S box favorites and the toolbar, as a file"));
+                crate::scenario::publish_target("keymap:export", export.rect);
+                if export.clicked() {
+                    action = Some((String::new(), "export"));
+                }
+                if !app.keymap.read_only {
+                    let import = ui_kit::icon_label_button(ui, app.tr("prefs.shortcuts_import"), "import_tray", true, false);
+                    crate::scenario::publish_target("keymap:import", import.rect);
+                    if import.clicked() {
+                        action = Some((String::new(), "import"));
+                    }
+                }
             });
-        }
-        ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
-        if !app.keymap.read_only {
-            ui_kit::text(ui, app.tr("ui.shortcut_capture_hint"), ui_kit::Text::Note("shortcut_capture_help"));
+            if app.keymap.read_only {
+                ui_kit::text(ui, app.tr_label("Read-only list: shortcuts can't be changed here."), ui_kit::Text::Note("shortcut_read_only"));
+            }
+            ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only)
+                .backing_on_hover_text(app.tr("ui.sketch_keys_only_tip"));
+            if let Some(chosen) = outcome(app, ui) {
+                action = Some((String::new(), chosen));
+            }
             if app.keymap.capturing.is_some() {
                 let hint = ctx.input(|input| app.keymap.recorder.hint(input));
                 ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
             }
         }
-        let q = app.keymap.filter.to_lowercase();
+        let q = if filtering { app.prefs_window.shell.filter.trim().to_lowercase() } else { app.keymap.filter.to_lowercase() };
         let commands: Vec<_> = command_specs()
             .into_iter()
             .filter_map(|c| {
-                let key = effective_for_spec(app, c).unwrap_or_default();
+                let keys = keys_for_spec(app, c);
+                let displayed: Vec<_> = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect();
                 let label = app.tr_label(c.label);
-                (q.is_empty() || [c.label, c.id, key, label].iter().any(|s| s.to_lowercase().contains(&q))).then_some((c, key, label))
+                let group = shortcut_group(c);
+                let hit = if filtering {
+                    crate::ui_kit::settings_search::shows_all(ui)
+                        || crate::ui_kit::settings_search::matches_text(
+                            &q,
+                            &[c.label, c.id, label, &group]
+                                .into_iter()
+                                .chain(keys.iter().copied())
+                                .chain(displayed.iter().map(String::as_str))
+                                .collect::<Vec<_>>(),
+                        )
+                } else {
+                    q.is_empty()
+                        || [c.label, c.id, label, &group]
+                            .iter()
+                            .chain(&keys)
+                            .copied()
+                            .chain(displayed.iter().map(String::as_str))
+                            .any(|s| s.to_lowercase().contains(&q))
+                };
+                hit.then_some((c, keys, label, group))
             })
             .collect();
-        let t = crate::theme::Tokens::get();
-        let key_width = commands
-            .iter()
-            .map(|(_, key, _)| ui_kit::ContentWidth::button(ui, &display(key)))
-            .chain(app.keymap.recorder.preview().filter(|_| app.keymap.capturing.is_some()).map(|text| ui_kit::ContentWidth::button(ui, &text)))
-            .fold(ui_kit::ContentWidth::button(ui, app.tr_label("press a key…")), f32::max)
-            .max(ui_kit::ContentWidth::label(ui, app.tr_label("Keyboard Shortcuts")) + t.space_8);
-        let action_width = if app.keymap.read_only {
-            t.control_height
-        } else {
-            ui_kit::ContentWidth::button(ui, app.tr_label("Clear")) + ui_kit::ContentWidth::button(ui, app.tr_label("Reset")) + t.space_4
-        };
-        ui_kit::settings_scroll(ui, "sc_keymap_scroll", |ui| {
-            let columns = [
-                ui_kit::Column::new("Command", 1.5).flex().min_content_width(t.form_label_width),
-                ui_kit::Column::new(crate::i18n::tr("keymap.command_id"), 1.8).flex().min_content_width(t.form_label_width),
-                ui_kit::Column::new("Keyboard Shortcuts", 1.0).flex().min_content_width(key_width),
-                ui_kit::Column::new("", 0.0).icon_only().min_content_width(action_width),
-            ];
-            ui_kit::table(ui, "keymap", &columns, crate::i18n::tr("keymap.empty"), |ui, table| {
-                for (c, key, translated_label) in commands {
-                    table.row_visible(ui, c.id, app.keymap.capturing.as_deref() == Some(c.id), false, |row| {
-                        row.cell(|ui| {
-                            ui_kit::text(ui, translated_label, ui_kit::Text::Cell);
-                        });
-                        row.cell(|ui| {
-                            ui_kit::text(ui, c.id, ui_kit::Text::Cell);
-                        });
-                        let capturing = app.keymap.capturing.as_deref() == Some(c.id);
-                        let changed = app.keymap.custom.contains_key(c.id);
-                        let text = if capturing {
-                            app.keymap.recorder.preview().unwrap_or_else(|| app.tr_label("press a key…").to_string())
-                        } else if key.is_empty() {
-                            "—".to_string()
-                        } else {
-                            display(key)
-                        };
-                        row.cell(|ui| {
-                            if app.keymap.read_only {
-                                ui_kit::text(ui, &text, ui_kit::Text::Cell);
-                            } else {
-                                let capture = if key.is_empty() && !capturing {
-                                    let (rect, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
-                                    ui_kit::quiet_icon_button_at(ui, rect, "plus", app.tr_label("Click, then press the new key"))
-                                } else {
-                                    ui_kit::button(ui, &text, ui_kit::Button::Normal).on_hover_text(app.tr_label("Click, then press the new key"))
-                                };
-                                crate::scenario::publish_target(&format!("keymap:capture:{}", c.id), capture.rect);
-                                if ui.is_rect_visible(capture.rect) {
-                                    crate::scenario::publish_handle(&format!("shortcut:{}", c.id), capture.rect.center());
-                                }
-                                if capture.clicked() {
-                                    capture.surrender_focus();
-                                    action = Some((c.id.to_string(), "capture"));
-                                }
-                            }
-                        });
-                        row.cell(|ui| {
-                            if !app.keymap.read_only {
-                                ui.horizontal(|ui| {
-                                    let clear = ui_kit::button(ui, app.tr_label("Clear"), ui_kit::Button::Enabled(!key.is_empty()));
-                                    crate::scenario::publish_target(&format!("keymap:clear:{}", c.id), clear.rect);
-                                    if clear.clicked() {
-                                        action = Some((c.id.to_string(), "clear"));
-                                    }
-                                    let reset = ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Enabled(changed));
-                                    crate::scenario::publish_target(&format!("keymap:reset:{}", c.id), reset.rect);
-                                    if reset.clicked() {
-                                        action = Some((c.id.to_string(), "reset"));
-                                    }
-                                });
-                            }
-                        });
-                    });
+        if filtering && commands.is_empty() {
+            return;
+        }
+        let count = commands.len();
+        // Keep registry order within each real registry group; no command is lost because it
+        // has no ribbon placement. Such commands use their registry id's namespace.
+        let mut groups: Vec<(String, Vec<_>)> = Vec::new();
+        for (c, keys, label, group) in commands {
+            if let Some((_, rows)) = groups.iter_mut().find(|(name, _)| name == &group) {
+                rows.push((c, keys, label));
+            } else {
+                groups.push((group, vec![(c, keys, label)]));
+            }
+        }
+        let shortcut_title = app.tr("prefs.shortcuts").to_string();
+        let mut paint = |ui: &mut egui::Ui| {
+            if filtering {
+                if let Some(chosen) = outcome(app, ui) {
+                    action = Some((String::new(), chosen));
                 }
-            });
-        });
+                if app.keymap.capturing.is_some() {
+                    let hint = ctx.input(|input| app.keymap.recorder.hint(input));
+                    ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
+                }
+            }
+            if count == 0 {
+                ui_kit::text(ui, app.tr("keymap.empty"), ui_kit::Text::Hint("shortcuts_empty"));
+            }
+            for (group, rows) in &groups {
+                ui_kit::section_heading(ui, group);
+                let heading = crate::scenario::rect_of(&format!("dialog:heading:{group}"));
+                if let Some(rect) = heading {
+                    crate::ui_kit::settings_search::remember(ui, group, rect);
+                    crate::ui_kit::settings_search::follow(ui, group, rect);
+                }
+                for (command, keys, label) in rows {
+                    if let Some(chosen) = shortcut_row(app, ui, command, keys, label, filtering) {
+                        action = Some(chosen);
+                    }
+                }
+            }
+        };
+        if filtering {
+            let open = ui_kit::search_fold(ui, &shortcut_title, count, paint).is_some();
+            if !open && let Some(rect) = crate::scenario::rect_of("prefs:search:shortcuts") {
+                // Collapsed matches still participate in Up/Down and Enter. Enter lands on
+                // the real group or command, where follow() reveals its complete row.
+                for (group, rows) in &groups {
+                    crate::ui_kit::settings_search::remember(ui, group, rect);
+                    for (command, keys, label) in rows {
+                        crate::ui_kit::settings_search::remember(ui, &shortcut_search_label(command, label, keys), rect);
+                    }
+                }
+            }
+        } else {
+            ui_kit::settings_scroll(ui, "sc_keymap_scroll", &mut paint);
+        }
     });
     crate::scenario::publish_count("shortcut_recording", f64::from(app.keymap.capturing.is_some()));
     if action.is_some() {
@@ -631,36 +824,40 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.keymap.recorder = Recorder::default();
     }
     match action {
-        Some((id, "capture")) => {
-            app.keymap.capturing = Some(id);
+        Some((pair, "capture")) => {
+            let (id, slot) = pair.split_once('\n').unwrap_or((&pair, "0"));
+            app.keymap.slot = slot.parse().unwrap_or(0);
+            app.keymap.capturing = Some(id.to_string());
             app.keymap.recorder = Recorder::default();
             app.keymap.conflict = None;
             app.keymap.message = None;
         }
         Some((id, "clear")) => drop(bind(app, &id, "", false)),
         Some((id, "reset")) => reset(app, Some(&id)),
-        Some((_, "reset_all")) => reset(app, None),
+        Some((_, "done")) => stop_capture(app),
         Some((_, "export")) => {
             let text = crate::toolbar_custom::export(app).to_string();
             app.pick_save("SolidCraft shortcuts.json", &["json"], move |app, path| {
                 if let Some(path) = path {
-                    app.keymap.message = std::fs::write(&path, text).err().map(|e| format!("export: {e}"));
+                    // Through `vfs`, like every other save: the web app hands it out as a download.
+                    app.keymap.message = solidcraft_engine::io::vfs::write(&path, text.as_bytes()).err().map(|e| format!("export: {e}"));
                 }
             });
         }
         Some((_, "import")) => {
             app.pick_open(|app, path| {
                 let Some(path) = path else { return };
-                let r = std::fs::read_to_string(&path)
+                // Through `vfs`, like every other import: in the web app a picked file is there.
+                let r = solidcraft_engine::io::vfs::read_to_string(&path, crate::toolbar_custom::MAX_IMPORT_BYTES)
                     .map_err(|e| e.to_string())
                     .and_then(|t| serde_json::from_str::<Value>(&t).map_err(|e| e.to_string()))
                     .and_then(|v| crate::toolbar_custom::import(app, &v));
                 app.keymap.message = r.err().map(|e| format!("import: {e}"));
             });
         }
-        Some((pair, "replace")) => {
-            if let Some((id, key)) = pair.split_once('\n') {
-                let _ = bind(app, id, key, true);
+        Some((_, "replace")) => {
+            if let Some((id, key, slot, _)) = app.keymap.conflict.take() {
+                let _ = bind_at(app, &id, Some(slot), &key, true);
             }
             app.keymap.conflict = None;
             app.keymap.message = None;
@@ -673,6 +870,201 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// A global search result must be visible even after the page's own filter was used.
+pub(crate) fn reveal(app: &mut SolveApp) {
+    app.keymap.filter.clear();
+}
+
+fn shortcut_group(command: &CommandSpec) -> String {
+    let group = if command.tab.is_empty() { command.id.split('.').next().unwrap_or(command.id) } else { command.tab };
+    crate::workspace::tab_name(&group.to_uppercase())
+}
+
+fn shortcut_search_label(command: &CommandSpec, label: &str, keys: &[&str]) -> String {
+    let displayed: Vec<_> = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect();
+    format!("{label} / {} ({}) · {} · {}", command.label, command.id, keys.join(", "), displayed.join(", "))
+}
+
+/// Keep every binding and recorder slot, while skipping the construction of off-screen rows.
+fn shortcut_row(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    command: &CommandSpec,
+    keys: &[&str],
+    label: &str,
+    filtering: bool,
+) -> Option<(String, &'static str)> {
+    let t = solidcraft_theme::Tokens::get();
+    let editing = !app.keymap.read_only;
+    let capturing = app.keymap.capturing.as_deref() == Some(command.id);
+    let mut slots: Vec<(usize, String, bool)> = keys.iter().enumerate().map(|(slot, key)| (slot, crate::ui_kit::chord_label(key), true)).collect();
+    if slots.is_empty() || (editing && slots.len() < MAX_KEYS) {
+        slots.push((slots.len(), String::new(), false));
+    }
+    for (slot, text, _) in &mut slots {
+        if capturing && *slot == app.keymap.slot {
+            *text = app.keymap.recorder.preview().unwrap_or_else(|| app.tr("prefs.shortcuts_press").to_owned());
+        }
+    }
+    let unassigned = solidcraft_ui_text::tr("prefs.shortcuts_not_assigned");
+    let widths: Vec<f32> = slots
+        .iter()
+        .map(|(slot, text, assigned)| {
+            if capturing && *slot == app.keymap.slot {
+                ui_kit::ContentWidth::button(ui, text)
+            } else if *assigned {
+                ui_kit::shortcut_binding_width(ui, text, unassigned)
+            } else if keys.is_empty() {
+                ui_kit::shortcut_binding_width(ui, "", unassigned)
+            } else {
+                t.control_height
+            }
+        })
+        .collect();
+    let width = ui.available_width().max(0.0);
+    let actions_width = if editing { t.control_height * 2.0 + t.space_4 } else { 0.0 };
+    let name_width = ui_kit::ContentWidth::label(ui, label).min(width * 0.45);
+    let widest = widths.iter().copied().fold(0.0, f32::max);
+    let beside = width - name_width - t.space_14 - actions_width - t.space_8 >= widest;
+    let controls_width = (width - actions_width - t.space_8 - if beside { name_width + t.space_14 } else { 0.0 }).max(0.0);
+    let mut lines = 1usize;
+    let mut line_width = 0.0;
+    for next in &widths {
+        if line_width > 0.0 && line_width + t.space_8 + next > controls_width.max(widest) {
+            lines += 1;
+            line_width = 0.0;
+        }
+        line_width += if line_width > 0.0 { t.space_8 + next } else { *next };
+    }
+    let label_galley = ui.painter().layout(
+        label.to_owned(),
+        egui::FontId::proportional(t.font_label),
+        t.form_ink,
+        if beside { name_width.max(1.0) } else { width.max(1.0) },
+    );
+    let label_height = label_galley.size().y.max(t.control_height);
+    let control_height = lines as f32 * t.control_height + lines.saturating_sub(1) as f32 * t.space_4;
+    let height = if beside { label_height.max(control_height) } else { label_height + control_height + t.space_4 } + t.space_8;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let search_label = shortcut_search_label(command, label, keys);
+    crate::ui_kit::settings_search::follow(ui, &search_label, rect);
+    if !filtering && !capturing && !ui.is_rect_visible(rect) {
+        return None;
+    }
+    if filtering {
+        crate::ui_kit::settings_search::reveal(ui);
+        crate::ui_kit::settings_search::push_force(ui);
+    }
+    let mut action = None;
+    ui.push_id(command.id, |ui| {
+        let name =
+            egui::Rect::from_min_size(rect.min + egui::vec2(0.0, t.space_4), egui::vec2(if beside { name_width } else { width }, label_height));
+        ui.painter().galley(egui::pos2(name.left(), name.center().y - label_galley.size().y / 2.0), label_galley, t.form_ink);
+        let response = ui.interact(name, ui.scope_id().with("command"), egui::Sense::hover()).backing_on_hover_text(command.id);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{label} ({})", command.id)));
+        let top = if beside { name.top() } else { name.bottom() + t.space_4 };
+        let total = widths.iter().sum::<f32>() + widths.len().saturating_sub(1) as f32 * t.space_8;
+        let left = if beside { rect.right() - actions_width - t.space_8 - total.min(controls_width) } else { rect.left() };
+        let used_width = total.min(controls_width);
+        let controls = egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(used_width, control_height));
+        crate::scenario::publish_rect(&format!("keymap:bindings:{}", command.id), controls);
+        let mut draw = |ui: &mut egui::Ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(used_width.max(widest), t.control_height),
+                egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+                |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(t.space_8, t.space_4);
+                    for (slot, text, assigned) in &slots {
+                        let active = capturing && *slot == app.keymap.slot;
+                        let capture = if active {
+                            ui_kit::button(ui, text, ui_kit::Button::Primary)
+                        } else if *assigned {
+                            ui_kit::shortcut_binding(ui, text, unassigned, editing)
+                        } else if keys.is_empty() {
+                            ui_kit::shortcut_binding(ui, "", unassigned, editing)
+                        } else {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
+                            ui_kit::quiet_icon_button_at(ui, r, "plus", app.tr_label("Click, then press the new key"))
+                        };
+                        if editing {
+                            let capture = capture.backing_on_hover_text(app.tr_label("Click, then press the new key"));
+                            let name = if *slot == 0 { command.id.to_owned() } else { format!("{}:{slot}", command.id) };
+                            crate::scenario::publish_target(&format!("keymap:capture:{name}"), capture.rect);
+                            if ui.is_rect_visible(capture.rect) {
+                                crate::scenario::publish_handle(&format!("shortcut:{name}"), capture.rect.center());
+                            }
+                            if capture.clicked() {
+                                capture.surrender_focus();
+                                action = Some((format!("{}\n{slot}", command.id), "capture"));
+                            }
+                        }
+                    }
+                },
+            );
+        };
+        ui.scope_builder(egui::UiBuilder::new().max_rect(controls).layout(egui::Layout::top_down(egui::Align::Min)), |ui| {
+            if widest > controls_width {
+                egui::ScrollArea::horizontal().id_salt("binding_scroll").auto_shrink([false, true]).show(ui, &mut draw);
+            } else {
+                draw(ui);
+            }
+        });
+        if editing {
+            let actions = egui::Rect::from_min_size(egui::pos2(rect.right() - actions_width, top), egui::vec2(actions_width, t.control_height));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(actions).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+                ui.spacing_mut().item_spacing.x = t.space_4;
+                for (kind, icon, enabled, label) in [
+                    ("reset", "undo", app.keymap.custom.contains_key(command.id), app.tr_label("Reset")),
+                    ("clear", "close", !keys.is_empty(), app.tr_label("Clear")),
+                ] {
+                    let button = ui
+                        .add_enabled_ui(enabled, |ui| {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
+                            ui_kit::quiet_icon_button_at(ui, r, icon, label)
+                        })
+                        .inner;
+                    crate::scenario::publish_target(&format!("keymap:{kind}:{}", command.id), button.rect);
+                    if button.clicked() {
+                        action = Some((command.id.to_owned(), kind));
+                    }
+                }
+            });
+        }
+    });
+    crate::ui_kit::settings_search::remember(ui, &search_label, rect);
+    t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
+    if filtering {
+        crate::ui_kit::settings_search::pop_force(ui);
+    }
+    action
+}
+
+/// A recording's outcome: its message, and for a key another command uses, Replace and Cancel
+/// (the one chosen).
+fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
+    let mut chosen = None;
+    if let Some(m) = &app.keymap.message {
+        ui_kit::text(ui, m, ui_kit::Text::Report("keymap_message", true));
+    }
+    if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
+        ui.horizontal_wrapped(|ui| {
+            let replace = ui_kit::button(
+                ui,
+                solidcraft_ui_text::format("keymap.use_anyway", &[("key", &crate::ui_kit::chord_label(&key))]),
+                ui_kit::Button::Normal,
+            );
+            crate::scenario::publish_target("keymap:replace", replace.rect);
+            if replace.clicked() {
+                chosen = Some("replace");
+            }
+            if ui_kit::button(ui, app.tr_label("Cancel"), ui_kit::Button::Normal).clicked() {
+                chosen = Some("cancel");
+            }
+        });
+    }
+    chosen
+}
+
 /// Stop waiting for a key (the dialog closed).
 pub fn stop_capture(app: &mut SolveApp) {
     app.keymap.capturing = None;
@@ -681,17 +1073,245 @@ pub fn stop_capture(app: &mut SolveApp) {
     app.keymap.message = None;
 }
 
-/// Is the page waiting for a key (so the key must not also run a command)?
+/// Is the page waiting for a key (so the key must not also run a command)? On the Shortcuts page,
+/// or in a Preferences search, which shows the matching shortcuts on the page it started from
+/// (#10043).
 pub fn capturing(app: &SolveApp) -> bool {
-    app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS && app.keymap.capturing.is_some()
+    app.prefs_window.shell.open
+        && app.keymap.capturing.is_some()
+        && (app.prefs_window.shell.section == crate::prefs::PAGE_SHORTCUTS || !app.prefs_window.shell.filter.trim().is_empty())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn panel_bindings_preserve_contextual_arrows_and_rebind_clear_conflict_and_reset() {
+        use solidcraft_engine::panels::ContextualPanelAction;
+        let mut a = app();
+        let defaults = panel_shortcuts(&a);
+        assert_eq!(defaults.len(), 4);
+        for (action, shortcut) in defaults {
+            assert_eq!(shortcut.modifiers, egui::Modifiers::NONE);
+            assert!(keys(&a, action.command_id()).contains(&shortcut.logical_key.name().to_string()));
+            assert_eq!(command_for(&a, shortcut.logical_key.name()), None, "arrows stay out of global dispatch");
+        }
+        bind(&mut a, "panel.sash.left", "Ctrl+Shift+Left", false).unwrap();
+        assert!(bind(&mut a, "solid.box", "Ctrl+Left", true).is_err());
+        assert!(bind(&mut a, "panel.focus.next", "Escape", true).is_err());
+        assert!(bind(&mut a, "panel.focus.next", "Ctrl+Z", true).is_err());
+        assert!(bind(&mut a, "panel.focus.next", "Right", false).is_err(), "existing sash binding conflicts");
+        bind(&mut a, "panel.focus.next", "Right", true).unwrap();
+        assert!(keys(&a, "panel.sash.right").is_empty());
+        bind(&mut a, "panel.toggle", "Ctrl+Alt+F12", true).unwrap();
+        assert_eq!(command_for(&a, "Ctrl+Alt+F12"), None);
+        let saved = a.keymap.prefs();
+        let mut restored = app();
+        restored.keymap.load(&saved);
+        assert_eq!(restored.keymap.prefs(), saved);
+        assert_eq!(keys(&restored, "panel.sash.left"), ["Ctrl+Shift+Left"]);
+        bind(&mut restored, "panel.sash.left", "", false).unwrap();
+        assert!(!panel_shortcuts(&restored).iter().any(|(action, _)| *action == ContextualPanelAction::ResizeLeft));
+        reset(&mut restored, Some("panel.sash.left"));
+        assert_eq!(keys(&restored, "panel.sash.left"), ["Left"]);
+        reset(&mut restored, None);
+        assert_eq!(panel_shortcuts(&restored).len(), 4);
+        assert!(keys(&restored, "panel.focus.next").is_empty());
+        let saved = json!({"panel.sash.up":"Ctrl+Up", "solid.box":"Ctrl+Up", "panel.toggle":"Ctrl+S"});
+        restored.keymap.load(&saved);
+        assert_eq!(keys(&restored, "panel.sash.up"), ["Ctrl+Up"]);
+        assert!(keys(&restored, "solid.box").is_empty());
+        assert!(keys(&restored, "panel.toggle").is_empty());
+    }
+
+    #[test]
+    fn assistant_shortcut_can_be_rebound_cleared_saved_and_reset() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert_eq!(effective(&h.app, "ui.assistant").as_deref(), Some("Ctrl+Shift+A"));
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.step(&json!({"key":"A", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "the old key no longer opens Assistant");
+        let held_key = |pressed, repeat| egui::Event::Key {
+            key: egui::Key::J,
+            physical_key: None,
+            pressed,
+            repeat,
+            modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+        };
+        h.frame_with(vec![held_key(true, false)]);
+        assert!(h.app.agent_chat.open, "the custom key opens Assistant");
+        h.frame_with(vec![held_key(true, true)]);
+        assert!(h.app.agent_chat.open, "holding the key does not repeatedly toggle");
+        h.frame_with(vec![held_key(false, false)]);
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "the custom key also hides Assistant");
+        let saved = h.app.keymap.prefs();
+        let mut restored = app();
+        restored.keymap.load(&saved);
+        assert_eq!(keys(&restored, "ui.assistant"), ["Ctrl+Shift+J"]);
+        assert!(bind(&mut h.app, "solid.box", "Ctrl+Shift+J", false).is_err(), "conflicts are reported");
+        bind(&mut h.app, "ui.assistant", "", false).unwrap();
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "clearing disables the shortcut");
+        reset(&mut h.app, Some("ui.assistant"));
+        h.step(&json!({"key":"A", "cmd":true, "shift":true})).unwrap();
+        assert!(h.app.agent_chat.open, "reset restores the original shortcut");
+    }
+
+    #[test]
+    fn a_released_unbound_assistant_chord_does_not_start_a_plain_letter_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.frames(2);
+        let modifiers = egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT);
+        h.frame_with(vec![
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: false, repeat: false, modifiers },
+            egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+        ]);
+        assert!(!h.app.agent_chat.open, "the old chord is unbound");
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none(), "Ctrl+Shift+A must not become plain A (Appearance) after release");
+    }
+
+    #[test]
+    fn assistant_shortcut_respects_text_focus_ai_switch_and_capture() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.app.preferences.ai_features = false;
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open);
+        h.app.preferences.ai_features = true;
+        h.step(&json!({"key":"J", "cmd":true, "shift":true, "alt":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "extra modifiers do not match");
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(h.app.agent_chat.open);
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("sc_agent_chat_input")));
+        h.frames(2);
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "a chord can hide Assistant from its input field");
+        bind(&mut h.app, "ui.assistant", "J", true).unwrap();
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        h.step(&json!({"key":"J"})).unwrap();
+        assert!(!h.app.agent_chat.open, "a bare letter in a text field remains text");
+        h.call("ui.palette", json!({"open":false}));
+        h.frames(2);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SHORTCUTS);
+        h.app.keymap.capturing = Some("solid.box".into());
+        h.step(&json!({"key":"J"})).unwrap();
+        assert!(!h.app.agent_chat.open, "recording a shortcut must not activate it");
+        assert!(crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
+        bind(&mut h.app, "ui.assistant", "", false).unwrap();
+        assert!(!crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
+    }
+
     fn app() -> SolveApp {
         SolveApp::new(solidcraft_engine::Session::default(), Default::default())
+    }
+
+    #[test]
+    fn text_shortcuts_preserve_recorded_keys_and_modifier_aliases() {
+        for &key in egui::Key::ALL.iter().filter(|&&key| Modifier::of(key).is_none()) {
+            for flags in 0..16 {
+                let mods = egui::Modifiers {
+                    ctrl: flags & 1 != 0,
+                    mac_cmd: flags & 2 != 0,
+                    command: flags & 3 != 0,
+                    alt: flags & 4 != 0,
+                    shift: flags & 8 != 0,
+                };
+                let recorded = key_name(key, mods);
+                assert_eq!(canonical_key(&recorded), Some(recorded.clone()), "{recorded}");
+            }
+        }
+        for (text, expected) in [
+            (" shift + CTRL + shift + t ", "Ctrl+Shift+T"),
+            ("cmd+option+t", "Ctrl+Alt+T"),
+            ("shift+cmd+ctrl+t", "Ctrl+Cmd+Shift+T"),
+            ("ctrl++", "Ctrl+Plus"),
+            ("+", "Plus"),
+            ("Ctrl+ShiftLeft", "Ctrl+Shift"),
+            ("shift+shiftright", "Shift"),
+            ("shift", "Shift"),
+        ] {
+            assert_eq!(canonical_key(text).as_deref(), Some(expected), "{text}");
+        }
+        for text in ["", " ", "+T", "++", "Ctrl+", "Ctrl++T", "Foo+T", "T+Ctrl", "Shift+Shift"] {
+            assert_eq!(canonical_key(text), None, "{text}");
+        }
+        assert_eq!(canonical_key(&"T".repeat(257)), None);
+    }
+
+    #[test]
+    fn text_shortcuts_use_the_recorded_chord_and_check_conflicts() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for spelling in ["ctrl+shift+t", "Shift+Ctrl+T", "CTRL+SHIFT+T", "Ctrl+Shift+T"] {
+            let reply = h.call("ui.shortcut", json!({"command":"solid.box", "key":spelling}));
+            assert_eq!(reply["result"]["keys"], json!(["Ctrl+Shift+T"]), "{reply}");
+            h.call("ui.key", json!({"key":"T", "cmd":true, "shift":true}));
+            assert!(
+                matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Primitive { cmd: "solid.box", .. })),
+                "{spelling} opens Box"
+            );
+            h.call("ui.key", json!({"key":"Escape"}));
+        }
+        let before = h.app.keymap.prefs();
+        let conflict = h.call("ui.shortcut", json!({"command":"solid.cylinder", "key":"shift+CTRL+t"}));
+        assert!(conflict["error"].as_str().unwrap().contains("already used by Box"));
+        for key in ["Foo", "Shift+Shift", "Ctrl+", "Ctrl++T", "T+Ctrl", "escape", "ctrl+z", "delete", "ctrl+comma"] {
+            let reply = h.call("ui.shortcut", json!({"command":"solid.box", "key":key}));
+            assert_eq!(reply["ok"], false, "{key}: {reply}");
+            assert_eq!(h.app.keymap.prefs(), before, "a refused binding changes nothing");
+        }
+        bind(&mut h.app, "solid.cylinder", "shift+ctrl+t", true).unwrap();
+        assert!(keys(&h.app, "solid.box").is_empty());
+        assert_eq!(keys(&h.app, "solid.cylinder"), ["Ctrl+Shift+T"]);
+    }
+
+    #[test]
+    fn text_shortcuts_are_checked_in_settings_and_shortcut_imports() {
+        let saved = json!({
+            "solid.box":["shift+ctrl+t", "CTRL+SHIFT+T", "Foo", "ctrl+z", "delete", "escape"],
+            "solid.cylinder":"alt+f12",
+            "solid.extrude":"Shift+ShiftLeft",
+            "solid.sphere":""
+        });
+        let mut a = app();
+        a.keymap.load(&saved);
+        assert_eq!(keys(&a, "solid.box"), ["Ctrl+Shift+T"]);
+        assert_eq!(keys(&a, "solid.cylinder"), ["Alt+F12"]);
+        assert_eq!(keys(&a, "solid.extrude"), ["Shift"], "legacy modifier-only keys survive");
+        assert!(keys(&a, "solid.sphere").is_empty());
+        let mut imported = app();
+        crate::toolbar_custom::import(&mut imported, &json!({"format":"solidcraft-shortcuts/1", "shortcuts":saved})).unwrap();
+        assert_eq!(imported.keymap.prefs(), a.keymap.prefs());
+        let mut h = crate::scenario::Harness::new();
+        let profile = json!({"format":crate::settings_profiles::FORMAT, "name":"Text keys", "shortcuts":saved});
+        for (command, params) in [("settings.profile.import", json!({"profile":profile})), ("settings.profile.apply", json!({"name":"Text keys"}))] {
+            let reply = h.call("engine.execute", json!({"command":command, "params":params}));
+            assert_eq!(reply["ok"], true, "{reply}");
+        }
+        assert_eq!(h.app.keymap.prefs(), a.keymap.prefs());
+    }
+
+    #[test]
+    fn text_shortcuts_command_catalog_reports_the_current_binding() {
+        let mut h = crate::scenario::Harness::new();
+        for key in ["Ctrl+Shift+F", ""] {
+            bind(&mut h.app, "solid.fillet", key, false).unwrap();
+            for (method, params) in [("engine.commands", json!({})), ("engine.execute", json!({"command":"engine.commands", "params":{}}))] {
+                let reply = h.call(method, params);
+                let row = reply["result"].as_array().unwrap().iter().find(|row| row["id"] == "solid.fillet").unwrap();
+                assert_eq!(row["shortcut"], json!(effective(&h.app, "solid.fillet")), "{method}");
+            }
+        }
     }
 
     fn recorder_frame(a: &mut SolveApp, ctx: &egui::Context, time: f64, events: Vec<egui::Event>) {
@@ -703,7 +1323,7 @@ mod tests {
     #[test]
     fn recorder_waits_for_late_modifiers_instead_of_binding_the_first_key_down() {
         let mut a = app();
-        let ctx = egui::Context::default();
+        let ctx = crate::fonts::test_context();
         a.keymap.capturing = Some("solid.chamfer".into());
         recorder_frame(
             &mut a,
@@ -739,9 +1359,9 @@ mod tests {
     #[test]
     fn recorder_previews_each_modifier_and_explains_the_next_step() {
         let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.keymap.filter = "solid.chamfer".into();
         h.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
-        h.step(&json!({"click":{"handle":"shortcut:filter"}})).unwrap();
-        h.call("ui.text", json!({"text":"solid.chamfer"}));
         h.step(&json!({"click":{"handle":"shortcut:solid.chamfer"}})).unwrap();
         h.call("ui.key", json!({"key":"ShiftLeft","pressed":true,"shift":true}));
         assert!(h.widget("Shift+…").is_some(), "show Shift immediately, before any ordinary key");
@@ -752,7 +1372,7 @@ mod tests {
         h.call("ui.key", json!({"key":"SuperLeft","pressed":false,"shift":true}));
         assert!(h.widget("Shift+…").is_some(), "remove released modifiers before an ordinary key");
         h.call("ui.key", json!({"key":"ShiftLeft","pressed":false}));
-        assert!(h.widget("press a key…").is_some());
+        assert!(h.widget(h.app.tr("prefs.shortcuts_press")).is_some(), "the empty recorder explains the next step");
         assert_eq!(effective(&h.app, "solid.chamfer"), None);
         h.call("ui.key", json!({"key":"ShiftRight","pressed":true,"shift":true}));
         h.call("ui.key", json!({"key":"C","pressed":true,"shift":true}));
@@ -781,7 +1401,7 @@ mod tests {
             (Key::SuperLeft, egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND, "Ctrl+C"),
             (Key::SuperRight, egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND, "Ctrl+C"),
         ] {
-            let ctx = egui::Context::default();
+            let ctx = crate::fonts::test_context();
             let mut recorder = Recorder::default();
             for (time, events, complete) in [
                 (0.0, vec![egui::Event::ModifiersChanged(mods), event(key, true, mods)], false),
@@ -811,7 +1431,7 @@ mod tests {
     #[test]
     fn recorder_accumulates_late_modifiers_and_settles_for_one_second() {
         let mut a = app();
-        let ctx = egui::Context::default();
+        let ctx = crate::fonts::test_context();
         a.keymap.capturing = Some("sketch.mirror".into());
         recorder_frame(&mut a, &ctx, 0.0, vec![event(egui::Key::M, true, egui::Modifiers::NONE)]);
         recorder_frame(&mut a, &ctx, 0.4, vec![egui::Event::ModifiersChanged(egui::Modifiers::SHIFT)]);
@@ -832,7 +1452,7 @@ mod tests {
     #[test]
     fn recorder_waits_indefinitely_for_modifier_only_input_and_for_release() {
         let mut a = app();
-        let ctx = egui::Context::default();
+        let ctx = crate::fonts::test_context();
         a.keymap.capturing = Some("sketch.mirror".into());
         let mods = egui::Modifiers { shift: true, ctrl: true, alt: true, mac_cmd: true, command: true };
         recorder_frame(&mut a, &ctx, 0.0, vec![egui::Event::ModifiersChanged(mods)]);
@@ -856,7 +1476,7 @@ mod tests {
     fn recorder_rejects_two_ordinary_keys_and_escape_preserves_the_old_binding() {
         for second in [egui::Key::N, egui::Key::Escape] {
             let mut a = app();
-            let ctx = egui::Context::default();
+            let ctx = crate::fonts::test_context();
             a.keymap.capturing = Some("solid.extrude".into());
             recorder_frame(&mut a, &ctx, 0.0, vec![event(egui::Key::M, true, egui::Modifiers::SHIFT)]);
             recorder_frame(&mut a, &ctx, 0.5, vec![event(second, true, egui::Modifiers::SHIFT)]);
@@ -869,12 +1489,12 @@ mod tests {
     #[test]
     fn recorder_conflicts_only_after_settling_and_plain_keys_still_work() {
         let mut a = app();
-        let ctx = egui::Context::default();
+        let ctx = crate::fonts::test_context();
         a.keymap.capturing = Some("solid.chamfer".into());
         recorder_frame(&mut a, &ctx, 0.0, vec![event(egui::Key::M, true, egui::Modifiers::NONE), event(egui::Key::M, false, egui::Modifiers::NONE)]);
         assert!(a.keymap.conflict.is_none());
         recorder_frame(&mut a, &ctx, 1.1, vec![]);
-        assert_eq!(a.keymap.conflict.as_ref().map(|(_, key, _)| key.as_str()), Some("M"));
+        assert_eq!(a.keymap.conflict.as_ref().map(|(_, key, _, _)| key.as_str()), Some("M"));
         assert_eq!(effective(&a, "solid.move").as_deref(), Some("M"));
         assert_eq!(effective(&a, "solid.chamfer"), None);
         stop_capture(&mut a);
@@ -887,7 +1507,7 @@ mod tests {
     #[test]
     fn recorder_cancels_on_focus_loss_and_dialog_close() {
         let mut a = app();
-        let ctx = egui::Context::default();
+        let ctx = crate::fonts::test_context();
         a.keymap.capturing = Some("solid.extrude".into());
         recorder_frame(&mut a, &ctx, 0.0, vec![event(egui::Key::K, true, egui::Modifiers::SHIFT)]);
         let raw = egui::RawInput { time: Some(0.5), focused: false, events: vec![egui::Event::WindowFocused(false)], ..Default::default() };
@@ -897,6 +1517,58 @@ mod tests {
         assert_eq!(effective(&a, "solid.extrude").as_deref(), Some("E"));
         stop_capture(&mut a);
         assert!(a.keymap.recorder.key.is_none());
+    }
+
+    #[test]
+    fn recording_a_shortcut_does_not_type_into_preferences_search() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SHORTCUTS);
+        h.app.keymap.capturing = Some("solid.extrude".into());
+        h.frames(1);
+        h.step(&json!({"text": "z"})).expect("key while recording");
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "a shortcut being recorded keeps the key");
+    }
+
+    /// A shortcut recorded from a Preferences search result takes the key, as on the Shortcuts
+    /// page (#10043): the search keeps its query, and the key runs no command behind
+    /// Preferences (P is Project's, which would open Create Sketch). P being Project's is
+    /// reported there with the choice to use it anyway, as on the page. Going back to the search
+    /// field to type stops a recording.
+    #[test]
+    fn a_shortcut_recorded_from_a_preferences_search_takes_the_key() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open": "General"}));
+        h.frames(3);
+        h.step(&json!({"text": "fix"})).expect("search");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "prefs:search:shortcuts"}})).expect("unfold the shortcut matches");
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "shortcut:sketch.constraint.fix"}})).expect("record Fix/Unfix's key");
+        assert!(capturing(&h.app), "recording from a search result");
+        h.step(&json!({"key": "P", "pressed": true})).unwrap();
+        h.step(&json!({"text": "p"})).unwrap();
+        h.step(&json!({"key": "P", "pressed": false})).unwrap();
+        h.frames(65);
+        assert_eq!(h.app.prefs_window.shell.filter, "fix", "the key went to the search");
+        assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_none(), "the key ran a command");
+        assert!(h.app.keymap.capturing.is_none());
+        let conflict = h.app.keymap.conflict.as_ref().map(|(id, key, ..)| (id.as_str(), key.as_str()));
+        assert_eq!(conflict, Some(("sketch.constraint.fix", "P")), "{:?}", h.app.keymap.message);
+        // The search shows why, and the choice, above the shortcuts it found.
+        let message = h.app.keymap.message.clone().unwrap_or_default();
+        assert!(h.widget(&message).is_some() && h.widget("Use P here anyway").is_some(), "{message}");
+        h.step(&json!({"click": {"handle": "keymap:replace"}})).expect("use P anyway");
+        assert_eq!(effective(&h.app, "sketch.constraint.fix").as_deref(), Some("P"));
+
+        h.step(&json!({"click": {"handle": "shortcut:sketch.constraint.fix:1"}})).expect("record a second key");
+        assert!(capturing(&h.app));
+        h.step(&json!({"click": {"handle": "prefs:search"}})).expect("back to the search");
+        h.step(&json!({"text": "x"})).unwrap();
+        h.frames(2);
+        assert!(h.app.keymap.capturing.is_none(), "typing in the search stops the recording");
+        assert_eq!(h.app.prefs_window.shell.filter, "fixx");
     }
 
     #[test]
@@ -910,7 +1582,7 @@ mod tests {
         assert!(h.app.session.active_sketch.is_none(), "C must not start a sketch while recording");
         h.call("ui.key", json!({"key": "Escape"}));
         h.frames(3);
-        assert!(h.app.prefs_window.open, "Escape should cancel the recorder, not close Preferences");
+        assert!(h.app.prefs_window.shell.open, "Escape should cancel the recorder, not close Preferences");
         assert!(h.app.keymap.capturing.is_none());
         assert_eq!(effective(&h.app, "solid.chamfer"), None);
     }
@@ -918,7 +1590,7 @@ mod tests {
     #[test]
     fn a_background_control_channel_recording_waits_for_an_actual_focus_loss() {
         let mut a = app();
-        let ctx = egui::Context::default();
+        let ctx = crate::fonts::test_context();
         a.keymap.capturing = Some("sketch.mirror".into());
         let raw =
             egui::RawInput { time: Some(0.0), focused: false, events: vec![event(egui::Key::M, true, egui::Modifiers::SHIFT)], ..Default::default() };
@@ -932,23 +1604,23 @@ mod tests {
     fn enter_and_space_are_recorded_without_reactivating_the_focused_button() {
         for key in ["Enter", "Space"] {
             let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.keymap.filter = "sketch.mirror".into();
             h.call("ui.prefs", json!({"open": "Keyboard Shortcuts"}));
-            h.step(&json!({"click":{"handle":"shortcut:filter"}})).unwrap();
-            h.call("ui.text", json!({"text":"sketch.mirror"}));
             h.step(&json!({"click":{"handle":"shortcut:sketch.mirror"}})).unwrap();
             h.call("ui.key", json!({"key":key}));
             assert!(h.app.keymap.capturing.is_some(), "{key} should still be pending");
             h.frames(65);
             assert_eq!(effective(&h.app, "sketch.mirror").as_deref(), Some(key));
-            assert!(h.app.prefs_window.open);
+            assert!(h.app.prefs_window.shell.open);
         }
     }
 
     #[test]
     fn chord_display_and_legacy_primary_modifier_bindings_are_compatible() {
-        assert_eq!(display_for_platform("Ctrl+Alt+Shift+M", true), "Cmd+Option+Shift+M");
-        assert_eq!(display_for_platform("Ctrl+Cmd+Alt+Shift+M", true), "Ctrl+Cmd+Option+Shift+M");
-        assert_eq!(display_for_platform("Ctrl+Alt+Shift+M", false), "Ctrl+Alt+Shift+M");
+        assert_eq!(crate::ui_kit::chord_label_for_platform("Ctrl+Alt+Shift+M", true), "Cmd+Option+Shift+M");
+        assert_eq!(crate::ui_kit::chord_label_for_platform("Ctrl+Cmd+Alt+Shift+M", true), "Ctrl+Cmd+Option+Shift+M");
+        assert_eq!(crate::ui_kit::chord_label_for_platform("Ctrl+Alt+Shift+M", false), "Ctrl+Alt+Shift+M");
         let mut a = app();
         a.keymap.load(&json!({"solid.chamfer":"Shift+C", "solid.extrude":"Ctrl+Alt+E"}));
         assert_eq!(effective(&a, "solid.chamfer").as_deref(), Some("Shift+C"));
@@ -969,6 +1641,14 @@ mod tests {
         h.call("ui.resize", json!({"width": 1200, "height": 600}));
         h.call("ui.prefs", json!({"open": "Keyboard Shortcuts"}));
         h.frames(3);
+        let filter = crate::scenario::rect_of("keymap:filter").unwrap();
+        let mut previous = filter;
+        for handle in ["keymap:done", "keymap:export", "keymap:import"] {
+            let action = crate::scenario::rect_of(handle).unwrap();
+            assert!((action.center().y - filter.center().y).abs() <= 1.0, "{handle}: shares the search row");
+            assert!(action.left() >= previous.right(), "{handle}: no overlap");
+            previous = action;
+        }
         let commands = command_specs();
         let first = commands.first().unwrap().id;
         let last = commands.last().unwrap().id;
@@ -1004,6 +1684,67 @@ mod tests {
         reset(&mut b, None);
         assert_eq!(effective(&b, "solid.move").as_deref(), Some("M"));
         assert_eq!(key_name(egui::Key::K, egui::Modifiers { ctrl: true, shift: true, ..Default::default() }), "Ctrl+Shift+K");
+    }
+
+    /// A command can run from several keys: the first is the one menus show, a key another
+    /// command takes over leaves its other keys, and one key is saved as before.
+    #[test]
+    fn a_command_runs_from_several_keys() {
+        let mut a = app();
+        bind_at(&mut a, "solid.extrude", Some(1), "Shift+J", false).unwrap();
+        assert_eq!(keys(&a, "solid.extrude"), ["E", "Shift+J"]);
+        assert_eq!(effective(&a, "solid.extrude").as_deref(), Some("E"), "the first key is shown");
+        assert_eq!(commands_for(&a, "E"), vec!["solid.extrude"]);
+        assert_eq!(commands_for(&a, "Shift+J"), vec!["solid.extrude"]);
+        bind_at(&mut a, "solid.extrude", Some(5), "Shift+J", false).unwrap();
+        assert_eq!(keys(&a, "solid.extrude"), ["E", "Shift+J"], "a key is kept once");
+        assert!(bind_at(&mut a, "solid.extrude", Some(2), "M", false).is_err(), "Move/Copy's key");
+        // Taking a key over leaves the other command its other keys.
+        bind_at(&mut a, "solid.revolve", None, "Shift+J", true).unwrap();
+        assert_eq!(keys(&a, "solid.extrude"), ["E"]);
+        assert!(!a.keymap.custom.contains_key("solid.extrude"), "back to its default");
+        // Saved as a list, and one key as a string.
+        bind_at(&mut a, "solid.extrude", Some(1), "Shift+K", false).unwrap();
+        let saved = a.keymap.prefs();
+        assert_eq!(saved["solid.extrude"], json!(["E", "Shift+K"]));
+        assert_eq!(saved["solid.revolve"], json!("Shift+J"));
+        let mut b = app();
+        b.keymap.load(&saved);
+        assert_eq!(keys(&b, "solid.extrude"), ["E", "Shift+K"]);
+        // A legacy modifier name in a list is renamed, as in a single key (#4582).
+        let mut c = app();
+        c.keymap.load(&json!({"solid.extrude": ["E", "Ctrl+ShiftLeft"]}));
+        assert_eq!(keys(&c, "solid.extrude"), ["E", "Ctrl+Shift"]);
+        // `""` at a slot removes that key; without one it clears them all.
+        bind_at(&mut b, "solid.extrude", Some(0), "", false).unwrap();
+        assert_eq!(keys(&b, "solid.extrude"), ["Shift+K"]);
+        bind(&mut b, "solid.extrude", "", false).unwrap();
+        assert!(keys(&b, "solid.extrude").is_empty());
+        assert_eq!(b.keymap.prefs()["solid.extrude"], json!(""));
+        // A hostile settings file can't give one command endless keys.
+        let many: Vec<String> = (1..50).map(|n| format!("Ctrl+Alt+F{n}")).collect();
+        b.keymap.load(&json!({"solid.extrude": many}));
+        assert_eq!(keys(&b, "solid.extrude").len(), MAX_KEYS);
+        assert!(bind_at(&mut b, "solid.extrude", Some(MAX_KEYS), "Shift+L", false).is_err());
+    }
+
+    /// On the page: the + after a command's key records one more, and both keys run it.
+    #[test]
+    fn the_shortcuts_page_adds_a_second_key() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.keymap.filter = "solid.extrude".into();
+        h.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"shortcut:solid.extrude:1"}})).unwrap();
+        assert_eq!(h.app.keymap.capturing.as_deref(), Some("solid.extrude"));
+        h.call("ui.key", json!({"key":"J","pressed":true,"shift":true}));
+        h.call("ui.key", json!({"key":"J","pressed":false}));
+        h.frames(65);
+        assert_eq!(keys(&h.app, "solid.extrude"), ["E", "Shift+J"]);
+        assert!(h.widget("E").is_some() && h.widget("Shift+J").is_some(), "both keys are listed");
+        let got = h.call("ui.shortcut", json!({"command":"solid.extrude"}));
+        assert_eq!(got["result"]["keys"], json!(["E", "Shift+J"]), "{got}");
     }
 
     /// #4163: one key for a model command and a sketch tool. Binding it to both is allowed (a
@@ -1070,8 +1811,7 @@ mod tests {
     }
 
     /// #3045: Shift+R starts the last tool again (here a sketch's Line after Escape put it
-    /// down), R alone is still the rectangle; the menus show the key on Repeat, and no command
-    /// can take it.
+    /// down), R alone is still the rectangle; the menus show the key on Repeat.
     #[test]
     fn shift_r_repeats_the_last_tool() {
         let mut h = crate::scenario::Harness::new();
@@ -1091,9 +1831,165 @@ mod tests {
         let rectangle = h.app.tool.as_ref().map(|t| t.cmd.to_string()).unwrap_or_default();
         assert!(rectangle.starts_with("sketch.rectangle"), "R alone: {rectangle}");
         let repeat = crate::context_menu::radial_items(&h.app).into_iter().find(|i| i.id == "ui.repeat").unwrap();
-        assert_eq!(repeat.shortcut, REPEAT_KEY);
-        let mut a = app();
-        assert!(bind(&mut a, "solid.extrude", REPEAT_KEY, true).is_err(), "Shift+R is the app's");
+        assert_eq!(repeat.shortcut, crate::ui_kit::chord_label("Shift+R"));
+    }
+
+    /// #7077: Repeat Last Command is the command `edit.repeat`: Keyboard Shortcuts lists it and
+    /// can give it another key (the old one then does nothing, and the menus show the new one),
+    /// another command takes its key only on request, and command search finds and starts it.
+    /// Typing Shift+R into a field is text, not Repeat.
+    #[test]
+    fn repeat_last_command_is_a_command_with_a_key_that_can_change() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert_eq!(effective(&h.app, "edit.repeat").as_deref(), Some("Shift+R"));
+        assert_eq!(commands_for(&h.app, "Shift+R"), ["edit.repeat"], "no other default uses Shift+R");
+        assert!(bind(&mut h.app, "solid.extrude", "Shift+R", false).unwrap_err().contains("Repeat Last Command"));
+        // Nothing was started yet: Repeat says so and starts nothing.
+        h.step(&json!({"key": "R", "shift": true})).unwrap();
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+        assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some(h.app.tr("ui.repeat_nothing")));
+        h.step(&json!({"start": "solid.box"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_some(), "Box opens its dialog");
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(1);
+        assert!(h.app.dialog.is_none());
+        // Another key for Repeat: Shift+R is free again, Alt+Shift+R starts Box's dialog again.
+        bind(&mut h.app, "edit.repeat", "Alt+Shift+R", false).unwrap();
+        h.step(&json!({"key": "R", "shift": true})).unwrap();
+        h.frames(1);
+        assert!(h.app.dialog.is_none(), "the old key no longer repeats");
+        h.step(&json!({"key": "R", "shift": true, "alt": true})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "the new key repeats");
+        let repeat = crate::context_menu::radial_items(&h.app).into_iter().find(|i| i.id == "ui.repeat").unwrap();
+        assert_eq!(repeat.shortcut, crate::ui_kit::chord_label("Alt+Shift+R"));
+        crate::dialogs::cancel(&mut h.app);
+        reset(&mut h.app, Some("edit.repeat"));
+        // Command search lists it, and choosing it starts the last command again.
+        assert_eq!(crate::shortcut_box::search(&h.app, "repeat last").first().map(|r| r.0), Some("edit.repeat"));
+        h.call("ui.palette", json!({"text": "repeat last"}));
+        h.frames(3);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.ui.palette_open);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "chosen in command search");
+        assert_eq!(h.app.last_command.as_ref().map(|c| c.0.as_str()), Some("solid.box"), "Repeat is never what is repeated");
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(1);
+        // While command search's field takes the keyboard, Shift+R is a letter typed there.
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        h.step(&json!({"key": "R", "shift": true})).unwrap();
+        h.frames(1);
+        assert!(h.app.ui.palette_open && h.app.dialog.is_none(), "typing in a field never repeats");
+    }
+
+    /// Command search is an ordinary command (#12190): S opens it out of the box, Preferences ›
+    /// Shortcuts can move it, and S is then free for another command.
+    #[test]
+    fn command_search_can_move_off_s_and_s_can_start_another_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert_eq!(effective(&h.app, "ui.palette").as_deref(), Some("S"));
+        h.step(&json!({"key": "S"})).unwrap();
+        assert!(h.app.ui.palette_open, "S opens command search by default");
+        h.call("ui.palette", json!({"open": false}));
+        h.frames(2);
+        bind(&mut h.app, "ui.palette", "Shift+J", true).unwrap();
+        h.step(&json!({"key": "S"})).unwrap();
+        assert!(!h.app.ui.palette_open, "S no longer opens command search");
+        h.step(&json!({"key": "J", "shift": true})).unwrap();
+        assert!(h.app.ui.palette_open, "its new key does");
+        h.call("ui.palette", json!({"open": false}));
+        h.frames(2);
+        // The closed field shows the key command search has now, and no key once it has none.
+        let width = || crate::scenario::rect_of("ribbon:search").map(|r| r.width());
+        let shown = display_for(&h.app, "ui.palette");
+        assert_eq!(shown.as_deref(), Some("Shift+J"));
+        assert_eq!(width(), Some(crate::ui_kit::CommandSearch::closed_width(&h.ctx, shown.as_deref())));
+        assert!(width() > Some(crate::ui_kit::CommandSearch::closed_width(&h.ctx, Some("S"))), "not the old S");
+        bind(&mut h.app, "ui.palette", "", false).unwrap();
+        h.frames(2);
+        assert_eq!(width(), Some(crate::ui_kit::CommandSearch::closed_width(&h.ctx, None)));
+        bind(&mut h.app, "ui.palette", "Shift+J", true).unwrap();
+        h.frames(2);
+        bind(&mut h.app, "solid.box", "S", true).unwrap();
+        h.step(&json!({"key": "S"})).unwrap();
+        h.frames(1);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "S starts the command given it");
+        assert!(!h.app.ui.palette_open);
+    }
+
+    /// Show/Hide keeps V out of the box, can move to another key (#13241), and V can then start
+    /// another command. A menu's Show/Hide row names the key and answers it.
+    #[test]
+    fn show_hide_can_move_off_v_and_v_can_start_another_command() {
+        use crate::context_menu::{self, Target};
+        const ID: &str = "ui.toggle_visibility";
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        let body = h.app.session.model.state().bodies[0].name.clone();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.frames(2);
+        let hidden = |h: &crate::scenario::Harness| h.app.session.visibility.hidden_bodies.contains(&body);
+        assert_eq!(effective(&h.app, ID).as_deref(), Some("V"));
+        assert_eq!(context_menu::shortcut_shown(&h.app, "V"), "V");
+        h.step(&json!({"key": "V"})).unwrap();
+        assert!(hidden(&h), "V hides the selection by default");
+        h.step(&json!({"key": "V"})).unwrap();
+        assert!(!hidden(&h), "and shows it again");
+        for chord in ["Shift+V", "Alt+V", "Alt+Shift+V"] {
+            press(&mut h.app, chord, false);
+            assert!(hidden(&h), "{chord} still toggles while Show/Hide is on V");
+            press(&mut h.app, chord, false);
+            assert!(!hidden(&h), "{chord} toggles back");
+        }
+
+        bind(&mut h.app, ID, "Shift+J", true).unwrap();
+        press(&mut h.app, "Shift+V", false);
+        assert!(!hidden(&h), "the old chords leave with V");
+        h.step(&json!({"key": "V"})).unwrap();
+        assert!(!hidden(&h), "V no longer hides");
+        h.step(&json!({"key": "J", "shift": true})).unwrap();
+        assert!(hidden(&h), "its new key does");
+        h.step(&json!({"key": "J", "shift": true})).unwrap();
+        assert!(!hidden(&h));
+
+        // With a menu open the new key runs the menu's own Show/Hide, and the row names that key.
+        assert_eq!(context_menu::shortcut_shown(&h.app, "V"), "Shift+J");
+        let mut rows = [
+            crate::ui_kit::Item { shortcut: "V".into(), ..crate::ui_kit::Item::action("solid.extrude", "Extrude", "") },
+            crate::ui_kit::Item { shortcut: "V".into(), ..crate::ui_kit::Item::action("ui.hide", "Show/Hide", "") },
+        ];
+        context_menu::show_current_keys(&h.app, &mut rows);
+        assert_eq!(rows[0].shortcut, "V", "another command's V stays on its row");
+        assert_eq!(rows[1].shortcut, "Shift+J");
+        // A command above Show/Hide in the menu now has V: Show/Hide's key still runs Show/Hide.
+        bind(&mut h.app, "component.from_bodies", "V", true).unwrap();
+        context_menu::open_for(&mut h.app, egui::pos2(300.0, 200.0), Target::Body { name: body.clone() });
+        h.frames(2);
+        let report = context_menu::describe(&h.app);
+        let show_hide = report["items"].as_array().and_then(|rows| rows.iter().find(|row| row["label"] == "Show/Hide")).unwrap();
+        assert_eq!(show_hide["shortcut"], "Shift+J", "`ui.menu` reports the current key");
+        h.step(&json!({"key": "J", "shift": true})).unwrap();
+        h.frames(2);
+        assert!(hidden(&h), "the menu's Show/Hide ran");
+        assert!(h.app.viewport.context_menu.is_none(), "the menu closes as after a click");
+        bind(&mut h.app, "component.from_bodies", "", false).unwrap();
+        h.app.run("browser.visibility", json!({"items": [body], "visible": true})).unwrap();
+
+        bind(&mut h.app, ID, "", false).unwrap();
+        assert_eq!(context_menu::shortcut_shown(&h.app, "V"), "", "no key, none on the row");
+        bind(&mut h.app, "solid.box", "V", true).unwrap();
+        h.step(&json!({"key": "V"})).unwrap();
+        h.frames(1);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "V starts the command given it");
+        assert!(!hidden(&h));
     }
 }
 
@@ -1107,6 +2003,118 @@ mod card_tests {
     use crate::scenario::{self, Harness};
 
     #[test]
+    fn preferences_shortcuts_uses_the_page_heading_and_right_aligned_profile_tag() {
+        for theme in ["light", "dark"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1000}));
+            h.call("ui.prefs", json!({"open":"Shortcuts","theme":theme}));
+            h.frames(4);
+            assert!(!h.app.keymap.read_only, "fresh Preferences retains its editable default");
+            let heading = scenario::rect_of("prefs:page_heading").unwrap();
+            let body = scenario::rect_of("prefs:page_body").unwrap();
+            let tag = scenario::rect_of("prefs:in_profile").unwrap();
+            assert!(body.contains_rect(heading));
+            assert!((heading.right() - tag.right()).abs() <= 1.0, "the profile tag uses the production page's far-right alignment");
+            let mut page_font = false;
+            for shape in &h.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        page_font |= text.galley.job.text == "Shortcuts"
+                            && text
+                                .galley
+                                .job
+                                .sections
+                                .iter()
+                                .all(|section| section.format.font_id.size == solidcraft_theme::Tokens::get().font_page_heading);
+                    }
+                });
+            }
+            assert!(page_font, "the actual Preferences title uses the page-heading font");
+        }
+    }
+
+    #[test]
+    fn done_keeps_editing_and_all_bindings_and_cancel_restores_the_bundle() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        bind_at(&mut h.app, "solid.extrude", Some(1), "Shift+J", false).unwrap();
+        let original = crate::toolbar_custom::export(&h.app);
+        h.app.keymap.filter = "solid.extrude".into();
+        h.call("ui.prefs", json!({"open":"Shortcuts"}));
+        h.step(&json!({"click":{"handle":"keymap:capture:solid.extrude:1"}})).unwrap();
+        assert_eq!(h.app.keymap.capturing.as_deref(), Some("solid.extrude"));
+        h.step(&json!({"click":{"handle":"keymap:done"}})).unwrap();
+        assert!(h.app.keymap.capturing.is_none());
+        assert!(!h.app.keymap.read_only, "Done stops capture without changing the independent edit state");
+        assert_eq!(keys(&h.app, "solid.extrude"), ["E", "Shift+J"]);
+        h.step(&json!({"click":{"handle":"keymap:clear:solid.extrude"}})).unwrap();
+        assert!(keys(&h.app, "solid.extrude").is_empty());
+        assert!(h.app.keymap.custom.contains_key("solid.extrude"), "Clear stores a disabled override");
+        h.step(&json!({"click":{"handle":"keymap:reset:solid.extrude"}})).unwrap();
+        assert_eq!(keys(&h.app, "solid.extrude"), ["E"]);
+        assert!(!h.app.keymap.custom.contains_key("solid.extrude"), "Reset restores the registry default");
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert_eq!(crate::toolbar_custom::export(&h.app), original, "Cancel restores the complete customization bundle");
+    }
+
+    #[test]
+    fn shared_page_defaults_stops_recording_without_resetting_favorites_or_toolbar() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = false;
+        bind_at(&mut h.app, "solid.extrude", Some(0), "Shift+J", false).unwrap();
+        h.app.sbox.pinned = vec!["solid.box".into(), "solid.extrude".into()];
+        h.app.toolbar_custom.panels.insert("DESIGN/MODEL/CREATE".into(), vec!["solid.extrude".into(), "solid.box".into()]);
+        let favorites = h.app.sbox.pinned.clone();
+        let toolbar = h.app.toolbar_custom.prefs();
+        h.app.keymap.filter = "solid.extrude".into();
+        h.call("ui.prefs", json!({"open":"Shortcuts"}));
+        assert!(!h.app.keymap.custom.is_empty(), "the changed binding enables page defaults");
+        h.step(&json!({"click":{"handle":"keymap:capture:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.keymap.capturing.as_deref(), Some("solid.extrude"));
+        h.step(&json!({"key":"ShiftLeft","shift":true,"pressed":true})).unwrap();
+        assert!(h.app.keymap.recorder.modifiers.shift, "the active recorder holds modifier state");
+        h.step(&json!({"click":{"handle":"prefs:defaults"}})).unwrap();
+        assert!(h.app.prefs_window.shell.open && h.app.keymap.capturing.is_none());
+        assert!(h.app.keymap.recorder.key.is_none());
+        assert_eq!(h.app.keymap.recorder.modifiers, egui::Modifiers::NONE);
+        assert!(h.app.keymap.custom.is_empty());
+        assert_eq!(keys(&h.app, "solid.extrude"), ["E"]);
+        assert_eq!(h.app.sbox.pinned, favorites);
+        assert_eq!(h.app.toolbar_custom.prefs(), toolbar);
+        h.step(&json!({"key":"ShiftLeft","pressed":false})).unwrap();
+        h.step(&json!({"key":"K","pressed":true})).unwrap();
+        h.step(&json!({"key":"K","pressed":false})).unwrap();
+        h.frames(65);
+        assert!(h.app.keymap.capturing.is_none() && h.app.keymap.custom.is_empty(), "the next chord cannot recreate an override after defaults");
+        assert_eq!(keys(&h.app, "solid.extrude"), ["E"]);
+        assert_eq!(h.app.sbox.pinned, favorites);
+        assert_eq!(h.app.toolbar_custom.prefs(), toolbar);
+    }
+
+    #[test]
+    fn every_saved_binding_keeps_its_own_recorder_slot() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let bindings = ["E", "Shift+J", "Shift+K", "Shift+L", "Alt+J", "Alt+K", "Alt+L", "Ctrl+Alt+Shift+J"];
+        for (slot, key) in bindings.iter().enumerate() {
+            bind_at(&mut h.app, "solid.extrude", Some(slot), key, true).unwrap();
+        }
+        h.app.keymap.filter = "solid.extrude".into();
+        h.call("ui.prefs", json!({"open":"Shortcuts"}));
+        for slot in 1..MAX_KEYS {
+            let handle = format!("keymap:capture:solid.extrude:{slot}");
+            assert!(scenario::handle_at(&handle).is_some(), "binding {slot} remains reachable");
+        }
+        h.step(&json!({"click":{"handle":"keymap:capture:solid.extrude:7"}})).unwrap();
+        assert_eq!(h.app.keymap.slot, 7);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(h.app.prefs_window.shell.open && h.app.keymap.capturing.is_none());
+        assert_eq!(keys(&h.app, "solid.extrude"), bindings);
+    }
+
+    #[test]
     fn live_chord_column_fits_all_modifiers() {
         let mut h = Harness::new();
         h.app.home.open = false;
@@ -1115,7 +2123,7 @@ mod card_tests {
         h.step(&json!({"click":{"handle":"keymap:capture:sketch.mirror"}})).unwrap();
         h.step(&json!({"key":"M","pressed":true,"shift":true,"cmd":true,"ctrl":true,"alt":true})).unwrap();
         let preview = h.app.keymap.recorder.preview().unwrap();
-        let cell = scenario::rect_of("dialog:table:keymap:sketch.mirror:cell:Keyboard Shortcuts").unwrap();
+        let cell = scenario::rect_of("keymap:bindings:sketch.mirror").unwrap();
         let ctx = crate::fonts::test_context();
         let mut needed = 0.0;
         let mut out = ctx.run_ui(Default::default(), |ui| {
@@ -1143,9 +2151,41 @@ mod card_tests {
         }
         h.step(&json!({"click":{"handle":"keymap:capture:solid.extrude"}})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
-        assert!(h.app.prefs_window.open && h.app.keymap.capturing.is_none());
+        assert!(h.app.prefs_window.shell.open && h.app.keymap.capturing.is_none());
         h.step(&json!({"key":"Escape"})).unwrap();
-        assert!(!h.app.prefs_window.open);
+        assert!(!h.app.prefs_window.shell.open);
+    }
+
+    /// Export… writes the shortcuts file through `vfs`, like the other saves, so the web app hands
+    /// it out as a download (#7192). On the disk it is the same file; a folder scope active while
+    /// it is written refuses a path outside it, which shows the write goes through `vfs`.
+    #[test]
+    fn shortcut_export_writes_through_vfs() {
+        use solidcraft_engine::io::vfs;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
+        h.frames(2);
+        let (root, out) = (h.dir.join("root"), h.dir.join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for (path, inside) in [(root.join("keys.json"), true), (out.join("keys.json"), false)] {
+            let answer = path.to_string_lossy().to_string();
+            h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(answer.clone())))));
+            vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
+                h.step(&json!({"click":{"handle":"keymap:export"}})).unwrap();
+                h.frames(4);
+            });
+            let message = h.app.keymap.message.clone();
+            if inside {
+                assert_eq!(message, None);
+                let file: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                assert_eq!(file, crate::toolbar_custom::export(&h.app));
+            } else {
+                assert!(message.as_deref().is_some_and(|m| m.contains("outside the folders this agent may use")), "{message:?}");
+                assert!(!path.exists(), "nothing written outside");
+            }
+        }
     }
 
     #[test]
@@ -1155,10 +2195,79 @@ mod card_tests {
         h.app.keymap.filter = "solid.extrude".into();
         h.call("ui.help", json!({"item":"shortcuts"}));
         assert!(h.app.keymap.read_only);
+        assert!(scenario::rect_of("prefs:page_heading").is_none(), "Help retains its external read-only presentation");
         assert!(scenario::handle_at("keymap:filter").is_some());
         for action in ["capture", "clear", "reset"] {
             assert!(scenario::handle_at(&format!("keymap:{action}:solid.extrude")).is_none());
         }
         assert_eq!(effective(&h.app, "solid.extrude").as_deref(), Some("E"));
+    }
+
+    /// Import… reads the shortcuts file through `vfs`, like the other imports: in the web app a
+    /// picked file is kept there, where `std::fs` can't read it (#7643). On the disk it is the same
+    /// file; a folder scope active while it is read refuses a path outside it, which shows the
+    /// read goes through `vfs`.
+    #[test]
+    fn shortcut_import_reads_through_vfs() {
+        use solidcraft_engine::io::vfs;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        bind(&mut h.app, "solid.extrude", "Shift+E", true).unwrap();
+        let text = crate::toolbar_custom::export(&h.app).to_string();
+        reset(&mut h.app, None);
+        h.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
+        h.frames(2);
+        let (root, out) = (h.dir.join("root"), h.dir.join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for (path, inside) in [(out.join("keys.json"), false), (root.join("keys.json"), true)] {
+            std::fs::write(&path, &text).unwrap();
+            let answer = path.to_string_lossy().to_string();
+            h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(answer.clone())))));
+            vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
+                h.step(&json!({"click":{"handle":"keymap:import"}})).unwrap();
+                h.frames(4);
+            });
+            let message = h.app.keymap.message.clone();
+            if inside {
+                assert_eq!(message, None);
+                assert_eq!(effective(&h.app, "solid.extrude").as_deref(), Some("Shift+E"));
+            } else {
+                assert!(message.as_deref().is_some_and(|m| m.contains("outside the folders this agent may use")), "{message:?}");
+                assert_eq!(effective(&h.app, "solid.extrude").as_deref(), Some("E"), "nothing imported");
+            }
+        }
+    }
+
+    /// #7409: the read-only list (Home › Keyboard shortcuts, Help › Keyboard Shortcuts) looked
+    /// like the editable page with Import… missing. It says it is read-only, and Edit shortcuts
+    /// turns the same page into the editable one: Import, page defaults and recording are there.
+    #[test]
+    fn read_only_shortcuts_say_so_and_edit_shortcuts_unlocks_them() {
+        for open in ["home", "help"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.keymap.filter = "solid.extrude".into();
+            if open == "home" {
+                h.app.keymap.open = true;
+                h.app.keymap.read_only = true;
+            } else {
+                h.call("ui.help", json!({"item":"shortcuts"}));
+            }
+            h.frames(4);
+            assert!(h.app.keymap.read_only, "{open}");
+            assert!(scenario::rect_of("prefs:page_heading").is_none(), "{open}: external read-only style is retained");
+            assert!(h.widget("Read-only list: shortcuts can't be changed here.").is_some(), "{open}");
+            assert!(h.widget("Import…").is_none(), "{open}: no Import… while read-only");
+            assert!(scenario::handle_at("keymap:capture:solid.extrude").is_none());
+            h.step(&json!({"widget":"Edit shortcuts"})).unwrap();
+            h.frames(4);
+            assert!(!h.app.keymap.read_only, "{open}: editable after Edit shortcuts");
+            assert!(scenario::rect_of("prefs:page_heading").is_some(), "{open}: Edit shortcuts enters the Preferences composition");
+            assert!(h.widget("Read-only list: shortcuts can't be changed here.").is_none(), "{open}");
+            assert!(h.widget("Edit shortcuts").is_none(), "{open}");
+            assert!(scenario::handle_at("keymap:import").is_some() && h.widget("Restore page defaults").is_some(), "{open}");
+            assert!(scenario::handle_at("keymap:capture:solid.extrude").is_some(), "{open}: a binding can be recorded");
+        }
     }
 }
