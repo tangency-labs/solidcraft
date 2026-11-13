@@ -13,17 +13,24 @@
     clippy::float_arithmetic
 )]
 
+use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
+
 use solidcore_ops::extend::{extend_sheet, Continuation};
 use solidcore_ops::sweep::{loft, Curve};
 use solidcore_ops::{Body, Error, Order};
-use solidcore_record::brep::{Brep, Curve as RecordCurve, Surface};
+use solidcore_record::brep::{Brep, Surface};
 
 fn line(start: [f64; 3], end: [f64; 3]) -> Curve {
     Curve::Line { start, end }
 }
 
 /// sqrt 3, 5 and 10 (ops' tests compute no roots).
-const SQRT_3: f64 = 1.732_050_807_568_877_2;
+const SQRT_2: f64 = std::f64::consts::SQRT_2;
+/// `sqrt(50 + 50 sqrt 2)`: where x = 0 and x = 10 meet the circle about (5, 0) of radius
+/// `5 sqrt 2 + 5` (the arched sheet's arc moved out 5).
+const ARCH_TOP: f64 = 10.986_841_134_678_1;
+/// `5 sqrt 2 + 5`: that circle's radius, its top at (5, ARCH_RADIUS).
+const ARCH_RADIUS: f64 = 12.071_067_811_865_476;
 const SQRT_5: f64 = 2.236_067_977_499_79;
 const SQRT_10: f64 = 3.162_277_660_168_379_5;
 
@@ -51,18 +58,37 @@ fn trapezoid() -> (Body, Order) {
     )
 }
 
-/// The sheet between (0, 0)-(10, 0) and the half circle about (5, 5) of radius 5 from (0, 5)
-/// over (5, 10) to (10, 5): one arc edge, its sides x = 0 and x = 10 from y = 0 to 5.
+/// The sheet between (0, 0)-(10, 0) and the quarter circle about (5, 0) of radius 5 sqrt 2 from
+/// (0, 5) over (5, 5 sqrt 2) to (10, 5): one arc edge, its sides x = 0 and x = 10 from y = 0 to
+/// 5. (A quarter circle is one rational Bezier span. The half circle this sheet first had is two
+/// spans meeting at a double knot, and the skin made its wall two faces: CI's "a sheet of more
+/// than one face".)
 fn arched() -> (Body, Order) {
     skin(
         line([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]),
+        Curve::Arc {
+            center: [5.0, 0.0, 0.0],
+            axis: [0.0, 0.0, -1.0],
+            reference: [-FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0],
+            radius: 5.0 * SQRT_2,
+            start: 0.0,
+            end: FRAC_PI_2,
+        },
+    )
+}
+
+/// The sheet between (0, 0)-(5, 0) and the quarter circle about (5, 5) of radius 5 from (0, 5)
+/// up to (5, 10): the arc leaves (0, 5) along +y, the side x = 0's own line.
+fn quarter() -> (Body, Order) {
+    skin(
+        line([0.0, 0.0, 0.0], [5.0, 0.0, 0.0]),
         Curve::Arc {
             center: [5.0, 5.0, 0.0],
             axis: [0.0, 0.0, -1.0],
             reference: [-1.0, 0.0, 0.0],
             radius: 5.0,
             start: 0.0,
-            end: std::f64::consts::PI,
+            end: FRAC_PI_2,
         },
     )
 }
@@ -175,42 +201,34 @@ fn each_edge_of_a_trapezoid_extends_with_its_neighbours_carried_along() {
     );
 }
 
-/// The arc edge is offset 5 mm out (the circle of radius 10 about (5, 5)), the sides carried
-/// up along x = 0 and x = 10 to meet it at y = 5 + 5 sqrt 3; the bottom edge moves down with
-/// the sides carried along.
+/// The arc edge is offset 5 mm out (the circle about (5, 0) of radius 5 sqrt 2 + 5), the sides
+/// carried up along x = 0 and x = 10 to meet it at y = sqrt(50 + 50 sqrt 2); the bottom edge
+/// moves down with the sides carried along.
 #[test]
 fn a_curved_edge_is_offset_and_its_neighbours_meet_it() {
+    let apex = [5.0, 5.0 * SQRT_2, 0.0];
     grows(
         "the arched sheet",
         arched(),
         &[
-            (
-                [5.0, 10.0, 0.0],
-                [[0.0, 0.0, 0.0], [10.0, 5.0 + 5.0 * SQRT_3, 0.0]],
-            ),
+            (apex, [[0.0, 0.0, 0.0], [10.0, ARCH_TOP, 0.0]]),
             ([5.0, 0.0, 0.0], [[0.0, -5.0, 0.0], [10.0, 5.0, 0.0]]),
         ],
     );
-    // the moved arc is the circle of radius 10
+    // the moved arc is that circle: its top, (5, 5 sqrt 2 + 5), lies on an edge of the result
+    // (whatever kind the record gives its curve)
     let (body, order) = arched();
-    let edge = edge_through(&body, &order, [5.0, 10.0, 0.0]);
+    let edge = edge_through(&body, &order, apex);
     let out = extend_sheet(&body, &order, edge, 5.0, Continuation::Natural).unwrap();
-    let (r, _) = out.to_record().unwrap();
-    assert!(
-        r.edges.iter().any(|e| matches!(
-            e.curve,
-            RecordCurve::Circle { radius, .. } if (radius - 10.0).abs() < 1e-9
-        )),
-        "{:?}",
-        r.edges.iter().map(|e| &e.curve).collect::<Vec<_>>()
-    );
+    let (_, out_order) = out.to_record().unwrap();
+    edge_through(&out, &out_order, [5.0, ARCH_RADIUS, 0.0]);
 }
 
-/// A side of the arched sheet: the arc leaves its corner along the side's own line (x = 0), so
-/// carried along its end tangent it never meets the side moved out: refused, not guessed.
+/// The quarter sheet's side x = 0: the arc leaves its corner (0, 5) along that side's own line,
+/// so carried along its end tangent it never meets the side moved out: refused, not guessed.
 #[test]
 fn a_neighbour_along_the_picked_edge_s_line_is_refused() {
-    let (body, order) = arched();
+    let (body, order) = quarter();
     let edge = edge_through(&body, &order, [0.0, 2.5, 0.0]);
     assert!(matches!(
         extend_sheet(&body, &order, edge, 5.0, Continuation::Natural),
