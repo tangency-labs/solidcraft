@@ -186,15 +186,30 @@ fn variable_round_on_planes_removes_the_laws_volume() {
     assert!(off < 3e-4, "{off}");
 }
 
-/// Without the fix the rails stray between the traced points: the surface is 8.0e-4 off the
-/// balls' touch circles, against 2.0e-4 with it. (The union of the balls removes about the
-/// same volume either way, within 3e-5 of the envelope's: before the round was the union of
-/// its balls, the great circles' volume showed the stray rails too.)
+/// Without the span fix the rails stray between the traced points, but the round's skin no
+/// longer follows them: it is held to its balls between stations (#15256). So the default
+/// kernel's surface is within T = 4 x the edge tolerance (1e-5 mm) of the balls' touch
+/// circles (sampled here, at the law's sections). A skin within T of the envelope moves
+/// the removed volume by at most about T x the envelope's area (A = 110.7 mm^2 here,
+/// 4.43e-3 mm^3), to first order: a necessary condition, which the result before #15256
+/// failed (6.1e-4 off the circles, 6.2e-3 mm^3 off the volume). The volume and the area are
+/// the balls' closed-form quadratures ([`envelope_removed`], [`envelope_area`]). This test
+/// asserted that defect (`off > 5e-4`).
 #[test]
-fn variable_round_on_planes_strays_off_its_balls_without_the_fix() {
+fn variable_round_on_planes_holds_its_balls_without_the_span_fix() {
+    let reference = envelope_removed(&law_6611, 20.0, 6.0, 24);
+    let bound = 4e-5 * envelope_area(&law_6611, 20.0, 24);
     let (v, off) = rounded_cube(false);
-    eprintln!("upstream: {v} off {off}");
-    assert!(off > 5e-4, "{off}");
+    let removed = 8000.0 - v;
+    eprintln!(
+        "default: removed {removed} reference {reference} diff {} bound {bound} off {off}",
+        removed - reference
+    );
+    assert!(
+        (removed - reference).abs() <= bound,
+        "{removed} vs {reference}"
+    );
+    assert!(off < 4e-5, "{off}");
 }
 
 // ---- Closed-form ball references for #15256 ----------------------------------------
