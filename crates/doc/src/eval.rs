@@ -5020,7 +5020,7 @@ pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) 
     let mut far: f64 = 0.0;
     let mut any = false;
     for b in st.bodies.iter().filter(|b| targets.is_empty() || targets.contains(&b.name)) {
-        let bb = b.mesh().bounds();
+        let bb = b.body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
         if bb.is_empty() {
             continue;
         }
@@ -5051,9 +5051,14 @@ fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> 
         .iter()
         .enumerate()
         .map(|(i, b)| {
-            let bb = b.mesh().bounds();
-            let q = Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
-            (i, q.dist(*p))
+            let dist = match b.body.exact_bounds() {
+                Ok(bb) if !bb.is_empty() => {
+                    let q = Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
+                    q.dist(*p)
+                }
+                _ => f64::INFINITY,
+            };
+            (i, dist)
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(i, _)| i)
@@ -6297,8 +6302,8 @@ fn hole_tools(
 /// largest body of the model, as before.
 fn hole_axis_size(st: &ModelState, position: &Vec3, dir: Vec3) -> f64 {
     let along = |b: &ModelBody| {
-        // The axis (an unbounded line) against the body's box, grown by the display tolerance.
-        let bb = b.mesh().bounds();
+        // The axis (an unbounded line) against the body's exact box, grown by the display tolerance.
+        let bb = b.body.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
         if bb.is_empty() {
             return false;
         }
@@ -9297,7 +9302,7 @@ fn chamfer_with(
         (None, None) => None,
     };
     Ok(match side {
-        Some(s) => kernel::chamfer_sides(b, edges, d, s, flip)?,
+        Some(s) => kernel::chamfer_sides_carrying_face(b, edges, d, s, flip)?,
         None => match kernel::chamfer_carrying_face(b, edges, d) {
             Err(kernel::KernelError::TooLarge(why)) => {
                 let hint = kernel::named_fit(&why);
@@ -10181,7 +10186,7 @@ fn eval_feature(
             st.bodies.push(ModelBody::traced_new(name, b, f.id));
             Ok(())
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, angle, copy } => {
+        FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy } => {
             let t =
                 Vec3::new(val(vals, &translate[0], Kind::Length)?, val(vals, &translate[1], Kind::Length)?, val(vals, &translate[2], Kind::Length)?);
             let ang = match angle {
@@ -10189,17 +10194,18 @@ fn eval_feature(
                 None => 0.0,
             };
             let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
+            let origin = origin.as_ref().map(|p| point(vals, p)).transpose()?.unwrap_or(Vec3::ZERO);
             // With `copy` set, the source body is kept in place and the transform lands on a new
             // body pushed beside it instead of replacing it.
             let mut output = 0;
             for n in bodies {
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 let Some(mb) = st.bodies.get(i).cloned() else { continue };
-                let nb = kernel::transform(&mb.body, t, Vec3::ZERO, axis, ang)?;
+                let nb = kernel::transform(&mb.body, t, origin, axis, ang)?;
                 if *copy {
                     let traced = moved_copy(&mb, nb, 1);
                     let name = copy_body_name(st, f, output, &mb.name);
-                    copy_sheet(st, &mb.name, &name, &crate::rigid(t, Vec3::ZERO, axis, ang));
+                    copy_sheet(st, &mb.name, &name, &crate::rigid(t, origin, axis, ang));
                     st.bodies.push(ModelBody::traced_new(name, traced, f.id));
                     output += 1;
                 } else if let Some(slot) = st.bodies.get_mut(i) {
@@ -10207,7 +10213,7 @@ fn eval_feature(
                 }
             }
             if !*copy {
-                move_constructions_with(doc, st, bodies, &crate::rigid(t, Vec3::ZERO, axis, ang));
+                move_constructions_with(doc, st, bodies, &crate::rigid(t, origin, axis, ang));
             }
             Ok(())
         }
@@ -11661,5 +11667,12 @@ mod named_face_lookup_tests {
         assert_eq!(on_copy.note(&name), None);
         assert!(crate::naming::locate_face(&st, &name, Vec3::new(15.0, 5.0, 30.0)).is_none());
         assert_eq!(crate::name_lookup::locate_face_on_body(&st, Some("Part1"), &name, Vec3::new(15.0, 5.0, 30.0)).map(|hit| hit.body), Some(1));
+    }
+
+    #[test]
+    fn body_at_picks_nearest_body_using_exact_bounds() {
+        let st = parts(3);
+        let hit = body_at(&st, &None, &[Vec3::new(22.0, 5.0, 5.0)]).unwrap();
+        assert_eq!(st.bodies[hit].name, "Part1");
     }
 }

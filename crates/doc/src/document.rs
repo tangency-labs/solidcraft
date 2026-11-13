@@ -1286,6 +1286,11 @@ pub enum FeatureKind {
         /// The profile point that sits on the line.
         #[serde(default, skip_serializing_if = "crate::frame::Anchor::is_origin")]
         anchor: crate::frame::Anchor,
+        /// The profile point that sits on each line, [x, y] from the profile's own origin
+        /// (`frame::Profile::origin`). Some: takes precedence over `anchor`; it stays on the line
+        /// when the profile's size changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        locate: Option<[f64; 2]>,
         /// How far the profile turns about the line (see `frame::member_axes`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Rotation")]
@@ -2054,6 +2059,10 @@ pub enum FeatureKind {
         translate: [Expr; 3],
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rotate_axis: Option<Dir>,
+        /// Rotation pivot in the body's authoring frame. Older moves turn about the origin.
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+        #[walk(placement)]
+        origin: Option<PointExpr>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Angle")]
         angle: Option<Expr>,
@@ -3435,6 +3444,10 @@ pub struct Document {
     /// it saves.
     #[serde(default, skip_serializing_if = "Visibility::is_empty")]
     pub visibility: Visibility,
+    /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
+    /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
+    pub plugin_data: std::collections::BTreeMap<String, String>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
@@ -3730,6 +3743,7 @@ impl Document {
             named_views: Vec::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
+            plugin_data: Default::default(),
         }
     }
 

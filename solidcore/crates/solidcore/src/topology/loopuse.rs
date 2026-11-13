@@ -87,13 +87,11 @@
 //! - **Prepared queries.** The shared UV-corner walk can also borrow prepared topology
 //!   without mutation. It reports [`SolidError::Unported`] only if a trim curve needs
 //!   creating at the point where the mutable walk would create it.
-//! - **UV-corner failures (WR-262, #521).** By default `GetUVCornerBoundaries` ignores
-//!   failed endpoint evaluations and point drops, as upstream (an edge use can reuse
-//!   the preceding one's endpoints). With the opt-in
-//!   `Kernel::fixes.topology_failed_evaluations_propagate` it does as the fork
+//! - **UV-corner failures (WR-262, #521).** `GetUVCornerBoundaries` does as the fork
 //!   (tangency-labs/smlib 7a35f33): a trim curve that cannot be made is none (the 3D
 //!   ends are dropped), an edge use whose ends cannot be evaluated adds no boundary,
-//!   and failed drops stay ignored.
+//!   and failed drops stay ignored. Upstream ignores the failed endpoint evaluations
+//!   as well, so there an edge use can reuse the preceding one's endpoints.
 //! - The `std::unordered_set` overloads of `GetEdges` / `GetVertices`,
 //!   `GetEdgeusesAndVertexuses`, `CalculateBoundingBox`, `GetTurningAngDeg`,
 //!   `SmLoop::GetMaxSameDimGap3d`, `IsLamina`, `IsManifold`,
@@ -1303,18 +1301,16 @@ pub struct UvCorners {
     pub on_params: Vec<f64>,
 }
 
-/// `pEdgeuse->GetOrCreateUVTrimCurve(pUVTrimCurve)`: the curve after the call (its status
-/// is ignored upstream; `None` when it could not be made). With the opt-in
-/// [`crate::kernel::UpstreamFixes::topology_failed_evaluations_propagate`] a failing
-/// status is no curve, as the fork has it (tangency-labs/smlib 7a35f33: the pointer kept
-/// the previous edge use's curve), so the walk drops the 3D ends instead.
+/// `pEdgeuse->GetOrCreateUVTrimCurve(pUVTrimCurve)`: the curve after the call, `None`
+/// when it could not be made. A failing status is no curve, as the fork has it
+/// (tangency-labs/smlib 7a35f33), so the walk drops the 3D ends instead; upstream
+/// ignores the status and its pointer keeps the previous edge use's curve.
 fn get_or_create_uv_trim_curve(
     k: &Kernel,
     b: &mut QueryTopology<'_>,
     eu: EdgeuseId,
 ) -> Result<Option<Curve>> {
-    let made = b.ensure_trim_curve(k, eu)?;
-    if k.fixes.topology_failed_evaluations_propagate && !made {
+    if !b.ensure_trim_curve(k, eu)? {
         return Ok(None);
     }
     Ok(crate::topology::edgeuse::p1::uv_trim_curve(b, eu)?
@@ -1330,9 +1326,7 @@ fn get_or_create_uv_trim_curve(
 /// With no guess and no solution array, `DropPoint` writes `rResultUV` only when it
 /// ends with `rbSuccess` set (its failed `GlobalPointSolve` returns before any write).
 ///
-/// The fork keeps these drops' statuses ignored (`SE`, tangency-labs/smlib 7a35f33), so
-/// [`crate::kernel::UpstreamFixes::topology_failed_evaluations_propagate`] does not change
-/// them.
+/// The fork keeps these drops' statuses ignored too (`SE`, tangency-labs/smlib 7a35f33).
 fn drop_point(k: &Kernel, s: &Surface, dom: &Extent2d, p: Point3) -> Result<Option<Point2>> {
     let opts = crate::surface::surface::p5::DropPointOptions::default();
     let r = s.drop_point::<crate::surface::surface::p4::NoObject>(k, p, dom, &opts);
@@ -1346,25 +1340,6 @@ fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
-    }
-}
-
-/// An end point of the corner walk.
-enum CornerEnd<T> {
-    /// Evaluated, or `None` where upstream ignores the failure and carries the previous
-    /// value on.
-    Value(Option<T>),
-    /// With the opt-in
-    /// [`crate::kernel::UpstreamFixes::topology_failed_evaluations_propagate`], the edge
-    /// use adds no boundary (the fork's `continue`, tangency-labs/smlib 7a35f33).
-    Skip,
-}
-
-/// The [`CornerEnd`] of an evaluation.
-fn evaluated<T>(k: &Kernel, r: Result<T>) -> Result<CornerEnd<T>> {
-    match ignored(r)? {
-        None if k.fixes.topology_failed_evaluations_propagate => Ok(CornerEnd::Skip),
-        v => Ok(CornerEnd::Value(v)),
     }
 }
 
@@ -1406,12 +1381,9 @@ pub(crate) fn uv_corner_boundaries_with_topology(
         return Ok(out);
     };
 
-    // locals (carried from one edge use to the next where upstream ignores a failed
-    // evaluation; with the opt-in fix that edge use adds no boundary instead)
+    // locals (carried from one edge use to the next where a point drop fails)
     let mut uv_pnt_beg = Point2::UNDEF;
     let mut uv_pnt_end = Point2::UNDEF;
-    let mut uv_beg = Vec3::UNDEF;
-    let mut uv_end = Vec3::UNDEF;
 
     // for every edgeuse - classify the end points
     for eu in edgeuses(b, lu, None, None)? {
@@ -1422,20 +1394,14 @@ pub(crate) fn uv_corner_boundaries_with_topology(
         if let Some(trim) = trim {
             // end points
             ivl = trim.natural_interval();
-            let CornerEnd::Value(beg) = evaluated(k, trim.evaluate_point(k, ivl.evaluate(0.0)))?
-            else {
+            // an edge use whose ends cannot be evaluated adds no boundary (the fork's
+            // `continue`, tangency-labs/smlib 7a35f33)
+            let Some(uv_beg) = ignored(trim.evaluate_point(k, ivl.evaluate(0.0)))? else {
                 continue;
             };
-            if let Some(p) = beg {
-                uv_beg = p;
-            }
-            let CornerEnd::Value(end) = evaluated(k, trim.evaluate_point(k, ivl.evaluate(1.0)))?
-            else {
+            let Some(uv_end) = ignored(trim.evaluate_point(k, ivl.evaluate(1.0)))? else {
                 continue;
             };
-            if let Some(p) = end {
-                uv_end = p;
-            }
             uv_pnt_beg = Point2::new(uv_beg.x, uv_beg.y);
             uv_pnt_end = Point2::new(uv_end.x, uv_end.y);
         } else {
@@ -1454,14 +1420,12 @@ pub(crate) fn uv_corner_boundaries_with_topology(
                 .as_ref()
                 .ok_or_else(|| null("GetUVCornerBoundaries: no curve"))?;
             ivl = edge.interval;
-            let CornerEnd::Value(beg) = evaluated(k, c.evaluate_point(k, ivl.min()))? else {
+            let Some(beg) = ignored(c.evaluate_point(k, ivl.min()))? else {
                 continue;
             };
-            let beg = beg.unwrap_or(Vec3::UNDEF);
-            let CornerEnd::Value(end) = evaluated(k, c.evaluate_point(k, ivl.max()))? else {
+            let Some(end) = ignored(c.evaluate_point(k, ivl.max()))? else {
                 continue;
             };
-            let end = end.unwrap_or(Vec3::UNDEF);
             if let Some(p) = drop_point(k, s, &dom, beg)? {
                 uv_pnt_beg = p;
             }
@@ -2064,35 +2028,11 @@ mod tests {
             }
             b.edgeuse_mut(eu(bad)).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
             let bad_edge = eu1::edge(&b, eu(bad)).unwrap();
-            let mut k = Kernel::default();
-            let off = uv_corner_boundaries(
-                &k,
-                &mut b.clone_standing_for_self().unwrap(),
-                LoopId::from_index(0),
-                &dom,
-                1e-6,
-            )
-            .unwrap();
-            k.fixes.topology_failed_evaluations_propagate = true;
+            let k = Kernel::default();
             let on = uv_corner_boundaries(&k, &mut b, LoopId::from_index(0), &dom, 1e-6).unwrap();
             assert!(!on.on_edges.contains(&bad_edge), "bad={bad}: {on:?}");
             assert_eq!(on.on_edges.len(), 6, "bad={bad}: {on:?}");
-            assert_ne!(off.on_edges, on.on_edges, "bad={bad}");
         }
-    }
-
-    #[test]
-    fn uv_corners_ignore_failed_trim_evaluation_by_default() {
-        // WR-262: upstream ignores the failed evaluation and keeps the previous ends.
-        let k = Kernel::default();
-        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let mut b = square(0.0);
-        for i in 0..4 {
-            b.edgeuse_mut(eu(2 * i)).unwrap().uv_trim_curve =
-                b.edge(EdgeId::from_index(i)).unwrap().curve.clone();
-        }
-        b.edgeuse_mut(eu(2)).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
-        assert!(uv_corner_boundaries(&k, &mut b, LoopId::from_index(0), &dom, 1e-6).is_ok());
     }
 
     #[test]

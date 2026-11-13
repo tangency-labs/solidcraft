@@ -655,6 +655,8 @@ pub enum ParamUser {
     Canvas { canvas: u64, name: String, input: String },
     /// The plane a mirrored occurrence is placed across (`input` is its label, e.g. `Offset`).
     Mirror { occurrence: u64, name: String, input: String },
+    /// An occurrence moved by an expression (`input` names the axis, e.g. `translate y`).
+    Occurrence { occurrence: u64, name: String, input: String },
 }
 
 impl ParamUser {
@@ -671,6 +673,7 @@ impl ParamUser {
             ParamUser::Rule { kind, name, field } => format!("{kind} rule {name} ({field})"),
             ParamUser::Canvas { name, input, .. } => format!("canvas {name} ({input})"),
             ParamUser::Mirror { name, input, .. } => format!("mirror plane of {name} ({input})"),
+            ParamUser::Occurrence { name, input, .. } => format!("occurrence {name} ({input})"),
         }
     }
 }
@@ -811,6 +814,12 @@ impl Document {
         }
         let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
         let rule_uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| r == name);
+        for o in &self.occurrences {
+            let axes: BTreeSet<&str> = o.expressed_moves.iter().flat_map(|m| m.exprs()).filter(|(_, e)| uses(e)).map(|(axis, _)| axis).collect();
+            for axis in axes {
+                out.push(ParamUser::Occurrence { occurrence: o.id, name: o.name.clone(), input: format!("translate {axis}") });
+            }
+        }
         for r in &self.sheet.rules {
             for (field, _, _) in r.fields().into_iter().filter(|(f, e, _)| rule_uses(f, e)) {
                 out.push(ParamUser::Rule { kind: "sheet metal".into(), name: r.name.clone(), field: field.into() });
@@ -990,6 +999,13 @@ impl Document {
                 if !text && matches!(column, crate::config::Column::Param(c) if !texts.contains(c)) {
                     *cell = expr::rename_reference(cell, old, new);
                 }
+            }
+        }
+        for e in self.occurrences.iter_mut().flat_map(|o| &mut o.expressed_moves).flat_map(|m| m.translate.iter_mut().flatten()) {
+            let r = expr::rename_reference(e, old, new);
+            if r != *e {
+                *e = r;
+                n += 1;
             }
         }
         for e in self.assembly.exprs_mut() {

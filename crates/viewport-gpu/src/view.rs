@@ -5178,6 +5178,11 @@ mod glass_tests {
     fn opengl_draws_grid_lines_in_every_direction_and_at_a_point() {
         let mut descriptor = crate::instance_descriptor_from_env();
         descriptor.backends = wgpu::Backends::GL;
+        // As in `crates/gpu/tests/capture.rs` (#5101): NVIDIA's GL answers wgpu's request for 3.3
+        // with exactly 3.3 yet lists GL_ARB_compute_shader, so wgpu builds its indirect-call
+        // validation pipeline, naga cannot emit compute GLSL below 4.30, and request_device fails
+        // as Device(Lost) (#15410). The test draws nothing indirect.
+        descriptor.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
         let instance = wgpu::Instance::new(descriptor);
         let policy = crate::test_env::policy();
         let Some((adapter, _)) = crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy) else {

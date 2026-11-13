@@ -475,8 +475,9 @@ fn add_link_unless_present(
     } else {
         None
     };
-    // The link is the edge that was picked, not whichever is nearest the picked point later.
+    // The link is the edge or vertex that was picked, not whichever is nearest the picked point later.
     let edge_name = solidcraft_doc::project::resolved_edge_name(&st, &r);
+    let vertex_name = solidcraft_doc::project::resolved_vertex_name(&st, &r);
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
     // The wires' exact curves, as a refresh of the link gives them (an included edge's record
     // curve): a link made now is the one its sketch would resolve.
@@ -484,6 +485,7 @@ fn add_link_unless_present(
     if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
         l.face_name = name;
         l.edge_name = edge_name;
+        l.vertex_name = vertex_name;
     }
     Ok(Some(link))
 }

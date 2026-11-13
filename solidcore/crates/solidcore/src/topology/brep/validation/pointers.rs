@@ -13,8 +13,7 @@
 //! Deviations: no recursion; CCW walks are bounded at the native 100000 steps.
 //! Native const geometry repairs use mutable curve access. Warning-only checks
 //! retain their evaluations and repairs; diagnostic log strings are omitted.
-//! Not upstream (WR-406, tangency-labs/solidcore#891, opt-in
-//! `Kernel::fixes.uv_trim_reversal_on_surface`): a UV trim's turn at its
+//! Not upstream (WR-406, tangency-labs/solidcore#891): a UV trim's turn at its
 //! ends is judged on its face's surface, so the check no longer straightens a
 //! circle's exact trim on a face whose parameters run at different speeds.
 //! Not upstream (WR-446, opt-in `Kernel::fixes.validation_does_not_make_uv_trims`):
@@ -1278,16 +1277,12 @@ fn edge_geometry(
                     return Err(err);
                 }
             }
-            // not upstream (WR-406, #891, opt-in): the turn judged on the face's surface
-            let surface = if k.fixes.uv_trim_reversal_on_surface {
-                Some(required(b.face(f)?.surface.as_ref())?.clone_for_evaluation()?)
-            } else {
-                None
-            };
+            // not upstream (WR-406, #891): the turn judged on the face's surface
+            let surface = required(b.face(f)?.surface.as_ref())?.clone_for_evaluation()?;
             fix_reversed_on(
                 k,
                 required(b.edgeuse_mut(eu)?.uv_trim_curve.as_mut())?,
-                surface.as_ref(),
+                Some(&surface),
             )?;
         }
     }
@@ -1512,12 +1507,10 @@ mod issue_891_tests {
         out
     }
 
-    /// `ValidatePointers` on [`half_disc`] with `fixes.uv_trim_reversal_on_surface`
-    /// as given: its status and the arc trims' middle control points before and
-    /// after.
-    fn validate_half_disc(on_surface: bool) -> (i32, Vec<Vec3>, Vec<Vec3>) {
+    /// `ValidatePointers` on [`half_disc`]: its status and the arc trims' middle
+    /// control points before and after.
+    fn validate_half_disc() -> (i32, Vec<Vec3>, Vec<Vec3>) {
         let mut k = Kernel::default();
-        k.fixes.uv_trim_reversal_on_surface = on_surface;
         let mut b = half_disc(&mut k);
         let before = rational_trim_middles(&mut b);
         let mut reports = AssertArray::new();
@@ -1526,30 +1519,17 @@ mod issue_891_tests {
         (status, before, rational_trim_middles(&mut b))
     }
 
-    /// WR-406 (tangency-labs/solidcore#891) through the Kernel: with
-    /// `fixes.uv_trim_reversal_on_surface`, `ValidatePointers` judges the exact
-    /// half circle trim's end turns on the face's 60 x 4 plane and leaves it exact.
+    /// WR-406 (tangency-labs/solidcore#891) through the Kernel: `ValidatePointers`
+    /// judges the exact half circle trim's end turns on the face's 60 x 4 plane and
+    /// leaves it exact, where upstream judges them in raw (u, v), takes the trim for a
+    /// reversal and moves its second control point onto the chord.
     #[test]
     fn issue_891_kernel_fix_keeps_the_exact_trim() {
-        let (status, before, after) = validate_half_disc(true);
+        let (status, before, after) = validate_half_disc();
         assert_eq!(status, SUCCESS);
         assert_eq!(before.len(), 2);
         assert_eq!(after, before);
         assert_eq!(after[0], middle_control_point(&mut trim()));
-    }
-
-    /// The default (upstream) judges the turn in raw (u, v), takes the exact trim
-    /// for a reversal and moves its second control point onto the chord.
-    #[test]
-    fn validate_pointers_straightens_the_exact_trim_by_default() {
-        assert!(!Kernel::default().fixes.uv_trim_reversal_on_surface);
-        let (status, before, after) = validate_half_disc(false);
-        assert_eq!(status, SUCCESS);
-        assert_eq!(before.len(), 2);
-        assert_eq!(after.len(), 2);
-        for (a, b) in after.iter().zip(&before) {
-            assert_ne!(a, b);
-        }
     }
 
     /// WR-446 (`plan/upstream-issues/WR-446--brepconstructor-endshell-validatepointers-makes-uv-trim-curves.md`):
@@ -1622,9 +1602,8 @@ mod issue_891_tests {
         }
 
         /// One `validate_pointers` run on a fresh [`half_disc`].
-        fn run(reversal: bool, no_new: bool) -> Run {
+        fn run(no_new: bool) -> Run {
             let mut k = Kernel::default();
-            k.fixes.uv_trim_reversal_on_surface = reversal;
             k.fixes.validation_does_not_make_uv_trims = no_new;
             let mut b = half_disc(&mut k);
             let before = trimmed_edgeuses(&b);
@@ -1665,34 +1644,30 @@ mod issue_891_tests {
                 );
             }
 
-            let ff = run(false, false);
-            let ft = run(false, true);
-            let tf = run(true, false);
-            let tt = run(true, true);
+            let made = run(false);
+            let no_new = run(true);
 
-            for r in [&ff, &ft, &tf, &tt] {
+            for r in [&made, &no_new] {
                 assert_eq!(r.status, SUCCESS);
             }
 
             // The default check creates at least one UV trim on the chord.
             assert!(
-                ff.after.iter().any(|id| chord.contains(id)),
+                made.after.iter().any(|id| chord.contains(id)),
                 "the default check created no UV trim on the chord"
             );
 
             // With the fix no chord trim is made, and nothing present is removed.
-            for r in [&ft, &tt] {
-                assert_eq!(r.before, r.after, "the fix created or removed a UV trim");
-                assert!(r.after.iter().all(|id| !chord.contains(id)));
-            }
+            assert_eq!(
+                no_new.before, no_new.after,
+                "the fix created or removed a UV trim"
+            );
+            assert!(no_new.after.iter().all(|id| !chord.contains(id)));
 
-            // Holding the WR-406 flag fixed, the new flag leaves the existing arc trims
-            // as they are; the WR-406 flag alone decides whether they are straightened.
-            assert_eq!(ff.arc_after, ft.arc_after);
-            assert_eq!(tf.arc_after, tt.arc_after);
+            // The new flag leaves the existing arc trims as they are.
+            assert_eq!(made.arc_after, no_new.arc_after);
             // And it does not change the trims present before the check.
-            assert_eq!(ff.arc_before, ft.arc_before);
-            assert_eq!(tf.arc_before, tt.arc_before);
+            assert_eq!(made.arc_before, no_new.arc_before);
         }
 
         /// Provide every edge use's trim through the public evaluator once, as setup.
@@ -1705,9 +1680,8 @@ mod issue_891_tests {
             }
         }
 
-        fn all_present_run(reversal: bool, no_new: bool) -> ReversalRun {
+        fn all_present_run(no_new: bool) -> ReversalRun {
             let mut k = Kernel::default();
-            k.fixes.uv_trim_reversal_on_surface = reversal;
             k.fixes.validation_does_not_make_uv_trims = no_new;
             let mut b = half_disc(&mut k);
             give_every_edgeuse_a_trim(&k, &mut b);
@@ -1733,14 +1707,12 @@ mod issue_891_tests {
         /// match.
         #[test]
         fn wr446_all_trims_present_is_inert() {
-            for reversal in [false, true] {
-                let (s0, t0, g0) = all_present_run(reversal, false);
-                let (s1, t1, g1) = all_present_run(reversal, true);
-                assert_eq!(s0, SUCCESS);
-                assert_eq!(s0, s1);
-                assert_eq!(t0, t1);
-                assert_eq!(g0, g1);
-            }
+            let (s0, t0, g0) = all_present_run(false);
+            let (s1, t1, g1) = all_present_run(true);
+            assert_eq!(s0, SUCCESS);
+            assert_eq!(s0, s1);
+            assert_eq!(t0, t1);
+            assert_eq!(g0, g1);
         }
 
         /// With no UV trim at all `sm_CheckEdgeuseGeometry` returns at its first test,

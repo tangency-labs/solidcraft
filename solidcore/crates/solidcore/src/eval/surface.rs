@@ -473,8 +473,9 @@ impl SurfaceEval {
     /// Which directions are collapsed at `uv`, exactly (to rounding), or within `reach` mm
     /// ([`super::collapse`]): a spline or revolution by its iso-lines, an analytic form by the
     /// radius of its circle along the angle in closed form (a cone's apex, a sphere's pole, a
-    /// torus's ring or tube of radius zero). Refused with a typed error where that cannot be
-    /// decided.
+    /// torus's ring or tube of radius zero), within the reach only where its circles are
+    /// somewhere wider than the reach ([`Self::pole_within`]). Refused with a typed error where
+    /// that cannot be decided.
     pub fn collapse(&self, uv: [f64; 2], reach: f64) -> Result<Collapse, EvalError> {
         super::collapse::check(uv, reach)?;
         let v = uv[1];
@@ -486,9 +487,23 @@ impl SurfaceEval {
         // The circle along u of radius `r`, rounded within `err`; v moves the point along a
         // straight line or a circle of radius `along_v` (a cylinder's and cone's generator never
         // stands still; a torus's tube does when its radius is zero).
+        //
+        // A direction is collapsed within the reach only where the surface narrows to a pole
+        // there: where its circles are nowhere wider than the reach (a 0.05 mm round, a 0.05 mm
+        // ball, in a file of 0.1 mm uncertainty) the surface is thin, not collapsed, and only an
+        // exact pole is one. Taken as one everywhere, every point of such a face was on a pole,
+        // its box bounded nothing and the face was lost ("a face whose boundary does not lie on
+        // its surface").
+        let within = |widest: f64| {
+            if 2.0 * widest.abs() > reach {
+                reach
+            } else {
+                0.0
+            }
+        };
         let (u_flag, v_flag) = match self {
             SurfaceEval::Eval(e, _) => return super::collapse::collapse(e, uv, reach),
-            SurfaceEval::Cylinder { radius, .. } => (circle(*radius, 0.0, reach)?, false),
+            SurfaceEval::Cylinder { radius, .. } => (circle(*radius, 0.0, within(*radius))?, false),
             SurfaceEval::Cone {
                 radius_at_origin,
                 slope,
@@ -503,8 +518,8 @@ impl SurfaceEval {
                 // float: the parameter given for it is off by up to its rounding.
                 let err = radius.abs() * (g(3) + 2.0 * unit * v.abs());
                 (
-                    circle(radius * v.cos(), err, reach)?,
-                    circle(*radius, 0.0, reach)?,
+                    circle(radius * v.cos(), err, within(*radius))?,
+                    circle(*radius, 0.0, within(*radius))?,
                 )
             }
             SurfaceEval::Torus {
@@ -513,7 +528,10 @@ impl SurfaceEval {
                 let w = v + tube;
                 let ring = major + minor * w.cos();
                 let err = g(4) * (major.abs() + minor.abs()) + minor.abs() * 2.0 * unit * w.abs();
-                (circle(ring, err, reach)?, circle(*minor, 0.0, reach)?)
+                (
+                    circle(ring, err, within(major.abs() + minor.abs()))?,
+                    circle(*minor, 0.0, within(*minor))?,
+                )
             }
         };
         Ok(Collapse::of([u_flag, v_flag]))
@@ -528,6 +546,14 @@ impl SurfaceEval {
     /// [`Self::pole`], or within `reach` mm of one: moving along a direction across its whole
     /// range moves the point no more than `reach`, certified (a boundary point that lies at a
     /// pole to within a tolerance, where its periodic parameter is free).
+    ///
+    /// On an analytic form a direction is collapsed within the reach only where the surface
+    /// narrows to a pole: where its circles along that direction are somewhere wider than the
+    /// reach (a cone's apex; a sphere's poles when its diameter exceeds the reach; a torus's ring
+    /// when it does). A form whose circles are nowhere wider (a cylinder, a sphere's meridian, a
+    /// torus's tube, or any of them no more than the reach across) is thin, not collapsed: only
+    /// an exact pole is one there. A cylinder never is. Splines and revolutions do not follow
+    /// that rule yet: their iso-lines are decided within the reach ([`super::collapse`]).
     ///
     /// A spline's parameters off its knot range (a pcurve's end fitted a little past it) are
     /// asked at the nearest point of the range with the reach less a certified bound on the

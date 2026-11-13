@@ -494,7 +494,7 @@ pub(crate) fn hover_tooltip(app: &mut SolveApp, response: &egui::Response, candi
 }
 
 pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::Rect) {
-    crate::shell::register_panel(app, "render:selection", None, None);
+    crate::shell::register_panel(app, "render:selection", None);
     if super::result_active(app) || app.render_workspace.view.stage != super::Stage::Look {
         return;
     }
@@ -540,7 +540,7 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
         ui_kit::selection_actions(ui, &selection_name(app, &sel), &actions)
     });
     crate::scenario::publish_rect("render:selection", pill.response.rect);
-    crate::shell::register_panel(app, "render:selection", Some(pill.response.rect), None);
+    crate::shell::register_panel(app, "render:selection", Some(pill.response.rect));
     match pill.inner {
         Some(0) => app.start("appearance.chain"),
         Some(1) => app.start("appearance.replace"),

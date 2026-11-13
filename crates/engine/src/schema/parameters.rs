@@ -760,6 +760,8 @@ pub enum ParameterUser {
     Canvas { canvas: u64, name: String, input: String },
     /// The plane a mirrored occurrence is placed across (`input` is its label, e.g. `Offset`).
     Mirror { occurrence: u64, name: String, input: String },
+    /// An occurrence moved by an expression (`input` names the axis, e.g. `translate y`).
+    Occurrence { occurrence: u64, name: String, input: String },
 }
 
 impl From<ParamUser> for ParameterUser {
@@ -773,6 +775,7 @@ impl From<ParamUser> for ParameterUser {
             ParamUser::Rule { kind, name, field } => ParameterUser::Rule { kind, name, field },
             ParamUser::Canvas { canvas, name, input } => ParameterUser::Canvas { canvas, name, input },
             ParamUser::Mirror { occurrence, name, input } => ParameterUser::Mirror { occurrence, name, input },
+            ParamUser::Occurrence { occurrence, name, input } => ParameterUser::Occurrence { occurrence, name, input },
         }
     }
 }

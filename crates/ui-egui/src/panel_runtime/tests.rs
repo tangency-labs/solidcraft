@@ -1242,15 +1242,26 @@ fn allocation_invisible_physical_edges_and_measured_tab_halves_preserve_rtl_and_
                     if left { card.outer.origin.x - outward } else { card.outer.origin.x + card.outer.size.width - inward }
                 );
             }
-            let before_last =
-                targets.iter().find(|target| target.id == HostDropTargetId::Tab { section: section("group"), before: Some(id("last")) }).unwrap();
-            assert_eq!(before_last.destination, Destination::JoinTab { section: section("group"), index: 1 }, "moved tab removed before indexing");
+            let before_moving = HostDropTargetId::Tab { section: section("group"), before: Some(id("moving")) };
+            let first = card.tabs.iter().find(|tab| tab.instance == id("first")).unwrap();
+            let moving = card.tabs.iter().find(|tab| tab.instance == id("moving")).unwrap();
+            let first_trailing = Point {
+                x: first.bounds.origin.x + first.bounds.size.width * if direction == Direction::Ltr { 0.75 } else { 0.25 },
+                y: middle(first.bounds).y,
+            };
+            let moving_leading = Point {
+                x: moving.bounds.origin.x + moving.bounds.size.width * if direction == Direction::Ltr { 0.25 } else { 0.75 },
+                y: middle(moving.bounds).y,
+            };
             let mut interaction = HostInteraction::default();
-            fixture_press(&service, &host, &mut interaction, HostPointerTarget::Tab { instance: id("moving") });
-            let preview = fixture_move(&service, &host, &mut interaction, middle(before_last.bounds));
-            assert_eq!(preview.target, Some(before_last.id.clone()), "measured tabs arbitrate ahead of top/side edges");
+            fixture_press(&service, &host, &mut interaction, HostPointerTarget::Tab { instance: id("last") });
+            let preview = fixture_move(&service, &host, &mut interaction, first_trailing);
+            assert_eq!(preview.target, Some(before_moving.clone()), "the trailing half inserts after the first tab");
+            assert_eq!(preview.destination, Some(Destination::JoinTab { section: section("group"), index: 1 }));
             assert_eq!(preview.targets.len(), 1);
-            interaction.cancel();
+            let release = interaction.update(&service, &fixture_scope(&service), &host, HostPointerEvent::Release { at: moving_leading });
+            assert_eq!(release.preview.unwrap().target, Some(before_moving));
+            assert_eq!(release.candidate.unwrap().layout(), preview.projected.as_ref().unwrap());
             fixture_press(&service, &host, &mut interaction, HostPointerTarget::Tab { instance: id("moving") });
             let corner = Point {
                 x: if physical_left { card.outer.origin.x + 45.0 } else { card.outer.origin.x + card.outer.size.width - 45.0 },
@@ -7069,6 +7080,7 @@ fn boundary_app() -> (crate::scenario::Harness, FixtureProbe, BoundaryProbe) {
             )
             .unwrap();
     }
+    h.app.disable_panel_runtime().unwrap();
     h.app.enable_panel_runtime(runtime, Box::new(BoundaryServices::new(trace.clone()))).unwrap();
     prepare_app_commands(&mut h.app);
     h.app.dispatch_panel_layout(transaction(vec![fixture_open("fixture.editor", "editor", "editor-section", Zone::Left, 0).unwrap()])).unwrap();
@@ -13143,7 +13155,9 @@ fn production_content_harness(combined_history: bool, assistant: bool) -> crate:
         h.app.run("sketch.create", serde_json::json!({"plane":"XY","name":name})).unwrap();
         h.app.run("sketch.finish", serde_json::json!({})).unwrap();
     }
-    h.app.preferences.shared_panel_layout = true;
+    h.app.disable_panel_runtime().unwrap();
+    // These fixtures seed first-run settings, without restoring the harness's earlier layout.
+    h.app.panel_layout_preferences = Default::default();
     super::production::enable_production(&mut h.app).unwrap();
     h.frames(3);
     h
@@ -13277,33 +13291,28 @@ fn production_browser_and_assistant_refuse_bottom_without_changing_live_content(
 }
 
 #[test]
-fn production_setting_cancel_preserves_classic_and_apply_enables_the_real_host() {
+fn production_host_ignores_the_retired_classic_switch() {
     let mut h = crate::scenario::Harness::new();
+    let mut saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+    saved["preferences"]["shared_panel_layout"] = serde_json::json!(false);
+    h.app.disable_panel_runtime().unwrap();
+    h.app.load_prefs(&saved.to_string());
     h.app.home.open = false;
-    assert!(!h.app.preferences.shared_panel_layout);
-    assert!(h.app.panel_runtime().is_none());
-    crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Layout"})).unwrap();
-    h.app.preferences.shared_panel_layout = true;
-    h.frames(2);
-    assert!(h.app.panel_runtime().is_none(), "an unapplied checkbox cannot replace Classic during the Preferences preview");
-    crate::prefs::control(&mut h.app, &serde_json::json!({"button":"cancel"})).unwrap();
-    h.frames(2);
-    assert!(!h.app.preferences.shared_panel_layout);
-    assert!(h.app.panel_runtime().is_none());
-    crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Layout"})).unwrap();
-    h.app.preferences.shared_panel_layout = true;
-    crate::prefs::control(&mut h.app, &serde_json::json!({"button":"apply"})).unwrap();
-    assert!(h.app.prefs_window.shell.open, "Apply keeps Preferences open");
-    assert!(h.app.panel_runtime().is_some(), "Apply accepts the production-host preference");
-    h.app.preferences.shared_panel_layout = false;
-    crate::prefs::control(&mut h.app, &serde_json::json!({"button":"cancel"})).unwrap();
     h.frames(3);
-    assert!(h.app.preferences.shared_panel_layout, "Cancel restores the last applied setting");
     assert!(h.app.universal_panel_frame().is_some());
-    let saved = h.app.prefs();
-    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
-    restored.load_prefs(&saved);
-    assert!(restored.preferences.shared_panel_layout, "the opt-in setting survives the existing preference envelope");
+    assert!(!h.app.prefs().contains("shared_panel_layout"));
+}
+
+#[test]
+fn production_preferences_without_a_panel_record_preserve_the_live_catalogue() {
+    let mut h = production_content_harness(false, false);
+    let mut saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+    saved.as_object_mut().unwrap().remove(super::preferences::PREFERENCES_KEY);
+    let current = super::preferences::preferences_value(&h.app).unwrap();
+    h.app.load_prefs(&saved.to_string());
+    h.frames(2);
+    assert_eq!(super::preferences::preferences_value(&h.app).unwrap(), current);
+    assert!(super::preferences::preferences_enabled(&h.app));
 }
 
 #[test]
@@ -13446,7 +13455,7 @@ fn production_render_panels_reopen_independently_with_existing_controls() {
     assert!(!presented(&h.app, "render-library"));
     assert!(presented(&h.app, "render-inspector"));
     assert!(presented(&h.app, "render-shots"));
-    assert!(super::production::reveal_render_library(&mut h.app));
+    h.app.render_workspace.view.library_focus_pending = true;
     h.frames(3);
     assert!(presented(&h.app, "render-library"));
     assert!(!presented(&h.app, "render-browser"));
@@ -13528,13 +13537,54 @@ fn production_bottom_history_has_fixed_height_without_collapse_or_height_changes
 }
 
 #[test]
+fn production_history_play_preference_updates_the_visible_shared_controls() {
+    let mut h = production_content_harness(false, false);
+    let play_is_visible = |app: &crate::SolveApp| {
+        app.universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .any(|section| section.instance == id("history") && section.actions.iter().any(|(action, _)| action.0 == "play"))
+    };
+    assert!(play_is_visible(&h.app));
+    h.app.preferences.history_play_button = false;
+    h.frames(2);
+    assert!(!play_is_visible(&h.app));
+    h.app.preferences.history_play_button = true;
+    h.frames(2);
+    assert!(play_is_visible(&h.app));
+}
+
+#[test]
+fn production_history_compatibility_command_updates_the_shared_layout() {
+    let mut h = production_content_harness(false, false);
+    h.app.run("view.history_layout", serde_json::json!({"dock":"left","width":340.0,"collapsed":true})).unwrap();
+    let layout = h.app.panel_runtime().unwrap().layout().layout();
+    let history = layout.containing(&id("history")).unwrap();
+    assert_eq!(history.location.zone(), Zone::Left);
+    assert!(history.collapsed);
+    assert_eq!(layout.column(history.column.as_ref().unwrap()).unwrap().width, 340.0);
+    let browser = layout.containing(&id("browser")).unwrap();
+    assert_ne!(history.column, browser.column);
+    assert_eq!(layout.column(browser.column.as_ref().unwrap()).unwrap().width, crate::prefs::DEFAULT_BROWSER_WIDTH);
+
+    h.app.run("view.history_layout", serde_json::json!({"dock":"bottom"})).unwrap();
+    let history = h.app.panel_runtime().unwrap().layout().layout().containing(&id("history")).unwrap();
+    assert_eq!(history.location.zone(), Zone::Bottom);
+    assert!(!history.collapsed);
+}
+
+#[test]
 fn production_fixed_bottom_history_ignores_a_legacy_collapsed_preference() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.app.ui.show_timeline = true;
     h.app.preferences.timeline_left = false;
     h.app.preferences.timeline_collapsed = true;
-    h.app.preferences.shared_panel_layout = true;
+    h.app.disable_panel_runtime().unwrap();
+    // These fixtures seed first-run settings, without restoring the harness's earlier layout.
+    h.app.panel_layout_preferences = Default::default();
     super::production::enable_production(&mut h.app).unwrap();
     h.frames(6);
     let section = h.app.panel_runtime().unwrap().layout().layout().containing(&id("history")).unwrap();
@@ -13766,4 +13816,39 @@ fn universal_registered_header_command_invokes_only_the_declared_synthetic_bindi
     assert_eq!(editor(&after)["cancels"], editor(&refused)["cancels"]);
     assert_eq!(editor(&after)["transaction_live"], editor(&refused)["transaction_live"]);
     assert_eq!(before["session"], refused["session"]);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monitor() {
+    use super::native::{DesktopNativeAdapter, NativeMonitor};
+
+    let mut adapter = DesktopNativeAdapter::default();
+    let host = HostId::new("desktop-test").unwrap();
+    let section = SectionId::new("desktop-section").unwrap();
+    let instance = InstanceId::new("desktop-panel").unwrap();
+    let create = [HostEffect::CreateNative { host: host.clone(), section: section.clone() }];
+    adapter.prepare(&create).unwrap();
+    assert!(adapter.viewport_id(&host).is_none());
+    adapter.commit(&create);
+    let previous = adapter.viewport_id(&host).unwrap();
+    assert!(adapter.owns(&host, &section));
+    assert_eq!(adapter.prepare(&create).unwrap_err().rule, Rule::DuplicateId);
+
+    let monitor = egui::Rect::from_min_size(egui::pos2(-1000.0, 0.0), egui::vec2(1000.0, 800.0));
+    adapter.update_monitors(|| vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }]);
+    let ctx = egui::Context::default();
+    let min = Size { width: 200.0, height: 100.0 };
+    let max = Size { width: 900.0, height: 900.0 };
+    let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), max, (min, max)).unwrap();
+    let size = builder.inner_size.unwrap();
+    let origin = builder.position.unwrap();
+    assert!(monitor.contains_rect(egui::Rect::from_min_size((origin.to_vec2() * 2.0).to_pos2(), size * 2.0)));
+    assert_eq!(builder.min_inner_size, Some(egui::vec2(min.width, min.height)));
+
+    adapter.commit(&[HostEffect::ReleaseNative { host: host.clone() }]);
+    assert!(adapter.viewport_id(&host).is_none());
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
+    assert_ne!(adapter.viewport_id(&host), Some(previous));
 }

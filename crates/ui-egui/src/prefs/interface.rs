@@ -303,9 +303,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::LayoutPreview {
                         compact: app.ui.layout == crate::ui_kit::LayoutMode::Docked,
                         labels: app.preferences.ribbon_labels,
-                        history: history_choice(app),
-                        translucent: app.preferences.browser_float,
-                        dialog_left: app.preferences.dialog_place == crate::dialog_column::DialogPlace::LeftColumn,
+                        history_in_browser: app.preferences.history_in_browser,
                     }
                 },
                 |ui, state| ui_kit::layout_preview(ui, state, solidcraft_ui_text::tr("prefs.layout_note")),
@@ -329,74 +327,24 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
         }
         ui_kit::settings_section(ui, "panels", app.tr("prefs.layout_page.panels"), |ui| {
-            let options = [
-                ui_kit::PictureChoice { key: "bottom", label: app.tr("prefs.bottom"), figure: ui_kit::paint_history_bottom },
-                ui_kit::PictureChoice { key: "left", label: app.tr("prefs.left"), figure: ui_kit::paint_history_left },
-                ui_kit::PictureChoice { key: "under_browser", label: app.tr("prefs.under_browser"), figure: ui_kit::paint_history_under_browser },
-                ui_kit::PictureChoice { key: "browser", label: app.tr("prefs.in_browser"), figure: ui_kit::paint_history_in_browser },
-            ];
-            if let Some(selected) = ui_kit::settings_picture_choices(ui, "history", app.tr("prefs.history"), &options, history_choice(app), true)
-                && let Some(option) = options.get(selected)
-            {
-                let _ = app.run("view.history_layout", json!({"dock":option.key}));
-            }
-            for (short, legacy) in [
-                ("prefs.bottom", "ui.timeline_bottom"),
-                ("prefs.left", "ui.timeline_left_sidebar"),
-                ("prefs.under_browser", "ui.history_below_browser"),
-            ] {
-                let row = app.tr("prefs.history");
-                if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr(short))) {
-                    crate::scenario::publish_handle(&format!("dialog:{row}:{}", app.tr(legacy)), at);
-                }
-            }
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = t.space_16;
-                let cards_width = (t.space_24 * 10.0 + t.space_2).min(ui.max_rect().width());
-                ui.allocate_ui_with_layout(egui::vec2(cards_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                    let options = [
-                        ui_kit::PictureChoice { key: "column", label: app.tr("prefs.layout_page.column"), figure: ui_kit::paint_browser_column },
-                        ui_kit::PictureChoice { key: "card", label: app.tr("prefs.layout_page.card"), figure: ui_kit::paint_browser_card },
-                    ];
-                    if let Some(selected) = ui_kit::settings_picture_choices(
-                        ui,
-                        "browser",
-                        app.tr("prefs.browser"),
-                        &options,
-                        usize::from(app.preferences.browser_float),
-                        app.ui.layout == crate::ui_kit::LayoutMode::Floating,
-                    ) {
-                        app.preferences.browser_float = selected == 1;
-                    }
-                    for (key, legacy) in [("column", "prefs.opaque"), ("card", "prefs.translucent")] {
-                        if let Some(at) = crate::scenario::handle_at(&format!("prefs:browser:{key}")) {
-                            crate::scenario::publish_handle(&format!("dialog:{}:{}", app.tr("prefs.browser"), app.tr(legacy)), at);
-                        }
-                    }
-                });
-                let labels = [app.tr("prefs.browser_shown"), app.tr("prefs.layout_page.on_hover")];
-                let width = labels.iter().map(|label| ui_kit::ContentWidth::name(ui, label)).fold(0.0, f32::max) * 2.0 + t.space_16 * 3.0 + t.space_6;
-                ui.allocate_ui_with_layout(
-                    egui::vec2(width.min(ui.max_rect().width()), t.control_height),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        browser_visibility(app, ui);
-                    },
-                );
-            });
+            layout_check(
+                ui,
+                app.tr("prefs.history_in_browser"),
+                app.tr("prefs.history_in_browser_note"),
+                &mut app.preferences.history_in_browser,
+                "history_in_browser",
+            );
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.history_sketches"), app.tr("prefs.history_sketches_note"), |ui| {
-                    ui.add_enabled_ui(app.preferences.timeline_left || app.preferences.history_in_browser, |ui| {
-                        let mut selected = usize::from(app.preferences.history_sketches == HistorySketches::UnderFeature);
-                        if ui_kit::segmented(
-                            ui,
-                            &mut selected,
-                            &[app.tr("prefs.history_sketches_in_order"), app.tr("prefs.history_sketches_under_feature")],
-                            ui_kit::Segments { intrinsic: true, ..Default::default() },
-                        ) {
-                            app.preferences.history_sketches = if selected == 1 { HistorySketches::UnderFeature } else { HistorySketches::InOrder };
-                        }
-                    });
+                    let mut selected = usize::from(app.preferences.history_sketches == HistorySketches::UnderFeature);
+                    if ui_kit::segmented(
+                        ui,
+                        &mut selected,
+                        &[app.tr("prefs.history_sketches_in_order"), app.tr("prefs.history_sketches_under_feature")],
+                        ui_kit::Segments { intrinsic: true, ..Default::default() },
+                    ) {
+                        app.preferences.history_sketches = if selected == 1 { HistorySketches::UnderFeature } else { HistorySketches::InOrder };
+                    }
                 });
                 for (key, label) in [("in_order", "prefs.history_sketches_in_order"), ("under_feature", "prefs.history_sketches_under_feature")] {
                     if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{}:{}", app.tr("prefs.history_sketches"), app.tr(label))) {
@@ -445,11 +393,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_bar_groups,
                     "history_bar_groups",
                 );
-                // Greyed out unless History is on the left. The box is disabled inside its own space: a
-                // disabled area around it would start at the row's end and squeeze the label away (#14564).
-                layout_check_enabled(
+                layout_check(
                     ui,
-                    app.preferences.timeline_left,
                     app.tr("prefs.layout_page.origin_bodies"),
                     app.tr("prefs.history_origin_bodies_note"),
                     &mut app.preferences.timeline_origin_bodies,
@@ -508,22 +453,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
-                ui_kit::settings_row_help(ui, app.tr("prefs.layout_page.open"), app.tr("prefs.dialogs_note"), |ui| {
-                    use crate::dialog_column::DialogPlace;
-                    let mut selected = usize::from(app.preferences.dialog_place == DialogPlace::LeftColumn);
-                    let options = [app.tr("prefs.dialogs_edge"), app.tr("prefs.dialogs_left_column")];
-                    let segments =
-                        ui.scope(|ui| ui_kit::segmented(ui, &mut selected, &options, ui_kit::Segments { intrinsic: true, ..Default::default() }));
-                    segments.response.backing_on_hover_text(app.tr("prefs.dialogs_note"));
-                    if segments.inner {
-                        app.preferences.dialog_place = if selected == 1 { DialogPlace::LeftColumn } else { DialogPlace::Edge };
-                    }
-                });
-                for option in ["prefs.dialogs_edge", "prefs.dialogs_left_column"] {
-                    if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{}", app.tr("prefs.layout_page.open"), app.tr(option))) {
-                        crate::scenario::publish_handle(&format!("dialog:{}:{}", app.tr("prefs.dialogs"), app.tr(option)), at);
-                    }
-                }
                 ui_kit::row(ui, app.tr("prefs.layout_page.ok_cancel"), |ui| {
                     let placements = [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top];
                     let mut selected = placements.iter().position(|p| *p == app.preferences.dialog_buttons).unwrap_or(0);
@@ -652,64 +581,19 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
 }
 
-fn history_choice(app: &SolveApp) -> usize {
-    if app.preferences.history_in_browser {
-        3
-    } else if app.preferences.timeline_left {
-        if app.preferences.timeline_under_browser { 2 } else { 1 }
-    } else {
-        0
-    }
-}
-
 /// Keep native checkbox responses and one real search target; guidance stays on hover.
 fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str) {
-    layout_check_enabled(ui, true, label, help, value, key);
-}
-
-/// A [`layout_check`] that may be greyed out. In a wrapped row, the box is placed (and wraps) as a whole,
-/// then disabled inside its own space.
-fn layout_check_enabled(ui: &mut egui::Ui, enabled: bool, label: &str, help: &str, value: &mut bool, key: &str) {
     let t = Tokens::get();
     let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16).min(ui.max_rect().width());
     ui.allocate_ui_with_layout(egui::vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
-        ui.add_enabled_ui(enabled, |ui| {
-            ui_kit::settings_form(ui, 0.0, |ui| {
-                ui_kit::row(ui, "", |ui| {
-                    ui.spacing_mut().item_spacing.x = t.space_6;
-                    let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
-                    let response = ui_kit::settings_control_width(ui, check_width, |ui| {
-                        ui_kit::checkbox(ui, label, value).backing_on_hover_text(help).backing_on_disabled_hover_text(help)
-                    });
-                    crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
-                    ui_kit::help_icon(ui, help);
-                })
-            });
-        });
-    });
-}
-
-fn browser_visibility(app: &mut SolveApp, ui: &mut egui::Ui) {
-    use crate::browser::BrowserShow;
-    ui_kit::settings_form(ui, 0.0, |ui| {
-        ui_kit::row(ui, app.tr("prefs.browser_shown"), |ui| {
-            ui.spacing_mut().item_spacing.x = Tokens::get().space_6;
-            crate::ui_kit::settings_search::note_current(ui, app.tr("prefs.layout_page.on_hover"));
-            ui.add_enabled_ui(!crate::timeline_left::stacked(app), |ui| {
-                let mut selected = usize::from(app.preferences.browser_show == BrowserShow::Hover);
-                if ui_kit::settings_segments(
-                    ui,
-                    app.tr("prefs.browser_shown"),
-                    &mut selected,
-                    &[app.tr("prefs.browser_shown"), app.tr("prefs.layout_page.on_hover")],
-                ) {
-                    app.preferences.browser_show = if selected == 1 { BrowserShow::Hover } else { BrowserShow::Shown };
-                }
-                if let Some(rect) = crate::scenario::rect_of(&format!("dialog:segments:{}", app.tr("prefs.browser_shown"))) {
-                    crate::scenario::publish_target("prefs:browser_show", rect);
-                }
-                ui_kit::help_icon(ui, app.tr("prefs.browser_show_note"));
-            });
+        ui_kit::settings_form(ui, 0.0, |ui| {
+            ui_kit::row(ui, "", |ui| {
+                ui.spacing_mut().item_spacing.x = t.space_6;
+                let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
+                let response = ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, value).backing_on_hover_text(help));
+                crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
+                ui_kit::help_icon(ui, help);
+            })
         });
     });
 }
