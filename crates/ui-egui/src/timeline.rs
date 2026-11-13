@@ -39,7 +39,8 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
 
 /// Where a step control (not Play) takes the marker from `marker`, or `None` when it keeps it.
 /// The steps are the features the History shows: in the bottom bar, only those of the component
-/// it shows (`timeline_scope`, #11430). A step lands where dropping the marker in that slot would.
+/// it shows (`timeline_scope`, #11430). A step lands where dropping the marker in that slot would,
+/// but past the last shown feature it goes to the end of the design (#15974).
 fn step_position(app: &SolveApp, marker: usize, control: crate::ui_kit::HistoryTransport) -> Option<usize> {
     use crate::ui_kit::HistoryTransport;
     let n = app.session.doc.features.len();
@@ -56,10 +57,13 @@ fn step_position(app: &SolveApp, marker: usize, control: crate::ui_kit::HistoryT
         HistoryTransport::Forward => slot.saturating_add(1).min(len),
         HistoryTransport::Last => len,
     };
-    let position = view.index(slot);
+    let backwards = matches!(control, HistoryTransport::First | HistoryTransport::Back);
+    // Past the last feature shown, every later feature belongs to components the bar leaves out:
+    // Forward and Last go to the end of the design, so none of them stays rolled back with nothing
+    // in the bar saying so (#15974).
+    let position = if !backwards && slot == len { n } else { view.index(slot) };
     // From a marker outside the shown features, the nearest shown slot can lie the other way:
     // First and Back never add features, and Forward and Last never roll any back.
-    let backwards = matches!(control, HistoryTransport::First | HistoryTransport::Back);
     if (backwards && position > marker) || (!backwards && position < marker) { None } else { Some(position) }
 }
 
@@ -2301,6 +2305,31 @@ mod tests {
         h.step(&json!({"click": {"handle": "history:forward"}})).unwrap();
         h.settle();
         assert_eq!(h.app.session.doc.marker, None, "forward from between the shown features");
+    }
+
+    /// Last, and Forward onto the last slot, with a component active go to the end of the design:
+    /// the features after the component's last one belong to other components, and none of them
+    /// stays rolled back behind a bar that shows its marker at the end (#15974).
+    #[test]
+    fn last_with_a_component_active_brings_back_the_later_features_of_other_components() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "A"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "BoxA"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "B"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new_body", "name": "BoxB"}))
+            .unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "PlaneB"})).unwrap();
+        h.app.run("component.activate", json!({"component": "A"})).unwrap();
+        h.settle();
+        for (control, position) in [("back", Some(0)), ("last", None), ("back", Some(0)), ("forward", None)] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "{control}");
+        }
     }
 
     /// A component with no features of its own lists nothing, so the controls leave the marker
