@@ -992,6 +992,98 @@ fn the_grooves_of_a_thread_cut_both_ways_unite() {
     assert!((vb - vu).abs() <= 1e-8 * vu, "{vb} back, {vu} made");
 }
 
+/// The grooves of a 22-turn M10 thread cut both ways (SolidCraft's 33 mm bolt in both hands): the
+/// union splits each groove's two flanks into a face wherever the other groove crosses them,
+/// 176 faces on 4 walls. Each face goes to the record as its own turns of its wall: the
+/// stations its box crosses and the net over them, in the same parameters, under the bound
+/// certified for that piece, never more than the whole wall's. With every face carrying its
+/// whole wall the record took 6,010,780 items, past an outside record's budget, so reading it
+/// back was refused; now it grows with the turns, not with the faces times the turns, and
+/// comes back the same solid.
+#[test]
+fn the_grooves_of_a_long_thread_cut_both_ways_go_to_the_record_within_its_budget() {
+    use solidcore::surface::procedural_sweep::ProceduralSweep;
+    use solidcore_record::brep::sweep::ProceduralSweepRecord;
+    use solidcore_record::brep::{Surface, MAX_ITEMS};
+    let p = |y: f64, z: f64| [0.0, y, z];
+    let mut pts = vec![
+        p(4.188101183952089, -1.6875),
+        p(5.075, -2.199551270189222),
+        p(5.075, -0.800448729810778),
+        p(4.188101183952089, -1.3125),
+    ];
+    let turns = 22.0;
+    let made = |pts: &[[f64; 3]], axis, pitch| {
+        screw_sweep(
+            &polygon(pts),
+            [0.0, 0.0, -1.5],
+            axis,
+            pitch,
+            turns,
+            None,
+            1.5e-4,
+        )
+        .unwrap()
+    };
+    let right = made(&pts, Z, 1.5);
+    pts.reverse();
+    let left = made(&pts, [0.0, 0.0, -1.0], -1.5);
+    let either = solidcore_ops::boolean::union_all(vec![right, left]).unwrap();
+    let (record, _) = either.to_record().unwrap();
+    let items = record.items().unwrap();
+    assert!(items < MAX_ITEMS, "{items} items of {MAX_ITEMS}");
+    record.validate().unwrap();
+    // Each wall's face carries its own spans: its stations are the ones its box crosses.
+    let mut split = 0;
+    for f in &record.faces {
+        let Surface::ProceduralSweep(s) = &f.surface else {
+            continue;
+        };
+        let [lo, hi] = if s.swapped { f.domain[0] } else { f.domain[1] };
+        let st = &s.stations;
+        let (first, last) = (st[0], st[st.len() - 1]);
+        assert!(
+            first <= lo && lo < st[1] && st[st.len() - 2] < hi && hi <= last,
+            "the face over [{lo}, {hi}] keeps the stations {first} to {last}"
+        );
+        split += 1;
+    }
+    assert_eq!(split, 176, "the walls' faces");
+    // Each piece's bound is its own certificate, at most its whole wall's re-certified one:
+    // the record's shared owners, which the wall's edges name, are the whole walls.
+    let proved = |s: &ProceduralSweepRecord| {
+        let mut s = s.clone();
+        s.bound = f64::MIN_POSITIVE;
+        let s = ProceduralSweep::from_record(&solidcore_convert::procedural_sweep(&s)).unwrap();
+        s.procedural_sweep().unwrap().definition().bound()
+    };
+    let walls: Vec<_> = record
+        .screw_owners
+        .iter()
+        .map(|wall| (wall, proved(wall)))
+        .collect();
+    for f in &record.faces {
+        let Surface::ProceduralSweep(piece) = &f.surface else {
+            continue;
+        };
+        let (_, whole) = walls
+            .iter()
+            .find(|(wall, _)| {
+                wall.definition == piece.definition
+                    && wall
+                        .stations
+                        .windows(piece.stations.len())
+                        .any(|w| w == piece.stations)
+            })
+            .expect("the piece's wall is an owner");
+        assert!(piece.bound <= *whole, "{} of {whole}", piece.bound);
+    }
+    let (back, _) = Body::from_record(&record, true).unwrap();
+    let (vb, vu) = (back.volume(1e-8).unwrap(), either.volume(1e-8).unwrap());
+    assert_eq!(back.counts().unwrap(), either.counts().unwrap());
+    assert!((vb - vu).abs() <= 1e-8 * vu, "{vb} back, {vu} made");
+}
+
 /// An M10 groove with a runout (its law moves the profile out 0.887 mm over the last two of four
 /// turns), cut from a 5 mm cylinder, at the tolerance SolidCraft sweeps a 1.5 mm pitch to. The
 /// law makes the groove's axial wall the extrusion of a spiral, and its net the extrusion of the
