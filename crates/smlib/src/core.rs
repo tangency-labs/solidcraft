@@ -204,7 +204,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.offset_keep_cavity_regions = true;
-    f.imprint_skips_collapsed_definition = true;
     f.temporary_radius_setup_errors = true;
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
@@ -249,7 +248,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.offset_updates_result_tolerances = true;
     f.cone_iso_circle_at_axial_height = true;
-    f.boolean_coincident_strip_drops_crossing = true;
     f.fillet_overflow_trim_at_creases = true;
     f.fillet_section_end_trim_at_creases = true;
     f.fillet_refuse_mixed_corner_crossing_rails = true;
