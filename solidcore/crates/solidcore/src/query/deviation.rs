@@ -11,8 +11,9 @@
 //! The bound: for two B-spline curves on one parameter domain, the kernel's
 //! [`crate::nurbs::crv_deviation::certified_distance`] bounds `|a(t) - b(t)|` at every `t`, so
 //! the largest distance from `a` to `b` is at most it (each `a(t)` is that close to a point of
-//! `b`). It is given where it applies (both curves B-splines, not rational, on one domain) and
-//! `None` elsewhere; it is never smaller than the true deviation, the sampled one never larger.
+//! `b`). It is given where it applies (both curves B-splines, not rational, on one domain; a
+//! rational form whose weights are all equal counts as polynomial) and `None` elsewhere; it is
+//! never smaller than the true deviation, the sampled one never larger.
 //!
 //! Bounded: at most [`MAX_SAMPLES`] drops; no recursion.
 
@@ -150,8 +151,12 @@ fn certified(a: &Curve, b: &Curve) -> Option<f64> {
         return None;
     };
     let (mut a, mut b) = (a.clone(), b.clone());
-    let na = a.get_or_create_gw_nurb().ok()?.clone();
-    let nb = b.get_or_create_gw_nurb().ok()?.clone();
+    let mut na = a.get_or_create_gw_nurb().ok()?.clone();
+    let mut nb = b.get_or_create_gw_nurb().ok()?.clone();
+    // A polynomial spline built from a record carries weights of 1 (a rational form with
+    // equal weights); the bound takes polynomial curves, so equal weights are dropped first.
+    na.prune_rat(false);
+    nb.prune_rat(false);
     crate::nurbs::crv_deviation::certified_distance(&na, &nb).ok()
 }
 

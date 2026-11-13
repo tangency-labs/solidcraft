@@ -46,7 +46,7 @@ fn two_parallel_lines_five_apart_deviate_by_five() {
         assert!((p.distance(*q) - 5.0).abs() < 1e-9, "{p:?} {q:?}");
     }
     let bound = d.bound.unwrap();
-    assert!(bound >= 5.0 - 1e-9 && bound < 5.0 + 1e-9, "{bound}");
+    assert!((5.0 - 1e-9..5.0 + 1e-9).contains(&bound), "{bound}");
 }
 
 /// The same cubic moved 0.0056 up: that offset reads back.

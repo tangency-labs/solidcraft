@@ -34,6 +34,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
+use crate::nurbs::knots::Side as Span;
 use crate::query::brep as qbrep;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -211,7 +212,6 @@ pub fn principal_curvatures(
     let Some(one) = side(k, s, sign, p, None)? else {
         return Ok(None);
     };
-    use crate::nurbs::knots::Side as Span;
     let g = match s.evaluate_geometric(k, one.uv, Span::Left, Span::Left) {
         Ok(g) => g,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
