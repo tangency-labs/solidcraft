@@ -10,21 +10,32 @@
 //!
 //! A doubt costs a build, never a skipped test. What cannot be read counts as a doc test: a doc
 //! attribute that is not a string literal (`#[doc = include_str!(..)]`), a block doc comment, a
-//! file that does not tokenise, a symbolic link among the sources. Docs written elsewhere are read
-//! where they are written:
+//! file that does not tokenise, a symbolic link among the sources, a `#[path]` or `include!("..")`
+//! that leads to no file. Docs written elsewhere are read where they are written:
 //! - files brought in from outside the package (`#[path]`, `include!("..")`, a `[lib] path`) are
-//!   read like its own;
-//! - a `macro_rules!` macro that writes a doc from an argument (`#[doc = $text]`), or hands its
-//!   arguments on to one, has the strings it is called with read as docs, under any name it is
-//!   imported as;
+//!   read like its own, with the modules they declare;
+//! - a `macro_rules!` macro that writes a doc from an argument (`#[doc = $text]`, `#[$meta]`), or
+//!   hands its arguments on to one, has the strings it is called with read as docs, under any name
+//!   it is imported as. So does a macro or attribute this cannot read: one from outside the
+//!   workspace (other than the standard library's), a procedural one, or one an unread macro is
+//!   handed to;
 //! - code a build script writes (`include!(concat!(env!("OUT_DIR"), ..))`) is judged by what
 //!   writes it, the build script and the workspace crates it builds with: a `///` line they write
-//!   whole is read as a doc; one they leave open or start with a `{}` placeholder, doc text as an
-//!   attribute (`#[doc` or `doc =` in a string, `#[doc ..]` in macro input such as `quote!`), or
+//!   whole is read as a doc; one they leave open or start with a `{}` placeholder, a block doc
+//!   comment, doc text as an attribute (`#[doc` or `doc =` in a string, `#[doc ..]` in macro input
+//!   such as `quote!`), or
 //!   a build dependency from outside the workspace that writes Rust source (one that uses
-//!   proc-macro2, quote, syn or prettyplease) counts as a doc test;
-//! - a function-like macro given a path (`bindgen!({ path: "wit" })`) has the `///` comments of
-//!   the files there read as docs.
+//!   proc-macro2, quote, syn or prettyplease, itself or through the libraries it uses) counts as a
+//!   doc test;
+//! - a function-like macro given a path (`bindgen!({ path: "wit" })`) has what it may copy from
+//!   the files there read as docs: a Rust file's docs, a Markdown file it names whole, the fenced
+//!   blocks of another text file it names, the `///` comments of any other file.
+//!
+//! It runs no code, so it cannot see doc text a build script copies from a file it reads (a
+//! template), or Rust that a build dependency writes without one of those four crates.
+//!
+//! Library means what `cargo test --doc` tests: a `lib` or `proc-macro` target, whatever its
+//! `doctest` setting (an explicit `--doc` ignores it).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -36,33 +47,50 @@ use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 /// Crates for writing Rust source: a build dependency that uses one may write docs.
 const CODE_WRITERS: [&str; 4] = ["prettyplease", "proc-macro2", "quote", "syn"];
 
-/// Macros that read no file named in their arguments; those strings are not looked up.
-const READ_NO_FILE: [&str; 24] = [
+/// The standard library's macros. The strings they are given never become docs, and the files they
+/// read are not looked up: they become docs only through `#[doc = include_str!(..)]`, which counts
+/// as a doc that cannot be read.
+const STD_MACROS: [&str; 35] = [
     "assert",
     "assert_eq",
     "assert_ne",
+    "cfg",
+    "column",
+    "compile_error",
     "concat",
+    "dbg",
     "debug_assert",
     "debug_assert_eq",
     "debug_assert_ne",
     "env",
     "eprint",
     "eprintln",
+    "file",
     "format",
     "format_args",
     "include",
     "include_bytes",
     "include_str",
+    "line",
     "matches",
+    "module_path",
     "option_env",
     "panic",
     "print",
     "println",
+    "stringify",
+    "thread_local",
     "todo",
+    "unimplemented",
     "unreachable",
+    "vec",
     "write",
     "writeln",
 ];
+
+/// The name the strings in an attribute other than `doc` and `path` are kept under: no macro has
+/// it, so they count wherever they hold a code block (an attribute macro may write a doc).
+const IN_ATTRIBUTE: &str = "#[..]";
 
 /// `cargo xtask doc-tests [--list] [-p NAME]... [CARGO ARGS] [-- TEST ARGS]`; `--list` only names
 /// the libraries it would test.
@@ -89,12 +117,16 @@ pub fn run(args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// `cargo test --profile ci --doc` for the workspace libraries (of `only`, when given) with a code
-/// block rustdoc would compile, and its label; `None`, after saying so, when none has one.
-/// `--ignored` or `--include-ignored` in `test_args` count the blocks marked `ignore` too.
+/// The doc tests of the workspace libraries (of `only`, when given) with a code block rustdoc
+/// would compile, as `doc_command` runs them, and its label; `None`, after saying so, when none has
+/// one. `--ignored` or `--include-ignored` in `test_args` count the blocks marked `ignore` too.
 pub fn command(only: Option<&[&str]>, cargo_args: &[&str], test_args: &[&str]) -> Result<Option<(String, Command)>, String> {
     let include_ignored = test_args.iter().any(|a| *a == "--ignored" || *a == "--include-ignored");
-    let libraries = libraries(&crate::metadata()?)?;
+    let meta = crate::metadata()?;
+    if let Some(only) = only {
+        known_packages(&meta, only)?;
+    }
+    let libraries = libraries(&meta)?;
     // Every library is read, one thread each, even with `only`: a macro one defines may write docs
     // in another. A thread that fails leaves its library counted as having doc tests.
     let read: Vec<(&Library, Vec<FileDocs>)> = std::thread::scope(|scope| {
@@ -104,7 +136,7 @@ pub fn command(only: Option<&[&str]>, cargo_args: &[&str], test_args: &[&str]) -
             .map(|(library, thread)| (library, thread.join().unwrap_or_else(|_| vec![FileDocs { test: true, ..FileDocs::default() }])))
             .collect()
     });
-    let doc_macros = doc_macros(read.iter().flat_map(|(_, files)| files));
+    let macros = macros(read.iter().flat_map(|(_, files)| files));
     let mut code_writers = None;
     let mut considered = 0;
     let mut chosen = Vec::new();
@@ -113,7 +145,7 @@ pub fn command(only: Option<&[&str]>, cargo_args: &[&str], test_args: &[&str]) -
             continue;
         }
         considered += 1;
-        if has_doc_test(library, files, &doc_macros, &mut code_writers, include_ignored)? {
+        if has_doc_test(library, files, &macros, &mut code_writers, include_ignored)? {
             chosen.push(library.name.as_str());
         }
     }
@@ -122,13 +154,30 @@ pub fn command(only: Option<&[&str]>, cargo_args: &[&str], test_args: &[&str]) -
         return Ok(None);
     }
     eprintln!("doc tests: {} of {considered} libraries have a code block rustdoc would compile: {}", chosen.len(), chosen.join(", "));
+    let all: Vec<&str> = libraries.iter().map(|library| library.name.as_str()).collect();
+    Ok(Some((format!("doc tests ({} libraries)", chosen.len()), doc_command(&all, &chosen, cargo_args, test_args))))
+}
+
+/// An error naming the first of `names` that is no workspace package (cargo never sees them).
+fn known_packages(meta: &serde_json::Value, names: &[&str]) -> Result<(), String> {
+    let packages = meta["packages"].as_array().ok_or("cargo metadata: no packages array")?;
+    match names.iter().find(|name| !packages.iter().any(|p| p["name"] == **name)) {
+        Some(name) => Err(format!("doc tests: the workspace has no package named `{name}`")),
+        None => Ok(()),
+    }
+}
+
+/// `cargo test --workspace --doc` with every library but the `chosen` excluded. As in the rest of
+/// `cargo xtask test`, which builds with `--workspace`, a `-p` in `cargo_args` only names a package
+/// that must exist and an `--exclude` leaves one out.
+fn doc_command(libraries: &[&str], chosen: &[&str], cargo_args: &[&str], test_args: &[&str]) -> Command {
     let mut c = crate::cargo();
-    c.args(["test", "--profile", "ci", "--doc"]);
-    for name in &chosen {
-        c.args(["-p", name]);
+    c.args(["test", "--workspace", "--profile", "ci", "--doc"]);
+    for name in libraries.iter().filter(|name| !chosen.contains(name)) {
+        c.args(["--exclude", name]);
     }
     c.args(cargo_args).arg("--").args(test_args);
-    Ok(Some((format!("doc tests ({} libraries)", chosen.len()), c)))
+    c
 }
 
 /// A workspace library rustdoc tests, and where its docs come from.
@@ -145,15 +194,19 @@ struct Library {
     external_writers: Vec<String>,
 }
 
-/// The workspace packages with a library rustdoc tests (`doctest` in cargo metadata).
+/// The workspace packages with a library `cargo test --doc` tests: a target of kind `lib`, `rlib`
+/// or `proc-macro`, whatever its `doctest` setting.
 fn libraries(meta: &serde_json::Value) -> Result<Vec<Library>, String> {
     let packages = meta["packages"].as_array().ok_or("cargo metadata: no packages array")?;
+    let doc_tested = |target: &&serde_json::Value| {
+        target["kind"].as_array().is_some_and(|kinds| kinds.iter().any(|k| k == "lib" || k == "rlib" || k == "proc-macro"))
+    };
     let mut out = Vec::new();
     for p in packages {
         let (Some(name), Some(manifest)) = (p["name"].as_str(), p["manifest_path"].as_str()) else { continue };
         let Some(dir) = Path::new(manifest).parent() else { continue };
         let targets = p["targets"].as_array().map(Vec::as_slice).unwrap_or_default();
-        let Some(root) = targets.iter().find(|t| t["doctest"] == true).and_then(|t| t["src_path"].as_str()) else { continue };
+        let Some(root) = targets.iter().find(doc_tested).and_then(|t| t["src_path"].as_str()) else { continue };
         let mut writers: Vec<PathBuf> = targets
             .iter()
             .filter(|t| t["kind"].as_array().is_some_and(|kinds| kinds.iter().any(|k| k == "custom-build")))
@@ -181,17 +234,21 @@ fn libraries(meta: &serde_json::Value) -> Result<Vec<Library>, String> {
 struct FileDocs {
     /// One of its docs has a code block rustdoc would compile, or cannot be read.
     test: bool,
+    /// The `macro_rules!` macros it defines.
+    macros: Vec<String>,
     /// The `macro_rules!` macros it defines that write a doc from an argument (`#[doc = $text]`).
     doc_macros: Vec<String>,
     /// (macro, other): a `macro_rules!` macro it defines hands an argument on to another macro.
     forwards: Vec<(String, String)>,
     /// (name, other name): `name as other name`, as in an import.
     aliases: Vec<(String, String)>,
-    /// The string literals it passes to macros that could hold a code block, with each macro's
-    /// name: docs, if that macro writes them from its arguments.
+    /// The string literals it passes to macros or attributes that could hold a code block, with
+    /// each macro's name (`IN_ATTRIBUTE` for an attribute): docs, if that macro may write them.
     macro_literals: Vec<(String, String)>,
     /// The files its `#[path = "..."]` attributes and `include!("...")` calls name.
     paths: Vec<String>,
+    /// The modules it declares in files of their own (`mod name;`) without a `#[path]` beside.
+    modules: Vec<String>,
     /// The strings in its macro calls that may name a file or directory the macro reads.
     referenced: Vec<String>,
     /// It includes code its build writes (`include!(concat!(env!("OUT_DIR"), ..))`).
@@ -199,16 +256,16 @@ struct FileDocs {
 }
 
 /// Whether a library has a doc test: in its files' docs (with what they bring in), in strings it
-/// passes to a macro that writes docs from them, or in code its build writes.
+/// passes to a macro or attribute that may write docs from them, or in code its build writes.
 fn has_doc_test(
     library: &Library,
     files: &[FileDocs],
-    doc_macros: &BTreeSet<String>,
+    macros: &Macros,
     code_writers: &mut Option<BTreeSet<String>>,
     include_ignored: bool,
 ) -> Result<bool, String> {
     if files.iter().any(|f| f.test)
-        || files.iter().flat_map(|f| &f.macro_literals).any(|(name, text)| doc_macros.contains(name) && literal_has_doc_test(text, include_ignored))
+        || files.iter().flat_map(|f| &f.macro_literals).any(|(name, text)| macros.may_write_docs(name) && literal_has_doc_test(text, include_ignored))
     {
         return Ok(true);
     }
@@ -228,29 +285,57 @@ fn literal_has_doc_test(text: &str, include_ignored: bool) -> bool {
     compiles_code(&markdown(&[(text, false)]), include_ignored) || compiles_code(&format!("{text}\n"), include_ignored)
 }
 
-/// The macros that write docs from their arguments: those that do it themselves, those that hand
-/// their arguments on to one, and the names they are imported as.
-fn doc_macros<'a>(files: impl Iterator<Item = &'a FileDocs> + Clone) -> BTreeSet<String> {
-    let mut out: BTreeSet<String> = files.clone().flat_map(|f| f.doc_macros.iter().cloned()).collect();
+/// What the macros the workspace calls do with the strings they are given, by name.
+struct Macros {
+    /// The macros known to write docs from their arguments.
+    docs: BTreeSet<String>,
+    /// The macros whose definitions are read: the standard library's and the workspace's
+    /// `macro_rules!` ones, under any name they are imported as.
+    known: BTreeSet<String>,
+}
+
+impl Macros {
+    /// Whether the strings a macro (or an attribute, `IN_ATTRIBUTE`) is given may become docs: it
+    /// writes docs from them, or what it does is not read.
+    fn may_write_docs(&self, name: &str) -> bool {
+        self.docs.contains(name) || !self.known.contains(name)
+    }
+}
+
+/// The workspace's macros, read: those that write docs from their arguments themselves, those
+/// that hand their arguments on to one or to a macro not read, and the names they are imported as.
+fn macros<'a>(files: impl Iterator<Item = &'a FileDocs> + Clone) -> Macros {
+    let mut known: BTreeSet<String> = STD_MACROS.iter().map(|name| name.to_string()).collect();
+    known.extend(files.clone().flat_map(|f| f.macros.iter().cloned()));
+    fixed_point(&mut known, |known| {
+        files.clone().flat_map(|f| &f.aliases).filter(|(name, _)| known.contains(name)).map(|(_, alias)| alias.clone()).collect()
+    });
+    let mut docs: BTreeSet<String> = files.clone().flat_map(|f| f.doc_macros.iter().cloned()).collect();
+    fixed_point(&mut docs, |docs| {
+        let writes = |name: &String| docs.contains(name) || !known.contains(name);
+        let callers = files.clone().flat_map(|f| &f.forwards).filter(|(_, callee)| writes(callee)).map(|(caller, _)| caller.clone());
+        let aliases = files.clone().flat_map(|f| &f.aliases).filter(|(name, _)| docs.contains(name)).map(|(_, alias)| alias.clone());
+        callers.chain(aliases).collect()
+    });
+    Macros { docs, known }
+}
+
+/// Grow `set` by what `more` finds from it until nothing new is found.
+fn fixed_point(set: &mut BTreeSet<String>, more: impl Fn(&BTreeSet<String>) -> Vec<String>) {
     loop {
-        let before = out.len();
-        for f in files.clone() {
-            let edges = f.forwards.iter().map(|(caller, callee)| (callee, caller)).chain(f.aliases.iter().map(|(name, alias)| (name, alias)));
-            for (from, to) in edges {
-                if out.contains(from) {
-                    out.insert(to.clone());
-                }
-            }
-        }
-        if out.len() == before {
-            return out;
+        let before = set.len();
+        let found = more(set);
+        set.extend(found);
+        if set.len() == before {
+            return;
         }
     }
 }
 
 /// Every .rs file of a library's package (and of its root's directory, when that lies outside),
 /// with what its `#[path]` attributes and `include!("...")` calls bring in, read; a path a macro is
-/// given has its files' `///` comments read as docs. What cannot be read counts as a doc test.
+/// given has what the macro may copy from it read as docs (`named_files_have_doc_test`). What
+/// cannot be read counts as a doc test.
 fn read_library(library: &Library, include_ignored: bool) -> Vec<FileDocs> {
     let doubt = || FileDocs { test: true, ..FileDocs::default() };
     let Ok(dir) = std::fs::canonicalize(&library.dir) else { return vec![doubt()] };
@@ -280,15 +365,36 @@ fn read_library(library: &Library, include_ignored: bool) -> Vec<FileDocs> {
         let own = base.join(file.file_stem().unwrap_or_default());
         for path in &docs.paths {
             // Relative to the file's directory, or to its own module directory for an attribute
-            // in an inline module: either may be the one.
+            // in an inline module: either may be the one. A path that leads to neither (as from a
+            // module nested deeper) cannot be read.
+            let mut found = false;
             for candidate in [base.join(path), own.join(path)] {
-                if let Ok(canonical) = std::fs::canonicalize(&candidate)
-                    && canonical.is_file()
-                    && !listed(&canonical)
-                    && brought_in.insert(canonical)
-                {
+                let Ok(canonical) = std::fs::canonicalize(&candidate) else { continue };
+                if !canonical.is_file() {
+                    continue;
+                }
+                found = true;
+                if !listed(&canonical) && brought_in.insert(canonical) {
                     files.push(candidate);
                 }
+            }
+            docs.test |= !found;
+        }
+        // A file brought in from outside has its modules beside it, as `mod.rs` has, or in a
+        // directory of its own name: they are read too, and one found in neither cannot be read.
+        if std::fs::canonicalize(&file).map_or(true, |canonical| !listed(&canonical)) {
+            for name in &docs.modules {
+                let file_name = format!("{name}.rs");
+                let candidates = [base.join(&file_name), base.join(name).join("mod.rs"), own.join(&file_name), own.join(name).join("mod.rs")];
+                let mut found = false;
+                for candidate in candidates {
+                    let Ok(canonical) = std::fs::canonicalize(&candidate) else { continue };
+                    found = true;
+                    if !listed(&canonical) && brought_in.insert(canonical) {
+                        files.push(candidate);
+                    }
+                }
+                docs.test |= !found;
             }
         }
         // A macro reads a path relative to the package (`CARGO_MANIFEST_DIR`) or to the file. The
@@ -299,7 +405,7 @@ fn read_library(library: &Library, include_ignored: bool) -> Vec<FileDocs> {
                     && candidate.exists()
                     && let Ok(canonical) = std::fs::canonicalize(&candidate)
                     && !dir.starts_with(&canonical)
-                    && comments_have_doc_test(&canonical, include_ignored)
+                    && named_files_have_doc_test(&canonical, &listed, include_ignored)
                 {
                     docs.test = true;
                 }
@@ -330,26 +436,37 @@ fn files_under(dir: &Path, rust_only: bool, out: &mut Vec<PathBuf>) -> Result<()
     Ok(())
 }
 
-/// Whether the `///` comments of a file, or of the files under a directory, hold a code block
-/// rustdoc would compile, read as docs (what a macro given that path may copy into Rust). Rust
-/// sources are read as such, and files that are not text are skipped.
-fn comments_have_doc_test(path: &Path, include_ignored: bool) -> bool {
-    let mut files = Vec::new();
-    if path.is_dir() {
-        if files_under(path, false, &mut files).is_err() {
-            return true;
-        }
-    } else {
-        files.push(path.to_path_buf());
+/// Whether a file a macro is given, or the files under a directory it is given, hold a code block
+/// rustdoc would compile in what the macro may copy into docs (`file_has_doc_test`). The package's
+/// own .rs files (`listed`) are read already.
+fn named_files_have_doc_test(path: &Path, listed: &dyn Fn(&Path) -> bool, include_ignored: bool) -> bool {
+    if !path.is_dir() {
+        return !listed(path) && file_has_doc_test(path, true, include_ignored);
     }
-    files.iter().filter(|f| f.extension().is_none_or(|e| e != "rs")).any(|f| {
-        std::fs::read_to_string(f).is_ok_and(|text| {
-            comment_runs(&text).iter().any(|run| {
-                let fragments: Vec<(&str, bool)> = run.iter().map(|line| (*line, true)).collect();
-                compiles_code(&markdown(&fragments), include_ignored)
-            })
+    let mut files = Vec::new();
+    files_under(path, false, &mut files).is_err() || files.iter().any(|file| !listed(file) && file_has_doc_test(file, false, include_ignored))
+}
+
+/// Whether what a macro may copy into docs from a file holds a code block rustdoc would compile: a
+/// Rust file's docs (read as the package's own files are); when the macro is given the file by
+/// name (`doctest!("README.md")`), a Markdown file whole and the fenced blocks of any other text;
+/// and the `///` comments of any other file. A Rust file that cannot be read counts; other files
+/// that are not text are skipped.
+fn file_has_doc_test(file: &Path, named: bool, include_ignored: bool) -> bool {
+    let extension = file.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let Ok(text) = std::fs::read_to_string(file) else { return extension == "rs" };
+    let comments = || {
+        comment_runs(&text).iter().any(|run| {
+            let fragments: Vec<(&str, bool)> = run.iter().map(|line| (*line, true)).collect();
+            compiles_code(&markdown(&fragments), include_ignored)
         })
-    })
+    };
+    match extension.as_str() {
+        "rs" => file_docs(&text, include_ignored).test,
+        "md" | "markdown" if named => compiles_code(&text, include_ignored),
+        _ if named => compiles_fenced_code(&text, include_ignored) || comments(),
+        _ => comments(),
+    }
 }
 
 /// The runs of consecutive `///` or `//!` comment lines in a text, without their markers.
@@ -374,22 +491,42 @@ fn comment_runs(text: &str) -> Vec<Vec<&str>> {
     runs
 }
 
-/// The packages in the dependency graph that write Rust source: one of `CODE_WRITERS`, or a
-/// package that depends on one.
+/// The packages in the whole dependency graph that write Rust source (`code_writers`).
 fn code_writer_packages() -> Result<BTreeSet<String>, String> {
     let out = crate::cargo().args(["metadata", "--format-version", "1"]).output().map_err(|e| format!("cargo metadata: {e}"))?;
     if !out.status.success() {
         return Err(format!("cargo metadata failed:\n{}", String::from_utf8_lossy(&out.stderr)));
     }
     let meta: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata: bad JSON: {e}"))?;
+    code_writers(&meta)
+}
+
+/// The packages of a cargo metadata graph that write Rust source: one of `CODE_WRITERS`, or a
+/// package that uses one, itself or through the libraries it depends on. A procedural macro is
+/// not followed to the packages that use it: it runs while they compile, not when they run.
+fn code_writers(meta: &serde_json::Value) -> Result<BTreeSet<String>, String> {
     let packages = meta["packages"].as_array().ok_or("cargo metadata: no packages array")?;
-    let writes = |p: &serde_json::Value| {
-        CODE_WRITERS.iter().any(|w| p["name"] == *w)
-            || p["dependencies"]
+    let proc_macros: BTreeSet<&str> = packages
+        .iter()
+        .filter(|p| {
+            p["targets"]
                 .as_array()
-                .is_some_and(|deps| deps.iter().any(|d| d["kind"].is_null() && CODE_WRITERS.iter().any(|w| d["name"] == *w)))
-    };
-    Ok(packages.iter().filter(|p| writes(p)).filter_map(|p| p["name"].as_str().map(str::to_string)).collect())
+                .is_some_and(|targets| targets.iter().any(|t| t["kind"].as_array().is_some_and(|kinds| kinds.iter().any(|k| k == "proc-macro"))))
+        })
+        .filter_map(|p| p["name"].as_str())
+        .collect();
+    let mut writers: BTreeSet<String> = CODE_WRITERS.iter().map(|name| name.to_string()).collect();
+    fixed_point(&mut writers, |writers| {
+        let uses_writer = |d: &serde_json::Value| {
+            d["kind"].is_null() && d["name"].as_str().is_some_and(|name| writers.contains(name) && !proc_macros.contains(name))
+        };
+        packages
+            .iter()
+            .filter(|p| p["dependencies"].as_array().is_some_and(|deps| deps.iter().any(uses_writer)))
+            .filter_map(|p| p["name"].as_str().map(str::to_string))
+            .collect()
+    });
+    Ok(writers)
 }
 
 /// Whether what writes a library's build-time code (its build script and the workspace crates it
@@ -456,10 +593,12 @@ fn writes_doc_test(tokens: TokenStream, in_macro: Option<&str>, include_ignored:
 }
 
 /// Whether a string a writer writes could write a doc test: doc text as an attribute (`#[doc`,
-/// `doc =`), a `///` line it leaves open or starts with a `{}` placeholder, or whole `///` lines
-/// holding a code block. (`//!` cannot reach `include!`d code, where inner attributes are refused.)
+/// `doc =`), a block doc comment (`/**`, not `/**/` or `/***`), a `///` line it leaves open or starts
+/// with a `{}` placeholder, or whole `///` lines holding a code block. (`//!` and `/*!` cannot reach
+/// `include!`d code, where inner attributes are refused.)
 fn text_writes_doc_test(text: &str, include_ignored: bool) -> bool {
-    if text.contains("#[doc") || text.contains("doc =") || text.contains("doc=") {
+    let block_doc = text.match_indices("/**").any(|(at, _)| !matches!(text.get(at + 3..).and_then(|rest| rest.chars().next()), Some('*' | '/')));
+    if block_doc || text.contains("#[doc") || text.contains("doc =") || text.contains("doc=") {
         return true;
     }
     let lines: Vec<&str> = text.split('\n').collect();
@@ -496,6 +635,8 @@ fn walk(tokens: TokenStream, lines: &[&str], include_ignored: bool, out: &mut Fi
     let trees: Vec<TokenTree> = tokens.into_iter().collect();
     let mut docs = Vec::new();
     let mut inner_run = None;
+    // The attributes before this token name the file of a module (`#[path = ".."]`).
+    let mut module_path = false;
     let mut i = 0;
     while i < trees.len() {
         if let Some((attribute, inner, next)) = attribute(&trees, i) {
@@ -506,7 +647,9 @@ fn walk(tokens: TokenStream, lines: &[&str], include_ignored: bool, out: &mut Fi
             }
             inner_run = Some(inner);
             let parts: Vec<TokenTree> = attribute.stream().into_iter().collect();
-            read_attribute(&parts, written(&trees[i], lines), &mut docs, &mut out.paths);
+            module_path |=
+                matches!(&parts[..], [TokenTree::Ident(key), TokenTree::Punct(eq), TokenTree::Literal(_)] if *key == "path" && eq.as_char() == '=');
+            read_attribute(&parts, written(&trees[i], lines), &mut docs, &mut out.paths, &mut out.macro_literals);
             i = next;
             continue;
         }
@@ -524,12 +667,13 @@ fn walk(tokens: TokenStream, lines: &[&str], include_ignored: bool, out: &mut Fi
                     out.doc_macros.push(defined.clone());
                 }
                 forwards(body.stream(), &defined, &mut out.forwards);
+                out.macros.push(defined);
             }
             (TokenTree::Ident(name), Some(TokenTree::Punct(bang)), Some(TokenTree::Group(args)), _) if bang.as_char() == '!' => {
                 let name = name.to_string();
                 if name == "include" {
                     include(args.stream(), out);
-                } else if !READ_NO_FILE.contains(&name.as_str()) {
+                } else if !STD_MACROS.contains(&name.as_str()) {
                     referenced(args.stream(), &mut out.referenced);
                 }
                 collect_literals(args.stream(), &name, &mut out.macro_literals);
@@ -538,7 +682,18 @@ fn walk(tokens: TokenStream, lines: &[&str], include_ignored: bool, out: &mut Fi
             (TokenTree::Ident(name), Some(TokenTree::Ident(keyword)), Some(TokenTree::Ident(other)), _) if *keyword == "as" => {
                 out.aliases.push((name.to_string(), other.to_string()));
             }
+            (TokenTree::Ident(keyword), Some(TokenTree::Ident(name)), Some(TokenTree::Punct(semicolon)), _)
+                if *keyword == "mod" && semicolon.as_char() == ';' && !module_path =>
+            {
+                out.modules.push(name.to_string().trim_start_matches("r#").to_string());
+            }
             _ => {}
+        }
+        // An item ends at its `;` or its body.
+        if matches!(&trees[i], TokenTree::Punct(p) if p.as_char() == ';')
+            || matches!(&trees[i], TokenTree::Group(g) if g.delimiter() == Delimiter::Brace)
+        {
+            module_path = false;
         }
         if let TokenTree::Group(group) = &trees[i] {
             walk(group.stream(), lines, include_ignored, out);
@@ -600,8 +755,8 @@ struct Fragment {
 }
 
 /// The doc fragments (`doc = ...`, also inside `cfg_attr`) and module paths (`path = "..."`) of one
-/// attribute's contents.
-fn read_attribute(parts: &[TokenTree], written: Written, docs: &mut Vec<Fragment>, paths: &mut Vec<String>) {
+/// attribute's contents, and the strings in any other attribute (under `IN_ATTRIBUTE`).
+fn read_attribute(parts: &[TokenTree], written: Written, docs: &mut Vec<Fragment>, paths: &mut Vec<String>, literals: &mut Vec<(String, String)>) {
     match parts {
         [TokenTree::Ident(key), TokenTree::Punct(eq), value @ ..] if *key == "doc" && eq.as_char() == '=' => {
             let text = match value {
@@ -618,10 +773,10 @@ fn read_attribute(parts: &[TokenTree], written: Written, docs: &mut Vec<Fragment
         [TokenTree::Ident(key), TokenTree::Group(args)] if *key == "cfg_attr" => {
             // `cfg_attr(predicate, attribute, ...)`: each attribute after the predicate.
             for attribute in split_commas(args.stream()).iter().skip(1) {
-                read_attribute(attribute, written, docs, paths);
+                read_attribute(attribute, written, docs, paths, literals);
             }
         }
-        _ => {}
+        _ => collect_literals(parts.iter().cloned().collect(), IN_ATTRIBUTE, literals),
     }
 }
 
@@ -661,7 +816,8 @@ fn mentions(trees: &[TokenTree], text: &str) -> bool {
     })
 }
 
-/// Whether a `macro_rules!` body writes a doc from one of its arguments (`doc = $text`).
+/// Whether a `macro_rules!` body writes a doc from one of its arguments: `doc = $text`, or an
+/// attribute made from one (`#[$meta]`, `#[cfg_attr(test, $meta)]`), which may be `doc = ".."`.
 fn writes_doc_from_argument(body: TokenStream) -> bool {
     let trees: Vec<TokenTree> = body.into_iter().collect();
     trees.iter().enumerate().any(|(i, tree)| match tree {
@@ -669,6 +825,7 @@ fn writes_doc_from_argument(body: TokenStream) -> bool {
             (trees.get(i + 1), trees.get(i + 2)),
             (Some(TokenTree::Punct(eq)), Some(TokenTree::Punct(dollar))) if eq.as_char() == '=' && dollar.as_char() == '$'
         ),
+        TokenTree::Punct(_) => attribute(&trees, i).is_some_and(|(attribute, _, _)| has_metavariable(attribute.stream())),
         TokenTree::Group(group) => writes_doc_from_argument(group.stream()),
         _ => false,
     })
@@ -715,12 +872,13 @@ fn collect_literals(args: TokenStream, name: &str, out: &mut Vec<(String, String
     }
 }
 
-/// The strings in a macro call's arguments that may name a file or directory.
+/// The strings in a macro call's arguments that may name a file or directory: one line, shorter than
+/// 260 bytes.
 fn referenced(args: TokenStream, out: &mut Vec<String>) {
     for tree in args {
         match tree {
             TokenTree::Literal(lit) => {
-                if let Some(text) = crate::shared::string_literal(&lit).filter(|t| !t.is_empty() && t.len() < 260 && !t.contains(char::is_whitespace))
+                if let Some(text) = crate::shared::string_literal(&lit).filter(|t| !t.trim().is_empty() && t.len() < 260 && !t.contains(['\n', '\r']))
                 {
                     out.push(text);
                 }
@@ -781,18 +939,27 @@ fn markdown(fragments: &[(&str, bool)]) -> String {
 }
 
 /// Whether rustdoc compiles a code block of `markdown`: an indented one, or a fenced one whose info
-/// string says Rust. The parser options are rustdoc's.
+/// string says Rust.
 fn compiles_code(markdown: &str, include_ignored: bool) -> bool {
-    if !could_hold_code(markdown) {
-        return false;
-    }
+    could_hold_code(markdown) && code_blocks(markdown, true, include_ignored)
+}
+
+/// `compiles_code` for fenced blocks only: in text that is not Markdown (a `.txt` a macro may make
+/// a doc), indentation means little, and a fence is written on purpose.
+fn compiles_fenced_code(text: &str, include_ignored: bool) -> bool {
+    (text.contains("```") || text.contains("~~~")) && code_blocks(text, false, include_ignored)
+}
+
+/// Whether `markdown`, parsed with the options rustdoc uses, holds a fenced block rustdoc compiles,
+/// or (with `indented`) an indented block.
+fn code_blocks(markdown: &str, indented: bool, include_ignored: bool) -> bool {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_SMART_PUNCTUATION;
     Parser::new_ext(markdown, options).any(|event| match event {
-        Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => true,
+        Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => indented,
         Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => compiled(&info, include_ignored),
         _ => false,
     })
@@ -834,11 +1001,12 @@ mod tests {
         file_docs(source, false).test
     }
 
-    /// Whether a crate made of these files has a doc test in strings passed to doc-writing macros.
+    /// Whether a crate made of these files has a doc test in strings passed to macros or attributes
+    /// that may write docs.
     fn found_in_calls(files: &[&str]) -> bool {
         let files: Vec<FileDocs> = files.iter().map(|source| file_docs(source, false)).collect();
-        let macros = doc_macros(files.iter());
-        files.iter().flat_map(|f| &f.macro_literals).any(|(name, text)| macros.contains(name) && literal_has_doc_test(text, false))
+        let macros = macros(files.iter());
+        files.iter().flat_map(|f| &f.macro_literals).any(|(name, text)| macros.may_write_docs(name) && literal_has_doc_test(text, false))
     }
 
     const DOCUMENTED: &str = "macro_rules! documented {\n    ($doc:literal) => {\n        #[doc = $doc]\n        pub struct S;\n    };\n}\n";
@@ -927,6 +1095,10 @@ mod tests {
         assert!(found_in_calls(&[DOCUMENTED, "documented!(\"```\\nlet x = 1;\\n```\");\n"]));
         // A literal passed to a macro that writes no docs is no doc.
         assert!(!found_in_calls(&[DOCUMENTED, "println!(\"```\\nlet x = 1;\\n```\");\n"]));
+        // An attribute made from an argument may be a doc too.
+        let tagged = "macro_rules! tagged {\n    ($m:meta) => {\n        #[$m]\n        pub struct S;\n    };\n}\n";
+        assert_eq!(file_docs(tagged, false).doc_macros, ["tagged"]);
+        assert!(found_in_calls(&[tagged, "tagged!(doc = \"```\\nlet x = 1;\\n```\");\n"]));
     }
 
     #[test]
@@ -934,6 +1106,149 @@ mod tests {
         let wrapper = "macro_rules! wrapper {\n    ($d:literal) => {\n        documented!($d);\n    };\n}\n";
         assert!(found_in_calls(&[DOCUMENTED, wrapper, "wrapper!(\"```\\nlet x = 1;\\n```\");\n"]));
         assert!(found_in_calls(&[DOCUMENTED, "use crate::documented as d;\nd!(\"```\\nlet x = 1;\\n```\");\n"]));
+    }
+
+    #[test]
+    fn strings_given_to_a_macro_or_attribute_that_is_not_read_count() {
+        let block = "\"```\\nlet x = 1;\\n```\"";
+        // A dependency's macro or attribute, or a procedural one, may write a doc from a string.
+        assert!(found_in_calls(&[&format!("dependency::documented!({block});\n")]));
+        assert!(found_in_calls(&[&format!("#[dependency::documented({block})]\nfn f() {{}}\n")]));
+        assert!(found_in_calls(&[&format!("#[cfg_attr(test, documented = {block})]\nfn f() {{}}\n")]));
+        // So may a workspace macro that hands its argument on to one.
+        let wrapper = "macro_rules! wrap {\n    ($d:literal) => {\n        dependency::documented!($d);\n    };\n}\n";
+        assert!(found_in_calls(&[wrapper, &format!("wrap!({block});\n")]));
+        // The standard library's macros, and the workspace's that write no docs, are read.
+        let plain = "macro_rules! plain {\n    ($s:literal) => {\n        const S: &str = $s;\n    };\n}\n";
+        assert!(!found_in_calls(&[&format!("println!({block});\nuse std::println as say;\nsay!({block});\n")]));
+        assert!(!found_in_calls(&[plain, &format!("plain!({block});\nuse crate::plain as p;\np!({block});\n")]));
+        // A string with no code block is no doc wherever it goes.
+        assert!(!found_in_calls(&["dependency::documented!(\"Plain    words.\");\n#[dependency::documented(\"Plain.\")]\nfn f() {}\n"]));
+    }
+
+    /// Whether a library whose package is `package/` among these files (path, text) has a doc
+    /// test, by its files and what they bring in or name.
+    fn read_package(files: &[(&str, &str)]) -> bool {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!("solidcraft-doc-tests-{}-{unique}", std::process::id()));
+        for (path, text) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        let package = root.join("package");
+        let library = Library {
+            name: "probe".into(),
+            root: package.join("src").join("lib.rs"),
+            dir: package,
+            writers: Vec::new(),
+            external_writers: Vec::new(),
+        };
+        let found = read_library(&library, false).iter().any(|f| f.test);
+        std::fs::remove_dir_all(&root).unwrap();
+        found
+    }
+
+    #[test]
+    fn a_path_that_leads_to_no_file_counts() {
+        assert!(read_package(&[("package/src/lib.rs", "#[path = \"missing.rs\"]\nmod m;\n")]));
+        assert!(read_package(&[("package/src/lib.rs", "include!(\"missing.rs\");\n")]));
+        let other = ("package/src/other.rs", "/// Plain.\npub fn f() {}\n");
+        assert!(!read_package(&[("package/src/lib.rs", "#[path = \"other.rs\"]\nmod m;\n"), other]));
+    }
+
+    #[test]
+    fn files_a_macro_is_given_are_read_for_what_it_may_copy_into_docs() {
+        let rust = "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}\n";
+        assert!(read_package(&[("package/src/lib.rs", "reads!(\"../shared/part.rs\");\n"), ("shared/part.rs", rust)]));
+        assert!(read_package(&[("package/src/lib.rs", "reads!(\"../shared\");\n"), ("shared/part.rs", rust)]));
+        // A Markdown file named is read whole; one in a folder named is not (a key such as
+        // `json!({"notes": ..})` may name a folder by chance).
+        let readme = "# Use\n\n```\nlet x = 1;\n```\n";
+        assert!(read_package(&[("package/src/lib.rs", "doctest!(\"../README.md\");\n"), ("README.md", readme)]));
+        assert!(!read_package(&[("package/src/lib.rs", "reads!(\"../notes\");\n"), ("notes/README.md", readme)]));
+        // The standard library's macros read no docs.
+        assert!(!read_package(&[("package/src/lib.rs", "const R: &str = include_str!(\"../../README.md\");\n"), ("README.md", readme)]));
+        // Another text file named has its fenced blocks read, not its indentation; a name may
+        // have spaces.
+        assert!(read_package(&[("package/src/lib.rs", "doctest!(\"../guide.txt\");\n"), ("guide.txt", readme)]));
+        assert!(!read_package(&[("package/src/lib.rs", "shader!(\"../shade.wgsl\");\n"), ("shade.wgsl", "fn main() {\n\n    let x = 1;\n}\n")]));
+        assert!(read_package(&[("package/src/lib.rs", "doctest!(\"../My Guide.md\");\n"), ("My Guide.md", readme)]));
+    }
+
+    #[test]
+    fn the_modules_of_a_file_brought_in_from_outside_are_read() {
+        let rust = "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}\n";
+        let lib = ("package/src/lib.rs", "#[path = \"../../shared/foo.rs\"]\nmod foo;\n");
+        assert!(read_package(&[lib, ("shared/foo.rs", "mod bar;\n"), ("shared/bar.rs", rust)]));
+        assert!(read_package(&[lib, ("shared/foo.rs", "pub mod bar;\n"), ("shared/foo/bar/mod.rs", rust)]));
+        // One declared but found nowhere cannot be read.
+        assert!(read_package(&[lib, ("shared/foo.rs", "pub mod gone;\n")]));
+        // One with a `#[path]` of its own is read from there.
+        let plain = "/// Plain.\npub fn f() {}\n";
+        assert!(!read_package(&[lib, ("shared/foo.rs", "#[path = \"other.rs\"]\npub(crate) mod bar;\n"), ("shared/other.rs", plain)]));
+        // The package's own files are all read anyway; their modules are not looked up.
+        assert!(!read_package(&[("package/src/lib.rs", "#[cfg(any())]\nmod absent;\n")]));
+    }
+
+    #[test]
+    fn unknown_package_names_are_refused() {
+        let meta = serde_json::json!({ "packages": [{ "name": "solidcraft-doc" }, { "name": "solidcraft" }] });
+        assert!(known_packages(&meta, &["solidcraft-doc", "solidcraft"]).is_ok());
+        assert!(known_packages(&meta, &["solidcraft", "solidcraft-dock"]).is_err_and(|e| e.contains("`solidcraft-dock`")));
+    }
+
+    #[test]
+    fn every_library_cargo_test_doc_tests_is_read() {
+        let package = |name: &str, kind: &str, doctest: bool| {
+            serde_json::json!({
+                "name": name,
+                "manifest_path": format!("/w/{name}/Cargo.toml"),
+                "targets": [{ "kind": [kind], "doctest": doctest, "src_path": format!("/w/{name}/src/lib.rs") }],
+                "dependencies": [],
+            })
+        };
+        let meta = serde_json::json!({ "packages": [
+            package("off", "lib", false),
+            package("derive", "proc-macro", true),
+            package("app", "bin", false),
+            package("plugin", "cdylib", true),
+        ] });
+        let names: Vec<String> = libraries(&meta).unwrap().into_iter().map(|library| library.name).collect();
+        assert_eq!(names, ["derive", "off"]);
+    }
+
+    #[test]
+    fn the_doc_command_keeps_the_workspace_and_the_callers_package_arguments() {
+        let c = doc_command(&["a", "b", "c"], &["b"], &["-p", "a", "--locked"], &["--include-ignored"]);
+        let args: Vec<String> = c.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        let expected =
+            ["test", "--workspace", "--profile", "ci", "--doc", "--exclude", "a", "--exclude", "c", "-p", "a", "--locked", "--", "--include-ignored"];
+        assert_eq!(args, expected);
+    }
+
+    #[test]
+    fn code_writers_are_found_through_libraries_but_not_through_procedural_macros() {
+        let package = |name: &str, kind: &str, dependencies: &[(&str, Option<&str>)]| {
+            let dependencies: Vec<_> = dependencies.iter().map(|(name, kind)| serde_json::json!({ "name": name, "kind": kind })).collect();
+            serde_json::json!({ "name": name, "targets": [{ "kind": [kind] }], "dependencies": dependencies })
+        };
+        let meta = serde_json::json!({ "packages": [
+            package("quote", "lib", &[]),
+            package("generator", "lib", &[("quote", None)]),
+            package("build-helper", "lib", &[("generator", None)]),
+            package("serde_derive", "proc-macro", &[("quote", None)]),
+            package("serde", "lib", &[("serde_derive", None)]),
+            package("toml", "lib", &[("serde", None)]),
+            package("tested", "lib", &[("quote", Some("dev"))]),
+        ] });
+        let writers = code_writers(&meta).unwrap();
+        for (name, writes) in
+            [("generator", true), ("build-helper", true), ("serde_derive", true), ("serde", false), ("toml", false), ("tested", false)]
+        {
+            assert_eq!(writers.contains(name), writes, "{name}");
+        }
     }
 
     #[test]
@@ -950,6 +1265,9 @@ mod tests {
         assert!(source_writes_doc_test("fn main() { out.push_str(\"#[doc = \\\"x\\\"]\"); }", false));
         assert!(source_writes_doc_test("fn main() { let t = quote! { #[doc = #text] pub struct S; }; }", false));
         assert!(source_writes_doc_test("fn main() { out.push_str(\"/// ```\\n/// let x = 1;\\n/// ```\\n\"); }", false));
+        assert!(source_writes_doc_test("fn main() { out.push_str(\"/** Made. */\\npub struct S;\\n\"); }", false));
+        // A glob or an empty comment is no block doc.
+        assert!(!source_writes_doc_test("fn main() { let glob = \"assets/**/*.png\"; let empty = \"/**/\"; }", false));
         // The writer's own docs and attributes are not what it writes.
         assert!(!source_writes_doc_test("/// ```\n/// let x = 1;\n/// ```\n#[doc = \"y\"]\nfn main() {}", false));
     }
