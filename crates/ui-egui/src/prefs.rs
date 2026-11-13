@@ -1151,6 +1151,9 @@ preference_settings! {
     /// Shade the viewport in linear light with a sky fill, so dark parts keep their shape
     /// (#7974). Off by default: the viewport shades as it always has.
     dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
+    /// Opaque bodies are lit by a soft studio in the viewport: metal and glossy appearances (PBR)
+    /// reflect it, other bodies get a satin finish. Off: shaded flat in their colour, as before.
+    viewport_material_finish: bool = true, PAGE_GRAPHICS => check_id("prefs.viewport_material_finish");
     /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
     cosmetic_threads: bool = false, PAGE_GRAPHICS;
     /// A section hatches each cut body its own way (the default), or every one alike, in the cap
@@ -1276,6 +1279,9 @@ preference_settings! {
     max_step_file_mb: u64 = DEFAULT_STEP_MB, PAGE_GENERAL;
     /// The largest design file opened or saved, in MB (#4086): from the default (256) up to 16 GB.
     max_design_file_mb: u64 = DEFAULT_DESIGN_MB, PAGE_GENERAL;
+    /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
+    /// its solids as one Import feature, as before.
+    freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
@@ -12165,9 +12171,11 @@ mod ambient_occlusion_tests {
         use solidcraft_viewport::UpAxis;
         let old: Prefs = serde_json::from_value(json!({"msaa": 4})).unwrap();
         assert!(!old.dark_parts_shading && !Prefs::default().dark_parts_shading);
-        assert_eq!(crate::viewport::sky_uniform(false, UpAxis::Z), [0.0; 4], "off: shaded as before");
-        assert_eq!(crate::viewport::sky_uniform(true, UpAxis::Z), [0.0, 0.0, 1.0, 1.0]);
-        assert_eq!(crate::viewport::sky_uniform(true, UpAxis::Y), [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(crate::viewport::sky_uniform(false, false, UpAxis::Z), [0.0, 0.0, 1.0, 0.0], "off: shaded as before");
+        assert_eq!(crate::viewport::sky_uniform(true, false, UpAxis::Z), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(crate::viewport::sky_uniform(true, false, UpAxis::Y), [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(crate::viewport::sky_uniform(false, true, UpAxis::Z), [0.0, 0.0, 1.0, 2.0], "material finish alone");
+        assert_eq!(crate::viewport::sky_uniform(true, true, UpAxis::Y), [0.0, 1.0, 0.0, 3.0], "both");
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Graphics"}));
         super::reveal_preference(&mut h, "prefs:dark_parts_shading");
