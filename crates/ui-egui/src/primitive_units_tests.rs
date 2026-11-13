@@ -1029,3 +1029,26 @@ fn a_point_selected_in_the_open_sketch_still_places_the_sphere_when_the_sketch_e
     assert!(h.app.session.active_sketch.is_none(), "the sphere ends the sketch");
     assert_eq!(sent(&h)["center"], json!([12.0, 7.0, 20.0]));
 }
+
+#[test]
+fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
+    // #11230: the Point input wakes snap points (a hole's centre, an edge's middle, a face's
+    // centre), and a snapped point fills the placement fields.
+    for cmd in ["solid.box", "solid.sphere", "solid.torus"] {
+        let mut h = design("mm");
+        h.app.start(cmd);
+        h.frames(3);
+        assert!(crate::snap_wake::wanted(&h.app), "{cmd}");
+        let point = solidcore_record::Vec3::new(5.0, 7.5, 0.0);
+        let hit = crate::viewport::Hit::Vertex { body: String::new(), point };
+        let sel = h.app.dialog.as_ref().and_then(|d| d.active_input()).and_then(|i| i.accepts(&hit, None, |_, _| false));
+        let Some(sel) = sel else { panic!("{cmd}: the snap point is not taken") };
+        crate::viewport::dialog_pick(&mut h.app, &hit, sel);
+        h.frames(2);
+        let want: Vec<(&str, String)> = [("X", "5 mm"), ("Y", "7.5 mm"), ("Z", "0 mm")].iter().map(|(k, v)| (*k, v.to_string())).collect();
+        assert_shown(&h, &want);
+        // Off in Preferences, nothing wakes.
+        h.app.preferences.snap_points = false;
+        assert!(!crate::snap_wake::wanted(&h.app), "{cmd}");
+    }
+}

@@ -1337,11 +1337,13 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                 if ui.is_sizing_pass() {
                     response.request_focus();
                 }
-                // It wraps but stays one line: Enter ends the edit as in a single-line field.
+                // It wraps but stays one line: Enter (or Shift+Enter, which moves up a row) ends the
+                // edit as in a single-line field.
                 // Raw events, as the table reads them: an accepted completion has already taken its Enter.
                 let enter = ui.input(|i| {
                     i.raw.events.iter().any(|e| {
-                        matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE)
+                        matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. }
+                            if *modifiers == egui::Modifiers::NONE || modifiers.shift_only())
                     })
                 });
                 if response.has_focus() && enter {
@@ -1750,7 +1752,7 @@ pub fn password_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str)
 /// Bounded integer or decimal preference with its original drag step and unit suffix.
 /// Tokens: scope control/font tokens. Values and limits are caller data.
 pub fn number_field<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, speed: f64, suffix: &str) -> Response {
-    bounded_number_field(ui, value, range, speed, suffix, true)
+    bounded_number_field(ui, value, range, speed, suffix, true, false)
 }
 
 /// A bounded editor that preserves an existing out-of-range value until the person edits it.
@@ -1763,7 +1765,12 @@ pub fn number_field_preserving<T: egui::emath::Numeric>(
     speed: f64,
     suffix: &str,
 ) -> Response {
-    bounded_number_field(ui, value, range, speed, suffix, false)
+    bounded_number_field(ui, value, range, speed, suffix, false, false)
+}
+
+/// A number editor for narrow columns that displays large magnitudes in scientific notation.
+pub fn compact_number_field(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusive<f64>, speed: f64, suffix: &str) -> Response {
+    bounded_number_field(ui, value, range, speed, suffix, true, true)
 }
 
 fn bounded_number_field<T: egui::emath::Numeric>(
@@ -1773,10 +1780,24 @@ fn bounded_number_field<T: egui::emath::Numeric>(
     speed: f64,
     suffix: &str,
     clamp_existing: bool,
+    compact: bool,
 ) -> Response {
-    let response = ui.add(
-        egui::DragValue::new(value).range(range).clamp_existing_to_range(clamp_existing).speed(speed).suffix(suffix).custom_parser(parse_number),
-    );
+    let mut widget =
+        egui::DragValue::new(value).range(range).clamp_existing_to_range(clamp_existing).speed(speed).suffix(suffix).custom_parser(parse_number);
+    if compact {
+        let id = ui.next_auto_id();
+        let ctx = ui.ctx().clone();
+        widget = widget.custom_formatter(move |value, decimals| {
+            if ctx.memory(|memory| memory.has_focus(id)) {
+                value.to_string()
+            } else if value.abs() >= 1e6 {
+                format!("{value:.3e}")
+            } else {
+                egui::emath::format_with_decimals_in_range(value, decimals)
+            }
+        });
+    }
+    let response = ui.add(widget);
     if response.has_focus() {
         super::settings_search::note_key_sink(ui.ctx());
     }

@@ -160,15 +160,25 @@ fn cache_path(key: &str) -> Option<std::path::PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 const KEEP_PICTURES: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
 
+#[cfg(test)]
+thread_local! {
+    /// A test that ages pictures on purpose keeps them in its own folder, so the once-a-run sweep
+    /// another test starts cannot delete them between the aging and the read.
+    static TEST_PICTURES: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 /// Where Home keeps its pictures: the per-user cache folder, which is still there after a restart,
 /// so a design that has not changed is not rebuilt for its picture at every launch.
 #[cfg(not(target_arch = "wasm32"))]
 fn pictures_dir() -> Option<std::path::PathBuf> {
     // Tests never touch the user's real folder.
-    if cfg!(test) {
-        return Some(std::env::temp_dir().join("SolidCraft").join("thumbnails"));
-    }
-    Some(solidcraft_engine::recovery::cache_dir()?.join("thumbnails"))
+    #[cfg(test)]
+    let own = TEST_PICTURES.with(|d| d.borrow().clone()).unwrap_or_else(|| std::env::temp_dir().join("SolidCraft").join("thumbnails"));
+    #[cfg(test)]
+    let dir = Some(own);
+    #[cfg(not(test))]
+    let dir = Some(solidcraft_engine::recovery::cache_dir()?.join("thumbnails"));
+    dir
 }
 
 /// Delete the pictures not read for [`KEEP_PICTURES`], once a run, off the window thread: saving a
@@ -1283,6 +1293,8 @@ mod tests {
     #[test]
     fn reading_a_picture_keeps_it_from_the_sweep_of_old_ones() {
         let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let own = std::env::temp_dir().join(format!("solidcraft-kept-pictures-{}-{nonce}", std::process::id()));
+        TEST_PICTURES.with(|d| *d.borrow_mut() = Some(own.clone()));
         let design = std::env::temp_dir().join(format!("solidcraft-kept-thumb-{}-{nonce}.sc", std::process::id()));
         std::fs::write(&design, b"design").unwrap();
         let key = design.to_string_lossy().into_owned();
@@ -1306,6 +1318,8 @@ mod tests {
         sweep();
         assert!(!png.exists(), "a picture nothing read for a month goes");
         std::fs::remove_file(design).unwrap();
+        std::fs::remove_dir_all(own).unwrap();
+        TEST_PICTURES.with(|d| *d.borrow_mut() = None);
     }
 
     /// STEP opens deliberately have no save path, but their source still gets a cache entry.

@@ -1289,6 +1289,8 @@ fn replay_solver_error(
     error.code = note.code;
     error.status = note.status;
     error.edge_type = note.edge_type;
+    // (not upstream) the note's own site, written below, or none of it
+    error.no_room_without_site = note.no_room_without_site;
     error.edge = map(note.edge);
     for (from, to) in [
         (&note.surfaces, &mut error.surfaces),
@@ -1326,6 +1328,7 @@ fn replay_corner_error(
     error.status = note.status;
     error.corner_type = note.corner_type;
     error.vertex = map(note.vertex);
+    error.no_room_without_site = false; // (not upstream: it names the vertex)
     for surface in &note.surfaces {
         let surface = map(*surface);
         if !error.surfaces.contains(&surface) {
@@ -2670,6 +2673,42 @@ impl<'target> FilletSession<'target> {
         &self.executive.error
     }
 
+    /// Where the executive noted its last failure, on the caller's body, as the typed failure
+    /// record names it ([`crate::error::Site`]): the error info's filleted edge, side face (else
+    /// end face) and filleted vertex where each is topology of the target body (an object of
+    /// an intermediate body names nothing), and its point. A no-room refusal noted without a
+    /// site (`ErrorInfo::no_room_without_site`) names none: the record's site fields are
+    /// then an earlier failure's. Reading it changes nothing.
+    #[must_use]
+    pub fn error_site(&self) -> crate::error::Site {
+        use crate::error::{Site, TargetEdge, TargetFace, TargetVertex};
+        let info = &self.executive.error;
+        // a no-room refusal noted without a site: what the record holds is an earlier
+        // failure's
+        if info.no_room_without_site
+            && info.code == crate::blend::fillet_geom::p1::FilletErrorType::NoRoom as i32
+        {
+            return Site::default();
+        }
+        Site {
+            edge: info.edge.as_ref().and_then(TargetEdge::of_fillet_object),
+            face: info
+                .side_face
+                .as_ref()
+                .and_then(TargetFace::of_fillet_object)
+                .or_else(|| {
+                    info.end_face
+                        .as_ref()
+                        .and_then(TargetFace::of_fillet_object)
+                }),
+            vertex: info
+                .vertex
+                .as_ref()
+                .and_then(TargetVertex::of_fillet_object),
+            at: info.location,
+        }
+    }
+
     /// The fork's `SetSweptTurns` (smlib#79 step 4b; WR-697): a blend corner's Turn (two rounds of one
     /// convexity that turn at a sharp side edge) is Swept, its corner face the rounds' end
     /// section revolved about the side edge (an exact torus), instead of Mitred; a Swept
@@ -2818,10 +2857,12 @@ impl<'target> FilletSession<'target> {
     #[must_use]
     pub fn fit_size(&self) -> Option<crate::blend::fillet_executive::FitSize<EdgeId>> {
         let fit = self.executive.fit_size()?;
-        let edge = match fit.edge {
-            Some(FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))) => Some(e),
-            _ => None,
-        };
+        // the mapping to the caller's body the typed failure record's site uses
+        let edge = fit
+            .edge
+            .as_ref()
+            .and_then(crate::error::TargetEdge::of_fillet_object)
+            .map(crate::error::TargetEdge::id);
         Some(crate::blend::fillet_executive::FitSize {
             size: fit.size,
             edge,
@@ -3540,7 +3581,7 @@ impl crate::blend::fillet_executive::p1::SmoothSequenceAccess<FilletObject> for 
         self.edge_caches.remove(&edge);
         let serial = self.target_serial;
         let key_of = |entity| crate::topology::brep::p3::topology_ref(serial, entity);
-        crate::topology::brep::p3::seed_records(
+        crate::topology::brep::p3::seed_records_since(
             &mut self.notification_records,
             self.target,
             &key_of,
@@ -6178,7 +6219,7 @@ impl SessionObjects<'_> {
     /// The end of `SmFilletNx1Corner::MakeCornerTopology` for a mixed-convexity end
     /// face spanning several faces: the corner's vertex geometry and the two new side
     /// edges' geometry (statuses ignored, as upstream), then the coincidence of the
-    /// kept extended end surface with the other side edge.
+    /// kept extended end surface with the end cap's piece of the other side edge.
     fn nx1_end_gap_checks(
         &mut self,
         k: &Kernel,
@@ -6251,10 +6292,29 @@ impl SessionObjects<'_> {
                     "the edge use's edge",
                 )
             })?;
-        let curve = crate::topology::edge::curve(self.target, other_edge)?.ok_or_else(|| {
-            SolidError::blend_missing("SmFilletNx1Corner::MakeCornerTopology", "the edge's curve")
-        })?;
-        let interval = crate::topology::edge::interval(self.target, other_edge)?;
+        let mut curve =
+            crate::topology::edge::curve(self.target, other_edge)?.ok_or_else(|| {
+                SolidError::blend_missing(
+                    "SmFilletNx1Corner::MakeCornerTopology",
+                    "the edge's curve",
+                )
+            })?;
+        let mut interval = crate::topology::edge::interval(self.target, other_edge)?;
+        // (not upstream, #15505) The end cap meets OtherSideEdge only along its own edge
+        // there, from the vertex to the rail's crossing, whose curve the loop above set:
+        // that piece must lie on the extended surface, not the whole edge (upstream tests
+        // the whole edge, so an edge running on past the extension gets a G0 corner patch
+        // although the cap lies on the extended surface). Where that edge got no curve
+        // (its geometry's status is ignored above) the whole edge is tested, as upstream.
+        for edge in [gaps.edge1, gaps.edge2] {
+            if self.pseudo.fillet_edge(edge)?.original_edge() != Some(other_edge) {
+                continue;
+            }
+            if let Some(piece) = crate::topology::edge::curve(self.pseudo.brep(), edge)? {
+                curve = piece;
+                interval = piece.natural_interval();
+            }
+        }
         let surface = self.extended_surfaces.get(&face).ok_or_else(|| {
             SolidError::blend_missing(
                 "SmFilletNx1Corner::MakeCornerTopology",
@@ -7378,6 +7438,69 @@ mod tests {
                 assert_eq!((error.vertex, error.location), (None, None));
             }
         }
+    }
+
+    #[test]
+    fn a_no_room_refusal_after_an_unsupported_corner_names_no_stale_site() {
+        let mut k = Kernel::default();
+        k.fixes.fillet_vertex_error_diagnostics = true;
+        let mut body = pentagonal_pyramid(&mut k);
+        let apex = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|vertex| crate::topology::vertex::point(&body, *vertex).unwrap().z > 1.0)
+            .unwrap();
+        let side_edges = crate::topology::brep::p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .filter(|edge| {
+                crate::topology::edge::vertices(&body, *edge, None)
+                    .unwrap()
+                    .iter()
+                    .flatten()
+                    .any(|vertex| *vertex == apex)
+            })
+            .collect::<Vec<_>>();
+        let apex_point = crate::topology::vertex::point(&body, apex).unwrap();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &side_edges[..3], 0.5, 1, 1, 1.0)
+            .unwrap();
+        // step by step: the apex corner is noted unsupported, at the apex
+        session.create_corners(&k, None).unwrap();
+        let site = session.error_site();
+        assert_eq!(
+            (site.vertex.map(crate::error::TargetVertex::id), site.at),
+            (Some(apex), Some(apex_point))
+        );
+        // a later no-room refusal noted without a site does not name the apex
+        assert!(session
+            .executive
+            .record_no_room(
+                crate::blend::fillet_executive::NoRoomReason::RailLeavesFace,
+                "no room"
+            )
+            .is_err());
+        assert_eq!(session.error_info().code, FilletErrorType::NoRoom as i32);
+        // (the record itself keeps the earlier fields, as upstream's overload does)
+        assert_eq!(session.error_info().location, Some(apex_point));
+        assert_eq!(session.error_site(), crate::error::Site::default());
+        // a no-room refusal noted at a vertex names it again
+        session.executive.error.note_vertex_error(
+            Some(FilletObject::Topology(
+                FilletBody::Target,
+                EntityRef::Vertex(apex),
+            )),
+            Some(apex_point),
+            FilStatus::Failure,
+            FilletErrorType::NoRoom,
+            Some("no room at the corner"),
+        );
+        let site = session.error_site();
+        assert_eq!(
+            (site.vertex.map(crate::error::TargetVertex::id), site.at),
+            (Some(apex), Some(apex_point))
+        );
     }
 }
 

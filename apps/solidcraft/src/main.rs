@@ -338,6 +338,27 @@ impl eframe::App for App {
             self.setup.ui(ui);
             return;
         }
+        if let Some(window) = frame.winit_window() {
+            self.solve.refresh_panel_monitors(|| {
+                let primary = window.primary_monitor();
+                window
+                    .available_monitors()
+                    .map(|monitor| {
+                        let position = monitor.position();
+                        let size = monitor.size();
+                        solidcraft_ui_egui::panel_runtime::NativeMonitor {
+                            name: monitor.name(),
+                            bounds: egui::Rect::from_min_size(
+                                egui::pos2(position.x as f32, position.y as f32),
+                                egui::vec2(size.width as f32, size.height as f32),
+                            ),
+                            scale: monitor.scale_factor() as f32,
+                            primary: primary.as_ref() == Some(&monitor),
+                        }
+                    })
+                    .collect()
+            });
+        }
         content_ui(&mut self.solve, ui);
         // After the frame's UI, so a setting changed in it (Preferences' OK) is written now.
         let now = std::time::Instant::now();
@@ -1961,7 +1982,7 @@ mod prefs_writer_tests {
         assert!(!super::changes_settings(&egui::Event::MouseMoved(egui::Vec2::X)));
     }
 
-    /// A setting that changes in every frame (a panel's width while its edge is dragged) doesn't
+    /// A setting that changes in every frame (for example while a slider is dragged) doesn't
     /// write the file in every frame: at most once a second, and the last change is on disk at
     /// most a second after it was made, with a frame asked for then so an idle app writes it.
     #[test]
@@ -1975,19 +1996,19 @@ mod prefs_writer_tests {
         // 1.5 s of dragging at 60 frames a second, with input in every frame.
         for n in 0..94u32 {
             let now = start + frame * n;
-            app.preferences.browser_width = 200.0 + n as f32;
+            app.preferences.ui_scale = 1.25 + n as f32 / 100.0;
             assert!(writer.due(true, now));
             asked = writer.store(&mut disk, app.prefs(), now);
         }
         assert_eq!(disk.flushes, 2, "the first change at once, then one a second later");
-        let wait = asked.expect("the last width waits, and a frame is asked for when it can be written");
+        let wait = asked.expect("the last value waits, and a frame is asked for when it can be written");
         assert!(wait <= PrefsWriter::INTERVAL);
 
         // The drag ends: no more input. Frames before the wait is over don't even look.
         let end = start + frame * 93;
         assert!(writer.due(false, end + frame), "the frame right after input");
         assert!(!writer.due(false, end + frame * 2), "an idle frame before the wait is over");
-        // The frame asked for writes the last width.
+        // The frame asked for writes the last value.
         let then = end + wait;
         assert!(writer.due(false, then));
         assert_eq!(writer.store(&mut disk, app.prefs(), then), None);
@@ -1995,7 +2016,7 @@ mod prefs_writer_tests {
         let mut next = new_app();
         let stored = solidcraft_ui_egui::prefs::stored(|k| disk.flushed.get(k).cloned()).expect("settings on disk");
         next.load_prefs(&stored);
-        assert_eq!(next.preferences.browser_width, 293.0, "the width the drag ended at");
+        assert_eq!(next.preferences.ui_scale, 1.25 + 93.0 / 100.0, "the value the drag ended at");
         assert!(!writer.due(false, then + frame), "nothing waits any more");
     }
 }

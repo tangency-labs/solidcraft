@@ -5972,13 +5972,28 @@ impl SheetBody {
             let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
             made.push((u0, u1, n * s0 + d * u0, leg, moving));
         }
-        // Flanges already on this panel: those beyond a folding tab move with it.
+        // Flanges already on this panel: those beyond a folding tab move with it. A flange wholly
+        // beyond the zone sits on one piece of the material beyond it, and goes where that piece
+        // goes, however long its bend is: a rim on a flared wall is longer than the wall's bend
+        // (#15519).
+        let piece_of = |f: &SheetFlange| {
+            let root = f.p + f.d * (f.len / 2.0);
+            beyond.iter().position(|part| near_outline(&Ring::new(part.clone()), root, 1e-6))
+        };
         let mut moves = Vec::new();
         for (k, f) in self.flanges.iter().enumerate() {
             if f.parent != panel {
                 continue;
             }
             let (e0, e1) = (f.p.dot(n) - s0, (f.p + f.d * f.len).dot(n) - s0);
+            if e0.min(e1) >= ba - 1e-9
+                && let Some(piece) = piece_of(f)
+            {
+                if let Some(j) = chosen.iter().position(|i| hangs.get(*i).is_some_and(|h| h.contains(&piece))) {
+                    moves.push((k, j));
+                }
+                continue;
+            }
             let fu = (f.p.dot(d).min((f.p + f.d * f.len).dot(d)), f.p.dot(d).max((f.p + f.d * f.len).dot(d)));
             let crosses = Err(DocError::Invalid("not supported yet: a fold through a flange's bend".into()));
             match made.iter().position(|m| fu.0 >= m.0 - 1e-9 && fu.1 <= m.1 + 1e-9) {

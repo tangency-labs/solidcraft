@@ -1551,7 +1551,7 @@ mod tests {
         ];
         for (failure, (want_status, want_phrase)) in cases {
             let (status, phrase, class) = carried(status(blend(failure)));
-            assert_eq!((status, phrase.as_str(), class), (want_status, want_phrase.as_str(), failure.kind()), "{failure:?}");
+            assert_eq!((status, phrase.as_str(), class), (want_status, want_phrase.as_str(), failure.class()), "{failure:?}");
         }
         let at = Failure::new("blend::fillet_executive::p3", BlendFailure::Failed("x"))
             .at(solidcore::EntityRef::Edge(solidcore::topology::EdgeId::from_index(2)))

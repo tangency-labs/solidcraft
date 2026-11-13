@@ -1,8 +1,8 @@
 //! Shared tree content, independent of the panels which present it.
 //!
-//! A frame has one app-owned begin/finalize pair. Each presentation owns its range order,
-//! anchor, geometry and transient input; the document, selection, folds and row cache remain
-//! in `SolveApp`. Hosts and future adapters can render the same content through `show`.
+//! A frame has one app-owned begin/finalize pair. Each presentation owns its row order, its
+//! panel state (anchor, rename timing, drags, eye drag), geometry and transient input; the
+//! document, selection, folds and row cache remain in `SolveApp`. Hosts and future adapters can render the same content through `show`.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -18,8 +18,6 @@ pub struct ContentOwner(pub u64);
 impl ContentOwner {
     pub const BROWSER: Self = Self(0);
     pub const HISTORY: Self = Self(1);
-    /// The design tree over the view while a dialog holds the left column (`dialog_tree`, #6710).
-    pub const DESIGN_TREE: Self = Self(2);
 }
 
 /// Runtime identity of the document and presentation which produced an interaction.
@@ -38,12 +36,8 @@ pub(crate) struct FeatureDrag {
 /// Existing row compositions. This interface deliberately contains no panel or host policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContentRequest {
-    Browser {
-        shrink_height: bool,
-    },
+    Browser { shrink_height: bool },
     ActiveBodiesOrigin,
-    /// The design's Origin, Bodies and Construction rows, for `dialog_tree` (#6710).
-    DesignTree,
 }
 
 pub type DrawnRow = (String, Rect, Option<Rect>, Option<bool>);
@@ -69,10 +63,10 @@ pub fn output(owner: ContentOwner) -> Output {
 #[derive(Default)]
 pub(crate) struct OwnerState {
     pub(crate) order: Vec<String>,
-    pub(crate) previous: Vec<String>,
-    pub(crate) anchor: Option<String>,
     pub(crate) feature_drags: HashMap<egui::Id, FeatureDrag>,
     order_len: usize,
+    /// The panel's own state for this presentation (anchor, rename timing, drags, eye drag).
+    pub(crate) browser: crate::ui_kit::browser::BrowserState,
     output: Output,
     actions: Option<crate::browser::Actions>,
     presented: bool,
@@ -89,10 +83,6 @@ impl OwnerState {
             self.order.push(key.to_owned());
         }
         self.order_len += 1;
-    }
-
-    pub(crate) fn current_order(&self) -> &[String] {
-        self.order.get(..self.order_len).unwrap_or(&[])
     }
 }
 
@@ -122,6 +112,11 @@ impl Frame {
         self.owners.entry(owner).or_default()
     }
 
+    /// The presentation being drawn (the Browser outside any).
+    pub(crate) fn active_owner(&self) -> ContentOwner {
+        self.active.map_or(ContentOwner::BROWSER, |(owner, _)| owner)
+    }
+
     pub(crate) fn browser_presentation(&self) -> bool {
         matches!(self.active, Some((ContentOwner::BROWSER, ContentRequest::Browser { .. })))
     }
@@ -139,11 +134,10 @@ fn capture_id() -> egui::Id {
     egui::Id::unique("sc_semantic_content_eye_owner")
 }
 
+/// The presentation an eye drag began in: only it lights the view until the drag ends.
 #[derive(Clone, Copy)]
 struct EyeCapture {
     source: ContentSource,
-    widget: egui::Id,
-    target: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -181,10 +175,6 @@ pub(crate) fn current_source(app: &SolveApp) -> Option<ContentSource> {
     (app.tree.content.session == Some(app.session.uid)).then_some(ContentSource { session: app.session.uid, owner })
 }
 
-pub(crate) fn same_document(ui: &Ui, source: ContentSource) -> bool {
-    ui.ctx().data(|data| data.get_temp::<ContentSource>(active_id())).is_some_and(|active| active.session == source.session)
-}
-
 pub(crate) fn source_present(app: &SolveApp, source: ContentSource) -> bool {
     app.tree.content.session == Some(source.session)
         && app.session.uid == source.session
@@ -204,6 +194,10 @@ pub(crate) fn leave_document(app: &mut SolveApp) {
                 ctx.stop_dragging();
             }
             ctx.data_mut(|data| data.remove::<RowCapture>(row_capture_id()));
+        }
+        let owners: Vec<ContentOwner> = app.tree.content.owners.keys().copied().collect();
+        for owner in owners {
+            end_panel_gestures(app, ctx, owner, session);
         }
         crate::browser::cancel_content_drag(ctx, session);
         ctx.data_mut(|data| {
@@ -282,9 +276,6 @@ pub(crate) fn begin(app: &mut SolveApp, ctx: &egui::Context) {
     frame.active = None;
     frame.finalized = false;
     for state in frame.owners.values_mut() {
-        if state.presented {
-            std::mem::swap(&mut state.previous, &mut state.order);
-        }
         state.order_len = 0;
         state.output = Output::default();
         state.actions = None;
@@ -335,21 +326,33 @@ pub(crate) fn render_scope(
     app.tree.content.active = None;
 }
 
-pub(crate) fn record_row(ui: &Ui, row: DrawnRow, response: &crate::ui_kit::RowResp) {
+/// The rows the panel drew for the presentation being drawn: its geometry for automation, and
+/// whether the pointer is over them.
+pub(crate) fn record_drawn(ui: &Ui, drawn: &crate::ui_kit::browser::Output) {
     if !presented(ui) {
         return;
     }
     let Some(source) = ui.ctx().data(|data| data.get_temp::<ContentSource>(active_id())) else { return };
-    let owner = source.owner;
     ui.ctx().data_mut(|data| {
-        let output = data.get_temp_mut_or_default::<Output>(output_id(owner));
-        output.rows.push(row);
-        output.pointer_owned |= response.hovered || response.resp.as_ref().is_some_and(|response| response.contains_pointer());
+        let output = data.get_temp_mut_or_default::<Output>(output_id(source.owner));
+        output.rows.extend(drawn.drawn.iter().map(|row| (row.label.clone(), row.rect, row.fold, row.open)));
+        output.pointer_owned |= drawn.pointer_owned;
     });
-    if !response.on_control
-        && let Some(response) = &response.resp
-    {
-        record_capture(ui, response);
+}
+
+/// A presentation's rows dragged, as the panel names their source.
+pub(crate) fn content_source(source: crate::ui_kit::browser::Source) -> ContentSource {
+    ContentSource { session: source.scope, owner: ContentOwner(source.presentation) }
+}
+
+/// End what the panel holds for presentation `owner` (an eye drag, a row drag): it is gone, or
+/// its document is. An eye drag it held becomes one undo step.
+fn end_panel_gestures(app: &mut SolveApp, ctx: &egui::Context, owner: ContentOwner, session: u64) {
+    let source = crate::ui_kit::browser::Source { scope: session, presentation: owner.0 };
+    let Some(state) = app.tree.content.owners.get_mut(&owner) else { return };
+    let ended = crate::ui_kit::browser::end_gestures(ctx, &mut state.browser, source);
+    if ended.contains(&crate::ui_kit::browser::Event::EyeGesture(crate::ui_kit::browser::Gesture::End)) {
+        crate::browser::merge_eye_drag(app, true);
     }
 }
 
@@ -370,56 +373,27 @@ pub(crate) fn record_occurrence(ui: &Ui, row: DrawnOccurrence) {
     ui.ctx().data_mut(|data| data.get_temp_mut_or_default::<Output>(output_id(owner)).occurrences.push(row));
 }
 
-/// The kit's eye gesture keeps its existing shared target value; its capture belongs to the
-/// presentation where it began, so another copy of a body cannot apply the same drag again.
-pub(crate) fn route_response(ui: &Ui, widget: egui::Id, response: &mut crate::ui_kit::RowResp) {
+/// An eye drag began or ended in the presentation being drawn ([`crate::ui_kit::browser::Gesture`]).
+pub(crate) fn eye_gesture(ui: &Ui, gesture: crate::ui_kit::browser::Gesture) {
     let Some(source) = ui.ctx().data(|data| data.get_temp::<ContentSource>(active_id())) else { return };
-    response.hovered &= response.resp.as_ref().is_some_and(|response| response.contains_pointer());
-    let action =
-        response.clicked || response.double || response.secondary.is_some() || response.fold || response.eye || response.radio || response.action;
-    let visible = presented(ui);
-    if !visible {
-        response.hovered = false;
-        response.resp = None;
-    }
-    if !visible || (action && !claim_action(ui, widget)) {
-        response.clicked = false;
-        response.double = false;
-        response.secondary = None;
-        response.fold = false;
-        response.eye = false;
-        response.radio = false;
-        response.action = false;
-    }
-    let capture = ui.ctx().data(|data| data.get_temp::<EyeCapture>(capture_id()));
-    if let Some(capture) = capture {
-        // A layout repeat may run the kit's drag-start branch again after visibility changed.
-        // Keep the gesture's original target rather than letting that branch invert it.
-        ui.ctx().data_mut(|data| data.insert_temp(crate::ui_kit::eye_drag_id(), capture.target));
-    }
-    if capture.is_some_and(|capture| capture.source != source) {
-        response.eye = false;
-    } else if response.eye
-        && let Some(response) = response.resp.as_ref().filter(|response| response.drag_started())
-    {
-        ui.ctx().data_mut(|data| {
-            if let Some(target) = data.get_temp::<bool>(crate::ui_kit::eye_drag_id()) {
-                data.insert_temp(capture_id(), EyeCapture { source, widget: response.id, target });
-            }
-        });
-    }
+    ui.ctx().data_mut(|data| match gesture {
+        crate::ui_kit::browser::Gesture::Begin => {
+            data.insert_temp(capture_id(), EyeCapture { source });
+        }
+        crate::ui_kit::browser::Gesture::End => {
+            data.remove::<EyeCapture>(capture_id());
+        }
+    });
 }
 
+/// The eye drag under way ends: the presentation it began in.
 pub(crate) fn release_eye(ctx: &egui::Context) -> Option<ContentSource> {
-    let capture = ctx.data_mut(|data| {
+    ctx.data_mut(|data| {
         let capture = data.get_temp::<EyeCapture>(capture_id());
         data.remove::<EyeCapture>(capture_id());
         capture
-    })?;
-    if ctx.dragged_id() == Some(capture.widget) {
-        ctx.stop_dragging();
-    }
-    Some(capture.source)
+    })
+    .map(|capture| capture.source)
 }
 
 /// A reveal is acknowledged only after its row is presented in the scroll viewport. An
@@ -434,7 +408,7 @@ pub(crate) fn scroll_acknowledged_at(ui: &Ui, rect: Rect, align: egui::Align) ->
     presented(ui) && ui.is_rect_visible(rect) && ui.clip_rect().contains(rect.center())
 }
 
-fn presented(ui: &Ui) -> bool {
+pub(crate) fn presented(ui: &Ui) -> bool {
     ui.is_visible() && ui.opacity() > 0.0
 }
 
@@ -450,6 +424,10 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     if capture.is_some_and(|source| !source_present(app, source)) {
         crate::browser::end_eye_drag(app, ctx);
         capture = None;
+    }
+    let gone: Vec<ContentOwner> = app.tree.content.owners.iter().filter(|(_, state)| !state.presented).map(|(owner, _)| *owner).collect();
+    for owner in gone {
+        end_panel_gestures(app, ctx, owner, app.session.uid);
     }
     if let Some(capture) = ctx.data(|data| data.get_temp::<RowCapture>(row_capture_id())) {
         if !source_present(app, capture.source) {

@@ -3340,6 +3340,59 @@ fn fold_second_collinear_tab_after_the_first() {
     assert!(bb["max"][0].as_f64().unwrap() < 110.0, "neither tab still lies flat out to x 115: {bb}");
 }
 
+/// #15519: a flared wall (90 wide at its root, 110 at its end, as on a mitred tray's flat) whose
+/// rim is folded first, then the wall. The wall's fold line crosses the side walls too, so its
+/// zone falls apart into pieces; the rim's bend is longer than the wall's, but lies wholly beyond
+/// it and goes up with the wall. With side walls or without, the two folds change the volume
+/// by the same amount and the front wall ends up in the same place.
+#[test]
+fn a_flared_wall_folds_with_the_rim_folded_on_its_end() {
+    let front = json!([[-45, -50], [-45, -60], [-55, -90], [55, -90], [45, -60], [45, -50]]);
+    let cross = json!([
+        [50, -45],
+        [60, -45],
+        [90, -55],
+        [90, 55],
+        [60, 45],
+        [50, 45],
+        [45, 50],
+        [45, 60],
+        [55, 90],
+        [-55, 90],
+        [-45, 60],
+        [-45, 50],
+        [-50, 45],
+        [-60, 45],
+        [-90, 55],
+        [-90, -55],
+        [-60, -45],
+        [-50, -45]
+    ]);
+    let mut got = Vec::new();
+    for rest in [json!([[50, -50], [50, 50], [-50, 50], [-50, -50]]), cross] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Steel 2", "thickness": "2 mm", "bend_radius": "2 mm", "k_factor": "0.4", "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+        let outline: Vec<Value> = front.as_array().into_iter().chain(rest.as_array()).flatten().cloned().collect();
+        run(&mut s, "sketch.line", json!({"points": outline, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Blank"}));
+        let flat_volume = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[-40, -80, 0], [40, -80, 0]], "angle": "90 deg", "fixed": [0, 0, 0]}));
+        run(&mut s, "sheet.fold", json!({"points": [[-45, -50, 0], [45, -50, 0]], "angle": "90 deg", "position": "start", "fixed": [0, 0, 0]}));
+        assert_eq!(flat(&mut s)["bends"].as_array().map(Vec::len), Some(2));
+        let bb = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"].clone();
+        let (z, y) = (bb["max"][2].as_f64().unwrap(), bb["min"][1].as_f64().unwrap());
+        got.push((volume(&mut s) - flat_volume, z, y));
+    }
+    let ((dv1, z1, _), (dv4, z4, y4)) = (got[0], got[1]);
+    assert!((dv1 - dv4).abs() < 1e-3, "the folds change the volume by {dv1} on one wall, {dv4} on the cross");
+    assert!((z1 - z4).abs() < 1e-6, "the wall and its rim stand as high on the cross as alone: z {z1} / {z4}");
+    // The wall stands up from the floor's front edge (y = -50), no longer lying out to y = -90;
+    // the side walls' corners reach y = -55.
+    assert!(z4 > 25.0 && y4 > -56.0, "the wall stands up: z {z4}, y {y4}");
+}
+
 /// An L blank (100 x 50 bottom leg, 40 x 50 upright leg on the right) with a tab x 45..60, y 60..90 on the inside
 /// edge x 60. The fold line x 59, extended, runs into the bottom leg.
 fn l_blank_with_inside_tab(s: &mut Session) {

@@ -2349,3 +2349,40 @@ fn spline_handle_preview_matches_the_stored_handles() {
         .unwrap();
     assert!(sk.spline_handle_preview(control).is_none(), "a control point spline has no tangent handles");
 }
+
+/// A band of rounded caps over the top of a ring (two arcs of radius 15 tangent to the ring's
+/// sides, joined by a line). On the left the cap's arc and the ring's corner arc leave the ring's
+/// side along one tangent, apart only by the solver's round-off; on the right the cap's arc ends
+/// a hair short of the top line's end. Both corners must still close the band.
+#[test]
+fn a_cap_whose_arcs_leave_a_ring_along_its_sides_closes_a_profile() {
+    for lift in [1e-6, -1e-6] {
+        let mut sk = Sketch::new();
+        let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+        // The ring: sides from y = -100 to 0, corners of radius 6, top at y = 6.
+        let (bl, left, left_top) = (p(&mut sk, 0.0, -100.0), p(&mut sk, 0.0, 0.0), p(&mut sk, 6.0, 6.0));
+        let (right_top, right, br) = (p(&mut sk, 94.0, 6.0), p(&mut sk, 100.0, 0.0), p(&mut sk, 100.0, -100.0));
+        sk.add_line_pts(bl, left, None).unwrap();
+        sk.add_arc(v(6.0, 0.0), v(6.0, 6.0), v(0.0, 0.0), [None, Some(left_top), Some(left)], None).unwrap();
+        sk.add_line_pts(left_top, right_top, None).unwrap();
+        sk.add_arc(v(94.0, 0.0), v(100.0, 0.0), v(94.0, 6.0), [None, Some(right), Some(right_top)], None).unwrap();
+        sk.add_line_pts(right, br, None).unwrap();
+        sk.add_line_pts(br, bl, None).unwrap();
+        // The cap: its left arc's centre a round-off off the ring's side, its right arc ending
+        // 2e-5 along the top line from the line's end.
+        let (cap_left, cap_right) = (p(&mut sk, 15.0, 15.0), p(&mut sk, 85.0, 15.0));
+        sk.add_arc(v(15.0, lift), v(15.0, 15.0), v(0.0, 0.0), [None, Some(cap_left), Some(left)], None).unwrap();
+        sk.add_line_pts(cap_right, cap_left, None).unwrap();
+        let short = v(85.0 + 2e-5, (225.0 - 4e-10_f64).sqrt());
+        sk.add_arc(v(85.0, 0.0), v(100.0, 0.0), short, [None, Some(right), None], None).unwrap();
+        let ps = find_profiles(&sk);
+        let band = ps.iter().find(|p| p.outer_curves.contains(&sk.curves[6].id));
+        let Some(band) = band else { panic!("lift {lift}: no profile through the cap: {ps:?}") };
+        // The cap less the ring's rounded top: 70 x 15 + two quarter discs of 15 - (88 x 6 + two of 6).
+        let want = 70.0 * 15.0 + PI * 225.0 / 2.0 - (88.0 * 6.0 + PI * 36.0 / 2.0);
+        assert!((band.area - want).abs() < 1e-3, "lift {lift}: {} vs {want}", band.area);
+        for p in &ps {
+            assert!(p.region.outer.is_closed(1e-6), "lift {lift}: {:?}", p.outer_curves);
+        }
+    }
+}

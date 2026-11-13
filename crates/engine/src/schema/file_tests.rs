@@ -23,7 +23,10 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<ExportParams>(),
         &["bodies", "effort", "format", "lay_on_print_faces", "mesh_prefix", "objects", "path", "quality", "velocity"],
     );
-    assert_keys(input_schema_for::<OpenParams>(), &["folder", "max_points", "names", "origin", "path", "read_only", "units", "up"]);
+    assert_keys(
+        input_schema_for::<OpenParams>(),
+        &["folder", "history", "max_points", "names", "origin", "path", "read_only", "reuse_import", "units", "up"],
+    );
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);

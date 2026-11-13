@@ -587,6 +587,26 @@ pub enum NotifyArg {
     Object(ObjectRef),
 }
 
+/// What [`ArenaNotifyState::seed`] has visited, for the tests of the callers that must not
+/// seed a whole B-rep for each edit they make (solidcraft#15786). Compiled only for tests.
+#[cfg(test)]
+pub(crate) mod seeded {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
+    static CALLS: AtomicU64 = AtomicU64::new(0);
+    static ENTITIES: AtomicU64 = AtomicU64::new(0);
+
+    pub(crate) fn note(entities: usize) {
+        CALLS.fetch_add(1, Relaxed);
+        ENTITIES.fetch_add(entities as u64, Relaxed);
+    }
+
+    /// The calls and the entities they visited since the last [`take`].
+    pub(crate) fn take() -> (u64, u64) {
+        (CALLS.swap(0, Relaxed), ENTITIES.swap(0, Relaxed))
+    }
+}
+
 impl NotifyArg {
     fn object_ref(self, env: &NotifyEnv<'_>) -> ObjectRef {
         match self {
@@ -837,6 +857,8 @@ impl ArenaNotifyState {
         all.extend(b.edges().iter().map(|(x, _)| EntityRef::Edge(x)));
         all.extend(b.vertexuses().iter().map(|(x, _)| EntityRef::Vertexuse(x)));
         all.extend(b.vertices().iter().map(|(x, _)| EntityRef::Vertex(x)));
+        #[cfg(test)]
+        seeded::note(all.len());
         if self.records.is_empty() {
             // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
             self.records = all

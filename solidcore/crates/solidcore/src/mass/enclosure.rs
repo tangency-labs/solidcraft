@@ -38,7 +38,8 @@
 //! certified face holds within its bound of the definition (that bound is not added here).
 //! The enclosure refines the cell of widest enclosure, one bisection at a time,
 //! until it is as narrow as asked ([`enclose_volume`]) or decides the sign
-//! ([`volume_sign`]), or until [`CELL_BUDGET`] cells are spent.
+//! ([`volume_sign`]), or until [`CELL_BUDGET`] cells are spent or no cell is left to cut
+//! ([`EnclosureStop`]); it answers the intersection of every enclosure it summed.
 //!
 //! References: [1] G. F. Corliss, L. B. Rall, Adaptive, self-validating numerical
 //! quadrature, *SIAM J. Sci. Stat. Comput.* 8(5) (1987); [2] K. Makino, M. Berz, Taylor
@@ -108,6 +109,22 @@ pub struct EnclosureCounts {
     pub strips: usize,
 }
 
+/// Why refinement ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnclosureStop {
+    /// The enclosure is as narrow as asked ([`enclose_volume`]) or decides the sign
+    /// ([`volume_sign`]).
+    Reached,
+    /// The sign is not decided, and the settled cells and fixed terms already hold 0
+    /// whatever the rest becomes ([`volume_sign`] only).
+    Settled,
+    /// [`CELL_BUDGET`] cells are spent.
+    Budget,
+    /// No cell is left that a cut narrows: every cell is settled, cut [`MAX_DEPTH`] times,
+    /// or of single parameters.
+    Exhausted,
+}
+
 /// A certified enclosure of a body's volume: the volume is in `[lo, hi]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VolumeEnclosure {
@@ -115,6 +132,15 @@ pub struct VolumeEnclosure {
     pub lo: f64,
     /// The upper end.
     pub hi: f64,
+    /// The width of the part of the last enclosure summed that no cut narrows (the settled
+    /// strip cells and the fixed terms), rounded up: refining does not take that one
+    /// enclosure below it. The result can still be narrower, since it intersects the
+    /// earlier enclosures too, and can then end at [`EnclosureStop::Reached`] for a width
+    /// below the floor; otherwise a width asked below it ends at [`EnclosureStop::Budget`] or
+    /// [`EnclosureStop::Exhausted`].
+    pub floor: f64,
+    /// Why refinement ended.
+    pub stop: EnclosureStop,
     /// What it cost.
     pub counts: EnclosureCounts,
 }
@@ -140,8 +166,14 @@ pub enum VolumeSign {
     Undecided(VolumeEnclosure),
 }
 
-/// An enclosure of the volume of the closed body `b` at most `width` wide, or the
-/// narrowest [`CELL_BUDGET`] cells give. Missing UV trim curves are made on `b`, as
+/// An enclosure of the volume of the closed body `b` at most `width` wide
+/// ([`EnclosureStop::Reached`]), or else the narrowest refinement gives within
+/// [`CELL_BUDGET`] cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
+/// ([`EnclosureStop::Exhausted`]). It is refined whatever `width` is: a width below the
+/// enclosure's [`VolumeEnclosure::floor`] is not reached, and refining stops only at one of
+/// those ends. The result is the intersection of every enclosure summed along the way (each
+/// holds the volume), so a tighter `width` is never answered wider by further refinement.
+/// Missing UV trim curves are made on `b`, as
 /// [`super::integrator::properties::brep_volume_default`] makes them.
 ///
 /// # Errors
@@ -158,8 +190,8 @@ pub fn enclose_volume(k: &Kernel, b: &mut Brep, width: f64) -> Result<VolumeEncl
         return Err(SolidError::invalid_input(OP, "width not positive"));
     }
     let mut w = Work::new(k, b)?;
-    // past a width the settled cells alone exceed, no refining narrows it
-    w.refine(|e| e.hi - e.lo <= width, |_, still| still + still > width)
+    // refined toward `width` whatever the floor: the floor only says where it ends
+    w.refine(|e| e.hi - e.lo <= width, |_, _| false)
 }
 
 /// The sign of the volume of the closed body `b`, from its enclosure refined until it
@@ -1420,25 +1452,35 @@ impl<'a> Work<'a> {
     }
 
     /// Refines the widest cell, one bisection at a time, until `done` holds of the
-    /// enclosure, `hopeless` of its parts ([`Work::parts`]: no refining can make `done`
-    /// hold), or the budget is spent.
+    /// enclosure ([`EnclosureStop::Reached`]), `hopeless` of its parts ([`Work::parts`]: no
+    /// refining can make `done` hold; [`EnclosureStop::Settled`]), the budget is spent, or
+    /// no cell is left to cut. The result is the intersection of every enclosure summed
+    /// (each holds the volume): rounding that grows faster than the cells shrink does not
+    /// widen it. Two enclosures that do not overlap mean one of them is not sound, which no
+    /// cell's construction allows: [`MassFailure::Failed`](crate::error::mass::MassFailure::Failed)
+    /// then, not an enclosure (no input is known to reach it).
     fn refine(
         &mut self,
         done: impl Fn(Ivl) -> bool,
         hopeless: impl Fn(Ivl, f64) -> bool,
     ) -> Result<VolumeEnclosure> {
-        let out = |w: &Self| {
-            let e = w.total();
-            VolumeEnclosure {
+        let out = |w: &Self, best: Ivl, stop: EnclosureStop| -> Result<VolumeEnclosure> {
+            let e = intersect(w.total(), best)?;
+            let (_, still) = w.parts();
+            Ok(VolumeEnclosure {
                 lo: e.lo,
                 hi: e.hi,
+                floor: (Ivl::from(still) + Ivl::from(still)).hi,
+                stop,
                 counts: w.counts,
-            }
+            })
         };
         // running sums in f64 say when to sum the enclosure in intervals again: when they
         // look done, or every quarter of the work list's length
         let total = self.total();
         let (mut lo, mut hi) = (total.lo, total.hi);
+        // the intersection of the enclosures summed so far
+        let mut best = total;
         let mut checked = self.counts.cells;
         let mut next_check = 0usize;
         loop {
@@ -1446,22 +1488,23 @@ impl<'a> Work<'a> {
                 || (done(Ivl::new(lo, hi)) && self.counts.cells >= checked + 16);
             if due {
                 let total = self.total();
-                if done(total) {
-                    return Ok(out(self));
+                best = intersect(total, best)?;
+                if done(best) {
+                    return out(self, best, EnclosureStop::Reached);
                 }
                 let (rest, still) = self.parts();
                 if hopeless(rest, still) {
-                    return Ok(out(self));
+                    return out(self, best, EnclosureStop::Settled);
                 }
                 (lo, hi) = (total.lo, total.hi);
                 checked = self.counts.cells;
                 next_check = self.counts.cells + (self.items.len() / 4).max(64);
             }
             if self.counts.cells >= self.budget {
-                return Ok(out(self));
+                return out(self, best, EnclosureStop::Budget);
             }
             let Some((_, Reverse(i))) = self.heap.pop() else {
-                return Ok(out(self));
+                return out(self, best, EnclosureStop::Exhausted);
             };
             let Some(it) = self.items.get(i).copied() else {
                 continue;
@@ -1525,6 +1568,20 @@ impl<'a> Work<'a> {
                 }
             }
         }
+    }
+}
+
+/// The intersection of two enclosures of the volume; a [`MassFailure::Failed`](crate::error::mass::MassFailure::Failed)
+/// where they do not overlap (one of them is not sound).
+fn intersect(a: Ivl, b: Ivl) -> Result<Ivl> {
+    let (lo, hi) = (a.lo.max(b.lo), a.hi.min(b.hi));
+    if lo <= hi {
+        Ok(Ivl::new(lo, hi))
+    } else {
+        Err(SolidError::mass_failed(
+            OP,
+            "two enclosures of the volume do not overlap",
+        ))
     }
 }
 
@@ -1826,6 +1883,22 @@ mod tests {
             VolumeSign::Undecided(e) => assert!(e.lo < v && v < e.hi, "{e:?}"),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// Enclosures intersect to their common part, and two that do not overlap (one of them
+    /// unsound) are a mass failure, not an enclosure.
+    #[test]
+    fn enclosures_that_do_not_overlap_are_a_failure() {
+        let e = intersect(Ivl::new(1.0, 3.0), Ivl::new(2.0, 4.0)).unwrap();
+        assert_eq!((e.lo, e.hi), (2.0, 3.0));
+        let r = intersect(Ivl::new(1.0, 2.0), Ivl::new(2.5, 4.0));
+        assert!(
+            matches!(
+                r.as_ref().map_err(SolidError::mass_failure),
+                Err(Some(crate::error::mass::MassFailure::Failed(_)))
+            ),
+            "{r:?}"
+        );
     }
 
     /// The moments hold the closed forms.

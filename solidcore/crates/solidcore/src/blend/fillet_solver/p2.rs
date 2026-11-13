@@ -2247,9 +2247,8 @@ impl FilletSolver {
     /// Returns `rbFoundIntersection`; when found, both tsect points get their UV points
     /// and further solution values. `hold_end_radii` is the fork's `bHoldEndRadii`
     /// (tangency-labs/smlib@465b62b): the variable radii are held at their end values
-    /// (`SmTemporaryRadiusChange`) only when it is set; upstream always holds them, so
-    /// callers pass `true` unless `fixes.fillet_retry_radius_as_first` is on and their
-    /// corner is not calculated as constant radius.
+    /// (`SmTemporaryRadiusChange`) only when it is set; upstream always holds them, and
+    /// callers pass it only at a corner calculated as constant radius (WR-300).
     ///
     /// # Errors
     ///
@@ -2321,9 +2320,9 @@ impl FilletSolver {
         // Temporarily replace the variable-radius functions with a constant. [Reg Iter:306]
         // `SmTemporaryRadiusChange::SetUp` does nothing unless the solver is an
         // `SmVariableRadiusFS` (`SM_CAST_PTR`), first for this solver, then the other.
-        // Fork tangency-labs/smlib@465b62b (`fixes.fillet_retry_radius_as_first`, WR-300):
-        // only where `hold_end_radii` (a corner calculated as constant radius, as the
-        // callers decide); `SmTemporaryRadiusChange(NULL, ..)` does nothing.
+        // WR-300 (the fork's tangency-labs/smlib@465b62b): only where `hold_end_radii`
+        // (a corner calculated as constant radius, as the callers decide);
+        // `SmTemporaryRadiusChange(NULL, ..)` does nothing.
         let other_side_eu = other.solver().edgeuse(other_rail_index)?;
         let this_side_eu = ops.solver().edgeuse(rail_index)?;
         let temp_this = match (ops.variable_radius_mut(), other_side_eu) {
