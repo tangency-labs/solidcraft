@@ -1,8 +1,7 @@
 use crate::display_units::{DecimalMarker, DimensionStyle, DimensionValue, NumberFormat, Ties, format_dimension};
 use crate::expr::Kind;
 use crate::tolerance::{
-    DecimalsRow, DimensionWarning, Frame, GeneralTolerance, Indicator, RangeRow, Repeat, Role, Tolerance, ToleranceChange, TolerancePresentation,
-    ToleranceText,
+    DecimalsRow, DimensionWarning, Frame, GeneralTolerance, Indicator, RangeRow, Repeat, Role, Tolerance, TolerancePresentation, ToleranceText,
 };
 use crate::{DocError, Result};
 
@@ -648,8 +647,7 @@ fn general(block: &GeneralTolerance, nominal: f64, unit: &str, decimals: u8) -> 
 
 /// A decimal-places block goes by the decimals a length is shown with: `25` ±0.5, `25.0` ±0.1,
 /// `25.00` ±0.05, and none at 3 dp (untoleranced); in inches the decimals mean something else, so
-/// a millimetre block gives none. Angles take its one angle value: `30.0°` ±0.3°. Changing the
-/// decimals is reported: 1 dp to 2 dp is ±0.1 to ±0.05, 2 dp to 3 dp ±0.05 to none.
+/// a millimetre block gives none. Angles take its one angle value: `30.0°` ±0.3°.
 #[test]
 fn a_decimal_places_block_goes_by_the_shown_decimals() {
     let block = by_decimals();
@@ -657,18 +655,12 @@ fn a_decimal_places_block_goes_by_the_shown_decimals() {
     assert_eq!(general(&block, 25.4, "in", 1), None);
     let angle = DimensionValue { kind: Kind::Angle, ..value(30.0 * DEG, Tolerance::None) };
     assert_eq!(block.effective(&angle, &shown("deg", 1)).unwrap(), Some(0.3 * DEG));
-    let length = value(25.0, Tolerance::None);
-    let report = |a: u8, b: u8| block.change((&length, &shown("mm", a)), (&length, &shown("mm", b))).unwrap();
-    assert_eq!(report(1, 2), Some(ToleranceChange { from: Some(0.1), to: Some(0.05) }));
-    assert_eq!(report(2, 3), Some(ToleranceChange { from: Some(0.05), to: None }));
-    assert_eq!(report(1, 1), None, "no change, no report");
 }
 
 /// A range block goes by the size a length is shown with, each row up to its end: 100 ±1, 1000
 /// ±2, 1000.5 at 1 dp ±3, but 1000.4 at 0 dp is shown `1000`, ±2; 100.04 is ±2 at 2 dp and shown
-/// `100` at 0 dp ±1, which the report gives; 4 in (101.6 mm) ±2; a size is a magnitude. A shown
-/// size within 1e-9 mm of a row's end is at it; past a closed last row, none; no angle value,
-/// none for an angle.
+/// `100` at 0 dp ±1; 4 in (101.6 mm) ±2; a size is a magnitude. A shown size within 1e-9 mm of a
+/// row's end is at it; past a closed last row, none; no angle value, none for an angle.
 #[test]
 fn a_range_block_goes_by_the_shown_size() {
     let block = by_range();
@@ -677,9 +669,6 @@ fn a_range_block_goes_by_the_shown_size() {
     for (nominal, decimals, deviation) in cases {
         assert_eq!(general(&block, nominal, "mm", decimals), Some(deviation), "{nominal} at {decimals} dp");
     }
-    let length = value(100.04, Tolerance::None);
-    let report = block.change((&length, &shown("mm", 0)), (&length, &shown("mm", 2))).unwrap();
-    assert_eq!(report, Some(ToleranceChange { from: Some(1.0), to: Some(2.0) }));
     assert_eq!(general(&block, 101.6, "in", 0), Some(2.0));
     let near = range_block("mm", &[(Some(100.0 - 5e-10), 1.0), (None, 2.0)], None);
     assert_eq!(general(&near, 100.0, "mm", 0), Some(1.0));

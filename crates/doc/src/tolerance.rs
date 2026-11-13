@@ -424,14 +424,6 @@ pub struct RangeRow {
     pub deviation: f64,
 }
 
-/// The precision report: what a format change does to the general tolerance a dimension takes,
-/// each `None` when it takes none.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ToleranceChange {
-    pub from: Option<f64>,
-    pub to: Option<f64>,
-}
-
 impl GeneralTolerance {
     /// What a block may hold, in a profile that writes numbers in `number`.
     pub(crate) fn validate(&self, number: &NumberFormat) -> Result<()> {
@@ -514,13 +506,6 @@ impl GeneralTolerance {
                 .and_then(|size| ranges.iter().find(|row| row.up_to.is_none_or(|up| size <= up + solidcraft_geom::EPS)).map(|row| row.deviation)),
             _ => None,
         })
-    }
-
-    /// The precision report for a dimension's format changing from `before` to `after` (each a
-    /// value and its style): the general tolerance it took and takes, when that changes.
-    pub fn change(&self, before: (&DimensionValue, &DimensionStyle), after: (&DimensionValue, &DimensionStyle)) -> Result<Option<ToleranceChange>> {
-        let (from, to) = (self.effective(before.0, before.1)?, self.effective(after.0, after.1)?);
-        Ok((from != to).then_some(ToleranceChange { from, to }))
     }
 }
 
