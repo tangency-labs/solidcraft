@@ -2144,6 +2144,23 @@ fn faces_smaller_than_a_coarse_tolerance_read() {
     assert!(rel(m.area, area) < 1e-3, "area {} vs {area}", m.area);
 }
 
+/// `cylinder_spline_rims` (tests/step-regressions): a cylinder of radius 10 and height 5 whose
+/// rims are closed rational cubic splines of two pieces, each an exact half circle, with no seam
+/// edge. A piece reaching half a turn about the axis was taken to reach every angle, so the wall
+/// had no angle left for its seam and was left out ("a band whose other loops leave its seam no
+/// angle"), the part coming in as two discs. It reads whole, with its exact volume.
+#[test]
+fn a_cylinder_whose_rims_are_splines_of_two_half_circles_keeps_its_wall() {
+    let text = include_str!("../../../../tests/step-regressions/cylinder_spline_rims.step");
+    let imp = step_import(text).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies.len(), 1);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert_eq!(m.faces, 3);
+    let volume = std::f64::consts::PI * 10.0 * 10.0 * 5.0;
+    assert!(rel(m.volume, volume) < 1e-6, "volume {} vs {volume}", m.volume);
+}
+
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
