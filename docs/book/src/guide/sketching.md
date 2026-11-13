@@ -35,7 +35,8 @@ is fully constrained and its curves turn white.
 **4. Finish.** Click **Finish Sketch** to go back to the model; the shaded region is a profile
 that Extrude can use ([Solid features](features.md)).
 
-![The finished sketch, numbered 1 to 5](../media/sketching/parts.png)
+<img class="dark-ui" src="../media/sketching/parts.png" alt="The finished sketch, numbered 1 to 5">
+<img class="light-ui" src="../media/sketching/parts.light.png" alt="The finished sketch, numbered 1 to 5">
 
 **1** Sketch tools · **2** A constraint (this side is vertical) · **3** A dimension ·
 **4** The sketch's state · **5** Finish Sketch
@@ -339,7 +340,8 @@ argument, the same way `"mid:<line>"` and `"on:<curve>:x,y"` work.
 
 With Preferences › Sketch › **Line up with other sketch points while drawing** turned on (it's
 off by default), the pointer also **lines up** while drawing with the sketch's points on screen:
-line ends, centres, standalone points and the origin, and the shape's own earlier points. It
+line ends, centres, standalone points and the origin, and the shape's own earlier points. It also
+lines up with the midpoint of a line you just hovered, whose dotted guide is showing. It
 lines up on both axes at once, level with one point and plumb with another, so a rectangle drawn
 beside another can take its height from one and its width from a point below. A line kept
 horizontal or vertical from its start can still end under or beside another point. A dotted guide
@@ -349,6 +351,13 @@ point it lined up with, in the shape's undo step, unless the sketch already sets
 preference off, drawing lines up only with the previous point, one axis at a time.
 
 Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
+
+Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
+3D curve points as construction references after finishing the sketch. This option is off by default.
+For example, choose **Offset Plane**, select its base plane, then select a spline point in
+the **Through point** field. The plane follows that point when the curve is edited. Interior
+points work as well as endpoints, and references use their full 3D positions. Hole placement
+continues to use planar sketch points; drawn 3D curve points are not Hole targets.
 While placing these points, you can snap to points on other visible sketches. For a bridge
 line, start Line and click an endpoint on each source sketch; each endpoint uses its source
 plane, even when that plane differs from the active sketch. These snaps capture positions;
@@ -412,6 +421,11 @@ not to tool shortcuts. `width = 40` (or `#width = 40`) defines the user paramete
 in one step. While you type, the dimension text follows the cursor, and Enter places
 it there (or in its default place if you haven't moved the cursor) as one undo step. Esc
 cancels the dimension.
+
+The first length dimension of a sketch with nothing sized yet scales the drawing it measures
+to its value, so the shape stays as drawn; separate shapes that nothing joins keep their
+size. To have the first dimension size only what it measures, turn off **The first dimension
+scales the drawing** in Preferences › Sketch.
 
 You can still place the text first. Before you type, a click on empty sketch space puts the
 text there and keeps the value box focused; a click on another point or line makes the
@@ -546,6 +560,12 @@ it to remove it. Each input has its own Clear button. Source inputs show a count
 references identify the chosen mirror line, direction, or centre. Box selection also works
 while the window is open. Sketch modify tools take geometry from the sketch being edited.
 
+If your preselection includes exactly one straight construction line of the active sketch,
+opening Mirror uses it as **Mirror line**, keeping your selected entities. Other construction
+lines in the sketch do not count unless selected. With none or multiple selected construction
+lines, choose the reference manually. You can clear or replace the line. To always choose it
+manually, turn off **Preferences > Sketch > Use the preselected construction line for Mirror**.
+
 Proposed sketch geometry appears **green** before confirmation. Change the inputs or values to
 update the preview, then press **OK**. **Cancel** discards the preview. A circular pattern centre
 can be an existing point or a position clicked in empty sketch space.
@@ -556,8 +576,9 @@ Choose a circle's centre point to keep a circular pattern centred on that circle
 placed in empty space becomes a sketch point that can be dimensioned or made coincident.
 Double-click the pattern badge (at the circular centre or beside the rectangular seed), or
 right-click a seed or copy and choose **Edit Sketch Pattern**, to change quantity, spacing,
-direction or total angle. Confirmed edits preserve surviving instance ids; Cancel discards
-the preview. Pattern settings survive save/reopen and undo/redo. Deleting a seed, copy or
+direction, total angle or the entities it copies. Confirmed edits preserve surviving instance
+ids, except that changing the entities rebuilds every copy, so dimensions and relations on the
+old copies are lost; Cancel discards the preview. Pattern settings survive save/reopen and undo/redo. Deleting a seed, copy or
 pattern relation breaks that association and leaves the remaining geometry independent.
 Patterns saved by older versions remain independent copies; recreate them to add associations.
 

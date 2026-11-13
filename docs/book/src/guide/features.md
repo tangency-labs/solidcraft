@@ -57,8 +57,8 @@ rebuilds on the taller block.
 
 **Quick measurement** (off by default; turn it on under Preferences › Interface): with edges,
 faces, sketch curves or points selected, the view's bottom right corner, above History, shows
-what they measure: an edge's length (Ø and R for a round one), a face's area, a point's position,
-two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
+what they measure: an edge's length (Ø and R for a round one), a face's area and perimeter, a point's
+position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
 (I) does more.
 
 Extrude, Revolve, Sweep, Loft, Coil and the Box, Cylinder, Sphere and Torus choose their
@@ -88,6 +88,14 @@ again, even off the plane. The extent can still be chosen manually. For a new ex
 start or end offsets or a From Object input, the target also sets the stored distance and
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
 existing picks. With the setting off, picks only add profiles.
+
+Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
+such as the far side of the block a cut goes into: once the arrow's tip comes within a few
+screen points of such a face, the distance becomes exactly that face's and the face is
+outlined. Elsewhere the distance moves in round steps. Hold Alt or Ctrl for a free drag, which
+stops at neither. **Extrude arrow stops at faces** (Preferences › Tools, on by default) turns
+the face stops off; the arrow then moves in round steps only, as before. The distance stays a number; to follow the face when the model changes, use
+**To Object** or **Through All**.
 
 A positive extrude taper slopes the side walls outward, so the profile grows along the
 extrusion direction and the far end is larger; a negative taper slopes them inward, making
@@ -200,6 +208,20 @@ a Single hole is placed:
 The Hole dialog draws a section through the hole as its options make it (type, extents, drill
 point, tapped) and puts each size in a field beside the dimension it sets; hovering a field, or
 typing in it, lights its dimension.
+
+**Hole Tap Type** is **Simple** (type the diameter), **Clearance** (a hole a bolt passes
+through) or **Tapped** (a thread). With Clearance, pick the bolt **Size** (M1.6 to M64) and the
+**Fit** (Close, Normal or Loose): the hole takes the ISO 273 clearance diameter, shown in
+**Clearance diameter** as a default you can change, the way **Tap drill diameter** works for a
+tapped hole; the section shows the bolt's shank through the hole. Scripts use `clearance: "M4"`
+with `fit: "normal"` on `solid.hole`. The hole stores its diameter, not the bolt: **Edit Feature**
+opens it as a Simple hole of that diameter.
+
+With **Hole Type** Counterbore and Clearance, **Screw head** sizes the counterbore for a cap
+screw: a socket head (ISO 4762) or a button head (ISO 7380-1) of the bolt's size. It fills
+**Counterbore Ø** and **Counterbore depth** with the head's diameter and height plus 0.5 mm each
+side and below; change either to use your own. Scripts use `head: "ISO 4762"` with `clearance`
+on `solid.hole`.
 
 The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,

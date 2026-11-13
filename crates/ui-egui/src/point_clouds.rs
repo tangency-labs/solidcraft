@@ -10,7 +10,7 @@ use egui::{Painter, Shape};
 use solidcraft_engine::doc::point_cloud::Keep;
 use solidcraft_engine::doc::point_cloud::{ColorBy, On, PLAIN, PointCloud, Source, byte};
 use solidcraft_engine::doc::point_cloud_distribution::color_range_by;
-use solidcraft_gpu::view::{Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
+use solidcraft_viewport_gpu::view::{Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 
 use crate::SolveApp;
 use crate::browser::point_cloud_tracks::{Ask, Paint, Tracks};
@@ -304,7 +304,7 @@ mod tests {
         assert!(crate::browser::is_open(&h.app, "point_clouds", true));
         let first = gpu_clouds(&h.app, &h.ctx);
         assert_eq!(first.len(), 1);
-        let size = solidcraft_gpu::view::CELL_SIZE;
+        let size = solidcraft_viewport_gpu::view::CELL_SIZE;
         assert_eq!((first[0].dots.len(), first[0].segments.len()), (2 * size, 0));
         // The second point: at x = 10, green.
         assert_eq!(&first[0].dots[size..size + 4], &10f32.to_le_bytes());

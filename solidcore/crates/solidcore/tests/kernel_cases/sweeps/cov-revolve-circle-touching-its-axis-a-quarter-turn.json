@@ -1,0 +1,97 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "angle": 1.5707963267948966,
+        "cap": true,
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                1.0,
+                0.0
+              ],
+              "center": [
+                5.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 5.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-revolve-circle-touching-its-axis-a-quarter-turn",
+  "expected": {
+    "body_count": 1,
+    "method": "the disc r5 about (5, 0) on XZ touches the Z axis at the origin; Pappus, its centroid 5 from the axis: V = pi 25 x 2 pi 5 / 4 = 616.850275",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 616.8502750680849,
+    "what": "a circle r5 that touches the revolve axis, revolved 90 deg: a quarter of a horn torus, its tube pinched to a point on the axis"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 2,
+      "faces": 3,
+      "vertices": 1
+    }
+  },
+  "result": [
+    {
+      "body": "Horn",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 403.8197427056008,
+      "body_count": 1,
+      "edges": 2,
+      "faces": 3,
+      "vertices": 1,
+      "volume_mm3": 616.8502750706629
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "revolve"
+  ],
+  "ungraded": [],
+  "what": "a circle r5 that touches the revolve axis, revolved 90 deg: a quarter of a horn torus, its tube pinched to a point on the axis",
+  "why_not": []
+}

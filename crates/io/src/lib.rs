@@ -14,18 +14,20 @@ mod design_metadata;
 mod dxf;
 mod dxf_out;
 pub mod formats;
+mod glb;
 pub use design::{
-    DesignCompression, DesignContainerReader, DesignPreview, FileKind, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
+    DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
     read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
     write_design_container, write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
     write_design_container_with_thumbnail, write_drawing_container,
 };
+pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
-pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
+pub use native_cad::{NATIVE_CAD_EXTS, NativeDesign, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_to_step};
 pub mod paper;
 mod ply;
 mod ply_complex;
@@ -33,18 +35,22 @@ pub use ply::{ply_counts, read_ply_mesh};
 mod point_cloud;
 pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
 pub mod safe_write;
+pub mod safe_zip;
 mod sketch2d;
 mod svg;
 mod threemf;
 pub mod urdf;
 pub mod vfs;
 
-pub use dxf::{read_dxf, write_dxf};
-pub use dxf_out::{DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_shapes, seg_shape, write_dxf_drawing};
+pub use dxf::{DxfWriteOptions, read_dxf, write_dxf, write_dxf_entities, write_dxf_opts};
+pub use dxf_out::{
+    DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_lwpolyline, loop_lwpolyline_scaled, loop_shapes, seg_shape, write_dxf_drawing,
+    write_dxf_drawing_units,
+};
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::{decode_svg, read_svg, svg_nothing_to_import};
+pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod obj;
@@ -95,7 +101,7 @@ pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
-    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, urdf or sc)")]
+    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, glb, urdf or sc)")]
     Format(String),
     #[error("nothing to export: the design has no bodies")]
     Empty,
@@ -228,6 +234,14 @@ fn step_text(bytes: &[u8]) -> String {
     encoding.decode_without_bom_handling(bytes).0.into_owned()
 }
 
+/// The STEP items of a native CAD file that its solids import leaves out: a FreeCAD body's
+/// hidden intermediate shapes. A Rhino file's hidden objects are its own visibility, which the
+/// file's user asked to keep, so none are left out; the format is the one cadmpeg detects in
+/// the bytes, not the file's name (a Rhino file can be called `.FCStd`).
+fn hidden_items(file: &str, bytes: &[u8], step: &str) -> std::collections::HashSet<u64> {
+    if is_native_cad_path(file) && native_cad::detects_freecad(bytes) { native_cad::invisible_items(step) } else { Default::default() }
+}
+
 /// Read STEP bytes (`file` is the source file name) into an Import base feature. The file is
 /// read once here to fail early and collect names; the feature holds the STEP text.
 pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
@@ -246,8 +260,10 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
         let text = step_text(bytes);
         if is_iges_path(file) { solidcraft_kernel::iges_to_step(&text).map_err(IoError::Invalid)? } else { (text, Vec::new()) }
     };
-    // The feature keeps this text and a save stores it: refuse now what could not be saved.
-    design::check_step_storable(&text)?;
+    // The limit of a file being imported is the limit of its format, not the design file's
+    // (#2721): the restated text is checked against the import limit, and the design file
+    // limit applies to the design that is saved, which refuses it there.
+    design::check_step_importable(&text)?;
     let imp = solidcraft_kernel::step_import_shared(&text)?;
     let stem = std::path::Path::new(file)
         .file_stem()
@@ -255,6 +271,10 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "Import".into());
     let body_names: Vec<String> = imp.bodies.iter().map(|b| body_name(b, names)).collect();
+    // A FreeCAD body's hidden intermediate shapes are not built (unless nothing else is).
+    let hidden = hidden_items(file, bytes, &text);
+    let skip: Vec<u64> = imp.bodies.iter().zip(0u64..).filter(|(b, _)| hidden.contains(&b.source_item)).map(|(_, i)| i).collect();
+    let skip = if skip.len() == imp.bodies.len() { Vec::new() } else { skip };
     // The root product's name; else the only body's name; else the file name.
     let name = match (imp.tree.as_slice(), body_names.as_slice()) {
         ([root], _) if !generic_name(&root.name) => root.name.clone(),
@@ -265,7 +285,7 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     Ok(StepFeature {
         name,
         body_names,
-        kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip: Vec::new() },
+        kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip },
         warnings: iges_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
         import: imp,
     })
@@ -292,8 +312,27 @@ pub struct MeshFeature {
 /// feature. A glTF file's bodies are all built where they are (see [`read_gltf`] for its node
 /// tree), and it can't read buffers in other files.
 pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
+    mesh_import_feature_in(bytes, file, 1.0)
+}
+
+/// [`mesh_import_feature`] for a file whose coordinates are in a unit of `mm_per_unit`
+/// millimetres (25.4 for inches). The scaling is made once, as the file is read: the feature
+/// keeps the millimetre mesh and nothing of the unit. Only STL, OBJ and PLY files take a unit
+/// other than millimetres; a 3MF or glTF file says its own.
+pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Result<MeshFeature> {
     let _span = solidcraft_profile::span("import", "mesh_import_feature");
+    if !mm_per_unit.is_finite() || mm_per_unit <= 0.0 {
+        return Err(IoError::Invalid("the unit must be a positive number of millimetres".into()));
+    }
+    let own_units = |what: &str| {
+        if mm_per_unit == 1.0 {
+            Ok(())
+        } else {
+            Err(IoError::Invalid(format!("a {what} file states its own units; a unit applies to STL, OBJ and PLY files")))
+        }
+    };
     if is_gltf_path(file) {
+        own_units("glTF")?;
         let mut no_files = |name: &str| Err(format!("`{name}` can't be read here"));
         let mut g = read_gltf(bytes, file, &mut no_files)?;
         g.flatten();
@@ -305,7 +344,7 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
     let path = std::path::Path::new(file);
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Mesh".into());
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    let (objects, warnings) = if ext == "obj" {
+    let (mut objects, warnings) = if ext == "obj" {
         obj::read_obj(bytes, &stem)?
     } else if ext == "ply" {
         ply::read_ply_mesh(bytes, &stem)?
@@ -319,17 +358,31 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
         let triangles = (0..n).map(|i| [i * 3, i * 3 + 1, i * 3 + 2]).collect();
         (vec![MeshObject { name: stem.clone(), positions, triangles, ..Default::default() }], Vec::new())
     } else {
+        own_units("3MF")?;
         read_3mf(bytes)?
     };
+    if mm_per_unit != 1.0 {
+        let limit = solidcraft_doc::point_cloud::MAX_COORD;
+        for o in &mut objects {
+            for p in &mut o.positions {
+                *p = *p * mm_per_unit;
+                if ![p.x, p.y, p.z].iter().all(|v| v.is_finite() && v.abs() <= limit) {
+                    return Err(IoError::Invalid(format!("mesh `{}` is out of range at this unit", o.name)));
+                }
+            }
+        }
+    }
     // Check every mesh now, so the command fails rather than the timeline.
     let mut meshes = Vec::with_capacity(objects.len());
     for o in &objects {
-        solidcraft_kernel::mesh_body(&o.positions, &o.triangles).map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
+        solidcraft_kernel::mesh_body_with_normals(&o.positions, &o.triangles, &o.corner_normals)
+            .map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
         meshes.push(solidcraft_doc::MeshData {
             name: o.name.clone(),
             positions: o.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: o.triangles.iter().flatten().copied().collect(),
             color: o.color,
+            corner_normals: o.corner_normals.iter().flatten().flat_map(|n| [n.x, n.y, n.z]).collect(),
         });
     }
     let name = match objects.as_slice() {
@@ -362,6 +415,9 @@ pub enum Format {
     /// A robot description of the assembly with its mesh files ([`urdf()`]); written by the
     /// engine, since it is several files.
     Urdf,
+    /// Binary glTF with the bodies' looks ([`export_glb`]); written from the document, which
+    /// holds the looks.
+    Glb,
 }
 
 impl Format {
@@ -377,6 +433,7 @@ impl Format {
             "3mf" => Format::ThreeMf,
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
+            "glb" => Format::Glb,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -468,15 +525,18 @@ pub fn stl_binary(meshes: &[Mesh], name: &str) -> Vec<u8> {
 
 /// ASCII STL.
 pub fn stl_ascii(meshes: &[Mesh], name: &str) -> String {
+    use std::fmt::Write as _;
     let name: String = name.chars().filter(|c| c.is_ascii_graphic()).collect();
     let mut s = format!("solid {name}\n");
     for m in meshes {
         for t in &m.triangles {
             let Some([a, b, c]) = m.tri(t) else { continue };
             let n = (b - a).cross(c - a).normalized().unwrap_or_default();
-            s += &format!("  facet normal {:e} {:e} {:e}\n    outer loop\n", n.x, n.y, n.z);
+            // Written into the text rather than formatted apart and appended: the same bytes,
+            // without a string made and dropped per line.
+            let _ = write!(s, "  facet normal {:e} {:e} {:e}\n    outer loop\n", n.x, n.y, n.z);
             for v in [a, b, c] {
-                s += &format!("      vertex {:e} {:e} {:e}\n", v.x, v.y, v.z);
+                let _ = writeln!(s, "      vertex {:e} {:e} {:e}", v.x, v.y, v.z);
             }
             s += "    endloop\n  endfacet\n";
         }
@@ -555,6 +615,7 @@ pub fn obj_files(bodies: &[ObjBody<'_>], mtl_name: &str) -> ObjFiles {
 /// and the bases the next body carries on from.
 fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) {
     use std::collections::HashMap;
+    use std::fmt::Write as _;
     let mut bounds = solidcraft_geom::Aabb3::EMPTY;
     for p in &mesh.positions {
         bounds.add(*p);
@@ -565,7 +626,7 @@ fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) 
     let (positions, triangles, from) = threemf::weld_tagged(&mesh.positions, &mesh.triangles, &source, eps);
     let mut s = String::new();
     for p in &positions {
-        s += &format!("v {} {} {}\n", p.x, p.y, p.z);
+        let _ = writeln!(s, "v {} {} {}", p.x, p.y, p.z);
     }
     // `+ 0.0` turns -0 into 0, so both merge.
     let key = |n: Vec3| [n.x + 0.0, n.y + 0.0, n.z + 0.0].map(f64::to_bits);
@@ -579,18 +640,18 @@ fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) 
             _ => None,
         };
         let Some(normals) = normals else {
-            faces += &format!("f {a} {b} {c}\n");
+            let _ = writeln!(faces, "f {a} {b} {c}");
             continue;
         };
         let [na, nb, nc] = normals.map(|n| {
             let next = nmap.len();
             nbase
                 + *nmap.entry(key(n)).or_insert_with(|| {
-                    s += &format!("vn {} {} {}\n", n.x, n.y, n.z);
+                    let _ = writeln!(s, "vn {} {} {}", n.x, n.y, n.z);
                     next
                 })
         });
-        faces += &format!("f {a}//{na} {b}//{nb} {c}//{nc}\n");
+        let _ = writeln!(faces, "f {a}//{na} {b}//{nb} {c}//{nc}");
     }
     s += &faces;
     (s, vbase + positions.len(), nbase + nmap.len())
@@ -679,7 +740,7 @@ pub fn export_obj(state: &ModelState, bodies: &[String], mtl_name: &str, quality
 
 /// The OBJ export of the given bodies: the mesh file and the material library beside it.
 fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
-    let meshes: Vec<Mesh> = sel.iter().map(|b| export_mesh_at(&b.body, quality)).collect::<Result<_>>()?;
+    let meshes: Vec<Mesh> = per_body(sel, |b| export_mesh_at(&b.body, quality))?;
     let bodies: Vec<ObjBody<'_>> = sel.iter().zip(&meshes).map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
     Ok(obj_files(&bodies, mtl_name))
 }
@@ -736,12 +797,14 @@ pub fn export_with_quality(
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "export_with_quality");
-    export_with_parts(state, bodies, &[], format, name, meta, quality)
+    export_with_parts(state, bodies, &[], format, name, meta, quality, None)
 }
 
 /// [`export_with_quality`], and in 3MF each of `parts` (a name and the names of its bodies)
 /// written as one object with those bodies as its parts ([`model_xml_parts`], #8139).
 /// Bodies of a part that are not exported are left out of it. Other formats have no parts.
+/// A 3MF carries `thumbnail` (a PNG) as its package thumbnail; other formats have no place for it.
+#[allow(clippy::too_many_arguments)]
 pub fn export_with_parts(
     state: &ModelState,
     bodies: &[String],
@@ -750,26 +813,24 @@ pub fn export_with_parts(
     name: &str,
     meta: &Metadata,
     quality: MeshQuality,
+    thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let sel = selected(state, bodies)?;
     Ok(match format {
         Format::StlBinary | Format::StlAscii => {
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
             // and the file is closed where faces meet.
-            let meshes: Vec<Mesh> = sel
-                .iter()
-                .map(|b| {
-                    let m = export_mesh_at(&b.body, quality)?;
-                    let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
-                    Ok(Mesh { positions, triangles, ..Mesh::default() })
-                })
-                .collect::<Result<_>>()?;
+            let meshes: Vec<Mesh> = per_body(&sel, |b| {
+                let m = export_mesh_at(&b.body, quality)?;
+                let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
+                Ok(Mesh { positions, triangles, ..Mesh::default() })
+            })?;
             if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() }
         }
         Format::Obj => {
             // One file, so no material library: a mesh file that names a library nobody wrote
             // would come out in the reader's default grey.
-            let meshes: Vec<(String, Mesh)> = sel.iter().map(|b| Ok((b.name.clone(), export_mesh_at(&b.body, quality)?))).collect::<Result<_>>()?;
+            let meshes: Vec<(String, Mesh)> = per_body(&sel, |b| Ok((b.name.clone(), export_mesh_at(&b.body, quality)?)))?;
             obj(&meshes).into_bytes()
         }
         Format::Step => {
@@ -783,14 +844,31 @@ pub fn export_with_parts(
             solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes()
         }
         Format::ThreeMf | Format::ThreeMfTagged => {
-            let objs: Vec<MeshObject> = sel.iter().map(|b| mesh_object(b, format == Format::ThreeMfTagged, quality)).collect::<Result<_>>()?;
+            let objs: Vec<MeshObject> = per_body(&sel, |b| mesh_object(b, format == Format::ThreeMfTagged, quality))?;
             let index = |n: &String| sel.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
-            write_3mf_parts(&objs, &parts, &threemf_metadata(meta))?
+            write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?
         }
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
+        Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
     })
+}
+
+/// Most threads an export meshes its bodies on, as many as the model cache encodes them on.
+const EXPORT_THREADS: usize = 16;
+
+/// `f` for each body of an export, on threads (a body at a time each), the results in the order
+/// of the bodies. The bodies are meshed and welded on their own, so the file is the same, byte
+/// for byte, as made one body after the other; of several failing bodies the first one's error is
+/// the export's, as it was then. An assembly of many bodies meshed on one core took most of the
+/// export's time.
+fn per_body<R: Send>(sel: &[&solidcraft_doc::ModelBody], f: impl Fn(&solidcraft_doc::ModelBody) -> Result<R> + Sync) -> Result<Vec<R>> {
+    solidcraft_kernel::map_on_threads(sel, EXPORT_THREADS, |b| f(b))
+        .into_iter()
+        .zip(sel)
+        .map(|(r, b)| r.unwrap_or_else(|| Err(IoError::Invalid(format!("body {}: meshing it failed", b.name)))))
+        .collect()
 }
 
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`
@@ -822,7 +900,18 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality
         (Vec::new(), 0)
     };
     let transparency = 1.0 - paint.map(|p| p.opacity).unwrap_or(1.0);
-    Ok(MeshObject { name: b.name.clone(), positions, triangles, color: b.body.color(), transparency, looks, tri_looks, tri_faces, faces })
+    Ok(MeshObject {
+        name: b.name.clone(),
+        positions,
+        triangles,
+        color: b.body.color(),
+        transparency,
+        looks,
+        tri_looks,
+        tri_faces,
+        faces,
+        corner_normals: Vec::new(),
+    })
 }
 
 /// STEP assembly of a design with components: a product per component holding its bodies in
@@ -969,6 +1058,7 @@ mod tests {
                 width: "20".into(),
                 height: "30".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -1009,6 +1099,83 @@ mod tests {
         let pos: Vec<Vec3> = m.positions.chunks(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
         let tris: Vec<[u32; 3]> = m.triangles.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
         solidcraft_kernel::measure(&solidcraft_kernel::mesh_body(&pos, &tris).unwrap()).unwrap().volume
+    }
+
+    /// A unit scales an STL's coordinates to millimetres once, as it is read (an inch cube of 10 is
+    /// 254 mm across); the feature keeps nothing of the unit. A bad unit, a unit on a file that
+    /// states its own, and a size beyond the limits are refused.
+    #[test]
+    fn stl_unit_scales_the_mesh_as_it_is_read() {
+        let stl = cube_stl(&[], b"solid exported by something", None, [0.0; 3]);
+        let volume = |mm: f64| {
+            let f = mesh_import_feature_in(&stl, "x.stl", mm).unwrap();
+            let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = f.kind else { panic!() };
+            let m = &meshes[0];
+            let pos: Vec<Vec3> = m.positions.chunks(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
+            let tris: Vec<[u32; 3]> = m.triangles.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+            solidcraft_kernel::measure(&solidcraft_kernel::mesh_body(&pos, &tris).unwrap()).unwrap().volume
+        };
+        assert!((volume(1.0) - 1000.0).abs() < 1e-6);
+        assert!((volume(25.4) - 1000.0 * 25.4f64.powi(3)).abs() < 1e-3 * 25.4f64.powi(3));
+        assert!(mesh_import_feature_in(&stl, "x.stl", 0.0).is_err());
+        assert!(mesh_import_feature_in(&stl, "x.stl", f64::NAN).is_err());
+        assert!(mesh_import_feature_in(&stl, "x.stl", 1e12).is_err());
+        assert!(mesh_import_feature_in(&stl, "x.3mf", 25.4).is_err());
+        assert!(mesh_import_feature_in(&stl, "x.glb", 25.4).is_err());
+    }
+
+    /// An STL holding `triangles` as a binary file.
+    fn stl_of(triangles: &[[[f32; 3]; 3]]) -> Vec<u8> {
+        let mut bytes = vec![0u8; 80];
+        bytes.extend((triangles.len() as u32).to_le_bytes());
+        for triangle in triangles {
+            bytes.extend([0u8; 12]);
+            for vertex in triangle {
+                for coordinate in vertex {
+                    bytes.extend(coordinate.to_le_bytes());
+                }
+            }
+            bytes.extend([0u8; 2]);
+        }
+        bytes
+    }
+
+    /// Every stored coordinate is the file's `f32` value widened to `f64` and multiplied by the
+    /// unit's millimetres, exactly: no rounding through `f32`, and not scaled twice. The values
+    /// are exact in `f32`, so the expected numbers carry no rounding of their own.
+    #[test]
+    fn stl_coordinates_are_the_widened_value_times_the_unit_exactly() {
+        let (a, b, c, d) = ([0.5, -3.75, 1.25], [7.0, 0.25, -2.5], [-1.5, 4.0, 0.125], [2.0, 2.0, 9.5]);
+        let triangles = [[a, b, c], [a, c, d], [a, d, b], [b, d, c]];
+        let stl = stl_of(&triangles);
+        for (unit, mm) in solidcraft_doc::point_cloud::UNITS {
+            let feature = mesh_import_feature_in(&stl, "t.stl", mm).unwrap();
+            let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = feature.kind else { panic!() };
+            let want: Vec<f64> = triangles.iter().flatten().flatten().map(|v| f64::from(*v) * mm).collect();
+            assert_eq!(&*meshes[0].positions, want.as_slice(), "{unit}");
+        }
+    }
+
+    /// A PLY with faces, read as a mesh, takes a unit as an STL does: it states none either.
+    #[test]
+    fn ply_mesh_unit_scales_its_vertices_exactly() {
+        let corners = [[0.5f32, -3.75, 1.25], [7.0, 0.25, -2.5], [-1.5, 4.0, 0.125], [2.0, 2.0, 9.5]];
+        let mut ply = String::from("ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\n");
+        ply.push_str("element face 4\nproperty list uchar int vertex_indices\nend_header\n");
+        for c in corners {
+            ply.push_str(&format!("{} {} {}\n", c[0], c[1], c[2]));
+        }
+        ply.push_str("3 0 1 2\n3 0 2 3\n3 0 3 1\n3 1 3 2\n");
+        let sorted = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            v
+        };
+        for (unit, mm) in solidcraft_doc::point_cloud::UNITS {
+            let feature = mesh_import_feature_in(ply.as_bytes(), "t.ply", mm).unwrap();
+            let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = feature.kind else { panic!() };
+            let want: Vec<f64> = corners.iter().flatten().map(|v| f64::from(*v) * mm).collect();
+            assert_eq!(sorted(meshes[0].positions.to_vec()), sorted(want), "{unit}");
+        }
     }
 
     /// STL quirks: a binary header starting with "solid", a zero triangle count, garbage
@@ -1055,11 +1222,8 @@ mod tests {
     }
 
     /// OBJ shares the vertices faces meet at and keeps the body name as written, spaces included.
-    /// The 10 × 20 × 30 box meshes as the planner's grids, no side longer than a fifth of its
-    /// extent (the 37.4 mm diagonal): its edges in 2, 3 and 5 pieces, so its faces are grids of
-    /// 2 × 3, 2 × 5 and 3 × 5 cells, 2 · (6 + 10 + 15) · 2 = 124 triangles. Welded, their
-    /// corners are the 3 · 4 · 6 = 72 nodes of the box's lattice less the 1 · 2 · 4 inside it: 64
-    /// positions (unwelded, 372), and one normal per face.
+    /// The 10 × 20 × 30 box meshes as two triangles a face (a flat face needs no interior
+    /// nodes), 12 triangles on its 8 corners (unwelded, 36), and one normal per face.
     #[test]
     fn obj_export_is_welded_and_keeps_names() {
         let (_, m) = model();
@@ -1070,10 +1234,10 @@ mod tests {
         let o = String::from_utf8(export(&st, &[], Format::Obj, "t").unwrap()).unwrap();
         let count = |p: &str| o.lines().filter(|l| l.starts_with(p)).count();
         assert!(o.contains("\no Red Block\n"), "{o}");
-        assert_eq!((count("v "), count("vn "), count("f ")), (64, 6, 124), "{o}");
+        assert_eq!((count("v "), count("vn "), count("f ")), (8, 6, 12), "{o}");
         let ids: Vec<usize> =
             o.lines().filter(|l| l.starts_with("f ")).flat_map(|l| l.split([' ', '/']).skip(1)).filter_map(|x| x.parse().ok()).collect();
-        assert!(ids.iter().all(|i| (1..=64).contains(i)));
+        assert!(ids.iter().all(|i| (1..=8).contains(i)));
     }
 
     /// The OBJ export carries the colours of the bodies: the mesh file names the material
@@ -1283,6 +1447,7 @@ mod tests {
                 width: "30".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -1406,6 +1571,7 @@ mod tests {
                 width: "30".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )

@@ -1,0 +1,147 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  20.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  20.0,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 10
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              0.0,
+              10.0
+            ]
+          ],
+          "tolerance": 1.7330508075688775
+        },
+        "kind": "curvature",
+        "sizes": [
+          6.0
+        ]
+      }
+    }
+  ],
+  "case": "862-fillet-curvature-continuous-box-edge",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g2"
+    },
+    "faces": 7,
+    "method": "type curvature: the curvature section: the order-2 section at the equal-area thumbweight between the contacts set back s along two planes square to each other (cov-fillet-section-curvature-box-edge-r3), S(t) = f(t) (e + (1 - t) (rho1 - e)) + (1 - f(t)) (e + t (rho2 - e)), f = (1-t)^3 / ((1-t)^3 + t^3), e the corner: it cuts A = 0.214601836603 s^2 off the corner, its first moment about either face M = 0.0474559669443 s^3 (Green's theorem on S), here s = radius = 6 (perpendicular faces): A = 5.55093559 mm^2; the edge is 20 long between two planar end faces square to it: V = 8000 - 20*5.55093559 = 7888.9813. Faces: 6 + 1 = 7. [the curvature section at the equal-area thumbweight (the default): on the same rails it takes off what the ball's circle does, so between square planes w = -0.5252123889 and it cuts A = (1 - pi/4) s^2 = 0.214601836603 s^2, first moment about either face M = 0.0474559669443 s^3 (Green's theorem on S); V = 7845.486678]",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#862"
+    ],
+    "volume_mm3": 7845.486677646163,
+    "what": "a curvature-continuous (G2) fillet of size 6 on one edge of a 20 mm cube"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "862-fillet-curvature-continuous-box-edge.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2333.2449434775226,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 7845.4867006424665
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#862"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a curvature-continuous (G2) fillet of size 6 on one edge of a 20 mm cube",
+  "why_not": []
+}

@@ -2,10 +2,9 @@
 use super::{ImageMethod, RenderSelection, cpu, hdr, inspector, setups, studio};
 use crate::{
     SolveApp,
-    browser::{self, Row},
-    context_menu::{self, Item},
-    theme::Tokens,
-    ui_kit,
+    browser::{self, Row, Spec, node_row},
+    context_menu,
+    ui_kit::{self, Item, browser::Rows},
 };
 use egui::Color32;
 use serde_json::json;
@@ -13,6 +12,7 @@ use solidcraft_engine::{
     Sel,
     doc::{ModelBody, appearance::Look},
 };
+use solidcraft_theme::Tokens;
 
 #[derive(Default)]
 pub(crate) struct Decoration {
@@ -37,7 +37,7 @@ pub(crate) fn decoration(app: &SolveApp, names: &[String]) -> Decoration {
         count: if count == 0 {
             String::new()
         } else {
-            crate::i18n::format(if count == 1 { "render.tree_face_one" } else { "render.tree_face_count" }, &[("count", &count.to_string())])
+            solidcraft_ui_text::format(if count == 1 { "render.tree_face_one" } else { "render.tree_face_count" }, &[("count", &count.to_string())])
         },
     }
 }
@@ -62,15 +62,15 @@ fn look_name(app: &SolveApp, look: Option<&Look>) -> String {
 }
 fn look_color(app: &SolveApp, body: &ModelBody, look: Option<&Look>) -> Color32 {
     let color = look.map(|l| l.color).or_else(|| app.session.doc.body_color(body).map(|c| c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)));
-    color.map_or(Tokens::get().body, |rgb| crate::theme::srgb(rgb.map(|channel| f32::from(channel) / 255.0)))
+    color.map_or(Tokens::get().body, |rgb| solidcraft_theme::srgb(rgb.map(|channel| f32::from(channel) / 255.0)))
 }
 
-fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
+fn section(app: &mut SolveApp, rows: &mut Rows<'_>, key: &str) -> bool {
     let id = format!("render:tree:{key}");
     let open = browser::is_open(app, &id, true);
     let label = app.tr(&format!("render.tree_{key}")).to_string();
     let add_label = app.tr(if key == "lights" { "render.tree_add_light" } else { "render.tree_add_shot" }).to_string();
-    let pending = app.tr("render.light_backend_limit").to_string();
+    let pending = app.tr("render.method_limit_raster").to_string();
     let actions = [ui_kit::TreeAction {
         icon: "plus",
         hover_only: false,
@@ -78,10 +78,10 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
         reason: (key == "lights" && app.render_workspace.view.method == ImageMethod::Raster).then_some(pending.as_str()),
         target: if key == "lights" { "render:tree:lights:add" } else { "render:tree:shots:add" },
     }];
-    let row = browser::draw_row(
-        ui,
-        ui.scope_id().with(&id),
-        &Row {
+    let row = node_row(
+        rows,
+        Spec { key: &id, ..Default::default() },
+        Row {
             label: &label,
             name: true,
             icon: match key {
@@ -104,7 +104,7 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     if let Some(rect) = row.rect {
         crate::scenario::publish_target(&id, rect);
     }
-    if row.actions.iter().any(|r| r.clicked()) {
+    if !row.actions.is_empty() {
         // Shot naming and saving use the existing Save shot prompt.
         if key == "lights" {
             if let Err(error) = super::light::edit(app, "render.lights.add", None, Some(json!({"kind":"area"}))) {
@@ -143,6 +143,11 @@ pub(crate) fn light_types(app: &SolveApp) -> Vec<&'static str> {
 }
 pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     let view = &app.render_workspace.view;
+    if view.method == ImageMethod::GpuRaytrace && view.studio.environment == studio::Environment::None && view.studio.lighting_enabled {
+        // An explicit constant, including black, is not the implicit studio.
+        // It owns RGB radiance, not the legacy draft rotation/intensity pair.
+        return (app.tr("render.tree_constant").to_string(), String::new());
+    }
     let fixed = || (app.tr("render.tree_fixed_studio").to_string(), view.draft.environment_rotation, view.draft.environment_intensity);
     let source = |input: &hdr::Input| match input {
         hdr::Input::EmbeddedResource { resource } => format!("{} {resource}", app.tr("render.tree_hdr")),
@@ -154,6 +159,7 @@ pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     let (name, rotation, intensity) = match view.method {
         ImageMethod::CpuRaytrace => match view.cpu.environment {
             cpu::Environment::Hdr => (source(&view.cpu.hdr), view.cpu.rotation_rad, view.cpu.intensity),
+            cpu::Environment::Sky => (app.tr("render.studio_sky").into(), view.cpu.rotation_rad, view.cpu.intensity),
             cpu::Environment::Constant => (app.tr("render.tree_constant").into(), 0.0, view.cpu.intensity),
             cpu::Environment::None => fixed(),
         },
@@ -166,22 +172,22 @@ pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     };
     (
         name,
-        crate::i18n::format(
+        solidcraft_ui_text::format(
             "render.tree_environment_values",
             &[("rotation", &format!("{:.0}", rotation.to_degrees())), ("intensity", &format!("{intensity:.2}"))],
         ),
     )
 }
 
-pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub(crate) fn sections(app: &mut SolveApp, rows: &mut Rows<'_>) {
     setups::refresh_dirty(app);
     let (source, _detail) = environment(app);
     let open = browser::is_open(app, "render:tree:environment", true);
     let environment_label = app.tr("render.tree_environment").to_string();
-    let row = browser::draw_row(
-        ui,
-        ui.scope_id().with("render_environment"),
-        &Row {
+    let row = node_row(
+        rows,
+        Spec { key: "render_environment", ..Default::default() },
+        Row {
             label: &environment_label,
             name: true,
             icon: "environment_map",
@@ -201,7 +207,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
     if row.clicked {
         select(app, "environment", None);
     }
-    if section(app, ui, "lights") {
+    if section(app, rows, "lights") {
         for (index, light) in super::light::rows(app).unwrap_or_default().iter().enumerate() {
             let label = super::light::name(app, light);
             let id = &light.id;
@@ -210,10 +216,11 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
             let solo_target = format!("render:tree:light:{index}:solo");
             let solo_label = app.tr("render.tree_solo").to_string();
             let actions = [ui_kit::TreeAction { icon: "lookat", hover_only: true, label: &solo_label, reason: None, target: &solo_target }];
-            let row = browser::draw_row(
-                ui,
-                ui.scope_id().with(("render_light", id)),
-                &Row {
+            let light_key = format!("render_light:{id}");
+            let row = node_row(
+                rows,
+                Spec { key: &light_key, ..Default::default() },
+                Row {
                     depth: 1,
                     label: &label,
                     name: true,
@@ -237,7 +244,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 let _ = app.run("render.lights.mute", json!({"id":id,"mute":visible}));
             }
-            if row.actions.iter().any(|response| response.clicked()) {
+            if !row.actions.is_empty() {
                 let _ = app.run("render.lights.solo", json!({"id":id,"solo":!solo}));
             }
             if row.clicked {
@@ -245,14 +252,15 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if section(app, ui, "shots") {
+    if section(app, rows, "shots") {
         let names: Vec<_> = app.session.doc.render.setups.keys().cloned().collect();
         for name in names {
             let active = name == app.render_workspace.view.name;
-            let row = browser::draw_row(
-                ui,
-                ui.scope_id().with(("render_shot", &name)),
-                &Row {
+            let shot_key = format!("render_shot:{name}");
+            let row = node_row(
+                rows,
+                Spec { key: &shot_key, ..Default::default() },
+                Row {
                     depth: 1,
                     label: &name,
                     name: true,
@@ -280,7 +288,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ("render.shot.remove", "render.shot_remove"),
                     ] {
                         let item = Item::action(command, app.tr(key), "");
-                        if context_menu::list_row(ui, &item).is_some() {
+                        if crate::ui_kit::menu::list_row(ui, &item).is_some() {
                             if command == "render.settings.apply" {
                                 super::switch_shot(app, name.clone());
                             } else {
@@ -295,13 +303,13 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-pub(crate) fn output(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub(crate) fn output(app: &mut SolveApp, rows: &mut Rows<'_>) {
     let (size, format) = super::output_summary(app);
     let subtitle = format!("{size} · {format}");
-    let row = browser::draw_row(
-        ui,
-        ui.scope_id().with("render_output"),
-        &Row {
+    let row = node_row(
+        rows,
+        Spec { key: "render_output", ..Default::default() },
+        Row {
             label: app.tr("render.tree_output"),
             icon: "render_image",
             name: true,
@@ -322,10 +330,11 @@ pub(crate) fn output(app: &mut SolveApp, ui: &mut egui::Ui) {
         ("check", "render.children.check", RenderSelection::Check),
     ] {
         let subtitle = crate::render_workspace::output_child_summary(app, kind);
-        let row = browser::draw_row(
-            ui,
-            ui.scope_id().with(("render_output_child", kind)),
-            &Row {
+        let child_key = format!("render_output_child:{kind}");
+        let row = node_row(
+            rows,
+            Spec { key: &child_key, ..Default::default() },
+            Row {
                 depth: 1,
                 label: app.tr(key),
                 name: true,
@@ -369,16 +378,16 @@ pub(crate) fn wear_subtitle(app: &SolveApp) -> String {
     if count == 0 {
         app.tr("render.wear_no_layers").into()
     } else {
-        crate::i18n::format(if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" }, &[("count", &count.to_string())])
+        solidcraft_ui_text::format(if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" }, &[("count", &count.to_string())])
     }
 }
 
-fn wear(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn wear(app: &mut SolveApp, rows: &mut Rows<'_>) {
     let subtitle = wear_subtitle(app);
-    let row = browser::draw_row(
-        ui,
-        ui.scope_id().with("render_wear"),
-        &Row {
+    let row = node_row(
+        rows,
+        Spec { key: "render_wear", ..Default::default() },
+        Row {
             depth: 1,
             label: app.tr("render.wear_title"),
             name: true,
@@ -397,14 +406,14 @@ fn wear(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 /// Returns true when the object section is closed or the By look lens drew its objects.
-pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut Vec<String>, hovered: &mut bool) -> bool {
+pub(crate) fn objects(app: &mut SolveApp, rows: &mut Rows<'_>, hover_bodies: &mut Vec<String>, hovered: &mut bool) -> bool {
     if app.tree.reveal.is_some() {
         app.tree.collapsed.remove("render:tree:objects");
     }
-    if !section(app, ui, "objects") {
+    if !section(app, rows, "objects") {
         return true;
     }
-    wear(app, ui);
+    wear(app, rows);
     if !app.render_workspace.view.by_look {
         return false;
     }
@@ -415,21 +424,21 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
         }
         let open = browser::is_open(app, &key, true);
         let label = look_name(app, group.look.as_ref());
-        let count = crate::i18n::format(
+        let count = solidcraft_ui_text::format(
             if group.objects.len() == 1 { "render.tree_user_one" } else { "render.tree_users" },
             &[("count", &group.objects.len().to_string())],
         );
-        let row = browser::draw_row(
-            ui,
-            ui.scope_id().with(("render_look", &key)),
-            &Row {
+        let row = node_row(
+            rows,
+            Spec { key: &key, ..Default::default() },
+            Row {
                 depth: 1,
                 label: &label,
                 name: true,
                 fold: Some(open),
                 count: &count,
                 swatch: Some(
-                    group.look.as_ref().map_or(Tokens::get().body, |l| crate::theme::srgb(l.color.map(|channel| f32::from(channel) / 255.0))),
+                    group.look.as_ref().map_or(Tokens::get().body, |l| solidcraft_theme::srgb(l.color.map(|channel| f32::from(channel) / 255.0))),
                 ),
                 ..Default::default()
             },
@@ -458,7 +467,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
         if let Some(response) = row.resp {
             ui_kit::Menu::context(&response, |ui| {
                 let item = context_menu::cmd(app, "select.same_look", "Select Same Look");
-                if context_menu::list_row(ui, &item).is_some()
+                if crate::ui_kit::menu::list_row(ui, &item).is_some()
                     && let Some(params) = &source
                 {
                     let _ = app.run("select.same_look", params.clone());
@@ -477,10 +486,11 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
                     Sel::Occurrence { path } => app.session.occurrence_bodies(path, true).is_ok_and(|bodies| bodies.contains(&name)),
                     _ => browser::picked_body(s) == Some(&name),
                 });
-                let row = browser::draw_row(
-                    ui,
-                    ui.scope_id().with((&key, &name)),
-                    &Row {
+                let object_key = format!("{key}/{name}");
+                let row = node_row(
+                    rows,
+                    Spec { key: &object_key, ..Default::default() },
+                    Row {
                         depth: 2,
                         label: &name,
                         name: true,
@@ -496,7 +506,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
                 if row.clicked {
                     let _ = app.run(
                         "select.set",
-                        json!({"items":[Sel::Body {name:name.clone()}],"add":ui.input(|i|i.modifiers.command || i.modifiers.ctrl)}),
+                        json!({"items":[Sel::Body {name:name.clone()}],"add":rows.ui().input(|i|i.modifiers.command || i.modifiers.ctrl)}),
                     );
                 }
                 if row.eye {
@@ -509,7 +519,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
                 if app.tree.reveal.as_ref() == Some(&name)
                     && let Some(rect) = row.rect
                 {
-                    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                    rows.ui().scroll_to_rect(rect, Some(egui::Align::Center));
                 }
                 if let Some(at) = row.secondary {
                     context_menu::open_for(app, at, context_menu::Target::Body { name });

@@ -1242,6 +1242,8 @@ pub fn convert_body(
                 zone_shape: None,
                 tag: String::new(),
                 tear: (false, false),
+                tear_curved: (false, false),
+                tear_ease: (0.0, 0.0),
             });
             let i = sh.flanges.len() - 1;
             let (ba, n) = sh.flanges.get(i).map_or((0.0, Vec2::new(d.y, -d.x)), |f| (sh.allowance(f), f.n));
@@ -1259,7 +1261,7 @@ pub fn convert_body(
     let made: Vec<usize> = (0..sh.flanges.len()).collect();
     let mut notes = Vec::new();
     for &i in &made {
-        notes.extend(sh.relieve_bend_ends(i, (false, false)));
+        notes.extend(sh.relieve_bend_ends(i, (false, false), false));
     }
     let corners = sh.corners(&made);
     let mut closed = Vec::with_capacity(corners.len());

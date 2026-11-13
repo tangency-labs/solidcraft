@@ -1,0 +1,35 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-plane-axis-point-refuses-a-point-on-the-axis",
+  "expected": {
+    "method": "(0,0,50) is on the Z axis: every plane through the axis holds it, so no one plane is meant: refused",
+    "outcome": "refused",
+    "refusal": "point is on the axis",
+    "source": "analytic",
+    "sources": [],
+    "what": "a plane through the Z axis and a point on it"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 1 (construct.plane.axis_point): the point is on the axis: pick a point off the axis to define a unique plane",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 1 (construct.plane.axis_point): the point is on the axis: pick a point off the axis to define a unique plane",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a plane through the Z axis and a point on it",
+  "why_not": [
+    "no kernel operation ran before the failure: step 1 (construct.plane.axis_point): the point is on the axis: pick a point off the axis to define a unique plane"
+  ]
+}

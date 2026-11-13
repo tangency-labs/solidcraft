@@ -40,7 +40,7 @@ pub(super) fn apply(app: &mut SolveApp, reply: &serde_json::Value) -> Result<(),
         .or(left)
         .ok_or("comparison needs a retained result")?;
     if app.render_workspace.view.compare.as_ref().is_none_or(|view| view.reference != reference) {
-        app.render_workspace.view.result_scale = ResultScale::Fit;
+        fit_result(app);
     }
     app.render_workspace.view.compare = Some(View { left, right, position, reference, dragging: false });
     app.render_workspace.view.result = true;
@@ -76,7 +76,9 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     let mut labels = vec![app.tr("render.compare_live").to_owned()];
-    labels.extend(results.iter().map(|result| crate::i18n::format("render.compare_render", &[("number", &result.frame.job.serial.to_string())])));
+    labels.extend(
+        results.iter().map(|result| solidcraft_ui_text::format("render.compare_render", &[("number", &result.frame.job.serial.to_string())])),
+    );
     let mut targets = vec!["render:compare:live".to_string()];
     targets.extend(results.iter().enumerate().map(|(index, _)| format!("render:compare:result:{index}")));
     let choices: Vec<_> = std::iter::once(None).chain(results.iter().map(|result| Some(result.frame.job))).collect();
@@ -170,15 +172,34 @@ fn label(app: &SolveApp, side: Option<JobId>) -> String {
     side.and_then(|job| app.render_workspace.view.retained.iter().find(|result| result.frame.job == job)).map_or_else(
         || app.tr("render.compare_live_preview").to_owned(),
         |result| {
-            crate::i18n::format(
+            solidcraft_ui_text::format(
                 "render.compare_side",
                 &[
                     ("number", &result.frame.job.serial.to_string()),
-                    ("shot", result.shot.as_deref().unwrap_or_else(|| crate::i18n::tr("render.results_unnamed"))),
+                    ("shot", result.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed"))),
                 ],
             )
         },
     )
+}
+
+pub(super) fn summary(app: &SolveApp, ui: &mut egui::Ui) {
+    let Some(view) = &app.render_workspace.view.compare else { return };
+    let Some(reference) = app.render_workspace.view.retained.iter().find(|result| result.frame.job == view.reference) else { return };
+    let stale = app.render_workspace.view.retained.iter().any(|result| [view.left, view.right].contains(&Some(result.frame.job)) && result.stale);
+    ui_kit::completion_text(ui, app.tr(if stale { "render.image_stale" } else { "render.result_current" }), !stale);
+    let summary = solidcraft_ui_text::format(
+        "render.compare_summary",
+        &[
+            ("shot", reference.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed"))),
+            ("width", &reference.frame.width.to_string()),
+            ("height", &reference.frame.height.to_string()),
+            ("seconds", &format!("{:.0}", reference.seconds)),
+            ("renderer", reference.frame.executor.as_str()),
+            ("revision", &reference.frame.scene_generation.to_string()),
+        ],
+    );
+    ui_kit::text(ui, &summary, ui_kit::Text::Inline);
 }
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -188,35 +209,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     ui.painter().rect_filled(ui.max_rect(), 0.0, Tokens::get().viewport_bottom);
-    let mut free = crate::render_ui::canvas(app, ui.max_rect());
-    if ribbon::busy(app) {
-        free = ui_kit::Container::below_navigation_row(free);
-    }
-    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(free).id_salt("render_compare_content"));
+    let viewport = ui.max_rect();
+    app.viewport.rect = Some(viewport);
+    crate::viewport::refresh_layout(app, ui.ctx());
+    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(viewport).id_salt("render_compare_content"));
     let ui = &mut content;
-    ui_kit::Container::navigation_contents(ui, |ui| {
-        ui.horizontal_wrapped(|ui| result_actions(app, ui));
-    });
     let Some(view) = app.render_workspace.view.compare.clone() else { return };
     app.render_workspace.comparison_images.retain(|(job, _)| [view.left, view.right].contains(&Some(*job)));
     let Some(reference) = app.render_workspace.view.retained.iter().find(|result| result.frame.job == view.reference).cloned() else { return };
-    let stale = app.render_workspace.view.retained.iter().any(|result| [view.left, view.right].contains(&Some(result.frame.job)) && result.stale);
-    // Keep freshness and the capture summary below the image, as in the result board.
-    ui_kit::Panel::pinned_footer(ui, "render_compare_summary", 2, |ui| {
-        ui_kit::completion_text(ui, app.tr(if stale { "render.image_stale" } else { "render.result_current" }), !stale);
-        let summary = crate::i18n::format(
-            "render.compare_summary",
-            &[
-                ("shot", reference.shot.as_deref().unwrap_or_else(|| crate::i18n::tr("render.results_unnamed"))),
-                ("width", &reference.frame.width.to_string()),
-                ("height", &reference.frame.height.to_string()),
-                ("seconds", &format!("{:.0}", reference.seconds)),
-                ("renderer", reference.frame.executor.as_str()),
-                ("revision", &reference.frame.scene_generation.to_string()),
-            ],
-        );
-        ui_kit::text(ui, &summary, ui_kit::Text::Inline);
-    });
     let canvas = ui.available_rect_before_wrap();
     if !canvas.is_positive() {
         return;
@@ -225,9 +225,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.viewport.rect = Some(canvas);
     crate::viewport::refresh_layout(app, ui.ctx());
     let size = [reference.frame.width, reference.frame.height];
-    if app.render_workspace.view.result_scale != ResultScale::Free {
-        app.render_workspace.view.result_camera = result_camera(size, canvas, ui.ctx().pixels_per_point(), app.render_workspace.view.result_scale);
-    }
     // Reserve the divider before navigation; captured drags cannot reach any camera path.
     let mut position = view.position;
     let divider = ui_kit::comparison_divider(ui, canvas, &mut position, app.tr("render.compare_divider"));
@@ -240,11 +237,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         app.set_status(error, true);
     }
-    if !captured {
-        with_result_camera(app, |app| {
-            crate::navigation::handle(app, ui, canvas, &response, crate::navigation::NavCaps { orbit: false, pick: false });
-        });
-    }
+    app.render_workspace.result_navigation = Some((canvas, response, captured));
     let image = result_rect(app.render_workspace.view.result_camera, size, canvas);
     let split = canvas.left() + canvas.width() * position;
     let halves = [

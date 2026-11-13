@@ -400,6 +400,173 @@ fn an_untouched_revolve_axis_keeps_its_origin_expressions_through_redefine() {
     }
 }
 
+/// A surface revolve's `{origin, dir}` axis is a world axis in a moved or turned component, as a
+/// solid revolve's is, when the revolve is made and when its axis is changed in Edit Feature.
+#[test]
+fn a_surface_revolve_axis_maps_into_a_moved_component() {
+    let made = |command: &str, turned: bool| {
+        let mut s = moved_part();
+        if turned {
+            run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [50, 0, 0]}));
+        }
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "Ring", "axis": {"origin": [50, 0, 0], "dir": [0, 0, 1]}, "name": "Turn"});
+        if command == "solid.revolve" {
+            p["operation"] = json!("new");
+        }
+        run(&mut s, command, p.clone());
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        let first = world_bbox(&s, &body);
+        // Edit Feature with a new axis, also given in the world: 2 mm along the sketch's X, which
+        // the quarter turn lays along the world's Y.
+        p["axis"]["origin"] = if turned { json!([50, 2, 0]) } else { json!([52, 0, 0]) };
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": command, "params": p}));
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        (first, world_bbox(&s, &body))
+    };
+    for turned in [false, true] {
+        let (solid, solid_edit) = made("solid.revolve", turned);
+        let (surface, surface_edit) = made("surface.revolve", turned);
+        assert!(near(solid.0, surface.0) && near(solid.1, surface.1), "turned {turned}: {solid:?} against {surface:?}");
+        assert!(
+            near(solid_edit.0, surface_edit.0) && near(solid_edit.1, surface_edit.1),
+            "turned {turned}, edited: {solid_edit:?} against {surface_edit:?}"
+        );
+    }
+}
+
+/// A surface revolve about a picked edge of a moved component turns about that edge where it is
+/// shown, as one about the same axis given as `{origin, dir}` does.
+#[test]
+fn a_surface_revolve_about_a_picked_edge_of_a_moved_component() {
+    let made = |axis: Value| {
+        let mut s = moved_part();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.revolve", json!({"sketch": "Ring", "axis": axis, "name": "Turn"}));
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        world_bbox(&s, &body)
+    };
+    // The block's vertical edge at its corner, shown at world x = 50.
+    let edge = made(json!({"edge": [50, 0, 5]}));
+    let line = made(json!({"origin": [50, 0, 0], "dir": [0, 0, 1]}));
+    assert!(near(edge.0, line.0) && near(edge.1, line.1), "{edge:?} against {line:?}");
+}
+
+/// A revolve axis written `{x, y, z}` maps into a moved or turned component like `[x, y, z]`:
+/// an origin of numbers or expressions, and a direction.
+#[test]
+fn an_object_form_axis_maps_into_a_moved_component() {
+    let made = |turned: bool, origin: Value, dir: Value| {
+        let mut s = moved_part();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "50 mm"}));
+        if turned {
+            run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [50, 0, 0]}));
+        }
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let axis = json!({"origin": origin, "dir": dir});
+        run(&mut s, "solid.revolve", json!({"sketch": "Ring", "axis": axis, "operation": "new", "body_name": "Ring"}));
+        world_bbox(&s, "Ring")
+    };
+    for turned in [false, true] {
+        // Origins, about the component's own Z axis (world x = 50, which a turn about Z keeps).
+        let array = made(turned, json!([50, 0, 0]), json!([0, 0, 1]));
+        for origin in [json!({"x": 50, "y": 0, "z": 0}), json!({"x": "W", "y": 0, "z": "0 mm"})] {
+            let object = made(turned, origin.clone(), json!([0, 0, 1]));
+            assert!(near(array.0, object.0) && near(array.1, object.1), "turned {turned}, {origin}: {array:?} against {object:?}");
+        }
+        // A direction, along the sketch's own X axis 8 mm below it: the world's X, or its Y once
+        // turned.
+        let (dir, dir_xyz) =
+            if turned { (json!([0, 1, 0]), json!({"x": 0, "y": 1, "z": 0})) } else { (json!([1, 0, 0]), json!({"x": 1, "y": 0, "z": 0})) };
+        let array = made(turned, json!([50, 0, -8]), dir);
+        let object = made(turned, json!([50, 0, -8]), dir_xyz);
+        assert!(near(array.0, object.0) && near(array.1, object.1), "turned {turned}, direction: {array:?} against {object:?}");
+    }
+}
+
+/// A hole whose position and direction are written `{x, y, z}` is drilled like one written
+/// `[x, y, z]`, in a turned component picked from the root: the direction turns with the body.
+#[test]
+fn an_object_form_hole_turns_with_the_picked_body() {
+    let drilled = |position: Value, direction: Value| {
+        let mut s = moved_part();
+        run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "origin": [50, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.hole", json!({"position": position, "direction": direction, "diameter": 4, "depth": 5, "name": "Drill"}));
+        // Where and which way it was drilled, as saved in the component's frame.
+        let saved = run(&mut s, "timeline.inspect", json!({"feature": "Drill"}))["definition"].clone();
+        (before - volume(&mut s), saved)
+    };
+    // The block's face at the top of the world once turned, at its middle.
+    let mut s = moved_part();
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "origin": [50, 0, 0]}));
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+    let (lo, hi) = world_bbox(&s, &body);
+    let (x, y, z) = ((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, hi.z);
+    let (array, array_saved) = drilled(json!([x, y, z]), json!([0, 0, -1]));
+    let (object, object_saved) = drilled(json!({"x": x, "y": y, "z": z}), json!({"x": 0, "y": 0, "z": -1}));
+    // A flat-bottomed hole of radius 2, 5 deep.
+    let bore = std::f64::consts::PI * 4.0 * 5.0;
+    assert!((array - bore).abs() < 1e-6 * bore, "array form cut {array}");
+    assert!((object - bore).abs() < 1e-6 * bore, "object form cut {object}");
+    assert_eq!(array_saved, object_saved);
+}
+
+/// An edge picked with a point written `{x, y, z}` in a list is found in a moved component, as
+/// one written `[x, y, z]` is.
+#[test]
+fn an_object_form_pick_in_a_list_maps_into_a_moved_component() {
+    let filleted = |edge: Value| {
+        let mut s = moved_part();
+        let before = volume(&mut s);
+        // The edge along X at the top front: world (65, 0, 10).
+        run(&mut s, "solid.fillet", json!({"edges": [edge], "radius": 2}));
+        before - volume(&mut s)
+    };
+    let array = filleted(json!([65, 0, 10]));
+    let object = filleted(json!({"x": 65, "y": 0, "z": 10}));
+    assert!((array - object).abs() < 1e-9 * array.max(1.0), "{array} against {object}");
+}
+
+/// A revolve axis given only by its direction passes through the world origin in a moved
+/// component, as one with `origin: [0, 0, 0]` does: solid and surface revolves, made and edited.
+#[test]
+fn an_axis_without_an_origin_passes_through_the_world_origin() {
+    let made = |command: &str, axis: Value| {
+        let mut s = moved_part();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "Ring", "axis": axis, "name": "Turn"});
+        if command == "solid.revolve" {
+            p["operation"] = json!("new");
+        }
+        run(&mut s, command, p.clone());
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        let first = world_bbox(&s, &body);
+        // Edit Feature with the same axis given again.
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": command, "params": p}));
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        (first, world_bbox(&s, &body))
+    };
+    for command in ["solid.revolve", "surface.revolve"] {
+        let (given, given_edit) = made(command, json!({"origin": [0, 0, 0], "dir": [0, 0, 1]}));
+        let (omitted, omitted_edit) = made(command, json!({"dir": [0, 0, 1]}));
+        assert!(near(given.0, omitted.0) && near(given.1, omitted.1), "{command}: {given:?} against {omitted:?}");
+        assert!(
+            near(given_edit.0, omitted_edit.0) && near(given_edit.1, omitted_edit.1),
+            "{command}, edited: {given_edit:?} against {omitted_edit:?}"
+        );
+    }
+}
+
 /// A new placement given to `timeline.redefine` is still a world point.
 #[test]
 fn a_new_primitive_placement_is_still_mapped_from_the_world() {
@@ -554,4 +721,432 @@ fn a_combine_tool_stays_where_it_is_placed() {
     run(&mut s, "component.capture_position", json!({}));
     assert_eq!(lumps(&s), Some(2), "the boss stays where it is in the world");
     assert!((volume(&mut s) - 17000.0).abs() < 1e-6, "{}", volume(&mut s));
+}
+
+/// The volume of one body in its own frame (a component's body once, however often it is placed).
+fn body_volume(s: &Session, body: &str) -> f64 {
+    s.model.state().body(body).unwrap_or_else(|| panic!("no body {body}")).measure().unwrap().volume
+}
+
+/// The body the last feature, a fillet or chamfer, keeps.
+fn blend_body(s: &Session) -> Option<String> {
+    match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Fillet { body, .. } | solidcraft_doc::FeatureKind::Chamfer { body, .. } => body.as_ref().map(|b| b.0.clone()),
+        k => panic!("{k:?}"),
+    }
+}
+
+/// The points the last feature, a fillet or chamfer, keeps.
+fn blend_edges(s: &Session) -> Vec<Vec3> {
+    match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Fillet { edges, .. } | solidcraft_doc::FeatureKind::Chamfer { edges, .. } => edges.iter().map(|p| p.0).collect(),
+        k => panic!("{k:?}"),
+    }
+}
+
+fn refused(s: &mut Session, id: &str, p: Value) -> String {
+    let features = s.doc.features.len();
+    let err = s.execute(id, &p).expect_err(&format!("{id} {p}")).to_string();
+    assert_eq!(s.doc.features.len(), features, "{id} {p}: {err}");
+    err
+}
+
+/// A 1 mm chamfer of a 40 mm edge between square faces.
+const CUT: f64 = 20.0;
+/// A box 40 x 30 x 10.
+const BLOCK: f64 = 12000.0;
+
+/// Component Base holds "Base block" and component Cap "Cap block", each a 40 x 30 x 10 box,
+/// Cap's at `cap_z` in its own frame and its placement moved by `moved`; Base is active.
+fn two_parts(cap_z: f64, moved: [f64; 3]) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Base block"}));
+    run(&mut s, "component.create", json!({"name": "Cap", "parent": "root"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, cap_z], "body_name": "Cap block"}));
+    if moved != [0.0; 3] {
+        run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "translate": moved}));
+    }
+    run(&mut s, "component.activate", json!({"component": "Base"}));
+    s
+}
+
+/// Component Lower holds "Lower block" (40 x 30 x 10) and component Upper "Upper block" (40 x 30
+/// x 2), both from their frames' origins, so Upper's bottom edges lie on Lower's in their own
+/// frames. Upper:1 sits on Lower, and a second placement, Upper:2, under it. The root is active.
+fn lower_and_uppers() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Lower"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Lower block"}));
+    run(&mut s, "component.create", json!({"name": "Upper", "parent": "root"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 2, "body_name": "Upper block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Upper:1", "translate": [0, 0, 10]}));
+    let under = run(&mut s, "occurrence.copy", json!({"component": "Upper"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": under, "space": "world", "translate": [0, 0, -12]}));
+    let (lo, hi) = world_bbox(&s, "Upper block (Upper:2)");
+    assert!(near(lo, Vec3::new(0.0, 0.0, -2.0)) && near(hi, Vec3::new(40.0, 30.0, 0.0)), "{lo:?} {hi:?}");
+    (s, under)
+}
+
+/// A world pick on an edge of a moved part finds that part, though another part has an edge at
+/// the same point in its own frame, and the blend keeps the body it found.
+#[test]
+fn edge_picks_on_a_moved_part_find_it_past_other_parts_frames() {
+    let round = (1.0 - std::f64::consts::PI / 4.0) * 40.0;
+    for (case, mut s, id, p, body, base, cap) in [
+        ("v0", two_parts(0.0, [0.0, 0.0, 50.0]), "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}), "Base block", BLOCK - CUT, BLOCK),
+        ("v4", two_parts(0.0, [0.0, 0.0, 50.0]), "solid.chamfer", json!({"edges": [[20, 0, 50]], "distance": 1}), "Cap block", BLOCK, BLOCK - CUT),
+        ("v5", two_parts(0.0, [500.0, 0.0, 0.0]), "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}), "Base block", BLOCK - CUT, BLOCK),
+        (
+            "v6",
+            two_parts(0.0, [0.0, 0.0, 50.0]),
+            "solid.chamfer",
+            json!({"edges": [[20, 0, 0]], "distance": 1, "tangent_chain": false}),
+            "Base block",
+            BLOCK - CUT,
+            BLOCK,
+        ),
+        ("fillet", two_parts(0.0, [0.0, 0.0, 50.0]), "solid.fillet", json!({"edges": [[20, 0, 0]], "radius": 1}), "Base block", BLOCK - round, BLOCK),
+        (
+            "press_pull",
+            two_parts(0.0, [0.0, 0.0, 50.0]),
+            "solid.press_pull",
+            json!({"edges": [[20, 0, 0]], "distance": 1}),
+            "Base block",
+            BLOCK - round,
+            BLOCK,
+        ),
+        ("v1 unplaced", two_parts(50.0, [0.0; 3]), "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}), "Base block", BLOCK - CUT, BLOCK),
+    ] {
+        if case == "v5" {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+        }
+        let features = s.doc.features.len();
+        run(&mut s, id, p.clone());
+        assert_eq!(s.doc.features.len(), features + 1, "{case}");
+        assert_eq!(blend_body(&s).as_deref(), Some(body), "{case}");
+        let (b, c) = (body_volume(&s, "Base block"), body_volume(&s, "Cap block"));
+        assert!((b - base).abs() < 1e-3 * CUT && (c - cap).abs() < 1e-3 * CUT, "{case}: Base {b}, Cap {c}");
+    }
+    // The pick on Cap is kept in Cap's frame.
+    let mut s = two_parts(0.0, [0.0, 0.0, 50.0]);
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 50]], "distance": 1}));
+    assert_eq!(blend_edges(&s), vec![Vec3::new(20.0, 0.0, 0.0)]);
+}
+
+/// Where the edges of two parts lie in one place in the world, a pick without `body` is refused,
+/// naming both; with `body`, or a pick's own `body`, the named part is cut.
+#[test]
+fn edge_picks_where_two_parts_meet_name_both() {
+    for (case, cap_z, moved) in [("v2 unplaced", 0.0, [0.0; 3]), ("v3 moved", 50.0, [0.0, 0.0, -50.0])] {
+        for (id, size) in [("solid.chamfer", "distance"), ("solid.fillet", "radius")] {
+            let mut s = two_parts(cap_z, moved);
+            let err = refused(&mut s, id, json!({"edges": [[20, 0, 0]], size: 1}));
+            assert!(
+                err.contains("[20, 0, 0] lies on edges of 2 bodies, Base block and Cap block") && err.contains("with `body`"),
+                "{case} {id}: {err}"
+            );
+            assert!(!err.contains("hidden"), "{err}");
+            assert_eq!((body_volume(&s, "Base block"), body_volume(&s, "Cap block")), (BLOCK, BLOCK));
+        }
+        let mut s = two_parts(cap_z, moved);
+        run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1, "body": "Cap block"}));
+        assert!((body_volume(&s, "Cap block") - (BLOCK - CUT)).abs() < 1e-3 * CUT && body_volume(&s, "Base block") == BLOCK, "{case}");
+        let mut s = two_parts(cap_z, moved);
+        run(&mut s, "solid.chamfer", json!({"edges": [{"point": [20, 0, 0], "body": "Cap block"}], "distance": 1}));
+        assert!((body_volume(&s, "Cap block") - (BLOCK - CUT)).abs() < 1e-3 * CUT && body_volume(&s, "Base block") == BLOCK, "{case}");
+        assert_eq!(blend_body(&s).as_deref(), Some("Cap block"), "{case}");
+    }
+}
+
+/// The lower block's outer bottom edge, with a hidden upper block placed under it: that block's
+/// top edge lies there too, so the pick is refused and the message says it is hidden. A lower
+/// block's edge whose only twin is in the upper block's own frame is cut.
+#[test]
+fn edge_picks_beside_a_hidden_placement_name_it() {
+    let (mut s, under) = lower_and_uppers();
+    run(&mut s, "browser.visibility", json!({"visible": false, "paths": [[under]]}));
+    let err = refused(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}));
+    assert!(
+        err.contains("lies on edges of 2 bodies, Lower block and Upper block (Upper:2)") && err.contains("(Upper block (Upper:2) is hidden)"),
+        "{err}"
+    );
+    run(&mut s, "browser.visibility", json!({"visible": true, "paths": [[under]]}));
+    let err = refused(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}));
+    assert!(err.contains("Lower block and Upper block (Upper:2)") && !err.contains("hidden"), "{err}");
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1, "body": "Lower block"}));
+    assert!((body_volume(&s, "Lower block") - (BLOCK - CUT)).abs() < 1e-3 * CUT && body_volume(&s, "Upper block") == 2400.0);
+    // Upper:2 out of the way: the lower block's bottom left edge has a twin only in Upper's frame.
+    let (mut s, under) = lower_and_uppers();
+    run(&mut s, "occurrence.move", json!({"occurrence": under, "space": "world", "translate": [0, 0, -100]}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[0, 15, 0]], "distance": 1}));
+    assert_eq!(blend_body(&s).as_deref(), Some("Lower block"));
+    assert!((body_volume(&s, "Lower block") - (BLOCK - 15.0)).abs() < 1e-3 * CUT && body_volume(&s, "Upper block") == 2400.0);
+}
+
+/// The lower block's top edge, where the upper block on it has its bottom edges, is refused
+/// naming both; `body` cuts either. A second lower block placed on the upper one meets it at the
+/// upper block's top edges likewise.
+#[test]
+fn edge_picks_on_a_top_edge_under_another_part_name_both() {
+    let (mut s, _) = lower_and_uppers();
+    let err = refused(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 10]], "distance": 1}));
+    assert!(err.contains("[20, 0, 10] lies on edges of 2 bodies, Lower block and Upper block:"), "{err}");
+    for (body, lower, upper) in [("Lower block", BLOCK - CUT, 2400.0), ("Upper block", BLOCK, 2400.0 - CUT)] {
+        let (mut s, _) = lower_and_uppers();
+        run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 10]], "distance": 1, "body": body}));
+        let (b, c) = (body_volume(&s, "Lower block"), body_volume(&s, "Upper block"));
+        assert!((b - lower).abs() < 1e-3 * CUT && (c - upper).abs() < 1e-3 * CUT, "{body}: Lower {b}, Upper {c}");
+    }
+    let (mut s, _) = lower_and_uppers();
+    let stacked = run(&mut s, "occurrence.copy", json!({"component": "Lower"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": stacked, "space": "world", "translate": [0, 0, 12]}));
+    let err = refused(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 12]], "distance": 1}));
+    assert!(err.contains("[20, 0, 12] lies on edges of 2 bodies, Upper block and Lower block (Lower:2):"), "{err}");
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 12]], "distance": 1, "body": "Lower block (Lower:2)"}));
+    assert_eq!(blend_body(&s).as_deref(), Some("Lower block"));
+    assert_eq!(blend_edges(&s), vec![Vec3::new(20.0, 0.0, 0.0)]);
+    assert!((body_volume(&s, "Lower block") - (BLOCK - CUT)).abs() < 1e-3 * CUT && body_volume(&s, "Upper block") == 2400.0);
+}
+
+/// A block's top edge inside the bottom face of a plate placed on it: the block alone has an edge
+/// there.
+#[test]
+fn an_edge_inside_another_parts_face_is_picked() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Lower"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Lower block"}));
+    run(&mut s, "component.create", json!({"name": "Plate", "parent": "root"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 2, "corner": [-30, -35, 0], "body_name": "Plate block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Plate:1", "translate": [0, 0, 10]}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 10]], "distance": 1}));
+    assert_eq!(blend_body(&s).as_deref(), Some("Lower block"));
+    assert!((body_volume(&s, "Lower block") - (BLOCK - CUT)).abs() < 1e-3 * CUT && body_volume(&s, "Plate block") == 20000.0);
+}
+
+/// Round edges of two parts in one place: a pick a little inside them, as a click on the drawn
+/// edge lands, is refused naming both. A disc edge 0.2 mm out is another edge.
+#[test]
+fn coincident_round_edges_of_two_parts_are_refused() {
+    let parts = |b_radius: f64| {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "A"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "body_name": "A rod"}));
+        run(&mut s, "component.create", json!({"name": "B", "parent": "root"}));
+        run(&mut s, "solid.cylinder", json!({"radius": b_radius, "height": 2, "body_name": "B disc"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "B:1", "translate": [0, 0, 10]}));
+        s
+    };
+    let pi = std::f64::consts::PI;
+    let disc = |r: f64| pi * r * r * 2.0;
+    // A round of radius 1 on the rod's top edge, radius 10: its section's area at its centroid's
+    // radius.
+    let (a, c) = (1.0 - pi / 4.0, (10.0 - 3.0 * pi) / (3.0 * (4.0 - pi)));
+    let rounded = pi * 100.0 * 10.0 - a * 2.0 * pi * (10.0 - c);
+    let mut s = parts(10.0);
+    let err = refused(&mut s, "solid.fillet", json!({"edges": [[0, 9.98, 10]], "radius": 1}));
+    assert!(err.contains("lies on edges of 2 bodies, A rod and B disc"), "{err}");
+    for pick in [[0.0, 9.98, 10.0], [0.0, 10.0, 10.0]] {
+        let mut s = parts(10.2);
+        run(&mut s, "solid.fillet", json!({"edges": [pick], "radius": 1}));
+        assert_eq!(blend_body(&s).as_deref(), Some("A rod"), "{pick:?}");
+        let (v, b) = (body_volume(&s, "A rod"), body_volume(&s, "B disc"));
+        assert!((v - rounded).abs() < 2e-4 * rounded && (b - disc(10.2)).abs() < 1e-6 * b, "{pick:?}: {v} vs {rounded}, {b}");
+    }
+}
+
+/// Two picks at one point of their parts' frames, on two parts, in one command: each is looked
+/// up where it was picked, and as the feature keeps one body or none, it is refused.
+#[test]
+fn two_picks_at_one_point_of_two_parts_frames_are_refused() {
+    let mut s = two_parts(0.0, [0.0, 0.0, 50.0]);
+    let err = refused(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0], [20, 0, 50]], "distance": 1}));
+    assert!(err.contains("the picks lie on 2 bodies, Base block and Cap block") && err.contains("in a command of its own"), "{err}");
+    assert_eq!((body_volume(&s, "Base block"), body_volume(&s, "Cap block")), (BLOCK, BLOCK));
+}
+
+/// One part placed twice: its edge picked through both placements, or through two placements in
+/// one place, is one edge of one body.
+#[test]
+fn one_edge_of_two_placements_is_one_edge() {
+    for (offset, edges) in [
+        ([0.0, 40.0, 0.0], json!([[20, 0, 0], [20, 40, 0]])),
+        ([0.0; 3], json!([[20, 0, 0]])),
+        // Overlapping along the edge: the pick is at x 25 of one placement and x 15 of the other.
+        ([10.0, 0.0, 0.0], json!([[25, 0, 0]])),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Pin"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Pin block"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let copy = run(&mut s, "occurrence.copy", json!({"component": "Pin"}))["occurrence"].as_u64().unwrap();
+        if offset != [0.0; 3] {
+            run(&mut s, "occurrence.move", json!({"occurrence": copy, "space": "world", "translate": offset}));
+        }
+        run(&mut s, "solid.chamfer", json!({"edges": edges, "distance": 1}));
+        assert!((body_volume(&s, "Pin block") - (BLOCK - CUT)).abs() < 1e-3 * CUT, "{offset:?}: {}", body_volume(&s, "Pin block"));
+        assert!((volume(&mut s) - 2.0 * (BLOCK - CUT)).abs() < 2e-3 * CUT, "{offset:?}");
+        assert_eq!(blend_body(&s), None, "one body in the model");
+    }
+}
+
+/// An edge given by body and index keeps its body on the feature.
+#[test]
+fn an_edge_by_index_keeps_its_body() {
+    let mut s = two_parts(0.0, [0.0, 0.0, 50.0]);
+    let tol = 1e-3_f64.max(s.model.state().body("Base block").unwrap().body.size() * 2e-3);
+    let edges = s.model.state().body("Base block").unwrap().body.edges(tol).unwrap();
+    let index = edges.iter().position(|e| e.mid.dist(Vec3::new(20.0, 0.0, 0.0)) < 1e-6).unwrap();
+    run(&mut s, "solid.chamfer", json!({"edges": [{"body": "Base block", "index": index}], "distance": 1}));
+    assert_eq!(blend_body(&s).as_deref(), Some("Base block"));
+    assert!((body_volume(&s, "Base block") - (BLOCK - CUT)).abs() < 1e-3 * CUT && body_volume(&s, "Cap block") == BLOCK);
+}
+
+/// A pick 0.42 mm off a moved part's edge, beyond the faces the placement is found by, is still
+/// looked up where it was picked: another part's edge there in its own frame is not in the way.
+#[test]
+fn a_pick_beside_an_edge_is_looked_up_where_it_was_picked() {
+    let mut s = two_parts(0.0, [0.0, 0.0, 50.0]);
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, -0.3, -0.3]], "distance": 1}));
+    assert_eq!(blend_body(&s).as_deref(), Some("Base block"));
+    assert!((body_volume(&s, "Base block") - (BLOCK - CUT)).abs() < 1e-3 * CUT && body_volume(&s, "Cap block") == BLOCK);
+}
+
+/// A chamfer of a moved part, found by a world pick, stays on that part through an edit of
+/// the other part, a recompute, undo and redo, and Edit Feature.
+#[test]
+fn a_blend_found_by_a_world_pick_keeps_its_part() {
+    let mut s = two_parts(0.0, [0.0, 0.0, 50.0]);
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 50]], "distance": 1, "name": "Edge"}));
+    let check = |s: &Session, base: f64, cap: f64, step: &str| {
+        let (b, c) = (body_volume(s, "Base block"), body_volume(s, "Cap block"));
+        assert!((b - base).abs() < 1e-3 * CUT && (c - cap).abs() < 1e-3 * CUT, "{step}: Base {b}, Cap {c}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{step}: {:?}", s.model.results);
+    };
+    check(&s, BLOCK, BLOCK - CUT, "made");
+    run(&mut s, "timeline.edit", json!({"feature": "Box1", "set": {"length": "50"}}));
+    check(&s, 15000.0, BLOCK - CUT, "Base edited");
+    run(&mut s, "timeline.compute_all", json!({}));
+    check(&s, 15000.0, BLOCK - CUT, "computed");
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, BLOCK, BLOCK - CUT, "undone");
+    run(&mut s, "edit.redo", json!({}));
+    check(&s, 15000.0, BLOCK - CUT, "redone");
+    run(&mut s, "timeline.redefine", json!({"feature": "Edge", "command": "solid.chamfer", "params": {"edges": [[20, 0, 50]], "distance": 2}}));
+    check(&s, 15000.0, BLOCK - 4.0 * CUT, "redefined");
+    assert_eq!(blend_body(&s).as_deref(), Some("Cap block"));
+}
+
+/// A corner of a moved part is refused at the point picked, in the world.
+#[test]
+fn a_corner_of_a_moved_part_is_refused_where_it_was_picked() {
+    let mut s = two_parts(0.0, [0.0, 0.0, 50.0]);
+    let err = refused(&mut s, "solid.chamfer", json!({"edges": [[0, 0, 50]], "distance": 1}));
+    assert!(err.contains("[0, 0, 50] is where 3 edges meet"), "{err}");
+}
+
+/// Picks far out, or overflowing a placement, in a design with moved parts are refused.
+#[test]
+fn hostile_edge_picks_in_a_placed_design_are_refused() {
+    let mut s = two_parts(0.0, [0.0, 0.0, 50.0]);
+    for pick in [json!([1e300, 0, 0]), json!([1.7e308, -1.7e308, 1.7e308]), json!([[1e300, 0, 0]])] {
+        let err = s.execute("solid.chamfer", &json!({"edges": [pick], "distance": 1})).expect_err("refused");
+        assert!(matches!(err, crate::EngineError::BadParams { .. }), "{pick}: {err}");
+    }
+    assert_eq!((body_volume(&s, "Base block"), body_volume(&s, "Cap block")), (BLOCK, BLOCK));
+}
+
+/// The index of the edge of `body` whose midpoint is `mid`.
+fn edge_index(s: &Session, body: &str, mid: Vec3) -> usize {
+    let b = s.model.state().body(body).unwrap().body.clone();
+    let edges = b.edges(1e-3_f64.max(b.size() * 2e-3)).unwrap();
+    edges.iter().position(|e| e.mid.dist(mid) < 1e-6).unwrap()
+}
+
+/// A pick's own `body` must exist and agree with the feature's `body`: the feature keeps one
+/// body, and the pick is found on its own.
+#[test]
+fn a_picks_own_body_must_agree_with_body() {
+    let mut s = two_parts(0.0, [0.0, 0.0, 50.0]);
+    let index = edge_index(&s, "Cap block", Vec3::new(20.0, 0.0, 0.0));
+    for edge in [json!({"point": [20, 0, 50], "body": "Cap block"}), json!({"body": "Cap block", "index": index})] {
+        let err = refused(&mut s, "solid.chamfer", json!({"edges": [edge], "body": "Base block", "distance": 1}));
+        assert!(err.contains("an edge names `Cap block`, but `body` is `Base block`: give one"), "{edge}: {err}");
+    }
+    let err = refused(&mut s, "solid.chamfer", json!({"edges": [{"point": [20, 0, 0], "body": "Nobody"}], "distance": 1}));
+    assert!(err.contains("no body `Nobody`"), "{err}");
+    assert_eq!((body_volume(&s, "Base block"), body_volume(&s, "Cap block")), (BLOCK, BLOCK));
+    run(&mut s, "solid.chamfer", json!({"edges": [{"point": [20, 0, 50], "body": "Cap block"}], "body": "Cap block", "distance": 1}));
+    assert!((body_volume(&s, "Cap block") - (BLOCK - CUT)).abs() < 1e-3 * CUT && body_volume(&s, "Base block") == BLOCK);
+}
+
+/// Press Pull on an edge is a fillet: where two parts meet it is refused naming both, and
+/// `body`, by its own name or a placement's, rounds that part.
+#[test]
+fn press_pull_on_an_edge_where_two_parts_meet_takes_body() {
+    let round = (1.0 - std::f64::consts::PI / 4.0) * 40.0;
+    let mut s = two_parts(50.0, [0.0, 0.0, -50.0]);
+    let err = refused(&mut s, "solid.press_pull", json!({"edges": [[20, 0, 0]], "distance": 1}));
+    assert!(err.contains("[20, 0, 0] lies on edges of 2 bodies, Base block and Cap block: name the one to round with `body`"), "{err}");
+    run(&mut s, "solid.press_pull", json!({"edges": [[20, 0, 0]], "distance": 1, "body": "Cap block"}));
+    assert_eq!(blend_body(&s).as_deref(), Some("Cap block"));
+    assert!((body_volume(&s, "Cap block") - (BLOCK - round)).abs() < 1e-3 * CUT && body_volume(&s, "Base block") == BLOCK);
+    let (mut s, _) = lower_and_uppers();
+    let stacked = run(&mut s, "occurrence.copy", json!({"component": "Lower"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": stacked, "space": "world", "translate": [0, 0, 12]}));
+    run(&mut s, "solid.press_pull", json!({"edges": [[20, 0, 12]], "distance": 1, "body": "Lower block (Lower:2)"}));
+    assert_eq!(blend_body(&s).as_deref(), Some("Lower block"));
+    assert_eq!(blend_edges(&s), vec![Vec3::new(20.0, 0.0, 0.0)]);
+    assert!((body_volume(&s, "Lower block") - (BLOCK - round)).abs() < 1e-3 * CUT && body_volume(&s, "Upper block") == 2400.0);
+}
+
+/// A body offset squashed flat, as only a hostile file has, leaves no placement to look a pick
+/// up through: the pick is looked up in the body's own frame, so one far from every edge is
+/// refused and one on an edge is cut.
+#[test]
+fn edge_picks_with_no_placement_to_look_through_are_checked() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Box"}));
+    let mut flat = solidcraft_doc::IDENTITY;
+    flat[2][2] = 0.0;
+    s.doc_mut().body_offsets.insert("Box".into(), flat);
+    let err = refused(&mut s, "solid.chamfer", json!({"edges": [[20, 15, 10]], "distance": 1}));
+    assert!(err.contains("no edge at [20, 15, 10]"), "{err}");
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}));
+    assert!((body_volume(&s, "Box") - (BLOCK - CUT)).abs() < 1e-3 * CUT, "{}", body_volume(&s, "Box"));
+}
+
+/// A sketch (and a construction plane) picked on another component's origin follows that
+/// component: the reference is saved as the placement's datum, not as a world plane frozen
+/// where the component was when it was picked (#7313).
+#[test]
+fn cross_component_sketch_refs_follow_the_component() {
+    use solidcraft_doc::construct::DatumItem;
+    let mut s = Session::default();
+    let made = run(&mut s, "component.create", json!({"name": "Assembly", "grounded": false}));
+    let (parent, first) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+    run(&mut s, "occurrence.move", json!({"occurrence": first, "translate": [100, 0, 0]}));
+    let child = run(&mut s, "component.create", json!({"name": "Child", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "translate": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": parent, "translate": [50, 0, 0]}));
+    // A sketch on the child's XY in its first placement, and a plane offset from the same plane.
+    let plane = crate::origins::key(&[first, child], "XY");
+    let sid = run(&mut s, "sketch.create", json!({"plane": plane, "name": "On child"}))["sketch"].as_u64().unwrap();
+    let f = s.doc.feature(sid).unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Datum { datum }, .. } = &f.kind else { panic!("{:?}", f.kind) };
+    assert_eq!(datum.item, DatumItem::XY);
+    assert_eq!(datum.path, vec![first, child]);
+    run(&mut s, "construct.plane.offset", json!({"base": plane, "offset": "5 mm", "name": "Off child"}));
+    // The sketch is where the child's XY is, and it follows the child when it moves.
+    let sketch_plane = |s: &Session| s.world_state().unwrap().sketch(sid).unwrap().plane;
+    assert!(near(sketch_plane(&s).origin, Vec3::new(120.0, 0.0, 0.0)), "{:?}", sketch_plane(&s));
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "translate": [10, 0, 0]}));
+    assert!(near(sketch_plane(&s).origin, Vec3::new(130.0, 0.0, 0.0)), "{:?}", sketch_plane(&s));
+    // The offset plane, built on the datum, follows the move too - offset and all.
+    let (_, _, off) = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Off child").unwrap();
+    assert!(near(off.origin, Vec3::new(130.0, 0.0, 5.0)), "{off:?}");
 }
