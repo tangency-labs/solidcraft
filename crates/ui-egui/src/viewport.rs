@@ -736,8 +736,19 @@ pub(crate) fn active_body_names(app: &SolveApp) -> Option<ActiveBodyNames> {
     Some(names)
 }
 
-/// How see-through Ghost Frame Members draws the bodies it ghosts.
+/// How see-through Ghost Frame Members draws the bodies it ghosts (the preview's new members
+/// too, at [`frame_ghost_alpha`]).
 const FRAME_GHOST_OPACITY: f64 = 0.3;
+
+/// [`FRAME_GHOST_OPACITY`] as a colour's alpha, as see-through faces are drawn.
+pub(crate) fn frame_ghost_alpha() -> u8 {
+    glass_alpha(FRAME_GHOST_OPACITY)
+}
+
+/// A see-through face's alpha for an opacity.
+fn glass_alpha(opacity: f64) -> u8 {
+    (opacity.clamp(0.05, 1.0) * 255.0).round() as u8
+}
 
 /// Is the Frame Member dialog open with Ghost Frame Members ticked (#15705)?
 pub(crate) fn frame_ghosting(app: &SolveApp) -> bool {
@@ -1816,7 +1827,7 @@ fn body_scene(
                 (c4(color.gamma_multiply(0.35)), crate::gpu::TriClass::Faded)
             } else if opacity < 0.999 {
                 let mut rgba = c4(color);
-                rgba[3] = (opacity.clamp(0.05, 1.0) * 255.0).round() as u8;
+                rgba[3] = glass_alpha(opacity);
                 (rgba, crate::gpu::TriClass::Glass)
             } else {
                 (c4(color), crate::gpu::TriClass::Opaque)
@@ -1847,7 +1858,7 @@ fn body_scene(
         };
         let alpha = match look {
             crate::gpu::InstanceLook::Faded => col[3],
-            crate::gpu::InstanceLook::Glass => (opacity.clamp(0.05, 1.0) * 255.0).round() as u8,
+            crate::gpu::InstanceLook::Glass => glass_alpha(opacity),
             crate::gpu::InstanceLook::Opaque | crate::gpu::InstanceLook::Pbr => 255,
         };
         set_palette_color(&mut arena, &mut sc.palette, slots.instance, [col[0], col[1], col[2], alpha]);

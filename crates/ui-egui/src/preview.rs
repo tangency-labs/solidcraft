@@ -38,8 +38,7 @@ pub struct Colors {
     /// The tool a join, cut or intersect adds, a datum plane a preview creates, and, where the
     /// preference asks for it (`tint_new`), the surface a feature adds to a body it changes.
     pub added: [u8; 4],
-    /// A body the preview creates (New Body), so it doesn't look like a join. See-through
-    /// (alpha below 255: Ghost Frame Members), such bodies are drawn see-through.
+    /// A body the preview creates (New Body), so it doesn't look like a join.
     pub new_body: [u8; 4],
     pub removed: [u8; 4],
     /// A Mirror's copies: the proposed-geometry green, as see-through as removed material.
@@ -55,6 +54,9 @@ pub struct Colors {
     /// red): the see-through cut and the ghost of the shape a feature replaces. Off: those fills
     /// are left out altogether, so they are fully transparent and only outlines are drawn.
     pub cut_tint: bool,
+    /// Whether bodies the preview creates are drawn see-through, in `new_body` and its alpha
+    /// (Ghost Frame Members: this Frame Member's own new members, #15705).
+    pub glass_new: bool,
 }
 
 impl Colors {
@@ -73,6 +75,7 @@ impl Colors {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            glass_new: false,
         }
     }
 
@@ -421,9 +424,6 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
     Some(job_key(&setup, revision, colors))
 }
 
-/// How see-through Ghost Frame Members draws this Frame Member's new members.
-const FRAME_GHOST_ALPHA: u8 = 77;
-
 /// The colours the open dialog's preview is drawn in.
 pub(crate) fn colors(app: &SolveApp) -> Colors {
     let mut colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, app.tool.is_some() || app.dialog.is_some());
@@ -435,7 +435,8 @@ pub(crate) fn colors(app: &SolveApp) -> Colors {
     // Ghost Frame Members: this feature's new members see-through in the new-body tint, apart
     // from the grey other frame members are drawn in (#15705).
     if crate::viewport::frame_ghosting(app) {
-        colors.new_body[3] = FRAME_GHOST_ALPHA;
+        colors.new_body[3] = crate::viewport::frame_ghost_alpha();
+        colors.glass_new = true;
     }
     colors
 }
@@ -889,7 +890,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             _ => Vec::new(),
         };
         let kept = if old.is_some() { body_color } else { new_body };
-        let glass = old.is_none() && c.new_body[3] < 255;
+        let glass = old.is_none() && c.glass_new;
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
             let new = new_face.get(*f as usize).copied().unwrap_or(false);
             let col = if new && c.tint_new { added_color } else { kept };
@@ -1228,6 +1229,7 @@ mod tests {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            glass_new: false,
         }
     }
 
