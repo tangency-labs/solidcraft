@@ -1171,6 +1171,40 @@ fn shuffled_operands_give_the_same_regions() {
     }
 }
 
+/// The canonical order does not hang on rounding noise. Two regions whose leftmost edges are
+/// vertical, at x values that differ by one ulp only, one way round and then the other: compared
+/// exactly, the smaller x would pick each loop's start corner and the regions' order. On the grid
+/// of the tolerance the x values are equal, so y decides: each loop starts at its lower left
+/// corner and the lower region comes first, in both variants.
+#[test]
+fn leftmost_points_a_rounding_apart_keep_one_order() {
+    let ulp = f64::EPSILON;
+    let variant = |lo: f64, hi: f64| {
+        // lower region: left edge from (lo, 0) to (hi, 4); upper one: from (hi, 10) to (lo, 14)
+        let lower = Region2 {
+            outer: Loop2::polygon(&[v(lo, 0.), v(5., 0.), v(5., 4.), v(hi, 4.)]),
+            holes: vec![],
+        };
+        let upper = Region2 {
+            outer: Loop2::polygon(&[v(hi, 10.), v(5., 10.), v(5., 14.), v(lo, 14.)]),
+            holes: vec![],
+        };
+        let far = rectangle(v(100., 0.), v(110., 10.));
+        planar_regions_boolean(&[upper, lower], &[far], BooleanOp::Union, 1e-7).unwrap()
+    };
+    let one = variant(1.0 + ulp, 1.0);
+    let two = variant(1.0, 1.0 + ulp);
+    for out in [&one, &two] {
+        assert_eq!(out.len(), 3);
+        let firsts: Vec<Vec2> = out.iter().map(|r| start(&r.outer.segs[0])).collect();
+        for (p, y) in firsts.iter().zip([0., 10., 0.]) {
+            assert_eq!(p.y, y, "{firsts:?}");
+        }
+        assert!((firsts[0].x - 1.0).abs() <= ulp && (firsts[1].x - 1.0).abs() <= ulp);
+    }
+    assert!(same_regions(&one, &two), "{one:?} {two:?}");
+}
+
 /// Planar booleans SolidCraft's sheet tests make (a channel engraved, a sheet with small bends
 /// and holes, a sheet perforated with a thousand round holes: each operand pair recorded from the
 /// call), where a face of one operand lies far from the other's plane face. The 2D boolean
