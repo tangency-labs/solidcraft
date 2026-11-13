@@ -1125,9 +1125,8 @@ impl<'s> SurfaceIntersector<'s> {
             .find_degen_param_for_direction(k, guess, toward, true, sing_dir, EFF_ZERO)
         {
             Ok(d) if d.converged => d,
-            Ok(_) => return Ok(None),
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Ok(None),
+            Ok(_) | Err(_) => return Ok(None),
         };
         let mut s = if sing_dir == SurfParamType::U {
             degen.uv.x
@@ -1143,7 +1142,7 @@ impl<'s> SurfaceIntersector<'s> {
             }
         }
         // the solve runs over the natural domain; the trace stays in its own
-        Ok(Some(s.clamp(lo, hi)))
+        Ok(Some(s.max(lo).min(hi)))
     }
 
     // ---- refinement and span tests ------------------------------------------------------------------
