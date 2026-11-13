@@ -170,6 +170,7 @@ pub struct WorkCounters {
     containment_edge_drops: Cell<u64>,
     loop_walks: Cell<u64>,
     target_record_seedings: Cell<u64>,
+    classification_snapshots: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -268,6 +269,15 @@ impl WorkCounters {
         self.target_record_seedings.get()
     }
 
+    /// Copies of a whole B-rep that curve-on-face classifications run on
+    /// ([`crate::query::face::p2::curve_on_classify`]'s snapshot): one per classification
+    /// that starts without a shared snapshot. Each copy walks every entity of the B-rep.
+    /// Not the fork's.
+    #[must_use]
+    pub fn classification_snapshots(&self) -> u64 {
+        self.classification_snapshots.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -281,6 +291,7 @@ impl WorkCounters {
         self.containment_edge_drops.set(0);
         self.loop_walks.set(0);
         self.target_record_seedings.set(0);
+        self.classification_snapshots.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -345,6 +356,12 @@ impl WorkCounters {
     pub(crate) fn add_target_record_seeding(&self) {
         self.target_record_seedings
             .set(self.target_record_seedings.get().saturating_add(1));
+    }
+
+    /// Counts one copy of a B-rep made for a curve-on-face classification.
+    pub(crate) fn add_classification_snapshot(&self) {
+        self.classification_snapshots
+            .set(self.classification_snapshots.get().saturating_add(1));
     }
 }
 
