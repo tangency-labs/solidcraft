@@ -77,6 +77,56 @@ fn sweeps_lofts_and_screws() {
     let sections = vec![vec![circle([0.0; 3], 5.0)], vec![circle([0.0, 0.0, 6.0], 3.0)]];
     let b = Brep::loft(&sections, 1, true).unwrap();
     assert_close(solid_volume(&b, "frustum"), PI * 2.0 * (25.0 + 9.0 + 15.0), 1e-5, "lofted frustum");
+    // Its wall is the cone itself, and two equal circles' the cylinder (#14421), however the
+    // circles are drawn or the loft runs; circles twisted against each other or off one axis
+    // are the skin's, whose wall is no cone.
+    let kinds = |b: &Brep| {
+        use solidcore_record::brep::Surface;
+        let record = b.to_native().unwrap();
+        solidcore_ops::record_check::validate(&record).unwrap();
+        let mut kinds: Vec<&str> = record
+            .faces
+            .iter()
+            .map(|f| match f.surface {
+                Surface::Cone { .. } => "cone",
+                Surface::Cylinder { .. } => "cylinder",
+                Surface::Plane { .. } | Surface::PlaneThrough { .. } => "plane",
+                _ => "other",
+            })
+            .collect();
+        kinds.sort_unstable();
+        kinds
+    };
+    assert_eq!(kinds(&b), ["cone", "plane", "plane"], "lofted frustum");
+    let halves = |z: f64, radius: f64| {
+        let half = |start: f64| Curve::Arc {
+            center: [0.0, 0.0, z],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius,
+            start,
+            end: start + PI,
+        };
+        vec![half(0.0), half(PI)]
+    };
+    for (sections, want, kind) in [
+        (vec![vec![circle([0.0; 3], 5.0)], vec![circle([0.0, 0.0, 6.0], 5.0)]], PI * 25.0 * 6.0, "cylinder"),
+        (vec![vec![circle([0.0, 0.0, 6.0], 3.0)], vec![circle([0.0; 3], 5.0)]], PI * 2.0 * (25.0 + 9.0 + 15.0), "cone"),
+        (vec![vec![circle([0.0; 3], 5.0)], vec![circle([0.0, 0.0, -6.0], 3.0)]], PI * 2.0 * (25.0 + 9.0 + 15.0), "cone"),
+        (vec![halves(0.0, 5.0), halves(6.0, 3.0)], PI * 2.0 * (25.0 + 9.0 + 15.0), "cone"),
+    ] {
+        let b = Brep::loft(&sections, 1, true).unwrap();
+        assert_close(solid_volume(&b, kind), want, 1e-5, kind);
+        let mut expected = vec![kind, "plane", "plane"];
+        expected.sort_unstable();
+        assert_eq!(kinds(&b), expected, "{kind}: {sections:?}");
+    }
+    let twisted = Curve::Arc { center: [0.0, 0.0, 6.0], axis: [0.0, 0.0, 1.0], reference: [0.0, 1.0, 0.0], radius: 3.0, start: 0.0, end: TAU };
+    for top in [twisted, circle([1.0, 0.0, 6.0], 3.0)] {
+        let b = Brep::loft(&[vec![circle([0.0; 3], 5.0)], vec![top.clone()]], 1, true).unwrap();
+        solid_volume(&b, "skinned");
+        assert!(kinds(&b).contains(&"other"), "{top:?}: {:?}", kinds(&b));
+    }
     // A ring lofted to a ring: the outline and the hole are one section, lofted loop to loop.
     let ring = |z: f64| {
         let hole = Curve::Arc { center: [0.0, 0.0, z], axis: [0.0, 0.0, -1.0], reference: [1.0, 0.0, 0.0], radius: 12.0, start: 0.0, end: TAU };

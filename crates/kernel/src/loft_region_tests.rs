@@ -136,3 +136,34 @@ fn a_loft_between_parallel_squares_has_planar_sides() {
         assert_eq!(types.get("plane"), Some(&6), "top {top}: {types:?}");
     }
 }
+
+/// #14421: a loft between two full circles about one axis has the cylinder or the cone frustum
+/// between them as its wall, whichever angle each circle starts at and on tilted parallel
+/// planes too. The skin gave a B-spline wall, which counts as "other" and goes to STEP as a
+/// free-form face. Circles off one axis make an oblique cone, no circular one: the skin keeps
+/// those, with the same volume.
+#[test]
+fn a_loft_between_coaxial_circles_has_a_cylinder_or_cone_wall() {
+    let disc = |r: f64, start: f64| Region2 { outer: Loop2::circle_from(Vec2::ZERO, r, start), holes: vec![] };
+    let frustum = |r0: f64, r1: f64| PI * 10.0 / 3.0 * (r0 * r0 + r0 * r1 + r1 * r1);
+    let tilted = Plane { origin: Vec3::new(1.0, 2.0, 3.0), x: Vec3::X, y: Vec3::new(0.0, 0.6, 0.8) };
+    for (plane, r1, start, kind) in
+        [(Plane::XY, 5.0, 0.0, "cone"), (Plane::XY, 10.0, 0.0, "cylinder"), (Plane::XY, 5.0, 1.0, "cone"), (tilted, 5.0, 0.0, "cone")]
+    {
+        let secs = [(plane, disc(10.0, 0.0)), (plane.offset(10.0), disc(r1, start))];
+        for secs in [secs.to_vec(), secs.into_iter().rev().collect()] {
+            let body = loft_regions(&secs).unwrap();
+            check(&body, frustum(10.0, r1), 1e-3);
+            let m = measure(&body).unwrap().merged;
+            assert_eq!((m.faces, m.edges, m.vertices), (3, 3, 2), "{kind} r1 {r1} start {start}");
+            assert_eq!(m.face_types.get(kind), Some(&1), "{kind} r1 {r1} start {start}: {:?}", m.face_types);
+            assert_eq!(m.face_types.get("plane"), Some(&2), "{kind} r1 {r1} start {start}: {:?}", m.face_types);
+            let imported = step_import(&step_export(&[&body], "SolidCraft").unwrap()).unwrap();
+            assert_eq!(imported.bodies.len(), 1);
+            check(&imported.bodies[0].body, frustum(10.0, r1), 1e-3);
+        }
+    }
+    let off = Region2 { outer: Loop2::circle(Vec2::new(3.0, 0.0), 5.0), holes: vec![] };
+    let body = loft_regions(&[(Plane::XY, disc(10.0, 0.0)), (Plane::XY.offset(10.0), off)]).unwrap();
+    check(&body, frustum(10.0, 5.0), 1e-3);
+}

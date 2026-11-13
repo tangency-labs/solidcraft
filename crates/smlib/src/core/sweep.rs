@@ -27,11 +27,13 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::{SmallTopoType, USE_DEFAULT, context_zone_tol_3d};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, CurveCanonical, KnotType};
+use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::primitive::primitive_creation::SweepOptions;
@@ -924,7 +926,8 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
 /// `smlib_loft`: a skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` across them.
 /// Two sections of lines whose sides are all flat are built as planar faces instead
 /// ([`planar_loft`]): the skin would make each side a B-spline surface, which nothing downstream
-/// takes for the plane it is (solidcraft#13331).
+/// takes for the plane it is (solidcraft#13331). Likewise two full circles about one axis are
+/// built as the cylinder or cone between them ([`conic_loft`], solidcraft#14421).
 pub(crate) fn loft(sections: &[Vec<Profile>], degree: u32, cap: bool) -> Result<Body> {
     if sections.len() < 2 || sections.len() > MAX_CURVES || !(1..=3).contains(&degree) {
         return Err(Error::Argument);
@@ -941,6 +944,12 @@ pub(crate) fn loft(sections: &[Vec<Profile>], degree: u32, cap: bool) -> Result<
         let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
         if let Some(planar) = planar_loft(k, &counts, &curves, cap)? {
             return Ok(planar);
+        }
+        // The cylinder or cone where it is one; any failure there leaves the loft to the skin.
+        if let Ok(Some(conic)) = conic_loft(k, sections, cap)
+            && let Ok(Ok(conic)) = finish(conic, cap)
+        {
+            return Ok(Ok(conic));
         }
         let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
         match create_skin_primitive(k, &counts, &refs, degree as usize, cap) {
@@ -1028,6 +1037,101 @@ fn planar_loft(k: &mut Kernel, counts: &[usize], curves: &[Curve], cap: bool) ->
     }
     b.refresh_cached_topology();
     finish(b, cap).map(Some)
+}
+
+/// The circle a loft section runs once round, as its first arc: every curve of `section` an
+/// arc of that circle (the same way round), each starting where the one before ends, the last
+/// ending where the first starts, one turn in all. `None` for any other section.
+fn full_circle(section: &[Profile]) -> Option<FlatArc> {
+    let arcs: Vec<FlatArc> = section.iter().map(FlatArc::of).collect::<Option<_>>()?;
+    let first = *arcs.first()?;
+    let tol = 1e-9 * first.radius;
+    let mut turn = 0.0;
+    for (i, c) in arcs.iter().enumerate() {
+        let next = arcs.get((i + 1) % arcs.len())?;
+        if !one_circle(&first, c, tol) || (c.at(c.start + c.sweep) - next.at(next.start)).length() > tol {
+            return None;
+        }
+        turn += c.sweep;
+    }
+    ((turn - TAU).abs() <= 1e-9 * TAU).then_some(first)
+}
+
+/// `conic_loft` (solidcraft#14421): a loft of two sections that are each one full circle
+/// ([`full_circle`], in as many arcs as each other), on parallel planes about one axis (the
+/// second centre on the first circle's axis, the axes the same way round), each arc starting
+/// in the same direction from its centre as its partner and turning as far: the ruled wall
+/// between them is then exactly the cylinder (equal radii) or the cone frustum between the
+/// circles, built as that one face (its seam on the first arcs' starts) with the circles as
+/// planar caps when `cap`, stitched (as SMLib's own cone and cylinder primitives are). `None`
+/// for any other loft (more sections, a line or spline, circles off one axis, twisted against
+/// each other, or a height or radius too small to build on): the skin takes it, as it would
+/// make the wall a B-spline surface, which nothing downstream takes for the cone it is. An
+/// error here leaves the loft to the skin too.
+fn conic_loft(k: &mut Kernel, sections: &[Vec<Profile>], cap: bool) -> solidcore::Result<Option<Brep>> {
+    let [first, second] = sections else { return Ok(None) };
+    if first.len() != second.len() {
+        return Ok(None);
+    }
+    let (Some(a), Some(b)) = (full_circle(first), full_circle(second)) else { return Ok(None) };
+    let offset = b.centre - a.centre;
+    let along = offset.dot(a.axis);
+    let reach = a.radius.max(b.radius);
+    let size = reach.max(along.abs());
+    let tol = 1e-9 * size;
+    // One axis, the same way round, the second centre on it, and a real height and radii.
+    if !(a.axis.dot(b.axis) > 0.0)
+        || a.axis.cross(b.axis).length() * size > tol
+        || (offset - a.axis * along).length() > tol
+        || !(along.abs() > 1e-6 && a.radius > 1e-6 && b.radius > 1e-6)
+    {
+        return Ok(None);
+    }
+    // Each arc paired with an arc starting in the same direction and turning as far: no twist.
+    for (p, q) in first.iter().zip(second) {
+        let (Some(p), Some(q)) = (FlatArc::of(p), FlatArc::of(q)) else { return Ok(None) };
+        let dp = (p.at(p.start) - p.centre) * (1.0 / p.radius);
+        let dq = (q.at(q.start) - q.centre) * (1.0 / q.radius);
+        if (dp - dq).length() * reach > tol || (p.sweep - q.sweep).abs() * reach > tol {
+            return Ok(None);
+        }
+    }
+    // The cone's frame: at the first centre, its seam (u = 0) through the first arc's start,
+    // its height running to the second circle.
+    let start = a.at(a.start) - a.centre;
+    let z = if along > 0.0 { a.axis } else { a.axis * -1.0 };
+    let Some(x) = unit([start.x, start.y, start.z]) else { return Ok(None) };
+    let frame = Axis2Placement::new(a.centre, x, z.cross(x));
+    let height = along.abs();
+    let wall = if (a.radius - b.radius).abs() <= tol {
+        // (as SMLib's CreateCylinder: the canonical cylinder bounded to the height)
+        let mut c = Cone::create_canonical_cylinder(k, &frame, a.radius)?;
+        c.adjust_step_uv_domain(k, &Extent2d::from_bounds(0.0, 0.0, 360.0, height))?;
+        c
+    } else {
+        Cone::create_canonical(k, &frame, a.radius, b.radius, height, false, false)?
+    };
+    // The face over the whole surface and the circles at its ends (`sm_CreateConicSolid`).
+    let domain = wall.rev().base().natural_uv_domain();
+    let mut rims = Vec::with_capacity(2);
+    for v in [domain.min().y, domain.max().y] {
+        rims.push(wall.create_iso_parametric_curve(k, SurfParamType::V, v, None, false)?.curve);
+    }
+    let mut brep = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+    let region = brep.infinite_region();
+    let tolerance = brep.tolerance();
+    build_faces(&mut brep, |b, fenv| -> solidcore::Result<()> {
+        create_face_from_surface(k, b, Some(Surface::from(wall)), &domain, fenv)?;
+        if cap {
+            for rim in &rims {
+                create_planar_face_with_3d_curves(k, b, region, std::slice::from_ref(rim), tolerance, fenv)?;
+            }
+        }
+        Ok(())
+    })?;
+    stitch_and_orient(k, &mut brep, &StitchAndOrientOptions::default())?;
+    brep.refresh_cached_topology();
+    Ok(Some(brep))
 }
 
 /// Each face's identity, for the face builders: their arena identity.

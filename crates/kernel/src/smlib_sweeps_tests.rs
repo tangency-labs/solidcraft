@@ -135,6 +135,13 @@ fn a_loft_and_a_screw_sweep_name_their_ends() {
     close(volume(&b), 800.0, 1e-6, "loft");
     let o = origins(&b);
     assert!(o.contains(&cap(false)) && o.contains(&cap(true)) && o.iter().filter(|x| x.contains("Profile")).count() == 4, "{o:?}");
+    // Between two circles about one axis the wall is the cone (#14421), still named by its circle.
+    let disc = |z: f64, r: f64| (Plane::XY.offset(z), pieces_of(&region(Loop2::circle(Vec2::ZERO, r))));
+    let b = smlib_sweeps::loft(&[disc(0.0, 10.0), disc(10.0, 5.0)], 0).unwrap();
+    close(volume(&b), PI * 10.0 / 3.0 * 175.0, 1e-3, "cone loft");
+    let mut want = vec![cap(false), cap(true), profile(0)];
+    want.sort();
+    assert_eq!(origins(&b), want);
     // A 0.4 mm square tooth at radius 4 in the xz plane, three turns of pitch 1 about z.
     let xz = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
     let tooth = region(Loop2::polygon(&[Vec2::new(4.0, 0.0), Vec2::new(4.4, 0.0), Vec2::new(4.4, 0.4), Vec2::new(4.0, 0.4)]));
