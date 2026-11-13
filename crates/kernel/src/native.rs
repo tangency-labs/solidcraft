@@ -102,20 +102,25 @@ pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep,
     Ok((brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, numbering(body.record(), &brep)))
 }
 
-/// `body` in SMLib as a boolean's operand, with its numbering as [`smlib_body_ordered`] gives it.
-/// Solids touching each other along an edge or at a vertex are kept apart in the record, each
-/// with its own copy of what they share; SMLib gets them sharing it, as its own boolean made them
-/// (`solidcraft_smlib::Brep::from_record_touching`). As copies, a third body's one edge or vertex
-/// there could not be related to both, and the boolean failed (#14419). A body with no such
-/// copies is its own SMLib form ([`Body::smlib`]).
-pub(crate) fn smlib_operand_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
+/// `body` in SMLib as a boolean's operand with the solids it keeps apart where they touch along
+/// an edge sharing that edge again, with its numbering as [`smlib_body_ordered`] gives it. The
+/// record keeps one copy of such an edge and its vertices per solid; SMLib gets them shared, as
+/// its own boolean made them (`solidcraft_smlib::Brep::from_record_touching`). As copies, a third
+/// body's one edge or vertex there could not be related to both, and the boolean failed
+/// (#14419). `None` where the record has no such copies, or SMLib refuses them shared (logged):
+/// [`smlib_body_ordered`] is then the operand.
+pub(crate) fn smlib_shared_operand_ordered(body: &Body) -> Result<Option<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)>> {
     body.require_brep("a boolean")?;
-    match solidcraft_smlib::Brep::from_record_touching(body.record(), true).map_err(|e| KernelError::smlib("SMLib", e))? {
-        Some(brep) => {
+    match solidcraft_smlib::Brep::from_record_touching(body.record(), true) {
+        Ok(Some(brep)) => {
             let order = numbering(body.record(), &brep);
-            Ok((brep, order))
+            Ok(Some((brep, order)))
         }
-        None => smlib_body_ordered(body),
+        Ok(None) => Ok(None),
+        Err(e) => {
+            log::debug!(target: "smlib", "touching solids not shared for a boolean: {e}");
+            Ok(None)
+        }
     }
 }
 

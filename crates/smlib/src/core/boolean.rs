@@ -120,18 +120,10 @@ fn operation(op: BooleanOp) -> BooleanOperation {
     }
 }
 
-/// Whether `b` is a solid operand: a manifold solid (`IsManifoldSolid`), or a closed body whose
-/// solids touch each other along edges or at vertices ([`closed_nonmanifold`]), as a boolean's
-/// operand is when its record keeps touching solids (`crate::import::touching`). A result from
-/// solid operands must be closed ([`finish`]).
-fn solid(b: &Brep) -> SolidResult<bool> {
-    Ok(p2::is_manifold_solid(b)? || closed_nonmanifold(b)?)
-}
-
-/// Whether every body is a solid operand ([`solid`]).
+/// Whether every body is a manifold solid (`IsManifoldSolid` of each copy).
 fn all_solid(bodies: &[Brep]) -> SolidResult<bool> {
     for b in bodies {
-        if !solid(b)? {
+        if !p2::is_manifold_solid(b)? {
             return Ok(false);
         }
     }
@@ -156,7 +148,7 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
         let (Some(ca), Some(cb)) = (c.next(), c.next()) else {
             return Err(SolidError::invalid_input("smlib_boolean", "no operand"));
         };
-        let solid_in = solid(&ca)? && solid(&cb)?;
+        let solid_in = p2::is_manifold_solid(&ca)? && p2::is_manifold_solid(&cb)?;
         let mut r = sm::boolean(k, ca, cb, operation(op))?;
         // Grow the result's tolerances to cover marginal edge/vertex, vertex/face and
         // edge/face gaps, so an otherwise-sound union is not refused as "Bad Gap" for a

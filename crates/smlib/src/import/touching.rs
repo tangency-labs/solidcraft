@@ -16,7 +16,8 @@
 //! the uses of both, in radial order round it. Only exact copies are glued: the split copies a
 //! point and a curve and never moves them. Entities that coincide only within a tolerance are left
 //! as they are. Three or more solids round one edge would need the angles of their wedges to order
-//! them, which this does not compute: such a record is not glued at all.
+//! them, which this does not compute: such a record is not glued at all. Nor is a record whose
+//! solids touch only at vertices: it is glued only where two solids share an edge.
 //!
 //! Round an edge two solids touch along, each copy's two uses bound one wedge of material. The
 //! record lists an edge's uses in radial order, right-hand about the edge's direction, and SMLib's
@@ -54,7 +55,7 @@ pub(super) fn may_share(brep: &b::Brep) -> bool {
 }
 
 /// `brep` with the copies of what its solids touch along glued back (see the module's notes);
-/// `None` when it has none to glue.
+/// `None` when no two of its solids share a copied edge.
 pub(super) fn shared(brep: &b::Brep) -> R<Option<Glued>> {
     // The shell each face is in, and whether the face's natural normal points out of the
     // material there.
@@ -210,6 +211,11 @@ pub(super) fn shared(brep: &b::Brep) -> R<Option<Glued>> {
                 _ => return Ok(None),
             }
         }
+    }
+    // Solids that touch only at vertices are left as the record keeps them: only an edge two
+    // solids share is glued (with its vertices and any others the same solids share).
+    if pairs.is_empty() {
+        return Ok(None);
     }
 
     // Each copy's uses ordered [into the material, out of it] (see the module's notes).
