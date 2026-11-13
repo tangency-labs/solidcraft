@@ -423,7 +423,8 @@ fn open_step(
     };
     let cache = cache.filter(|_| reuse && !solidcraft_io::is_native_cad_path(path) && solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    // Every option that changes the design is in the key: a reused import is the one this open asks for.
+    // Every `doc.open` option that changes the imported design is in the key: a reused import is
+    // the one this open asks for.
     let key = solidcraft_io::ImportCache::key(
         &bytes,
         path,
