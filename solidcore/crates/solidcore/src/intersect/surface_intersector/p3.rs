@@ -68,6 +68,13 @@
 //! - **Previous UVs.** `ComputeNextPoint` hands `RefinePoint` the address of the
 //!   previous point's first UV position, which the callee may read as the array
 //!   `m_vUVCurvePV` (`[uv0, duv0, uv1, duv1]`); that array is passed.
+//! - **A step to a pole past a boundary it does not reach** (not upstream). Where the
+//!   curve runs into a pole at the corner of a domain (a sphere's pole on its seam
+//!   meridian), `ComputeNextPoint` clipped the step at the seam, short of the pole, though
+//!   the refined point was not on the seam; the following short step to the pole left the
+//!   pole point with an ill-conditioned UV tangent and singular parameter, and the trims
+//!   failed the body check. Such a step goes on to the pole
+//!   ([`SurfaceIntersector::pole_corner_step`]).
 //! - **Unported callees.**
 //!   `SmSurface::DropAndTrimCurve`'s trace (`intersect.surface_drop_curve`, through
 //!   [`Surface::drop_and_trim_curve`]) return [`SolidError::Unported`], which always propagates (also where upstream
@@ -94,6 +101,7 @@ use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::p2::TsectCurveType;
@@ -114,6 +122,37 @@ const OP_NEXT: &str = "intersect::surface_intersector::p3::SurfaceIntersector::c
 const OP_UPDATE: &str =
     "intersect::surface_intersector::p3::SurfaceIntersector::update_tsect_point";
 const OP_TEST: &str = "intersect::surface_intersector::p3::SurfaceIntersector::test_point";
+
+/// The step to a pole of [`SurfaceIntersector::pole_corner_step`] (not upstream) and the
+/// degenerate boundary it reaches.
+#[derive(Debug, Clone, Copy)]
+struct PoleCorner {
+    /// The step along the UV tangents.
+    step: f64,
+    /// The surface with the pole.
+    srf: SrfIndex,
+    /// Whether the degenerate boundary is one of constant v (else of constant u).
+    on_v_boundary: bool,
+    /// The parameter of the degenerate boundary.
+    bound: f64,
+    /// The UV tolerance "on the boundary" is measured with.
+    uv_tol: f64,
+}
+
+impl PoleCorner {
+    /// Whether the refined UV points `uvs` are on the degenerate boundary: the curve
+    /// reaches the pole.
+    fn reached(&self, uvs: [Point2; 2]) -> bool {
+        let [uv0, uv1] = uvs;
+        let uv = if self.srf == SrfIndex::First {
+            uv0
+        } else {
+            uv1
+        };
+        let at = if self.on_v_boundary { uv.y } else { uv.x };
+        (at - self.bound).abs() <= self.uv_tol
+    }
+}
 
 /// The outputs of [`SurfaceIntersector::compute_next_point`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -847,7 +886,9 @@ impl SurfaceIntersector<'_> {
     /// intersection point, evaluated into `next` (`ComputeNextPoint`).
     ///
     /// The step is clipped to both domains (`clipped`); a zero step is a boundary
-    /// hit. The guesses are refined ([`SurfaceIntersector::refine_point`] with
+    /// hit. A step clipped short of a pole at a boundary the curve does not reach goes on
+    /// to the pole (not upstream, [`SurfaceIntersector::pole_corner_step`]). The guesses
+    /// are refined ([`SurfaceIntersector::refine_point`] with
     /// boundary testing, then without when the step collapses below a hundredth),
     /// the step scaled by the refinement's UV step on the first surface. A failed
     /// evaluation is a boundary hit; a tangent or coincident next point, or one behind
@@ -913,13 +954,15 @@ impl SurfaceIntersector<'_> {
             return Ok(res);
         }
 
-        // Set NextStep UVs for Surface0 and Surface1
-        let guess_uv0 = prev_tsp.uv_pos(s0) + prev_tsp.uv_deriv(s0) * step_size;
-        let guess_uv1 = prev_tsp.uv_pos(s1) + prev_tsp.uv_deriv(s1) * step_size;
-
-        // this safety step should no longer fire since StepSize has already been clipped
-        let guess_uv0 = self.uv_domains[0].clamp_point(guess_uv0);
-        let guess_uv1 = self.uv_domains[1].clamp_point(guess_uv1);
+        // Set NextStep UVs for Surface0 and Surface1 (this safety clamp should no longer
+        // fire since StepSize has already been clipped)
+        let guesses = |step: f64| {
+            [
+                self.uv_domains[0].clamp_point(prev_tsp.uv_pos(s0) + prev_tsp.uv_deriv(s0) * step),
+                self.uv_domains[1].clamp_point(prev_tsp.uv_pos(s1) + prev_tsp.uv_deriv(s1) * step),
+            ]
+        };
+        let [mut guess_uv0, mut guess_uv1] = guesses(step_size);
 
         // the previous point's m_vUVCurvePV, as RefinePoint may read it
         let previous_uv = [
@@ -930,24 +973,42 @@ impl SurfaceIntersector<'_> {
         ];
 
         // Find surf/surf xSectPoint near the guess points (a failure is no answer)
-        let refine = |do_boundary_testing: bool| -> Result<Option<[Point2; 2]>> {
-            match self.refine_point(
-                k,
-                guess_uv0,
-                guess_uv1,
-                prev_tsp.point_type,
-                Some(prev_tsp.crv_deriv()),
-                Some(&previous_uv),
-                do_boundary_testing,
-            ) {
-                Ok(r) => Ok(r),
-                Err(e) if e.is_unported_or_cancelled() => Err(e),
-                Err(_) => Ok(None),
-            }
-        };
-        let Some(mut next_uvs) = refine(true)? else {
+        let refine =
+            |guess: [Point2; 2], do_boundary_testing: bool| -> Result<Option<[Point2; 2]>> {
+                match self.refine_point(
+                    k,
+                    guess[0],
+                    guess[1],
+                    prev_tsp.point_type,
+                    Some(prev_tsp.crv_deriv()),
+                    Some(&previous_uv),
+                    do_boundary_testing,
+                ) {
+                    Ok(r) => Ok(r),
+                    Err(e) if e.is_unported_or_cancelled() => Err(e),
+                    Err(_) => Ok(None),
+                }
+            };
+        let Some(mut next_uvs) = refine([guess_uv0, guess_uv1], true)? else {
             return Ok(res);
         };
+
+        // Not upstream: a step clipped at a boundary the curve does not reach, where the
+        // line goes on to a degenerate boundary (a pole), steps to the pole instead
+        // (`pole_corner_step`)
+        if res.clipped {
+            if let Some(pole) =
+                self.pole_corner_step(k, &prev_tsp, step_size, unclipped_step_size, next_uvs)?
+            {
+                let corner = guesses(pole.step);
+                // taken only when the curve reaches the pole there
+                if let Some(uvs) = refine(corner, true)?.filter(|uvs| pole.reached(*uvs)) {
+                    step_size = pole.step;
+                    [guess_uv0, guess_uv1] = corner;
+                    next_uvs = uvs;
+                }
+            }
+        }
 
         // compute actual step to guess step
         let guess_step = guess_uv0 - prev_tsp.uv_pos(s0);
@@ -962,7 +1023,7 @@ impl SurfaceIntersector<'_> {
         if is_zero(step_size) || actual_step_size < guess_step_size / 100.0 {
             // Before bailing out try local intersection again without boundary
             // testing.
-            let Some(uvs) = refine(false)? else {
+            let Some(uvs) = refine([guess_uv0, guess_uv1], false)? else {
                 return Ok(res);
             };
             next_uvs = uvs;
@@ -1027,6 +1088,111 @@ impl SurfaceIntersector<'_> {
         res.deviation_found = acc.deviation_found;
         res.angle_found_rad = Some(acc.angle_found_rad);
         Ok(res)
+    }
+
+    /// Not upstream: the step of [`SurfaceIntersector::compute_next_point`] that reaches a
+    /// pole, when the step was clipped at a boundary the curve does not reach on the way.
+    ///
+    /// Where the intersection curve runs into a pole at a corner of a domain, the corner of
+    /// the degenerate boundary and a boundary across it (a sphere's pole on its seam
+    /// meridian), the UV tangent line reaches both boundaries at nearly the same step. The
+    /// UV curve bends, so the line can meet the other boundary first although the curve
+    /// meets it only at the pole. The step is then clipped short of the pole, and its
+    /// refined point is not on the boundary it was clipped at: the boundary solve of
+    /// `RefinePoint` finds no crossing there. The trace took such a step, then a shorter one
+    /// to the pole. `StepBackFromSingularity` finds the pole point's singular parameter and
+    /// UV tangent 1 % of the last span away from the pole, and on a span that short the
+    /// singular parameter's derivative there is below the precision of the coordinates: the
+    /// pole point got a UV tangent of the wrong sign or a singular parameter across the
+    /// seam, and the trims made from the curve failed the body check.
+    ///
+    /// For each surface: when its domain clipped the step at a boundary (the guess is on
+    /// it), the refined point is not on that boundary, the UV tangent line reaches the
+    /// surface's other boundary within `unclipped_step_size`, and the surface is singular
+    /// at that exit, collapsing along that boundary ([`Surface::is_singularity`] at
+    /// `SM_EFF_ZERO`), the step to that exit, clipped to the other domain, is returned when
+    /// it is longer than `step_size`, with that boundary: the caller takes the step only
+    /// when its refined point is on it ([`PoleCorner::reached`]), so a curve that passes
+    /// near the pole without reaching it keeps the clipped step. "On a boundary" is within
+    /// `SM_EFF_ZERO` scaled by the domain, as `TraceCurve` scales its UV tolerance.
+    ///
+    /// # Errors
+    ///
+    /// Those of the singularity test.
+    fn pole_corner_step(
+        &self,
+        k: &Kernel,
+        prev: &TsectPnt,
+        step_size: f64,
+        unclipped_step_size: f64,
+        next_uvs: [Point2; 2],
+    ) -> Result<Option<PoleCorner>> {
+        let srfs = [SrfIndex::First, SrfIndex::Second];
+        for ((s, dom), next) in srfs.into_iter().zip(self.uv_domains).zip(next_uvs) {
+            let p = prev.uv_pos(s);
+            let d = prev.uv_deriv(s);
+            // the parameter along the tangent line where it leaves through each boundary
+            let exit = |pc: f64, dc: f64, lo: f64, hi: f64| {
+                if dc > 0.0 {
+                    ((hi - pc) / dc, hi)
+                } else if dc < 0.0 {
+                    ((lo - pc) / dc, lo)
+                } else {
+                    (f64::INFINITY, hi)
+                }
+            };
+            let (exit_u, bound_u) = exit(p.x, d.x, dom.min.x, dom.max.x);
+            let (exit_v, bound_v) = exit(p.y, d.y, dom.min.y, dom.max.y);
+            let uv_tol = EFF_ZERO * (1.0 + dom.max_dimension());
+            let guess = dom.clamp_point(p + d * step_size);
+            // the boundary this domain clipped the step at, and the exit through the other
+            let (clipped, reached, other_exit, collapse, pole_bound) = if exit_u <= exit_v {
+                (
+                    (guess.x - bound_u).abs() <= uv_tol,
+                    (next.x - bound_u).abs() <= uv_tol,
+                    exit_v,
+                    SurfParamType::U,
+                    bound_v,
+                )
+            } else {
+                (
+                    (guess.y - bound_v).abs() <= uv_tol,
+                    (next.y - bound_v).abs() <= uv_tol,
+                    exit_u,
+                    SurfParamType::V,
+                    bound_u,
+                )
+            };
+            if !clipped || reached || !(other_exit > step_size && other_exit <= unclipped_step_size)
+            {
+                continue;
+            }
+            let corner = dom.clamp_point(p + d * other_exit);
+            let sing = self.surface(s).is_singularity(k, corner, EFF_ZERO, false)?;
+            if !sing.singular
+                || !(sing.direction == collapse || sing.direction == SurfParamType::Both)
+            {
+                continue;
+            }
+            // the other domain clips that step as it clipped the first
+            let mut corner_step = other_exit;
+            for (o, other_dom) in srfs.into_iter().zip(self.uv_domains) {
+                if o != s {
+                    corner_step =
+                        other_dom.clip_line(prev.uv_pos(o), prev.uv_deriv(o), corner_step);
+                }
+            }
+            if corner_step > step_size {
+                return Ok(Some(PoleCorner {
+                    step: corner_step,
+                    srf: s,
+                    on_v_boundary: collapse == SurfParamType::U,
+                    bound: pole_bound,
+                    uv_tol,
+                }));
+            }
+        }
+        Ok(None)
     }
 
     // ---- end-of-trace tests ----------------------------------------------------------------

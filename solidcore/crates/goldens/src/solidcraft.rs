@@ -1576,6 +1576,7 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 orient_profile_perpendicular_to_path: false,
                 move_to_profile: false,
                 profile_at_path_start: false,
+                up: None,
             };
             sweeps::create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
                 .map_err(|e| solid(&e))?

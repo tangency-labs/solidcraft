@@ -16,10 +16,13 @@ mod dxf_out;
 pub mod formats;
 mod glb;
 pub use design::{
-    DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
-    read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
-    write_design_container, write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
-    write_design_container_with_thumbnail, write_drawing_container,
+    DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
+    ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus, ProvenanceSummary, SignatureSource, Signer,
+    THUMBNAIL_SIZE, file_kind, has_design_provenance, is_design_container, read_design_file, read_design_geometry, read_design_preview,
+    read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file, read_design_provenance_file,
+    read_design_provenance_file_checked, read_design_provenance_summary_file, read_design_thumbnail, read_design_thumbnail_file, read_drawing,
+    read_drawing_file, write_design_container, write_design_container_with_cache, write_design_container_with_compression,
+    write_design_container_with_preview, write_design_container_with_provenance, write_design_container_with_thumbnail, write_drawing_container,
 };
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
