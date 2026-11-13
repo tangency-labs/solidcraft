@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::construct::{DatumItem, GeoRef};
-use solidcraft_doc::expr::Kind;
 use solidcraft_doc::frame::sizes::{self, Family};
 use solidcraft_doc::frame::{self, Anchor, MemberPair, MemberProfile, Profile, ProfileSpec};
 use solidcraft_doc::{FeatureKind, SketchId};
