@@ -848,6 +848,28 @@ fn a_centreline_is_hovered_within_8_px_and_clicked_to_select() {
     assert_eq!(app.menu.target, crate::context_menu::Target::FrameTubes);
     assert_eq!(picked_tubes(&mut app), ["pair1"]);
     assert_eq!(menu_labels(&app), [("Remove Tube".to_string(), "delete".to_string())]);
+    // With Right-click confirms on, the right-click confirms the input as before: no menu.
+    app.preferences.right_click_confirms = true;
+    assert!(!super::open_menu(&mut app, middle));
+}
+
+/// A click on a line member's sketch line picks the line as before (it comes out of the path):
+/// the centreline over it takes a click only where nothing else would be picked.
+#[test]
+fn a_line_under_a_line_members_centreline_is_picked_not_the_tube() {
+    let mut app = frame_app();
+    let frame = sketch_id(&app, "Frame");
+    let id = frame_lines(&app)[0].clone();
+    from_above(&mut app);
+    dialog_with(&mut app, &[Sel::ExternalSketchCurve { sketch: frame, id: id.clone() }]);
+    let proj = model_proj(&app);
+    let c = app.preview.centrelines.first().cloned().unwrap();
+    // A third of the way along, clear of the line's ends and its middle.
+    let at = proj.to_screen(c.a + (c.b - c.a) * (1.0 / 3.0)).unwrap();
+    let hits = crate::viewport::pick(&app, &proj, at);
+    assert!(hits.contains(&centreline(&id)), "{hits:?}");
+    assert_eq!(super::tube_hover(&app, &hits), None);
+    assert!(matches!(crate::viewport::candidate(&app, &hits), Some((crate::viewport::Hit::SketchCurve { .. }, _))), "{hits:?}");
 }
 
 #[test]
