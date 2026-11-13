@@ -87,7 +87,6 @@
   "planar_path_sweep_statuses",
   "brep_edit_statuses_pass_on",
   "query_statuses_pass_on",
-  "sweep_statuses_pass_on",
   "ssi_proto_topology_statuses_pass_on",
   "analytic_inversion_answers_apart",
   "cone_iso_circle_at_axial_height",

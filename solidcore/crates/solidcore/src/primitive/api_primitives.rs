@@ -1059,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    fn blend_success_can_return_a_face_or_no_face() {
+    fn blend_returns_its_face_or_its_surface_failure() {
         let mut k = Kernel::default();
         for (edge2_index, face2_index, has_face) in [(3, 2, false), (2, 2, true), (1, 1, true)] {
             let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
@@ -1073,20 +1073,25 @@ mod tests {
                 edges[edge2_index],
                 faces[face2_index],
                 true,
-            )
-            .unwrap();
-            assert_eq!(blend.is_some(), has_face);
-            let after_faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
-            assert_eq!(after_faces.len(), faces.len() + usize::from(has_face));
-            if let Some(face) = blend {
-                assert!(after_faces.contains(&face));
-                assert!(brep.face(face).unwrap().surface.is_some());
-            } else {
+            );
+            if !has_face {
+                // the blend surface cannot be made: upstream's face/edge
+                // `CreateBlendPrimitive` drops the edge-use overload's status and returns
+                // success with no face, the box unchanged; the fork returns the failure
+                // (c8f6a31, `SER( CreateBlendPrimitive(pEdgeuse1, ..) )`)
+                let e = blend.unwrap_err();
                 assert_eq!(
-                    crate::topology::brep::p1::edges(&brep, None).unwrap(),
-                    edges
+                    e.operation(),
+                    "surface::surface::p8::Surface::create_blend_surface",
+                    "{e:?}"
                 );
+                continue;
             }
+            let face = blend.unwrap().expect("a blend face");
+            let after_faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
+            assert_eq!(after_faces.len(), faces.len() + 1);
+            assert!(after_faces.contains(&face));
+            assert!(brep.face(face).unwrap().surface.is_some());
         }
 
         // Missing edge/face association remains an error, not success/None.

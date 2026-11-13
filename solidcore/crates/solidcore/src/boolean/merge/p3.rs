@@ -1383,12 +1383,26 @@ mod tests {
             );
             // IntersectInsertRelate runs (the edge-less fixture faces relate nothing);
             // copying an unrelated B face then needs its face use, which a bare face
-            // record lacks, so Union, ExclusiveOr and Merge stop there
+            // record lacks, so Union, ExclusiveOr and Merge stop there. Intersection
+            // deletes A's unrelated face, which a bare face record cannot do either: upstream
+            // went on without the delete, the fork returns its failure (c8f6a31,
+            // `Boolean2D`'s `SER( sTI.DeleteFaces(sDelFaces) )`)
             let copies = matches!(
                 operation,
                 BooleanOperation::Union | BooleanOperation::ExclusiveOr | BooleanOperation::Merge
             );
-            if copies {
+            if operation == BooleanOperation::Intersection {
+                assert!(
+                    matches!(
+                        result,
+                        Err(SolidError::InvalidInput {
+                            operation: "boolean::topology_intersector::p2::delete_faces",
+                            ..
+                        })
+                    ),
+                    "{operation:?}: {result:?}"
+                );
+            } else if copies {
                 assert!(
                     matches!(
                         result,

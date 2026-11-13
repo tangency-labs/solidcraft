@@ -5,10 +5,10 @@
 //! one copy. The port builds a line's and a conic's NURB lazily. The split took a copy of
 //! the bare B-spline base, which had none, `make_nurb` refused it (1001), and the dropped
 //! status left no pieces, so the line was left out of the profile: a profile of lines made
-//! "no composite curve" (tangency-labs/solidcraft#15938). With
-//! `Kernel::fixes.sweep_statuses_pass_on` (fork c8f6a31, WR-662) the status was returned.
+//! "no composite curve" (tangency-labs/solidcraft#15938). The fork returns that status
+//! (c8f6a31, WR-662), the only path since #14246 batch S5.
 //!
-//! Each draft below builds with the flag off and on, to the frustum's closed-form volume
+//! Each draft below builds to the frustum's closed-form volume
 //! `h/3 (A1 + A2 + sqrt(A1 A2))`, the top inset (draft > 0) or outset (draft < 0) by
 //! `h tan |draft|`.
 
@@ -33,10 +33,8 @@ const SIDE: f64 = 4.0;
 const HEIGHT: f64 = 2.0;
 const RADIUS: f64 = 2.0;
 
-fn kernel(pass_on: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.sweep_statuses_pass_on = pass_on;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, body: &mut Brep) -> f64 {
@@ -90,87 +88,75 @@ fn cone_frustum(angle: f64) -> f64 {
 }
 
 /// Draft `curves` (linear corners, both caps): faces and volume, printed before any check.
-fn draft(label: &str, pass_on: bool, curves: &[Curve], angle: f64) -> (usize, f64) {
-    let mut k = kernel(pass_on);
+fn draft(label: &str, curves: &[Curve], angle: f64) -> (usize, f64) {
+    let mut k = kernel();
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let made = create_draft_sweep(&mut k, &refs, HEIGHT, angle, false, 3);
     let mut body = match made {
         Ok(body) => body,
         Err(e) => {
-            println!("MEASURE {label} pass_on {pass_on} angle {angle}: Err {e:?}");
-            panic!("{label}, pass_on {pass_on}, angle {angle}: {e:?}");
+            println!("MEASURE {label} angle {angle}: Err {e:?}");
+            panic!("{label}, angle {angle}: {e:?}");
         }
     };
     let faces = body.face_list().len();
     let v = volume(&k, &mut body);
     println!(
-        "MEASURE {label} pass_on {pass_on} angle {angle}: faces {faces} edges {} vertices {} volume {v:?}",
+        "MEASURE {label} angle {angle}: faces {faces} edges {} vertices {} volume {v:?}",
         body.edge_list().len(),
         body.vertex_list().len()
     );
     (faces, v)
 }
 
-fn assert_frustum(label: &str, pass_on: bool, angle: f64, v: f64, want: f64, rel: f64) {
+fn assert_frustum(label: &str, angle: f64, v: f64, want: f64, rel: f64) {
     assert!(
         (v - want).abs() <= rel * want,
-        "{label}, pass_on {pass_on}, angle {angle}: volume {v}, want {want}"
+        "{label}, angle {angle}: volume {v}, want {want}"
     );
 }
 
 /// The square of four lines drafts to the same body as the square of B-spline segments.
 #[test]
 fn a_square_of_lines_drafts_like_the_square_of_splines() {
-    for pass_on in [false, true] {
-        for angle in [5.0, -5.0] {
-            let (spline_faces, spline_v) = draft("splines", pass_on, &square([false; 4]), angle);
-            let (faces, v) = draft("lines", pass_on, &square([true; 4]), angle);
-            let want = square_frustum(angle);
-            assert_frustum("splines", pass_on, angle, spline_v, want, 1e-12);
-            assert_frustum("lines", pass_on, angle, v, want, 1e-12);
-            assert_eq!(
-                faces, spline_faces,
-                "lines, pass_on {pass_on}, angle {angle}"
-            );
-        }
+    for angle in [5.0, -5.0] {
+        let (spline_faces, spline_v) = draft("splines", &square([false; 4]), angle);
+        let (faces, v) = draft("lines", &square([true; 4]), angle);
+        let want = square_frustum(angle);
+        assert_frustum("splines", angle, spline_v, want, 1e-12);
+        assert_frustum("lines", angle, v, want, 1e-12);
+        assert_eq!(faces, spline_faces, "lines, angle {angle}");
     }
 }
 
 /// Three lines and a B-spline segment: no line is left out of the profile.
 #[test]
 fn a_square_of_lines_and_a_spline_drafts_whole() {
-    for pass_on in [false, true] {
-        for angle in [5.0, -5.0] {
-            let (spline_faces, _) = draft("splines", pass_on, &square([false; 4]), angle);
-            let (faces, v) = draft("mixed", pass_on, &square([true, false, true, true]), angle);
-            assert_frustum("mixed", pass_on, angle, v, square_frustum(angle), 1e-12);
-            assert_eq!(
-                faces, spline_faces,
-                "mixed, pass_on {pass_on}, angle {angle}"
-            );
-        }
+    for angle in [5.0, -5.0] {
+        let (spline_faces, _) = draft("splines", &square([false; 4]), angle);
+        let (faces, v) = draft("mixed", &square([true, false, true, true]), angle);
+        assert_frustum("mixed", angle, v, square_frustum(angle), 1e-12);
+        assert_eq!(faces, spline_faces, "mixed, angle {angle}");
     }
 }
 
 /// A conic: the analytic circle `Ellipse::circle_from_3_points` makes drafts to a cone frustum.
 #[test]
 fn a_circle_drafts_to_a_cone_frustum() {
-    for pass_on in [false, true] {
-        for angle in [5.0, -5.0] {
-            let k = kernel(pass_on);
-            let circle = Curve::from(
-                Ellipse::circle_from_3_points(
-                    &k,
-                    Point3::new(RADIUS, 0.0, 0.0),
-                    Point3::new(0.0, RADIUS, 0.0),
-                    Point3::new(-RADIUS, 0.0, 0.0),
-                    3,
-                    true,
-                )
-                .unwrap(),
-            );
-            let (_, v) = draft("circle", pass_on, &[circle], angle);
-            assert_frustum("circle", pass_on, angle, v, cone_frustum(angle), 1e-9);
-        }
+    for angle in [5.0, -5.0] {
+        let k = kernel();
+        let circle = Curve::from(
+            Ellipse::circle_from_3_points(
+                &k,
+                Point3::new(RADIUS, 0.0, 0.0),
+                Point3::new(0.0, RADIUS, 0.0),
+                Point3::new(-RADIUS, 0.0, 0.0),
+                3,
+                true,
+            )
+            .unwrap(),
+        );
+        let (_, v) = draft("circle", &[circle], angle);
+        assert_frustum("circle", angle, v, cone_frustum(angle), 1e-9);
     }
 }

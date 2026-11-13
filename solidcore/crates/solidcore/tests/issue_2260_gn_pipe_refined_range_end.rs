@@ -199,7 +199,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "ssi_trace_tangent_curves_once",
     "surface_continuity_checks_last_v_knot",
     "surface_parallel_to_vector_checks",
-    "sweep_statuses_pass_on",
     "taper_tangent_corner_planes",
     "temporary_radius_setup_errors",
     "thicken_planar_side_walls",

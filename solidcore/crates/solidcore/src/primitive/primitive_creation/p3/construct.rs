@@ -33,9 +33,8 @@
 //! Not upstream (#15263): turning planar sections carry their winding along the
 //! centroid travel and align their cyclic seams by exact curve evaluations before
 //! joining. Parallel sections with coherent winding retain their correspondence.
-//! **Statuses pass on** (opt-in `Kernel::fixes.sweep_statuses_pass_on`, WR-662;
-//! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
-//! are returned instead (`SER`).
+//! **Statuses pass on** (WR-662; SolidCraft change, tangency-labs/smlib c8f6a31): the
+//! statuses upstream drops here are returned (`SER`).
 
 use super::{
     geometry::{prepare_curve_sweep, GeometryHandle, PreparedCurveSweep},
@@ -45,7 +44,7 @@ use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, passed_on, Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector2d::Point2;
@@ -675,11 +674,7 @@ impl PrimitiveCreation {
             // (a B-spline surface just made: never lazy)
             let domain = surface.natural_uv_domain_if_built();
             // fork c8f6a31 (WR-662): SER(CreateFacesFromSurface(..)).
-            let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
-            ignore_status(passed_on(
-                a.surface_faces(brep, surface, domain, &mut made),
-                p,
-            )?)?;
+            a.surface_faces(brep, surface, domain, &mut made)?;
             new_faces.extend_from_slice(&made);
             if trace.is_some() && untraced.is_none() {
                 let sections: Vec<&LoopSpans> = loop_spans
@@ -753,8 +748,7 @@ impl PrimitiveCreation {
         // (a B-spline surface just made: never lazy)
         let domain = surface.natural_uv_domain_if_built();
         // fork c8f6a31 (WR-662): SER(pBrep->CreateFaceFromSurface(..)).
-        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
-        ignore_status(passed_on(a.surface_face(brep, surface, domain, output), p)?)?;
+        a.surface_face(brep, surface, domain, output)?;
         Ok(())
     }
 
@@ -952,17 +946,13 @@ impl PrimitiveCreation {
                 groups.push(first..side_faces.len());
             }
             // fork c8f6a31 (WR-662): SER(pBrep->Transform(..)) for both moves back.
-            let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
-            ignore_status(passed_on(
-                a.transform_primitive(brep, &prepared.rotation_back),
-                p,
-            )?)?;
+            a.transform_primitive(brep, &prepared.rotation_back)?;
             let placement = if options.move_to_profile {
                 &prepared.profile_back
             } else {
                 &prepared.path_back
             };
-            ignore_status(passed_on(a.transform_primitive(brep, placement), p)?)?;
+            a.transform_primitive(brep, placement)?;
             // SolidCraft fork (5d3939e): the motions carrying the profile as given onto
             // its first, middle and last sections. A profile point went forward into the
             // sweep's space (to the origin, the path turned onto x, oriented with the path
@@ -990,8 +980,7 @@ impl PrimitiveCreation {
                 a.planar_faces(region, &mut ends, approx_tol, end_faces)?;
             }
             // fork c8f6a31 (WR-662): SER(pBrep->StitchAndOrient()).
-            let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
-            ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
+            a.stitch_and_orient(brep)?;
             Ok(())
         })();
         a.kernel_mut(brep)?.context.set_doing_boolean(previous);

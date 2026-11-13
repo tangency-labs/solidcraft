@@ -197,7 +197,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.brep_edit_statuses_pass_on = true;
     f.fillet_run_on_bspline_trims = true;
     f.query_statuses_pass_on = true;
-    f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;
     f.analytic_inversion_answers_apart = true;
     f.fillet_statuses_pass_on = true;

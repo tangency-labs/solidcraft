@@ -17,13 +17,14 @@
 //! Pivot endpoint failures propagate through both pivot policies instead of using
 //! undefined points (#483).
 //!
-//! With `sweep_statuses_pass_on` (WR-662, fork c8f6a31) the degree reduction, the
-//! curve transforms and evaluations and `MatchWeights` pass their statuses on.
+//! The degree reduction, the curve transforms and evaluations and `MatchWeights` pass
+//! their statuses on, as the fork does (WR-662, tangency-labs/smlib c8f6a31); upstream
+//! drops them.
 //!
 
 use crate::curve::composite_curve::OffsetMapAttribute;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
+use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::geom_utility::p1::circle_from_3_points;
 use crate::kernel::Kernel;
@@ -66,11 +67,7 @@ pub fn ruled_surface_from_offset(
     options: OffsetRuleOptions,
 ) -> Result<(BSplineSurface, Option<OffsetMapAttribute>)> {
     // fork c8f6a31 (WR-662): the statuses below are passed on (`SER`).
-    let p = k.fixes.sweep_statuses_pass_on;
-    ignore_status(passed_on(
-        offset_curve.degree_reduction(options.tolerance, true),
-        p,
-    )?)?;
+    offset_curve.degree_reduction(options.tolerance, true)?;
     let map =
         map.ok_or_else(|| SolidError::primitive_failed(OP, "the offset curve has no offset map"))?;
     let index = usize::try_from(map.curve).map_err(|_| {
@@ -101,20 +98,16 @@ pub fn ruled_surface_from_offset(
         let pivot = pivot_nearest_corner(source, other, options.same_point_tolerance, &first)?;
         second = BSplineCurve::create_point_curve(pivot)?;
         second_is_generator = false;
-        ignore_status(passed_on(first.transform(&options.movement, None), p)?)?;
+        first.transform(&options.movement, None)?;
     } else {
         if source.form() == BSplineCurveForm::CircularArc {
             let interval = source.natural_interval();
             let oi = first.natural_interval();
-            let start = ignored(passed_on(source.evaluate_point(interval.min()), p)?)?
-                .unwrap_or(Vec3::UNDEF);
-            let end = ignored(passed_on(source.evaluate_point(interval.max()), p)?)?
-                .unwrap_or(Vec3::UNDEF);
-            let offset_start =
-                ignored(passed_on(first.evaluate_point(oi.min()), p)?)?.unwrap_or(Vec3::UNDEF);
+            let start = source.evaluate_point(interval.min())?;
+            let end = source.evaluate_point(interval.max())?;
+            let offset_start = first.evaluate_point(oi.min())?;
             if start.distance_squared(offset_start) > end.distance_squared(offset_start) {
-                let mid = ignored(passed_on(source.evaluate_point(interval.mid()), p)?)?
-                    .unwrap_or(Vec3::UNDEF);
+                let mid = source.evaluate_point(interval.mid())?;
                 // The upstream ignores this status. Undefined circle outputs on
                 // a failed three-point construction cannot safely form a NURB.
                 let circle = circle_from_3_points(start, mid, end, 3, false)?;
@@ -131,12 +124,12 @@ pub fn ruled_surface_from_offset(
                     options.movement.x_axis(),
                     options.movement.y_axis(),
                 );
-                ignore_status(passed_on(first.transform(&movement, None), p)?)?;
+                first.transform(&movement, None)?;
             } else {
-                ignore_status(passed_on(first.transform(&options.movement, None), p)?)?;
+                first.transform(&options.movement, None)?;
             }
         } else {
-            ignore_status(passed_on(first.transform(&options.movement, None), p)?)?;
+            first.transform(&options.movement, None)?;
         }
         *unmarried.get_mut(index).ok_or_else(|| {
             SolidError::primitive_failed(OP, "the offset map's curve is out of range")
@@ -183,9 +176,9 @@ pub fn ruled_surface_from_offset(
     let [first, second] = &mut rules;
     if map.corner_offset && first_input_rational {
         if first.is_degenerate(k, EFF_ZERO, None)? {
-            ignore_status(passed_on(first.match_weights(second), p)?)?;
+            first.match_weights(second)?;
         } else if second.is_degenerate(k, EFF_ZERO, None)? {
-            ignore_status(passed_on(second.match_weights(first), p)?)?;
+            second.match_weights(first)?;
         }
     }
     if first_is_offset {
