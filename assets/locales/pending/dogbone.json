@@ -17,7 +17,7 @@
     "ui.dogbone_title": "DOGBONE"
   },
   "ar": {
-    "cmd.solid_dogbone": "تفريغ الزوايا",
+    "cmd.solid_dogbone": "تجويف لقمة الراوتر",
     "error.dogbone_corners": "اختر حواف الزوايا الداخلية، أو وجهًا لتفريغ زواياه الداخلية",
     "help.solid.dogbone": "يقطع تفريغًا دائريًا بقطر لقمة الراوتر في كل زاوية داخلية، حتى تستقر قطعة أو لوح بزاوية قائمة حيث تترك اللقمة استدارة. استخدمه للجيوب والشقوق والفتحات التي ستقطعها بآلة راوتر CNC.",
     "ui.dogbone.corners": "الزوايا",
@@ -31,7 +31,7 @@
     "ui.dogbone.side": "الجانب",
     "ui.dogbone.style": "النمط",
     "ui.dogbone.t_bone": "على شكل T",
-    "ui.dogbone_title": "تفريغ الزوايا"
+    "ui.dogbone_title": "تجويف لقمة الراوتر"
   },
   "he": {
     "cmd.solid_dogbone": "הקלת פינות",
