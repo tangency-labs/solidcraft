@@ -828,7 +828,6 @@ fn a_round_rolled_onto_a_taller_boss_ends_inside_the_boss_face() {
     }
 }
 
-
 /// The rails of edge 28's round in `made`, checked against the closed forms of the faces it
 /// rolls on: every edge the round made (no edge of `input` passes through its middle) that
 /// lies, at 65 points, within `tol` of the R3 round's cylinder (about x = 3, z = 4.5 along y),
@@ -900,13 +899,13 @@ fn assert_b27_rails_on_faces(input: &Body, made: &Body, r: f64, tol: f64) {
 
 /// Edge 28 of `b27` rounded 1.6 builds a valid solid (#15906). It failed with status 1001,
 /// "the smooth end cap is not built": the End at the edge's end on x = 0 never built its
-/// edges. Its rail on the R3 round is the trace's Hermite approximation, which the trace
-/// accepts within the blend's approximation tolerance (4e-5) of the round; it crosses the
-/// End's plane 1.9e-5 off the round, past the round's zone (1e-5), so the rail end
-/// classified off its face and the End waited for a rollover over the round's tangent edge
-/// x = 0 that never comes (the round rolls over only its other tangent edge, z = 7.5, at the
-/// other end), in the rails' adjusted pass too. A rail end within the rail's tolerance of
-/// its face is now classified at its foot on the face. At 1.5 and 1.7 the crossing fell
+/// edges. Its rail on the R3 round is the trace's Hermite approximation, whose spans the
+/// trace accepts by a sampled check; it crosses the End's plane 1.9e-5 off the round, past
+/// the round's zone (1e-5), so the rail end classified off its face and the End waited for a
+/// rollover over the round's tangent edge x = 0 that never comes (the round rolls over only
+/// its other tangent edge, z = 7.5, at the other end), in the rails' adjusted pass too. A rail
+/// end off its face at the face's zone is now solved on the faces (the point of the round on
+/// the End's plane where the ball touches it) and classified there. At 1.5 and 1.7 the crossing fell
 /// within 1e-5 of the round; those builds are unchanged, and the three volumes fall as the
 /// radius grows (a larger ball removes more of a convex edge).
 #[test]

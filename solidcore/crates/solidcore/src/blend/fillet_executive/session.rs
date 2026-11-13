@@ -263,6 +263,21 @@ impl SolverObject {
         }
     }
 
+    /// Not upstream (#15906): the fixed offset distances of a constant-radius solver's two
+    /// surfaces ([`ConstantRadiusFs::oriented_offsets`]); `None` for a solver whose offsets
+    /// change along the blend (constant distance: its offset is solved at each section;
+    /// variable radius: its law's).
+    ///
+    /// # Errors
+    /// Those of [`ConstantRadiusFs::oriented_offsets`].
+    pub fn constant_offsets(&self) -> Result<Option<[f64; 2]>> {
+        match self {
+            Self::ConstantRadius(solver) => Ok(Some(solver.oriented_offsets()?)),
+            Self::SurfaceSurface(solver) => Ok(Some(solver.base.oriented_offsets()?)),
+            Self::ConstantDistance(_) | Self::VariableRadius(_) => Ok(None),
+        }
+    }
+
     /// Borrow the same base for a native member write.
     pub fn base_mut(&mut self) -> &mut FilletSolver {
         match self {
@@ -578,6 +593,13 @@ impl crate::blend::blend_corner::swept::SweptSolvers for SweptSessionSolvers<'_>
             .and_then(Option::as_ref)
             .map(SolverObject::base)
             .ok_or_else(|| invalid("swept turn solver is not live"))
+    }
+    fn constant_offsets(&self, id: FilletSolverId) -> Result<Option<[f64; 2]>> {
+        self.solvers
+            .get(id.0 as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| invalid("swept turn solver is not live"))?
+            .constant_offsets()
     }
 }
 
@@ -3274,6 +3296,15 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             if crate::blend::blend_corner::end::end_awaits_rollover(
                 k, target, pseudo, corner, &lookup, rolls_over,
             )? {
+                // in the adjusted corner's pass the rollover has run: an End that would wait
+                // again would be left without edges, its cap built on none (#15906). A stage
+                // failure with no reason the kernel names (a defect), built on purpose
+                if executive.rollover_adjusting {
+                    return Err(SolidError::blend(
+                        "SmBlendCorner::CalcEndEdgeGeom",
+                        crate::error::blend::BlendFailure::StageFailed,
+                    ));
+                }
                 return Ok(());
             }
             let refusal = crate::blend::blend_corner::end::calc_end_edge_geom(
@@ -7376,6 +7407,31 @@ mod tests {
     use crate::topology::brep::p8::{create_planar_face_with_3d_curves, FaceBuildEnv};
     use crate::topology::loopuse;
     use crate::topology::topology_traverser::Marks;
+
+    /// Only the constant-radius solvers have fixed offsets an End's rail end can be solved
+    /// with (#15906): a constant-distance solver solves its offset at each section and a
+    /// variable-radius one takes it from its law.
+    #[test]
+    fn only_constant_radius_solvers_have_constant_offsets() {
+        use crate::blend::fillet_standard_solver::p1::{
+            CurveBasedFs, FilletLawKind, VariableRadiusFs,
+        };
+        let constant_distance = SolverObject::ConstantDistance(Box::new(ConstantDistanceFs {
+            solver: FilletSolver::new(1e-6, 0.5, 0.03),
+            distance: 2.0,
+        }));
+        assert_eq!(constant_distance.constant_offsets().unwrap(), None);
+        let variable = SolverObject::VariableRadius(Box::new(VariableRadiusFs {
+            curve_based: CurveBasedFs::new(1e-6, 0.5, 0.03),
+            law: FilletLaw::new(FilletLawKind::Linear {
+                start_radius: 1.0,
+                end_radius: 2.0,
+            }),
+            law_orientation: false,
+            law_interval: crate::geom::extent1d::Extent1d::from_min_max(0.0, 1.0),
+        }));
+        assert_eq!(variable.constant_offsets().unwrap(), None);
+    }
 
     /// An empty edge list is a typed refusal of the value, with the status of the bare
     /// `SM_ERR_INVALID_INPUT` it replaced (#13790), for every prepare that checks it.
