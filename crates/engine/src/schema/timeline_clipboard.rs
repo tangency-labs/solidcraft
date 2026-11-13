@@ -407,7 +407,7 @@ pub struct Script {
 /// What `timeline.export_script` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ExportScriptResult {
-    /// What the script leaves out (appearances, folders, views, configurations, print-face
+    /// What the script leaves out (appearances, folders, views, configurations with face-appearance columns, print-face
     /// assignments…).
     pub omitted: Vec<String>,
     /// The file written, or null.

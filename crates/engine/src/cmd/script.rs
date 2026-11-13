@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
+use solidcraft_doc::config::Column;
 use solidcraft_doc::{Document, Feature, FeatureKind, Param, expr};
 
 use super::CommandSpec;
@@ -36,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ExportScriptResult>)
         .params(
         "path?: write the script to this file → script: {commands: [...]} that rebuilds the design (solidcraft-cli eval/run), \
-         steps, omitted: what the script leaves out (appearances, folders, views, configurations, print-face assignments); components and assemblies \
+         steps, omitted: what the script leaves out (appearances, folders, views, configurations with face-appearance columns, print-face assignments); components and assemblies \
          are not supported yet",
     ),
 ];
@@ -232,7 +233,6 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
     let mut omitted = Vec::new();
     for (empty, what) in [
         (doc.appearances.is_empty(), "appearances (colours of bodies and faces)"),
-        (doc.configs.is_empty(), "configurations"),
         (doc.canvases.is_empty(), "canvases (reference images)"),
         (doc.point_clouds.is_empty(), "point clouds"),
         (doc.print_faces.is_empty(), "print-face assignments (body.print_face)"),
@@ -391,8 +391,61 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
         out.push(step("plastic.assign_rule", json!({"bodies": bodies, "rule": rule})));
     }
 
+    // The configuration table, once the features, parameters and bodies its columns name exist.
+    if !doc.configs.is_empty() {
+        match config_steps(doc, &mut omitted) {
+            Ok(steps) => out.extend(steps),
+            Err(why) => omitted.push(format!("configurations ({why})")),
+        }
+    }
+
     if let Some(m) = doc.marker.filter(|m| *m < doc.features.len()) {
         out.push(step("timeline.rollback", json!({"position": m})));
     }
     Ok((out, omitted))
+}
+
+/// The steps that rebuild the configuration table: its columns, its rows, its rules, then the
+/// active row. Row ids are not kept (a row is found by its name). `Err` says why the table
+/// can't be written, and then none of it is.
+fn config_steps(doc: &Document, omitted: &mut Vec<String>) -> std::result::Result<Vec<Value>, String> {
+    let table = &doc.configs;
+    let mut out = Vec::new();
+    for column in &table.columns {
+        let params = match column {
+            Column::Param(name) => json!({"param": name}),
+            Column::Suppress(id) => {
+                // `config.column` finds the feature by name, so the name has to pick out this one.
+                let name = doc.feature(*id).map(|f| f.name.as_str()).filter(|n| doc.find_feature(n).is_some_and(|f| f.id == *id));
+                json!({"feature": name.ok_or("a suppression column whose feature a name does not pick out")?})
+            }
+            Column::Material(body) => json!({"material": body}),
+            Column::Appearance(body) => json!({"appearance": body}),
+            Column::ComponentAppearance(_) | Column::FaceAppearance(_) => return Err("component or face appearance columns".into()),
+        };
+        out.push(step("config.column", params));
+    }
+    let mut names = BTreeSet::new();
+    for row in &table.rows {
+        let name = row.name.as_str();
+        if name.is_empty() || name.trim() != name || name.len() > 128 || !names.insert(name) || row.cells.len() != table.columns.len() {
+            return Err(format!("row `{name}` that config.row can't add by name"));
+        }
+        let values: Map<String, Value> = table.columns.iter().zip(&row.cells).map(|(c, v)| (doc.config_key(c), json!(v))).collect();
+        out.push(step("config.row", json!({"name": name, "values": values})));
+    }
+    if !table.rules.is_empty() {
+        let rules = serde_json::to_value(&table.rules).map_err(|e| e.to_string())?;
+        out.push(step("config.rule", json!({"rules": rules})));
+    }
+    // Activating a row sets the design to it, so only a design that still matches its row can
+    // have it activated without changing.
+    if let Some(active) = &table.active {
+        if doc.configuration_matches() {
+            out.push(step("config.activate", json!({"row": active})));
+        } else {
+            omitted.push("the active configuration (the design no longer matches its row)".to_string());
+        }
+    }
+    Ok(out)
 }
