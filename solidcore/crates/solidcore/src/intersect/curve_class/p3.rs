@@ -2029,8 +2029,8 @@ pub fn fix_problems_by_squeezing<O: ClassObject>(
 impl<O: ClassObject> CurveClassification<O> {
     /// Classify interval `index`, whose two ends lie on one face boundary edge, as on that
     /// edge: when the interval and the edge are both straight, when both ends lie within the
-    /// intersection tolerance of the edge's line (always; the distance is affine along the
-    /// interval); otherwise when its midpoint is within the intersection tolerance of the
+    /// intersection tolerance of the edge's line (always; the distance to a line is convex
+    /// along the interval, so its ends bound it); otherwise when its midpoint is within the intersection tolerance of the
     /// edge (the fork's `SmCurveClassification::ClassifyEdgeInterval`, WR-305, opt-in
     /// `Kernel::fixes.classify_edge_interval`). Both ends are on edge `E` when each
     /// classifies to `E` or to one of its two vertices and at least one to `E` itself. An
@@ -2149,15 +2149,15 @@ impl<O: ClassObject> CurveClassification<O> {
 }
 
 /// Not upstream (#15718): whether `curve` over `interval` runs along the line of
-/// `edge_curve` over `edge_interval` within `tol`, both curves lines. The distance from the
-/// interval to the edge's line is affine along it, so its two ends bound it, exactly up to
-/// the rounding counted here: a certificate, not a sample. `false` for a curve that is not
+/// `edge_curve` over `edge_interval` within `tol`, both curves lines. The distance from a
+/// point to the edge's line is the norm of an affine function of the point, hence convex
+/// along the interval, so its two ends bound it, exactly up to the rounding counted here: a certificate, not a sample. `false` for a curve that is not
 /// a line and for an edge of zero length.
 ///
 /// # Errors
 ///
 /// Those of the end evaluations.
-pub(super) fn straight_run_on_line(
+pub(crate) fn straight_run_on_line(
     k: &Kernel,
     curve: &Curve,
     interval: &Extent1d,

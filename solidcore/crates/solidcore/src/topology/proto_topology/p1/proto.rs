@@ -15,6 +15,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::tol::{xsect_tol3d, zone_tol3d};
+use crate::intersect::curve_class::p3::straight_run_on_line;
 use crate::intersect::curve_class::{src_zone_tol_3d_of, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
     object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
@@ -25,6 +26,7 @@ use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::query::face::p2 as face_p2;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::proto_topology::p2::EXACT_TOL_FACTOR;
 use crate::topology::topology as topo;
 use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, VertexId};
 
@@ -512,6 +514,34 @@ pub fn are_same_curve<O: Copy + PartialEq>(
 
     // return TRUE when DropPoint() succeeded and DropDist < dTol
     Ok(dropped.is_some_and(|d| d.success && d.distance < tol))
+}
+
+/// Not upstream (#15718): whether two edge definitions on lines are one piece within
+/// `tol`, decided over both whole pieces. Each end of the first definition's interval lies
+/// within `tol` of the second's line, and each end of the second's interval within `tol`
+/// of the first's line ([`straight_run_on_line`], rounding counted). The distance from a
+/// point to a line is the norm of an affine function of the point, so it is convex along a
+/// segment and its maximum over a piece is reached at one of the piece's ends: the four end
+/// checks bound every point of both pieces, a certificate where upstream's
+/// [`are_same_curve`] drops one midpoint. `false` when either curve is not a line or either
+/// piece has zero length (nothing combined: the definitions are kept).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a missing curve; those of the end evaluations.
+fn exact_lines_coincide<O: Copy>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    d1: &EdgeDefinition<O>,
+    d2: &EdgeDefinition<O>,
+    tol: f64,
+) -> Result<bool> {
+    let c1 = curve_of(geometry, d1.xsect_curve_3d)?;
+    let c2 = curve_of(geometry, d2.xsect_curve_3d)?;
+    Ok(
+        straight_run_on_line(k, c1, &d1.xsect_interval, c2, &d2.xsect_interval, tol)?
+            && straight_run_on_line(k, c2, &d2.xsect_interval, c1, &d1.xsect_interval, tol)?,
+    )
 }
 
 /// `sm_AreConnected(const SmVertex*, const SmFace*)`.
@@ -2209,8 +2239,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// Sets the coincident line edge pairs (B-rep 1's edge, B-rep 2's edge): two straight
     /// edges whose ends lie within their intersection tolerance of each other, end for end,
-    /// are within it of each other everywhere (the distance between points at the same
-    /// fraction along both is affine, so its ends bound it), one coincident interval.
+    /// are within it of each other everywhere (the vector between points at the same
+    /// fraction along both is affine in it, so its length is convex and its ends bound it),
+    /// one coincident interval.
     /// Where they cross is where two coincident pieces cross within their tolerance, not a
     /// feature: [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`] makes no vertex
     /// definition for a point classified on one edge of a pair in each B-rep. The
@@ -3607,15 +3638,23 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // compares the second curve over the first definition's interval.)
         let domain1 = d1.xsect_interval;
         let tol = (d1.tolerance(k) + d2.tolerance(k)) * factor;
-        if !are_same_curve(
-            k,
-            geometry,
-            d1.xsect_curve_3d,
-            &domain1,
-            d2.xsect_curve_3d,
-            &domain1,
-            tol,
-        )? {
+        let same = if factor == EXACT_TOL_FACTOR {
+            // Not upstream (#15718): at the exact radius both definitions are lines
+            // (`edge_combine_factor`), and the decision is a certificate over both whole
+            // pieces, not upstream's one midpoint.
+            exact_lines_coincide(k, geometry, d1, d2, tol)?
+        } else {
+            are_same_curve(
+                k,
+                geometry,
+                d1.xsect_curve_3d,
+                &domain1,
+                d2.xsect_curve_3d,
+                &domain1,
+                tol,
+            )?
+        };
+        if !same {
             return Ok(0);
         }
 

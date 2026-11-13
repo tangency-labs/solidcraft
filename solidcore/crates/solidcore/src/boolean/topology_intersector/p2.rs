@@ -2674,8 +2674,9 @@ fn split_edges_at_vertices<O: ClassObject + SolutionObject + Ord>(
 /// Not upstream (#15718): the pairs (an edge of `this`, an edge of `other`) of line edges
 /// whose ends lie within their intersection tolerance of each other, end for end (the
 /// start of one at the start or the end of the other, and the other two ends likewise),
-/// each distance with its rounding counted. Points at the same fraction along two segments
-/// are an affine function of it apart, so the end distances bound the distance everywhere:
+/// each distance with its rounding counted. The vector between points at the same fraction
+/// along two segments is an affine function of the fraction, so its length is convex and
+/// the end distances bound the distance everywhere:
 /// the two are one coincident interval, a certificate, not a sample. An edge whose ends
 /// are within twice that tolerance of each other is too short to pair its ends one way
 /// only, and is left out. Edges whose boxes lie farther apart than the tolerance are never
