@@ -45,6 +45,9 @@ pub fn update_tolerances_after_boolean(k: &mut Kernel, b: &mut Brep) -> Result<T
 /// succeeds, returned; otherwise the pass fails only on a vertex or edge missing from `b`, a broken
 /// result that the check would refuse anyway.
 pub(crate) fn centre_wide_vertices(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+    if p1::vertices(b, None)?.is_empty() {
+        return Ok(());
+    }
     let limit = LARGE_SMALL_SIZE_RATIO * b.tolerance();
     for v in p1::vertices(b, None)? {
         // the check wants a vertex's tolerance strictly under the limit

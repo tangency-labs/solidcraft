@@ -272,6 +272,41 @@ mod tests {
         assert!(boolean2d(a, b, BooleanOp::Union).unwrap().is_none());
     }
 
+    /// Two disjoint boxes intersect to no result (`Ok(None)`), not an error, with the tolerance
+    /// update in place: the empty result has no vertex, so there is no gap to close, and the
+    /// empty contract holds through the new call.
+    #[test]
+    fn disjoint_boxes_intersect_to_no_result_with_the_update_in_place() {
+        all_fixes();
+        let a = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let b = make_box([3.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        assert!(boolean(a, b, BooleanOp::Intersect).unwrap().is_none());
+    }
+
+    /// Disjoint solids unioned through `union_all` with the tolerance update in place: the body
+    /// holds both boxes, its volume is the closed form, and its proof stands.
+    #[test]
+    fn disjoint_boxes_union_all_measures_the_closed_form_with_the_update_in_place() {
+        all_fixes();
+        let a = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let b = make_box([3.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let u = union_all(vec![a, b]).unwrap();
+        let v = u.volume(1e-8).unwrap();
+        assert!((v - 2.0).abs() < 2.0 * 1e-9, "{v}");
+    }
+
+    /// Overlapping boxes unioned through `union_all` with the tolerance update in place: the
+    /// shared region is not double-counted, so the update did not bend the geometry.
+    #[test]
+    fn overlapping_boxes_union_all_measures_the_closed_form_with_the_update_in_place() {
+        all_fixes();
+        let a = make_box([0.0, 0.0, 0.0], [2.0, 1.0, 1.0]).unwrap();
+        let b = make_box([1.0, 0.0, 0.0], [2.0, 1.0, 1.0]).unwrap();
+        let u = union_all(vec![a, b]).unwrap();
+        let v = u.volume(1e-8).unwrap();
+        assert!((v - 3.0).abs() < 3.0 * 1e-9, "{v}");
+    }
+
     /// A boolean that fails hands the failure callback its operands as they came in, not the
     /// empty bodies the kernel leaves once it has taken them.
     #[test]
