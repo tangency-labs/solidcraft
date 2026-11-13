@@ -61,11 +61,11 @@ CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("
     .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
     .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
 CommandSpec::new("view.fit", "Fit", fit)
-    .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
+    .icon("fit").key("F6").noundo().doc_only().any_part().params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
 CommandSpec::new("view.home", "Home View", home)
-    .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
+    .icon("home").noundo().doc_only().any_part().params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
 CommandSpec::new("view.tool", "Navigation Tool", tool)
-    .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
+    .icon("orbit").noundo().doc_only().any_part().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it (a drawing's sheet pans and zooms)"),
 CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zoom", zoom_tool))
     .icon("zoom").noundo().doc_only()
     .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
@@ -719,6 +719,26 @@ mod tests {
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
         assert!(s.camera.is_none());
+    }
+
+    /// Fit, Home and the pan and zoom tools also frame and move a drawing's sheet, so they run with
+    /// a drawing open; the other view commands act on the model and stay refused there. None makes
+    /// an undo step or changes the design.
+    #[test]
+    fn sheet_navigation_runs_with_a_drawing_open() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("drawing.create", &json!({})).unwrap();
+        let (before, undo) = (s.doc.to_json(), s.undo.len());
+        for (id, params) in
+            [("view.fit", json!({})), ("view.home", json!({})), ("view.tool", json!({"tool": "pan"})), ("view.tool", json!({"tool": "none"}))]
+        {
+            assert!(s.execute(id, &params).is_ok(), "{id}");
+        }
+        for id in ["view.normal_to", "view.visual_style"] {
+            assert!(s.execute(id, &json!({"style": "shaded"})).unwrap_err().to_string().contains("a drawing is open"), "{id}");
+        }
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo));
     }
 
     #[test]

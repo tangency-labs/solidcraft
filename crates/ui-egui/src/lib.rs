@@ -201,6 +201,7 @@ mod blend_dialog_tests;
 mod boundary_dialog_tests;
 pub(crate) mod display_lod;
 pub mod drawing_jobs;
+pub mod drawing_sheet_page;
 pub mod drawing_workspace;
 #[cfg(test)]
 mod file_load_ui_tests;
@@ -1897,7 +1898,7 @@ impl SolveApp {
         if drawing_workspace::active(self)
             && !id.starts_with("drawing.")
             && !matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata" | "document.metadata.set" | "view.layout")
-            && !(dialogs_sheet::flat_active(self) && matches!(id, "view.fit" | "view.home"))
+            && !matches!(id, "view.fit" | "view.home" | "view.tool")
         {
             self.set_status(self.tr_label("Return to Design to use this command.").to_string(), true);
             return;
@@ -3003,6 +3004,7 @@ impl SolveApp {
             return;
         }
         if drawing_workspace::active(self) {
+            drawing_sheet_page::fit(self);
             return;
         }
         if render_workspace::active(self) {
@@ -3198,6 +3200,7 @@ impl SolveApp {
             return;
         }
         if drawing_workspace::active(self) {
+            drawing_sheet_page::fit(self);
             return;
         }
         if render_workspace::active(self) {
@@ -3235,6 +3238,10 @@ impl SolveApp {
 
     /// Animated view changes for the axis view and navigation bar.
     pub fn animate_view(&mut self, v: &str) {
+        if drawing_workspace::active(self) && !dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home") {
+            drawing_sheet_page::fit(self);
+            return;
+        }
         if drawing_workspace::active(self) && !(dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home")) {
             return;
         }
@@ -3259,7 +3266,9 @@ impl SolveApp {
             self.flat_view.fitted = false;
             return;
         }
+        // The sheet page: Fit and Home both show the whole sheet.
         if drawing_workspace::active(self) {
+            drawing_sheet_page::fit(self);
             return;
         }
         if render_workspace::active(self) {

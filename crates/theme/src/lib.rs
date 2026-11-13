@@ -1242,6 +1242,19 @@ pub struct Tokens {
     /// Sheet metal flat pattern: bend up, bend down.
     pub bend_up: Color32,
     pub bend_down: Color32,
+    /// The drawing sheet on screen (Preferences › Design › Drawings › Sheet colour), each with the
+    /// ink its lines and text are drawn in: White, an off-white that is never pure white; Blueprint;
+    /// Prussian Blue, a deeper blue with softer lines; and the dark sheet "Follows the theme" shows
+    /// in a dark theme (the Blueprint theme sets it to its blue). Printed and exported sheets stay
+    /// white whatever is chosen.
+    pub paper_white: Color32,
+    pub paper_ink: Color32,
+    pub paper_blueprint: Color32,
+    pub paper_blueprint_ink: Color32,
+    pub paper_prussian_blue: Color32,
+    pub paper_prussian_blue_ink: Color32,
+    pub paper_dark: Color32,
+    pub paper_dark_ink: Color32,
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
     /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled

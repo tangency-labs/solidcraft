@@ -12,7 +12,8 @@ use solidcraft_theme::Tokens;
 /// What the current canvas lets the camera do: a flat sheet page or a finished render cannot
 /// orbit or pick, the Render workspace has its own caps, and the model has the full set.
 pub(crate) fn canvas_caps(app: &SolveApp) -> NavCaps {
-    if crate::dialogs_sheet::flat_active(app) || crate::render_workspace::result_active(app) {
+    // The flat pattern, the Render result and the drawing sheet are flat pages.
+    if crate::dialogs_sheet::flat_active(app) || crate::render_workspace::result_active(app) || crate::drawing_workspace::active(app) {
         NavCaps { orbit: false, pick: false }
     } else if crate::render_workspace::active(app) {
         NavCaps::RENDER
