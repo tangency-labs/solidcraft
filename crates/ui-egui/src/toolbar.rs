@@ -1025,6 +1025,7 @@ impl PanelButton {
             name: &self.name,
             icon: self.icon,
             size: self.size,
+            planned: self.selected.planned.is_some(),
             enabled: self.enabled,
             pressed: self.pressed,
             exit: self.exit,
@@ -1090,13 +1091,13 @@ impl RibbonPanels {
                     let info = crate::render_workspace::interactive_command_info(app, selected);
                     let persistent = persistent_available(app, selected.id);
                     let size = if labels {
-                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label_in(tab, c), crate::workspace::ribbon_family_label);
+                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), crate::workspace::ribbon_family_label);
                         ButtonSize { width: ribbon::button_width(painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
                     } else {
                         let width = if family.is_some() { 50.0 } else { 40.0 };
                         ButtonSize { width, min_width: width }
                     };
-                    let button_label = crate::workspace::ribbon_button_label_in(tab, selected);
+                    let button_label = crate::workspace::ribbon_button_label(selected);
                     PanelButton {
                         pinned: c,
                         selected,
@@ -1829,7 +1830,11 @@ impl RowData {
         }
         let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
         // A disabled row says why; a documented command also shows its help (#2758).
-        let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason));
+        let reason = if crate::drawing_workspace::active(app) && c.planned.is_some() {
+            Some(app.tr("ui.drawing_ribbon.planned"))
+        } else {
+            info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason))
+        };
         let (tip, help, hint) = match persistent_hint(app, c, info.enabled) {
             Some(hint) => (Some(hint), None, true),
             None => (
@@ -2021,8 +2026,13 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         if let Some(help) = crate::command_help::help(command.id) {
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
         }
-        if let Some(reason) = disabled {
-            ui.add(egui::Label::new(egui::RichText::new(app.tr_label(reason)).color(t.text_dim)).wrap());
+        let reason = if crate::drawing_workspace::active(app) && command.planned.is_some() {
+            Some(app.tr("ui.drawing_ribbon.planned"))
+        } else {
+            disabled.map(|reason| app.tr_label(reason))
+        };
+        if let Some(reason) = reason {
+            ui.add(egui::Label::new(egui::RichText::new(reason).color(t.text_dim)).wrap());
         }
     })
 }
@@ -4436,7 +4446,7 @@ mod ribbon_label_tests {
                 for command in commands.iter().take(count) {
                     for catalog in crate::i18n::LOCALES {
                         let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
-                        let label = locale.label(crate::workspace::ribbon_button_label_in(section.tab, command));
+                        let label = locale.label(crate::workspace::ribbon_button_label(command));
                         let whole = Rect::from_min_size(pos2(40.0, 2.0), vec2(ribbon::button_width(&painter, label), ribbon::BUTTON_HEIGHT));
                         let galley = ribbon::button_galley(&painter, label, whole.width() - ribbon::BUTTON_LABEL_PADDING, Color32::WHITE);
                         let top = ribbon::label_top(whole, galley.size().y);
@@ -4468,7 +4478,7 @@ mod ribbon_label_tests {
                 for command in commands.iter().take(count) {
                     for catalog in crate::i18n::LOCALES {
                         let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
-                        let label = locale.label(crate::workspace::ribbon_button_label_in(section.tab, command));
+                        let label = locale.label(crate::workspace::ribbon_button_label(command));
                         let width = ribbon::button_width(&painter, label) - ribbon::BUTTON_LABEL_PADDING;
                         let galley = ribbon::button_galley(&painter, label, width, Color32::WHITE);
                         assert!(galley.rows.len() <= 2, "{}: {label}", command.id);

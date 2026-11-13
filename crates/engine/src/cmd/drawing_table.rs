@@ -42,7 +42,6 @@ pub static COMMANDS: &[CommandSpec] = &[
              model is evaluated.",
         ),
     CommandSpec::new(EDIT, "Edit Table", crate::checked!("drawing.table.edit", edit))
-        .at("DRAWING PARTS", "TABLES")
         .icon("edit")
         .in_drawing()
         .doc_only()

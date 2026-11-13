@@ -204,6 +204,25 @@ fn key(tab: &str, panel: &str) -> String {
 
 /// The buttons a panel shows: the user's list, or the first `promoted` commands of the panel.
 pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandSpec], promoted: usize) -> Vec<&'static CommandSpec> {
+    if tab == "DRAWING LAYOUT" && panel == "VIEWS" {
+        let flat_pattern = "drawing.view.flat_pattern";
+        let sheet_metal = crate::workspace::sheet_body(app).is_some();
+        if let Some(ids) = app.toolbar_custom.panels.get(&key(tab, panel)) {
+            return ids
+                .iter()
+                .filter(|id| id.as_str() != "drawing.view.projected.planned" && (id.as_str() != flat_pattern || sheet_metal))
+                .filter_map(|id| solidcraft_engine::find_command(id))
+                .collect();
+        }
+        let mut shown: Vec<_> = cmds.iter().take(promoted).copied().collect();
+        if sheet_metal
+            && let Some(flat) = cmds.iter().find(|command| command.id == flat_pattern)
+            && let Some(break_view) = shown.iter_mut().find(|command| command.id == "drawing.view.break")
+        {
+            *break_view = *flat;
+        }
+        return shown;
+    }
     match app.toolbar_custom.panels.get(&key(tab, panel)) {
         Some(ids) => ids.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect(),
         None => cmds.iter().take(promoted).copied().collect(),

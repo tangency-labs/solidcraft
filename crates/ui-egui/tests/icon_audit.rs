@@ -424,6 +424,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         // following Design menu scenes, where the provisional glyph is forbidden.
         let mut drawing = Harness::new();
         drawing.app.home.open = false;
+        drawing.app.preferences.drawing_sheets_visibility = "legacy".into();
         workspace::enter(&mut drawing.app, "drawing").unwrap();
         drawing.frames(3);
         collect(&mut drawing, "Drawing sheet strip and browser", &mut requested);
