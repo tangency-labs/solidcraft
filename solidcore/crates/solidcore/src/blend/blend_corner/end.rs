@@ -1139,13 +1139,18 @@ fn side_edge_in_cap(
 /// within `rail_tol` is classified at its foot there instead (`DropPoint`, on F's own
 /// surface, the point of F the rail end approximates): whether the rail ends on F or has left
 /// it across a boundary is F's trim boundary's question, not the rail's approximation
-/// error's. A rail that has left F across its tangent edge T lies on the face beyond, off F's
-/// surface by about d^2 / 2R at a distance d past T (R F's radius of curvature across T),
-/// far more than `rail_tol` for any rail end not at the vertex, and stays unknown.
+/// error's. A rail that has left F across its tangent edge T lies on the face beyond, a
+/// distance d past T. Where F's surface runs on past T, that point is off it by about
+/// d^2 / 2R (R F's radius of curvature across T): more than `rail_tol` unless d is below
+/// `sqrt(2 R rail_tol)` (0.015 at R 3, `rail_tol` 4e-5), and below that its foot lies past T
+/// too, outside F's trim, so the foot's classification keeps it unknown. Where F's surface
+/// ends at T the foot is clamped onto T and the gap is d itself, so only a rail end within
+/// `rail_tol` of T, the rail's own accuracy, can classify on T. A drop that fails or finds
+/// no foot keeps the classification at the rail end (unknown), as before.
 ///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` for a face without surface; those of the classification and the
-/// drop.
+/// `SM_ERR_NULL_POINTER` for a face without surface; those of the classification, and an
+/// unported or cancelled drop.
 fn classify_rail_end(
     k: &Kernel,
     target: &mut Brep,
@@ -1168,21 +1173,30 @@ fn classify_rail_end(
     if on.point_class() != PointClassType::Unknown {
         return Ok(on);
     }
-    let surface = crate::topology::face::p2::surface(target, face)?
-        .ok_or_else(nul)?
-        .clone_for_evaluation()?;
-    let foot = surface.drop_point::<NoObject>(
-        k,
-        point,
-        &surface.natural_uv_domain_with_nurb(k)?,
-        &DropPointOptions::default(),
-    )?;
-    // off F's surface by more than its zone (unknown for that, not for F's boundary) but
-    // within the rail's tolerance
-    if !(foot.success && foot.gap > zone && foot.gap <= rail_tol) {
-        return Ok(on);
-    }
-    let at = surface.evaluate_point(k, foot.result_uv)?;
+    // the foot on F's surface of a rail end off F's surface by more than its zone (unknown
+    // for that, not for F's boundary) but within the rail's tolerance
+    let foot = || -> Result<Option<Point3>> {
+        let surface = crate::topology::face::p2::surface(target, face)?
+            .ok_or_else(nul)?
+            .clone_for_evaluation()?;
+        let foot = surface.drop_point::<NoObject>(
+            k,
+            point,
+            &surface.natural_uv_domain_with_nurb(k)?,
+            &DropPointOptions::default(),
+        )?;
+        if !(foot.success && foot.gap > zone && foot.gap <= rail_tol) {
+            return Ok(None);
+        }
+        surface.evaluate_point(k, foot.result_uv).map(Some)
+    };
+    let at = match foot() {
+        Ok(Some(at)) => at,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        // no foot within the rail's tolerance: the rail end stays off F, refused or awaiting
+        // the rollover as before
+        Ok(None) | Err(_) => return Ok(on),
+    };
     let mut on_foot = PointClassification::new(zone);
     point_3d_classify(
         k,
