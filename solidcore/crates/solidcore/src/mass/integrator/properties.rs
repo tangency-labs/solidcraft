@@ -263,7 +263,9 @@ fn boundary(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Curve>> {
         .map(|t| t.curves)
 }
 /// `SmFace::ComputePreciseProperties`; the default property mask is `PPF_ALL`. Missing UV
-/// trim curves of the face are made on `b`.
+/// trim curves of the face are made on `b`, after the arguments are checked: a non-finite
+/// `accuracy` or an invalid mask is [`SolidError::InvalidInput`], as in
+/// [`boundary_properties`].
 pub fn face_properties(
     k: &Kernel,
     b: &mut Brep,
@@ -276,6 +278,7 @@ pub fn face_properties(
     flags: u64,
 ) -> Result<PreciseProperties> {
     valid_flags(flags)?;
+    valid_accuracy(accuracy)?;
     let trims = boundary(k, b, f)?;
     let fbox = face_box(k, b, f)?;
     let surface = b
@@ -353,7 +356,8 @@ struct IsoLine<'a> {
 
 /// The trim pieces' integrand at `t` on `trim` into `dy` (`SmODEAreaIFEO::Evaluate`):
 /// the iso-u integral at the trim point `(u, v)` from `v = base` to `v`, times the trim's
-/// `-du/dt`. Zero, without the iso-u integral, where `du/dt` is exactly zero. The iso-u
+/// `-du/dt`. Zero, without the iso-u integral, where `du/dt` is exactly zero or the trim
+/// point is on its base (`v = base`: a zero-width iso-u integral). The iso-u
 /// integral is taken by [`kronrod_integrate`] piece by piece between the surface's v knots
 /// between `base` and `v` (WR-494), at `iso.accuracy`; one running down (a trim point
 /// below its base) is the negated integral up. `scratch` holds the iso integrand's
@@ -392,6 +396,10 @@ fn trim_integrand(
     } else {
         (p0.y, base, -1.0)
     };
+    // (a trim point on its base: a zero-width iso-u integral, nothing to evaluate)
+    if lo == hi {
+        return Ok(());
+    }
     let eval = OdeIsoCurveLength::new(k, iso.surface, p0.x, iso.origin, iso.thickness, iso.layout);
     let mut v0 = lo;
     for v1 in surface_knots_inside(k, iso.surface, SurfParamType::V, lo, hi)?
@@ -522,6 +530,15 @@ where
     }
     Ok(())
 }
+/// A NaN accuracy would pass every piece's error test (`estimate > NaN` is false) and an
+/// infinite one would hold no piece to any: neither asks for an accuracy.
+fn valid_accuracy(accuracy: f64) -> Result<()> {
+    if accuracy.is_finite() {
+        Ok(())
+    } else {
+        Err(SolidError::invalid_input(OP, "accuracy not finite"))
+    }
+}
 fn valid_flags(flags: u64) -> Result<()> {
     if flags == 0 || flags & !PPF_ALL != 0 {
         Err(SolidError::invalid_input(OP, "invalid property mask"))
@@ -533,6 +550,12 @@ fn valid_flags(flags: u64) -> Result<()> {
 /// `trims` must have the orientation and order returned by `CreateOrientedTrimBoundary`;
 /// `face_box` is the face's bounding box (`CalculateBoundingBox`), which sets the error
 /// scale of the volume and moment components.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an invalid property mask or a non-finite `accuracy`
+/// (a NaN one would accept every quadrature piece unchecked); otherwise those of the
+/// trims' and the surface's evaluation and of the integration.
 pub fn boundary_properties(
     k: &Kernel,
     surface: &Surface,
@@ -549,6 +572,7 @@ pub fn boundary_properties(
     // the moment groups' extra length dimensions
     const POWERS: [u32; 8] = [1, 2, 2, 2, 2, 3, 3, 3];
     valid_flags(flags)?;
+    valid_accuracy(accuracy)?;
     if accuracy < EFF_ZERO {
         accuracy = EFF_ZERO_SQ;
     }

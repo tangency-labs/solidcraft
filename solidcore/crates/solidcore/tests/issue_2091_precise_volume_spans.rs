@@ -636,6 +636,94 @@ fn an_unbanded_long_face_integrates_its_trim_pieces_by_gauss_kronrod() {
     }
 }
 
+/// A trim along the trims' lowest v, the base of every iso-u integral, adds nothing: each
+/// of its points' iso-u integrals runs from the base to itself. It evaluates nothing
+/// either; before, each of its trim samples took the inner quadrature's seven samples of
+/// that zero-width line, at least 49 iso evaluations a piece.
+#[test]
+fn a_trim_along_the_base_evaluates_no_iso_line() {
+    let k = Kernel::default();
+    let n = 1_usize;
+    let surface = long_strip(n);
+    let base_trim = strip_trims(n).into_iter().next().unwrap();
+    let face_box = Extent3d::from_points(Point3::new(-1.0, -1.0, -1.0), Point3::new(2.0, 2.0, 1.0));
+    let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, n as f64);
+    k.work_counters.reset();
+    let p = boundary_properties(
+        &k,
+        &surface,
+        &[base_trim],
+        &domain,
+        &face_box,
+        OrientType::Opposite,
+        1e-9,
+        Vec3::new(0.3, -0.2, -1.0),
+        0.05,
+        0.0,
+        PPF_ALL,
+    )
+    .unwrap();
+    assert_eq!(k.work_counters.mass_iso_evaluations(), 0);
+    assert_eq!(p.area, 0.0, "{p:?}");
+    assert_eq!(p.volume, 0.0, "{p:?}");
+}
+
+/// A non-finite accuracy is refused, typed, before any integration: a NaN one passed
+/// every quadrature piece's error test (`estimate > NaN` is false), so a trimmed face's
+/// properties came back unchecked, and an infinite one holds no piece to any accuracy.
+#[test]
+fn a_non_finite_accuracy_is_refused() {
+    let k = Kernel::default();
+    let n = 2_usize;
+    let surface = long_strip(n);
+    let trims = strip_trims(n);
+    let face_box = Extent3d::from_points(
+        Point3::new(-1.0, -1.0, -1.0),
+        Point3::new(2.0, n as f64 + 1.0, 1.0),
+    );
+    let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, n as f64);
+    for accuracy in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let r = boundary_properties(
+            &k,
+            &surface,
+            &trims,
+            &domain,
+            &face_box,
+            OrientType::Opposite,
+            accuracy,
+            Vec3::new(0.3, -0.2, -1.0),
+            0.5 * n as f64 / 10.0,
+            0.0,
+            PPF_ALL,
+        );
+        assert!(
+            matches!(r, Err(solidcore::SolidError::InvalidInput { .. })),
+            "accuracy {accuracy}: {r:?}"
+        );
+    }
+    let mut k = Kernel::default();
+    let mut b = solidcore::topology::brep::p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT)
+        .unwrap();
+    let f = create_face_from_surface(&mut k, &mut b, &multispan_surface()).unwrap();
+    for accuracy in [f64::NAN, f64::INFINITY] {
+        let r = face_properties(
+            &k,
+            &mut b,
+            f,
+            OrientType::Opposite,
+            accuracy,
+            Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            0.0,
+            PPF_ALL,
+        );
+        assert!(
+            matches!(r, Err(solidcore::SolidError::InvalidInput { .. })),
+            "face_properties, accuracy {accuracy}: {r:?}"
+        );
+    }
+}
+
 /// A bicubic patch `[0, n]²` with `n` unit knot spans each way, wavy, as a G2 corner patch
 /// is a dense spline grid in both directions.
 fn dense_grid(n: usize) -> Surface {
