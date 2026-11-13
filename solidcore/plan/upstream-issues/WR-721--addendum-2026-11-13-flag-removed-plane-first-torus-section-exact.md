@@ -2,7 +2,7 @@ Updates: WR-721
 
 #### WR-721 (update, 2026-11-13). `plane_first_torus_section_exact` is removed
 
-The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch A13c). With a plane first, `global_surface_intersect_into` (`surface/plane/p2.rs`) takes a torus's own plane section, the orders and UV curves swapped as for a surface of revolution; `SurfOfRevolution`'s plane section through the axis (`surface/surf_of_revolution/p1.rs`) rotates a circle generator as the circle it is, so a meridian keeps its kind. A plane the torus's own case does not solve (oblique, or parallel to the axis off it) still goes on to the general intersection.
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch A13c). With a plane first, `global_surface_intersect_into` (`surface/plane/p2.rs`) takes a torus's own plane section, the orders and UV curves swapped as for a surface of revolution; `SurfOfRevolution`'s plane section through the axis (`surface/surf_of_revolution/p1.rs`) rotates an ellipse-kind generator (a torus's circle, or any revolved arc) as the curve it is, so a meridian keeps its kind. A plane the torus's own case does not solve (oblique, or parallel to the axis off it) still goes on to the general intersection.
 
 - **Tests:** `a_plane_meets_a_torus_in_its_exact_circles_in_either_order` runs on `Kernel::default()`; its half that pinned upstream's marched sections is gone.
 - **Results:** 35 goldens rows in 5 units move, on the library's default kernel (SolidCraft's preset had the flag on).
