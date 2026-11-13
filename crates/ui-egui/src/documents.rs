@@ -67,6 +67,8 @@ pub struct DocSlot {
 /// waits in the same slot, so showing the tab again picks up exactly where it was left.
 #[derive(Default)]
 struct DocWork {
+    /// Shared panel content belongs to the design, independently of its current placement.
+    bom: Option<crate::bom_panel::BomPanel>,
     dialog: Option<crate::dialogs::Dialog>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
@@ -79,12 +81,14 @@ struct DocWork {
 /// computing after OK can't wait (its result belongs to the window thread): that dialog is
 /// cancelled, as without the preference.
 fn take_work(app: &mut SolveApp) -> DocWork {
+    let bom = app.bom.take();
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
         app.tool = None;
-        return DocWork::default();
+        return DocWork { bom, ..DocWork::default() };
     }
     DocWork {
+        bom,
         dialog: app.dialog.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
@@ -97,6 +101,8 @@ fn take_work(app: &mut SolveApp) -> DocWork {
 /// design's history rolled back for an edit, and only the dialog's Cancel or OK puts it back.
 /// `before`: the session's revision before the switch moved it on to refresh the views.
 fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
+    app.bom = work.bom;
+    crate::bom_panel::set_focus_pending(app, true);
     // That refresh is not a change to the design: the edit's Cancel must still see the design
     // it left (`Session::restore_editor` compares revisions), as `PendingFeatureEdit` does.
     if let Some(state) = &mut work.editing_state {
@@ -308,6 +314,11 @@ impl Documents {
         self.slots.iter_mut().filter_map(Option::as_mut)
     }
 
+    /// The background slot (a tab not shown) holding the design with `uid`.
+    pub(crate) fn background_slot_mut(&mut self, uid: u64) -> Option<&mut DocSlot> {
+        self.slots.iter_mut().flatten().find(|slot| slot.session.uid == uid)
+    }
+
     /// The designs in the tabs not shown.
     pub(crate) fn background(&self) -> impl Iterator<Item = &Session> {
         self.slots.iter().filter_map(Option::as_ref).map(|slot| &slot.session)
@@ -324,6 +335,12 @@ impl Documents {
     /// [`Self::active_tab`], without numbering a tab not asked for yet (0).
     pub(crate) fn current_tab(&self) -> u64 {
         self.active_tab
+    }
+
+    /// Whether the tab numbered `tab` is still open: the one shown, or one behind it. A file
+    /// operation bound to a tab that is gone has nothing left to land in.
+    pub(crate) fn tab_open(&self, tab: u64) -> bool {
+        self.active_tab == tab || self.slots.iter().flatten().any(|slot| slot.tab == tab)
     }
 
     /// Number of open designs (at least the active one).
@@ -402,7 +419,6 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     crate::dim_view::cancel();
     app.params = None;
     app.design_properties = None;
-    app.bom = None;
     app.cancel_view_animation();
     app.viewport.orbit_free = None;
     app.preview.reset();
@@ -448,6 +464,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     app.session.invalidate_view(out_rev);
@@ -673,6 +690,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::semantic_content::leave_document(app);
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.bom = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
@@ -721,6 +739,11 @@ pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     let mut doc = solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?;
     if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
         doc.name = name.to_string();
+    }
+    // Like a design opened from a file, it comes in without its print faces unless they are kept
+    // (#11512); dropped before the session starts, so it still opens saved with nothing to undo.
+    if !app.preferences.keep_print_faces {
+        doc.print_faces.clear();
     }
     let replaced = app.docs.active;
     open_tab(app, Session::opened(doc, None))?;
@@ -827,6 +850,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.bom = None;
         app.session.replace_design(Session::default());
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
@@ -998,19 +1022,72 @@ fn dirty(app: &SolveApp, i: usize) -> bool {
     app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty())
 }
 
+/// A tab's name: the file a saved design was opened or saved as (without its extension), so a
+/// Save As shows the new name; an unsaved design, or one renamed since it was saved, shows its
+/// design name. The Browser's top row shows the same name (#7267).
+///
+/// With the `names_from_file` preference off, every tab shows the design's own name, as before.
+pub(crate) fn tab_name(app: &SolveApp, session: &Session) -> String {
+    if app.preferences.names_from_file { session.save_as_name() } else { session.doc.name.clone() }
+}
+
 /// Tab names (with an unsaved-changes flag), in order.
 pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
     if app.docs.slots.is_empty() {
-        return vec![(app.session.doc.name.clone(), app.session.is_dirty())];
+        return vec![(tab_name(app, &app.session), app.session.is_dirty())];
     }
     app.docs
         .slots
         .iter()
         .map(|s| match s {
-            Some(d) => (d.session.doc.name.clone(), d.session.is_dirty()),
-            None => (app.session.doc.name.clone(), app.session.is_dirty()),
+            Some(d) => (tab_name(app, &d.session), d.session.is_dirty()),
+            None => (tab_name(app, &app.session), app.session.is_dirty()),
         })
         .collect()
+}
+
+/// Cached title inputs, separate from document identity: equal visible titles need no update.
+#[derive(Default)]
+pub(crate) struct WindowTitle {
+    initialized: bool,
+    design: Option<(String, String, bool)>,
+}
+
+impl WindowTitle {
+    fn update(&mut self, name: Option<&str>, dirty: bool, language: &str) -> Option<String> {
+        let unchanged = match (&self.design, name) {
+            (None, None) => true,
+            (Some((old_name, old_language, old_dirty)), Some(name)) => old_name == name && old_language == language && *old_dirty == dirty,
+            _ => false,
+        };
+        if self.initialized && unchanged {
+            return None;
+        }
+        self.initialized = true;
+        self.design = name.map(|name| (name.to_owned(), language.to_owned(), dirty));
+        Some(match name {
+            Some(name) => {
+                let name = solidcraft_ui_text::Locale::for_language(language).given_name(name);
+                format!("{name}{} — SolidCraft", if dirty { " *" } else { "" })
+            }
+            None => "SolidCraft".into(),
+        })
+    }
+}
+
+/// Derive from the live session after UI actions, including tab switches and asynchronous saves.
+/// Embedded applications leave the host's page/window chrome entirely alone.
+pub(crate) fn sync_window_title(app: &mut SolveApp, ctx: &egui::Context) {
+    if app.embedded || app.embed_editor {
+        return;
+    }
+    // The start page can overlay existing designs; only its untouched launch/last-close
+    // session represents no open design. Documents::count includes that placeholder.
+    let no_design = app.home.open && app.docs.count() == 1 && active_is_blank(app);
+    let name = (!no_design).then_some(app.session.doc.name.as_str());
+    if let Some(title) = app.window_title.update(name, app.session.is_dirty(), &app.preferences.language) {
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(title));
+    }
 }
 
 /// A design open in another tab, as Insert Design offers it (#8570): its name, its file (`None`:
@@ -1043,10 +1120,125 @@ fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
 
 /// Where a tab's design is saved (home shortened to `~`), or that it isn't yet; below, that a
 /// saved design has changes not saved yet (`dirty`), which the bullet after a cut name no longer
-/// shows (#11408). The tab puts its full name above when it cuts it short (#5868).
-fn tab_place(path: Option<&str>, dirty: bool) -> String {
-    let place = path.map_or_else(|| solidcraft_ui_text::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
-    if dirty && path.is_some() { format!("{place}\n{}", solidcraft_ui_text::tr("document.tab_unsaved_changes")) } else { place }
+/// shows (#11408), and what its signature says. The tab puts its full name above when it cuts it
+/// short (#5868).
+fn tab_place(path: Option<&str>, dirty: bool, security: Option<&str>) -> String {
+    let mut place = path.map_or_else(|| solidcraft_ui_text::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
+    if dirty && path.is_some() {
+        place.push('\n');
+        place.push_str(solidcraft_ui_text::tr("document.tab_unsaved_changes"));
+    }
+    if let Some(security) = security {
+        place.push('\n');
+        place.push_str(security);
+    }
+    place
+}
+
+/// What a design's signature says, for its tab's tooltip: the last verification when one ran, or
+/// that the file carries records that have not been checked in this session.
+fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
+    open_sessions(app)
+        .into_iter()
+        .map(|session| {
+            if let Some(report) = &session.provenance {
+                if session.is_dirty() {
+                    return Some(solidcraft_ui_text::tr("ui.open_signature_changed").to_string());
+                }
+                let trusted = report.newest().is_some_and(|record| signer_trusted(app, record));
+                return Some(signature_line(report, trusted));
+            }
+            let signed = session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+            signed.then(|| solidcraft_ui_text::tr("ui.open_signature_unverified").to_string())
+        })
+        .collect()
+}
+
+/// Whether a record's key is in the user's trusted-fingerprint list. The embedded user id is not
+/// proof of anything; this is the app's one trust decision.
+pub(crate) fn signer_trusted(app: &SolveApp, record: &solidcraft_engine::io::ProvenanceRecord) -> bool {
+    trusted_fingerprint(&app.preferences.trusted_signing_keys, &record.signer.fingerprint())
+}
+
+/// Whether `fingerprint` is one of the comma/space separated fingerprints in `trusted`.
+pub(crate) fn trusted_fingerprint(trusted: &str, fingerprint: &str) -> bool {
+    let fingerprint = fingerprint.trim();
+    if fingerprint.is_empty() {
+        return false;
+    }
+    // Commas/newlines separate entries; spaces inside an entry are ignored, because
+    // `gpg --fingerprint` prints a single fingerprint in groups of four.
+    trusted
+        .split([',', ';', '\n'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.chars().filter(|c| !c.is_whitespace()).collect::<String>())
+        .any(|entry| entry.eq_ignore_ascii_case(fingerprint))
+}
+
+/// The shield each design tab shows, from the same last check as its tooltip.
+fn tab_badges(app: &SolveApp) -> Vec<Option<crate::app_bar::TabBadge>> {
+    use crate::app_bar::TabBadge;
+    open_sessions(app)
+        .into_iter()
+        .map(|session| {
+            if let Some(report) = &session.provenance {
+                if session.is_dirty() {
+                    return Some(TabBadge::Signed);
+                }
+                return Some(match &report.status {
+                    solidcraft_engine::io::ProvenanceStatus::Valid => {
+                        if report.newest().is_some_and(|record| signer_trusted(app, record)) {
+                            TabBadge::Verified
+                        } else {
+                            TabBadge::Signed
+                        }
+                    }
+                    solidcraft_engine::io::ProvenanceStatus::NotCovered => TabBadge::NotCovered,
+                    solidcraft_engine::io::ProvenanceStatus::Invalid(_) => TabBadge::Invalid,
+                    solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => TabBadge::Unsupported,
+                });
+            }
+            let signed = session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+            signed.then_some(TabBadge::Signed)
+        })
+        .collect()
+}
+
+/// A verification report as one line for a tab tooltip.
+pub(crate) fn signature_line(report: &solidcraft_engine::io::ProvenanceReport, trusted: bool) -> String {
+    match &report.status {
+        solidcraft_engine::io::ProvenanceStatus::Valid => match (trusted, report.newest()) {
+            (true, Some(record)) => {
+                let key = signer_name(record);
+                solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
+            }
+            (_, Some(record)) => {
+                let fingerprint = record.signer.fingerprint();
+                solidcraft_ui_text::format("ui.open_signature_valid_untrusted", &[("key", &fingerprint)])
+            }
+            _ => solidcraft_ui_text::tr("ui.open_signature_unverified").to_string(),
+        },
+        solidcraft_engine::io::ProvenanceStatus::NotCovered => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
+        solidcraft_engine::io::ProvenanceStatus::Invalid(why) => solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", why)]),
+        solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
+    }
+}
+
+/// The name to show for the key that signed a record.
+fn signer_name(record: &solidcraft_engine::io::ProvenanceRecord) -> String {
+    match &record.signer {
+        solidcraft_engine::io::ProvenanceSigner::Ed25519 { key_id, .. } => {
+            use std::fmt::Write as _;
+            let mut hex = String::with_capacity(16);
+            for byte in &key_id[..8] {
+                // Writing to a `String` cannot fail.
+                let _ = write!(&mut hex, "{byte:02x}");
+            }
+            hex
+        }
+        solidcraft_engine::io::ProvenanceSigner::OpenPgp { fingerprint, user_id } => user_id.clone().unwrap_or_else(|| fingerprint.clone()),
+    }
 }
 
 /// The designs a launch with no file to open reopens: those open at the last quit that still
@@ -1201,7 +1393,14 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let n = info.len();
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     let names: Vec<String> = info.iter().map(|(name, _)| locale.given_name(name)).collect();
-    let places: Vec<String> = info.iter().zip(&paths).map(|((_, dirty), path)| tab_place(path.as_deref(), *dirty)).collect();
+    let security = tab_security(app);
+    let badges = tab_badges(app);
+    let places: Vec<String> = info
+        .iter()
+        .zip(&paths)
+        .zip(&security)
+        .map(|(((_, dirty), path), security)| tab_place(path.as_deref(), *dirty, security.as_deref()))
+        .collect();
     let selected = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
     let mut rename = app.menu.rename.take();
     let renaming = renaming_tab_state(rename.as_ref());
@@ -1212,7 +1411,14 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .iter()
                 .zip(&names)
                 .zip(&places)
-                .map(|(((list_name, dirty), name), place)| crate::app_bar::DocTab { name, list_name, dirty: *dirty, place })
+                .zip(&badges)
+                .map(|((((list_name, dirty), name), place), security)| crate::app_bar::DocTab {
+                    name,
+                    list_name,
+                    dirty: *dirty,
+                    place,
+                    security: *security,
+                })
                 .collect(),
             selected,
             shown_selected: (!app.home.open).then_some(selected),
@@ -1581,7 +1787,7 @@ pub fn tab_list_open(ctx: &egui::Context) -> bool {
 /// A tab's tooltip ([`crate::app_bar::tab_tip`] over [`tab_place`]).
 #[cfg(test)]
 fn tab_tooltip(name: &str, path: Option<&str>, cut: bool, dirty: bool) -> String {
-    crate::app_bar::tab_tip(name, &tab_place(path, dirty), cut)
+    crate::app_bar::tab_tip(name, &tab_place(path, dirty, None), cut)
 }
 
 #[cfg(test)]
@@ -1599,6 +1805,185 @@ fn renaming_tab(app: &SolveApp) -> bool {
 
 #[cfg(test)]
 mod tests {
+    fn title_commands(app: &mut SolveApp) -> Vec<String> {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |ui| sync_window_title(app, ui.ctx()));
+        output.textures_delta.clear();
+        output
+            .viewport_output
+            .into_iter()
+            .filter(|(id, _)| *id == egui::ViewportId::ROOT)
+            .flat_map(|(_, output)| output.commands)
+            .filter_map(|command| match command {
+                egui::ViewportCommand::Title(title) => Some(title),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn only_a_listed_fingerprint_is_trusted() {
+        assert!(trusted_fingerprint("0123456789ABCDEF, fedcba9876543210", "0123456789abcdef"));
+        assert!(trusted_fingerprint("0123456789ABCDEF; fedcba9876543210", "FEDCBA9876543210"));
+        // `gpg --fingerprint` prints a fingerprint in groups of four.
+        assert!(trusted_fingerprint("0123 4567 89AB CDEF", "0123456789ABCDEF"));
+        assert!(!trusted_fingerprint("", "0123456789ABCDEF"));
+        assert!(!trusted_fingerprint("1111111111111111", "0123456789ABCDEF"));
+        assert!(!trusted_fingerprint("0123456789ABCDEF", ""));
+        // Two fingerprints must be separated by a comma; a run of spaces is one grouped fingerprint.
+        assert!(!trusted_fingerprint("0123456789ABCDEF 1111111111111111", "0123456789ABCDEF"));
+    }
+
+    #[test]
+    fn an_untrusted_user_id_is_not_shown_for_a_valid_signature() {
+        let record = solidcraft_engine::io::ProvenanceRecord {
+            signer: solidcraft_engine::io::ProvenanceSigner::OpenPgp {
+                fingerprint: "0123456789ABCDEF".into(),
+                user_id: Some("Alice <alice@example.invalid>".into()),
+            },
+            author: Some("Alice".into()),
+            tool: None,
+            note: None,
+            created: None,
+            app: "test".into(),
+            format: "solidcraft/55".into(),
+            pending: Vec::new(),
+            document: [0; 32],
+            container: [0; 32],
+            parts: 0,
+            signature_valid: true,
+            covered: true,
+        };
+        let report = solidcraft_engine::io::ProvenanceReport {
+            chain: Default::default(),
+            records: vec![record],
+            status: solidcraft_engine::io::ProvenanceStatus::Valid,
+        };
+        let record = report.newest().unwrap();
+        assert_eq!(record.signer.fingerprint(), "0123456789ABCDEF");
+        assert_eq!(signer_name(record), "Alice <alice@example.invalid>");
+        assert!(!trusted_fingerprint("", &record.signer.fingerprint()));
+        assert!(trusted_fingerprint("0123 4567 89AB CDEF", &record.signer.fingerprint()));
+    }
+
+    #[test]
+    fn tab_badges_show_the_last_check_or_that_the_file_is_signed() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let record = solidcraft_engine::io::ProvenanceRecord {
+            signer: solidcraft_engine::io::ProvenanceSigner::OpenPgp { fingerprint: "0123456789ABCDEF".into(), user_id: None },
+            author: None,
+            tool: None,
+            note: None,
+            created: None,
+            app: "test".into(),
+            format: "solidcraft/55".into(),
+            pending: Vec::new(),
+            document: [0; 32],
+            container: [0; 32],
+            parts: 0,
+            signature_valid: true,
+            covered: true,
+        };
+        h.app.session.provenance = Some(solidcraft_engine::io::ProvenanceReport {
+            chain: Default::default(),
+            records: vec![record],
+            status: solidcraft_engine::io::ProvenanceStatus::Valid,
+        });
+        h.app.session.mark_saved();
+        h.app.preferences.trusted_signing_keys = "0123456789ABCDEF".into();
+        assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Verified)]);
+        h.app.session.provenance = Some(solidcraft_engine::io::ProvenanceReport {
+            chain: Default::default(),
+            records: vec![],
+            status: solidcraft_engine::io::ProvenanceStatus::Valid,
+        });
+        h.app.preferences.trusted_signing_keys.clear();
+        assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Signed)]);
+        h.app.session.provenance = None;
+        h.app.session.provenance_chain = Some(solidcraft_engine::io::ProvenanceChain { records: vec![vec![1]], truncated: false });
+        assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Signed)]);
+    }
+
+    #[test]
+    fn window_title_tracks_live_design_save_rename_switch_and_open() {
+        let mut a = app();
+        a.home.open = false;
+        let initial = a.session.doc.name.clone();
+        assert_eq!(title_commands(&mut a), [format!("{initial} — SolidCraft")]);
+        assert!(title_commands(&mut a).is_empty(), "unchanged frames send no command");
+        a.session.execute("component.rename", &json!({"component": 0, "name": "Bracket"})).unwrap();
+        assert_eq!(title_commands(&mut a), ["Bracket * — SolidCraft"]);
+        let path = std::env::temp_dir().join(format!("solidcraft-window-title-{}.solidcraft", std::process::id()));
+        let path = path.to_string_lossy().into_owned();
+        a.session.execute("file.save", &json!({"path": path})).unwrap();
+        let saved = a.session.doc.name.clone();
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        a.session.execute("component.rename", &json!({"component": 0, "name": "Housing"})).unwrap();
+        assert_eq!(title_commands(&mut a), ["Housing * — SolidCraft"]);
+        a.session.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        new_tab(&mut a);
+        let blank = a.session.doc.name.clone();
+        assert_eq!(title_commands(&mut a), [format!("{blank} — SolidCraft")]);
+        switch(&mut a, 0);
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        switch(&mut a, 1);
+        title_commands(&mut a);
+        a.open_path(&path);
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        a.session.execute("component.rename", &json!({"component": 0, "name": "Saved copy"})).unwrap();
+        assert_eq!(title_commands(&mut a), ["Saved copy * — SolidCraft"]);
+        let copy = format!("{path}.copy.solidcraft");
+        a.session.execute("file.save_as", &json!({"path": copy})).unwrap();
+        let copy_name = std::path::Path::new(&copy).file_stem().unwrap().to_str().unwrap();
+        assert_eq!(title_commands(&mut a), [format!("{copy_name} — SolidCraft")]);
+        a.open_path(&path);
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        std::fs::remove_file(copy).unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn window_title_respects_home_and_embedded_hosts() {
+        let mut a = app();
+        a.home.open = true;
+        assert_eq!(title_commands(&mut a), ["SolidCraft"]);
+        assert!(title_commands(&mut a).is_empty());
+        a.home.open = false;
+        let name = a.session.doc.name.clone();
+        assert_eq!(title_commands(&mut a), [format!("{name} — SolidCraft")]);
+        for editor in [false, true] {
+            let mut embedded = app();
+            embedded.home.open = false;
+            embedded.embedded = !editor;
+            embedded.embed_editor = editor;
+            assert!(title_commands(&mut embedded).is_empty(), "the host owns the title");
+        }
+    }
+
+    #[test]
+    fn window_title_keeps_existing_design_when_start_page_is_shown() {
+        let mut a = app();
+        a.home.open = false;
+        a.session.execute("component.rename", &json!({"component": 0, "name": "Bracket"})).unwrap();
+        assert_eq!(title_commands(&mut a), ["Bracket * — SolidCraft"]);
+        a.home.open = true;
+        assert!(title_commands(&mut a).is_empty(), "opening the start page does not close the design");
+        close(&mut a, 0, true);
+        assert_eq!(title_commands(&mut a), ["SolidCraft"], "closing the last design leaves only the blank placeholder");
+    }
+
+    #[test]
+    fn window_title_formats_dirty_state_and_suppresses_unchanged_titles() {
+        let mut title = WindowTitle::default();
+        assert_eq!(title.update(Some("Plate"), false, "en").as_deref(), Some("Plate — SolidCraft"));
+        assert!(title.update(Some("Plate"), false, "en").is_none());
+        assert_eq!(title.update(Some("Plate"), true, "en").as_deref(), Some("Plate * — SolidCraft"));
+        assert_eq!(title.update(None, true, "en").as_deref(), Some("SolidCraft"));
+        assert!(title.update(None, false, "fr").is_none());
+    }
+
     #[test]
     fn reopening_saved_design_preserves_dirty_session_and_view() {
         let mut a = super::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -1676,6 +2061,22 @@ mod tests {
         a.home.open = true;
         assert!(reuse_path(&mut a, "renamed.solidcraft").unwrap());
         assert!(!a.home.open);
+    }
+
+    #[test]
+    fn saved_tabs_show_file_names_and_unsaved_tabs_keep_design_names() {
+        let mut a = app();
+        let design = a.session.doc.name.clone();
+        assert_eq!(tabs_info(&a)[0].0, design);
+        a.session.path = Some("parts/bracket.solidcraft".into());
+        assert_eq!(tabs_info(&a)[0].0, "bracket");
+        // Save As under a new revision name: the tab follows the file, not the design's first name.
+        a.session.path = Some("parts/bracket rev B.solidcraft".into());
+        assert_eq!(tabs_info(&a)[0].0, "bracket rev B");
+        new_tab(&mut a);
+        let names: Vec<String> = tabs_info(&a).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names.first().map(String::as_str), Some("bracket rev B"));
+        assert_eq!(names.len(), 2);
     }
 
     #[test]

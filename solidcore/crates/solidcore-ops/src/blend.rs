@@ -11,7 +11,8 @@
 //! - [`fillet_variable`]: one edge rounded with a radius law.
 //! - [`edge_faces_along`]: the two faces of an edge with how far each faces a direction, for an
 //!   application choosing the face a chamfer's first distance is along.
-//! - [`tangent_chain`]: the edges a blend of some edges runs on into tangentially, the kernel's.
+//! - [`tangent_chain`]: the edges a blend of some edges runs on into tangentially, on the
+//!   kernel's measures.
 //!
 //! The kernel's session is driven as the C API's `round_edges` drove SMLib's executive:
 //! the turn, parameters, the set-back vertices, the corners (setbacks set, a chamfer's
@@ -26,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::BlendCornerEvent;
-use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable};
+use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::faces_along;
 use solidcore::blend::fillet_executive::p3::{
     ErrorInfo, FitKind as KernelFit, FitSize as KernelFitSize, NoRoomReason,
@@ -54,6 +55,7 @@ use solidcore::{Brep, EntityRef, Kernel, SolidError, Vec3};
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
 use crate::session::{answer, measure_body, with_body};
+use crate::tangent::Chain;
 use crate::{Error, FitKind, Result, RoomReason, Unblendable};
 
 mod room;
@@ -260,7 +262,10 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
     use RoomReason as R;
     Some(match r {
         NoRoomReason::BallDoesNotFit => R::BallDoesNotFit,
+        // the crease trim's refusal: the blend runs off its face across a tangent edge onto
+        // the face beyond, which would need a crease
         NoRoomReason::RailLeavesFace
+        | NoRoomReason::CreaseAcrossTangentEdge
         | NoRoomReason::ConcaveOverflow
         | NoRoomReason::OverflowWithConcaveBlend
         | NoRoomReason::OverflowWithRollover
@@ -285,18 +290,178 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
 const RAIL_LEAVES_FACE: &str =
     "a blend whose rail leaves its face, refused without the cliff overflow fix";
 
-/// A failure of the session as the operation's: a blend too large that the kernel sizes is
-/// [`Error::TooLarge`] (the edge it was found for returned with it); a vertex no corner kind
-/// handles is [`Error::CornerUnsupported`] (`corner`: the corners step noted one, which stands
-/// for any later failure); a blend larger than its faces allow, unsized, is [`Error::NoRoom`];
-/// any other is the kernel's.
-fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, Option<EdgeId>) {
-    if let SolidError::BlendRefused { refusal, .. } = &e {
-        if let Some(refused) = refused(s.target(), refusal) {
-            return (refused, None);
+/// What a fillet session was doing when it failed, for [`session_refusal`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SessionCall {
+    /// The corners step noted a vertex no corner kind handles (`SM_FILERR_CORNER_UNSUPPORTED`
+    /// in the session's error info after `create_corners` succeeded): the corner it could not
+    /// make stands for a later step's failure, other than one the kernel itself types as not
+    /// supported or not ported (which is its own cause).
+    pub corner: bool,
+    /// The session marks the set-back corners' patches for another patch to replace
+    /// (`set_mark_corner_patches`): the kernel's fill is then not the corner, so a setback it
+    /// names is not one shown to build.
+    pub patches: bool,
+    /// The session blends chamfers: a fit of an equal chamfer's offset is given as its distance.
+    pub chamfer: bool,
+}
+
+/// A refusal of a fillet session ([`session_refusal`]): exactly the refusals it gives, each
+/// the [`Error`] variant of the same name and fields ([`From`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Refusal {
+    /// [`Error::TooLarge`]: the largest size that builds, what it sizes, a point at the
+    /// middle of the edge it was found for, and why there is no room.
+    TooLarge {
+        /// The largest size that builds it.
+        size: f64,
+        /// What the size sizes.
+        kind: FitKind,
+        /// A point at the middle of the edge it was found for.
+        at: Option<[f64; 3]>,
+        /// Why there is no room.
+        why: Option<RoomReason>,
+    },
+    /// [`Error::SetbackTooShort`].
+    SetbackTooShort {
+        /// The corner's vertex index; `None` where the vertex is no longer the body's.
+        vertex: Option<usize>,
+        /// The least setback.
+        least: f64,
+        /// The corner's point, where the kernel's session notes it.
+        at: Option<[f64; 3]>,
+        /// Whether a setback of `least` builds the corner.
+        builds: bool,
+    },
+    /// [`Error::NoRoom`]: larger than its faces allow, unsized.
+    NoRoom,
+    /// [`Error::CornerUnsupported`]: a vertex no corner kind handles.
+    CornerUnsupported,
+    /// [`Error::Unsupported`]: a blend whose rail leaves its face, refused without the cliff
+    /// overflow fix (its reason).
+    RailLeavesFace(&'static str),
+}
+
+impl From<Refusal> for Error {
+    fn from(r: Refusal) -> Error {
+        match r {
+            Refusal::TooLarge {
+                size,
+                kind,
+                at,
+                why,
+            } => Error::TooLarge {
+                size,
+                kind,
+                at,
+                why,
+            },
+            Refusal::SetbackTooShort {
+                vertex,
+                least,
+                at,
+                builds,
+            } => Error::SetbackTooShort {
+                vertex,
+                least,
+                at,
+                builds,
+            },
+            Refusal::NoRoom => Error::NoRoom,
+            Refusal::CornerUnsupported => Error::CornerUnsupported,
+            Refusal::RailLeavesFace(why) => Error::Unsupported(why),
         }
     }
+}
+
+/// A refusal of a fillet session ([`session_refusal`]), with the edge a sized refusal was
+/// found for, until [`SessionRefusal::on`] reads that edge's point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionRefusal {
+    refusal: Refusal,
+    edge: Option<EdgeId>,
+}
+
+impl SessionRefusal {
+    /// The refusal, a [`Refusal::TooLarge`] given the point at the middle of the edge its size
+    /// was found for, read on `b` once the session has let it go. An edge or point that cannot
+    /// be read leaves the size without a point.
+    ///
+    /// # Errors
+    /// The kernel's failure to evaluate the edge's curve.
+    pub fn on(self, k: &Kernel, b: &Brep) -> solidcore::Result<Refusal> {
+        Ok(match (self.refusal, self.edge) {
+            (
+                Refusal::TooLarge {
+                    size, kind, why, ..
+                },
+                Some(edge),
+            ) => Refusal::TooLarge {
+                size,
+                kind,
+                at: edge_point(k, b, edge)?,
+                why,
+            },
+            (r, _) => r,
+        })
+    }
+}
+
+/// A failure `e` of the kernel's fillet session `s` (its preparation, corners or filleting) as
+/// the refusal it stands for, for an application that drives the session itself: one
+/// implementation of the refusal for ops and its callers.
+///
+/// - A setback too short (the kernel's `BlendRefusal::SetbackTooShort`) is
+///   [`Error::SetbackTooShort`] with the least setback, the corner's vertex and point, and
+///   whether that setback builds: only where the corner fill's convex or concave test named
+///   it and no other patch replaces the fill (`call.patches`). A setback short of where the
+///   rails cross names one that passes that test only, so it does not build.
+/// - A failure the kernel itself types as not supported or not ported
+///   (`SolidError::Unsupported`, `SolidError::Unported`) is its own cause: it is given back
+///   (below), whatever an earlier step of the session noted (no room, a fit, an unsupported
+///   vertex), since a size or corner noted before it is not what failed.
+/// - A blend too large that the kernel sizes (`SolidError::FilletRefused`, or the session's
+///   fit under `SM_FILERR_NO_ROOM`) is [`Error::TooLarge`] with the size, what it sizes, and
+///   the kernel's reason ([`RoomReason`]), unless the corners step noted an unsupported vertex
+///   or the rail leaves its face; a chamfer's fit by radius whose offsets are equal as its
+///   distance ([`FilletSession::chamfer_fit`], a knife edge's included), or [`Error::NoRoom`]
+///   where it cannot be read so.
+/// - Otherwise, a vertex no corner kind handles (noted by the corners step, `call.corner`, or
+///   by the failing step) is [`Error::CornerUnsupported`]; a blend whose
+///   rail leaves its face without the cliff overflow fix is [`Error::Unsupported`]; any other
+///   blend too large is [`Error::NoRoom`].
+///
+/// # Errors
+/// `e` back, for a failure that is no refusal of the blend's size or corners: a kernel failure
+/// (`SolidError::Unsupported`, `SolidError::Unported`, or a status other than
+/// `SM_FILERR_NO_ROOM`), which the caller maps as it maps the kernel's failures.
+pub fn session_refusal(
+    s: &FilletSession<'_>,
+    e: SolidError,
+    call: SessionCall,
+) -> std::result::Result<SessionRefusal, SolidError> {
     let info = s.error_info();
+    if let SolidError::BlendRefused {
+        refusal: BlendRefusal::SetbackTooShort { vertex, least, why },
+        ..
+    } = e
+    {
+        let fill = matches!(
+            why,
+            SetbackTooShortWhy::ConvexFill | SetbackTooShortWhy::ConcaveFill
+        );
+        let vertex = s.target().vertex_list().iter().position(|&x| x == vertex);
+        let refusal = Refusal::SetbackTooShort {
+            vertex,
+            least,
+            at: info.location.map(|p| [p.x, p.y, p.z]),
+            builds: fill && !call.patches,
+        };
+        return Ok(SessionRefusal {
+            refusal,
+            edge: None,
+        });
+    }
     let (fit, reason) = match &e {
         SolidError::FilletRefused { fit, reason, .. } => {
             (Some(*fit), reason.or(info.no_room_reason()))
@@ -308,10 +473,10 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, 
         e,
         SolidError::Unsupported { .. } | SolidError::Unported { .. }
     ) {
-        return (status(e), None);
+        return Err(e);
     }
     if let Some(fit) = fit {
-        if !corner
+        if !call.corner
             && info.no_room_reason() != Some(NoRoomReason::RailLeavesFace)
             && fit.size.is_finite()
             && fit.size > 0.0
@@ -322,21 +487,48 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, 
                 KernelFit::Chord => FitKind::Chord,
             };
             let why = reason.and_then(room_reason);
-            let refusal = Error::TooLarge {
+            let refusal = Refusal::TooLarge {
                 size: fit.size,
                 kind,
                 at: None,
                 why,
             };
-            return (refusal, fit.edge);
+            return Ok(SessionRefusal {
+                refusal: chamfer_sized(s, call.chamfer, fit.edge, refusal),
+                edge: fit.edge,
+            });
         }
     }
-    (blend_failure_unsized(info, e, corner), None)
+    blend_failure_unsized(info, e, call.corner).map(|refusal| SessionRefusal {
+        refusal,
+        edge: None,
+    })
 }
 
-/// The kernel's refusal of an edge or a corner as the operation's, its entities by their
-/// indices in `b`; `None` for an entity `b` does not hold.
-fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
+/// A failure of the session as the operation's: the kernel's refusal of an edge, or of a
+/// corner's setback as too long, by its entity's index ([`refused`]), else
+/// [`session_refusal`]'s, the kernel's failures mapped by [`status`].
+fn blend_failure(
+    s: &FilletSession<'_>,
+    e: SolidError,
+    call: SessionCall,
+) -> (Error, Option<EdgeId>) {
+    if let SolidError::BlendRefused { refusal, .. } = &e {
+        if let Some(error) = refused(s, refusal) {
+            return (error, None);
+        }
+    }
+    match session_refusal(s, e, call) {
+        Ok(r) => (r.refusal.into(), r.edge),
+        Err(e) => (status(e), None),
+    }
+}
+
+/// The kernel's refusal of an edge, or of a corner's setback as too long, as the operation's,
+/// its entities by their indices in the session's body; `None` for an entity that body does
+/// not hold, and for a setback too short ([`session_refusal`]'s).
+fn refused(s: &FilletSession<'_>, refusal: &BlendRefusal) -> Option<Error> {
+    let b = s.target();
     let edge = |e: EdgeId| b.edge_list().iter().position(|&x| x == e);
     let vertex = |v: VertexId| b.vertex_list().iter().position(|&x| x == v);
     Some(match *refusal {
@@ -368,12 +560,6 @@ fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
             tolerance,
             smallest: smallest_radius,
         },
-        BlendRefusal::SetbackTooShort {
-            vertex: v, least, ..
-        } => Error::SetbackTooShort {
-            vertex: vertex(v)?,
-            least,
-        },
         BlendRefusal::SetbackTooLong {
             vertex: v, largest, ..
         } => Error::SetbackTooLong {
@@ -393,49 +579,54 @@ fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
     })
 }
 
-/// [`blend_failure`] where the kernel gives no size.
-fn blend_failure_unsized(info: &ErrorInfo<FilletObject>, e: SolidError, corner: bool) -> Error {
+/// [`session_refusal`] where the kernel gives no size; `e` back for a failure that is not
+/// the blend's.
+fn blend_failure_unsized(
+    info: &ErrorInfo<FilletObject>,
+    e: SolidError,
+    corner: bool,
+) -> std::result::Result<Refusal, SolidError> {
     if corner || info.code == FilletErrorType::CornerUnsupported as i32 {
-        Error::CornerUnsupported
+        Ok(Refusal::CornerUnsupported)
     } else if info.code != FilletErrorType::NoRoom as i32 {
-        status(e)
+        Err(e)
     } else if info.no_room_reason() == Some(NoRoomReason::RailLeavesFace) {
-        Error::Unsupported(RAIL_LEAVES_FACE)
+        Ok(Refusal::RailLeavesFace(RAIL_LEAVES_FACE))
     } else {
-        Error::NoRoom
+        Ok(Refusal::NoRoom)
     }
 }
 
 /// A chamfer's fit by radius ([`FitKind::Radius`], an equal chamfer's one offset) as the
 /// distance that builds, which the kernel reads through the chamfer's definition
-/// ([`FilletSession::chamfer_fit`]); one it cannot read so is [`Error::NoRoom`]. Any other
-/// failure, or a blend that is no chamfer, as it is.
+/// ([`FilletSession::chamfer_fit`]); one it cannot read so is [`Refusal::NoRoom`]. Any other
+/// fit, or a blend that is no chamfer, as it is.
 fn chamfer_sized(
     s: &FilletSession<'_>,
-    section: Section<'_>,
+    chamfer: bool,
     edge: Option<EdgeId>,
-    e: Error,
-) -> Error {
+    e: Refusal,
+) -> Refusal {
     match e {
-        Error::TooLarge {
+        Refusal::TooLarge {
             size,
             kind: FitKind::Radius,
             at,
             why,
-        } if section.chamfer() => {
+        } if chamfer => {
             let fit = KernelFitSize {
                 size,
                 edge,
                 kind: KernelFit::Radius,
             };
             match s.chamfer_fit(fit) {
-                Some(size) => Error::TooLarge {
+                Some(size) => Refusal::TooLarge {
                     size,
                     kind: FitKind::Distance,
                     at,
                     why,
                 },
-                None => Error::NoRoom,
+                None => Refusal::NoRoom,
             }
         }
         e => e,
@@ -454,19 +645,26 @@ fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::
     let Some(edge) = edge else {
         return Ok(e);
     };
-    let at = match b.edge(edge) {
-        Ok(rec) => match rec.curve.as_ref() {
-            Some(c) => answer(c.evaluate_point(k, middle(rec.interval.min(), rec.interval.max())))?
-                .map(|p| [p.x, p.y, p.z]),
-            None => None,
-        },
-        Err(_) => None,
-    };
     Ok(Error::TooLarge {
         size,
         kind,
-        at,
+        at: edge_point(k, b, edge)?,
         why,
+    })
+}
+
+/// The point at the middle of `edge` of `b` (`half_way` along its interval); `None` for an
+/// edge or curve that cannot be read.
+fn edge_point(k: &Kernel, b: &Brep, edge: EdgeId) -> solidcore::Result<Option<[f64; 3]>> {
+    Ok(match b.edge(edge) {
+        Ok(rec) => match rec.curve.as_ref() {
+            Some(c) => {
+                answer(c.evaluate_point(k, half_way(rec.interval.min(), rec.interval.max())))?
+                    .map(|p| [p.x, p.y, p.z])
+            }
+            None => None,
+        },
+        Err(_) => None,
     })
 }
 
@@ -477,6 +675,17 @@ fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::
 )]
 pub(crate) fn middle(lo: f64, hi: f64) -> f64 {
     0.5 * (lo + hi)
+}
+
+/// The parameter half way along `[lo, hi]` as the kernel's interval evaluates it
+/// (`Extent1d::evaluate(0.5)`: `lo + 0.5 (hi - lo)`), the point a sized refusal names, as
+/// SolidCraft named it before its refusals were ops'.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "a sample parameter ops chooses, not a geometric quantity (docs/layers.md)"
+)]
+fn half_way(lo: f64, hi: f64) -> f64 {
+    lo + 0.5 * (hi - lo)
 }
 
 /// The faces of `b`.
@@ -632,6 +841,11 @@ fn pass(
             step = corners(&mut s, p.section, p.setbacks);
         }
         s.set_mark_corner_patches(p.patches);
+        let call = SessionCall {
+            corner,
+            patches: p.patches,
+            chamfer: p.section.chamfer(),
+        };
         match step {
             // the marks go with the session: read them before it drops
             Ok(Ok(set_back)) => match s.do_filleting(k, None) {
@@ -643,16 +857,16 @@ fn pass(
                         stopped.overflow = Some(s.overflow_edges());
                         stopped.mitred = s.mitred_edges();
                     }
-                    let (why, edge) = blend_failure(&s, e, corner);
+                    let (error, edge) = blend_failure(&s, e, call);
                     fit_edge = edge;
-                    Ok(Err(Refused::Error(chamfer_sized(&s, p.section, edge, why))))
+                    Ok(Err(Refused::Error(error)))
                 }
             },
             Ok(Err(refusal)) => Ok(Err(refusal)),
             Err(e) => {
-                let (why, edge) = blend_failure(&s, e, corner);
+                let (error, edge) = blend_failure(&s, e, call);
                 fit_edge = edge;
-                Ok(Err(Refused::Error(chamfer_sized(&s, p.section, edge, why))))
+                Ok(Err(Refused::Error(error)))
             }
         }
     };
@@ -929,6 +1143,20 @@ fn overflow_first(
     }
     untagged(&mut fresh)?;
     Ok(Ok(fresh))
+}
+
+/// A kernel error as ops' blend failure, for a caller that runs the kernel's blend itself: a
+/// failure the kernel states in words where it replaced a bare status (its `BlendFailure`), as
+/// [`Error::BlendFailed`] with its class, its status and the kernel's statement; `None` for any
+/// other error.
+#[must_use]
+pub fn failure(e: &SolidError) -> Option<Error> {
+    let b = e.blend_failure().filter(|b| b.replaces_upstream_status())?;
+    Some(Error::BlendFailed {
+        class: b.class(),
+        status: e.sm_status().unwrap_or(solidcore::error::SM_ERR),
+        phrase: b.to_string(),
+    })
 }
 
 /// The edges of `body` at native-list indices `edges` blended by `kind`, edge i at `sizes[i]` (or
@@ -1432,39 +1660,154 @@ fn faces_along_indices(
     })
 }
 
-/// The tangent chain of the edges of `body` at record indices `edges` (the kernel's
-/// `blend_refusal::tangent_chain`): those edges (each once, in order), then every edge with a
-/// blend that one of them runs on into at a vertex, leaving it opposite within `angle`
-/// radians, along one of its faces, of its convexity and with faces not tangent there, and so
-/// on until no more do. For a blend that is to run on: the edges to blend together.
+/// A flat face of a concave straight edge that a round can be carried on past, with the slab
+/// that carries it on (the kernel's [`solidcore::blend::carried_face::CarriedFace`], its face
+/// by index).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CarriedFace {
+    /// The flat face's index.
+    pub face: usize,
+    /// The edge's start vertex: the origin of the slab's frame.
+    pub origin: [f64; 3],
+    /// The unit direction of the edge.
+    pub along: [f64; 3],
+    /// The unit direction in the face's plane square to the edge; `along` × `across` is the
+    /// face's outward normal.
+    pub across: [f64; 3],
+    /// The slab's rectangle in (`along`, `across`) from `origin`.
+    pub outline: [[f64; 2]; 4],
+    /// The slab's extent along the outward normal, up to the face's plane.
+    pub depth: [f64; 2],
+    /// How far to either side of its plane the face's outline is to be carried.
+    pub reach: f64,
+    /// Which way along `across` from the edge's line the other face's material stands, in the
+    /// face's plane: `1.0` or `-1.0`.
+    pub other_side: f64,
+}
+
+/// The flat faces of `body`'s edge at index `edge` that a round of radius `radius` can be
+/// carried on past (the kernel's [`solidcore::blend::carried_face::carried_faces`]): for an
+/// application building a round wider than the flat face beside its edge, by rounding the
+/// edge on the body with that face carried on as a slab and keeping what the round adds
+/// within the face's outline. None where that does not give the round of an unbounded face:
+/// the edge is not straight and concave, no face of it is flat, or an end of it has no flat
+/// face square to it.
 ///
 /// # Errors
-/// [`Error::Argument`] for no edges, an index past the body's edges, or an angle not finite
-/// and strictly between 0 and a right angle; the kernel's refusals.
-pub fn tangent_chain(body: &Body, edges: &[usize], angle: f64) -> Result<Vec<usize>> {
-    if edges.is_empty() || !(angle > 0.0 && angle < std::f64::consts::FRAC_PI_2) {
+/// [`Error::Argument`] for an index past the edges or a radius not finite, positive and at
+/// most [`MAX_SIZE`]; the kernel's refusals.
+pub fn carried_faces(body: &Body, edge: usize, radius: f64) -> Result<Vec<CarriedFace>> {
+    carried_faces_impl(body, None, edge, radius)
+}
+
+/// [`carried_faces`] with the edge and the returned faces indexed by `order`.
+///
+/// # Errors
+/// As [`carried_faces`] and [`Body::copy_with_order`].
+pub fn carried_faces_ordered(
+    body: &Body,
+    order: &crate::Order,
+    edge: usize,
+    radius: f64,
+) -> Result<Vec<CarriedFace>> {
+    carried_faces_impl(body, Some(order), edge, radius)
+}
+
+fn carried_faces_impl(
+    body: &Body,
+    order: Option<&crate::Order>,
+    edge: usize,
+    radius: f64,
+) -> Result<Vec<CarriedFace>> {
+    if !size_ok(radius) {
         return Err(Error::Argument);
     }
-    measure_body("tangent_chain", body, |k, b| {
-        // the copy keeps the order: an edge's index in it is its index in the body
-        let list = b.edge_list().to_vec();
-        let mut seeds = Vec::new();
-        for &i in edges {
-            match list.get(i) {
-                Some(&e) => seeds.push(e),
-                None => return Ok(Err(Error::Argument)),
-            }
-        }
-        let chain = solidcore::blend::blend_refusal::tangent_chain(k, b, &seeds, angle)?;
-        let mut out = Vec::new();
-        for e in chain {
-            match list.iter().position(|&x| x == e) {
-                Some(i) => out.push(i),
-                None => return Ok(Err(Error::Exception)),
-            }
-        }
-        Ok(Ok(out))
+    if let Some(order) = order {
+        let (copy, mapped) = body.copy_with_order(order)?;
+        return with_body("carried_faces", &copy, |k, b| {
+            carried_face_indices(k, b, Some(&mapped), edge, radius)
+        })?;
+    }
+    measure_body("carried_faces", body, |k, b| {
+        carried_face_indices(k, b, None, edge, radius)
     })?
+}
+
+fn carried_face_indices(
+    k: &mut Kernel,
+    b: &mut Brep,
+    order: Option<&crate::Order>,
+    edge: usize,
+    radius: f64,
+) -> solidcore::Result<Result<Vec<CarriedFace>>> {
+    let edges = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
+    let Some(&e) = edges.get(edge) else {
+        return Ok(Err(Error::Argument));
+    };
+    if !b.edge_list().contains(&e) {
+        return Ok(Err(Error::Argument));
+    }
+    let found = solidcore::blend::carried_face::carried_faces(k, b, e, radius)?;
+    // The supplied order is mapped through the measurement copy.
+    let face_order = order.map_or_else(|| b.face_list(), |o| o.faces.as_slice());
+    let mut out = Vec::new();
+    for c in found {
+        let Some(face) = face_order.iter().position(|&g| g == c.face) else {
+            return Ok(Err(Error::Exception));
+        };
+        out.push(CarriedFace {
+            face,
+            origin: [c.origin.x, c.origin.y, c.origin.z],
+            along: [c.along.x, c.along.y, c.along.z],
+            across: [c.across.x, c.across.y, c.across.z],
+            outline: c.outline,
+            depth: c.depth,
+            reach: c.reach,
+            other_side: c.other_side,
+        });
+    }
+    Ok(Ok(out))
+}
+
+/// The tangent chain of the edges of `body` at record indices `edges` (through `order`, its
+/// record's [`crate::Order`], or the body's own edge order): those edges (each once, in
+/// order), then every edge that continues one of them within `angle` radians at a shared
+/// vertex, and so on
+/// until no more do (the walk: [`crate::tangent`]). An edge does not join when it is not
+/// between two faces, when it is smooth (its faces meet within `angle` all along it, a seam
+/// among them), when it turns over (convex where the edge it continues is concave, or the
+/// reverse), or when it is in `passed_over`. An edge whose smoothness the kernel leaves
+/// undecided joins nothing and is named in [`Chain::undecided`]. Every measure is the kernel's
+/// (`query::tangent_edge`, `query::edge_turn`). For a blend that is to run on: the edges to
+/// blend together.
+///
+/// # Errors
+/// [`Error::Argument`] for no edges, an index past the edges or naming an edge the body does
+/// not have, or an angle not finite and strictly between 0 and a right angle; the kernel's
+/// refusals (a face with no NURBS form or in power-basis form, an edge use with no pcurve, a
+/// pcurve leaving its face's net); [`Error::Cancelled`] when the session's cancel token is
+/// cancelled.
+pub fn tangent_chain(
+    body: &Body,
+    order: Option<&crate::Order>,
+    edges: &[usize],
+    passed_over: &[usize],
+    angle: f64,
+) -> Result<Chain> {
+    let walk = crate::tangent::edge_walk;
+    match order {
+        Some(order) => {
+            let (copy, mapped) = body.copy_with_order(order)?;
+            with_body("tangent_chain", &copy, |k, b| {
+                walk(k, b, &mapped.edges, edges, passed_over, angle)
+            })?
+        }
+        None => measure_body("tangent_chain", body, |k, b| {
+            // the copy keeps the order: an edge's index in it is its index in the body
+            let list = b.edge_list().to_vec();
+            walk(k, b, &list, edges, passed_over, angle)
+        })?,
+    }
 }
 
 /// The edges of `body` at record indices `edges` chamfered `distance` back along the face of

@@ -85,13 +85,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("constraint: a circle's or an arc's radius or diameter dimension id; diameter?: bool (default: the other one); sketch?: id|name (default: the one being edited). The circle stays the same size: its parameter is halved or doubled (a plain value is rewritten, an expression becomes `(e) / 2` or `2 * (e)`); refused when anything else uses that parameter"),
     CommandSpec::new("sketch.glyphs", "Constraint Glyphs", crate::checked!("sketch.glyphs", glyphs)).icon("eye")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
         .contract(&GLYPHS_CONTRACT)
         .output(output_schema_for::<GlyphsResult>)
         .params("sketch?: id|name: every constraint with where to draw its glyph (sketch coordinates)"),
     CommandSpec::new("sketch.snap", "Snap Inference", crate::checked!("sketch.snap", snap)).icon("snap")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
         .contract(&SNAP_CONTRACT)
         .output(output_schema_for::<SnapResult>)
         .params("at: [x,y], from?: [x,y] (previous click), radius?: mm (snap distance, default 1): what a click there would snap to and infer"),

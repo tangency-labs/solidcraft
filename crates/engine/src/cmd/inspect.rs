@@ -18,7 +18,7 @@ use crate::schema::inspect::{
     FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
     MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
     ModelThread, ModelThreads, ModelThreadsParams, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile,
-    SketchWire, TimelineEntry, TimelineSummary, WireArcInfo,
+    SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -50,13 +50,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSPECT")
         .icon("measure")
         .key("I")
-        .noundo()
+        .noundo().read_only()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
         .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&DOCUMENT_INSPECT_CONTRACT)
         .output(output_schema_for::<DocumentInspectResult>)
         .params(
@@ -72,19 +72,19 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
         .at("SKETCH", "INSPECT")
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&SKETCH_INSPECT_CONTRACT)
         .output(output_schema_for::<SketchInspected>)
         .params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", crate::checked!("model.edges", model_edges))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&BODY_LIST_CONTRACT)
         .output(output_schema_for::<ModelEdges>)
         .params("body: name"),
     CommandSpec::new("model.faces", "List Faces", crate::checked!("model.faces", model_faces))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&BODY_LIST_CONTRACT)
         .output(output_schema_for::<ModelFaces>)
         .params(
@@ -360,12 +360,27 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
                 CurveKind::Ellipse { c: cc, m, r } => {
                     CurveShape::Ellipse { center: pid(cc), major: pid(m), center_at: at(cc), major_at: at(m), minor_radius: r }
                 }
-                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs } => CurveShape::Spline {
+                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs, ref handles } => CurveShape::Spline {
                     points: pts.iter().map(|q| pid(*q)).collect(),
                     points_at: pts.iter().map(|q| at(*q)).collect(),
                     control,
                     degree,
                     periodic,
+                    tangent_handles: handles
+                        .iter()
+                        .map(|&point| SplineTangentHandle {
+                            point: pid(point),
+                            at: at(point),
+                            curve: sk
+                                .curves
+                                .iter()
+                                .find(|candidate| {
+                                    candidate.spline_handle_of.as_deref() == Some(c.id.as_str())
+                                        && matches!(candidate.kind, CurveKind::Line { a, b } if a == point || b == point)
+                                })
+                                .map(|candidate| candidate.id.clone()),
+                        })
+                        .collect(),
                     // A control spline with its own knots (a projected free-form edge) says them.
                     knots: nurbs.as_ref().map(|n| n.knots.clone()),
                     weights: nurbs.as_ref().filter(|n| !n.weights.is_empty()).map(|n| n.weights.clone()),
@@ -747,8 +762,11 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
 const DESCRIBE_CONTRACT: crate::schema::TypedContract<crate::schema::inspect::DescribeParams> = crate::schema::TypedContract::new();
 
 /// A command's prose documentation and, for converted commands, its schemas.
-fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
+fn describe(s: &mut Session, p: &Value) -> Result<Value> {
     let id = p.get("command").and_then(Value::as_str).ok_or_else(|| crate::params::bad("engine.describe", "`command` must be a command id"))?;
+    if let Some(entry) = crate::plugin::describe_entry(s, id)? {
+        return Ok(entry);
+    }
     let spec = super::find_command(id).ok_or_else(|| crate::EngineError::UnknownCommand(id.to_string()))?;
     let reply = crate::schema::inspect::DescribeResult {
         id: spec.id.to_string(),
@@ -762,7 +780,27 @@ fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
-    let list: Vec<CommandEntry> = crate::command_specs().iter().map(|c| c.info(s).into()).collect();
+    let mut list: Vec<CommandEntry> = crate::command_specs().iter().map(|c| c.info(s).into()).collect();
+    for (package_id, path) in &s.plugin_state.packages {
+        if let Ok(package) = crate::plugin::read_package(path)
+            && let Some(runtime) = package.manifest.runtime
+        {
+            for entry in runtime.entries {
+                list.push(CommandEntry {
+                    id: format!("{package_id}.{}", entry.name),
+                    label: entry.name,
+                    tab: String::new(),
+                    panel: String::new(),
+                    icon: "play".into(),
+                    shortcut: None,
+                    params: "approval, params: declared entry inputs (engine.describe)".into(),
+                    enabled: !s.disabled_plugins.contains(package_id),
+                    disabled_reason: s.disabled_plugins.contains(package_id).then(|| "plugin is disabled".into()),
+                    planned: None,
+                });
+            }
+        }
+    }
     typed_reply("engine.commands", list)
 }
 
@@ -989,7 +1027,7 @@ pub(super) fn appearance_look(cmd: &str, p: &Value) -> Result<Option<solidcraft_
 }
 
 fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcore_record::Vec3) -> f64 {
-    let bb = b.mesh().bounds();
+    let bb = b.body.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
     let c = solidcore_record::Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
     c.dist(p)
 }

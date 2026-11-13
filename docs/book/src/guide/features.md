@@ -209,6 +209,20 @@ The Hole dialog draws a section through the hole as its options make it (type, e
 point, tapped) and puts each size in a field beside the dimension it sets; hovering a field, or
 typing in it, lights its dimension.
 
+**Hole Tap Type** is **Simple** (type the diameter), **Clearance** (a hole a bolt passes
+through) or **Tapped** (a thread). With Clearance, pick the bolt **Size** (M1.6 to M64) and the
+**Fit** (Close, Normal or Loose): the hole takes the ISO 273 clearance diameter, shown in
+**Clearance diameter** as a default you can change, the way **Tap drill diameter** works for a
+tapped hole; the section shows the bolt's shank through the hole. Scripts use `clearance: "M4"`
+with `fit: "normal"` on `solid.hole`. The hole stores its diameter, not the bolt: **Edit Feature**
+opens it as a Simple hole of that diameter.
+
+With **Hole Type** Counterbore and Clearance, **Screw head** sizes the counterbore for a cap
+screw: a socket head (ISO 4762) or a button head (ISO 7380-1) of the bolt's size. It fills
+**Counterbore Ø** and **Counterbore depth** with the head's diameter and height plus 0.5 mm each
+side and below; change either to use your own. Scripts use `head: "ISO 4762"` with `clearance`
+on `solid.hole`.
+
 The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
 `"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.

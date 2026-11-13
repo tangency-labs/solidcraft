@@ -3,7 +3,7 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::ribbon::{self, BUTTON_MIN_WIDTH, ButtonSize, GROUP_HEIGHT, ICON_GROUP_HEIGHT};
 use crate::{SolveApp, app_bar, icons};
@@ -189,6 +189,7 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     home_rect: &["titlebar:home", "appbar:home"],
     file: &["appbar:file", "appbar:folder"],
     file_rect: &["appbar:file"],
+    plugins: "appbar:plugins",
     button: &["appbar:", "titlebar:"],
     separator: "titlebar:separator:",
     search: "titlebar:search",
@@ -234,6 +235,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
+                // The web build runs no plugins: no Plugins menu there. Its accessible name says
+                // "menu", so it is not taken for Preferences' Plugins page.
+                plugins: (!cfg!(target_arch = "wasm32")).then(|| (app.tr("ui.plugins"), app.plugin_menu.open, app.tr("ui.plugin_menu_name"))),
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
@@ -254,12 +258,21 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
+            app.plugin_menu.in_file_menu = out.plugins_in_file;
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
+                    app_bar::BarAction::Plugins { rect } => {
+                        app.ui.palette_open = false;
+                        crate::plugin_menu::toggle(app, &ui.ctx().clone(), *rect);
+                    }
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
+                        app.plugin_menu.open = false;
+                        if app.plugin_menu.in_file_menu {
+                            crate::plugin_menu::refresh(app);
+                        }
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -313,6 +326,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     file_menu(app, ui.ctx());
+    crate::plugin_menu::menu(app, &ui.ctx().clone());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::unique("sc_help_anchor")).unwrap_or(300.0));
     crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
 }
@@ -334,6 +348,8 @@ pub enum FileAction {
     Redo,
     /// Save a JSON design using the existing save-as flow.
     SaveJson,
+    /// Check the signatures of the active design's saved file.
+    VerifySignature,
     /// Export through the format-specific export command.
     Export(&'static str),
     /// Open the mesh export dialog with the selected format.
@@ -357,8 +373,9 @@ pub enum FileAction {
 impl FileAction {
     /// Whether this action is available in the current document, picker and report state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
-        let needs_design = matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_))
-            || matches!(self, Self::Export(extension) if *extension != "json");
+        let needs_design =
+            matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature)
+                || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
         // with unsaved changes under the report, and ask about it where it can't be answered.
@@ -367,6 +384,7 @@ impl FileAction {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
+            Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
@@ -396,6 +414,9 @@ impl FileAction {
             Self::Undo => drop(app.run("edit.undo", json!({}))),
             Self::Redo => drop(app.run("edit.redo", json!({}))),
             Self::SaveJson => save_as_with_extension(app, "json"),
+            Self::VerifySignature => {
+                crate::verify_job::start(app);
+            }
             Self::Export(extension) => export(app, extension),
             Self::ExportMesh(format) => crate::dialogs_save_mesh::start_with_format(app, format),
             Self::Command(command) => app.start(command),
@@ -468,6 +489,7 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
+    rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
     if app.services.download_design.is_some() {
         rows.push(row("download", app.tr_label("Download design"), "", "export", shown));
@@ -490,6 +512,11 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
+    // A narrow app bar has no room for the Plugins button: its menu is here instead.
+    if app.plugin_menu.in_file_menu {
+        rows.push(crate::plugin_menu::file_submenu(app));
+        rows.push(FileRow::Separator);
+    }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
     if crate::install::offered(app).is_some() {
         rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
@@ -502,6 +529,10 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
 
 /// Runs the File menu's row `id` ([`file_rows`]).
 fn run_file_row(app: &mut SolveApp, id: &str) {
+    if let Some(id) = id.strip_prefix("plugins:") {
+        crate::plugin_menu::choose(app, id);
+        return;
+    }
     if let Some(i) = id.strip_prefix("recent:").and_then(|i| i.parse::<usize>().ok()) {
         if let Some(path) = app.home.recent.get(i).cloned() {
             FileAction::OpenRecent(path).run(app);
@@ -526,6 +557,7 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
         "save_json" => FileAction::SaveJson.run(app),
+        "file.verify" => FileAction::VerifySignature.run(app),
         "download" => download_design(app),
         "browser_files" => {
             if let Some(show) = &app.services.browser_files {
@@ -552,6 +584,20 @@ pub fn design_shown(app: &SolveApp) -> bool {
     !app.home.open
 }
 
+/// The parameters a save takes from Preferences. Signing is off by default; a signing key left
+/// empty asks GnuPG for its default key.
+pub(crate) fn provenance_params(app: &SolveApp) -> Value {
+    let mut params = json!({});
+    if app.preferences.sign_saved_designs {
+        params["sign"] = json!(true);
+        let key = app.preferences.signing_key.trim();
+        if !key.is_empty() {
+            params["signing_key"] = json!(key);
+        }
+    }
+    params
+}
+
 pub fn save(app: &mut SolveApp) {
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
@@ -560,7 +606,7 @@ pub fn save(app: &mut SolveApp) {
     if app.session.path.is_some() {
         // Read-only, or changed on disk since it was opened: Save As, or a question, instead.
         if crate::open_elsewhere::check_save(app) {
-            crate::save_job::start(app, "file.save", json!({}));
+            crate::save_job::start(app, "file.save", provenance_params(app));
         }
     } else {
         save_as(app);
@@ -594,7 +640,18 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
     app.pick_save(&name, &[solidcraft_engine::io::DESIGN_EXT, "json"], |app, path| {
         // A save under way answers a closing tab when it ends.
         if let Some(path) = path
-            && crate::save_job::start(app, "file.save_as", json!({"path": path}))
+            && {
+                let mut params = provenance_params(app);
+                // A JSON design has no container to sign; asking would make this save fail.
+                if std::path::Path::new(&path).extension().is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+                    && let Some(params) = params.as_object_mut()
+                {
+                    params.remove("sign");
+                    params.remove("signing_key");
+                }
+                params["path"] = json!(path);
+                crate::save_job::start(app, "file.save_as", params)
+            }
         {
             return;
         }
@@ -1585,11 +1642,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             // an earlier, shorter list (#874); they still shrink to fit their content.
                             let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
                             egui::ScrollArea::vertical().id_salt("panel_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
-                                for (index, (heading, c)) in grouped.iter().enumerate() {
+                                for (heading, c) in &grouped {
                                     if let Some(heading) = heading {
-                                        if *panel == "CONSTRUCT" && index > 0 {
-                                            ui.separator();
-                                        }
                                         ribbon::section_heading(ui, &group_heading_text(heading), row_w);
                                     }
                                     let pinned = crate::toolbar_custom::pinned_on(app, &tab, c.id).is_some();
@@ -1796,17 +1850,19 @@ struct RowData {
     hint: bool,
 }
 
+fn dropdown_checkable(app: &SolveApp, id: &str) -> bool {
+    id == "view.shots_strip" || (persistent_available(app, id) && app.preferences.persistent_ribbon_pressed)
+}
+
 impl RowData {
     fn new(app: &SolveApp, c: &'static solidcraft_engine::CommandSpec) -> Self {
         let info = crate::render_workspace::interactive_command_info(app, c);
         let label = app.tr_label(info.label).to_string();
-        let mut checked = None;
-        if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
-            checked = Some(persistent_pressed(app, c.id));
-        }
-        if c.id == "view.shots_strip" {
-            checked = Some(app.preferences.render_shots_strip);
-        }
+        let checked = if c.id == "view.shots_strip" {
+            Some(app.preferences.render_shots_strip)
+        } else {
+            dropdown_checkable(app, c.id).then(|| persistent_pressed(app, c.id))
+        };
         let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
         // A disabled row says why; a documented command also shows its help (#2758).
         let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason));
@@ -1866,11 +1922,19 @@ fn dropdown_keys(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engi
 
 /// How wide a panel drop-down's rows are: the widest label and shortcut, at least 200.
 fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engine::CommandSpec]) -> f32 {
-    let rows: Vec<(String, String)> = cmds
+    let rows: Vec<_> = cmds
         .iter()
-        .map(|c| (app.tr_label(c.info(&app.session).label).to_string(), crate::keymap::display_for(app, c.id).unwrap_or_default()))
+        .map(|c| {
+            let info = c.info(&app.session);
+            (
+                app.tr_label(info.label).to_string(),
+                crate::keymap::display_for(app, c.id).unwrap_or_default(),
+                info.icon,
+                dropdown_checkable(app, c.id),
+            )
+        })
         .collect();
-    ribbon::menu_width(ui, rows.iter().map(|(label, key)| (label.as_str(), key.as_str())))
+    ribbon::menu_width(ui, rows.iter().map(|(label, key, icon, checkable)| (label.as_str(), key.as_str(), *icon, *checkable)))
 }
 
 /// A panel drop-down drawn as a grid of large icons (the `ribbon_icon_grid` preference, #4739):
@@ -3487,14 +3551,19 @@ mod dropdown_tests {
         }
     }
 
-    /// Both layouts keep the original order by default and expose every tool with grouping on.
+    /// Both layouts group Construct under Planes, Axes and Points by default, and keep the
+    /// original ungrouped order when `construct_menu_groups` is turned off.
     #[test]
     fn construct_dropdown_groups_are_visible_in_list_and_grid() {
-        for (grid, grouped) in [(false, false), (true, false), (false, true), (true, true)] {
+        for (grid, grouped) in [(false, true), (true, true), (false, false), (true, false)] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.app.preferences.ribbon_icon_grid = grid;
-            h.app.preferences.construct_menu_groups = grouped;
+            if !grouped {
+                h.app.preferences.construct_menu_groups = false;
+            } else {
+                assert!(h.app.preferences.construct_menu_groups);
+            }
             h.call("ui.resize", json!({"width":1600,"height":1200}));
             h.app.ui.tab = "MODEL".into();
             h.frames(4);
@@ -4113,9 +4182,7 @@ mod dropdown_toggle_tests {
             let folded = rect_of("ribbon:folded").unwrap();
             assert!(folded.height() <= super::TAB_ROW_HEIGHT + 1.0, "{layout}: only the tab row is left: {folded:?}");
             assert!(rect_of("panel:MODEL:CREATE").is_none(), "{layout}: no panels while folded");
-            if layout == "compact" {
-                assert!(h.app.viewport.rect.unwrap().top() < whole_view.top() - 50.0, "{layout}: the view takes the panels' room");
-            }
+            assert_eq!(h.app.viewport.rect.unwrap(), whole_view, "{layout}: folding preserves the canvas domain");
 
             // A tab's click opens its panels over the view, as tall as the whole ribbon.
             let tab = rect_of("toolbar_tab:SURFACE").unwrap().center();
@@ -4126,10 +4193,7 @@ mod dropdown_toggle_tests {
             let open = rect_of("ribbon:open").unwrap();
             assert!((open.height() - whole.height()).abs() <= 2.0 * crate::ui_kit::SHELL_GAP + 1.0, "{layout}: {open:?} vs {whole:?}");
             assert!(rect_of("panel:SURFACE:CREATE").is_some(), "{layout}: the panels are drawn");
-            if layout == "compact" {
-                let top = h.app.viewport.rect.unwrap().top();
-                assert!((top - folded.bottom()).abs() <= 2.0, "{layout}: over the view, not pushing it down: {top} {folded:?}");
-            }
+            assert_eq!(h.app.viewport.rect.unwrap(), whole_view, "{layout}: the open ribbon overlays the canvas");
 
             // The pointer leaving the panels closes them.
             let away = h.app.viewport.rect.unwrap().center() + egui::vec2(0.0, 150.0);

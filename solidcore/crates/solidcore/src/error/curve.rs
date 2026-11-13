@@ -294,7 +294,7 @@ mod tests {
             "curve",
             31,
             &[
-                ("curve/curve/p3.rs", 10),
+                ("curve/curve/p3.rs", 9),
                 ("curve/curve/p7.rs", 3),
                 ("curve/ellipse/p1.rs", 6),
             ],

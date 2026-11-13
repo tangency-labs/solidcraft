@@ -824,7 +824,7 @@ const BLEND_STATIONS: usize = 41;
 /// The sketch curves `ids` (free-form ones exactly where they can be) grouped into chains of segments that meet end to end, each oriented
 /// to run one way. Curves are joined greedily at their free ends: where three meet, one of them
 /// starts a chain of its own.
-fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<Seg2>>> {
+pub(super) fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<Seg2>>> {
     if ids.len() > MAX_CHAIN_CURVES {
         return Err(DocError::Invalid(format!("at most {MAX_CHAIN_CURVES} curves")));
     }

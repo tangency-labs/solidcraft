@@ -7,7 +7,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_heading(ui, app.tr("prefs.structure.tools"), app.tr("prefs.structure.tools_note"));
         ui_kit::settings_section(ui, "create", app.tr("ui.create"), |ui| {
             create_card(ui, |ui| {
-                create_row(ui, app.tr("ui.hole"), &["hole"], true, |ui| {
+                create_row(ui, app.tr("ui.hole"), None, &["hole"], true, |ui| {
                     for (setting, help, key, legacy) in [
                         (
                             setting::hole_snaps as fn(&mut SolveApp, &mut egui::Ui) -> egui::Response,
@@ -29,7 +29,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                     }
                 });
-                create_row(ui, app.tr_label("Extrude"), &["extrude"], false, |ui| {
+                create_row(ui, app.tr_label("Extrude"), None, &["extrude"], false, |ui| {
                     for (setting, help, key) in [
                         (
                             setting::extrude_auto_to_object as fn(&mut SolveApp, &mut egui::Ui) -> egui::Response,
@@ -56,13 +56,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:extrude_view_return", response.rect);
                     });
                 });
-                create_row(ui, app.tr("prefs.design_tools.placement_group"), &["rest", "boss", "snap_fit"], false, |ui| {
+                // Found by the name of every feature that has the marker, as well as by the label.
+                let placed = PLACED_FEATURES.iter().map(|key| app.tr(key)).collect::<Vec<_>>().join(" ");
+                create_row(ui, app.tr("prefs.design_tools.placement_group"), Some(&placed), &["rest", "boss", "snap_fit"], false, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         let response = setting::placement_handles(app, ui).backing_on_hover_text(app.tr("ui.placement_handles_tip"));
                         crate::scenario::publish_target("prefs:placement_handles", response.rect);
                         if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                             ui_kit::help_icon(ui, app.tr("ui.placement_handles_tip"));
                         }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        let response = setting::snap_points(app, ui);
+                        crate::scenario::publish_target("prefs:snap_points", response.rect);
                     });
                 });
             });
@@ -215,8 +221,14 @@ fn create_card(ui: &mut egui::Ui, rows: impl FnOnce(&mut egui::Ui)) {
 
 /// One tool in the Create card: its icons in tiles and its name on the left, its settings on the
 /// right, a rule above every row but the first. Search uses the same block gate as `tool_group`.
-fn create_row(ui: &mut egui::Ui, label: &str, icons: &[&str], first: bool, add: impl FnOnce(&mut egui::Ui)) {
-    let gate = crate::ui_kit::settings_search::block_gate(ui, label, None);
+/// The features with a placement marker, by their name keys: Preferences search finds the
+/// Placed features row by any of them.
+const PLACED_FEATURES: [&str; 9] =
+    ["cmd.plastic_rest", "cmd.plastic_boss", "cmd.plastic_snap_fit", "ui.box", "ui.cylinder", "ui.cone", "ui.sphere", "ui.torus", "ui.coil"];
+
+/// A tool's row; `hint` is more text the search finds the row by (it is not shown).
+fn create_row(ui: &mut egui::Ui, label: &str, hint: Option<&str>, icons: &[&str], first: bool, add: impl FnOnce(&mut egui::Ui)) {
+    let gate = crate::ui_kit::settings_search::block_gate(ui, label, hint);
     let before = crate::ui_kit::settings_search::hits(ui);
     if gate.as_ref().is_some_and(|gate| !gate.show) {
         crate::ui_kit::settings_search::run_hidden(ui, label, add);

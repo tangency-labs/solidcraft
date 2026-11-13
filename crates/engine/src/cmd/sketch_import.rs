@@ -13,8 +13,8 @@ use super::sketch::{Left, edit_solved, ids_of};
 use super::sketch_store;
 use crate::params::{bad, bool_, num, str_, vec2};
 use crate::schema::sketch_import::{
-    AirfoilInserted, DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertAirfoilParams, InsertDxfParams, InsertSvgParams,
-    SketchSolve,
+    AirfoilInserted, DrawingBoundsParams, DrawingBoundsResult, DrawingBox, DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult,
+    InsertAirfoilParams, InsertDxfParams, InsertSvgParams, SketchSolve,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -22,6 +22,7 @@ use crate::{EngineError, Result, Session};
 const INSERT_DXF_CONTRACT: TypedContract<InsertDxfParams> = TypedContract::new();
 const INSERT_SVG_CONTRACT: TypedContract<InsertSvgParams> = TypedContract::new();
 const INSERT_AIRFOIL_CONTRACT: TypedContract<InsertAirfoilParams> = TypedContract::new();
+const DRAWING_BOUNDS_CONTRACT: TypedContract<DrawingBoundsParams> = TypedContract::new();
 const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
 
 /// A command's reply as JSON, built from the type its output schema describes so the two can't
@@ -49,9 +50,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSERT_AIRFOIL_CONTRACT)
         .output(output_schema_for::<AirfoilInserted>)
         .params(concat!("path | text: airfoil coordinates (.dat, Selig or Lednicer, told apart by content; format?: \"selig\" | \"lednicer\" overrides); chord: mm (> 0); pivot?: share of the chord that `at` places and `angle` turns about (0 leading edge, 0.25 quarter chord, 1 trailing edge; default 0); at?: [x,y] mm (default [0,0]); angle?: degrees, counter-clockwise about the pivot; flip?: bool, mirror across the chord line; tolerance?: mm within which points join (default 0.0001; a trailing edge within it is closed, else a line closes it); plane?: (when no sketch is active, a new sketch on it; default XY); name?: the new sketch's name. One fit point spline through every point; replies with the point count, the trailing edge's gap, the largest deviation of merged points and the largest bulge of the spline between points", created_doc!())),
-    CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
+    CommandSpec::new("sketch.drawing_bounds", "Drawing Size", crate::checked!("sketch.drawing_bounds", drawing_bounds))
         .icon("svg")
-        .noundo()
+        .noundo().read_only()
+        .contract(&DRAWING_BOUNDS_CONTRACT)
+        .output(output_schema_for::<DrawingBoundsResult>)
         .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height of the drawn geometry in the file's own size, and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
         .icon("sketch_dxf")
@@ -156,7 +159,14 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
                         idx.push(i);
                     }
                 }
-                (idx.len() >= 2).then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false, nurbs: None })
+                (idx.len() >= 2).then_some(CurveKind::Spline {
+                    pts: idx,
+                    control: *control,
+                    degree: *degree,
+                    periodic: false,
+                    nurbs: None,
+                    handles: Vec::new(),
+                })
             }
             Geom2::Conic { a, apex, b, rho } => {
                 let (a, x, b) = (pt(sk, *a)?, pt(sk, *apex)?, pt(sk, *b)?);
@@ -234,8 +244,9 @@ fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, V
     Ok((geom, bounds, text))
 }
 
-fn sheet_json((lo, hi): (Vec2, Vec2)) -> Value {
-    json!({"min": [lo.x, lo.y], "max": [hi.x, hi.y], "width": hi.x - lo.x, "height": hi.y - lo.y})
+/// The box around a drawing, as the reply describes it: `min`, `max` and the span between them.
+fn drawing_box((lo, hi): (Vec2, Vec2)) -> DrawingBox {
+    DrawingBox { min: [lo.x, lo.y], max: [hi.x, hi.y], width: hi.x - lo.x, height: hi.y - lo.y }
 }
 
 /// How big a drawing is in its own file, to size it before it is inserted.
@@ -247,11 +258,9 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
         None => !name_is_dxf,
     };
     let (_, bounds, text) = read_drawing(p, cmd, svg)?;
-    let mut out = sheet_json(bounds);
-    if svg && let Some(sheet) = solidcraft_io::svg_sheet(&text) {
-        out["sheet"] = sheet_json(sheet);
-    }
-    Ok(out)
+    // Only an SVG names a sheet, and only when it says how big its sheet is.
+    let sheet = svg.then(|| solidcraft_io::svg_sheet(&text)).flatten().map(drawing_box);
+    reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, param_warnings: Vec::new() })
 }
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
@@ -357,6 +366,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             texts: n_text,
             fixed: fixed.then_some(n_fixed),
             info,
+            created: None,
             param_warnings: Vec::new(),
         },
     )

@@ -1,5 +1,5 @@
 //! Contracts and result types for the commands in `cmd/sketch_import.rs`: `sketch.insert_dxf`,
-//! `sketch.insert_svg`, `sketch.insert_airfoil` and `sketch.export_dxf`.
+//! `sketch.insert_svg`, `sketch.insert_airfoil`, `sketch.drawing_bounds` and `sketch.export_dxf`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a file can be read or written, a sketch
@@ -26,6 +26,7 @@ use solidcraft_io::{AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_DRAWING_BYTES};
 
 use super::check::{located, whole};
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::{Point2, not_blank_pattern};
 
 /// A key that, once given (`null` included), must parse as `T`, as the handler reads it.
@@ -177,8 +178,7 @@ const INSERT_SVG: &str = "Insert an SVG drawing into a sketch as curves: the act
 /// characters, so 4095 is as close as the schema gets. `height` is read only without a `width`
 /// and `scale` only without either, so their shapes apply only then, as [`leave_unread`] has it.
 fn source_required(schema: &mut Schema) {
-    let read_path = serde_json::json!({"type": "string", "maxLength": 4095, "pattern": not_blank_pattern()});
-    schema.insert("anyOf".into(), serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}]));
+    schema.insert("anyOf".into(), source_any_of());
     let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) else { return };
     let mut read_only_without = |key: &str| {
         let shape = props.get_mut(key).map(Value::take).unwrap_or_default();
@@ -574,6 +574,9 @@ pub struct DrawingInserted {
     pub fixed: Option<usize>,
     /// The sketch's solve afterwards; null when it was not solved.
     pub info: Option<SketchSolve>,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -701,6 +704,86 @@ pub enum DxfExported {
         /// How many entities it holds.
         entities: usize,
     },
+}
+
+/// How big a drawing is in its own file, to size it before inserting it: the drawing is read as
+/// `sketch.insert_dxf` and `sketch.insert_svg` read it, and its bounds are the answer. Nothing is
+/// added to a sketch, so it needs no sketch and changes nothing.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = bounds_source_required)]
+pub struct DrawingBoundsParams {
+    /// The drawing itself, as text. Wins over `path`. At most 16 MiB (`MAX_DRAWING_BYTES`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<DrawingText>,
+    /// The drawing file to read (not blank, fewer than 4096 UTF-8 bytes). Used when `text` is
+    /// not given; ignored when it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "path_schema")]
+    pub path: Option<DrawingPath>,
+    /// Which reader the drawing is read with, in any case: `dxf` reads a DXF, and so does any
+    /// other text (`format: "png"` reads an SVG). Left out: a `path` ending in `.dxf` is a DXF,
+    /// anything else an SVG.
+    #[serde(default, deserialize_with = "drawing_format", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "drawing_format_schema")]
+    pub format: Option<String>,
+}
+
+/// The `anyOf` saying a drawing must come from `text` or from a `path` the handler reads.
+fn source_any_of() -> Value {
+    let read_path = serde_json::json!({"type": "string", "maxLength": 4095, "pattern": not_blank_pattern()});
+    serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}])
+}
+
+/// `sketch.drawing_bounds` reads no key but these three, so only the source rule applies.
+fn bounds_source_required(schema: &mut Schema) {
+    schema.insert("anyOf".into(), source_any_of());
+}
+
+/// The drawing's format as `drawing_bounds` reads it: text, and anything but `dxf` (in any case)
+/// reads an SVG. A value that is not text is read as no `format` by the handler, and refused here.
+fn drawing_format<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(format)) => Ok(Some(format)),
+        Some(_) => Err(D::Error::custom(whole("`format` must be a string"))),
+    }
+}
+
+fn drawing_format_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"], "description": "dxf or any other text, in any case: only dxf reads a DXF. Default: dxf for a path ending in .dxf, otherwise svg."})
+}
+
+/// A box around drawn geometry, in millimetres: what `sketch.insert_dxf` and `sketch.insert_svg`
+/// size against when the caller gives a `width`. A DXF's coordinates are taken as they are; an
+/// SVG's user units are scaled by what its `width` and `viewBox` say, and a file that names no
+/// size is read at 96 dpi. The box is in SolidCraft's y-up coordinates, so a file whose y axis
+/// points down (an SVG) comes back turned over: a viewBox `0 0 20 10` at 1 mm per unit is
+/// `min: [0, -10]`, `max: [20, 0]`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DrawingBox {
+    /// The box's lower left corner, `[x, y]` in mm.
+    pub min: [f64; 2],
+    /// The box's upper right corner, `[x, y]` in mm.
+    pub max: [f64; 2],
+    /// `max[0] - min[0]`: the box's width in mm.
+    pub width: f64,
+    /// `max[1] - min[1]`: the box's height in mm.
+    pub height: f64,
+}
+
+/// What `sketch.drawing_bounds` returns: the box around the drawing's geometry, and the SVG
+/// sheet's box when the file has a sheet.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DrawingBoundsResult {
+    #[serde(flatten)]
+    pub drawing: DrawingBox,
+    /// The SVG's sheet: its viewBox, else its width and height. Left out for a DXF, and for an
+    /// SVG that names no sheet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet: Option<DrawingBox>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 #[cfg(test)]

@@ -125,6 +125,7 @@ mod convexity;
 mod curved;
 mod graph;
 mod qp;
+mod saddle;
 mod scale;
 mod spring;
 
@@ -138,7 +139,15 @@ const OP: &str = "blend::blend_setback";
 
 /// `SM_ERR`.
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::blend_failed(OP, "the setback corner's construction could not continue")
+}
+
+/// A stage of the setback corner that failed with no reason the kernel names (a defect,
+/// [`crate::error::blend::BlendFailure::StageFailed`]): a fill that is not the one its
+/// construction builds. Its origin is the caller's line.
+#[track_caller]
+fn stage_failed() -> SolidError {
+    SolidError::blend(OP, crate::error::blend::BlendFailure::StageFailed)
 }
 
 // ---- the ease of a round into another section before its setback ----------------------
@@ -348,7 +357,7 @@ pub fn ease_surface_of(
 ) -> Result<BSplineSurface> {
     let part = |s: &Surface| -> Result<BSplineSurface> {
         Ok(crate::topology::brep::p3::with_nurb(k, s)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "a round surface's NURB form"))?
             .into_owned())
     };
     let blend = |s: &Surface| matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
@@ -416,7 +425,7 @@ impl EaseSide<'_> {
             Self::Net(b) => Ok(*b),
             Self::Blend(_, s) => match s.into_kind() {
                 SurfaceKind::ProceduralBlend(pb) => Ok(pb.net),
-                _ => Err(SolidError::null_pointer(OP)),
+                _ => Err(SolidError::blend_missing(OP, "the procedural blend's net")),
             },
         }
     }
@@ -792,7 +801,7 @@ impl Refusal {
     /// `SM_SB_FAIL(.., SM_ERR, reason)`.
     fn sm_err(reason: &'static str) -> Self {
         Self {
-            error: sm_err(),
+            error: SolidError::blend_failed(OP, reason),
             reason: Some(reason),
         }
     }
@@ -1259,7 +1268,12 @@ fn round_jets(
     // Copy, then SM_CAST_PTR(SmBSplineSurface, pCopy) (NER): an analytic round's NURB, a
     // procedural blend's net
     let mut s = crate::topology::brep::p3::with_nurb(kernel, round.surface)?
-        .ok_or_else(|| Refusal::from(SolidError::null_pointer(OP)))?
+        .ok_or_else(|| {
+            Refusal::from(SolidError::blend_missing(
+                OP,
+                "the round surface's NURB form",
+            ))
+        })?
         .into_owned();
     let p = s.degree(along);
     let dom = s.natural_uv_domain();
@@ -2829,26 +2843,37 @@ fn fill_hole_with(
             continue;
         }
 
-        // no fold: every patch's normal keeps to one side, and each setback patch's agrees
-        // with its round's side's interior part where they meet
-        for net in &fill_nets {
-            let (_, su, sv) = first(net, 0.5, 0.5)?;
-            let mid = su.cross(sv);
-            for a in 0..=8 {
-                for b in 0..=8 {
-                    let (_, su, sv) = first(net, f64::from(a) / 8.0, f64::from(b) / 8.0)?;
-                    if !(su.cross(sv).dot(mid) > 0.0) {
-                        return Err(Refusal::sm_err("SmBlendSetback: the fill folds"));
-                    }
-                }
+        // no fold, at any convexity mix (owner, 2026-11-13): every patch's normal certified
+        // regular and one-signed against the outward normal of its round (a setback patch:
+        // the round's at its section's middle, the bisector of its faces' outward normals)
+        // or of the corner (an interior part: the faces' outward normals summed), and of one
+        // sign over the whole fill, so that its parts face one way (saddle::certified_side)
+        let mut outward = Vec3::ZERO;
+        for m in 0..n {
+            outward += face_of(m)?.normal;
+        }
+        let outward = outward.unitize()?;
+        let mut facing = 0.0;
+        for (i, net) in fill_nets.iter().enumerate() {
+            let d = if i < n {
+                (face_of(i)?.normal + face_of(i + 1)?.normal).unitize()?
+            } else {
+                outward
+            };
+            let side = saddle::certified_side(net, d)?;
+            if side == 0.0 || (facing != 0.0 && side != facing) {
+                return Err(Refusal::sm_err(
+                    "SmBlendSetback: the fill's normal is not certified regular and to one side of its rounds' (the fill may fold)",
+                ));
             }
+            facing = side;
         }
         for m in 0..n {
-            let (sp, su, sv) = first(el_ref(&fill_nets, m)?, 1.0, 0.25)?;
-            let (qp, qu, qv) = first(el_ref(&fill_nets, n + m)?, 1.0, 0.5)?;
-            if !(su.cross(sv).dot(qu.cross(qv)) > 0.0) || !((sp - qp).length() <= tol) {
+            let (sp, _, _) = first(el_ref(&fill_nets, m)?, 1.0, 0.25)?;
+            let (qp, _, _) = first(el_ref(&fill_nets, n + m)?, 1.0, 0.5)?;
+            if !((sp - qp).length() <= tol) {
                 return Err(Refusal::sm_err(
-                    "SmBlendSetback: the fill folds where a setback patch meets the interior",
+                    "SmBlendSetback: a setback patch does not meet the interior",
                 ));
             }
         }
@@ -2942,6 +2967,97 @@ pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f
         }
     }
     Ok(worst)
+}
+
+/// Not the fork's (owner, 2026-11-13): [`containment`] at a corner of any convexity mix, each
+/// round's convexity read from the fill (its setback patch's end section's middle on the
+/// material's side of its first face: convex). Where every round has one convexity, it is
+/// [`containment`]'s. Else each face is held by the rounds beside it: past its plane on
+/// their side ([`containment`]'s bound) where they agree; where a convex and a concave round
+/// meet on it the fill has no side of it to keep to, and is certified off its kept part
+/// instead (`saddle::clear_of_kept_face`), 0 where it is and `f64::INFINITY` where not. A
+/// corner of mixed convexity beside a curved face is not taken (`f64::INFINITY`): its kept
+/// parts have no test yet.
+///
+/// # Errors
+/// As [`containment`]'s; a stage failure for a fill that is not the setback split's (`2n`
+/// patches of one span), `SM_ERR` for one whose faces meet in no one point.
+pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Result<f64> {
+    let n = fill.round.len();
+    if n < 3 || fill.patches.len() != 2 * n || fill.face.len() != n {
+        return Err(stage_failed());
+    }
+    let mut convex = Vec::new();
+    for m in 0..n {
+        let patch = el_ref(&fill.patches, m)?;
+        let face = el_ref(faces, el(&fill.face, m)?)?;
+        let middle = patch.evaluate_point(Point2::new(0.0, 0.5))?;
+        convex.push(face.distance(middle).0 < 0.0);
+    }
+    let first_convex = el(&convex, 0)?;
+    if convex.iter().all(|&c| c == first_convex) {
+        return containment(k, fill, faces, first_convex, tol);
+    }
+    if faces.iter().any(Face::is_curved) {
+        return Ok(f64::INFINITY);
+    }
+    let vertex = graph::faces_common_point(faces).ok_or_else(sm_err)?;
+    let mut nets = Vec::new();
+    for patch in &fill.patches {
+        nets.push(net_of(patch)?);
+    }
+    let mut worst = f64::NEG_INFINITY;
+    for m in 0..n {
+        let face = el_ref(faces, el(&fill.face, m)?)?;
+        let prev = (m + n - 1).checked_rem(n).ok_or_else(sm_err)?;
+        let (before, after) = (el(&convex, prev)?, el(&convex, m)?);
+        if before == after {
+            let side = if after { 1.0 } else { -1.0 };
+            for patch in &fill.patches {
+                let canonical = patch.canonical()?;
+                let mut hull = f64::NEG_INFINITY;
+                for &pt in &canonical.control_points {
+                    hull = smax(hull, side * (pt - face.point).dot(face.normal));
+                }
+                if hull > tol {
+                    hull = plane_bound(k, &canonical, face, side, tol)?;
+                }
+                worst = smax(worst, hull);
+            }
+        } else if saddle::clear_of_kept_face(k, &nets, m, face, vertex, tol)? {
+            worst = smax(worst, 0.0);
+        } else {
+            return Ok(f64::INFINITY);
+        }
+    }
+    Ok(worst)
+}
+
+/// A one-span patch's homogeneous net (a stage failure for more than one span or a weight
+/// not positive).
+fn net_of(patch: &BSplineSurface) -> Result<Net> {
+    let canonical = patch.canonical()?;
+    if canonical.u_knots.len() != 2 || canonical.v_knots.len() != 2 {
+        return Err(stage_failed());
+    }
+    let rational = canonical.weights.len() == canonical.control_points.len();
+    let mut pts = Vec::new();
+    for (i, &pt) in canonical.control_points.iter().enumerate() {
+        let w = if rational {
+            el(&canonical.weights, i)?
+        } else {
+            1.0
+        };
+        if !(w > 0.0) {
+            return Err(stage_failed());
+        }
+        pts.push([pt.x * w, pt.y * w, pt.z * w, w]);
+    }
+    Ok(Net {
+        p: canonical.u_degree,
+        q: canonical.v_degree,
+        pts,
+    })
 }
 
 /// A certified bound of how far a one-span patch (`canonical`, weights positive) stands past
@@ -3137,6 +3253,34 @@ mod tests {
             EaseRamp { from: 2.0, to: 4.0 },
         ];
         assert!(ease_law_on_span(&ramps, 2.5, 3.0).is_err());
+    }
+
+    /// Two ramps over one span are a typed `Failed`, with the `SM_ERR` status the bare
+    /// status had; a refusal's error carries its reason.
+    #[test]
+    fn two_ramps_over_one_span_are_a_typed_failure() {
+        let ramps = [
+            EaseRamp { from: 0.0, to: 4.0 },
+            EaseRamp { from: 1.0, to: 5.0 },
+        ];
+        let err = ease_law_on_span(&ramps, 2.0, 3.0).unwrap_err();
+        assert!(matches!(
+            err.blend_failure(),
+            Some(crate::error::blend::BlendFailure::Failed(_))
+        ));
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        let refusal = Refusal::sm_err("why");
+        assert_eq!(
+            refusal.error.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Failed("why"))
+        );
+        assert_eq!(
+            crate::error::upstream_status(&refusal.error),
+            Some(crate::error::SM_ERR)
+        );
     }
 
     /// The round of radius r along axis a of the box corner `x, y, z >= 0` over `[s, s + len]`,

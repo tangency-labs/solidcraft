@@ -37,28 +37,27 @@
 //! `Y`, `F` is the integral of its derivative, which lies in that hull wherever it exists,
 //! so the mean-value form `F(y) ∈ F(ỹ) + F′(Y) (y − ỹ)` holds [Neumaier 1990, §2.1]. Taken
 //! over enclosures that hold both forms past a u side, `K(Y)` holds each form's own, so a box
-//! it proves holds a root of whichever is built. At most [`KRAWCZYK_STEPS`] steps run.
+//! it proves holds a root of whichever is built. At most
+//! [`crate::geom::krawczyk::KRAWCZYK_STEPS`] steps run ([`crate::geom::krawczyk::krawczyk`]).
 
 use std::cell::Cell;
 
 use crate::blend::fillet_section::certificate::{
-    curve_derivs_over, inverse4, nurbs_partials_over_box, NurbsCurve,
+    curve_derivs_over, nurbs_partials_over_box, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::station::Nurbs;
 use crate::error::{Result, SolidError};
+use crate::geom::krawczyk::{
+    inverse_of_columns2, inverse_of_columns3, inverse_of_columns4, krawczyk, newton, Linearised,
+    NEWTON_STEPS,
+};
 use crate::geom::vector3d::{sqrt, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::surface::implicit::Implicit;
 use crate::surface::side::BoxSide;
 use crate::surface::surface::{Surface, SurfaceKind};
-
-/// The most Krawczyk steps one meeting gets.
-const KRAWCZYK_STEPS: usize = 8;
-
-/// The most Newton steps for the root a Krawczyk box is centred on.
-const NEWTON_STEPS: usize = 40;
 
 /// The grid each parameter of a net is searched on for Newton's first guess (a guess only:
 /// every meeting is proved by its Krawczyk box).
@@ -792,147 +791,6 @@ fn clamped_and_continuous(knots: &[f64], p: usize) -> bool {
     true
 }
 
-/// The inverse of the 3 × 3 matrix of columns `c`, as rows; `None` where it is singular in
-/// floating point.
-fn inverse3(c: [Vec3; 3]) -> Option<[[f64; 3]; 3]> {
-    let [a, b, d] = c;
-    let det = a.dot(b.cross(d));
-    if !(det.is_finite() && det != 0.0) {
-        return None;
-    }
-    let rows = [b.cross(d), d.cross(a), a.cross(b)].map(|r| [r.x / det, r.y / det, r.z / det]);
-    rows.iter().flatten().all(|x| x.is_finite()).then_some(rows)
-}
-
-/// Krawczyk's test about `mid` with the approximate inverse `c` (rows), `F` enclosed at a
-/// point box by `value` and `F′` over a box by `jacobian` (columns): the box proved to hold
-/// a root (module docs), or `None` where none is within [`KRAWCZYK_STEPS`] steps.
-///
-/// # Errors
-///
-/// Those of `value` and `jacobian` (a cancel).
-fn krawczyk<const N: usize>(
-    mid: [f64; N],
-    c: [[f64; N]; N],
-    value: &dyn Fn([Ivl; N]) -> Result<Option<[Ivl; N]>>,
-    jacobian: &dyn Fn([Ivl; N]) -> Result<Option<[[Ivl; N]; N]>>,
-) -> Result<Option<[Ivl; N]>> {
-    let Some(f) = value(mid.map(Ivl::from))? else {
-        return Ok(None);
-    };
-    let times = |row: &[f64; N], x: &[Ivl; N]| {
-        row.iter()
-            .zip(x)
-            .fold(Ivl::from(0.0), |s, (&r, &v)| s + Ivl::from(r) * v)
-    };
-    let cf: [Ivl; N] = c.map(|row| times(&row, &f));
-    // the first box: twice Newton's step from the middle, and a little more
-    let mut radius = cf.map(|x| 2.0 * x.mag());
-    for (r, m) in radius.iter_mut().zip(&mid) {
-        *r = round_up(*r + 1e-12 * (1.0 + m.abs()));
-    }
-    for _ in 0..KRAWCZYK_STEPS {
-        let mut y = mid.map(Ivl::from);
-        for ((yi, &m), &r) in y.iter_mut().zip(&mid).zip(&radius) {
-            if !r.is_finite() {
-                return Ok(None);
-            }
-            *yi = Ivl::new(m - r, m + r);
-        }
-        let Some(j) = jacobian(y)? else {
-            return Ok(None);
-        };
-        let mut k = y;
-        for (i, ((ki, row), (&m, &cfi))) in
-            k.iter_mut().zip(&c).zip(mid.iter().zip(&cf)).enumerate()
-        {
-            let mut v = Ivl::from(m) - cfi;
-            for (jj, (col, (&yj, &mj))) in j.iter().zip(y.iter().zip(&mid)).enumerate() {
-                // (I − C F′(Y))_ij, formed before it multiplies Y − ỹ
-                let identity = Ivl::from(if i == jj { 1.0 } else { 0.0 });
-                v = v + (identity - times(row, col)) * (yj - Ivl::from(mj));
-            }
-            *ki = v;
-        }
-        let inside = k.iter().zip(&y).all(|(a, b)| a.lo > b.lo && a.hi < b.hi);
-        if inside {
-            let mut out = k;
-            for (o, b) in out.iter_mut().zip(&y) {
-                *o = Ivl::new(o.lo.max(b.lo), o.hi.min(b.hi));
-            }
-            return Ok(Some(out));
-        }
-        for ((r, ki), &m) in radius.iter_mut().zip(&k).zip(&mid) {
-            let reach = (ki.lo - m).abs().max((ki.hi - m).abs());
-            *r = round_up(1.5 * reach.max(*r) + 1e-12 * (1.0 + m.abs()));
-        }
-    }
-    Ok(None)
-}
-
-/// `F` at a point and its columns there, as numbers ([`newton`]).
-type Linearised<const N: usize> = Option<([f64; N], [[f64; N]; N])>;
-
-/// A square matrix's inverse (rows) from its columns, `None` where it is singular.
-type Inverse<const N: usize> = dyn Fn(&[[f64; N]; N]) -> Option<[[f64; N]; N]>;
-
-/// Newton's root of `F` from `start` (`at` gives `F` and its columns there): the root, or
-/// `None` where a step is not defined or the steps do not settle.
-fn newton<const N: usize>(
-    start: [f64; N],
-    at: &dyn Fn([f64; N]) -> Result<Linearised<N>>,
-    inverse: &Inverse<N>,
-) -> Result<Option<[f64; N]>> {
-    let mut y = start;
-    let mut last = f64::INFINITY;
-    for _ in 0..NEWTON_STEPS {
-        let Some((f, j)) = at(y)? else {
-            return Ok(None);
-        };
-        let Some(c) = inverse(&j) else {
-            return Ok(None);
-        };
-        let mut size = 0.0_f64;
-        let mut next = y;
-        for (yi, row) in next.iter_mut().zip(&c) {
-            let step: f64 = row.iter().zip(&f).map(|(r, x)| r * x).sum();
-            if !step.is_finite() {
-                return Ok(None);
-            }
-            size = size.max(step.abs());
-            *yi -= step;
-        }
-        // settled: the step no longer shrinks, at the rounding of `F` wherever the part
-        // lies (no stop relative to `y`, which a part far from the origin never meets)
-        if size == 0.0 || size >= last {
-            return Ok(Some(y));
-        }
-        y = next;
-        last = size;
-    }
-    // a start only: Krawczyk's box decides whether a root is near
-    Ok(y.iter().all(|x| x.is_finite()).then_some(y))
-}
-
-/// The inverse (rows) of a 3 × 3 matrix given by columns.
-fn inverse_of_columns3(j: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
-    inverse3(j.map(|[x, y, z]| Vec3::new(x, y, z)))
-}
-
-/// The inverse (rows) of a 4 × 4 matrix given by columns.
-fn inverse_of_columns4(j: &[[f64; 4]; 4]) -> Option<[[f64; 4]; 4]> {
-    let mut rows = [[0.0_f64; 4]; 4];
-    for (jj, col) in j.iter().enumerate() {
-        for (row, &x) in rows.iter_mut().zip(col) {
-            if let Some(r) = row.get_mut(jj) {
-                *r = x;
-            }
-        }
-    }
-    let inv = inverse4(&rows).ok()?;
-    inv.iter().flatten().all(|x| x.is_finite()).then_some(inv)
-}
-
 /// A line `x0 + τ u` (`u` a unit vector, both enclosed over a piece of an edge's
 /// parameters; `mid` the same at the piece's middle, as numbers) meeting the net: the
 /// enclosure of `τ` at a meeting proved for every parameter of the piece, by Krawczyk's
@@ -1111,17 +969,6 @@ fn quadric_value_and_gradient(q: &Implicit, x: I3) -> Option<(Ivl, I3)> {
         }
         _ => None,
     }
-}
-
-/// The inverse (rows) of a 2 × 2 matrix given by columns.
-fn inverse_of_columns2(j: &[[f64; 2]; 2]) -> Option<[[f64; 2]; 2]> {
-    let [[a, c], [b, d]] = *j;
-    let det = a * d - b * c;
-    if !(det.is_finite() && det != 0.0) {
-        return None;
-    }
-    let inv = [[d / det, -b / det], [-c / det, a / det]];
-    inv.iter().flatten().all(|x| x.is_finite()).then_some(inv)
 }
 
 /// Where the plane `(origin, normal)`, the quadric `q` and the net meet, near the vertex

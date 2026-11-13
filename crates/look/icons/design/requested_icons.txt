@@ -68,6 +68,7 @@ compute	false
 cone	false
 configuration_table	false
 conic	false
+constrain	false
 constrainer	false
 construction	false
 construction_line	false
@@ -173,6 +174,10 @@ open	false
 orbit	false
 origin	false
 pan	false
+panel_dock_bottom	false
+panel_dock_left	false
+panel_dock_right	false
+panel_float	false
 params	false
 paste	false
 path_flange	false

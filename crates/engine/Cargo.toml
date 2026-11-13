@@ -9,7 +9,8 @@ license.workspace = true
 workspace = true
 
 [features]
-default = []
+default = ["plugins"]
+plugins = ["dep:craft-plugin-wasm"]
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
 bundled-render-library = []
 raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
@@ -35,6 +36,7 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+craft-plugin = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
@@ -51,6 +53,7 @@ solidcraft-profile = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 toml_edit = "0.25"
 schemars = { workspace = true }
 serde_path_to_error = { workspace = true }
@@ -72,3 +75,10 @@ required-features = ["raytrace-cpu"]
 [[example]]
 name = "wood_texture_workflow"
 required-features = ["raytrace-cpu"]
+
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
+# Component-model sandbox; no WASI, cache deserialization, network or process imports.
+craft-plugin-wasm = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wat = "1"

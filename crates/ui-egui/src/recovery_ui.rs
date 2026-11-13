@@ -28,6 +28,12 @@ impl Autosaves {
     pub fn save(&mut self, session: &Session) -> EngineResult<bool> {
         save_slot(&self.dir, &mut self.active, session, true, true)
     }
+
+    /// Save a background tab's design now, under that tab's own autosaver. A recovered design
+    /// that lands behind keeps an entry of its own before the recovery entry it came from goes.
+    pub(crate) fn save_background(&mut self, slot: &mut crate::documents::DocSlot) -> EngineResult<bool> {
+        save_slot(&self.dir, &mut slot.autosave, &slot.session, true, true)
+    }
 }
 
 /// Bring one tab's autosave up to date. `due`: its turn has come. `wait`: write on this thread
@@ -507,6 +513,21 @@ mod tests {
         assert!(entries(&dir).is_empty());
         drop(app);
         assert!(recovery::orphans(&dir).is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Saving a background tab's design writes it under that tab's own autosaver: a recovered
+    /// design that lands behind keeps an entry of its own before the old recovery entry goes.
+    #[test]
+    fn a_background_tabs_design_saves_under_its_own_autosaver() {
+        let (mut app, dir) = app("save-background", Duration::ZERO);
+        edit(&mut app);
+        documents::new_tab(&mut app);
+        let uid = app.docs.background().next().map(|s| s.uid).expect("a background tab");
+        let (autosave, docs) = (&mut app.autosave, &mut app.docs);
+        let slot = docs.background_slot_mut(uid).expect("the background slot");
+        assert!(autosave.as_mut().expect("autosave").save_background(slot).unwrap(), "it wrote the design");
+        assert_eq!(entries(&dir).len(), 1, "the background design has an entry of its own");
         fs::remove_dir_all(dir).unwrap();
     }
 

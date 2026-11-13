@@ -825,7 +825,7 @@
 {"case":"guard_op1_span_u_1e-8","deferred":null,"error":null,"ints":{"labels":[0,1,106,3,106,3,106,3]},"topology":null,"values":{"values":[0.0,1.0,0.3,8e-9,0.0,0.0,0.6,2.9999999999999987e-9]}}
 {"case":"guard_op1_span_uv_1e-8","deferred":null,"error":null,"ints":{"labels":[0,2,106,3,107,1,106,4,106,4,107,1,106,5]},"topology":null,"values":{"values":[0.0,0.9117647058823531,0.19999999999999998,3e-9,0.0,0.0,0.5735294117647058,3.4411764705882343e-9,0.9117647058823531,1.0,0.5735294117647058,3.4411764705882343e-9,0.0,0.0,0.30000000000000004,4.000000000000001e-9]}}
 {"case":"guard_op1_span_v_1e-8","deferred":null,"error":null,"ints":{"labels":[0,1,106,3,106,3,106,3]},"topology":null,"values":{"values":[0.0,1.0,0.2,3e-9,0.0,0.0,0.7,6e-9]}}
-{"case":"guard_op2_circle_radius_-0.1","deferred":null,"error":null,"ints":{"labels":[0,1,106,3,107,1,100,-1]},"topology":null,"values":{"values":[0.0,360.0,0.4,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"guard_op2_circle_radius_-0.1","deferred":null,"error":null,"ints":{"labels":{"blocks":[[1629,27501]],"n":32}},"topology":null,"values":{"values":{"blocks":[[369.4,369.4,12432.7]],"n":40}}}
 {"case":"guard_op2_circle_radius_1e-12","deferred":null,"error":null,"ints":{"labels":[0,1,106,3,107,1,100,-1]},"topology":null,"values":{"values":[0.0,360.0,0.5,9.999778782798785e-13,0.0,0.0,0.0,0.0]}}
 {"case":"guard_op2_circle_radius_1e-13","deferred":null,"error":null,"ints":{"labels":[0,1,106,3,107,1,100,-1]},"topology":null,"values":{"values":[0.0,360.0,0.5,1.000310945187266e-13,0.0,0.0,0.0,0.0]}}
 {"case":"guard_op2_circle_radius_1e-300","deferred":null,"error":null,"ints":{"labels":[0,1,106,3,107,1,100,-1]},"topology":null,"values":{"values":[0.0,360.0,0.5,0.0,0.0,0.0,0.0,0.0]}}

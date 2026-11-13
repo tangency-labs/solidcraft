@@ -97,16 +97,17 @@
 //!   ([`ProtoBrep::face_coincident_edge`], `SmTools::FindCoincidentEdge`) as the
 //!   definition's edge there instead of making a second one (the SMLib fork's
 //!   tangency-labs/smlib@81cd61a).
-//! - **Opt-in fix (WR-619, #1794; own design).** With `Kernel::fixes.imprint_skips_collapsed_definition`,
+//! - **Not upstream (WR-619, #1794; own design).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] makes no edge for a definition whose ends
 //!   are one proto vertex and one vertex in each B-rep, along a speck within that vertex's
 //!   tolerance and the definition's own, when another definition of its proto edge is
 //!   imprinted between two distinct vertices in each B-rep (`collapsed_beside_sibling`);
 //!   upstream makes a closed edge on that vertex.
-//! - **Opt-in fixes (WR-452, WR-453, #435, #410).** With `Kernel::fixes.imprint_trims_edge_to_proto_vertex` and
-//!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`, [`ProtoTopologyManager::imprint_edge_definition`]
-//!   first fits each end of the definition's interval to its proto vertex (`imprint_ends`: the SMLib
-//!   fork's thread-groove fixes, tangency-labs/smlib b43876f, a8caccd).
+//! - **Not upstream: ends fitted to proto vertices (WR-452, WR-453, #435, #410).**
+//!   [`ProtoTopologyManager::imprint_edge_definition`] first fits each end of the definition's
+//!   interval to its proto vertex where `imprint_ends`'s checks pass (the SMLib fork's
+//!   thread-groove fixes, tangency-labs/smlib b43876f; the continuation a8caccd is opt-in,
+//!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`).
 //! - **Not upstream: one trim interval** (WR-767, tangency-labs/solidcore#3214).
 //!   [`ProtoTopologyManager::create_proto_edge`] trims the 3D curve and its uv curves to the
 //!   one interval none of their trims snaps (`exact_pieces::common_trim_interval`); upstream
@@ -919,7 +920,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         (result, edited)
     }
 
-    /// Not upstream (WR-619, opt-in `fixes.imprint_skips_collapsed_definition`): when the
+    /// Not upstream (WR-619): when the
     /// definition `ed`, with proto vertices `pvs` and final vertices `vertices` (start, end in
     /// B-reps 1 and 2), is a collapsed speck, returns each B-rep vertex's maximum sampled
     /// distance to the speck and the speck's start and end points. All must hold, else `None`:
@@ -1022,37 +1023,31 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let brep1 = self.which_brep(1);
         let brep2 = self.which_brep(2);
 
-        // Not upstream (WR-619, #1794; opt-in, own design): a definition that would be a closed
+        // Not upstream (WR-619, #1794; own design): a definition that would be a closed
         // edge on one vertex in each B-rep along a speck within that vertex's tolerance and its
         // own, beside a sibling definition imprinted between distinct vertices, makes no edge;
         // each vertex's tolerance covers the skipped speck's span in `ImprintIntersections`.
-        if k.fixes.imprint_skips_collapsed_definition {
-            if let Some(([gap1, gap2], p0, p1)) = self.collapsed_beside_sibling(
-                k,
-                &*brep,
-                ed,
-                (start_pv, end_pv),
-                [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
-            )? {
-                self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
-                self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
-                return Ok(());
-            }
+        if let Some(([gap1, gap2], p0, p1)) = self.collapsed_beside_sibling(
+            k,
+            &*brep,
+            ed,
+            (start_pv, end_pv),
+            [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
+        )? {
+            self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
+            self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
+            return Ok(());
         }
 
-        // not upstream (WR-452, WR-453, #435, #410; opt-in): fit the ends to the proto vertices
-        if k.fixes.imprint_trims_edge_to_proto_vertex
-            || k.fixes.imprint_extends_edge_to_proto_vertex
-        {
-            self.fit_edge_def_ends_to_proto_vertices(
-                k,
-                brep,
-                ed,
-                start_pv,
-                end_pv,
-                [(start_vtx1, start_vtx2), (end_vtx1, end_vtx2)],
-            )?;
-        }
+        // not upstream (WR-452, WR-453, #435, #410): fit the ends to the proto vertices
+        self.fit_edge_def_ends_to_proto_vertices(
+            k,
+            brep,
+            ed,
+            start_pv,
+            end_pv,
+            [(start_vtx1, start_vtx2), (end_vtx1, end_vtx2)],
+        )?;
 
         let d = self.ed_ref(ed)?;
         let type1 = d.src_topo_type(1);

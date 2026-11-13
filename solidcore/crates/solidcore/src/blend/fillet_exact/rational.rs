@@ -74,8 +74,9 @@ const OP: &str = "blend::fillet_exact::rational";
 /// The most spine segments a conic is cut into before the weights are made positive.
 pub const MAX_SPINE_SEGMENTS: f64 = 1.0e5;
 
-fn sm_err() -> SolidError {
-    SolidError::blend_failed(OP, "the rational fillet section could not be built")
+/// `SM_ERR`: the rational fillet section could not be built, as `what` says.
+fn sm_err(what: &'static str) -> SolidError {
+    SolidError::blend_failed(OP, what)
 }
 
 /// `sm_Poly`: a polynomial by its Bernstein coefficients on `[0, 1]`.
@@ -448,15 +449,34 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
     let b1 = g.dot(u);
     let b2 = g.dot(v);
     let c2 = quad(point, point) + 2.0 * s_bv.dot(point) + dc;
-    // principal axes of A2
-    let tr = a11 + a22;
-    let det = a11 * a22 - a12 * a12;
-    let disc = max2(0.0, 0.25 * tr * tr - det).sqrt();
-    let adl = [0.5 * tr + disc, 0.5 * tr - disc];
+    // principal axes of A2: the eigenvalues m +- hypot(h, a12), h = (a11 - a22) / 2, and
+    // each axis in the form whose terms add (not upstream, which takes the eigenvalues from
+    // sqrt(tr^2 / 4 - det) and the axes from (a12, lambda - a11): both cancel as the section
+    // nears a circle, and the conic then misses the quadric by about eps / a^2,
+    // tangency-labs/solidcraft#15037). The axes are those upstream's give in exact
+    // arithmetic, signs included: (a12, lambda_0 - a11) = (a12, r - h) is a12 / |a12| times
+    // (r + h, a12) scaled by |a12| / (r + h), and (a12, lambda_1 - a11) = (a12, -(r + h)) is
+    // a12 / |a12| times (r - h, -a12) scaled by |a12| / (r - h).
+    let m = 0.5 * (a11 + a22);
+    let h = 0.5 * (a11 - a22);
+    let r = h.hypot(a12);
+    let adl = [m + r, m - r];
+    let sg = if a12 < 0.0 { -1.0 } else { 1.0 };
+    let axes = [
+        if h >= 0.0 {
+            [sg * (r + h), sg * a12]
+        } else {
+            [a12, r - h]
+        },
+        if h <= 0.0 {
+            [sg * (r - h), -sg * a12]
+        } else {
+            [a12, -(r + h)]
+        },
+    ];
     let mut ade = [[0.0; 2]; 2];
-    for (kk, (row, &lk)) in ade.iter_mut().zip(adl.iter()).enumerate() {
-        let mut ex = a12;
-        let mut ey = lk - a11;
+    for (kk, (row, &[x, y])) in ade.iter_mut().zip(axes.iter()).enumerate() {
+        let (mut ex, mut ey) = (x, y);
         if ex.abs() + ey.abs() < EFF_ZERO * (a11.abs() + a22.abs() + 1.0) {
             ex = if (kk == 0) == (a11 >= a22) { 1.0 } else { 0.0 };
             ey = 1.0 - ex;
@@ -471,7 +491,7 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
     let dscale = max2(l0.abs(), l1.abs());
     if dscale <= 0.0 {
         // the plane meets the quadric in no conic
-        return Err(sm_err());
+        return Err(sm_err("the plane meets the quadric in no conic"));
     }
     let pick = |a: [f64; 2], k: usize| if k == 0 { a[0] } else { a[1] };
     let pick_v = |a: [Vec3; 2], k: usize| if k == 0 { a[0] } else { a[1] };
@@ -482,7 +502,7 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
             let o = 1 - kk;
             if pick(beta, kk).abs() <= EFF_ZERO * dscale {
                 // the plane meets the quadric in lines
-                return Err(sm_err());
+                return Err(sm_err("the plane meets the quadric in lines"));
             }
             // s = -(L t^2 + 2 beta_o t + c2) / (2 beta_k): about t0 = -beta_o / L
             let (lo, bo, bk) = (pick(adl, o), pick(beta, o), pick(beta, kk));
@@ -518,7 +538,7 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
         )
     } else {
         // the plane misses the quadric
-        return Err(sm_err());
+        return Err(sm_err("the plane misses the quadric"));
     };
     Ok(Conic {
         kind,
@@ -718,7 +738,9 @@ fn nodal_quartic(
     let g11 = g1x * g1x + g1y * g1y + g1z * g1z;
     if g11 <= 0.0 {
         // no normal at the node
-        return Err(sm_err());
+        return Err(sm_err(
+            "the quadrics' intersection has no normal at the node",
+        ));
     }
     let kk = (g1x * g2x + g1y * g2y + g1z * g2z) / g11;
     let mut c = [[0.0; 3]; 3];
@@ -746,7 +768,7 @@ fn nodal_quartic(
     let d = c12 * c12 - c11 * c22;
     if d < 0.0 || (c11 == 0.0 && c22 == 0.0) {
         // the node is isolated
-        return Err(sm_err());
+        return Err(sm_err("the node of the quadrics' intersection is isolated"));
     }
     let mut branch = [Vec3::ZERO; 2];
     for (kb, bk) in branch.iter_mut().enumerate() {
@@ -764,7 +786,9 @@ fn nodal_quartic(
         cone: c,
         node,
         gradient: Vec3::new(g1x, g1y, g1z),
-        ray: *branch.get(base).ok_or_else(sm_err)?,
+        ray: *branch
+            .get(base)
+            .ok_or_else(|| sm_err("the base branch is not one of the node's two branches"))?,
         from,
         to,
         branch,
@@ -838,9 +862,17 @@ pub fn calc_rational_spine_fillet_geom(
             SolutionRequested::Single,
             &GlobalPointSolveOptions::<crate::topology::ObjectHandle>::default(),
         )?;
-        let t = sols.get(0).ok_or_else(sm_err)?.start.param(0)?;
+        let t = sols
+            .get(0)
+            .ok_or_else(|| {
+                sm_err("the trace's first point has no closest point on the edge's curve")
+            })?
+            .start
+            .param(0)?;
         let pv = curve.evaluate(k, t, 1, true, false)?;
-        pv.get(1).copied().ok_or_else(sm_err)?
+        pv.get(1).copied().ok_or_else(|| {
+            sm_err("the edge's curve has no first derivative at the trace's first point")
+        })?
     };
 
     let s = ops.solver();
@@ -911,7 +943,7 @@ pub fn calc_rational_spine_fillet_geom(
         };
         let nf = (span.abs() / dmax).ceil();
         if !nf.is_finite() || nf > MAX_SPINE_SEGMENTS {
-            return Err(sm_err());
+            return Err(sm_err("the spine needs too many segments"));
         }
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let mut n = nf as usize;
@@ -937,7 +969,7 @@ pub fn calc_rational_spine_fillet_geom(
         let to_node = to_pt.length() <= tol;
         if from_node && to_node {
             // the trace starts and ends at the node
-            return Err(sm_err());
+            return Err(sm_err("the trace starts and ends at the node"));
         }
         let mut arc_q = nodal_quartic(&o0, &o1, blend.point, from_pt, to_pt, 0)?;
         // the arc from start to end that keeps off the node: G (g1.v) is not zero inside
@@ -948,7 +980,10 @@ pub fn calc_rational_spine_fillet_geom(
             let end_branch = cand / 2;
             let sign = if cand % 2 == 0 { 1.0 } else { -1.0 };
             cand += 1;
-            let eb = *arc_q.branch.get(end_branch).ok_or_else(sm_err)?;
+            let eb = *arc_q
+                .branch
+                .get(end_branch)
+                .ok_or_else(|| sm_err("the end branch is not one of the node's two branches"))?;
             let from = if from_node { eb } else { from_pt } * sign;
             let to = if to_node { eb } else { to_pt };
             if !from_node && !to_node && end_branch == 1 {
@@ -979,7 +1014,9 @@ pub fn calc_rational_spine_fillet_geom(
         }
         if !found {
             // the quartic's arc between the trace's ends runs through its node
-            return Err(sm_err());
+            return Err(sm_err(
+                "the quartic's arc between the trace's ends runs through its node",
+            ));
         }
         // s runs from the trace's first point to its last
         let mut s0 = 0.0;
@@ -1044,7 +1081,7 @@ fn rational_spine_parts(
             let (w0, wd) = (at(&sg.w, 0), at(&sg.w, d));
             if !positive(w0) || !positive(wd) {
                 // a spine segment's end weight is not positive
-                return Err(sm_err());
+                return Err(sm_err("a spine segment's end weight is not positive"));
             }
             let c = (w0 / wd).powf(1.0 / d as f64);
             let mut ci = prev / w0;
@@ -1110,7 +1147,7 @@ fn rational_spine_parts(
             if !all_positive {
                 if depth >= 6 {
                     // the round's weights do not keep positive
-                    return Err(sm_err());
+                    return Err(sm_err("the round's weights do not keep positive"));
                 }
                 let mut l = Segment::default();
                 let mut rr = Segment::default();
@@ -1151,7 +1188,9 @@ fn rational_spine_parts(
     let nv = rows_w.first().map_or(0, Vec::len);
     let nseg = rows_w.len();
     if nv < 2 || nseg == 0 || deg == 0 {
-        return Err(sm_err());
+        return Err(sm_err(
+            "the round has too few section points, no spine segments or no degree",
+        ));
     }
     let nu = nseg * deg + 1;
     let mut cps = vec![Point3::ZERO; nu * nv];
@@ -1202,7 +1241,7 @@ fn rational_spine_parts(
         }
         if !positive(wmin) || wmax > 1e4 * wmin {
             // the round's weights range too far for a NURBS
-            return Err(sm_err());
+            return Err(sm_err("the round's weights range too far for a NURBS"));
         }
         let sc = 1.0 / (wmin * wmax).sqrt();
         for w in &mut wts {
@@ -1227,7 +1266,7 @@ fn rational_spine_parts(
     // the round is the ball's: its rails on their faces, every point at r from the spine
     for (kk, sd) in done.iter().enumerate() {
         let (Some(&ua), Some(&ub)) = (u_knots.get(kk), u_knots.get(kk + 1)) else {
-            return Err(sm_err());
+            return Err(sm_err("a spine segment has no knot span in the round"));
         };
         for a in 0..=4 {
             let t = f64::from(a) / 4.0;
@@ -1246,7 +1285,7 @@ fn rational_spine_parts(
                 };
                 if off > tol || on_face > tol {
                     // the round built is not the ball's
-                    return Err(sm_err());
+                    return Err(sm_err("the round built is not the ball's"));
                 }
             }
         }
@@ -1266,7 +1305,9 @@ fn rational_spine_parts(
         *slot = Some(c.natural_interval());
         rails.push(c);
     }
-    let [rail0, rail1]: [Curve; 2] = rails.try_into().map_err(|_| sm_err())?;
+    let [rail0, rail1]: [Curve; 2] = rails
+        .try_into()
+        .map_err(|_| sm_err("the round's iso-curves do not give two rails"))?;
     let spine = {
         let sdeg = done.first().map_or(0, |d| degree(&d.w));
         let mut sp: Vec<Point3> = Vec::new();
@@ -1379,6 +1420,42 @@ mod tests {
             let p = conic_point(&kc, t);
             assert!((conic_param(&kc, p) - t.sin().atan2(t.cos())).abs() < 1e-12);
         }
+    }
+
+    /// A plane that meets the quadric in no conic says how it fails, with status `SM_ERR`.
+    #[test]
+    fn a_plane_missing_the_quadric_or_meeting_it_in_lines_says_so() {
+        let quadric = |kind: QuadricKind| BlendQuadric {
+            kind,
+            point: Point3::ZERO,
+            dir: Vec3::new(0.0, 0.0, 1.0),
+            radius: 4.0,
+            angle: 0.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let missed = plane_section(
+            Point3::new(0.0, 0.0, 10.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            &quadric(QuadricKind::Sphere),
+        )
+        .unwrap_err();
+        assert_eq!(
+            missed,
+            SolidError::blend_failed(OP, "the plane misses the quadric")
+        );
+        assert_eq!(missed.sm_status(), Some(crate::error::SM_ERR));
+        // a plane along the cylinder's axis, outside it
+        let lines = plane_section(
+            Point3::new(10.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            &quadric(QuadricKind::Cylinder),
+        )
+        .unwrap_err();
+        assert_eq!(
+            lines.to_string(),
+            "blend::fillet_exact::rational: the plane meets the quadric in lines"
+        );
     }
 
     /// The original nodal pair satisfies both offset equations, including its last end.
