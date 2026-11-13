@@ -1286,6 +1286,11 @@ pub enum FeatureKind {
         /// The profile point that sits on the line.
         #[serde(default, skip_serializing_if = "crate::frame::Anchor::is_origin")]
         anchor: crate::frame::Anchor,
+        /// The profile point that sits on each line, [x, y] from the profile's own origin
+        /// (`frame::Profile::origin`). Some: takes precedence over `anchor`; it stays on the line
+        /// when the profile's size changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        locate: Option<[f64; 2]>,
         /// How far the profile turns about the line (see `frame::member_axes`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Rotation")]

@@ -43,7 +43,8 @@
 //! moved onto it. Each keeps the kind of its status, as before the record, and reads as
 //! neither a defect nor a refusal ([`BlendFailure::is_phrase`]); its phrase stays in its
 //! message. They go class by class: a site that has a finer cause moves to it, and one that
-//! has none to [`BlendFailure::StageFailed`], built on purpose.
+//! has none to [`BlendFailure::StageFailed`], built on purpose. A test counts the library
+//! sites that build a phrase cause, per file, and lets the count only fall.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No cause
 //! names an entity of its own: a failure is at the entity the site it replaces named

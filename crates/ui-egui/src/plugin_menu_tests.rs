@@ -56,6 +56,45 @@ fn selections_targets_and_nested_objects_are_not_guessed() {
 }
 
 #[test]
+fn constraints_the_dialog_cannot_check_are_not_guessed() {
+    let one = |property: Value| form(&json!({"type":"object","properties":{"p":property}}));
+    for property in [
+        json!({"type":"string","pattern":"^[A-Z]+$"}),
+        json!({"type":"string","contentEncoding":"base64"}),
+        json!({"type":"number","minimum":"5"}),
+        json!({"type":"number","multipleOf":0}),
+        json!({"type":"number","minimum":5,"maximum":1}),
+        json!({"type":"integer","multipleOf":2}),
+        json!({"type":"string","maxLength":-1}),
+        json!({"type":"boolean","readOnly":true}),
+    ] {
+        assert_eq!(one(property.clone()), None, "{property}");
+    }
+    assert!(one(json!({"type":"string","format":"email","examples":["a@b.c"]})).is_some(), "annotations are fine");
+    assert_eq!(form(&json!({"type":"object","required":["key"]})), None, "a required key with no field to fill it");
+    assert_eq!(form(&json!({"type":"object","required":[]})), Some(Vec::new()));
+}
+
+#[test]
+fn integer_bounds_apply_every_form_and_refuse_what_does_not_fit_i64() {
+    let bounds = |property: Value| {
+        form(&json!({"type":"object","properties":{"n":property}})).map(|f| match &f[0].0.kind {
+            Kind::Integer { min, max, .. } => (*min, *max),
+            other => panic!("{other:?}"),
+        })
+    };
+    assert_eq!(bounds(json!({"type":"integer","minimum":0,"exclusiveMinimum":true})), Some((Some(1), None)), "draft-4 boolean");
+    assert_eq!(bounds(json!({"type":"integer","maximum":10,"exclusiveMaximum":true})), Some((None, Some(9))));
+    assert_eq!(bounds(json!({"type":"integer","minimum":3,"exclusiveMinimum":5})), Some((Some(6), None)), "both apply");
+    assert_eq!(bounds(json!({"type":"integer","minimum":2.2,"exclusiveMaximum":5.5})), Some((Some(3), Some(5))));
+    assert_eq!(bounds(json!({"type":"integer","exclusiveMinimum":1e30})), None, "outside i64");
+    assert_eq!(bounds(json!({"type":"integer","maximum":-1e30})), None);
+    assert_eq!(bounds(json!({"type":"integer","exclusiveMaximum":-9223372036854775808.0_f64})), None, "no i64 below the lowest");
+    assert_eq!(bounds(json!({"type":"integer","minimum":9223372036854775807_i64})), None, "rounds to 2^63, past i64");
+    assert_eq!(bounds(json!({"type":"integer","minimum":5,"maximum":4})), None, "no value fits");
+}
+
+#[test]
 fn run_waits_for_required_fields_and_valid_values() {
     let schema = json!({"type":"object","required":["teeth","profile","label","bore"],"properties":{
         "teeth":{"type":"integer","minimum":6},
@@ -124,6 +163,20 @@ fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
     assert_eq!(label, "tools plugin");
     let labels: Vec<&str> = sub.iter().map(|r| if let FileRow::Item(i) = r { i.label.as_str() } else { "" }).collect();
     assert_eq!(labels, ["measure…", "tidy…"]);
+}
+
+/// A narrow app bar puts the same rows in the File menu, under `plugins:`, and they act the same.
+#[test]
+fn the_file_submenu_holds_the_same_rows_and_opens_the_same_dialog() {
+    use crate::app_bar::FileRow;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![listed("gears", vec![entry("spur", "edit", json!([]))])];
+    let FileRow::Sub { label, rows } = file_submenu(&app) else { panic!("a submenu") };
+    assert_eq!(label, app.tr("ui.plugins"));
+    let ids: Vec<&str> = rows.iter().filter_map(|r| if let FileRow::Item(i) = r { Some(i.id.as_str()) } else { None }).collect();
+    assert_eq!(ids, ["plugins:install", "plugins:entry:0:0"]);
+    choose(&mut app, "entry:0:0");
+    assert_eq!(app.plugin_menu.dialog.as_ref().map(|d| d.entry.as_str()), Some("spur"));
 }
 
 #[test]
@@ -205,6 +258,47 @@ mod native {
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.as_ref(), before.as_ref(), "undo takes back the whole run");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_run_is_for_the_design_its_dialog_opened_on() {
+        let root = package("tabs");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        open_entry(&mut h.app, 0, 0);
+        let first = h.app.session.uid;
+        // Another tab, then Run: refused at once, nothing queued.
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        assert_ne!(h.app.session.uid, first);
+        assert_eq!(run(&mut h.app), Err(h.app.tr("ui.plugin_dialog_other_design").to_string()));
+        assert!(h.app.control_held.is_empty());
+        // Back on its design it runs; a switch while the request waits in the queue refuses it.
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.session.uid, first);
+        run(&mut h.app).unwrap();
+        crate::documents::switch(&mut h.app, 1);
+        let other = h.app.session.doc.clone();
+        settle(&mut h);
+        let error = h.app.plugin_menu.dialog.as_ref().and_then(|d| d.error.clone()).expect("refused in the dialog");
+        assert!(error.contains(h.app.tr("ui.plugin_dialog_other_design")), "{error}");
+        assert!(std::sync::Arc::ptr_eq(&other, &h.app.session.doc), "the other design is untouched");
+        crate::documents::switch(&mut h.app, 0);
+        assert!(h.app.session.undo.is_empty(), "nor is its own");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_explicitly_inspected_package_wins_over_an_installed_one_with_its_id() {
+        let installed = package("installed");
+        let inspected = package("inspected");
+        let mut h = crate::scenario::Harness::new();
+        let path = inspected.join("boxes").to_string_lossy().into_owned();
+        h.app.session.plugin_state.packages.insert("boxes".into(), path.clone());
+        let listed = list(&h.app, Some(&installed));
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path, path);
+        let _ = std::fs::remove_dir_all(installed);
+        let _ = std::fs::remove_dir_all(inspected);
     }
 
     #[test]

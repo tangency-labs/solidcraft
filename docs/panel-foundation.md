@@ -329,13 +329,16 @@ The standalone Assistant window keeps its native host and polls the existing
 Assistant service. The shared host keeps the same conversation and backend while
 the Assistant panel is shown, hidden or moved.
 
-The default adapter truthfully advertises no native windows. Actual Window
-placement needs the native sibling's monitor/DPI, focus and close/redock services.
+On desktop, **Pop out to window** moves a shared panel into a separate OS window.
+Closing the OS window returns the panel through its saved dock placement. The
+controller and document stay with the panel. The desktop adapter remembers the
+panel's window size and monitor for the current app session and checks that the
+OS created the window before presenting content. On the web, the same action
+places the panel in the shared Floating zone.
 The renderer resolves surface intent through the shared Container, raising its
 fill alpha when canonical text needs more contrast. Captured `paint_alpha` and
 `contrast` report the effective paint and any readable fallback separately from
 declarative intent. Input and occlusion remain reserved regardless of alpha.
-General panel pop-out and native monitor and DPI handling remain roadmap work.
 
 ### Keyboard, accessibility and motion
 

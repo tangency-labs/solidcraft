@@ -5,7 +5,7 @@
 use serde_json::json;
 
 use crate::SolveApp;
-use crate::browser::{answer_capture, apply_occurrence_move, occurrence_origin, revert_occurrence_dialog};
+use crate::browser::{answer_capture, apply_occurrence_move, occurrence_centre, occurrence_origin, revert_occurrence_dialog};
 use crate::ui_kit;
 
 /// Move/Copy of an occurrence: offsets and a rotation about Z, pending until Capture Position.
@@ -29,11 +29,13 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let ctx = ui.ctx().clone();
     if m.pivot.is_none() {
-        m.pivot = if m.path.is_empty() {
-            occurrence_origin(app, m.occurrence)
-        } else {
-            app.session.occurrence_placement(&m.path).ok().map(|p| solidcraft_engine::doc::apply_point(&p.world, solidcore_record::Vec3::ZERO))
-        };
+        m.pivot = occurrence_centre(app, &m).or_else(|| {
+            if m.path.is_empty() {
+                occurrence_origin(app, m.occurrence)
+            } else {
+                app.session.occurrence_placement(&m.path).ok().map(|p| solidcraft_engine::doc::apply_point(&p.world, solidcore_record::Vec3::ZERO))
+            }
+        });
     }
     let name = app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.name.clone()).unwrap_or_default();
     let before = (m.translate, m.angles);

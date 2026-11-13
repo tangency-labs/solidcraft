@@ -329,6 +329,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_section(ui, "panels", app.tr("prefs.layout_page.panels"), |ui| {
             layout_check(
                 ui,
+                app.tr("prefs.live_panel_drag_preview"),
+                app.tr("prefs.live_panel_drag_preview_help"),
+                &mut app.preferences.live_panel_drag_preview,
+                "live_panel_drag_preview",
+            );
+            layout_check(
+                ui,
                 app.tr("prefs.history_in_browser"),
                 app.tr("prefs.history_in_browser_note"),
                 &mut app.preferences.history_in_browser,

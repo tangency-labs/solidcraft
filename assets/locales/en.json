@@ -5984,7 +5984,7 @@
   "ui.panel_host.menu": "Panel actions",
   "ui.panel_host.move": "Move to",
   "ui.panel_host.overflow": "More panels",
-  "ui.panel_host.popout": "Open in a window",
+  "ui.panel_host.popout": "Pop out to window",
   "ui.panel_host.resize": "Resize panel",
   "ui.panel_host.right": "Right",
   "ui.panel_host.rule.availability": "This panel is unavailable.",

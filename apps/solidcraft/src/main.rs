@@ -338,6 +338,27 @@ impl eframe::App for App {
             self.setup.ui(ui);
             return;
         }
+        if let Some(window) = frame.winit_window() {
+            self.solve.refresh_panel_monitors(|| {
+                let primary = window.primary_monitor();
+                window
+                    .available_monitors()
+                    .map(|monitor| {
+                        let position = monitor.position();
+                        let size = monitor.size();
+                        solidcraft_ui_egui::panel_runtime::NativeMonitor {
+                            name: monitor.name(),
+                            bounds: egui::Rect::from_min_size(
+                                egui::pos2(position.x as f32, position.y as f32),
+                                egui::vec2(size.width as f32, size.height as f32),
+                            ),
+                            scale: monitor.scale_factor() as f32,
+                            primary: primary.as_ref() == Some(&monitor),
+                        }
+                    })
+                    .collect()
+            });
+        }
         content_ui(&mut self.solve, ui);
         // After the frame's UI, so a setting changed in it (Preferences' OK) is written now.
         let now = std::time::Instant::now();

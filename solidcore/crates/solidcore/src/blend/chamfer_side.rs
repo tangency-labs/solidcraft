@@ -38,7 +38,7 @@ fn invalid(why: &'static str) -> SolidError {
 }
 
 /// The face edge use `u` bounds and its outward unit normal at parameter `t` of its edge.
-fn outward(k: &Kernel, b: &mut Brep, u: EdgeuseId, t: f64) -> Result<(FaceId, Vec3)> {
+pub(crate) fn outward(k: &Kernel, b: &mut Brep, u: EdgeuseId, t: f64) -> Result<(FaceId, Vec3)> {
     let face = match eu1::faceuse(b, u)? {
         Some(fu) => b.faceuse(fu)?.face,
         None => None,

@@ -63,7 +63,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-6, &attrs).unwrap()
+    brep_volume(k, b, 1e-10, &attrs).unwrap()
 }
 
 /// The front top edge, (0, 0, 10) to (40, 0, 10).

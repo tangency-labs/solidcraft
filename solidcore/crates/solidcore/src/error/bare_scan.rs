@@ -20,7 +20,7 @@ const NEEDLES: [&str; 4] = [
     "SolidError::nl_ser(",
 ];
 
-fn is_ident(b: u8) -> bool {
+pub(in crate::error) fn is_ident(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
@@ -136,7 +136,7 @@ fn blank(text: &str, ranges: &[Range<usize>]) -> String {
 }
 
 /// The offset just past the closer matching the opener at `i` of `s`.
-fn match_close(s: &[u8], mut i: usize) -> usize {
+pub(in crate::error) fn match_close(s: &[u8], mut i: usize) -> usize {
     let mut depth = 0usize;
     while let Some(&ch) = s.get(i) {
         match ch {
@@ -297,7 +297,27 @@ pub(in crate::error) fn bare_sites(code: &str) -> usize {
 pub(in crate::error) fn library_files(area: &str, least: usize) -> Vec<(String, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut paths: Vec<PathBuf> = vec![root.join(format!("{area}.rs"))];
-    let mut dirs = vec![root.join(area)];
+    rust_files_under(&root.join(area), &mut paths);
+    library_files_at(&root, &paths, least)
+}
+
+/// The library files of a whole crate, everything under `<crate_dir>/src`, as
+/// (path relative to `src` with `/` separators, text with LF line ends), sorted by path,
+/// with the same files skipped as [`library_files`]. At least `least` `.rs` files must be
+/// found.
+pub(in crate::error) fn crate_library_files(
+    crate_dir: &Path,
+    least: usize,
+) -> Vec<(String, String)> {
+    let root = crate_dir.join("src");
+    let mut paths = Vec::new();
+    rust_files_under(&root, &mut paths);
+    library_files_at(&root, &paths, least)
+}
+
+/// Every `.rs` file under `dir`, appended to `paths`.
+fn rust_files_under(dir: &Path, paths: &mut Vec<PathBuf>) {
+    let mut dirs = vec![dir.to_path_buf()];
     while let Some(dir) = dirs.pop() {
         for entry in std::fs::read_dir(dir).expect("read dir") {
             let path = entry.expect("entry").path();
@@ -308,12 +328,17 @@ pub(in crate::error) fn library_files(area: &str, least: usize) -> Vec<(String, 
             }
         }
     }
+}
+
+/// The library files among `paths` (all under `root`), relative to `root`: see
+/// [`library_files`].
+fn library_files_at(root: &Path, paths: &[PathBuf], least: usize) -> Vec<(String, String)> {
     assert!(paths.len() >= least, "{paths:?}");
     let mut files: Vec<(String, String)> = paths
         .iter()
         .map(|path| {
             let relative = path
-                .strip_prefix(&root)
+                .strip_prefix(root)
                 .expect("under src")
                 .to_string_lossy()
                 .replace('\\', "/");
@@ -328,13 +353,18 @@ pub(in crate::error) fn library_files(area: &str, least: usize) -> Vec<(String, 
     let mut test_only: Vec<String> = Vec::new();
     for (relative, text) in &files {
         let stem = relative.trim_end_matches(".rs");
+        // a crate root's modules sit at the top of `src`
         let dir = match stem.strip_suffix("/mod") {
-            Some(parent) => parent.to_owned(),
-            None => stem.to_owned(),
+            Some(parent) => Some(parent.to_owned()),
+            None if stem == "lib" || stem == "main" => None,
+            None => Some(stem.to_owned()),
         };
         let code = blank(text, &literal_ranges(text));
         for name in split(&code).test_mods {
-            test_only.push(format!("{dir}/{name}"));
+            test_only.push(match &dir {
+                Some(dir) => format!("{dir}/{name}"),
+                None => name,
+            });
         }
     }
     files.retain(|(relative, _)| {

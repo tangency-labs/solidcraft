@@ -31,6 +31,8 @@ const INSTALL: &str = "install";
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) open: bool,
+    /// The app bar had no room for the Plugins button this frame: Plugins is a File submenu.
+    pub(crate) in_file_menu: bool,
     /// The pass the menu opened on: that click is not a click elsewhere.
     opened_pass: u64,
     /// The left edge of the Plugins button, where the menu opens.
@@ -38,6 +40,8 @@ pub(crate) struct State {
     /// The plugins listed when the menu last opened.
     pub(crate) listed: Vec<Listed>,
     pub(crate) dialog: Option<EntryDialog>,
+    /// The run waiting in the control queue: its request's serial and the session it is for.
+    pending: Option<(u64, u64)>,
 }
 
 /// An installed plugin, as its package read when the menu opened.
@@ -126,6 +130,8 @@ pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
         Some(list) => list.as_array()?.iter().map(Value::as_str).collect::<Option<_>>()?,
     };
     let properties = match schema.get("properties") {
+        // A required key that no field can fill: the dialog could only send it empty.
+        None if !required.is_empty() => return None,
         None => return Some(Vec::new()),
         Some(p) => p.as_object()?,
     };
@@ -142,14 +148,37 @@ pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
 
 fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> {
     let p = property.as_object()?;
-    if ["$ref", "oneOf", "anyOf", "allOf", "if", "not", "const", "items", "properties"].iter().any(|k| p.contains_key(*k)) {
+    // Only keywords the dialog draws or checks before Run turns on; any other constraint
+    // (`pattern`, `const`, `items`, `oneOf`, ...) would let an invalid value through.
+    let kind = p.get("type")?.as_str()?;
+    let allowed: &[&str] = match (kind, p.contains_key("enum")) {
+        ("number", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"],
+        ("integer", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"],
+        ("boolean", false) => &[],
+        ("string", true) => &["enum"],
+        ("string", false) => &["minLength", "maxLength", "format"],
+        _ => return None,
+    };
+    const ANNOTATIONS: &[&str] = &["type", "title", "description", "default", "unit", "x-unit", "units", "examples", "$comment", "deprecated"];
+    if p.keys().any(|k| !ANNOTATIONS.contains(&k.as_str()) && !allowed.contains(&k.as_str())) {
+        return None;
+    }
+    // A constraint of the wrong JSON type is a schema this dialog can't check either.
+    let numeric = |k: &str| p.get(k).is_none_or(|v| v.as_f64().is_some_and(f64::is_finite));
+    let exclusive = |k: &str| p.get(k).is_none_or(|v| v.is_boolean() || v.as_f64().is_some_and(f64::is_finite));
+    let count = |k: &str| p.get(k).is_none_or(|v| v.as_u64().is_some());
+    let words = |k: &str| p.get(k).is_none_or(Value::is_string);
+    if !(numeric("minimum") && numeric("maximum") && numeric("multipleOf") && exclusive("exclusiveMinimum") && exclusive("exclusiveMaximum"))
+        || !(count("minLength") && count("maxLength"))
+        || !(words("title") && words("description") && words("unit") && words("x-unit") && words("units") && words("format"))
+    {
         return None;
     }
     let text = |k: &str| p.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
     let number = |k: &str| p.get(k).and_then(Value::as_f64).filter(|n| n.is_finite());
     let unit = text("unit").or_else(|| text("x-unit")).or_else(|| text("units"));
     let default = p.get("default");
-    let (kind, input) = match p.get("type")?.as_str()? {
+    let (kind, input) = match kind {
         "number" if !p.contains_key("enum") => {
             // `exclusiveMinimum` as a number (draft 6+); a boolean beside `minimum` (draft 4).
             let (min, exclusive_min) = match (number("exclusiveMinimum"), number("minimum")) {
@@ -163,6 +192,14 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
                 (None, m) => (m, p.get("exclusiveMaximum") == Some(&Value::Bool(true))),
             };
             let step = number("multipleOf").filter(|s| *s > 0.0);
+            if p.contains_key("multipleOf") && step.is_none() {
+                return None;
+            }
+            if let (Some(lo), Some(hi)) = (min, max)
+                && (lo > hi || (lo == hi && (exclusive_min || exclusive_max)))
+            {
+                return None;
+            }
             let input = match default.and_then(Value::as_f64).filter(|n| n.is_finite()) {
                 Some(n) => Input::Number(n),
                 None => Input::Typed(String::new()),
@@ -170,15 +207,12 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             (Kind::Number { min, max, exclusive_min, exclusive_max, step, unit }, input)
         }
         "integer" if !p.contains_key("enum") => {
-            let whole = |k: &str| p.get(k).and_then(Value::as_f64).filter(|n| n.is_finite());
-            let min = match whole("exclusiveMinimum") {
-                Some(e) => Some(e.floor() as i64 + 1),
-                None => whole("minimum").map(|m| m.ceil() as i64),
-            };
-            let max = match whole("exclusiveMaximum") {
-                Some(e) => Some(e.ceil() as i64 - 1),
-                None => whole("maximum").map(|m| m.floor() as i64),
-            };
+            let (min, max) = (integer_bound(p, true)?, integer_bound(p, false)?);
+            if let (Some(lo), Some(hi)) = (min, max)
+                && lo > hi
+            {
+                return None;
+            }
             let input = match default.and_then(Value::as_i64) {
                 Some(n) => Input::Integer(n),
                 None => Input::Typed(String::new()),
@@ -246,6 +280,25 @@ pub(crate) fn params(fields: &[(Field, Input)]) -> Result<Value, Problem> {
     Ok(Value::Object(out))
 }
 
+/// An integer property's lowest (`lower`) or highest allowed value: `Some(None)` when it has
+/// none, `None` when a bound lies outside the 64-bit integers this field holds. `minimum` with
+/// the draft-4 boolean `exclusiveMinimum`, and the numeric `exclusiveMinimum`, both apply.
+fn integer_bound(p: &Map<String, Value>, lower: bool) -> Option<Option<i64>> {
+    let (inclusive, exclusive) = if lower { ("minimum", "exclusiveMinimum") } else { ("maximum", "exclusiveMaximum") };
+    // Within i64 before any arithmetic: 2^63 is exactly representable, so `< 2^63` is exact.
+    let whole = |v: f64| (v.is_finite() && (-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&v)).then_some(v as i64);
+    let past = |v: f64| if lower { whole(v.floor())?.checked_add(1) } else { whole(v.ceil())?.checked_sub(1) };
+    let within = |v: f64| whole(if lower { v.ceil() } else { v.floor() });
+    let mut bounds = Vec::new();
+    if let Some(v) = p.get(inclusive).and_then(Value::as_f64) {
+        bounds.push(if p.get(exclusive) == Some(&Value::Bool(true)) { past(v)? } else { within(v)? });
+    }
+    if let Some(v) = p.get(exclusive).and_then(Value::as_f64) {
+        bounds.push(past(v)?);
+    }
+    Some(if lower { bounds.into_iter().max() } else { bounds.into_iter().min() })
+}
+
 /// Whether `value` is within the limits of `kind`.
 fn within(kind: &Kind, value: &Value) -> bool {
     match kind {
@@ -284,7 +337,9 @@ pub(crate) fn missing_groups(app: &SolveApp, plugin: &Listed) -> Vec<String> {
 /// The plugins installed in `dir` and those inspected this session, by name. Reading a package
 /// runs none of its code.
 pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
-    let mut paths: Vec<String> = Vec::new();
+    // A package the session inspected explicitly comes first: when an installed folder has the
+    // same id, the inspected one is what `plugin.run` was pointed at, as the engine keeps it.
+    let mut paths: Vec<String> = app.session.plugin_state.packages.values().cloned().collect();
     if let Some(dir) = dir
         && let Ok(folders) = std::fs::read_dir(dir)
     {
@@ -297,7 +352,6 @@ pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
         found.sort();
         paths.extend(found);
     }
-    paths.extend(app.session.plugin_state.packages.values().cloned());
     let mut seen = BTreeSet::new();
     let mut listed: Vec<Listed> = paths
         .iter()
@@ -355,7 +409,47 @@ pub(crate) fn toggle(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) 
     if state.open {
         // One menu at a time: File closes.
         ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), false));
-        app.plugin_menu.listed = list(app, crate::plugins::plugins_dir().as_deref());
+        refresh(app);
+    }
+}
+
+/// Read the installed plugins again, as the menu shows them when it opens.
+pub(crate) fn refresh(app: &mut SolveApp) {
+    app.plugin_menu.listed = list(app, crate::plugins::plugins_dir().as_deref());
+}
+
+/// Where the File menu holds the Plugins menu (a narrow app bar): a submenu of the same rows,
+/// their ids under `plugins:`.
+pub(crate) fn file_submenu(app: &SolveApp) -> crate::app_bar::FileRow {
+    use crate::app_bar::FileRow;
+    fn prefixed(rows: Vec<FileRow>) -> Vec<FileRow> {
+        rows.into_iter()
+            .map(|row| match row {
+                FileRow::Item(mut item) => {
+                    item.id = format!("plugins:{}", item.id);
+                    FileRow::Item(item)
+                }
+                FileRow::Button { mut item, tip } => {
+                    item.id = format!("plugins:{}", item.id);
+                    FileRow::Button { item, tip }
+                }
+                FileRow::Sub { label, rows } => FileRow::Sub { label, rows: prefixed(rows) },
+                FileRow::Separator => FileRow::Separator,
+            })
+            .collect()
+    }
+    FileRow::Sub { label: app.tr("ui.plugins").to_owned(), rows: prefixed(rows(app)) }
+}
+
+/// Run the Plugins menu's row `id` (from the menu or the File submenu).
+pub(crate) fn choose(app: &mut SolveApp, id: &str) {
+    if id == INSTALL {
+        install_plugin_action(app);
+        return;
+    }
+    let mut parts = id.strip_prefix("entry:").into_iter().flat_map(|rest| rest.split(':')).map(str::parse::<usize>);
+    if let (Some(Ok(p)), Some(Ok(e))) = (parts.next(), parts.next()) {
+        open_entry(app, p, e);
     }
 }
 
@@ -371,15 +465,8 @@ pub(crate) fn menu(app: &mut SolveApp, ctx: &egui::Context) {
     if out.close {
         app.plugin_menu.open = false;
     }
-    match out.chosen.as_deref() {
-        Some(INSTALL) => install_plugin_action(app),
-        Some(id) => {
-            let mut parts = id.strip_prefix("entry:").into_iter().flat_map(|rest| rest.split(':')).map(str::parse::<usize>);
-            if let (Some(Ok(p)), Some(Ok(e))) = (parts.next(), parts.next()) {
-                open_entry(app, p, e);
-            }
-        }
-        None => {}
+    if let Some(id) = out.chosen {
+        choose(app, &id);
     }
 }
 
@@ -391,6 +478,8 @@ pub(crate) fn install_plugin_action(app: &mut SolveApp) {
 /// The dialog of one plugin entry.
 pub(crate) struct EntryDialog {
     pub(crate) plugin: Listed,
+    /// The session (design tab) the dialog was opened on: Run acts on that design only.
+    pub(crate) session: u64,
     pub(crate) entry: String,
     pub(crate) label: String,
     pub(crate) read: bool,
@@ -419,6 +508,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         read: entry.effect == solidcraft_engine::plugin::Effect::Read,
         fields,
         plugin,
+        session: app.session.uid,
         running: None,
         error: None,
         result: None,
@@ -428,6 +518,9 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
 impl EntryDialog {
     /// The parameters to run with, or why Run is off (in words for the dialog).
     pub(crate) fn ready(&self, app: &SolveApp) -> Result<Value, String> {
+        if self.session != app.session.uid {
+            return Err(app.tr("ui.plugin_dialog_other_design").into());
+        }
         if self.plugin.disabled {
             return Err(app.tr("ui.plugin_dialog_disabled").into());
         }
@@ -455,6 +548,7 @@ pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params}});
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
     let ticket = req.ticket.clone();
+    app.plugin_menu.pending = Some((req.serial, app.session.uid));
     app.control_held.push_back(req);
     if let Some(dialog) = app.plugin_menu.dialog.as_mut() {
         dialog.running = Some(Running { reply, ticket });
@@ -462,6 +556,18 @@ pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
         dialog.result = None;
     }
     Ok(())
+}
+
+/// A queued run is for the design its dialog was opened on: refused, when its turn comes, if
+/// another design tab is active by then.
+pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::ControlRequest) -> Result<(), String> {
+    match app.plugin_menu.pending {
+        Some((serial, session)) if serial == req.serial => {
+            app.plugin_menu.pending = None;
+            if session == app.session.uid { Ok(()) } else { Err(app.tr("ui.plugin_dialog_other_design").into()) }
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Take a finished run's reply: an edit closes the dialog, a read shows its result, an error
@@ -537,7 +643,10 @@ fn body(app: &SolveApp, ui: &mut egui::Ui, dialog: &mut EntryDialog, why_not: Op
     };
     ui_kit::text(ui, &about, ui_kit::Text::Note("plugin_about"));
     let missing = missing_groups(app, plugin);
-    if plugin.disabled {
+    let other_design = dialog.session != app.session.uid;
+    if other_design {
+        ui_kit::status_line(ui, app.tr("ui.plugin_dialog_other_design"), ui_kit::StatusTone::Warning);
+    } else if plugin.disabled {
         ui_kit::status_line(ui, app.tr("ui.plugin_dialog_disabled"), ui_kit::StatusTone::Warning);
     } else if !missing.is_empty() {
         let asks = solidcraft_ui_text::format("ui.plugin_dialog_needs_groups", &[("groups", &missing.join(", "))]);
@@ -566,6 +675,7 @@ fn body(app: &SolveApp, ui: &mut egui::Ui, dialog: &mut EntryDialog, why_not: Op
     } else if let Some(why) = why_not
         && dialog.fields.as_ref().is_some_and(|f| !f.is_empty())
         && !plugin.disabled
+        && !other_design
         && missing.is_empty()
     {
         ui_kit::status_line(ui, why, ui_kit::StatusTone::Dim);

@@ -3163,8 +3163,15 @@ mod tests {
     /// values land on their joints; a value for a missing joint is skipped.
     #[test]
     fn a_solution_places_occurrences_in_their_moved_parents() {
-        let occurrence =
-            |id, component, parent| crate::Occurrence { id, component, parent, name: format!("O{id}"), transform: IDENTITY, grounded: false };
+        let occurrence = |id, component, parent| crate::Occurrence {
+            id,
+            component,
+            parent,
+            name: format!("O{id}"),
+            transform: IDENTITY,
+            grounded: false,
+            expressed_moves: Vec::new(),
+        };
         // Component 1 sits at the root twice (its first occurrence is the frame its children sit
         // in), component 2 inside 1 and component 3 inside 2.
         let mut doc = Document {
