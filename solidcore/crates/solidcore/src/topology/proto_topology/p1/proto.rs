@@ -2123,6 +2123,11 @@ pub struct ProtoTopologyManager<O> {
     /// whose collapsed speck definition `SmEdgeDefinition::Imprint` skipped, so
     /// `ImprintIntersections` grows each vertex's tolerance to cover the speck's span.
     skipped_speck_vertices: Vec<(O, f64, Point3, Point3)>,
+    /// Not upstream (#15718): pairs (B-rep 1's edge, B-rep 2's edge) of line edges whose
+    /// two ends lie within their intersection tolerance of each other, end for end: one
+    /// coincident interval, so a point where the two cross is no event and gets no vertex
+    /// definition ([`ProtoTopologyManager::set_coincident_edges`]).
+    coincident_edges: Vec<(O, O)>,
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -2182,6 +2187,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pf_store: Vec::new(),
             split_self_loops_on_vertices: true,
             skipped_speck_vertices: Vec::new(),
+            coincident_edges: Vec::new(),
         })
     }
 
@@ -2199,6 +2205,26 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// (tangency-labs/solidcore#480, WR-214). Not upstream.
     pub fn set_split_self_loops_on_vertices(&mut self, split: bool) {
         self.split_self_loops_on_vertices = split;
+    }
+
+    /// Sets the coincident line edge pairs (B-rep 1's edge, B-rep 2's edge): two straight
+    /// edges whose ends lie within their intersection tolerance of each other, end for end,
+    /// are within it of each other everywhere (the distance between points at the same
+    /// fraction along both is affine, so its ends bound it), one coincident interval.
+    /// Where they cross is where two coincident pieces cross within their tolerance, not a
+    /// feature: [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`] makes no vertex
+    /// definition for a point classified on one edge of a pair in each B-rep. The
+    /// Boolean's topology intersector sets them before intersecting. Not upstream
+    /// (#15718).
+    pub fn set_coincident_edges(&mut self, pairs: Vec<(O, O)>) {
+        self.coincident_edges = pairs;
+    }
+
+    /// Whether `(edge1, edge2)` (of B-reps 1 and 2) is a coincident line edge pair
+    /// ([`ProtoTopologyManager::set_coincident_edges`]). Not upstream.
+    #[must_use]
+    pub fn are_coincident_edges(&self, edge1: O, edge2: O) -> bool {
+        self.coincident_edges.contains(&(edge1, edge2))
     }
 
     /// Final vertices `(vertex, max_gap, speck_start, speck_end)` whose collapsed speck

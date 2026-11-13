@@ -6,12 +6,18 @@
 //! tol / sin, the whole strip, yet upstream makes it an edge whose end vertices are picked
 //! per body and never related, and the merge fails (`SmMerge::MakeFaceuse`, `SM_ERR`).
 //!
-//! solidcore drops that crossing before `ResolveIntersections` (WR-614). With the speck
-//! definition skipped at imprint (WR-619, #2068), the strip union at d = 1e-5 is one valid
-//! manifold solid of both cubes' combined volume. Both are the default (their opt-in flags,
-//! `boolean_coincident_strip_drops_crossing` and `imprint_skips_collapsed_definition`, were
-//! retired). The exact overlap of A and B is a wedge of volume 20.2 d^2 (2.02e-9 at
-//! d = 1e-5), below the accuracy asked of the volume integrator.
+//! solidcore makes no curve for that crossing: before the two faces are intersected, both
+//! sides of their crossing are bounded by an edge within tolerance of the other plane, so
+//! the crossing lies inside a coincident pair of their pieces and is no event
+//! (`topology_intersector::coincident_strip`, which replaced WR-614's removal after the
+//! fact). B's corner on A's edge, and A's corner on B's, are events decided once before
+//! intersecting, and the two edges between them are one coincident interval, where their
+//! crossing is no event either. With the speck definition skipped at imprint (WR-619,
+//! #2068), the strip union at d = 1e-5 is one valid manifold solid of both cubes' combined
+//! volume. All of it is the default (the opt-in flags `boolean_coincident_strip_drops_crossing`
+//! and `imprint_skips_collapsed_definition` were retired). The exact overlap of A and B is a
+//! wedge of volume 20.2 d^2 (2.02e-9 at d = 1e-5), below the accuracy asked of the volume
+//! integrator.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -272,8 +278,10 @@ fn overlap_volume(d: f64) -> f64 {
 }
 
 /// One offset of the sweeps below: the union of A (`width` along x from x = -2) and B at
-/// offset d is one valid manifold solid of volume |A| + 64 - overlap, and their intersection
-/// is empty and valid. Returns what failed, or nothing.
+/// offset d is one valid manifold solid of volume |A| + 64 - overlap, their intersection
+/// is empty and valid, and A minus B is box A, valid, of volume |A| - overlap (the
+/// overlap's faces lie within d of each other, so it is no piece of either result).
+/// Returns what failed, or nothing.
 fn union_one_solid_intersection_empty(width: f64, d: f64) -> Vec<String> {
     let mut failed = Vec::new();
     let mut k = Kernel::default();
@@ -315,6 +323,26 @@ fn union_one_solid_intersection_empty(width: f64, d: f64) -> Vec<String> {
             }
         }
     }
+    let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), width, SIDE, SIDE).unwrap();
+    let (_, b) = strip_cubes(&mut k, d);
+    match boolean_difference(&mut k, a, b) {
+        Err(e) => failed.push(format!("d = {d}: difference refused: {e}")),
+        Ok(mut diff) => {
+            let want = width * SIDE * SIDE - overlap_volume(d);
+            let v = volume(&k, &mut diff);
+            let check = check_brep(&mut k, &mut diff, CheckLevel::Level2).unwrap();
+            if shape(&diff) != (6, 12, 8, 1, true)
+                || check.failure_count() != 0
+                || (v - want).abs() > ACCURACY * want
+            {
+                failed.push(format!(
+                    "d = {d}: difference {:?}, volume {v} (want {want}), check {:?}",
+                    shape(&diff),
+                    check.lines()
+                ));
+            }
+        }
+    }
     failed
 }
 
@@ -328,7 +356,6 @@ fn union_one_solid_intersection_empty(width: f64, d: f64) -> Vec<String> {
 /// 1.005 d wide, within the intersection tolerance; as in the test above, the imprint skips
 /// its collapsed definition (WR-619, the default).
 #[test]
-#[ignore = "fails on main: un-ignored with the coincident face pairs"]
 fn wr_614_wider_box_union_is_one_solid_and_intersection_empty_across_offsets() {
     let failed: Vec<String> = [1e-5, 9e-6, 7.45e-6, 7.4e-6, 5e-6, 3e-6, 2.5e-6]
         .into_iter()
@@ -339,14 +366,79 @@ fn wr_614_wider_box_union_is_one_solid_and_intersection_empty_across_offsets() {
 
 /// The narrow A ([-2, 2], the strip of the tests above) across offsets d: the union is one
 /// valid manifold solid of volume 128 - overlap, and the intersection is empty (its faces
-/// lie within d of each other, as in the wider case). WR-619 as in the wider case.
+/// lie within d of each other, as in the wider case). WR-619 as in the wider case. Down to
+/// d = 1.2e-6, where B's corner P0 and A's corner C are 20.02 d = 2.4e-5 apart, more than
+/// the intersection tolerance (2e-5): two vertices. The crossing between them, 10 d from
+/// both (within the tolerance below d = 2e-6), lies inside the coincident pair and is no
+/// event, so it never chains the two into one point.
 #[test]
-#[ignore = "fails on main: un-ignored with the vertex events and coincident intervals"]
 fn wr_614_strip_union_is_one_solid_and_intersection_empty_across_offsets() {
-    let failed: Vec<String> = [1e-5, 9e-6, 7.4e-6, 5e-6, 3e-6, 2e-6]
+    let failed: Vec<String> = [1e-5, 9e-6, 7.4e-6, 5e-6, 3e-6, 2e-6, 1.5e-6, 1.2e-6]
         .into_iter()
         .flat_map(|d| union_one_solid_intersection_empty(SIDE, d))
         .collect();
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// Below the offsets where B's corner P0, its drop P0' on A's edge, and the crossings Q4
+/// and Q1 are pairwise within the intersection tolerance (2e-5) of each other, they are one
+/// point: wider A from 10.05 d < 2e-5 (P0 to Q1), narrow A from 20.02 d < 2e-5 (P0 to A's
+/// corner C). Every piece of B below A's face y = 20 is then shorter than the tolerance and
+/// the overlap is no volume: the union is the two boxes touching along the line through P0,
+/// two solid regions, valid at the tolerance, of volume |A| + 64 - overlap (invariant 8 of
+/// `docs/validity-and-tolerances.md`); the intersection is empty and A minus B is box A.
+#[test]
+fn wr_614_union_below_the_collapse_offsets_is_two_touching_solids() {
+    let mut failed = Vec::new();
+    for (width, d) in [
+        (12.0, 1.5e-6),
+        (12.0, 1e-6),
+        (12.0, 5e-7),
+        (SIDE, 8e-7),
+        (SIDE, 5e-7),
+    ] {
+        let mut k = Kernel::default();
+        let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), width, SIDE, SIDE).unwrap();
+        let (_, b) = strip_cubes(&mut k, d);
+        match boolean_union(&mut k, a, b) {
+            Err(e) => failed.push(format!("A {width}, d = {d}: union refused: {e}")),
+            Ok(mut u) => {
+                let want = width * SIDE * SIDE + SIDE * SIDE * SIDE - overlap_volume(d);
+                let v = volume(&k, &mut u);
+                let check = check_brep(&mut k, &mut u, CheckLevel::Level2).unwrap();
+                if shape(&u).3 != 2
+                    || collapsed_edges(&k, &u) != 0
+                    || check.failure_count() != 0
+                    || (v - want).abs() > ACCURACY * want
+                {
+                    failed.push(format!(
+                        "A {width}, d = {d}: union {:?}, volume {v} (want {want}), check {:?}",
+                        shape(&u),
+                        check.lines()
+                    ));
+                }
+            }
+        }
+        let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), width, SIDE, SIDE).unwrap();
+        let (_, b) = strip_cubes(&mut k, d);
+        match boolean_intersection(&mut k, a, b) {
+            Err(e) => failed.push(format!("A {width}, d = {d}: intersection refused: {e}")),
+            Ok(inter) if shape(&inter).0 != 0 || shape(&inter).3 != 0 => failed.push(format!(
+                "A {width}, d = {d}: intersection {:?}",
+                shape(&inter)
+            )),
+            Ok(_) => {}
+        }
+        let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), width, SIDE, SIDE).unwrap();
+        let (_, b) = strip_cubes(&mut k, d);
+        match boolean_difference(&mut k, a, b) {
+            Err(e) => failed.push(format!("A {width}, d = {d}: difference refused: {e}")),
+            Ok(diff) if shape(&diff) != (6, 12, 8, 1, true) => {
+                failed.push(format!("A {width}, d = {d}: difference {:?}", shape(&diff)));
+            }
+            Ok(_) => {}
+        }
+    }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 

@@ -1,67 +1,61 @@
-//! Not upstream (WR-614, tangency-labs/solidcore#1794): the crossing line of two
-//! planes that stay within tolerance of each other across a strip bounded by their edges
-//! is not an edge.
+//! Not upstream (#15718, replacing WR-614's removal, tangency-labs/solidcore#1794): the
+//! crossing line of two planar faces that lie within the intersection tolerance of each
+//! other wherever both exist beside it is no event, decided from the operands' geometry
+//! before the face pair is intersected.
 //!
-//! Two planar faces `fa` (B-rep 1) and `fb` (B-rep 2) crossing at a small angle meet in a
-//! line fixed only to `tol / sin(angle)`. When one face has an edge lying on the other
-//! (an edge-on-face edge definition, within tolerance by construction), parallel to the
-//! crossing, covering it, farther from it than the tolerance and with the face's interior
-//! toward the crossing, and on the opposite side of the crossing the other face ends at an
-//! edge likewise parallel to, covering and facing the crossing within the edge/face
-//! intersection tolerance (either as a second edge-on-face definition or as a boundary
-//! edge within `GetXSectTol3d(edge, plane_face)`), the two planes stay within tolerance of
-//! each other across the whole strip where both faces exist (the gap between two planes is
-//! linear across it). Upstream still makes the crossing an edge definition: its end
-//! vertices are picked per B-rep (`SmProtoVertex::GetFinalVertex`) and never related by
-//! `SetRelationships`, so `SmMerge::MakeFaceuse` fails on the edge's inconsistent vertex
-//! mates (`SM_ERR`). Removing the crossing's edge definition before `Resolve` (and its
-//! proto edge when that is left without one) leaves the strip bounded by the existing
-//! edges, while keeping crossings where either face continues out of tolerance past the
-//! crossing.
+//! Two planes crossing at a small angle θ meet in a line fixed only to `tol / sin θ`.
+//! Their distance is affine across the line: zero on it, growing linearly to either side.
+//! Take each side of the crossing. When on both sides a straight boundary edge of either
+//! face spans the crossing's extent along the line, faces back toward the line (its face's
+//! interior lies between it and the line), and lies within the intersection tolerance of
+//! the other face's plane at both ends, then every point where both faces exist beside the
+//! crossing lies within that tolerance of the other face (the distance is affine, so it is
+//! largest at the bounds, and past a bound its face ends). The two face pieces form one
+//! coincident pair and the crossing is a line where two coincident pieces cross within
+//! their tolerance, not a feature: the face pair makes no curve, no edge definition and no
+//! vertex definitions for it ([`crossing_inside_coincident_pair`]). Where either face
+//! goes on past the tolerance on one side, the crossing is an exit and stays.
 //!
-//! Every geometric condition is decided over the whole curve, never from samples: a curve
-//! enters the test only as a line segment or a B-spline, whose points over its interval lie in
-//! the convex hull of its two ends or of the control points of the knot spans that meet the
-//! interval (`Curve::hull_points_over`). The offset from the crossing line and the distance from
-//! a plane are affine in the point (up to the absolute value or norm, which are convex), so
-//! their bound over those points, widened by the rounding of the points and of the arithmetic,
-//! bounds them over the curve. A curve of any other kind, or a hull that leaves the band,
-//! keeps the crossing.
+//! Upstream makes the crossing an edge definition. Its end vertices, a tolerance or less
+//! from the bounds' vertices, are picked per B-rep (`SmProtoVertex::GetFinalVertex`) and
+//! never related by `SetRelationships`, so `SmMerge::MakeFaceuse` fails on the edge's
+//! inconsistent vertex mates (`SM_ERR`); or its ends make a chain of points pairwise
+//! within the tolerance that no vertex covers. WR-614 removed the crossing's edge
+//! definition after the intersection, which left its end vertex definitions (a dangling
+//! edge in each end face) and missed the crossing once the classification had read it as
+//! running along the bounds; it also required the bounds to run parallel to the crossing
+//! and farther from it than the tolerance. Deciding the rule up front, from the planes and
+//! the bound edges, removes all three.
+//!
+//! The decision is a certificate, not a sample: each bound is a line segment, so its
+//! distance to the other plane is affine along it and its two end distances bound it
+//! (with their rounding counted); the side of each end and the direction its face extends
+//! are signs of distances to the other plane; and the crossing's extent is over-estimated
+//! by the projections of both faces onto the crossing's direction (from the end points of
+//! their line edges and the boxes of the others), so a bound that spans it spans the
+//! crossing wherever it lies in both faces.
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | `TopologyIntersector::drop_crossings_in_coincident_strips` (crate) | none (own design) |
+//! | `crossing_inside_coincident_pair` (crate) | none (own design) |
 //!
-//! Deviations: not upstream at all; always on (its opt-in flag was retired).
+//! Deviations: not upstream at all; always on. Planes only (two planar faces, bounds on
+//! lines); every other pair is intersected as upstream does.
 
+use crate::curve::curve::p2::CurveKind;
 use crate::error::Result;
-use crate::geom::solution_array::SolutionObject;
-use crate::geom::tol::{xsect_tol3d, zone_tol3d};
-use crate::intersect::point_class::{ClassObject, PointClassType};
+use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d};
+use crate::intersect::point_class::{object_zone_tol_3d, ClassObject};
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, EFF_ZERO};
+use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::math::gamma;
 use crate::surface::surface::p2::SurfaceKind;
-use crate::topology::proto_topology::{EdgeDefId, ProtoEdgeId};
 
-use super::p1::{ignore_soft, TopologyIntersector};
+use super::p1::ignore_soft;
 use super::p2::IntersectorBrepP2;
 
-const OP_DROP_STRIP: &str =
-    "boolean::topology_intersector::coincident_strip::drop_crossings_in_coincident_strips";
-
-/// An edge definition as the strip test reads it: its proto edge, its source objects and
-/// their classification types in B-reps 1 and 2, the start and end of its curve over its
-/// interval, the points whose convex hull holds the curve there (`None`: no certified hull),
-/// and its tolerance.
-struct Def<O> {
-    pe: ProtoEdgeId,
-    ed: EdgeDefId,
-    src: [(PointClassType, Option<O>); 2],
-    ends: [Point3; 2],
-    hull: Option<Vec<(Point3, f64)>>,
-    tol: f64,
-}
+const OP_STRIP: &str =
+    "boolean::topology_intersector::coincident_strip::crossing_inside_coincident_pair";
 
 /// Origin and unit normal of a planar face's surface.
 #[derive(Clone, Copy)]
@@ -71,88 +65,203 @@ struct PlanePos {
 }
 
 impl PlanePos {
-    /// An upper bound of the distance from the plane of the point `q` whose coordinates are
-    /// within `e` of it: the difference rounds by `γ_1` and the dot by `γ_3` of `|q - origin|`
-    /// per component, the normal is unit within `γ_8` (as `curve::plane_of`).
-    fn distance_bound(self, q: Point3, e: f64) -> f64 {
-        let w = q - self.origin;
-        (w.dot(self.unit_normal).abs() * (1.0 + gamma(8))
-            + 2.0 * (gamma(1) + gamma(3)) * w.length() * (1.0 + gamma(5))
-            + 2.0 * e)
-            * (1.0 + gamma(2))
+    /// The signed distance of `pt` from the plane, and a bound on its rounding: the
+    /// difference, the dot product and the normal's own normalisation, each a few
+    /// rounded operations on coordinates no larger than `|pt| + |origin|`.
+    fn signed_distance(self, pt: Point3) -> (f64, f64) {
+        let rounding = gamma(16) * (pt.length() + self.origin.length());
+        ((pt - self.origin).dot(self.unit_normal), rounding)
     }
 }
 
-impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
-    /// Removes every face/face edge definition of two planes whose crossing lies in a
-    /// strip bounded on both sides by edges of the two faces within tolerance of the
-    /// opposite plane (module docs), and every proto edge that is left without an edge
-    /// definition, and returns the curves deleted with them.
-    ///
-    /// # Errors
-    ///
-    /// Those of the curve and binormal evaluations and the face/edge connection tests.
-    pub(crate) fn drop_crossings_in_coincident_strips(
-        &mut self,
-        k: &Kernel,
-        brep: &mut impl IntersectorBrepP2<O>,
-    ) -> Result<Vec<O>> {
-        k.check_cancelled(OP_DROP_STRIP)?;
-        let Some(mgr) = self.proto_topo_mgr.as_mut() else {
-            return Ok(Vec::new());
-        };
-        let mut defs = Vec::new();
-        for &pe in mgr.proto_edges() {
-            let Some(edge) = mgr.proto_edge(pe) else {
-                continue;
-            };
-            for &ed in edge.edge_definitions() {
-                let Some(def) = mgr.edge_def(ed) else {
-                    continue;
-                };
-                let Some(curve) = def.xsect_curve_3d().and_then(|c| brep.curve(c)) else {
-                    continue;
-                };
-                let ivl = def.xsect_interval();
-                defs.push(Def {
-                    pe,
-                    ed,
-                    src: [
-                        (def.src_topo_type(1), def.src_topo(1)),
-                        (def.src_topo_type(2), def.src_topo(2)),
-                    ],
-                    ends: [
-                        curve.evaluate_point(k, ivl.min())?,
-                        curve.evaluate_point(k, ivl.max())?,
-                    ],
-                    hull: curve.hull_points_over(&ivl),
-                    tol: def.tolerance(k),
-                });
-            }
-        }
-        let mut doomed: Vec<(ProtoEdgeId, EdgeDefId)> = Vec::new();
-        for crossing in &defs {
-            if in_coincident_strip(k, brep, crossing, &defs)? {
-                doomed.push((crossing.pe, crossing.ed));
-            }
-        }
-        let mut deleted = Vec::new();
-        for (pe, ed) in doomed {
-            if let Some(edge) = mgr.proto_edge_mut(pe) {
-                ignore_soft(edge.remove_edge_definition(ed))?;
-            }
-            deleted.extend(mgr.delete_edge_definition(ed));
-            if mgr
-                .proto_edge(pe)
-                .is_some_and(|e| e.num_edge_definitions() == 0)
-            {
-                ignore_soft(mgr.remove_proto_edge(k, pe))?;
-                mgr.forget_proto_edge(pe);
-                deleted.extend(mgr.delete_proto_edge_object(pe));
-            }
-        }
-        Ok(deleted)
+/// Whether the crossing line of planar faces `fa` and `fb` (of the two operands) lies
+/// inside a coincident pair of their pieces (module docs): on both sides of the line a
+/// straight boundary edge of either face spans the crossing's extent, faces back toward the
+/// line and lies within the intersection tolerance of the other face's plane. `false` for
+/// any face that is not planar, for planes closer to parallel than `EFF_ZERO_SQRT`, and
+/// for faces whose projections onto the crossing's direction do not overlap.
+///
+/// # Errors
+///
+/// Those of the curve and binormal evaluations, the edge boxes and the zone tolerances.
+pub(crate) fn crossing_inside_coincident_pair<O: ClassObject>(
+    k: &Kernel,
+    brep: &mut impl IntersectorBrepP2<O>,
+    fa: O,
+    fb: O,
+) -> Result<bool> {
+    k.check_cancelled(OP_STRIP)?;
+    let (Some(pa), Some(pb)) = (plane_pos(brep, fa), plane_pos(brep, fb)) else {
+        return Ok(false);
+    };
+    // the other plane's normal turned toward fa's, so that both measure "above" alike
+    let pb = PlanePos {
+        origin: pb.origin,
+        unit_normal: if pa.unit_normal.dot(pb.unit_normal) < 0.0 {
+            -pb.unit_normal
+        } else {
+            pb.unit_normal
+        },
+    };
+    let cross = pa.unit_normal.cross(pb.unit_normal);
+    let sine = cross.length();
+    let crossing = sine > EFF_ZERO_SQRT;
+    if !crossing {
+        return Ok(false);
     }
+    let along = cross / sine;
+    let (Some(span_a), Some(span_b)) = (
+        face_span(k, brep, fa, along)?,
+        face_span(k, brep, fb, along)?,
+    ) else {
+        return Ok(false);
+    };
+    let extent = (span_a.0.max(span_b.0), span_a.1.min(span_b.1));
+    if extent.0 > extent.1 {
+        return Ok(false);
+    }
+    // On fa, the side of the crossing a point lies on is the sign of its distance above
+    // fb's plane; on fb, the sign of its distance below fa's (fa rises above fb on one
+    // side of the line exactly where fb lies below fa). `flip` turns fb's into fa's sense.
+    let (mut above, mut below) = (false, false);
+    for (face, other, other_plane, flip) in [(fa, fb, pb, 1.0), (fb, fa, pa, -1.0)] {
+        let other_zone = object_zone_tol_3d(k, &*brep, Some(other))?;
+        for edge in brep.face_edges(face)? {
+            match bound_side(
+                k,
+                brep,
+                face,
+                edge,
+                (other_plane, flip, other_zone),
+                along,
+                extent,
+            )? {
+                Some(Side::Above) => above = true,
+                Some(Side::Below) => below = true,
+                None => {}
+            }
+            if above && below {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// A side of the crossing line, in fa's sense: where fa lies above fb's plane, or below.
+#[derive(Clone, Copy)]
+enum Side {
+    Above,
+    Below,
+}
+
+/// The side of the crossing (in fa's sense) that `edge` of `face` bounds (module docs), or `None`: the edge is a line
+/// segment; both its ends lie within the intersection tolerance of the other face's plane
+/// (`other`: that plane, the sign `flip` that turns its distances into fa's sense, and the
+/// other face's zone tolerance), with their rounding counted, so the whole edge does (the
+/// distance is affine along it); both ends lie on that side or on the line (within their
+/// rounding); its projection onto the crossing's direction `along` covers `extent`
+/// (within the tolerance and its end vertices' zone tolerances); and its face's interior
+/// lies toward the line from it (the inward binormal, constant along a line edge of a
+/// planar face, takes the distance to the other plane toward zero, or across the line for
+/// an edge on it).
+fn bound_side<O: ClassObject>(
+    k: &Kernel,
+    brep: &mut impl IntersectorBrepP2<O>,
+    face: O,
+    edge: O,
+    (other, flip, other_zone): (PlanePos, f64, f64),
+    along: Vec3,
+    extent: (f64, f64),
+) -> Result<Option<Side>> {
+    let Some(ivl) = brep.edge_interval(edge) else {
+        return Ok(None);
+    };
+    let ends = {
+        let Some(curve) = brep.edge_curve(edge).flatten().and_then(|c| brep.curve(c)) else {
+            return Ok(None);
+        };
+        if !matches!(curve.kind(), CurveKind::Line(_)) {
+            return Ok(None);
+        }
+        [
+            curve.evaluate_point(k, ivl.min())?,
+            curve.evaluate_point(k, ivl.max())?,
+        ]
+    };
+    let tol = xsect_tol_3d_from_zones(k, object_zone_tol_3d(k, &*brep, Some(edge))?, other_zone);
+    let mut dist = [(0.0, 0.0); 2];
+    for (slot, &p) in dist.iter_mut().zip(&ends) {
+        let (g, rounding) = other.signed_distance(p);
+        let within = g.abs() + rounding < tol;
+        if !within {
+            return Ok(None);
+        }
+        *slot = (flip * g, rounding);
+    }
+    let (s0, s1) = (ends[0].dot(along), ends[1].dot(along));
+    let end_tol = tol + edge_end_tol(k, brep, edge)?;
+    if !(s0.min(s1) <= extent.0 + end_tol && s0.max(s1) >= extent.1 - end_tol) {
+        return Ok(None);
+    }
+    let Some(eu) = brep.edge_edgeuse_of_face(edge, face)? else {
+        return Ok(None);
+    };
+    let Some(binorm) = ignore_soft(brep.edgeuse_evaluate_binormal(k, eu, ivl.mid()))? else {
+        return Ok(None);
+    };
+    if !binorm.is_initialized() {
+        return Ok(None);
+    }
+    let rise = flip * other.unit_normal.dot(binorm);
+    for (side, sigma) in [(Side::Above, 1.0), (Side::Below, -1.0)] {
+        let on_side = dist.iter().all(|&(g, rounding)| sigma * g >= -rounding);
+        if on_side && sigma * rise < 0.0 {
+            return Ok(Some(side));
+        }
+    }
+    Ok(None)
+}
+
+/// The projection of `face` onto the unit direction `along`, over-estimated: the end
+/// points of its line edges and the box corners of its other edges; `None` for a face
+/// without edges.
+fn face_span<O: ClassObject>(
+    k: &Kernel,
+    brep: &impl IntersectorBrepP2<O>,
+    face: O,
+    along: Vec3,
+) -> Result<Option<(f64, f64)>> {
+    let mut span: Option<(f64, f64)> = None;
+    let mut take = |p: Point3| {
+        let s = p.dot(along);
+        span = Some(span.map_or((s, s), |(lo, hi)| (lo.min(s), hi.max(s))));
+    };
+    for edge in brep.face_edges(face)? {
+        let line = brep
+            .edge_curve(edge)
+            .flatten()
+            .and_then(|c| brep.curve(c))
+            .filter(|c| matches!(c.kind(), CurveKind::Line(_)));
+        if let (Some(curve), Some(ivl)) = (line, brep.edge_interval(edge)) {
+            take(curve.evaluate_point(k, ivl.min())?);
+            take(curve.evaluate_point(k, ivl.max())?);
+        } else {
+            let b = brep.edge_bounding_box(k, edge)?;
+            if b.has_negative_volume() {
+                return Ok(None);
+            }
+            let (lo, hi) = (b.min(), b.max());
+            for corner in 0..8 {
+                take(Point3::new(
+                    if corner & 1 == 0 { lo.x } else { hi.x },
+                    if corner & 2 == 0 { lo.y } else { hi.y },
+                    if corner & 4 == 0 { lo.z } else { hi.z },
+                ));
+            }
+        }
+    }
+    Ok(span)
 }
 
 /// The plane of `face` when its surface is planar with a valid normal.
@@ -176,28 +285,6 @@ fn plane_pos<O: ClassObject>(brep: &impl IntersectorBrepP2<O>, face: O) -> Optio
     })
 }
 
-/// Whether `face`'s interior along `edge` lies toward the crossing line (`off` points from
-/// the crossing line to `edge`, so `face`'s inward binormal at `edge`'s midpoint must dot
-/// negatively with `off`).
-fn faces_inward<O: ClassObject>(
-    k: &Kernel,
-    brep: &mut impl IntersectorBrepP2<O>,
-    edge: O,
-    face: O,
-    off: Vec3,
-) -> Result<bool> {
-    let Some(eu) = brep.edge_edgeuse_of_face(edge, face)? else {
-        return Ok(false);
-    };
-    let Some(ivl) = brep.edge_interval(edge) else {
-        return Ok(false);
-    };
-    let Some(binorm) = ignore_soft(brep.edgeuse_evaluate_binormal(k, eu, ivl.mid()))? else {
-        return Ok(false);
-    };
-    Ok(binorm.is_initialized() && binorm.dot(off) < 0.0)
-}
-
 /// Maximum zone tolerance of `edge`'s start and end vertices.
 fn edge_end_tol<O: ClassObject>(
     k: &Kernel,
@@ -213,304 +300,4 @@ fn edge_end_tol<O: ClassObject>(
         .and_then(|v| brep.topology_tolerance(v))
         .map_or(0.0, |t| zone_tol3d(k, t));
     Ok(t0.max(t1))
-}
-
-/// Whether `face` has a boundary edge within intersection tolerance of `other_plane` that
-/// runs parallel to and covers the crossing line `(p0, dir, len)` on the side opposite to
-/// at least one offset in `opposite_defs`, with `face`'s interior toward the crossing.
-#[allow(clippy::too_many_arguments)]
-fn face_edge_bounds_strip<O: ClassObject>(
-    k: &Kernel,
-    brep: &mut impl IntersectorBrepP2<O>,
-    face: O,
-    other_plane: PlanePos,
-    other_face_tol: f64,
-    p0: Point3,
-    dir: Vec3,
-    len: f64,
-    crossing_tol: f64,
-    opposite_defs: &[Vec3],
-) -> Result<bool> {
-    for edge in brep.face_edges(face)? {
-        let Some(ivl) = brep.edge_interval(edge) else {
-            continue;
-        };
-        let (ends, hull) = {
-            let Some(curve) = brep.edge_curve(edge).flatten().and_then(|c| brep.curve(c)) else {
-                continue;
-            };
-            let Some(hull) = curve.hull_points_over(&ivl) else {
-                continue;
-            };
-            (
-                [
-                    curve.evaluate_point(k, ivl.min())?,
-                    curve.evaluate_point(k, ivl.max())?,
-                ],
-                hull,
-            )
-        };
-        let edge_tol = zone_tol3d(k, brep.topology_tolerance(edge).unwrap_or(0.0));
-        let plane_tol = xsect_tol3d(k, edge_tol + other_face_tol).max(crossing_tol);
-        if !hull
-            .iter()
-            .all(|&(q, e)| other_plane.distance_bound(q, e) <= plane_tol)
-        {
-            continue;
-        }
-        let end_tol = plane_tol + edge_end_tol(k, brep, edge)?;
-        let Some(off) = band_offset(p0, dir, len, ends, &hull, crossing_tol, end_tol) else {
-            continue;
-        };
-        if !opposite_defs.iter().any(|other| off.dot(*other) < 0.0) {
-            continue;
-        }
-        if faces_inward(k, brep, edge, face, off)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-/// Whether `crossing`, a face/face edge definition of two planes, lies in a strip bounded
-/// on both sides by edges of the two faces within tolerance of the opposite plane, with at
-/// least one side represented by an edge-on-face definition in `defs` (module docs).
-fn in_coincident_strip<O: ClassObject>(
-    k: &Kernel,
-    brep: &mut impl IntersectorBrepP2<O>,
-    crossing: &Def<O>,
-    defs: &[Def<O>],
-) -> Result<bool> {
-    let [(PointClassType::Face, Some(fa)), (PointClassType::Face, Some(fb))] = crossing.src else {
-        return Ok(false);
-    };
-    let (Some(pa), Some(pb)) = (plane_pos(brep, fa), plane_pos(brep, fb)) else {
-        return Ok(false);
-    };
-    let [p0, p1] = crossing.ends;
-    let axis = p1 - p0;
-    let len = axis.length();
-    if len <= crossing.tol {
-        return Ok(false);
-    }
-    let dir = axis / len;
-    // the crossing itself runs within its tolerance of its chord over its whole interval
-    let Some(crossing_hull) = crossing.hull.as_deref() else {
-        return Ok(false);
-    };
-    if !crossing_hull
-        .iter()
-        .all(|&(q, e)| offset_bound(p0, dir, Vec3::ZERO, q, e) <= crossing.tol)
-    {
-        return Ok(false);
-    }
-    let mut def_on_fb = Vec::new();
-    let mut def_on_fa = Vec::new();
-    for def in defs.iter().filter(|d| d.ed != crossing.ed) {
-        let edge_side = match def.src {
-            [(PointClassType::Edge, Some(e)), (PointClassType::Face, Some(f))]
-                if f == fb && brep.edge_is_connected_to_face(e, fa)? =>
-            {
-                Some((true, e, fa))
-            }
-            [(PointClassType::Face, Some(f)), (PointClassType::Edge, Some(e))]
-                if f == fa && brep.edge_is_connected_to_face(e, fb)? =>
-            {
-                Some((false, e, fb))
-            }
-            _ => None,
-        };
-        let Some((is_a_on_fb, edge, owner_face)) = edge_side else {
-            continue;
-        };
-        let Some(hull) = def.hull.as_deref() else {
-            continue;
-        };
-        let end_tol = crossing.tol.max(def.tol) + edge_end_tol(k, brep, edge)?;
-        let Some(off) = band_offset(p0, dir, len, def.ends, hull, crossing.tol, end_tol) else {
-            continue;
-        };
-        if !faces_inward(k, brep, edge, owner_face, off)? {
-            continue;
-        }
-        if is_a_on_fb {
-            def_on_fb.push(off);
-        } else {
-            def_on_fa.push(off);
-        }
-    }
-    if def_on_fb.is_empty() && def_on_fa.is_empty() {
-        return Ok(false);
-    }
-    if def_on_fb
-        .iter()
-        .any(|a| def_on_fa.iter().any(|b| a.dot(*b) < 0.0))
-    {
-        return Ok(true);
-    }
-    let fa_tol = zone_tol3d(k, brep.topology_tolerance(fa).unwrap_or(0.0));
-    let fb_tol = zone_tol3d(k, brep.topology_tolerance(fb).unwrap_or(0.0));
-    if !def_on_fa.is_empty()
-        && face_edge_bounds_strip(
-            k,
-            brep,
-            fa,
-            pb,
-            fb_tol,
-            p0,
-            dir,
-            len,
-            crossing.tol,
-            &def_on_fa,
-        )?
-    {
-        return Ok(true);
-    }
-    if !def_on_fb.is_empty()
-        && face_edge_bounds_strip(
-            k,
-            brep,
-            fb,
-            pa,
-            fa_tol,
-            p0,
-            dir,
-            len,
-            crossing.tol,
-            &def_on_fb,
-        )?
-    {
-        return Ok(true);
-    }
-    Ok(false)
-}
-
-/// The offset from the crossing line (through `p0` along unit `dir`, `len` long) of the
-/// curve with ends `[q0, q1]` and certified hull `hull` (points with the error bounds of
-/// their coordinates), when every point of the curve lies within `tol` of the offset of the
-/// ends' midpoint (an enclosure over `hull`, [`offset_bound`]), the ends' offsets are within
-/// `tol` of each other, the curve covers `[0, len]` within `end_tol` and lies farther from
-/// the line than `tol`; else `None`.
-fn band_offset(
-    p0: Point3,
-    dir: Vec3,
-    len: f64,
-    [q0, q1]: [Point3; 2],
-    hull: &[(Point3, f64)],
-    tol: f64,
-    end_tol: f64,
-) -> Option<Vec3> {
-    let (s0, s1) = ((q0 - p0).dot(dir), (q1 - p0).dot(dir));
-    let r0 = (q0 - p0) - dir * s0;
-    let r1 = (q1 - p0) - dir * s1;
-    let off = (r0 + r1) / 2.0;
-    let parallel = (r0 - r1).length() <= tol
-        && hull
-            .iter()
-            .all(|&(q, e)| offset_bound(p0, dir, off, q, e) <= tol);
-    let covers = s0.min(s1) <= end_tol && s0.max(s1) >= len - end_tol;
-    (parallel && covers && off.length() > tol).then_some(off)
-}
-
-/// An upper bound of `|r(q) - off|`, with `r(q) = (q - p0) - dir ((q - p0) . dir)` the
-/// offset of `q` from the line through `p0` along `dir` (unit within rounding), for the
-/// point `q` whose coordinates are within `e` of it. `r` is affine in `q` and the norm is
-/// convex, so the bound over the points of a convex hull bounds it over the hull. Rounding:
-/// the difference `w` rounds by `γ_1 |w|`, the dot by `γ_3 |w|`, the product and the
-/// subtraction by `γ_2 |w|` more; a coordinate error `e` moves `r` by at most `2 √3 e`; the
-/// final norm rounds by `γ_4`. `NaN` propagates, so a caller comparing with `<=` refuses it.
-fn offset_bound(p0: Point3, dir: Vec3, off: Vec3, q: Point3, e: f64) -> f64 {
-    let w = q - p0;
-    let r = w - dir * w.dot(dir);
-    ((r - off).length() + 4.0 * gamma(8) * w.length() + 4.0 * e) * (1.0 + gamma(4))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::curve::curve::Curve;
-    use crate::curve::line::Line;
-    use crate::geom::extent1d::Extent1d;
-    use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
-
-    const TOL: f64 = 1e-5;
-    const LEN: f64 = 10.0;
-    const OFF: f64 = 1e-3;
-
-    fn cubic(points: &[Point3; 4]) -> Curve {
-        Curve::from(
-            BSplineCurve::create_canonical(&CanonicalData {
-                dim: 3,
-                degree: 3,
-                control_points: points,
-                form: BSplineCurveForm::Unspecified,
-                knot_multiplicities: &[4, 4],
-                knots: &[0.0, 1.0],
-                knot_type: KnotType::Unspecified,
-                weights: None,
-                trim: None,
-            })
-            .unwrap(),
-        )
-    }
-
-    /// The band offset of `curve` over `[0, 1]` from the crossing along x, `[0, LEN]`.
-    fn offset_of(k: &Kernel, curve: &Curve) -> Option<Vec3> {
-        let ivl = Extent1d::from_min_max(0.0, 1.0);
-        let ends = [
-            curve.evaluate_point(k, 0.0).unwrap(),
-            curve.evaluate_point(k, 1.0).unwrap(),
-        ];
-        let hull = curve.hull_points_over(&ivl)?;
-        band_offset(Point3::ZERO, Vec3::X, LEN, ends, &hull, TOL, TOL)
-    }
-
-    /// A boundary whose start, midpoint and end lie on the band `y = OFF` but which bows a
-    /// hundred tolerances off it in between: the three samples the test once read pass, the
-    /// enclosure over its control points does not, so the crossing is kept.
-    #[test]
-    fn a_bowed_boundary_keeps_the_crossing() {
-        let k = Kernel::default();
-        let h = 100.0 * TOL;
-        let curve = cubic(&[
-            Point3::new(0.0, OFF, 0.0),
-            Point3::new(LEN / 3.0, OFF + h, 0.0),
-            Point3::new(2.0 * LEN / 3.0, OFF - h, 0.0),
-            Point3::new(LEN, OFF, 0.0),
-        ]);
-        for t in [0.0, 0.5, 1.0] {
-            let q = curve.evaluate_point(&k, t).unwrap();
-            assert!((q.y - OFF).abs() <= TOL, "sample {t} is on the band");
-        }
-        // the bulge at t = (3 - sqrt 3) / 6 is h / (6 sqrt 3) off the band
-        let t = (3.0 - 3.0_f64.sqrt()) / 6.0;
-        let bulge = curve.evaluate_point(&k, t).unwrap().y - OFF;
-        assert!(bulge > 25.0 * TOL, "bulge {bulge}");
-        assert_eq!(offset_of(&k, &curve), None);
-    }
-
-    /// A B-spline whose control points lie on the band, and a line segment, bound the strip.
-    #[test]
-    fn a_straight_spline_or_line_bounds_the_strip() {
-        let k = Kernel::default();
-        let straight = cubic(&[
-            Point3::new(0.0, OFF, 0.0),
-            Point3::new(LEN / 4.0, OFF, 0.0),
-            Point3::new(LEN / 2.0, OFF, 0.0),
-            Point3::new(LEN, OFF, 0.0),
-        ]);
-        let off = offset_of(&k, &straight).unwrap();
-        assert!((off.y - OFF).abs() <= TOL && off.x.abs() <= TOL);
-        let line = Curve::from(
-            Line::create_line_segment(
-                3,
-                Point3::new(0.0, OFF, 0.0),
-                Point3::new(LEN, OFF, 0.0),
-                None,
-            )
-            .unwrap(),
-        );
-        let off = offset_of(&k, &line).unwrap();
-        assert!((off.y - OFF).abs() <= TOL);
-    }
 }

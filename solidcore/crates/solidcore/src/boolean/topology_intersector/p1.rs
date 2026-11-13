@@ -1201,6 +1201,9 @@ pub struct TopologyIntersector<O> {
     subset: Option<BTreeSet<O>>,
     /// `m_pProtoTopoMgr`.
     pub(super) proto_topo_mgr: Option<ProtoTopologyManager<O>>,
+    /// Not upstream: the operand vertices put on the other operand's line edges before
+    /// intersecting (`split_edges_at_vertices`), as pairs (B-rep 1's vertex, B-rep 2's).
+    pub(super) vertices_on_edges: Vec<(O, O)>,
 }
 
 /// Not upstream: the tolerances vertex `v` and its edges need to cover the gaps between
@@ -1272,7 +1275,8 @@ fn certified_vertex_gaps<O: ClassObject>(
             let position = plane.position();
             let normal = position.z_axis();
             let length = normal.length();
-            if !(length > 0.0) {
+            let usable = length > 0.0;
+            if !usable {
                 continue;
             }
             let w = point - position.origin();
@@ -1439,6 +1443,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             intersection_table: None,
             subset: None,
             proto_topo_mgr: None,
+            vertices_on_edges: Vec::new(),
         }
     }
 

@@ -1033,11 +1033,11 @@ pub(crate) fn delete_topological_vertex_joining(
 /// the far vertex of one of its edges (a tube may not reach an entity it does not bound);
 /// those of the topology walks and the curve evaluations.
 pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
+    use crate::curve::curve::CurveKind;
+    use crate::nurbs::math::gamma;
     if !b.edge_list().contains(&e) {
         return Ok(());
     }
-    use crate::curve::curve::CurveKind;
-    use crate::nurbs::math::gamma;
     let ed = b.edge(e)?;
     let Some(curve) = ed.curve.as_ref() else {
         return Ok(());
@@ -1071,7 +1071,8 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
             grow.push((v, point, tolerance));
         }
     }
-    if !(edge_gap > edge_tolerance) && grow.is_empty() {
+    let gapped = edge_gap > edge_tolerance;
+    if !gapped && grow.is_empty() {
         return Ok(());
     }
     for &(v, point, tolerance) in &grow {
@@ -1080,7 +1081,8 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
             if let Some(far) = far.filter(|&f| f != v) {
                 let f = b.vertex(far)?;
                 // (a NaN distance passes no test and refuses)
-                if !(tolerance + f.tolerance < point.distance(f.point)) {
+                let clear = tolerance + f.tolerance < point.distance(f.point);
+                if !clear {
                     return Err(SolidError::topology_failed(
                         OP,
                         "a joined edge's vertex tolerance would reach the far vertex of one of its edges",
