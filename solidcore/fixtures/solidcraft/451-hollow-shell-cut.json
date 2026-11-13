@@ -384,7 +384,6 @@
     }
    },
    "fixes": [
-    "precise_properties_body_length_scale",
     "revolve_nested_shells_as_cavities"
    ]
   },

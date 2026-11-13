@@ -327,6 +327,55 @@ fn anchor_angle_and_mirror_place_the_profile() {
 }
 
 #[test]
+fn a_located_member_keeps_its_profile_point_on_the_line_when_the_section_changes() {
+    let place = |width: f64, height: f64, locate: Value| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [1000, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let p = json!({"sketch": "Rail", "profile": {"kind": "angle", "width": width, "height": height, "thickness": 5}, "locate": locate});
+        run(&mut s, "frame.member", p);
+        bodies(&mut s).remove(0)
+    };
+    // The angle is drawn about its heel: locate [0, 0] puts the heel on the line, as the
+    // bottom_left anchor does, and it stays there when the legs grow.
+    let small = place(60.0, 40.0, json!([0, 0]));
+    assert!(near3(small.2, [0.0, 0.0, 0.0]) && near3(small.3, [1000.0, 60.0, 40.0]), "{small:?}");
+    let large = place(80.0, 50.0, json!([0, 0]));
+    assert!(near3(large.2, [0.0, 0.0, 0.0]) && near3(large.3, [1000.0, 80.0, 50.0]), "{large:?}");
+    // A point 10 across and 5 up from the heel on the line moves the profile back by that much.
+    let off = place(60.0, 40.0, json!([10, 5]));
+    assert!(near3(off.2, [0.0, -10.0, -5.0]) && near3(off.3, [1000.0, 50.0, 35.0]), "{off:?}");
+    // A bad point is refused with the reason.
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    for bad in [json!([1]), json!(["a", 0]), json!([0, 1e9])] {
+        let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "locate": bad})).unwrap_err().to_string();
+        assert!(err.contains("`locate`"), "{bad}: {err}");
+    }
+    // A design file with a point the command would refuse fails the feature, with the reason.
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "locate": [0, 0]}));
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    fn far(v: &mut Value) {
+        match v {
+            Value::Object(o) => {
+                if let Some(l) = o.get_mut("locate") {
+                    *l = json!([1e8, 0.0]);
+                }
+                o.values_mut().for_each(far);
+            }
+            Value::Array(a) => a.iter_mut().for_each(far),
+            _ => {}
+        }
+    }
+    far(&mut saved);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    let fid = reopened.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })).unwrap().id;
+    let failing = reopened.model.result(fid).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(failing.contains("`locate`"), "{failing}");
+}
+
+#[test]
 fn bad_members_are_refused() {
     let mut s = Session::default();
     rectangle_frame(&mut s);

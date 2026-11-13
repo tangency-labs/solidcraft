@@ -503,3 +503,130 @@ fn a_drafted_face_projects_its_edge_as_one_ellipse() {
         resolved.geom
     );
 }
+
+fn lens_body(radius: f64, height: f64) -> ModelBody {
+    // Two equal arcs meeting at two sharp corners (x = ±half_w, y = 0), so both top vertices
+    // share the exact same three incident faces: bottom/top and the two arc walls.
+    let half_w = 10.0;
+    let d = (radius * radius - half_w * half_w).sqrt();
+    let doc = Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [-half_w, 0.]},
+                        {"fixed": false, "id": "p2", "pos": [half_w, 0.]},
+                        {"fixed": false, "id": "c1", "pos": [0., -d]},
+                        {"fixed": false, "id": "c2", "pos": [0., d]}
+                    ],
+                    "curves": [
+                        {"type": "arc", "id": "a1", "a": 2, "b": 1, "c": 3, "reversed": false, "construction": false},
+                        {"type": "arc", "id": "a2", "a": 1, "b": 2, "c": 4, "reversed": false, "construction": false}
+                    ],
+                    "constraints": [],
+                    "counters": {"a": 2, "p": 4}
+                }
+            },
+            {
+                "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Lens"],
+                "extent": {"convention": "total_distance", "direction": "positive", "distance": format!("{height} mm")},
+                "operation": "new_body", "profiles": {"type": "all"}, "sketch": 1
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    model.state().body("Lens").cloned().unwrap()
+}
+
+#[test]
+fn vertex_names_disambiguate_shared_incident_faces_with_tilde() {
+    let body = lens_body(12.0, 5.0);
+    let names = crate::naming::vertex_names(&body);
+    let record = body.body.record();
+    let numbered: Vec<(usize, &str)> = names.iter().enumerate().filter(|(_, n)| n.contains('~')).map(|(i, n)| (i, n.as_str())).collect();
+    assert_eq!(numbered.len(), 4, "two top and two bottom vertices share identical face sets: {names:?}");
+    for &(i, name) in &numbered {
+        let p = record.vertices[i].point;
+        let pt = Vec3::new(p[0], p[1], p[2]);
+        let hit = crate::naming::locate_vertex(&body, name, pt).unwrap();
+        assert_eq!(hit.vertex, i);
+        assert!(hit.point.dist(pt) < 1e-6);
+    }
+}
+
+#[test]
+fn named_vertex_projection_moves_past_closer_neighbor_and_fails_when_removed() {
+    let at_height = |h: f64| {
+        // Right trapezoid whose bottom-right corner at x = 10 sits near x = 10, y = 0, z = h:
+        // when z increases by 20, the other corner at x = 0, y = 0, z = h - 18 would be closer to
+        // saved `at` if resolved by distance, while topological naming follows the picked corner.
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 4.0, h)).unwrap();
+        let mut names = vec![String::new(); body.faces(0.01).unwrap().len()];
+        for f in body.faces(0.01).unwrap() {
+            let n = f.plane_normal.unwrap();
+            names[f.index] = if n.z > 0.9 {
+                "F2:top"
+            } else if n.z < -0.9 {
+                "F2:bottom"
+            } else if n.x > 0.9 {
+                "F2:side:right"
+            } else if n.x < -0.9 {
+                "F2:side:left"
+            } else if n.y > 0.9 {
+                "F2:side:back"
+            } else {
+                "F2:side:front"
+            }
+            .into();
+        }
+        let mut mb = ModelBody::new("Block".into(), body, 2);
+        mb.names = crate::naming::NameCell::known(Arc::new(names));
+        mb
+    };
+
+    let doc = Document::default();
+    let mut initial = ModelState::default();
+    initial.bodies.push(at_height(5.0));
+    let plane = Plane::XZ;
+    let source = LinkSource::Vertex { body: "Block".into(), at: Vec3::new(10.0, 0.0, 5.0) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    let vertex_name = crate::project::resolved_vertex_name(&initial, &resolved).unwrap();
+    assert_eq!(vertex_name, "F2:side:front|F2:side:right|F2:top");
+
+    let mut sketch = Sketch::default();
+    let link_id = sketch.add_link(LinkKind::Project, resolved.source, &resolved.geom).unwrap();
+    sketch.links[0].vertex_name = Some(vertex_name.clone());
+
+    // Grow height from 5 to 40 (well past 0.25 * diagonal and past closer neighbors).
+    let mut taller = ModelState::default();
+    taller.bodies.push(at_height(40.0));
+    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &taller, &plane, &mut sketch).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert!(!sketch.links[0].lost);
+    let p_idx = sketch.link_points(&link_id)[0];
+    let pt = sketch.points[p_idx].pos;
+    // Plane::XZ has local y_dir = -Z, so z = 40 projects to local y = -40.
+    assert!((pt.x - 10.0).abs() < 1e-6 && (pt.y + 40.0).abs() < 1e-6, "vertex followed to height 40: {pt:?}");
+
+    // If the top face is gone, the named vertex fails with Reselect instead of snapping elsewhere.
+    let mut renamed = taller;
+    renamed.bodies[0].names = crate::naming::NameCell::known(Arc::new(vec!["other".into(); 6]));
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &renamed, &plane, &mut sketch).unwrap_err();
+    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == &vertex_name), "{error}");
+}
+
+#[test]
+fn mesh_body_has_no_vertex_names() {
+    let mb = ModelBody::new(
+        "MeshPart".into(),
+        solidcraft_kernel::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 2, 3]]).unwrap(),
+        1,
+    );
+    assert!(crate::naming::vertex_names(&mb).is_empty());
+}

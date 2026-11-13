@@ -38,7 +38,7 @@
 //! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
 //! are returned instead (`SER`).
 
-use super::{construct::target, geometry::bspline, PrimitiveAccess};
+use super::{construct::target, geometry::bspline_with_nurb, PrimitiveAccess};
 use crate::curve::curve::Curve;
 use crate::curve::curve::CurveKind;
 use crate::curve::ellipse::Ellipse;
@@ -95,10 +95,13 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
         let curve = slot
             .as_ref()
             .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
-        let curve = bspline(curve)
+        let k = a.kernel(b)?;
+        // `((SmBSplineCurve *)cr3DCurves[ii])->SubdivideAtDiscontinuity(..)`: the curve with
+        // the NURB its own `GetOrCreateGwNurbPointer` makes (a line's lazy NURB), not a copy
+        // of its bare base, which has none and refuses (`make_nurb`, 1001).
+        let curve = bspline_with_nurb(k, curve)?
             .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline continuity input"))?;
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
-        let k = a.kernel(b)?;
         let pieces = ignored(passed_on(
             curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5),
             k.fixes.sweep_statuses_pass_on,

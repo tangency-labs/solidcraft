@@ -68,7 +68,7 @@ struct Layout {
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, angle, mirror, .. } = &f.kind else {
+    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
@@ -76,11 +76,25 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     let mapped =
         if ps.sketch.wires.is_empty() { Cow::Owned(sketch_in_feature_frame(doc, ps, f.component)?) } else { path_in_frame(doc, ps, f.component)? };
     let segments = member_lines(mapped.as_ref(), lines)?;
-    let (mut regions, description) = profile_regions(vals, st, profile)?;
+    let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
     if *mirror {
         regions = regions.iter().map(frame::mirrored).collect();
     }
-    let at = frame::anchor_point(&regions, *anchor);
+    let at = match locate {
+        Some([x, y]) => {
+            // A design file is hostile input: the command checks the point, a file may not.
+            if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
+                return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
+            }
+            // `locate` is the profile point that sits on the line, measured from the profile's
+            // own origin (`Profile::origin`). The built-in region is centred on its bounding
+            // box, so that origin moves when the section's size changes, and the located point
+            // moves with it: the member stays attached at the same point of its section.
+            let p = origin + Vec2::new(*x, *y);
+            if *mirror { Vec2::new(-p.x, p.y) } else { p }
+        }
+        None => frame::anchor_point(&regions, *anchor),
+    };
     let turn = match angle {
         Some(e) => val(vals, e, Kind::Angle)?,
         None => 0.0,
@@ -229,11 +243,12 @@ fn straight(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
 
 /// The regions of a member's profile, in the profile's own coordinates: one piece of material,
 /// holes and all; and what its members are named after when they have no name of their own.
-fn profile_regions(vals: &BTreeMap<String, Value>, st: &ModelState, profile: &MemberProfile) -> Result<(Vec<Region2>, String)> {
-    let (regions, description) = match profile {
+fn profile_regions(vals: &BTreeMap<String, Value>, st: &ModelState, profile: &MemberProfile) -> Result<(Vec<Region2>, String, Vec2)> {
+    let (regions, description, origin) = match profile {
         MemberProfile::Library { profile } => {
             let p = profile.resolve(|name, e| val(vals, e, Kind::Length).map_err(|err| DocError::Invalid(format!("profile `{name}`: {err}"))))?;
-            (vec![p.region()?], p.description())
+            let origin = p.origin();
+            (vec![p.region()?], p.description(), origin)
         }
         MemberProfile::Sketch { sketch, profiles } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
@@ -241,11 +256,11 @@ fn profile_regions(vals: &BTreeMap<String, Value>, st: &ModelState, profile: &Me
                 ProfileSel::All => material(ss)?,
                 sel => select_profiles(ss, sel)?,
             };
-            (solidcraft_sketch::merge_regions(&picked), ss.name.clone())
+            (solidcraft_sketch::merge_regions(&picked), ss.name.clone(), Vec2::ZERO)
         }
     };
     match regions.len() {
-        1 => Ok((regions, description)),
+        1 => Ok((regions, description, origin)),
         0 => Err(DocError::Invalid("the member profile has no area".into())),
         n => Err(DocError::Invalid(format!("the member profile is {n} separate pieces (pick one with `profiles`)"))),
     }

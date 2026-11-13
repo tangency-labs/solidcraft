@@ -17,6 +17,7 @@ use solidcore::query::api_queries::brep_is_closed_touching_solids;
 use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped};
+use solidcore::topology::brep::sheet::turn_over_sheet;
 use solidcore::topology::brep::{is_outward_solid, is_valid_and_outward};
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::FaceId;
@@ -245,6 +246,39 @@ impl Body {
         })?
     }
 
+    /// Turns this sheet over ([`turn_over_sheet`], `SmFace::SwapUV` on each face): each face's
+    /// side the other way (its surface's u and v swapped, its normal reversed), its edges as they
+    /// were, the body valid. Turning a sheet over twice gives it back. `order` is this body's
+    /// record order (its record's, from [`Body::from_record`] or [`Body::to_record`]).
+    ///
+    /// The turned sheet's record, its order and, for each record edge of `order`, the index of
+    /// the same edge in the new record: the record numbers edges by its canonical walk, which a
+    /// turned face's loops take the other way round (docs/native-brep.md, "Canonical order"), so
+    /// picks and history go through this map. The kernel keeps every edge, so the map is a
+    /// lookup.
+    ///
+    /// # Errors
+    /// [`Error::Unsupported`] for a body with a closed shell (turned over, a solid would be inside
+    /// out), the body as it was; [`Error::Argument`] for an `order` that is not this body's; the
+    /// kernel's status; those of [`Body::to_record`].
+    pub fn turn_over(&self, order: &Order) -> Result<TurnedOver> {
+        with_body("turn_over_sheet", self, |k, b| {
+            Ok(turn_over_sheet(k, b).map_err(status))
+        })??;
+        let (record, new_order) = self.to_record()?;
+        let now = new_order.record_edges();
+        let edges = order
+            .edges
+            .iter()
+            .map(|e| now.get(e).copied().ok_or(Error::Argument))
+            .collect::<Result<Vec<u32>>>()?;
+        Ok(TurnedOver {
+            record,
+            order: new_order,
+            edges,
+        })
+    }
+
     /// Face, edge and vertex counts.
     ///
     /// # Errors
@@ -276,6 +310,18 @@ impl Body {
             brep_volume(k, b, relative_accuracy, &attrs)
         })
     }
+}
+
+/// A sheet turned over ([`Body::turn_over`]): its record and order, and where each record edge
+/// of the order it was turned with went.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TurnedOver {
+    /// The turned sheet's record.
+    pub record: Record,
+    /// Its record order.
+    pub order: Order,
+    /// For each record edge before the turn, its index in `record`.
+    pub edges: Vec<u32>,
 }
 
 /// The conditioning a body's motion must be proved above, its smallest scale against its

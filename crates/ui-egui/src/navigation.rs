@@ -903,10 +903,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // left button would otherwise do - selecting, dragging geometry, the preset's binding or the
     // navigation bar's fixed mode - and lasts only while the key is held. Space still types in a
     // text field, and while a dimension's text is being edited, so those keep the keyboard.
-    let space_pan = (inside || primary_down)
-        && !ui.ctx().egui_wants_keyboard_input()
-        && !crate::dim_view::editing()
-        && ui.input(|i| i.key_down(egui::Key::Space));
+    let space_pan =
+        (inside || primary_down) && !ui.ctx().text_edit_focused() && !crate::dim_view::editing() && ui.input(|i| i.key_down(egui::Key::Space));
     if zoom_held {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
     } else if space_pan {
@@ -938,10 +936,13 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     } else {
         None
     };
-    // An orbit started on the viewport owns its button until release, including over a
-    // floating shell card that disables the underlying egui response.
-    let captured_orbit = app.viewport.orbit_from.is_some() && button.is_some();
-    let dragging = resp.dragged() || (inside && button.is_some()) || captured_orbit;
+    // The full canvas response can report a drag whose press belonged to a panel above it.
+    // A camera drag that started in free space keeps its capture when it crosses a panel.
+    let press_in_view = ui.input(|input| input.pointer.press_origin()).is_some_and(|at| {
+        input_rect.contains(at) && !axes.contains(at) && !readout.is_some_and(|rect| rect.contains(at)) && !crate::shell::covered(app, at)
+    });
+    let captured = button.is_some_and(|button| app.viewport.orbit_from.is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == button));
+    let dragging = captured || (press_in_view && (resp.dragged() || (inside && (button.is_some() || (space_pan && primary_down)))));
     // A middle or right drag keeps the mode it started with until its button is released, as a
     // left one does (`primary_nav`): letting go of Shift partway through a Shift+middle orbit
     // doesn't turn the rest into a pan (#9557). Off in Preferences, the keys held decide on every
