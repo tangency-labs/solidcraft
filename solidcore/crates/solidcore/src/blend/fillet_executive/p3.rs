@@ -3816,9 +3816,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // Not the fork's (#16156): at the radius named, the refused solver's ball may have
         // every position on its edge's faces past an end of the edge, which
         // `refuse_balls_past_an_end` refuses at that radius: the refusal names the radius at
-        // which it first has a section between the ends where that is smaller. The refusal
-        // stands whatever this finds: an ordinary failure judging it leaves the irregular
-        // ball's size named (port defects and cancellation propagate).
+        // which it first has a section between the ends where that is smaller and not refused
+        // too; where it has no such size, none is named, since the irregular ball's own is
+        // refused past the end (`note_past_end_fit`: no size is named that a refusal would
+        // refuse). The refusal stands whatever this finds: an ordinary failure judging it
+        // leaves the irregular ball's size named (port defects and cancellation propagate).
         if let Some((solver, _)) = worst_solver {
             if self.fit_radius > 0.0 && self.fit_kind == FitKind::Radius {
                 let named = self.fit_radius;
@@ -3829,17 +3831,21 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 ))?
                 .flatten();
                 if let Some(past) = past {
-                    if past.radius < named {
-                        let noted = crate::error::native_failure(self.note_past_end_fit(
+                    let noted = past.radius < named
+                        && crate::error::native_failure(self.note_past_end_fit(
                             k,
                             access,
                             solver,
                             past.radius,
                         ))?
                         .unwrap_or(false);
-                        if noted {
-                            self.error.comment = format!("{}; but at that radius every position of the rolling ball on the edge's faces lies past an end of the edge (at ({}, {}, {})): a radius below {} has a section between the edge's ends", self.error.comment, g(past.at.x), g(past.at.y), g(past.at.z), g(past.radius));
-                        }
+                    if noted {
+                        self.error.comment = format!("{}; but at that radius every position of the rolling ball on the edge's faces lies past an end of the edge (at ({}, {}, {})): a radius below {} has a section between the edge's ends", self.error.comment, g(past.at.x), g(past.at.y), g(past.at.z), g(past.radius));
+                    } else {
+                        // the irregular ball's size is refused past the end, and no smaller
+                        // size is known that is not
+                        self.note_fit_radius(-1.0, None, FitKind::Radius);
+                        self.error.comment = format!("{}; but at that radius every position of the rolling ball on the edge's faces lies past an end of the edge (at ({}, {}, {})), and no size is known that has a section between the edge's ends", self.error.comment, g(past.at.x), g(past.at.y), g(past.at.z));
                     }
                 }
             }
