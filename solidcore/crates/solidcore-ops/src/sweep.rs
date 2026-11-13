@@ -1352,7 +1352,8 @@ pub fn face_section(
 
 /// `curves` dropped onto record face `face` of `body` (through `order`, its record's [`Order`])
 /// square to its surface: the kernel's surface drop of a curve (`DropAndTrimCurve` over the
-/// face's parameter box, every piece kept) lifted back to 3D (`LiftCurve`), each within
+/// face's parameter box, every piece kept, on a standalone copy of the face's surface: the face's
+/// trims do not cut it) lifted back to 3D (`LiftCurve`), each within
 /// `tolerance`, as NURBS with their intervals. A curve over the face lands on the foot of each of
 /// its points.
 ///
@@ -1374,9 +1375,13 @@ pub fn drop_curves(
         let given = parsed!(parse(k, curves));
         let face = parsed!(face_of(b, order, face));
         let domain = b.face(face)?.uv_domain;
-        let Some(surface) = b.face(face)?.surface.as_ref() else {
+        let Some(owned) = b.face(face)?.surface.as_ref() else {
             return Ok(Err(Error::Argument));
         };
+        // A standalone copy (its owner not copied): the drop and lift work over the face's
+        // parameter box, and a face-owned surface's solves would ask for the face's trimmed
+        // cache, which they are not given here.
+        let surface = owned.copy(k)?;
         let mut out = Vec::new();
         for c in &given.curves {
             let dropped = match surface.drop_and_trim_curve::<NoObject>(
