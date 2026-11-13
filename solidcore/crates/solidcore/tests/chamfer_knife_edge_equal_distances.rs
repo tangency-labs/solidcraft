@@ -331,3 +331,36 @@ fn the_limit_holds_with_the_wall_split_along_its_length() {
         "{limit} vs {KEEPS_NOTHING}"
     );
 }
+
+/// The fallback: the part with a spherical dimple in its bottom face, far from the knife
+/// edge, is a body the limit is not read off (a sphere is neither a plane nor a cylinder
+/// along the edge), so `knife_chamfer_keeps_nothing` gives none and the refusal names the
+/// overflow's own bound, where the rails stay on their faces: the arc's radius less the
+/// fit margin, as the part named before its limit was computed. The reason is still that
+/// the overflow keeps nothing, not corners taking the edge (it has no corners).
+#[test]
+fn a_knife_edge_the_limit_is_not_read_off_names_its_faces_bound() {
+    use solidcore::blend::fillet_executive::session::fit_size::knife_chamfer_keeps_nothing;
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::primitive::api_primitives::create_sphere;
+    let mut k = all_fixes();
+    let plain = part(&mut k);
+    let dimple = create_sphere(&mut k, Point3::new(10.0, -10.0, 0.0), 3.0).unwrap();
+    let mut b = boolean_difference(&mut k, plain, dimple).unwrap();
+    let e = knife_edge(&k, &b);
+    assert_eq!(knife_chamfer_keeps_nothing(&k, &b, e).unwrap(), None);
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    s.prepare_chamfers(&k, &[e], &[ChamferSize::Distances([200.0, 200.0])])
+        .unwrap();
+    assert!(s.do_fillet(&mut k).is_err(), "200 built");
+    assert_eq!(
+        s.error_info().no_room_reason(),
+        Some(NoRoomReason::OverflowKeepsNothing)
+    );
+    let fit = s.fit_size().expect("a fit");
+    assert_eq!(fit.kind, FitKind::Radius);
+    assert_eq!(fit.edge, Some(e));
+    let d = s.chamfer_fit(fit).expect("a distance");
+    let closed = R - 0.01;
+    assert!((d - closed).abs() <= 1e-9 * closed, "{d} vs {closed}");
+}
