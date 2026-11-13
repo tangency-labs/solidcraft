@@ -18,12 +18,17 @@ use solidcraft_doc::ids;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
 
+use solidcraft_geom::paper::Scene;
+use solidcraft_sketch::PaperFonts;
+
 use super::CommandSpec;
 use super::drawing_view::{check_drawn, drawn_warning};
+use crate::drawing_dimension_paper::{LineRole, paper_group};
+use crate::drawing_scene::{NO_PLACE, NOT_DRAWN, designed, moved};
 use crate::params::bad;
 use crate::schema::drawing_dimension::{
-    AddParams, CandidateResult, CornerParam, DimensionResult, DimensionSet, EdgeParam, EditParams, EditResult, FaceParam, InspectParams, KindParam,
-    MemberResult, PickParam, RepairParams, SilhouetteParam, SlotParam,
+    AddParams, ArrowResult, CandidateResult, CornerParam, DimensionLayoutResult, DimensionResult, DimensionSet, EdgeParam, EditParams, EditResult,
+    FaceParam, InspectParams, KindParam, MemberResult, PickParam, RepairParams, SilhouetteParam, SlotParam,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -114,7 +119,13 @@ pub static COMMANDS: &[CommandSpec] = &[
              members?: a chain's [{value, text}] from its first point, last_good? (the value it last read, kept when the design \
              is saved, when it has none now), exact, candidates?: [{edge: {body, index}}, {corner: [x, y, z]} or {face: {body, index}}]: \
              what an ambiguous name finds, or a lost one's leads; one of a slot's kind passes back to drawing.dimension.repair as it \
-             stands, warnings?: its view edited since to leave out a part it measures}. Read-only; no model is evaluated.",
+             stands, warnings?: its view edited since to leave out a part it measures, layout?: where it sits on its view's sheet \
+             now, in paper mm from the sheet's lower-left corner, its lines before an arrowhead stops one: {extension_lines, \
+             dimension_lines: [[[x, y], ..]], arrows: [{tip, points: the unit direction}], text_boxes: [[4 corners]]: start and end \
+             on the line's side, then end and start on the far side} (none when it isn't drawn; one the sheet leaves out for its \
+             limits, or on a view whose lines fail, still has one, and drawing.scene's drawn says; none while its text waits for a \
+             font, which is never waited for here), layout_why?: why it has no layout, or no box for its text, when status \
+             doesn't say}. Read-only; no model is evaluated.",
         ),
 ];
 
@@ -571,6 +582,8 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         }
         None => s.dimension_values.get(&(d.id, id)).copied().or(dimension.last_good),
     };
+    // Before `status_words` takes the status: the layout reads the whole reading.
+    let (layout, layout_why) = layout_on_sheet(s, &d, dimension, &r);
     let (status, why, candidates) = status_words(r.status);
     let angle = dimension.kind.is_angle();
     let shown = |value: f64| if angle { value.to_degrees() } else { value };
@@ -587,11 +600,78 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         last_good: last_good.map(shown),
         exact: r.exact,
         candidates,
+        layout,
+        layout_why,
         warnings: drawn_warning(&d, dimension.view, dimension.kind.paths()),
         dry_run: false,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// Why a dimension has no layout while the search for a font to fall back to runs: the search is
+/// never waited for here, as add and its dry run run on the window thread.
+const TEXT_WAITS: &str = "its text waits for a font to fall back to; drawing.scene draws it when one is found";
+
+/// Where `dimension` of `d`, read as `r`, sits on its view's sheet now, as the sheet draws it: laid out
+/// through its view's frame ([`paper_group`]), then moved to the view's centre. Or none, with why when
+/// its status doesn't say it, in the sheet's words: its view draws its parts apart, isn't drawn (a
+/// style it can't draw yet, or nothing to measure), has no place for what it measures, or its group
+/// alone fails the paper scene's checks; or its text still waits for a font ([`TEXT_WAITS`]). A text
+/// that can't be set has no box, and says why. It reads the model as it is evaluated and draws no
+/// view's lines, so a view whose lines fail still answers.
+fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved) -> (Option<DimensionLayoutResult>, Option<String>) {
+    let id = dimension.view;
+    if let Some(apart) = crate::drawing_view::draws_apart(d, id) {
+        return (None, Some(apart.held().into()));
+    }
+    let not_drawn = || (None, Some(NOT_DRAWN.to_string()));
+    // The views draw from where the design places its parts, as the sheet does; a dimension reads the
+    // same either way, as it reads the model, not the session's moves.
+    let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
+    let s = copy.as_ref().unwrap_or(s);
+    let Ok(view) = d.resolve_view(id) else { return not_drawn() };
+    let unstyled = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
+    if unstyled.or_else(|| crate::drawing_view::not_drawable_apart(&view)).is_some() {
+        return not_drawn();
+    }
+    let on = match crate::drawing_view::on_sheet(s, d, id, INSPECT) {
+        Ok(on) if on.unmeasured.is_none() => on,
+        _ => return not_drawn(),
+    };
+    let size = d.views.iter().find(|v| v.id == id).and_then(|v| d.sheets.iter().find(|sheet| sheet.id == v.sheet)).map(|sheet| sheet.sheet.size_mm());
+    let (Ok(frame), Ok(centre), Some(Ok(size))) =
+        (crate::drawing_view::frame(view.basis, view.scale.value, &on.extents.model, Vec2::ZERO, INSPECT), d.view_centre(id), size)
+    else {
+        return not_drawn();
+    };
+    // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
+    let Some(paper) = paper_group(dimension, r, &frame, view.line_group.value, &PaperFonts::new(&d.font, &d.language, false)) else {
+        return (None, (!r.points.is_empty()).then(|| NO_PLACE.to_string()));
+    };
+    // No layout at all until the font is found: a short span's lines depend on its text's width.
+    if paper.pending {
+        return (None, Some(TEXT_WAITS.to_string()));
+    }
+    // As the sheet takes it: alone on its sheet, its group must pass the paper scene's checks.
+    let mut alone = Scene::new(size, vec![moved(&paper.group, centre)]);
+    alone.add_fonts(paper.fonts);
+    if let Err(e) = alone.validate() {
+        return (None, Some(e.to_string()));
+    }
+    // Each point plus the centre, as the sheet moves the group, so the two are the same numbers.
+    let at = |p: &Vec2| {
+        let p = *p + centre;
+        [p.x, p.y]
+    };
+    let lines = |role: LineRole| paper.layout.lines.iter().filter(|(of, _)| *of == role).map(|(_, line)| line.iter().map(at).collect()).collect();
+    let layout = DimensionLayoutResult {
+        extension_lines: lines(LineRole::Extension),
+        dimension_lines: lines(LineRole::Dimension),
+        arrows: paper.layout.arrows.iter().map(|(tip, dir)| ArrowResult { tip: at(tip), points: [dir.x, dir.y] }).collect(),
+        text_boxes: paper.layout.text_boxes.iter().map(|corners| corners.each_ref().map(at)).collect(),
+    };
+    (Some(layout), paper.why)
 }
 
 /// How a command's answer says where a reference stands with the model: the status's word, why

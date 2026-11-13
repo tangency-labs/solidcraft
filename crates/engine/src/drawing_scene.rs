@@ -596,6 +596,11 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     }
 }
 
+/// Why a sheet leaves out a dimension or a note whose view it doesn't draw.
+pub(crate) const NOT_DRAWN: &str = "its view isn't drawn";
+/// Why a sheet leaves out a dimension that measures something its view has no place to draw.
+pub(crate) const NO_PLACE: &str = "what it measures has no place to draw on its view";
+
 /// The records of `wanted` read once, each by its kind, each drawn through its view's frame (`None`:
 /// its view isn't drawn), in its line group, in `wanted`'s order. A record that can't be read says so
 /// instead.
@@ -629,7 +634,7 @@ fn draw_dimensions(
                 Some(paper) => drawn(Some(Arc::new(paper.group)), paper.fonts, paper.why, paper.pending),
                 None => {
                     let nothing = !resolved.points.is_empty() && frame(record.view).is_some();
-                    drawn(None, Vec::new(), nothing.then(|| "what it measures has no place to draw on its view".to_string()), false)
+                    drawn(None, Vec::new(), nothing.then(|| NO_PLACE.to_string()), false)
                 }
             }
         }
@@ -826,7 +831,7 @@ impl Assembly {
             let mut why = one.why.clone();
             let mut drawn = false;
             match (self.placed.get(&one.view).map(|(_, centre)| *centre), &one.group) {
-                (None, _) => why = Some("its view isn't drawn".into()),
+                (None, _) => why = Some(NOT_DRAWN.into()),
                 (Some(centre), Some(group)) => match self.add(group, &one.fonts, centre, DrawnFor::View) {
                     Ok(bounds_mm) => {
                         drawn = true;
@@ -986,7 +991,7 @@ fn group_bounds(group: &Group, fonts: &[Font]) -> Aabb2 {
 
 /// `group` moved `by` on paper: each point plus `by`, exactly, so the same lines moved to the same
 /// centre are the same bytes however they got there.
-fn moved(group: &Group, by: Vec2) -> Group {
+pub(crate) fn moved(group: &Group, by: Vec2) -> Group {
     let segs = |path: &[Seg2]| -> Vec<Seg2> {
         // A shift keeps an arc's radius and angles: no turn, no mirror.
         path.iter().map(|seg| seg.mapped(|p| p + by, ArcMap::turn(0.0, false))).collect()
@@ -1600,7 +1605,7 @@ pub fn cancel(s: &mut Session) {
 }
 
 /// A copy of `s` as the design places its parts: an occurrence move not captured yet is left out.
-fn designed(s: &Session) -> Session {
+pub(crate) fn designed(s: &Session) -> Session {
     let mut copy = s.scratch();
     copy.pending_moves.clear();
     copy

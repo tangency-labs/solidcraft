@@ -47,6 +47,9 @@ pub struct DimLayout {
     /// The direction the value text runs in: level (+x), or along a linear dimension's line when
     /// it is above it ([`DimSizes::above`]).
     pub text_dir: Vec2,
+    /// How many of [`DimLayout::lines`], from the first, are extension lines: each kind lays those out
+    /// before its dimension lines and arcs.
+    pub extensions: usize,
 }
 
 /// The sizes a dimension is laid out with, in its frame's units: [`DimSizes::screen`] on screen,
@@ -445,6 +448,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: DimText, sizes: &DimSizes, half: Vec
                     out.lines.push(vec![p + u * gap.min(v.len()), q + u * over]);
                 }
             }
+            out.extensions = out.lines.len();
             let len = (q1 - q0).dot(dir);
             let (lo, hi) = if len >= 0.0 { (q0, q1) } else { (q1, q0) };
             let span = len.abs();
@@ -510,6 +514,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: DimText, sizes: &DimSizes, half: Vec
                     }
                 }
             }
+            out.extensions = out.lines.len();
             // The leader stops where it meets the (level) text box.
             let rim = box_exit(half, u) + gap;
             let from = if diameter { center - u * radius } else { center };
@@ -547,6 +552,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: DimText, sizes: &DimSizes, half: Vec
                 let u = Vec2::from_angle(a);
                 out.lines.push(vec![vertex + u * (r * 0.15).min(gap * 3.0), vertex + u * (r + over)]);
             }
+            out.extensions = out.lines.len();
             let arc_len = r * sweep;
             if arc_len > 2.5 * arrow {
                 out.lines.push(arc_pts(vertex, r, a0, sweep));
@@ -576,6 +582,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: DimText, sizes: &DimSizes, half: Vec
                 let (from, to) = if r >= radius { (radius + gap, r + over) } else { (radius - gap, r - over) };
                 out.lines.push(vec![center + u * from, center + u * to]);
             }
+            out.extensions = out.lines.len();
             out.lines.push(arc_pts(center, r, start, sweep));
             out.arrows.push((center + Vec2::from_angle(start) * r, -Vec2::from_angle(start).perp()));
             out.arrows.push((center + Vec2::from_angle(start + sweep) * r, Vec2::from_angle(start + sweep).perp()));
@@ -974,6 +981,7 @@ mod tests {
                 for (sizes, fallback) in &cases {
                     let lay = dim_layout_sized(&f, DimText::Default, sizes, half, [None, None]);
                     assert!(finite(&lay), "{bad} in {sizes:?}, {f:?}: {lay:?}");
+                    assert!(lay.extensions <= lay.lines.len(), "{bad} in {sizes:?}, {f:?}: {lay:?}");
                     assert_eq!(lay, dim_layout_sized(&f, DimText::Default, fallback, half, [None, None]), "{bad} in {sizes:?}, {f:?}");
                 }
                 // A screen pixel that big makes every size too big: all fall back together.
@@ -1046,8 +1054,65 @@ mod tests {
                     let lay = dim_layout(f, Some(text), 0.1, Vec2::new(hx, hy));
                     let mut points = lay.lines.iter().flatten().chain(lay.arrows.iter().map(|(p, _)| p));
                     assert!(lay.text.is_finite() && points.all(|p| p.is_finite()), "{f:?} {hx} {hy} {text:?}: {:?}", lay.lines);
+                    assert!(lay.extensions <= lay.lines.len(), "{f:?} {hx} {hy} {text:?}: {lay:?}");
                 }
             }
         }
+    }
+
+    /// Each kind lays out its extension lines (ISO 129-1) first and counts them, so a reader can tell
+    /// them from its dimension lines: a linear one's two, none when both would have no length; a
+    /// radius's extension of its arc when its arrow is past the arc's end, none on the arc or on a
+    /// whole circle; an angle's two rays; an arc length's two; a half axis's as the linear dimension it
+    /// is drawn as. Each starts at what it measures, out by the gap (an angle's ray by its own rule).
+    #[test]
+    fn each_kind_counts_its_extension_lines_first() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        // On a screen of one pixel: a 9 arrowhead, a 3 gap, a 4 overshoot and 22 across.
+        let (px, half) = (1.0, Vec2::new(2.0, 1.0));
+        let starts = |l: &DimLayout| l.lines.iter().take(l.extensions).map(|line| line[0]).collect::<Vec<_>>();
+
+        // 10 above an 80 long line: from the gap above each end (3) to the overshoot past the line (14).
+        let linear = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(80.0, 0.0), dir: Vec2::X };
+        let lay = dim_layout(&linear, Some(Vec2::new(0.0, 10.0)), px, half);
+        assert_eq!(lay.extensions, 2, "{lay:?}");
+        assert!(close(lay.lines[0][0], Vec2::new(0.0, 3.0)) && close(lay.lines[0][1], Vec2::new(0.0, 14.0)), "{lay:?}");
+        assert!(close(lay.lines[1][0], Vec2::new(80.0, 3.0)) && close(lay.lines[1][1], Vec2::new(80.0, 14.0)), "{lay:?}");
+        // On the line it measures, both have no length and neither is laid out; the line still is.
+        let flat = dim_layout(&linear, Some(Vec2::ZERO), px, half);
+        assert!(flat.extensions == 0 && !flat.lines.is_empty(), "{flat:?}");
+
+        // A quarter arc of radius 10 from 0° to 90°, its radius's text 20 out at 135°: the arc continued
+        // from its 90° end, (0, 10). At 45° the arrow is on the arc, and a whole circle has no ends.
+        let arc = DimFrame::Radial { center: Vec2::ZERO, radius: 10.0, diameter: false, arc: Some((0.0, FRAC_PI_2)) };
+        let past = dim_layout(&arc, Some(Vec2::from_angle(0.75 * PI) * 20.0), px, half);
+        assert_eq!(past.extensions, 1, "{past:?}");
+        assert!(close(starts(&past)[0], Vec2::new(0.0, 10.0)), "{past:?}");
+        assert_eq!(dim_layout(&arc, Some(Vec2::from_angle(0.25 * PI) * 20.0), px, half).extensions, 0);
+        let circle = DimFrame::Radial { center: Vec2::ZERO, radius: 10.0, diameter: false, arc: None };
+        assert_eq!(dim_layout(&circle, Some(Vec2::new(-20.0, 0.0)), px, half).extensions, 0);
+
+        // An angle of 1 radian from +x, its text 48 out by default: each ray from 0.15 of 48 out (7.2,
+        // short of three gaps, 9).
+        let angle = DimFrame::Angular { vertex: Vec2::ZERO, d0: Vec2::X, sweep: 1.0 };
+        let lay = dim_layout(&angle, None, px, half);
+        assert_eq!(lay.extensions, 2, "{lay:?}");
+        assert!(close(starts(&lay)[0], Vec2::X * 7.2) && close(starts(&lay)[1], Vec2::from_angle(1.0) * 7.2), "{lay:?}");
+
+        // An arc of radius 10 from 0.5 by 2 radians, its text 10 + 20 out by default: each end's line
+        // from the gap past the arc (13).
+        let arc_length = DimFrame::ArcLength { center: Vec2::ZERO, radius: 10.0, start: 0.5, sweep: 2.0 };
+        let lay = dim_layout(&arc_length, None, px, half);
+        assert_eq!(lay.extensions, 2, "{lay:?}");
+        assert!(close(starts(&lay)[0], Vec2::from_angle(0.5) * 13.0) && close(starts(&lay)[1], Vec2::from_angle(2.5) * 13.0), "{lay:?}");
+
+        // A half axis 8 long up +y, its text at (10, 4): the linear dimension from the centre to (0, 8),
+        // 10 to its right, its extension lines from the gap right of each end (x 3).
+        let half_axis = DimFrame::HalfAxis { center: Vec2::ZERO, dir: Vec2::Y, len: 8.0 };
+        let to_end = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(0.0, 8.0), dir: Vec2::Y };
+        let lay = dim_layout(&half_axis, Some(Vec2::new(10.0, 4.0)), px, half);
+        assert_eq!(lay, dim_layout(&to_end, Some(encode_text(&to_end, Vec2::new(10.0, 4.0))), px, half));
+        assert_eq!(lay.extensions, 2, "{lay:?}");
+        assert!(close(starts(&lay)[0], Vec2::new(3.0, 0.0)) && close(starts(&lay)[1], Vec2::new(3.0, 8.0)), "{lay:?}");
     }
 }
