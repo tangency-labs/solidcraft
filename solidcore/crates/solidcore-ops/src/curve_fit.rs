@@ -489,10 +489,7 @@ mod tests {
         };
         let (r, bound) = rebuild(&c, 3, 1).unwrap();
         assert!(bound < 1e-9, "{bound}");
-        assert_eq!(
-            r.natural(),
-            solidcore_record::brep::Natural::Range(0.0, 1.0)
-        );
+        assert_eq!(r.natural(), Natural::Range(0.0, 1.0));
     }
 
     #[test]
@@ -615,11 +612,11 @@ mod tests {
 
     #[test]
     fn a_trimmed_edge_is_refitted_on_it_within_its_bound() {
-        let (cut, order, edge) = cut_sheet();
         // A cubic of four spans: CI measured the certified bound of the refit against the edge
         // at one parameter (rebuild's) at 4.998e-4, an upper bound of the distance between the
         // shapes, so the measured distance is within the pinned 5e-4.
         const REACHED: f64 = 5e-4;
+        let (cut, order, edge) = cut_sheet();
         let refit = edge_as_curve(&cut, &order, edge, 3, 4, REACHED);
         let Ok((fit, bound)) = &refit else {
             panic!("refused: {refit:?}")
