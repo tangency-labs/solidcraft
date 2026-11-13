@@ -1,0 +1,42 @@
+{
+  "de": {
+    "forms.selection_frame.current_cad": "Die Auswahlachsen benötigen die aktuelle CAD-Vorschau.",
+    "forms.selection_frame.single_element": "Wählen Sie eine Fläche, Kante oder einen Punkt als Bezug für die Auswahlachsen.",
+    "forms.selection_frame.unavailable": "Für dieses Element sind keine eindeutigen Auswahlachsen verfügbar."
+  },
+  "en": {
+    "forms.selection_frame.current_cad": "Selection axes require the current CAD preview.",
+    "forms.selection_frame.single_element": "Pick a face, edge or point to set the Selection axes.",
+    "forms.selection_frame.unavailable": "This element has no unambiguous Selection axes."
+  },
+  "ja": {
+    "forms.selection_frame.current_cad": "選択軸には最新の CAD プレビューが必要です。",
+    "forms.selection_frame.single_element": "選択軸の基準にする面、エッジ、または点を選択してください。",
+    "forms.selection_frame.unavailable": "この要素の選択軸を一意に決められません。"
+  },
+  "ko": {
+    "forms.selection_frame.current_cad": "선택 축에는 최신 CAD 미리보기가 필요합니다.",
+    "forms.selection_frame.single_element": "선택 축의 기준이 될 면, 모서리 또는 점을 선택하세요.",
+    "forms.selection_frame.unavailable": "이 요소의 선택 축을 하나로 결정할 수 없습니다."
+  },
+  "zh": {
+    "forms.selection_frame.current_cad": "选择轴需要当前的 CAD 预览。",
+    "forms.selection_frame.single_element": "请选择作为选择轴基准的面、边或点。",
+    "forms.selection_frame.unavailable": "此元素没有可唯一确定的选择轴。"
+  },
+  "ar": {
+    "forms.selection_frame.current_cad": "تتطلب محاور التحديد معاينة CAD الحالية.",
+    "forms.selection_frame.single_element": "اختر وجهًا أو حافة أو نقطة لضبط محاور التحديد.",
+    "forms.selection_frame.unavailable": "لا يمكن تعيين محاور تحديد واضحة لهذا العنصر."
+  },
+  "he": {
+    "forms.selection_frame.current_cad": "צירי הבחירה דורשים את תצוגת ה־CAD המקדימה העדכנית.",
+    "forms.selection_frame.single_element": "יש לבחור פאה, קצה או נקודה כדי לקבוע את צירי הבחירה.",
+    "forms.selection_frame.unavailable": "לא ניתן לקבוע צירי בחירה חד־משמעיים לרכיב זה."
+  },
+  "vi": {
+    "forms.selection_frame.current_cad": "Để xác định các trục vùng chọn, cần bản xem trước CAD hiện tại.",
+    "forms.selection_frame.single_element": "Chọn một mặt, cạnh hoặc điểm để xác định các trục vùng chọn.",
+    "forms.selection_frame.unavailable": "Không thể xác định duy nhất các trục vùng chọn cho phần tử này."
+  }
+}

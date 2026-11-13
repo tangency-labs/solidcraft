@@ -67,6 +67,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_surface::Surf::Blend { .. } => "surface.blend",
             crate::dialogs_surface::Surf::Boundary { .. } => "surface.boundary",
             crate::dialogs_surface::Surf::Patch { .. } => "surface.patch",
+            crate::dialogs_surface::Surf::RefinedWeld => "form.refined_weld",
             crate::dialogs_surface::Surf::Unstitch => "surface.unstitch",
             crate::dialogs_surface::Surf::ReverseNormal => "surface.reverse_normal",
             crate::dialogs_surface::Surf::Ruled { .. } => "surface.ruled",

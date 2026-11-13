@@ -1,0 +1,90 @@
+{
+  "de": {
+    "forms.prototype.region_browser_unavailable": "Die Bereichsauswahl ist im Browser noch nicht verfügbar. Verwenden Sie die Desktop-App.",
+    "forms.prototype.region_busy": "Formelemente werden ausgewählt…",
+    "forms.prototype.region_failed": "Formbereich kann nicht ausgewählt werden: {error}",
+    "forms.prototype.region_help": "Zum Auswählen im leeren Bereich ziehen. Umschalt fügt hinzu; Strg+Umschalt schaltet um. Von links nach rechts werden ganze Elemente ausgewählt, umgekehrt berührte Elemente. Lasso in den Auswahloptionen zeichnet ein Freihandfenster. Navigationskürzel behalten ihr Verhalten. Die Auswahl läuft im Hintergrund. Escape bricht sie ab.",
+    "forms.prototype.region_invalid": "Das Auswahlergebnis der Form ist nicht mehr gültig. Bitte erneut versuchen.",
+    "forms.prototype.region_limit": "Die Auswahlkontur ist zu lang. Zeichnen Sie ein kürzeres Lasso.",
+    "forms.prototype.region_waiting": "Die vorherige Auswahl wird abgeschlossen…",
+    "forms.prototype.region_worker_lost": "Der Auswahlprozess wurde ohne Ergebnis beendet.",
+    "prefs.forms_region_selection": "Formelemente mit Rechteck oder Lasso auswählen"
+  },
+  "en": {
+    "forms.prototype.region_browser_unavailable": "Region selection is not available in the browser yet. Use the desktop app.",
+    "forms.prototype.region_busy": "Selecting Form elements…",
+    "forms.prototype.region_failed": "Cannot select Form region: {error}",
+    "forms.prototype.region_help": "Drag empty space to select. Shift adds; Ctrl+Shift toggles. Left to right selects whole elements; right to left selects touching elements. Lasso in the selection options draws a freehand window. Navigation shortcuts keep their usual behaviour. Selection runs in the background. Escape cancels it.",
+    "forms.prototype.region_invalid": "The Form selection result is no longer valid. Try again.",
+    "forms.prototype.region_limit": "The selection outline is too long. Draw a shorter lasso.",
+    "forms.prototype.region_waiting": "Waiting for the previous selection to finish…",
+    "forms.prototype.region_worker_lost": "The Form selection worker stopped before returning a result.",
+    "prefs.forms_region_selection": "Select Form elements with a box or lasso"
+  },
+  "ja": {
+    "forms.prototype.region_browser_unavailable": "範囲選択はブラウザーではまだ使用できません。デスクトップアプリをご利用ください。",
+    "forms.prototype.region_busy": "フォームの要素を選択中…",
+    "forms.prototype.region_failed": "フォームの範囲を選択できません: {error}",
+    "forms.prototype.region_help": "空白部分をドラッグして選択します。Shiftで追加、Ctrl+Shiftで切り替えます。左から右では全体が含まれる要素、右から左では接触する要素を選択します。選択オプションの投げ縄では自由な輪郭で囲めます。ナビゲーションのショートカットは従来どおり動作します。 選択処理はバックグラウンドで実行されます。Escapeでキャンセルします。",
+    "forms.prototype.region_invalid": "フォームの選択結果が無効になりました。もう一度お試しください。",
+    "forms.prototype.region_limit": "選択の輪郭が長すぎます。短い投げ縄を描いてください。",
+    "forms.prototype.region_waiting": "前の選択処理の完了を待っています…",
+    "forms.prototype.region_worker_lost": "フォームの選択処理が結果を返す前に停止しました。",
+    "prefs.forms_region_selection": "矩形または投げ縄でフォームの要素を選択"
+  },
+  "ko": {
+    "forms.prototype.region_browser_unavailable": "영역 선택은 아직 브라우저에서 지원되지 않습니다. 데스크톱 앱을 사용하세요.",
+    "forms.prototype.region_busy": "폼 요소 선택 중…",
+    "forms.prototype.region_failed": "폼 영역을 선택할 수 없습니다: {error}",
+    "forms.prototype.region_help": "빈 공간을 드래그하여 선택합니다. Shift는 추가, Ctrl+Shift는 전환합니다. 왼쪽에서 오른쪽은 완전히 포함된 요소, 반대 방향은 닿는 요소를 선택합니다. 선택 옵션의 올가미로 자유 영역을 그릴 수 있습니다. 탐색 단축키는 기존 동작을 유지합니다. 선택은 백그라운드에서 실행됩니다. Escape로 취소합니다.",
+    "forms.prototype.region_invalid": "폼 선택 결과가 더 이상 유효하지 않습니다. 다시 시도하세요.",
+    "forms.prototype.region_limit": "선택 윤곽이 너무 깁니다. 더 짧은 올가미를 그리세요.",
+    "forms.prototype.region_waiting": "이전 선택이 끝나기를 기다리는 중…",
+    "forms.prototype.region_worker_lost": "폼 선택 작업이 결과를 반환하기 전에 중단되었습니다.",
+    "prefs.forms_region_selection": "상자 또는 올가미로 폼 요소 선택"
+  },
+  "zh": {
+    "forms.prototype.region_browser_unavailable": "浏览器暂不支持区域选择。请使用桌面应用。",
+    "forms.prototype.region_busy": "正在选择形状元素…",
+    "forms.prototype.region_failed": "无法选择形状区域：{error}",
+    "forms.prototype.region_help": "在空白处拖动以选择。Shift 添加，Ctrl+Shift 切换。由左向右选择完全包含的元素；由右向左选择相交的元素。选择选项中的套索可绘制自由窗口。导航快捷键保持原有行为。 选择在后台运行。按 Escape 取消。",
+    "forms.prototype.region_invalid": "形状选择结果已失效。请重试。",
+    "forms.prototype.region_limit": "选择轮廓过长。请绘制较短的套索。",
+    "forms.prototype.region_waiting": "正在等待上一次选择完成…",
+    "forms.prototype.region_worker_lost": "形状选择任务在返回结果前已停止。",
+    "prefs.forms_region_selection": "使用框选或套索选择形状元素"
+  },
+  "ar": {
+    "forms.prototype.region_browser_unavailable": "تحديد المناطق غير متاح في المتصفح بعد. استخدم تطبيق سطح المكتب.",
+    "forms.prototype.region_busy": "جارٍ تحديد عناصر الشكل…",
+    "forms.prototype.region_failed": "تعذّر تحديد منطقة من الشكل: {error}",
+    "forms.prototype.region_help": "اسحب في مساحة فارغة للتحديد. استخدم Shift للإضافة وCtrl+Shift لتبديل حالة التحديد. يحدّد السحب من اليسار إلى اليمين العناصر الواقعة بالكامل داخل المنطقة، ومن اليمين إلى اليسار العناصر التي تلامسها. اختر التحديد الحر في خيارات التحديد لرسم منطقة حرّة. تعمل اختصارات التنقّل كالمعتاد. يجري التحديد في الخلفية، ويمكن إلغاؤه بالضغط على Esc.",
+    "forms.prototype.region_invalid": "لم تعد نتيجة تحديد الشكل صالحة. أعد المحاولة.",
+    "forms.prototype.region_limit": "محيط التحديد طويل جدًا. ارسم محيطًا حرًا أقصر.",
+    "forms.prototype.region_waiting": "بانتظار انتهاء التحديد السابق…",
+    "forms.prototype.region_worker_lost": "توقّفت مهمة تحديد الشكل قبل إرجاع نتيجة.",
+    "prefs.forms_region_selection": "تحديد عناصر الشكل بمستطيل أو برسم حر"
+  },
+  "he": {
+    "forms.prototype.region_browser_unavailable": "בחירת אזור עדיין אינה זמינה בדפדפן. יש להשתמש ביישום שולחן העבודה.",
+    "forms.prototype.region_busy": "מתבצעת בחירה של רכיבי הצורה החופשית…",
+    "forms.prototype.region_failed": "לא ניתן לבחור אזור בצורה החופשית: {error}",
+    "forms.prototype.region_help": "לבחירה יש לגרור בשטח ריק. Shift מוסיף לבחירה, ו־Ctrl+Shift מחליף את מצב הבחירה. גרירה משמאל לימין בוחרת רכיבים שנמצאים במלואם באזור, וגרירה מימין לשמאל בוחרת גם רכיבים שנוגעים בו. אפשרות לאסו מציירת אזור בחירה חופשי. קיצורי הניווט נשארים כרגיל. הבחירה מתבצעת ברקע וניתן לבטלה באמצעות Escape.",
+    "forms.prototype.region_invalid": "תוצאת בחירת הרכיבים כבר אינה תקפה. יש לנסות שוב.",
+    "forms.prototype.region_limit": "מתאר הבחירה ארוך מדי. יש לצייר מתאר לאסו קצר יותר.",
+    "forms.prototype.region_waiting": "ממתין לסיום הבחירה הקודמת…",
+    "forms.prototype.region_worker_lost": "תהליך הבחירה של רכיבי הצורה החופשית הופסק לפני שהתקבלה תוצאה.",
+    "prefs.forms_region_selection": "בחירת רכיבי צורה חופשית באמצעות מלבן או לאסו"
+  },
+  "vi": {
+    "forms.prototype.region_browser_unavailable": "Trình duyệt chưa hỗ trợ chọn theo vùng. Hãy dùng ứng dụng máy tính.",
+    "forms.prototype.region_busy": "Đang chọn phần tử của hình…",
+    "forms.prototype.region_failed": "Không thể chọn vùng trên hình: {error}",
+    "forms.prototype.region_help": "Kéo trên vùng trống để chọn. Giữ Shift để thêm vào vùng chọn, hoặc Ctrl+Shift để chọn hay bỏ chọn từng phần tử. Kéo từ trái sang phải để chọn các phần tử nằm hoàn toàn bên trong. Kéo từ phải sang trái để chọn cả các phần tử chạm vùng chọn. Dùng dây chọn trong tùy chọn chọn để vẽ vùng tự do. Các phím tắt điều hướng vẫn hoạt động như thường lệ. Quá trình chọn chạy trong nền. Nhấn Escape để hủy.",
+    "forms.prototype.region_invalid": "Kết quả chọn trên hình không còn hợp lệ. Hãy thử lại.",
+    "forms.prototype.region_limit": "Đường bao vùng chọn quá dài. Hãy vẽ vùng chọn ngắn hơn bằng dây chọn.",
+    "forms.prototype.region_waiting": "Đang chờ lần chọn trước hoàn tất…",
+    "forms.prototype.region_worker_lost": "Tác vụ chọn trên hình đã dừng trước khi trả về kết quả.",
+    "prefs.forms_region_selection": "Chọn phần tử của hình bằng khung chữ nhật hoặc dây chọn"
+  }
+}

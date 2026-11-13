@@ -68,7 +68,10 @@ impl Lineage {
     /// history or its history cannot be composed with theirs: the result is then named from
     /// geometry, flagged as unverified.
     pub(crate) fn step(result: &Body, inputs: &[&Lineage]) -> Option<Lineage> {
-        let mut history = result.history()?.clone();
+        Self::from_history(result.history()?.clone(), inputs)
+    }
+
+    pub(crate) fn from_history(mut history: History, inputs: &[&Lineage]) -> Option<Lineage> {
         if history.operands != inputs.len() {
             return None;
         }

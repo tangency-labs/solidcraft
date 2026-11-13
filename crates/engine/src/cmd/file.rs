@@ -973,6 +973,9 @@ fn check_design_name(cmd: &str, path: &str) -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
     // A path outside the agent's folders says so first, whatever its name.
+    if s.forms_prototype.is_some() {
+        return Err(bad("file.save", "finish or cancel the active Form before saving the design"));
+    }
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     check_design_name(cmd, path)?;
     // A move not captured yet isn't in the document a file holds: refuse, rather than write the
@@ -1780,15 +1783,16 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "doc.recover";
     let dir = recovery_dir(p, cmd)?;
     let id = str_(p, "id").ok_or_else(|| bad(cmd, "`id` is required (see doc.recovery_list)"))?;
-    let (mut doc, entry) = crate::recovery::load(&dir, id)?;
+    let (bytes, entry) = crate::recovery::load_package(&dir, id)?;
+    let (mut doc, draft) = solidcraft_io::read_recovery_container(&bytes)?;
     if let Some(stem) = entry.path.as_deref().and_then(|path| default_name_for(&doc.name, path)) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at_validating(doc, None, entry.path.as_deref(), s.validation()));
-    s.mark_unsaved();
+    let recovered = crate::recovery::restore_validating(doc, draft.as_deref(), entry.path.as_deref(), s.validation())?;
     if bool_(p, "discard").unwrap_or(false) {
         crate::recovery::remove(&dir, id)?;
     }
+    s.replace_design(recovered);
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
     let reply =
         RecoverResult { id: id.to_string(), path: entry.path, name: entry.name, features: s.doc.features.len(), errors, param_warnings: Vec::new() };

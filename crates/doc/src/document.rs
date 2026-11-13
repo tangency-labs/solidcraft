@@ -760,6 +760,16 @@ pub enum FeatureKind {
     NewerFileFeature {
         raw: crate::newer_file::RawFeature,
     },
+    /// Editable subdivision source and its fitted CAD result.
+    Form {
+        definition: Box<crate::forms::Definition>,
+        #[walk(length = "Fit tolerance")]
+        tolerance: Expr,
+        #[serde(default)]
+        operation: Operation,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<BodyName>,
+    },
     /// A recorded timeline ownership boundary. Geometry is converted from its
     /// current local frame into the destination component frame exactly once.
     BodyTransfer {
@@ -1756,6 +1766,9 @@ pub enum FeatureKind {
         #[serde(default = "zero_expr")]
         #[walk(length = "Tolerance")]
         tolerance: Expr,
+        /// Source-scoped refined Form seam. Ordinary Stitch has no seam record.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        form_seam: Option<Box<crate::forms::RefinedWeldSeam>>,
     },
     /// Surface bodies thickened into solids along their normals (by half each way when
     /// `symmetric`).
@@ -1765,6 +1778,14 @@ pub enum FeatureKind {
         thickness: Expr,
         #[serde(default)]
         symmetric: bool,
+        /// Construction chosen at authoring, in source body order. A true slot
+        /// builds two half walls. Older documents did not record that choice.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        form_half_walls: Option<Vec<bool>>,
+        /// A true slot retains the exact planar skin and sweeps its boundary
+        /// curves instead of offsetting the fitted surface in the kernel.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        form_planar_walls: Option<Vec<bool>>,
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
@@ -2804,6 +2825,7 @@ impl FeatureKind {
             FeatureKind::NewerFileFeature { .. } => "NewerFileFeature",
             FeatureKind::BodyTransfer { .. } => "BodyTransferFeature",
             FeatureKind::Sketch { .. } => "Sketch",
+            FeatureKind::Form { .. } => "FormFeature",
             FeatureKind::Extrude { .. } => "ExtrudeFeature",
             FeatureKind::Revolve { .. } => "RevolveFeature",
             FeatureKind::Fillet { .. } => "FilletFeature",
@@ -2889,6 +2911,7 @@ impl FeatureKind {
     pub fn kind_key(&self) -> &'static str {
         match self {
             FeatureKind::NewerFileFeature { .. } => "newer_file_feature",
+            FeatureKind::Form { .. } => "form",
             FeatureKind::BodyTransfer { .. } => "body_transfer",
             FeatureKind::Sketch { .. } => "sketch",
             FeatureKind::Extrude { .. } => "extrude",
@@ -3132,6 +3155,7 @@ impl FeatureKind {
             FeatureKind::SurfaceUntrim { .. } => "Untrim",
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
+            FeatureKind::Form { .. } => "Form",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
             FeatureKind::Repair { .. } => "Repair",
         }

@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
+default-run = "solidcraft-web"
 
 [lints]
 workspace = true
@@ -12,6 +13,13 @@ workspace = true
 [[bin]]
 name = "solidcraft-web"
 path = "src/main.rs"
+
+[[bin]]
+name = "solidcraft-compute-worker"
+path = "src/compute_worker.rs"
+
+[lib]
+path = "src/compute_protocol.rs"
 
 [features]
 default = ["profile"]
@@ -46,4 +54,5 @@ web-sys = { version = "0.3", features = [
     "Headers", "ReadableStream", "ReadableStreamDefaultReader",
     "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "FormData", "RequestInit", "MediaQueryList", "Gamepad", "Performance",
     "PointerEvent", "Node", "VisibilityState",
+    "DedicatedWorkerGlobalScope", "MessageEvent", "Worker", "WorkerGlobalScope", "WorkerOptions", "WorkerType",
 ] }

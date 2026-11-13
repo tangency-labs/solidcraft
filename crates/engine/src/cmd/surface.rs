@@ -630,7 +630,7 @@ fn stitch(s: &mut Session, p: &Value) -> Result<Value> {
     let bodies = bodies_param(s, p, cmd)?;
     let tolerance = expr(p, "tolerance").unwrap_or_else(|| "0".into());
     check_expr(s, &tolerance, Kind::Length, cmd, "tolerance")?;
-    add_feature(s, p, FeatureKind::Stitch { bodies: bodies.into_iter().map(BodyName).collect(), tolerance })
+    add_feature(s, p, FeatureKind::Stitch { bodies: bodies.into_iter().map(BodyName).collect(), tolerance, form_seam: None })
 }
 
 fn thicken(s: &mut Session, p: &Value) -> Result<Value> {
@@ -638,10 +638,40 @@ fn thicken(s: &mut Session, p: &Value) -> Result<Value> {
     let bodies = bodies_param(s, p, cmd)?;
     let thickness = expr(p, "thickness").ok_or_else(|| bad(cmd, "`thickness` is required"))?;
     check_expr(s, &thickness, Kind::Length, cmd, "thickness")?;
+    let symmetric = bool_(p, "symmetric").unwrap_or(false);
+    let state = s.model.state();
+    let forms: Vec<_> = bodies
+        .iter()
+        .map(|name| {
+            let body = state.body(name)?;
+            let FeatureKind::Form { definition, .. } = &s.doc.feature(body.feature)?.kind else { return None };
+            Some((&body.body, definition.hierarchy.is_some()))
+        })
+        .collect();
+    let planar: Vec<_> = forms.iter().map(|form| form.is_some_and(|(body, _)| solidcraft_doc::forms::can_build_planar_wall(body))).collect();
+    let form_half_walls = if symmetric {
+        let refined: Vec<_> =
+            forms.iter().zip(&planar).map(|(form, planar)| form.and_then(|(body, refined)| (refined && !planar).then_some(body))).collect();
+        if refined.iter().any(Option::is_some) {
+            let length = s.doc.eval(&s.doc.with_design_unit(&thickness, Kind::Length), Kind::Length)?;
+            Some(
+                refined
+                    .into_iter()
+                    .map(|body| body.map_or(Ok(false), |body| solidcraft_doc::refined_symmetric_uses_half_walls(body, length)))
+                    .collect::<solidcraft_doc::Result<Vec<_>>>()?,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let kind = FeatureKind::Thicken {
         bodies: bodies.into_iter().map(BodyName).collect(),
         thickness,
-        symmetric: bool_(p, "symmetric").unwrap_or(false),
+        symmetric,
+        form_half_walls,
+        form_planar_walls: planar.iter().any(|&wall| wall).then_some(planar),
         operation: operation(p, cmd)?,
         targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),
     };
@@ -958,6 +988,234 @@ mod tests {
         assert_eq!(cold.world_state().unwrap().bodies.len(), 3);
         assert!(s.execute("surface.unstitch", &json!({"body": "Nope"})).is_err());
         assert!(s.execute("surface.unstitch", &json!({})).is_err());
+    }
+
+    #[test]
+    fn thicken_a_saved_sculpted_refined_form_keeps_source_and_requires_a_valid_solid() {
+        use solidcore_record::Vec3;
+        use solidcraft_kernel::history::{BodyHistory, FaceOrigin};
+        use std::collections::BTreeSet;
+
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "form.prototype.create",
+            json!({
+                "primitive":"face","dimensions":[20,20,1],"segments":[4,4,1],"levels":0
+            }),
+        );
+        let roots = s.forms_prototype.as_ref().unwrap().logical.faces.len();
+        run(&mut s, "form.prototype.refine", json!({"faces":[5],"counts":[2,2]}));
+        let form = s.forms_prototype.as_ref().unwrap();
+        let children = &form.logical.faces[roots..];
+        let &center = children[0].iter().find(|point| children.iter().all(|face| face.contains(point))).unwrap();
+        let point = form.definition().cage.points[center] + Vec3::Z * 0.35;
+        run(
+            &mut s,
+            "form.prototype.set_vertices",
+            json!({
+                "vertices":[center],"positions":[[point.x,point.y,point.z]]
+            }),
+        );
+        let kept = roots..roots + 2;
+        let removed: Vec<_> = s
+            .forms_prototype
+            .as_ref()
+            .unwrap()
+            .logical
+            .faces
+            .iter()
+            .enumerate()
+            .filter_map(|(id, face)| (!kept.contains(&id) && !face.is_empty()).then_some(id))
+            .collect();
+        run(&mut s, "form.prototype.topology", json!({"tool":"delete_faces","faces":removed}));
+        let definition = s.forms_prototype.as_ref().unwrap().definition();
+        assert!(definition.hierarchy.as_ref().unwrap().details.iter().any(|row| !row.is_empty()));
+        let feature = run(&mut s, "form.prototype.commit", json!({"tolerance":0.05,"name":"Sculpted"}))["feature"].as_u64().unwrap();
+        let original = s.doc.clone();
+        let state = s.model.state();
+        let source = state.bodies.iter().find(|body| body.feature == feature).unwrap();
+        assert!(source.body.is_surface());
+        assert_eq!(source.body.face_count(), 2);
+        let initial_bounds = source.body.exact_bounds().unwrap();
+        assert!(initial_bounds.max.z - initial_bounds.min.z > 0.1);
+
+        for (distance, name) in [(0.1, "AlongNormal"), (-0.1, "AgainstNormal")] {
+            run(
+                &mut s,
+                "surface.thicken",
+                json!({
+                    "bodies":[source.name],"thickness":distance,"operation":"new","body_name":name
+                }),
+            );
+            let state = s.model.state();
+            assert_eq!(state.body(&source.name).unwrap().body.record(), source.body.record());
+            assert_eq!(s.doc.feature(feature), original.feature(feature));
+            let solid = &state.body(name).unwrap().body;
+            assert!(!solid.is_surface() && solidcraft_kernel::validity(solid).ok());
+            let bounds = solid.exact_bounds().unwrap();
+            if distance > 0.0 {
+                assert!(bounds.max.z > initial_bounds.max.z + 0.09 && (bounds.min.z - initial_bounds.min.z).abs() < 1e-7);
+            } else {
+                assert!(bounds.min.z < initial_bounds.min.z - 0.09 && (bounds.max.z - initial_bounds.max.z).abs() < 1e-7);
+            }
+            assert!((solidcraft_kernel::measure(solid).unwrap().volume - 1.25).abs() < 0.01);
+            let history = solid.history().unwrap();
+            history.check(solid, &[&source.body]).unwrap();
+            let origins = || history.faces.iter().flat_map(|face| face.origins.iter().copied());
+            let kept: BTreeSet<_> = origins()
+                .filter_map(|origin| match origin {
+                    FaceOrigin::Face { operand: 0, face } => Some(face),
+                    _ => None,
+                })
+                .collect();
+            let offset: BTreeSet<_> = origins()
+                .filter_map(|origin| match origin {
+                    FaceOrigin::Offset { operand: 0, face } => Some(face),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(kept, BTreeSet::from([0, 1]));
+            assert_eq!(offset, kept);
+            assert!(origins().any(|origin| matches!(origin, FaceOrigin::Edge { operand: 0, .. })));
+        }
+
+        let before = s.doc.clone();
+        let folded = s.execute("surface.thicken", &json!({"bodies":[source.name],"thickness":-20,"body_name":"Fold"})).unwrap_err();
+        assert!(folded.to_string().contains("offset would fold"), "{folded}");
+        assert_eq!(s.doc.as_ref(), before.as_ref());
+        run(
+            &mut s,
+            "surface.thicken",
+            json!({
+                "bodies":[source.name],"thickness":0.1,"symmetric":true,"body_name":"BothSides"
+            }),
+        );
+        let state = s.model.state();
+        let named_wall = state.body("BothSides").unwrap();
+        let saved = &s.doc.feature(named_wall.feature).unwrap().kind;
+        assert!(matches!(saved, FeatureKind::Thicken { form_half_walls: Some(walls), .. } if walls.as_slice() == [true]));
+        let exact_names = |body: &solidcraft_doc::ModelBody| {
+            solidcraft_doc::naming::face_names(body)
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| solidcraft_doc::naming::face_name_exact(body, *index))
+                .map(|(_, name)| name.clone())
+                .collect::<BTreeSet<_>>()
+        };
+        let names = exact_names(named_wall);
+        assert!(names.iter().filter(|name| name.contains(":inner:")).count() >= 4);
+        let symmetric = &named_wall.body;
+        assert_eq!(symmetric.shell_count(), 1);
+        assert!(!symmetric.is_surface() && solidcraft_kernel::validity(symmetric).ok());
+        assert_eq!(state.body(&source.name).unwrap().body.record(), source.body.record());
+        let bounds = symmetric.exact_bounds().unwrap();
+        assert!((bounds.min.z - initial_bounds.min.z + 0.05).abs() < 0.001);
+        assert!((bounds.max.z - initial_bounds.max.z - 0.05).abs() < 0.001);
+        let history = symmetric.history().unwrap();
+        history.check(symmetric, &[&source.body]).unwrap();
+        for source_face in 0..source.body.face_count() {
+            assert_eq!(history.faces.iter().filter(|f| f.origins.contains(&FaceOrigin::Offset { operand: 0, face: source_face })).count(), 2);
+        }
+        assert!(!history.faces.iter().flat_map(|f| &f.origins).any(|origin| matches!(origin, FaceOrigin::Face { .. })));
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        run(&mut reopened, "form.edit", json!({"feature":feature}));
+        assert_eq!(reopened.forms_prototype.as_ref().unwrap().definition(), definition);
+
+        let shifted = definition.cage.points[center] + Vec3::Z * 0.05;
+        run(&mut reopened, "form.prototype.set_vertices", json!({"vertices":[center],"positions":[[shifted.x,shifted.y,shifted.z]]}));
+        let finished = run(&mut reopened, "form.prototype.commit", json!({"tolerance":0.05}));
+        assert_eq!(finished["feature"].as_u64(), Some(feature));
+        let updated = reopened.model.state();
+        let updated_source = &updated.body(&source.name).unwrap().body;
+        let updated_wall = updated.body("BothSides").unwrap();
+        let updated_solid = &updated_wall.body;
+        assert_eq!(updated_solid.face_count(), symmetric.face_count());
+        assert!(names.is_subset(&exact_names(updated_wall)), "existing exact wall names survive source editing");
+        assert_ne!(updated_source.record(), source.body.record());
+        assert!(!updated_solid.is_surface() && solidcraft_kernel::validity(updated_solid).ok());
+        assert!(updated_solid.exact_bounds().unwrap().max.z > bounds.max.z + 0.015);
+        updated_solid.history().unwrap().check(updated_solid, &[updated_source]).unwrap();
+
+        let saved_again = Session::new(solidcraft_doc::Document::from_json(&reopened.doc.to_json()).unwrap());
+        let saved_state = saved_again.model.state();
+        assert_eq!(saved_state.body("BothSides").unwrap().body.record(), updated_solid.record());
+    }
+
+    #[test]
+    fn thicken_a_saved_sculpted_planar_form_keeps_the_wall_and_exact_names() {
+        use solidcore_record::Vec3;
+        use solidcraft_doc::naming::{edge_names, face_name_exact, face_names};
+        use std::collections::BTreeSet;
+
+        for shape in ["base", "refined", "collapsed"] {
+            let mut s = Session::default();
+            run(&mut s, "form.prototype.create", json!({"primitive":"plane","size":8,"spans":1,"levels":2}));
+            let mut edited_point = 1;
+            if shape != "base" {
+                run(&mut s, "form.prototype.refine", json!({"faces":[0],"counts":[2,1]}));
+                if shape == "collapsed" {
+                    let form = s.forms_prototype.as_ref().unwrap().definition();
+                    let layout = form.hierarchy.as_ref().unwrap().layout().unwrap();
+                    let leaf = &layout.faces[1];
+                    edited_point = leaf[1];
+                    run(&mut s, "form.prototype.topology", json!({"tool":"weld","vertices":[leaf[3],leaf[0]],"tolerance":0.05}));
+                }
+            }
+            let feature = run(&mut s, "form.prototype.commit", json!({"tolerance":0.05}))["feature"].as_u64().unwrap();
+            let state = s.model.state();
+            let source = state.bodies.iter().find(|body| body.feature == feature).unwrap();
+            let source_body = &source.body;
+            let expected_volume = solidcraft_kernel::measure(source_body).unwrap().area * 0.25;
+            let exact_names = |body: &solidcraft_doc::ModelBody| {
+                let faces: BTreeSet<_> = face_names(body).iter().cloned().collect();
+                assert_eq!(faces.len(), body.body.face_count());
+                assert!((0..faces.len()).all(|i| face_name_exact(body, i)), "wall face history for {shape}: {faces:?}");
+                (faces, edge_names(body).into_iter().collect::<BTreeSet<_>>())
+            };
+            for (name, thickness, symmetric) in [("Front", 0.25, false), ("Back", -0.25, false), ("Centered", 0.25, true)] {
+                run(&mut s, "surface.thicken", json!({"bodies":[source.name],"thickness":thickness,"symmetric":symmetric,"body_name":name}));
+                let model = s.model.state();
+                let wall = model.body(name).unwrap();
+                assert!(matches!(
+                    &s.doc.feature(wall.feature).unwrap().kind,
+                    FeatureKind::Thicken { form_planar_walls: Some(walls), form_half_walls: None, .. } if walls.as_slice() == [true]
+                ));
+                assert_eq!(model.body(&source.name).unwrap().body.record(), source_body.record());
+                assert!(!wall.body.is_surface() && solidcraft_kernel::validity(&wall.body).ok());
+                assert!((solidcraft_kernel::measure(&wall.body).unwrap().volume - expected_volume).abs() < 1e-7);
+                exact_names(wall);
+            }
+            let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+            let old_state = reopened.model.state();
+            let centered = old_state.body("Centered").unwrap();
+            let names = exact_names(centered);
+            assert_eq!(centered.body.record(), s.model.state().body("Centered").unwrap().body.record());
+            run(
+                &mut reopened,
+                "timeline.redefine",
+                json!({"feature":centered.feature,"command":"surface.thicken","params":{
+                    "bodies":[source.name],"thickness":0.5,"symmetric":true,"body_name":"Centered"
+                }}),
+            );
+            assert_eq!(exact_names(reopened.model.state().body("Centered").unwrap()), names);
+            run(&mut reopened, "form.edit", json!({"feature":feature}));
+            let point = reopened.forms_prototype.as_ref().unwrap().cage.points[edited_point] + Vec3::X * 0.125;
+            run(&mut reopened, "form.prototype.set_vertices", json!({"vertices":[edited_point],"positions":[[point.x,point.y,point.z]]}));
+            run(&mut reopened, "form.prototype.commit", json!({"tolerance":0.05}));
+            let new_state = reopened.model.state();
+            let wall = new_state.body("Centered").unwrap();
+            let new_source = &new_state.body(&source.name).unwrap().body;
+            assert_ne!(source_body.record(), new_source.record());
+            assert_eq!(exact_names(wall), names);
+            let new_volume = solidcraft_kernel::measure(new_source).unwrap().area * 0.5;
+            assert!((solidcraft_kernel::measure(&wall.body).unwrap().volume - new_volume).abs() < 1e-7);
+            let cold = Session::new(solidcraft_doc::Document::from_json(&reopened.doc.to_json()).unwrap());
+            let cold_state = cold.model.state();
+            let cold_wall = cold_state.body("Centered").unwrap();
+            assert_eq!(cold_wall.body.record(), wall.body.record());
+            assert_eq!(exact_names(cold_wall), names);
+        }
     }
 
     /// A patch turned over thickens the other way; a solid is not turned over.

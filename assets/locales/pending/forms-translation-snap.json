@@ -1,0 +1,50 @@
+{
+  "de": {
+    "forms.translation_snap.enabled": "Verschiebungen einrasten",
+    "forms.translation_snap.help": "Bewegung in Vielfachen des Schritts ab dem Startpunkt entlang der aktiven Achse oder Ebene. Wirkt vor der weichen Auswahl und beim Extrudieren mit Umschalt. Strg/Cmd setzt das Einrasten aus; Alt ebenfalls, wenn die vorhandene Manipulator-Einstellung dies erlaubt. Drehung, Skalierung und numerische Transformationen behalten ihre Einstellungen.",
+    "forms.translation_snap.increment": "Rasterschritt",
+    "forms.translation_snap.invalid": "Geben Sie einen endlichen Verschiebungsschritt zwischen 0,000001 mm und 100000 mm ein. Auch Bewegung und Bezugsrahmen müssen endlich sein."
+  },
+  "en": {
+    "forms.translation_snap.enabled": "Snap translations",
+    "forms.translation_snap.help": "Move in multiples of the increment from where the drag began, along the active axis or plane. Applies before soft selection and to Shift extrusion. Ctrl/Cmd bypasses snapping; Alt also bypasses it when enabled in the existing manipulator preference. Rotation, scale and numeric transforms keep their own settings.",
+    "forms.translation_snap.increment": "Snap increment",
+    "forms.translation_snap.invalid": "Enter a finite translation increment between 0.000001 mm and 100000 mm. The movement and constraint frame must also be finite."
+  },
+  "ja": {
+    "forms.translation_snap.enabled": "移動をスナップ",
+    "forms.translation_snap.help": "ドラッグ開始位置から、現在の軸または平面に沿って増分の倍数で移動します。ソフト選択の前に適用され、Shiftによる押し出しにも適用されます。Ctrl/Cmdで解除し、既存のマニピュレータ設定が有効ならAltでも解除します。回転、拡大縮小、数値変形には各設定が適用されます。",
+    "forms.translation_snap.increment": "移動の増分",
+    "forms.translation_snap.invalid": "0.000001 mmから100000 mmまでの有限な移動増分を入力してください。移動量と基準も有限である必要があります。"
+  },
+  "ko": {
+    "forms.translation_snap.enabled": "이동 스냅",
+    "forms.translation_snap.help": "드래그 시작점부터 활성 축이나 평면을 따라 증분의 배수로 이동합니다. 소프트 선택 전에 적용되며 Shift 돌출에도 적용됩니다. Ctrl/Cmd로 스냅을 해제하며 기존 조작기 설정이 켜져 있으면 Alt로도 해제합니다. 회전, 크기 조절 및 수치 변환은 각 설정을 유지합니다.",
+    "forms.translation_snap.increment": "이동 증분",
+    "forms.translation_snap.invalid": "0.000001 mm에서 100000 mm 사이의 유한한 이동 증분을 입력하세요. 이동량과 기준 프레임도 유한해야 합니다."
+  },
+  "zh": {
+    "forms.translation_snap.enabled": "移动吸附",
+    "forms.translation_snap.help": "沿当前轴或平面，从拖动起点按增量的整数倍移动。在软选择之前应用，也适用于 Shift 拉伸。Ctrl/Cmd 暂时关闭吸附；若现有操纵器设置允许，Alt 也可关闭。旋转、缩放和数值变换保留各自设置。",
+    "forms.translation_snap.increment": "移动增量",
+    "forms.translation_snap.invalid": "请输入 0.000001 mm 到 100000 mm 之间的有限移动增量。移动量和约束坐标系也必须为有限值。"
+  },
+  "ar": {
+    "forms.translation_snap.enabled": "التقاط الإزاحة",
+    "forms.translation_snap.help": "حرّك بمضاعفات خطوة الالتقاط بدءًا من موضع بدء السحب وعلى طول المحور أو المستوى النشط. يُطبَّق الالتقاط قبل التحديد الناعم ويشمل البثق باستخدام Shift. اضغط Ctrl/Cmd لتجاوز الالتقاط. ويمكن تجاوزه باستخدام Alt أيضًا إذا كان مفعّلًا في إعداد أداة التحكّم الحالي. يحتفظ التدوير وتغيير المقياس والتحويلات الرقمية بإعداداتها الخاصة.",
+    "forms.translation_snap.increment": "خطوة الالتقاط",
+    "forms.translation_snap.invalid": "أدخل خطوة إزاحة محدودة بين 0.000001 مم و100000 مم. يجب أن تكون قيم الحركة والإطار المرجعي للقيود محدودة أيضًا."
+  },
+  "he": {
+    "forms.translation_snap.enabled": "הצמדת הזזות",
+    "forms.translation_snap.help": "ההזזה מתבצעת בכפולות של המרווח מנקודת תחילת הגרירה, לאורך הציר הפעיל או על המישור הפעיל. ההצמדה חלה לפני בחירה רכה וגם בשליפה עם Shift. Ctrl או Cmd עוקפים את ההצמדה. Alt עוקף אותה כשהאפשרות המתאימה מופעלת בהגדרות כלי המניפולציה. לסיבוב, לקנה מידה ולשינויים מספריים נשארות הגדרות נפרדות.",
+    "forms.translation_snap.increment": "מרווח הצמדה",
+    "forms.translation_snap.invalid": "יש להזין מרווח הצמדה סופי בין 0.000001 מ״מ ל־100000 מ״מ. גם התנועה ומסגרת האילוצים חייבות להיות סופיות."
+  },
+  "vi": {
+    "forms.translation_snap.enabled": "Bắt bước tịnh tiến",
+    "forms.translation_snap.help": "Di chuyển theo bội số của bước dịch chuyển tính từ điểm bắt đầu kéo, dọc theo trục hoặc mặt phẳng đang dùng. Áp dụng trước chế độ chọn mềm và cả khi giữ Shift để đùn. Giữ Ctrl/Cmd để tạm bỏ bắt bước. Alt cũng có tác dụng nếu đã bật tùy chọn tương ứng của bộ điều khiển. Xoay, đổi tỷ lệ và biến đổi bằng số vẫn dùng thiết lập riêng.",
+    "forms.translation_snap.increment": "Bước dịch chuyển",
+    "forms.translation_snap.invalid": "Nhập bước dịch chuyển hữu hạn trong khoảng từ 0,000001 mm đến 100000 mm. Độ dịch chuyển và hệ trục ràng buộc cũng phải hữu hạn."
+  }
+}

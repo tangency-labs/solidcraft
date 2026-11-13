@@ -312,9 +312,24 @@ pub fn run_checked_as(s: &mut Session, p: &Value, id: &str, handler: Run) -> Res
 /// this is exactly `handler(s, p)`.
 pub fn run_checked(s: &mut Session, p: &Value, id: &str, contract: &dyn Contract, handler: Run) -> Result<Value> {
     let level = s.param_check;
+    checked_value(level, p, id, contract, || handler(s, p))
+}
+
+/// Check a read-only query against its registered command contract without
+/// constructing or cloning an editing session on the caller's thread.
+pub fn run_read_query_checked(level: ParamCheck, p: &Value, id: &str, handler: impl FnOnce() -> Result<Value>) -> Result<Value> {
+    run_detached_checked(level, p, id, handler)
+}
+
+pub(crate) fn run_detached_checked(level: ParamCheck, p: &Value, id: &str, handler: impl FnOnce() -> Result<Value>) -> Result<Value> {
+    let Some(contract) = crate::cmd::find_command(id).and_then(|command| command.contract) else { return handler() };
+    checked_value(level, p, id, contract, handler)
+}
+
+fn checked_value(level: ParamCheck, p: &Value, id: &str, contract: &dyn Contract, handler: impl FnOnce() -> Result<Value>) -> Result<Value> {
     let recording = record::enabled();
     if level == ParamCheck::Off && !recording {
-        return handler(s, p);
+        return handler();
     }
     let issues = contract.check(p);
     if level == ParamCheck::Strict
@@ -325,7 +340,7 @@ pub fn run_checked(s: &mut Session, p: &Value, id: &str, contract: &dyn Contract
         }
         return Err(bad(id, first.message.clone()));
     }
-    let result = handler(s, p);
+    let result = handler();
     if recording && !issues.is_empty() {
         record::note(id, &issues, Some(&result), p);
     }

@@ -31,6 +31,44 @@ fn acceptance_preserves_file_history_and_prepared_world_without_evaluation() {
 }
 
 #[test]
+fn checkpoint_restores_a_prepared_finish_without_putting_the_draft_in_document_undo() {
+    let mut s = Session::default();
+    let empty = s.checkpoint();
+    s.execute("form.prototype.create", &json!({"primitive":"box","size":10,"segments":[1,1,1],"levels":1})).unwrap();
+    s.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[-6,-5,-5]]})).unwrap();
+    let edited = s.execute("form.prototype.inspect", &json!({})).unwrap();
+    s.execute("form.prototype.undo", &json!({})).unwrap();
+    let draft = s.execute("form.prototype.inspect", &json!({})).unwrap();
+    let open = s.checkpoint();
+    let before = s.doc.clone();
+
+    let prepared = s.scratch().compute_commands(&[("form.prototype.commit".into(), json!({"tolerance":0.05}))], None).unwrap();
+    s.accept_commands(prepared).unwrap();
+    assert!(s.forms_prototype.is_none());
+    assert_eq!(s.doc.features.len(), 1);
+    s.restore_checkpoint(open).unwrap();
+    assert!(Arc::ptr_eq(&s.doc, &before));
+    assert!(s.undo.is_empty());
+    assert_eq!(s.execute("form.prototype.inspect", &json!({})).unwrap(), draft);
+    s.execute("form.prototype.redo", &json!({})).unwrap();
+    assert_eq!(s.execute("form.prototype.inspect", &json!({})).unwrap()["points"], edited["points"]);
+
+    let open = s.checkpoint();
+    s.execute("file.new", &json!({})).unwrap();
+    assert!(s.forms_prototype.is_none());
+    s.restore_checkpoint(open).unwrap();
+    assert_eq!(s.execute("form.prototype.inspect", &json!({})).unwrap()["points"], edited["points"]);
+    s.restore_checkpoint(empty).unwrap();
+    assert!(s.forms_prototype.is_none());
+
+    s.execute("form.prototype.create", &json!({"primitive":"box","size":10,"segments":[1,1,1],"levels":1})).unwrap();
+    s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.forms_prototype.is_none());
+    assert!(s.doc.features.is_empty());
+}
+
+#[test]
 fn failure_discards_the_entire_batch() {
     let session = Session::default();
     let document = session.doc.clone();
@@ -59,6 +97,118 @@ fn revision_context_selection_and_replaced_document_reject_old_work() {
         assert!(Arc::ptr_eq(&document, &session.doc));
         assert!(session.undo.is_empty());
     }
+}
+
+#[test]
+fn view_invalidation_keeps_prepared_form_edits_current_across_tab_revision_jumps() {
+    for offset in [0, 1_000] {
+        let mut session = Session::default();
+        session.execute("form.prototype.create", &json!({"size":10,"segments":[1,1,1],"levels":1})).unwrap();
+        let command = ("form.prototype.set_vertices".into(), json!({"vertices":[0],"positions":[[-6,-5,5]]}));
+        let prepared = session.scratch().compute_commands(&[command], None).unwrap();
+        let document = session.doc.clone();
+        let authoring = session.authoring_revision();
+        session.refresh_display();
+        let previous = session.revision + offset;
+        session.invalidate_view(previous);
+        assert!(session.revision > previous);
+        assert_eq!(session.authoring_revision(), authoring);
+        assert!(Arc::ptr_eq(&document, &session.doc));
+        assert!(prepared.is_current(&session));
+        session.accept_commands(prepared).unwrap();
+        assert_eq!(session.authoring_revision(), authoring, "adopting a transient Form edit must not invent a document/model change");
+        assert_eq!(session.execute("form.prototype.inspect", &json!({})).unwrap()["undo"], 1);
+        assert_eq!(session.forms_prototype.as_ref().unwrap().cage.points[0], solidcore_record::Vec3::new(-6., -5., 5.));
+    }
+}
+
+#[test]
+fn acceptance_keeps_the_computed_authoring_revision_after_a_large_display_jump() {
+    let mut session = Session::default();
+    session.refresh_display();
+    let original = session.authoring_revision();
+    let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
+    let expected = prepared.computed.authoring_revision();
+    assert!(expected > original, "the prepared box really changed the document/model");
+    session.invalidate_view(session.revision + 100_000);
+    assert_eq!(session.authoring_revision(), original);
+    assert!(prepared.is_current(&session));
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(session.authoring_revision(), expected, "revision and display-only increments must be adopted as one history");
+    let previous = session.revision;
+    session.invalidate_view(previous + 100_000);
+    assert_eq!(session.authoring_revision(), expected);
+    assert_eq!(session.doc.features.len(), 1);
+}
+
+#[test]
+fn view_invalidation_does_not_hide_authored_source_context_or_support_changes() {
+    for change in 0..9 {
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"length":2,"width":3,"height":4,"body_name":"Support"})).unwrap();
+        let primitive = json!({"size":10,"segments":[1,1,1],"levels":1});
+        session.execute("form.prototype.create", &primitive).unwrap();
+        let command = ("form.prototype.set_vertices".into(), json!({"vertices":[0],"positions":[[-6,-5,5]]}));
+        let prepared = session.scratch().compute_commands(&[command], None).unwrap();
+        let authoring = session.authoring_revision();
+        session.invalidate_view(session.revision + 1_000);
+        assert_eq!(session.authoring_revision(), authoring);
+        assert!(prepared.is_current(&session));
+        match change {
+            0 => {
+                session.execute("parameters.add", &json!({"name":"changed","expression":"2 mm"})).unwrap();
+            }
+            1 => {
+                session.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[-7,-5,5]]})).unwrap();
+            }
+            2 => {
+                session.execute("form.prototype.close", &json!({})).unwrap();
+                session.execute("form.prototype.create", &primitive).unwrap();
+            }
+            3 => session.active_component = 17,
+            4 => session.active_occurrence_path = Some(vec![1]),
+            5 => session.selection.push(crate::Sel::Axis { name: "X".into() }),
+            6 => {
+                session
+                    .pending_moves
+                    .insert(41, crate::doc::rigid(solidcore_record::Vec3::X, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0));
+            }
+            7 => {
+                let document = session.doc.clone();
+                session.refresh();
+                assert!(Arc::ptr_eq(&document, &session.doc));
+                assert!(session.authoring_revision() > authoring, "a model refresh is not display-only");
+            }
+            _ => {
+                let crate::doc::FeatureKind::Box { height, .. } = &mut session.doc_mut().features[0].kind else { panic!("expected support box") };
+                *height = "8 mm".into();
+                session.refresh();
+            }
+        }
+        let document = session.doc.clone();
+        let draft = session.forms_prototype.as_ref().unwrap().definition();
+        assert!(!prepared.is_current(&session), "source change {change} must refuse old work");
+        assert!(session.accept_commands(prepared).is_err());
+        assert!(Arc::ptr_eq(&document, &session.doc));
+        assert_eq!(session.forms_prototype.as_ref().unwrap().definition(), draft);
+    }
+}
+
+#[test]
+fn prepared_form_commands_reject_an_identical_replacement_draft() {
+    let mut session = Session::default();
+    let primitive = json!({"size":10,"segments":[1,1,1],"levels":1});
+    session.execute("form.prototype.create", &primitive).unwrap();
+    let edit = ("form.prototype.set_vertices".into(), json!({"vertices":[0],"positions":[[-6,-5,-5]]}));
+    let prepared = session.scratch().compute_commands(&[edit], None).unwrap();
+    assert!(prepared.is_current(&session));
+    let original = session.execute("form.prototype.inspect", &json!({})).unwrap();
+
+    session.execute("form.prototype.close", &json!({})).unwrap();
+    session.execute("form.prototype.create", &primitive).unwrap();
+    assert_eq!(session.execute("form.prototype.inspect", &json!({})).unwrap(), original);
+    assert!(session.accept_commands(prepared).is_err());
+    assert_eq!(session.execute("form.prototype.inspect", &json!({})).unwrap(), original);
 }
 
 #[test]
@@ -179,6 +329,30 @@ fn editor_display_changes_allow_apply_and_cancel() {
 }
 
 #[test]
+fn editor_tab_view_invalidations_allow_apply_and_cancel() {
+    for jump in [0, 10_000] {
+        let (mut session, source, original, commands) = extrusion_editor();
+        let prepared = session.scratch().compute_editor_commands(&commands, &source, original).unwrap();
+        let authoring = session.authoring_revision();
+        session.invalidate_view(session.revision + jump);
+        assert_eq!(session.authoring_revision(), authoring);
+        assert!(prepared.is_current(&session));
+        session.accept_commands(prepared).unwrap();
+        assert_editor_volume(&mut session, 12024.0);
+
+        let (mut session, source, original, _) = extrusion_editor();
+        let authoring = source.authoring_revision();
+        let history = (session.undo.len(), session.redo.len());
+        session.invalidate_view(session.revision + jump);
+        session.restore_editor(&source, original).unwrap();
+        assert_eq!(source.authoring_revision(), authoring, "the saved editor source remains untouched");
+        assert_eq!((session.undo.len(), session.redo.len()), history);
+        assert!(session.doc.marker.is_none());
+        assert_editor_volume(&mut session, 6024.0);
+    }
+}
+
+#[test]
 fn editor_visibility_changes_allow_cancel_and_keep_undo_and_redo_at_the_original_marker() {
     for undo_hide in [false, true] {
         let (mut session, source, original, _) = extrusion_editor();
@@ -243,6 +417,7 @@ fn visibility_does_not_make_a_stale_editor_current() {
             _ => session = Session::default(),
         }
         session.execute("browser.visibility", &json!({"items":["XY"],"visible":false})).unwrap();
+        session.invalidate_view(session.revision + 10_000);
         let doc = session.doc.clone();
         let visibility = session.visibility.clone();
         assert!(session.scratch().compute_editor_commands(&commands, &source, original.scratch()).is_err(), "change {change}");

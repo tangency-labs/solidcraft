@@ -72,6 +72,7 @@ pub mod end_cap;
 pub mod features;
 pub mod features_more;
 pub mod file;
+pub mod forms_prototype;
 pub mod frame;
 pub mod insert_mesh;
 pub mod insert_step;
@@ -147,7 +148,10 @@ pub mod timeline_clipboard;
 pub mod ui_prefs;
 pub mod view_navigation;
 
-pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, issues, output_schema_for, run_checked, run_checked_as};
+pub(crate) use check::run_detached_checked;
+pub use check::{
+    Contract, Issue, ParamCheck, TypedContract, input_schema_for, issues, output_schema_for, run_checked, run_checked_as, run_read_query_checked,
+};
 pub use types::*;
 
 /// A command's `run` that checks the call against the contract command `$id` publishes

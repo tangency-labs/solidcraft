@@ -23,7 +23,7 @@ const IDENTITY: [[f64; 4]; 3] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.
 
 /// How a face's record parameters become its evaluator's.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Params {
+pub enum Params {
     /// The same parameters (planes, splines, revolutions).
     Same,
     /// A cylinder or cone: (angle, height) to (−height, angle).
@@ -34,7 +34,7 @@ pub(crate) enum Params {
 
 impl Params {
     /// The evaluator's parameters of the record's `uv`.
-    pub(crate) fn to_eval(self, uv: [f64; 2]) -> [f64; 2] {
+    pub fn to_eval(self, uv: [f64; 2]) -> [f64; 2] {
         let [u, v] = uv;
         match self {
             Params::Same => uv,
@@ -47,7 +47,7 @@ impl Params {
 /// The spans of a circular arc made by [`arc`]: from angle `start`, `count` spans of `step`
 /// each, over the parameter [0, 1]; `periodic` for a whole turn.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Arc {
+pub struct Arc {
     start: f64,
     step: f64,
     count: usize,
@@ -73,7 +73,8 @@ impl Arc {
 /// `surface` in the evaluator's form, and how the record's parameters map onto it. `domain` is
 /// the face's parameter box in the record's parameters, `[[u0, u1], [v0, v1]]`: a cylinder's
 /// or cone's generator spans the face's heights.
-pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Result<(EvalSurface, Params)> {
+/// Construct the plan evaluator and its parameter map for a native surface.
+pub fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Result<(EvalSurface, Params)> {
     use std::f64::consts::{FRAC_PI_2, TAU};
     let invalid = |what: &str| TessError::Invalid(format!("tessellation: {what}"));
     let axes = |f: &Frame| {

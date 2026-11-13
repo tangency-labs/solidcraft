@@ -7,6 +7,10 @@ frame_end_cap
     Inset Ratio = cap.ratio (Unitless)
     Corner Chamfer = cap.chamfer (Length)
   expressions: cap1.angle, cap1.offset, cap.thickness, cap.ratio, cap.chamfer
+form
+  inputs:
+    Fit tolerance = form.tolerance (Length)
+  expressions: form.tolerance
 body_transfer
 sketch
   inputs:

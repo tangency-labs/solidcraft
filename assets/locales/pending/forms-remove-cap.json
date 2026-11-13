@@ -1,0 +1,42 @@
+{
+  "de": {
+    "forms.fill.cap_delete_desktop": "Das Löschen einer Abdeckung ist in der Desktop-App verfügbar.",
+    "forms.fill.retired_cap_bridge": "Beim Verbinden würden die gespeicherten Flächen-IDs gelöschter Abdeckungen verloren gehen.",
+    "forms.fill.select_cap_only": "Wählen Sie zum Löschen nur die Fläche der Abdeckung aus."
+  },
+  "en": {
+    "forms.fill.cap_delete_desktop": "Removing a cap requires the desktop app.",
+    "forms.fill.retired_cap_bridge": "Bridge would replace the saved face IDs of removed caps.",
+    "forms.fill.select_cap_only": "Select only the cap face to delete it."
+  },
+  "ja": {
+    "forms.fill.cap_delete_desktop": "キャップを削除するにはデスクトップアプリが必要です。",
+    "forms.fill.retired_cap_bridge": "ブリッジすると、削除したキャップに保存されている面 ID が失われます。",
+    "forms.fill.select_cap_only": "削除するには、キャップの面だけを選択してください。"
+  },
+  "ko": {
+    "forms.fill.cap_delete_desktop": "캡을 제거하려면 데스크톱 앱이 필요합니다.",
+    "forms.fill.retired_cap_bridge": "브리지를 적용하면 제거한 캡의 저장된 면 ID가 바뀝니다.",
+    "forms.fill.select_cap_only": "삭제하려면 캡 면만 선택하세요."
+  },
+  "zh": {
+    "forms.fill.cap_delete_desktop": "移除封盖需要使用桌面应用。",
+    "forms.fill.retired_cap_bridge": "桥接会替换已移除封盖所保留的面 ID。",
+    "forms.fill.select_cap_only": "若要删除封盖，请只选择封盖面。"
+  },
+  "ar": {
+    "forms.fill.cap_delete_desktop": "تتطلب إزالة رقعة إغلاق تطبيق سطح المكتب.",
+    "forms.fill.retired_cap_bridge": "قد تستبدل أداة التجسير معرّفات الأوجه المحفوظة لرقع الإغلاق المُزالة.",
+    "forms.fill.select_cap_only": "حدّد وجه رقعة الإغلاق وحده لحذفه."
+  },
+  "he": {
+    "forms.fill.cap_delete_desktop": "הסרת מכסה דורשת את יישום שולחן העבודה.",
+    "forms.fill.retired_cap_bridge": "גישור יחליף את מזהי הפאות השמורים של מכסים שהוסרו.",
+    "forms.fill.select_cap_only": "יש לבחור רק את פאת המכסה כדי למחוק אותו."
+  },
+  "vi": {
+    "forms.fill.cap_delete_desktop": "Xóa mặt bịt cần ứng dụng máy tính.",
+    "forms.fill.retired_cap_bridge": "Nối cầu sẽ thay thế các ID mặt đã lưu của những mặt bịt đã xóa.",
+    "forms.fill.select_cap_only": "Chỉ chọn mặt bịt cần xóa."
+  }
+}

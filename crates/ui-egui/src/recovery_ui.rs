@@ -90,6 +90,18 @@ pub fn tick(app: &mut SolveApp) {
     }
 }
 
+/// Demand-driven windows need a frame when the next autosave becomes due even
+/// when the person stops editing. Clean documents and disabled autosave need no
+/// periodic repaint. A minimum delay prevents a zero-interval busy loop.
+pub(crate) fn next_wakeup(app: &SolveApp) -> Option<Duration> {
+    let autosave = app.autosave.as_ref()?;
+    if app.autosave_minutes <= 0.0 || autosave.interval == Duration::MAX || (!app.session.is_dirty() && !app.docs.background().any(Session::is_dirty))
+    {
+        return None;
+    }
+    Some(autosave.interval.saturating_sub(autosave.last_at.elapsed()).max(Duration::from_millis(1)))
+}
+
 /// Start autosaving into `dir` and queue the designs that crashed apps left there.
 pub fn start(app: &mut SolveApp, dir: &std::path::Path, interval: std::time::Duration) {
     match Autosaver::new(dir, SHARED_CADENCE) {
@@ -428,6 +440,36 @@ mod tests {
     }
 
     #[test]
+    fn a_recovered_form_is_ready_to_edit_and_its_panel_belongs_to_its_tab() {
+        let (mut app, dir) = app("forms", Duration::ZERO);
+        app.run("form.prototype.create", json!({"size":12,"segments":[1,1,1],"levels":1})).unwrap();
+        app.run("form.prototype.set_vertices", json!({"vertices":[0],"positions":[[-6,-6,-8]]})).unwrap();
+        let before = app.session.execute("form.prototype.inspect", &json!({})).unwrap()["points"].clone();
+        app.forms_prototype.projected = vec![(0, solidcore_record::Vec3::ZERO, egui::pos2(40.0, 40.0))];
+        documents::new_tab(&mut app);
+        assert!(app.forms_prototype.projected.is_empty());
+        assert!(app.session.forms_prototype.is_none());
+        tick_and_wait(&mut app);
+        documents::switch(&mut app, 0);
+        assert_eq!(app.forms_prototype.projected, vec![(0, solidcore_record::Vec3::ZERO, egui::pos2(40.0, 40.0))]);
+        drop(app);
+
+        let mut recovered = restart(&dir);
+        let entry = recovered.recoverable.first().unwrap();
+        recovered.run("doc.recover", json!({"dir":dir,"id":entry.id})).unwrap();
+        assert!(!recovered.home.open);
+        assert!(recovered.cam.distance < 60.0, "the Form is framed even though its document has no bodies");
+        let inspected = recovered.session.execute("form.prototype.inspect", &json!({})).unwrap();
+        assert_eq!(inspected["points"], before);
+        recovered.run("form.prototype.undo", json!({})).unwrap();
+        assert_ne!(recovered.session.execute("form.prototype.inspect", &json!({})).unwrap()["points"], before);
+        recovered.run("form.prototype.close", json!({})).unwrap();
+        assert!(!recovered.session.is_dirty());
+        drop(recovered);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn switching_to_a_clean_tab_keeps_the_background_entry_and_its_id() {
         let (mut app, dir) = app("clean-tab", Duration::ZERO);
         edit(&mut app);
@@ -576,6 +618,26 @@ mod tests {
         app.autosave.as_mut().unwrap().last_at = Instant::now() - Duration::from_secs(1);
         tick_and_wait(&mut app);
         assert_eq!(entries(&dir).len(), 2, "changed preferences apply to every tab");
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn idle_dirty_tabs_schedule_the_next_autosave_without_input() {
+        let interval = Duration::from_secs(3600);
+        let (mut app, dir) = app("idle-deadline", interval);
+        assert_eq!(next_wakeup(&app), None, "clean windows need no autosave wakeup");
+        edit(&mut app);
+        let delay = next_wakeup(&app).unwrap();
+        assert!(delay > Duration::ZERO && delay <= interval);
+        app.autosave.as_mut().unwrap().interval = Duration::ZERO;
+        assert_eq!(next_wakeup(&app), Some(Duration::from_millis(1)), "an overdue autosave must not wait for another pointer event");
+        documents::new_tab(&mut app);
+        assert!(!app.session.is_dirty());
+        assert!(next_wakeup(&app).is_some(), "a dirty background tab also needs the shared wakeup");
+        app.autosave_minutes = 0.0;
+        crate::prefs::set_autosave(&mut app);
+        assert_eq!(next_wakeup(&app), None, "the off preference disables periodic wakeups");
         drop(app);
         fs::remove_dir_all(dir).unwrap();
     }

@@ -872,6 +872,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // go (kept through the release frame, so the end of the drag doesn't select either).
     if primary_pressed && inside && !zoom_drag {
         let empty_space = |app: &SolveApp| {
+            if hover.is_some_and(|p| crate::forms_prototype::owns_pointer(app, &projection(app, rect), p)) {
+                return false;
+            }
             app.viewport.context_menu.is_none()
                 && hover.is_some_and(|p| {
                     // The free canvas owns navigation, including gray letterbox. Its
@@ -910,13 +913,6 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     } else if space_pan {
         ui.ctx().set_cursor_icon(if primary_down { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
     }
-    let primary_nav = if zoom_drag {
-        zoom_held.then_some(NavMode::Zoom)
-    } else if space_pan {
-        Some(NavMode::Pan)
-    } else {
-        app.viewport.nav.or(app.viewport.primary_nav)
-    };
     // The right button also clicks (the context menu), so it navigates only once the press can no
     // longer be a click: a Magic Mouse moves the pointer a fraction of a point as it is clicked (#5517).
     // On that frame the drag catches up with the whole way from the press, so none of it is lost.
@@ -929,6 +925,21 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         _ => delta,
     };
     app.viewport.right_drag = right_drag;
+    let forms_shift = mods.shift
+        && !mods.alt
+        && !mods.ctrl
+        && !mods.command
+        && (crate::forms_prototype::shift_dragging(app)
+            || hover.is_some_and(|p| crate::forms_prototype::owns_pointer(app, &projection(app, rect), p)));
+    let primary_nav = if zoom_drag {
+        zoom_held.then_some(NavMode::Zoom)
+    } else if forms_shift {
+        None
+    } else if space_pan {
+        Some(NavMode::Pan)
+    } else {
+        app.viewport.nav.or(app.viewport.primary_nav)
+    };
     let button = if middle {
         Some(crate::prefs::NavButton::Middle)
     } else if right_drag {

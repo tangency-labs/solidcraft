@@ -1,0 +1,82 @@
+{
+  "de": {
+    "forms.face_pick.context_missing_cad": "Die exakte Flächenauswahl erfordert eine CAD-Umgebung. Blenden Sie Netzkörper aus und versuchen Sie es erneut.",
+    "forms.face_pick.insert_face_required": "Wählen Sie eine Formfläche mit bearbeitbaren Zellen.",
+    "forms.face_pick.limit": "Die CAD-Flächenauswahl hat das Rechenlimit erreicht.",
+    "forms.face_pick.not_ready": "Warten Sie vor der Flächenauswahl auf die aktuelle CAD-Vorschau.",
+    "forms.face_pick.unresolved": "Die vorderste CAD-Fläche konnte nicht ermittelt werden. Versuchen Sie es an einem anderen Punkt.",
+    "forms.face_pick.worker_stopped": "Die CAD-Flächenauswahl wurde angehalten. Versuchen Sie es erneut.",
+    "prefs.forms_exact_face_picking": "Exakte CAD-Flächenauswahl verwenden",
+    "prefs.forms_exact_face_picking_help": "Wählen Sie in der Desktop-App Formflächen auf der angepassten CAD-Oberfläche aus und fügen Sie dort Kanten ein. Bei Beschnitten oder überlappenden Flächen kann ein anderer Klickpunkt erforderlich sein."
+  },
+  "en": {
+    "forms.face_pick.context_missing_cad": "Exact face picking needs CAD context. Hide mesh bodies to try again.",
+    "forms.face_pick.insert_face_required": "Choose a Form face with editable cells.",
+    "forms.face_pick.limit": "The CAD face pick exceeded its work limit.",
+    "forms.face_pick.not_ready": "Wait for the current CAD preview before picking a face.",
+    "forms.face_pick.unresolved": "Could not determine the front CAD face. Try another point.",
+    "forms.face_pick.worker_stopped": "The CAD face pick stopped. Try again.",
+    "prefs.forms_exact_face_picking": "Use exact CAD face picking",
+    "prefs.forms_exact_face_picking_help": "On desktop, select Form faces and insert edges on the fitted CAD surface. Some trims or overlapping faces may need a different click point."
+  },
+  "ja": {
+    "forms.face_pick.context_missing_cad": "正確な面選択には周囲の CAD 形状が必要です。メッシュボディを非表示にして、もう一度試してください。",
+    "forms.face_pick.insert_face_required": "編集可能なセルを持つフォーム面を選択してください。",
+    "forms.face_pick.limit": "CAD 面選択が計算量の上限に達しました。",
+    "forms.face_pick.not_ready": "面を選択する前に、現在の CAD プレビューが表示されるまで待ってください。",
+    "forms.face_pick.unresolved": "最前面の CAD 面を特定できませんでした。別の点を試してください。",
+    "forms.face_pick.worker_stopped": "CAD 面選択が停止しました。もう一度試してください。",
+    "prefs.forms_exact_face_picking": "正確な CAD 面選択を使用",
+    "prefs.forms_exact_face_picking_help": "デスクトップアプリで、近似した CAD 曲面上のフォーム面を選択し、エッジを挿入します。トリムや面の重なりによっては別の位置をクリックしてください。"
+  },
+  "ko": {
+    "forms.face_pick.context_missing_cad": "정확한 면 선택에는 주변 CAD 형상이 필요합니다. 메시 바디를 숨기고 다시 시도하세요.",
+    "forms.face_pick.insert_face_required": "편집 가능한 셀이 있는 폼 면을 선택하세요.",
+    "forms.face_pick.limit": "CAD 면 선택이 계산 한도를 초과했습니다.",
+    "forms.face_pick.not_ready": "면을 선택하기 전에 현재 CAD 미리 보기가 준비될 때까지 기다리세요.",
+    "forms.face_pick.unresolved": "가장 앞에 있는 CAD 면을 확인할 수 없습니다. 다른 점을 시도하세요.",
+    "forms.face_pick.worker_stopped": "CAD 면 선택이 중단되었습니다. 다시 시도하세요.",
+    "prefs.forms_exact_face_picking": "정확한 CAD 면 선택 사용",
+    "prefs.forms_exact_face_picking_help": "데스크톱 앱에서 피팅된 CAD 곡면의 폼 면을 선택하고 모서리를 삽입합니다. 트림이나 겹친 면에서는 다른 지점을 클릭해야 할 수 있습니다."
+  },
+  "zh": {
+    "forms.face_pick.context_missing_cad": "精确选面需要周围的 CAD 几何。请隐藏网格体后重试。",
+    "forms.face_pick.insert_face_required": "请选择含有可编辑单元的形态面。",
+    "forms.face_pick.limit": "CAD 选面超出了计算上限。",
+    "forms.face_pick.not_ready": "请等待当前 CAD 预览就绪后再选面。",
+    "forms.face_pick.unresolved": "无法确定最前方的 CAD 面。请尝试其他位置。",
+    "forms.face_pick.worker_stopped": "CAD 选面已停止。请重试。",
+    "prefs.forms_exact_face_picking": "使用精确 CAD 选面",
+    "prefs.forms_exact_face_picking_help": "在桌面应用中，可在拟合的 CAD 曲面上选择形态面并插入边。遇到修剪边界或重叠面时，可能需要改点其他位置。"
+  },
+  "ar": {
+    "forms.face_pick.context_missing_cad": "يتطلب اختيار الوجه بدقة هندسة CAD في المشهد المحيط. أخفِ الأجسام الشبكية وأعد المحاولة.",
+    "forms.face_pick.insert_face_required": "اختر وجهًا في الشكل يحتوي على خلايا قابلة للتحرير.",
+    "forms.face_pick.limit": "تجاوز اختيار وجه CAD حدّ المعالجة.",
+    "forms.face_pick.not_ready": "انتظر ظهور معاينة CAD الحالية قبل اختيار وجه.",
+    "forms.face_pick.unresolved": "تعذّر تحديد وجه CAD الأقرب في اتجاه الرؤية. جرّب نقطة أخرى.",
+    "forms.face_pick.worker_stopped": "توقّف اختيار وجه CAD. أعد المحاولة.",
+    "prefs.forms_exact_face_picking": "استخدام الاختيار الدقيق لأوجه CAD",
+    "prefs.forms_exact_face_picking_help": "في تطبيق سطح المكتب، اختر أوجه الشكل وأدرج الحواف على سطح CAD الملائَم. قد تحتاج إلى النقر في نقطة أخرى عند الحدود المقصوصة أو الأوجه المتداخلة."
+  },
+  "he": {
+    "forms.face_pick.context_missing_cad": "בחירה מדויקת של פאות דורשת סביבת CAD. יש להסתיר גופי רשת ולנסות שוב.",
+    "forms.face_pick.insert_face_required": "יש לבחור פאה של צורה חופשית שיש בה תאים הניתנים לעריכה.",
+    "forms.face_pick.limit": "בחירת פאת ה־CAD חרגה ממגבלת החישוב.",
+    "forms.face_pick.not_ready": "יש להמתין לתצוגה המקדימה העדכנית של ה־CAD לפני בחירת פאה.",
+    "forms.face_pick.unresolved": "לא ניתן היה לזהות את פאת ה־CAD הקדמית ביותר. יש לנסות נקודה אחרת.",
+    "forms.face_pick.worker_stopped": "בחירת פאת ה־CAD הופסקה. יש לנסות שוב.",
+    "prefs.forms_exact_face_picking": "בחירה מדויקת של פאות CAD",
+    "prefs.forms_exact_face_picking_help": "ביישום שולחן העבודה אפשר לבחור פאות של צורה חופשית ולהוסיף קצוות על משטח ה־CAD המותאם. ליד גבולות גזומים או פאות חופפות ייתכן שיהיה צורך ללחוץ בנקודה אחרת."
+  },
+  "vi": {
+    "forms.face_pick.context_missing_cad": "Chọn mặt chính xác cần hình học CAD xung quanh. Hãy ẩn các khối lưới rồi thử lại.",
+    "forms.face_pick.insert_face_required": "Chọn một mặt của hình có các ô chỉnh sửa được.",
+    "forms.face_pick.limit": "Thao tác chọn mặt CAD đã vượt quá giới hạn tính toán.",
+    "forms.face_pick.not_ready": "Chờ bản xem trước CAD hiện tại sẵn sàng rồi chọn mặt.",
+    "forms.face_pick.unresolved": "Không xác định được mặt CAD ngoài cùng theo hướng nhìn. Hãy thử bấm ở vị trí khác.",
+    "forms.face_pick.worker_stopped": "Thao tác chọn mặt CAD đã dừng. Hãy thử lại.",
+    "prefs.forms_exact_face_picking": "Chọn mặt CAD chính xác",
+    "prefs.forms_exact_face_picking_help": "Trong ứng dụng máy tính, chọn mặt của hình và chèn cạnh trên bề mặt CAD đã khớp. Với một số đường cắt xén hoặc mặt chồng nhau, có thể cần bấm ở vị trí khác."
+  }
+}

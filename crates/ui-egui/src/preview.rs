@@ -418,8 +418,11 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { .. }))) {
         colors.ghost = app.preferences.drive_joints_ghost;
     }
-    colors.tint_new = app.preferences.preview_tint_new_faces;
-    colors.cut_tint = app.preferences.cut_preview_tint;
+    // Both input skins remain in the weld. Drawing their old tessellations as a
+    // cut or highlighting the donor faces as new obscures the joined surface.
+    let weld = cmds.iter().any(|(command, _)| command == "form.refined_weld");
+    colors.tint_new = !weld && app.preferences.preview_tint_new_faces;
+    colors.cut_tint = !weld && app.preferences.cut_preview_tint;
     let key = job_key(&cmds, app.session.revision, colors);
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
