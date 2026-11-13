@@ -2454,7 +2454,12 @@ mod tests {
     /// from the tube's centre) the section is convex circumferentially and concave across:
     /// k = -1/2. Each is found by a certified bisection to `1e-13` of itself, each step's
     /// certificate within `1e-12` of its terms' size (a few times the curvature here): k
-    /// within `1e-11` of itself.
+    /// within `1e-11` of itself. That bound holds because the least curvature sits at
+    /// phi = 0, the row's parameter 1/2: the first midpoint split of this symmetric
+    /// -45 to 45 degree section, where the halves' Bernstein end coefficients are the
+    /// values there exactly, so the certificate's slack is not spent on the subdivision's
+    /// enclosure (not because of the subdivision's depth). A section whose least point is
+    /// not at a split (an asymmetric one) would need a looser bound.
     #[test]
     fn round_end_curvature_of_a_torus_round_in_a_bore() {
         // the tube's centre circle radius A = 10, its radius a = 2; the section's point at
@@ -2535,6 +2540,50 @@ mod tests {
                     assert_eq!(worst, f64::INFINITY, "{name}, {off} past the face: refused");
                 }
             }
+        }
+    }
+
+    /// `containment_curved` on a setback patch's column lying on a face (`fill.face` names
+    /// the face, so the form's `v^2` is divided out and its dropped `v^0`, `v^1`
+    /// coefficients checked to be rounding), on a concave corner's side (`convex = false`)
+    /// beside a sphere of radius 5 about the origin with the material inside it (side +1).
+    /// There the fill must lie outside the sphere, out of the material. Each patch is the
+    /// quarter circle in u swept along v by the rows `(rho, z)` `(5, 0)`, `(5 + b, 1)`,
+    /// `(5 + c, 2)` (weights 1 in v), so `rho(v) = 5 + 2 b v + (c - 2 b) v^2`, `z = 2 v`,
+    /// and its column v = 0 is the sphere's equator. The sphere's form at a point is
+    /// `rho^2 + z^2 - 25` times the u-weight squared:
+    /// - `b = 0, c = 1`: `rho = 5 + v^2`, the patch leaves the equator vertically, tangent to
+    ///   the sphere (G1 to it there), and `rho^2 + z^2 - 25 = 14 v^2 + v^4 >= 0`: outside
+    ///   the sphere everywhere, so contained (0). The form is `v^2 (14 + v^2)`, its `v^0`,
+    ///   `v^1` coefficients 0.
+    /// - `b = 0, c = -1`: `rho = 5 - v^2`, still tangent, but `-6 v^2 + v^4 < 0` on
+    ///   `0 < v <= 1`: inside the sphere, in the material: refused (infinite). The defect
+    ///   next to the accepted case is still caught after the division by `v^2`.
+    /// - `b = 1/2, c = 1`: `rho = 5 + v`, outside the sphere (`10 v + 5 v^2 > 0`) but not
+    ///   tangent to it along the column: the form's `v^1` coefficient is not rounding, so
+    ///   the patch is not G1 to its face there and is refused (infinite), the conservative
+    ///   side.
+    #[test]
+    fn containment_curved_on_a_column_lying_on_a_sphere() {
+        let sphere = Face {
+            kind: FaceKind::Sphere,
+            radius: 5.0,
+            side: 1.0,
+            ..Face::default()
+        };
+        for (b, c, contained) in [(0.0, 1.0, true), (0.0, -1.0, false), (0.5, 1.0, false)] {
+            let fill = Fill {
+                patches: vec![swept(&[
+                    [5.0, 0.0, 1.0],
+                    [5.0 + b, 1.0, 1.0],
+                    [5.0 + c, 2.0, 1.0],
+                ])],
+                face: vec![0],
+                ..Fill::default()
+            };
+            let worst = containment_curved(&fill, &[sphere], false).unwrap();
+            let want = if contained { 0.0 } else { f64::INFINITY };
+            assert_eq!(worst, want, "rows b {b}, c {c}: {worst}");
         }
     }
 }
