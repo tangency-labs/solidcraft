@@ -730,6 +730,34 @@ fn blocked_arcs_keep_a_seam_off_by_the_tolerance() {
     assert!(blocked.clear(0.3 + 0.75 * tol / 2.0 + 0.5 * tol));
 }
 
+/// A closed rational cubic spline of two pieces, each an exact half circle of radius 1 about the
+/// axis (a cylinder's rim as some exporters write it): a piece reaching half a turn has no arc of
+/// its own, and its whole edge was taken to reach every angle, so a band between two such rims
+/// had no angle left for its seam and the face was left out ("a band whose other loops leave its
+/// seam no angle"). Halved, each part has its arc.
+#[test]
+fn a_piece_half_way_round_the_axis_is_halved_for_its_arcs() {
+    let frame = seams::Perpendicular::about(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    // (1, 0), (1, 2), (-1, 2), (-1, 0) with weights 1, 1/3, 1/3, 1, and the same turned half way.
+    let w = 1.0 / 3.0;
+    let half = |s: f64| [[s, 0.0, 0.0, 1.0], [s * w, s * 2.0 * w, 0.0, w], [-s * w, s * 2.0 * w, 0.0, w], [-s, 0.0, 0.0, 1.0]];
+    let (upper, lower) = (half(1.0), half(-1.0));
+    let rim = BCurve::RationalSpline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0],
+        homogeneous: upper.iter().chain(&lower[1..]).copied().collect(),
+    };
+    let pieces = frame.pieces(&rim, [0.0, 2.0], 1e-6);
+    assert_eq!(pieces.len(), 4, "each half halved once");
+    let mut turn = 0.0;
+    for p in &pieces {
+        let [a, b] = p.blocked();
+        assert!(b - a < PI, "an arc of {} rad", b - a);
+        turn += b - a;
+    }
+    // The four arcs cover the turn between them (each a little wider than its quarter).
+    assert!((TAU..TAU + 0.1).contains(&turn), "{turn}");
+}
+
 /// A control point that is not a number gives no arc (the whole turn is blocked), never one
 /// that leaves it out.
 #[test]
