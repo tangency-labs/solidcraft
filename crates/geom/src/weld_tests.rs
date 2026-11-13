@@ -349,9 +349,11 @@ fn tail_only_notes_work_without_any_bead_or_dashed_line() {
 #[test]
 fn tail_limits_use_bytes_and_reject_visual_control_injection() {
     let mut n = note();
-    for text in ["", " \t", "x\ny", "x\ry", "x\0y", "x\u{202e}y", "x\u{2067}y", "x\u{2028}y"] {
+    for text in ["", " \t", "x\ny", "x\ry", "x\0y", "x\u{200f}y", "x\u{feff}y", "x\u{202e}y", "x\u{2067}y", "x\u{2028}y"] {
         n.tail = Some(text.into());
         assert!(n.validate().is_err(), "{text:?}");
+        assert!(n.text().is_err(), "{text:?}");
+        assert!(n.draw(a(IdentificationLine::Above), Style::default(), number, metric).is_err(), "{text:?}");
     }
     n.tail = Some("é".repeat(MAX_TAIL_BYTES / 2));
     n.validate().unwrap();

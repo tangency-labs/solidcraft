@@ -180,10 +180,7 @@ impl Weld {
         }
         if let Some(tail) = &self.tail {
             require(tail.len() <= MAX_TAIL_BYTES && !tail.trim().is_empty(), "tail must contain text and be at most 512 bytes")?;
-            require(
-                !tail.chars().any(|c| c.is_control() || matches!(c, '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}')),
-                "tail must be a single line without controls or bidi overrides",
-            )?;
+            require(crate::plain_text::is_plain_line(tail), "tail must be a plain single line without controls or invisible formatting")?;
         }
         if let (Some(a), Some(b)) = (&self.arrow_side, &self.other_side)
             && (a.intermittent.is_some() || b.intermittent.is_some())
