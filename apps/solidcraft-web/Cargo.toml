@@ -30,6 +30,7 @@ solidcraft-ui-text = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 url = "2"
 percent-encoding = "2"
 

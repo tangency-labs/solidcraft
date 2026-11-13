@@ -78,8 +78,8 @@ pub struct Files {
     pub panel: Cell<bool>,
     /// An autosave left by an earlier session: its design's name and file.
     pub recovery: RefCell<Option<(String, Option<String>)>>,
-    /// When this page last wrote the autosave of its unsaved work (`None`: it keeps none).
-    pub autosave_stamp: Cell<Option<f64>>,
+    /// This page began an autosave, which may still be writing when the page leaves.
+    pub autosave_owned: Cell<bool>,
     /// The app's context, to wake it when a browser call finishes.
     pub ctx: RefCell<Option<egui::Context>>,
     /// This page's id: the copies it keeps are named after it (`keep::entry_id`).
@@ -302,6 +302,11 @@ pub fn start(files: &Rc<Files>) {
         });
     }
     let page = keep::page_id(js_sys::Date::now(), js_sys::Math::random());
+    let previous = remember_page(&page);
+    let reload_owner = reloaded().then_some(previous).flatten();
+    if let Some(owner) = reload_owner.as_deref() {
+        clear_left_owner(owner);
+    }
     hold_page_lock(&page);
     *files.keep_page.borrow_mut() = page;
     let files = files.clone();
@@ -317,8 +322,18 @@ pub fn start(files: &Rc<Files>) {
                 }
                 let mut entries = Vec::new();
                 let kept = kept_copies(&all);
-                // When the autosave was written: it names the page that left it (#9621).
-                let mut recovery_stamp = None;
+                let meta = all
+                    .iter()
+                    .find(|(name, _, _)| name == RECOVERY_META)
+                    .and_then(|(_, bytes, _)| serde_json::from_slice::<serde_json::Value>(bytes).ok());
+                let payload = all.iter().find(|(name, _, _)| name == RECOVERY).map(|(_, bytes, _)| bytes.as_slice());
+                let given_up = match (meta.as_ref(), payload) {
+                    (Some(meta), Some(bytes)) => {
+                        let left = crate::recovery_owner(meta).filter(|owner| was_left(owner));
+                        crate::autosave_given_up(meta, bytes, left, reload_owner.as_deref())
+                    }
+                    _ => false,
+                };
                 let has_recovery = all.iter().any(|(n, _, _)| n == RECOVERY);
                 let legacy = (!has_recovery).then(|| LEGACY_RECOVERY.into_iter().find(|l| all.iter().any(|(n, _, _)| n == l))).flatten();
                 for (name, bytes, modified) in all {
@@ -331,7 +346,6 @@ pub fn start(files: &Rc<Files>) {
                     if name == RECOVERY_META {
                         let meta: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
                         let n = meta["name"].as_str().unwrap_or("Untitled").to_string();
-                        recovery_stamp = meta["saved_at"].as_f64();
                         *files.recovery.borrow_mut() = Some((n, meta["path"].as_str().map(str::to_string)));
                         continue;
                     }
@@ -346,11 +360,10 @@ pub fn start(files: &Rc<Files>) {
                 if !vfs::exists(&format!("{OPFS}{RECOVERY}")) {
                     *files.recovery.borrow_mut() = None;
                 }
-                // The page that left it was closed with the browser's "Leave": its changes were
-                // given up, so they are not offered again (#9621).
-                if crate::autosave_given_up(recovery_stamp, take_left_stamp(), reloaded()) {
+                // Do not offer work its own page intentionally left. Keep the files: another
+                // tab can write shared recovery after our snapshot, so deleting here is unsafe.
+                if given_up {
                     *files.recovery.borrow_mut() = None;
-                    autosave(&files, None);
                 }
                 sort_kept(&files, kept, &live_pages().await);
             }
@@ -459,8 +472,13 @@ pub fn autosave(files: &Rc<Files>, doc: Option<(&solidcraft_engine::doc::Documen
                 }
             };
             let stamp = js_sys::Date::now();
-            files.autosave_stamp.set(Some(stamp));
-            let meta = serde_json::json!({"name": d.name, "path": path, "saved_at": stamp}).to_string();
+            files.autosave_owned.set(true);
+            let meta = serde_json::json!({
+                "name": d.name, "path": path, "saved_at": stamp,
+                "recovery_owner": files.keep_page.borrow().as_str(),
+                "recovery_sha256": crate::recovery_digest(&bytes),
+            })
+            .to_string();
             spawn_local(async move {
                 let r = async {
                     write_file(RECOVERY, &bytes).await?;
@@ -472,7 +490,7 @@ pub fn autosave(files: &Rc<Files>, doc: Option<(&solidcraft_engine::doc::Documen
             });
         }
         None => {
-            files.autosave_stamp.set(None);
+            files.autosave_owned.set(false);
             spawn_local(async move {
                 let _ = remove_file(RECOVERY).await;
                 for legacy in LEGACY_RECOVERY {
@@ -484,27 +502,62 @@ pub fn autosave(files: &Rc<Files>, doc: Option<(&solidcraft_engine::doc::Documen
     }
 }
 
-/// Local storage key: the stamp of the autosave a page left when it was closed with the
-/// browser's "Leave" (#9621). Local storage is written at once, so it survives the page going
-/// away; the browser's file storage is written later, which a closing page can't wait for.
-const LEFT_KEY: &str = "solidcraft.recovery.left";
+/// Fixed journal slots keep Leave intents bounded and separate between release channels.
+/// Each value is an exact page owner; a collision can only cause an extra recovery prompt.
+fn left_key(slot: usize) -> String {
+    crate::channel::key(&format!("solidcraft.recovery.left.{slot}"))
+}
 
 /// The page is going away for good (not into the browser's back/forward cache): the user
 /// answered the browser's "leave site?" with Leave, or there was nothing unsaved to ask about.
-/// The autosave this page wrote is marked as given up; the next visit drops it.
+/// Mark this page, not its last attempted timestamp: an older write may remain after a failed
+/// attempt, and an in-flight write may finish after this synchronous notification.
 pub fn leaving(files: &Files) {
-    let Some(stamp) = files.autosave_stamp.get() else { return };
-    if let Ok(storage) = local() {
-        let _ = storage.set_item(LEFT_KEY, &stamp.to_string());
+    // This page may have returned from BFCache after another same-tab page changed the
+    // session value. A real departure/reload must identify this page again, not that one.
+    let _ = remember_page(&files.keep_page.borrow());
+    if !files.autosave_owned.get() {
+        return;
+    }
+    let Ok(storage) = local() else { return };
+    let markers = (0..crate::RECOVERY_LEAVE_SLOTS)
+        .map(|slot| storage.get_item(&left_key(slot)).ok().flatten().and_then(|text| crate::LeaveMarker::parse(&text)))
+        .collect::<Vec<_>>();
+    let owner = files.keep_page.borrow();
+    let Some((slot, marker)) = crate::next_leave_marker(&markers, &owner) else { return };
+    let text = serde_json::json!({"owner": marker.owner, "order": marker.order}).to_string();
+    let key = left_key(slot);
+    if storage.set_item(&key, &text).is_ok() && storage.get_item(&key).ok().flatten().as_deref() != Some(text.as_str()) {
+        log::info!("recovery Leave intent changed concurrently");
     }
 }
 
-/// The stamp a closed page left (taken: it counts once).
-fn take_left_stamp() -> Option<f64> {
-    let storage = local().ok()?;
-    let left = storage.get_item(LEFT_KEY).ok().flatten();
-    let _ = storage.remove_item(LEFT_KEY);
-    crate::parse_left_stamp(left.as_deref()?)
+fn was_left(owner: &str) -> bool {
+    let Ok(storage) = local() else { return false };
+    (0..crate::RECOVERY_LEAVE_SLOTS).any(|slot| {
+        storage.get_item(&left_key(slot)).ok().flatten().and_then(|text| crate::LeaveMarker::parse(&text)).is_some_and(|m| m.owner == owner)
+    })
+}
+
+/// A reload changes only the marker belonging to the prior page in this same tab/channel.
+fn clear_left_owner(owner: &str) {
+    let Ok(storage) = local() else { return };
+    for slot in 0..crate::RECOVERY_LEAVE_SLOTS {
+        let key = left_key(slot);
+        if storage.get_item(&key).ok().flatten().and_then(|text| crate::LeaveMarker::parse(&text)).is_some_and(|m| m.owner == owner) {
+            let _ = storage.remove_item(&key);
+        }
+    }
+}
+
+/// Session storage survives a reload, but is separate between tabs. Update the identity before
+/// async startup so a tab reloading an unrelated abandoned recovery cannot exempt its owner.
+fn remember_page(page: &str) -> Option<String> {
+    let storage = web_sys::window()?.session_storage().ok().flatten()?;
+    let key = crate::channel::key("solidcraft.recovery.page");
+    let previous = storage.get_item(&key).ok().flatten().filter(|owner| crate::valid_recovery_owner(owner));
+    storage.set_item(&key, page).ok()?;
+    previous
 }
 
 /// This page was loaded by reloading the last one (the browser's navigation timing says so).
