@@ -26,6 +26,10 @@ struct Host {
     rename: Rename,
     /// When C's drag starts, the host adds this undrawn item to the set, with its own data.
     hidden_in_drag: Option<NodeId>,
+    /// G's own drop rule: the one zone it takes.
+    g_takes: Option<Zone>,
+    /// B is laid out by the host itself, out of view: passed, not drawn.
+    pass_b: bool,
     /// Each row's response this frame.
     outs: RefCell<Vec<(NodeId, RowOut)>>,
 }
@@ -39,6 +43,8 @@ impl Default for Host {
             extra: 0,
             rename: Rename::Inline,
             hidden_in_drag: None,
+            g_takes: None,
+            pass_b: false,
             outs: RefCell::new(Vec::new()),
         }
     }
@@ -77,6 +83,10 @@ impl Host {
             let mut bodies: Vec<(NodeId, &str)> = BODIES.to_vec();
             bodies.extend(extra.iter().map(|(id, label)| (*id, label.as_str())));
             for (id, label) in bodies {
+                if id == 3 && self.pass_b {
+                    rows.pass(id, Selectable::Yes(0));
+                    continue;
+                }
                 self.emit(
                     rows,
                     Node {
@@ -100,10 +110,13 @@ impl Host {
                 );
             }
         }
+        let g_takes = self.g_takes;
+        let g_rule = move |_: &Dragged, zone: Zone| Some(zone) == g_takes;
         self.emit(
             rows,
             Node {
                 id: GROUP,
+                accept: g_takes.is_some().then_some(&g_rule as &dyn Fn(&Dragged, Zone) -> bool),
                 key: "g",
                 row: Row { fold: Some(self.folds.is_open("g", true)), icon: "folder", label: "G", name: true, ..Default::default() },
                 select: Selectable::Yes(1),
@@ -673,4 +686,56 @@ fn an_inactive_presentation_draws_and_emits_nothing_and_ends_its_gestures() {
     assert_eq!(rig.frame(vec![Input::PointerMoved(c + vec2(0.0, 12.0))]), Vec::new());
     assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&rig.ctx));
     assert!(rig.ctx.dragged_id().is_none());
+}
+
+#[test]
+fn a_rows_own_drop_rule_decides_and_a_refused_zone_falls_back_to_the_other() {
+    let rig = Rig::new();
+    let (c, g) = (rig.at("row:C"), rig.rect(GROUP));
+    // G takes drops only before it: over its middle, where a drop would go inside, it goes before.
+    rig.host.borrow_mut().g_takes = Some(Zone::Before);
+    let events = rig.drag(c, g.center());
+    assert!(matches!(events.as_slice(), [Event::Move { target: GROUP, zone: Zone::Before, .. }]), "{events:?}");
+    // Its own rule overrides the panel's: inside only, even in its top part.
+    rig.host.borrow_mut().g_takes = Some(Zone::Into);
+    rig.into_g.set(false);
+    let events = rig.drag(c, pos2(g.center().x, g.top() + 3.0));
+    assert!(matches!(events.as_slice(), [Event::Move { target: GROUP, zone: Zone::Into, .. }]), "{events:?}");
+}
+
+#[test]
+fn a_rows_response_has_its_widget_response_and_whether_a_press_was_on_a_control() {
+    let rig = Rig::new();
+    rig.click(rig.at("row:B"));
+    let b = rig.out(3);
+    assert!(b.response.as_ref().is_some_and(|r| b.rect == Some(r.rect)));
+    assert!(!b.on_control);
+    let eye = rig.at("eye:B");
+    rig.frame(vec![Input::PointerMoved(eye)]);
+    rig.press(eye, PointerButton::Primary, true, Modifiers::NONE);
+    assert!(rig.out(3).on_control, "the press is on the eye");
+    rig.press(eye, PointerButton::Primary, false, Modifiers::NONE);
+}
+
+#[test]
+fn a_row_the_host_passes_over_keeps_its_place_in_a_range() {
+    let rig = Rig::new();
+    rig.host.borrow_mut().pass_b = true;
+    rig.frame(Vec::new());
+    assert_eq!(rig.labels(), ["Bodies", "A", "C", "G", "Settings"], "B is not drawn");
+    rig.click(rig.at("row:A"));
+    assert_eq!(rig.click_mods(rig.at("row:C"), Modifiers::SHIFT), vec![Event::Select { id: 4, how: How::Range(vec![2, 3, 4]) }]);
+}
+
+#[test]
+fn the_gestures_of_a_presentation_not_drawn_end_from_the_context() {
+    let rig = Rig::new();
+    let (a, b) = (rig.at("eye:A"), rig.at("eye:B"));
+    rig.frame(vec![Input::PointerMoved(a)]);
+    rig.press(a, PointerButton::Primary, true, Modifiers::NONE);
+    assert_eq!(rig.frame(vec![Input::PointerMoved(b)]).first(), Some(&Event::EyeGesture(Gesture::Begin)));
+    let ended = end_gestures(&rig.ctx, &mut rig.state.borrow_mut(), Source { scope: 7, presentation: 0 });
+    assert_eq!(ended, vec![Event::EyeGesture(Gesture::End)]);
+    assert!(rig.ctx.dragged_id().is_none());
+    assert!(end_gestures(&rig.ctx, &mut rig.state.borrow_mut(), Source { scope: 7, presentation: 0 }).is_empty(), "once");
 }

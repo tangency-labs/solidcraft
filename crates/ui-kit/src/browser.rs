@@ -99,6 +99,8 @@ pub struct Node<'a> {
     pub menu: NodeMenu<'a>,
     /// A click on the row's label folds it as its arrow does (folders), after [`Event::Click`].
     pub click_folds: bool,
+    /// The row's own drop rule (where a drag may land on it), in place of the panel's.
+    pub accept: Option<&'a dyn Fn(&Dragged, Zone) -> bool>,
 }
 
 /// How the rows are drawn this frame.
@@ -296,6 +298,10 @@ pub struct RowOut {
     pub fold_at: Option<Pos2>,
     pub eye_at: Option<Pos2>,
     pub radio_at: Option<Pos2>,
+    /// The row's widget response (tooltips, a host's own drags).
+    pub response: Option<egui::Response>,
+    /// The press under way began on the fold arrow, eye, radio or an action, not on the row.
+    pub on_control: bool,
     /// The row's events, with [`Browser::events_per_row`] (else they are in [`Output::events`]).
     pub events: Vec<Event>,
 }
@@ -678,23 +684,30 @@ impl<'s> Browser<'s> {
 
 /// A hidden presentation: it draws nothing and emits nothing, and the gestures it holds end.
 fn inactive(ui: &mut egui::Ui, state: &mut BrowserState, source: Source) -> Output {
+    Output { events: end_gestures(ui.ctx(), state, source), ..Default::default() }
+}
+
+/// End what a presentation holds, for one that is hidden or not drawn at all this frame: an eye
+/// drag ends ([`Gesture::End`], the only event), a row drag it began is cancelled and its widget
+/// released, and a held slow click or rename request is dropped.
+pub fn end_gestures(ctx: &egui::Context, state: &mut BrowserState, source: Source) -> Vec<Event> {
     let mut events = Vec::new();
     if state.eye_gesture {
-        ui.data_mut(|d| d.remove_temp::<bool>(eye_drag_id()));
+        ctx.data_mut(|d| d.remove_temp::<bool>(eye_drag_id()));
         state.eye_gesture = false;
         events.push(Event::EyeGesture(Gesture::End));
     }
-    if egui::DragAndDrop::payload::<Dragged>(ui.ctx()).is_some_and(|d| d.source == source) {
-        egui::DragAndDrop::clear_payload(ui.ctx());
+    if egui::DragAndDrop::payload::<Dragged>(ctx).is_some_and(|d| d.source == source) {
+        egui::DragAndDrop::clear_payload(ctx);
     }
     if let Some(widget) = state.drag_widget.take()
-        && ui.ctx().dragged_id() == Some(widget)
+        && ctx.dragged_id() == Some(widget)
     {
-        ui.ctx().stop_dragging();
+        ctx.stop_dragging();
     }
     state.pending = None;
     state.rename_request = None;
-    Output { events, ..Default::default() }
+    events
 }
 
 /// What the rows gathered this frame.
@@ -771,6 +784,16 @@ impl Rows<'_> {
         }
     }
 
+    /// A row the host lays out itself out of view (it takes the row's place): kept in the rows'
+    /// order, so a Shift range across it is whole. Ignored while searching.
+    pub fn pass(&mut self, id: NodeId, select: Selectable) {
+        if self.query.is_none()
+            && let Selectable::Yes(class) = select
+        {
+            self.state.order.push((id, class));
+        }
+    }
+
     /// The UI the rows are drawn in, for a host's own lines between rows.
     pub fn ui(&mut self) -> &mut egui::Ui {
         &mut *self.ui
@@ -778,7 +801,7 @@ impl Rows<'_> {
 
     /// Draw one row.
     pub fn row(&mut self, node: Node<'_>) -> RowOut {
-        let Node { id, key, row, name, select, rename, drag, drops, menu, click_folds } = node;
+        let Node { id, key, row, name, select, rename, drag, drops, menu, click_folds, accept } = node;
         let (depth, label, secondary, fold, eye, selected, actions) =
             (row.depth, row.label, row.secondary, row.fold, row.eye, row.selected, row.actions);
         let handle = row.handle.unwrap_or(label);
@@ -891,7 +914,7 @@ impl Rows<'_> {
                 drag_started = true;
             }
             if drops.before || drops.into {
-                drop_zone = self.drop_target(id, &response, drops);
+                drop_zone = self.drop_target(id, &response, drops, accept);
             }
         }
         if editing {
@@ -911,6 +934,8 @@ impl Rows<'_> {
             fold_at: out.fold_at,
             eye_at: out.eye_at,
             radio_at: out.radio_at,
+            response: out.resp.clone(),
+            on_control: out.on_control,
             events,
         }
     }
@@ -1028,27 +1053,24 @@ impl Rows<'_> {
 
     /// While rows of this scope are dragged over the row, mark where they would land; on release,
     /// report the move. Drags of other kinds of payload are left alone.
-    fn drop_target(&mut self, id: NodeId, response: &egui::Response, drops: Drops) -> Option<Zone> {
+    fn drop_target(&mut self, id: NodeId, response: &egui::Response, drops: Drops, own: Option<&dyn Fn(&Dragged, Zone) -> bool>) -> Option<Zone> {
         let dragged = egui::DragAndDrop::payload::<Dragged>(self.ui.ctx())?;
         if dragged.ids.contains(&id) || !response.contains_pointer() {
             return None;
         }
         let r = response.rect;
         let at = self.ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()));
-        let zone = if drops.before && drops.into {
-            if at.is_some_and(|p| p.y < r.top() + r.height() * BEFORE_ZONE) { Zone::Before } else { Zone::Into }
-        } else if drops.before {
-            Zone::Before
-        } else {
-            Zone::Into
+        // The zone under the pointer first (a row taking both takes a drop before it in its top
+        // part); when the rules refuse it, the row's other zone.
+        let pointer = if at.is_some_and(|p| p.y < r.top() + r.height() * BEFORE_ZONE) { Zone::Before } else { Zone::Into };
+        let other = if pointer == Zone::Before { Zone::Into } else { Zone::Before };
+        let offered = |zone: Zone| if zone == Zone::Before { drops.before } else { drops.into };
+        let accepts = |zone: Zone| match (own, self.accept) {
+            (Some(rule), _) => rule(&dragged, zone),
+            (None, Some(rule)) => rule(&dragged, id, zone),
+            (None, None) => dragged.source.scope == self.source.scope,
         };
-        let accepted = match self.accept {
-            Some(accept) => accept(&dragged, id, zone),
-            None => dragged.source.scope == self.source.scope,
-        };
-        if !accepted {
-            return None;
-        }
+        let zone = [pointer, other].into_iter().find(|zone| offered(*zone) && accepts(*zone))?;
         let t = Tokens::get();
         match zone {
             Zone::Before => {
