@@ -370,11 +370,12 @@ pub fn preset_card(
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
-/// The (i) icon after a label: shows `text` as a tooltip and tells assistive technology the same.
+/// The (i) icon after a label: shows `text` as a tooltip on hover (and tells assistive
+/// technology the same); clickable, so a page can hold the text open on a click.
 pub fn help_icon(ui: &mut Ui, text: &str) -> Response {
     let t = Tokens::get();
     let size = t.space_12 + 1.0;
-    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
     let ink = if response.hovered() { t.form_ink } else { t.form_dim };
     let p = ui.painter();
     p.circle_stroke(rect.center(), size * 0.5 - 0.5, Stroke::new(1.0, ink));

@@ -151,7 +151,13 @@ fn no_english_is_painted_where_the_language_has_a_translation() {
     crate::i18n::install();
     let english = english_ids();
     let mut h = sample();
-    let names = design_names(&h.app);
+    let mut names = design_names(&h.app);
+    // Rule names the preference's default-rule box shows as named.
+    {
+        names.insert(h.app.preferences.sheet_rule.name.clone());
+        names.extend(h.app.preferences.personal_sheet_rules.rules().iter().map(|r| r.name().to_string()));
+        names.extend(h.app.session.doc.sheet.rules.iter().map(|r| r.name.clone()));
+    }
     assert!(names.contains("Boss") && names.len() > 5, "{names:?}");
     let mut leaks = Vec::new();
     for catalog in crate::i18n::LOCALES.iter().filter(|c| c.id != "en") {

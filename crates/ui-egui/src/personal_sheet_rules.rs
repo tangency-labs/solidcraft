@@ -25,7 +25,7 @@ const INVALID_VALUES: &str = "sheet.personal_rules.invalid_values";
 /// the same sheet in a millimetre or an inch design; `Thickness` and other expressions are kept
 /// as written.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-struct Rule {
+pub struct Rule {
     name: String,
     thickness: String,
     k_factor: String,
@@ -91,7 +91,13 @@ impl Rule {
         [&self.thickness, &self.k_factor, &self.bend_radius, &self.relief_width, &self.relief_depth, &self.corner_relief, &self.hem_gap, &self.gap]
     }
 
-    fn sheet_rule(&self) -> SheetRule {
+    /// The rule's name, as stored.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The rule as a design's sheet rule.
+    pub fn sheet_rule(&self) -> SheetRule {
         SheetRule {
             name: self.name.clone(),
             thickness: self.thickness.clone(),
@@ -236,6 +242,14 @@ impl<'de> Deserialize<'de> for Library {
 }
 
 impl Library {
+    /// The stored rules, in save order.
+    pub fn rules(&self) -> &[Rule] {
+        &self.0
+    }
+    /// The rule stored under `name`, ignoring case.
+    pub fn rule(&self, name: &str) -> Option<&Rule> {
+        self.find(name).and_then(|index| self.0.get(index))
+    }
     /// Names are unique ignoring case.
     fn find(&self, name: &str) -> Option<usize> {
         let name = name.to_lowercase();

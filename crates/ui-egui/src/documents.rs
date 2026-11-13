@@ -2989,6 +2989,33 @@ mod tests {
         assert!(!a.session.is_dirty());
     }
 
+    /// New designs get the preferred sheet-metal rule, edited or not; a design with geometry keeps
+    /// its own rules.
+    #[test]
+    fn new_designs_get_the_preferred_sheet_rule() {
+        let mut a = app();
+        assert!(a.session.doc.sheet.rules.is_empty());
+        crate::prefs::apply_new_design(&mut a);
+        assert_eq!(a.session.doc.sheet.rules.len(), 1, "{:?}", a.session.doc.sheet.rules);
+        assert_eq!(a.session.doc.sheet.rules[0], solidcraft_engine::doc::sheet::SheetRule::steel());
+        assert_eq!(a.session.doc.sheet.active, Some("Steel (mm)".to_string()));
+        assert!(!a.session.is_dirty());
+        // Edited preference, edited rule.
+        let mut b = app();
+        b.preferences.sheet_rule.thickness = "3 mm".into();
+        crate::prefs::apply_new_design(&mut b);
+        assert!(b.session.doc.sheet.rules.iter().any(|r| r.thickness == "3 mm"), "{:?}", b.session.doc.sheet.rules);
+        // Geometry keeps its own rules.
+        b.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        b.preferences.sheet_rule.k_factor = "0.6".into();
+        crate::prefs::apply_new_design(&mut b);
+        assert!(b.session.doc.sheet.rules.iter().all(|r| r.k_factor != "0.6"), "{:?}", b.session.doc.sheet.rules);
+        let tabs = b.docs.count();
+        new_design(&mut b);
+        assert_eq!(b.docs.count(), tabs + 1);
+        assert!(b.session.doc.sheet.rules.iter().any(|r| r.k_factor == "0.6"));
+    }
+
     /// A design built elsewhere replaces a blank one and gets a tab otherwise.
     #[test]
     fn adopt_reuses_a_blank_design() {

@@ -26,7 +26,7 @@ pub enum DxfLinetype {
     Continuous,
     /// AutoCAD's DASHED: a dash of 12.7 mm and a gap of 6.35 mm.
     Dashed,
-    /// Short 2 mm dashes and 1 mm gaps for hidden edges in millimetre drawings.
+    /// Short 2 mm dashes and 1 mm gaps for hidden edges.
     Hidden,
 }
 
@@ -322,12 +322,35 @@ impl DxfShape {
             }
         }
     }
+
+    /// This shape with every length multiplied by `k`; angles, ratios, parameters, knots and
+    /// weights are kept.
+    pub fn scaled(&self, k: f64) -> DxfShape {
+        match self {
+            DxfShape::Line(a, b) => DxfShape::Line(*a * k, *b * k),
+            DxfShape::Circle { c, r } => DxfShape::Circle { c: *c * k, r: *r * k },
+            DxfShape::Arc { c, r, a0, a1 } => DxfShape::Arc { c: *c * k, r: *r * k, a0: *a0, a1: *a1 },
+            DxfShape::Ellipse { c, major, ratio, t0, t1 } => DxfShape::Ellipse { c: *c * k, major: *major * k, ratio: *ratio, t0: *t0, t1: *t1 },
+            DxfShape::Spline { degree, knots, ctrl, weights } => {
+                DxfShape::Spline { degree: *degree, knots: knots.clone(), ctrl: ctrl.iter().map(|p| *p * k).collect(), weights: weights.clone() }
+            }
+            DxfShape::Text { at, height, angle_deg, text } => {
+                DxfShape::Text { at: *at * k, height: *height * k, angle_deg: *angle_deg, text: text.clone() }
+            }
+            DxfShape::Polyline { points } => DxfShape::Polyline { points: points.iter().map(|p| *p * k).collect() },
+            DxfShape::LwPolyline { verts, closed } => {
+                DxfShape::LwPolyline { verts: verts.iter().map(|(p, b)| (*p * k, *b)).collect(), closed: *closed }
+            }
+        }
+    }
 }
 
 /// Group codes and handles, in file order.
 struct Out {
     s: String,
     next: u64,
+    /// A millimetre dash length in the drawing's units (1 for a millimetre drawing).
+    k: f64,
 }
 
 impl Out {
@@ -340,6 +363,10 @@ impl Out {
         let text = text.trim_end_matches('0');
         let text = if text.ends_with('.') { format!("{text}0") } else { text.to_string() };
         self.code(c, if text == "-0.0" { "0.0" } else { text.as_str() });
+    }
+    /// A millimetre dash length in the drawing's units (the linetype patterns of the file).
+    fn len(&mut self, c: i32, v: f64) {
+        self.num(c, v * self.k);
     }
     /// A point in the plane at height 0: codes `c`, `c + 10`, `c + 20`.
     fn point(&mut self, c: i32, p: Vec2) {
@@ -430,7 +457,9 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     write_dxf_drawing_units(layers, entities, 4)
 }
 
-/// [`write_dxf_drawing`], with explicit DXF `$INSUNITS` (1 in, 2 ft, 4 mm, 5 cm, 6 m).
+/// [`write_dxf_drawing`], with explicit DXF `$INSUNITS` (1 in, 2 ft, 4 mm, 5 cm, 6 m). The
+/// entities are given in the drawing's units; the file's own DASHED and HIDDEN linetype patterns
+/// are in millimetres and are converted to the drawing's units for `$INSUNITS` 1 or 2.
 pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insunits: i32) -> Result<String> {
     let mut pts = Vec::new();
     for e in entities {
@@ -452,7 +481,8 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
     }
 
     // Everything but the header, which needs the handle seed.
-    let mut o = Out { s: String::new(), next: 0x20 };
+    let k = if insunits == 1 || insunits == 2 { 1.0 / 25.4 } else { 1.0 };
+    let mut o = Out { s: String::new(), next: 0x20, k };
     let (model, paper) = (o.handle(), o.handle());
     let root = o.handle();
 
@@ -515,9 +545,9 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
         o.code(3, description);
         o.code(72, 65);
         o.code(73, pattern.len());
-        o.num(40, pattern.iter().map(|d| d.abs()).sum());
+        o.len(40, pattern.iter().map(|d| d.abs()).sum());
         for d in pattern {
-            o.num(49, *d);
+            o.len(49, *d);
             o.code(74, 0);
         }
     }
@@ -716,7 +746,7 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
     o.code(0, "ENDSEC");
     o.code(0, "EOF");
 
-    let mut head = Out { s: String::new(), next: 0 };
+    let mut head = Out { s: String::new(), next: 0, k };
     head.code(0, "SECTION");
     head.code(2, "HEADER");
     head.code(9, "$ACADVER");
@@ -934,6 +964,51 @@ mod tests {
         assert!(dxf.ends_with("  0\nEOF\n"));
         // No entities: a valid, empty drawing.
         assert_eq!(entities(&write_dxf_drawing(&[], &[]).unwrap()).len(), 0);
+    }
+
+    #[test]
+    fn an_inches_drawing_writes_inches_and_the_imperial_header() {
+        // The geometry is given in the drawing's units: one of them is 25.4 mm.
+        let ents = vec![
+            DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::new(1.0, 0.0)) },
+            DxfEntity { layer: "CUT".into(), shape: DxfShape::Circle { c: Vec2::new(1.0, 1.0), r: 1.0 } },
+        ];
+        let dxf = write_dxf_drawing_units(&[DxfLayer::new("OUTLINE", 7), DxfLayer::new("CUT", 1)], &ents, 1).unwrap();
+        let p = pairs(&dxf);
+        let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
+        assert_eq!(after("$INSUNITS")[0], (70, "1".to_string()));
+        assert_eq!(after("$MEASUREMENT")[0], (70, "0".to_string()));
+        // The line's end, the circle's centre and its radius, and the extents read in inches, as
+        // the entities gave them.
+        let file = entities(&dxf);
+        assert!(near(&values(&file[0], 11), &[1.0]) && near(&values(&file[0], 21), &[0.0]));
+        assert!(near(&values(&file[1], 10), &[1.0]) && near(&values(&file[1], 20), &[1.0]) && near(&values(&file[1], 40), &[1.0]));
+        assert_eq!(&after("$EXTMIN")[..2], &[(10, "0.0".to_string()), (20, "0.0".to_string())]);
+        assert_eq!(&after("$EXTMAX")[..2], &[(10, "2.0".to_string()), (20, "2.0".to_string())]);
+        // The file's own DASHED pattern is converted from millimetres to half and quarter inches.
+        let types = table_records(&p, "LTYPE");
+        let dashed = types.iter().find(|r| field(r, 2) == "DASHED").unwrap();
+        let numbers = |code: i32| dashed.iter().filter(|(c, _)| *c == code).map(|(_, v)| v.parse::<f64>().unwrap()).collect::<Vec<_>>();
+        assert!(near(&numbers(49), &[0.5, -0.25]) && near(&numbers(40), &[0.75]));
+        // The reader converts the inches back to millimetres: the geometry comes out as it went in.
+        let back = read_dxf(&dxf).unwrap();
+        assert!(
+            matches!(&back[..], [Geom2::Line(a, b), Geom2::Circle(c, r)] if b.dist(Vec2::new(25.4, 0.0)) < 1e-9 && c.dist(Vec2::new(25.4, 25.4)) < 1e-9 && (r - 25.4).abs() < 1e-9),
+            "{back:?}"
+        );
+    }
+
+    #[test]
+    fn scaled_keeps_angles_ratios_knots_and_weights_and_scales_the_lengths() {
+        let shape = DxfShape::Ellipse { c: Vec2::new(50.0, 40.0), major: Vec2::new(25.0, 0.0), ratio: 0.48, t0: 0.0, t1: FRAC_PI_2 };
+        let twice = shape.scaled(2.0);
+        let DxfShape::Ellipse { c, major, ratio, t0: _, t1 } = twice else { panic!("{twice:?}") };
+        assert!(c.dist(Vec2::new(100.0, 80.0)) < 1e-12 && major.dist(Vec2::new(50.0, 0.0)) < 1e-12);
+        assert!((ratio - 0.48).abs() < 1e-12 && (t1 - FRAC_PI_2).abs() < 1e-12);
+        let text = DxfShape::Text { at: Vec2::new(30.0, 12.0), height: 3.0, angle_deg: 90.0, text: "AB".into() };
+        let third = text.scaled(1.0 / 3.0);
+        let DxfShape::Text { at, height, angle_deg, .. } = third else { panic!("{third:?}") };
+        assert!(at.dist(Vec2::new(10.0, 4.0)) < 1e-12 && (height - 1.0).abs() < 1e-12 && angle_deg == 90.0);
     }
 
     #[test]

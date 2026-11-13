@@ -143,9 +143,9 @@ fn flat_exports_use_the_save_picker() {
             captured.lock().unwrap().push((name.to_string(), extensions.iter().map(|x| x.to_string()).collect::<Vec<_>>()));
             Box::pin(std::future::ready(None))
         }));
-        assert_eq!(export_flat(&mut app, "Base", "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", "csv", "mm"), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
-        assert_eq!(export_flat(&mut app, "Base", "dxf"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", "dxf", "mm"), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         let picks = picks.lock().unwrap();
         assert!(picks[0].0.ends_with("-Base.csv"));
@@ -194,8 +194,55 @@ fn shallow_pocket_overlay_labels_depth_without_drawing_a_through_void() {
     }
 }
 
+/// The panel's Bend lines checkbox shows and removes the bend centre lines and their legend.
+#[test]
+fn the_bend_lines_checkbox_shows_and_hides_the_flat_pattern_bends() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    // A base sheet and four edge flanges: the flat pattern has bend lines.
+    let sk = app.session.doc.features[0].id;
+    app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    app.start("sheet.flange");
+    let c = apply_commands(&app, &app.dialog.clone().unwrap()).unwrap();
+    run_all(&mut app, c);
+    let edges: Vec<Sel> = [[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5], [100.0, 30.0, 2.5]]
+        .iter()
+        .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
+        .collect();
+    assert_eq!(edges.len(), 4);
+    app.session.selection = edges;
+    app.start("sheet.flange");
+    let mut d = app.dialog.clone().unwrap();
+    if let Kind::Sheet(Sm::Flange { height, .. }) = &mut d.kind {
+        *height = "20 mm".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    assert!(!flat["bends"].as_array().unwrap().is_empty());
+    app.start("sheet.flat_pattern");
+    let mut dialog = app.dialog.clone().unwrap();
+    {
+        let Kind::Sheet(Sm::FlatPattern { data, .. }) = &mut dialog.kind else { panic!("flat dialog") };
+        *data = Some(Ok(flat));
+    }
+    let ctx = crate::fonts::test_context();
+    let mut legend = |dialog: &crate::dialogs::Dialog| -> bool {
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("flat-bend-test")));
+            assert!(overlay(&mut app, &painter, Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0)), dialog));
+        });
+        crate::test_support::text_shapes(&output).any(|text| text.galley.text() == "Bend up")
+    };
+    assert!(legend(&dialog), "the bend lines show by default");
+    {
+        let Kind::Sheet(Sm::FlatPattern { show_bend_lines, .. }) = &mut dialog.kind else { panic!("flat dialog") };
+        *show_bend_lines = false;
+    }
+    assert!(!legend(&dialog), "the checkbox removes the bend lines and their legend");
+}
+
 /// The Flat Pattern panel shows each side of the flat size, and the thickness, whole: on one row
-/// ("1250.00 mm × 1000.00 mm × 2.50 mm") the panel cut it off after the first side.
+/// ("1250.00 mm × 1000.00 mm × 2.50 mm") the panel cut it off after its first side.
 #[test]
 fn flat_pattern_shows_each_side_of_the_flat_size_whole() {
     for layout in ["docked", "floating"] {
@@ -363,6 +410,61 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
     }
 }
 
+/// The flat panel's DXF units: the default is metric, and choosing inches reaches the exported
+/// drawing, which is then written in inches (header and coordinates).
+#[test]
+fn flat_pattern_dxf_units_reach_the_exported_drawing() {
+    fn header_value(dxf: &str, var: &str) -> String {
+        let lines: Vec<&str> = dxf.lines().collect();
+        let i = lines.iter().position(|l| l.trim() == var).unwrap();
+        lines.get(i + 2).map_or_else(String::new, |l| l.trim().to_string())
+    }
+    fn ext(dxf: &str, var: &str) -> [f64; 2] {
+        let lines: Vec<&str> = dxf.lines().collect();
+        let i = lines.iter().position(|l| l.trim() == var).unwrap();
+        [lines[i + 2].trim().parse().unwrap(), lines[i + 4].trim().parse().unwrap()]
+    }
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"layout": mode}));
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+            ("sketch.finish", json!({})),
+            ("sheet.flange", json!({"sketch": "Base"})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+        let path = h.dir.join("units.dxf");
+        let chosen = path.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert!(name.ends_with(".dxf"), "{name}");
+            assert_eq!(extensions, &["dxf"]);
+            Box::pin(std::future::ready(Some(chosen.clone())))
+        }));
+        h.app.start("sheet.flat_pattern");
+        h.settle();
+        // The default is metric.
+        h.step(&json!({"widget": "Export DXF…"})).unwrap();
+        let mm = std::fs::read_to_string(&path).expect("the default export writes the file");
+        assert_eq!(header_value(&mm, "$INSUNITS"), "4");
+        std::fs::remove_file(&path).unwrap();
+        // The choice asks for inches, and the next export has them.
+        h.step(&json!({"click": {"handle": "dialog:DXF Units"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:DXF Units:Inch"}})).unwrap();
+        h.step(&json!({"widget": "Export DXF…"})).unwrap();
+        let inches = std::fs::read_to_string(&path).expect("the inch export writes the file");
+        assert_eq!(header_value(&inches, "$INSUNITS"), "1");
+        assert_eq!(header_value(&inches, "$MEASUREMENT"), "0");
+        // The extents are the millimetre ones over 25.4.
+        for var in ["$EXTMIN", "$EXTMAX"] {
+            for (a, b) in ext(&mm, var).iter().zip(ext(&inches, var)) {
+                assert!((a / 25.4 - b).abs() < 1e-9, "{var}: {a} vs {b}");
+            }
+        }
+    }
+}
+
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn bend_table_picker_writes_the_current_body() {
@@ -379,7 +481,7 @@ fn bend_table_picker_writes_the_current_body() {
             Box::pin(std::future::ready(Some(chosen.clone())))
         }));
         let undo = app.session.undo.len();
-        assert_eq!(export_flat(&mut app, &body, "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, &body, "csv", "mm"), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         assert_eq!(app.status.as_ref().map(|s| &s.0), Some(&format!("Exported {output}")));
         let contents = std::fs::read_to_string(&path).unwrap();

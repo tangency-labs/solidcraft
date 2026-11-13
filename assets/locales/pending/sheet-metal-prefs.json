@@ -1,0 +1,101 @@
+{
+  "en": {
+    "prefs.structure.sheet_metal": "Sheet Metal",
+    "prefs.structure.sheet_metal_note": "What new designs start with for sheet metal, and how the flat pattern is exported as DXF.",
+    "prefs.sheet_metal_default_rule": "Default rule",
+    "prefs.sheet_metal_dxf_export": "DXF export",
+    "prefs.sheet_dxf_units": "Default export units",
+    "prefs.sheet_export_bend_lines": "Export with bend lines",
+    "prefs.sheet_export_bend_lines_help": "Keep the bend centre lines (BEND_UP, BEND_DOWN) in the exported flat-pattern DXF. Off for a cutter that would cut them.",
+    "prefs.sheet_export_markings": "Export with markings",
+    "prefs.sheet_export_markings_help": "Keep the letters (TEXT, ETCH) and the bend notes in the exported flat-pattern DXF. Off for a machine that would etch them."
+  },
+  "ar": {
+    "prefs.structure.sheet_metal": "المعدن المفلطح",
+    "prefs.structure.sheet_metal_note": "ما تبدأ به التصاميم الجديدة فيما يخص المعدن المفلطح، وكيفية تصدير النمط المسطح بصيغة DXF.",
+    "prefs.sheet_metal_default_rule": "القاعدة الافتراضية",
+    "prefs.sheet_metal_dxf_export": "تصدير DXF",
+    "prefs.sheet_dxf_units": "وحدات التصدير الافتراضية",
+    "prefs.sheet_export_bend_lines": "التصدير مع خطوط الطي",
+    "prefs.sheet_export_bend_lines_help": "إبقاء خطوط الطي المركزية (BEND_UP، BEND_DOWN) في ملف DXF المصدَّر للنمط المسطح. أعدِها إن كانت الآلة ستقطعها.",
+    "prefs.sheet_export_markings": "التصدير مع العلامات",
+    "prefs.sheet_export_markings_help": "إبقاء الحروف (TEXT، ETCH) وملاحظات الطي في ملف DXF المصدَّر. أعدِها إن كانت الآلة ستنقشها."
+  },
+  "de": {
+    "prefs.structure.sheet_metal": "Blech",
+    "prefs.structure.sheet_metal_note": "Womit neue Designs im Blechbereich starten und wie die flächige Darstellung als DXF exportiert wird.",
+    "prefs.sheet_metal_default_rule": "Standardregel",
+    "prefs.sheet_metal_dxf_export": "DXF-Export",
+    "prefs.sheet_dxf_units": "Standard-Exporteinheiten",
+    "prefs.sheet_export_bend_lines": "Mit Biegekanten exportieren",
+    "prefs.sheet_export_bend_lines_help": "Behält die Biegemittellinien (BEND_UP, BEND_DOWN) im exportierten DXF der flächigen Darstellung. Aus für eine Maschine, die sie schneiden würde.",
+    "prefs.sheet_export_markings": "Mit Markierungen exportieren",
+    "prefs.sheet_export_markings_help": "Behält die Buchstaben (TEXT, ETCH) und die Kantenhinweise im exportierten DXF. Aus für eine Maschine, die sie gravieren würde."
+  },
+  "he": {
+    "prefs.structure.sheet_metal": "עיבוד לוחות",
+    "prefs.structure.sheet_metal_note": "איך מתחילים עיצובים חדשים בעיבוד לוחות, ואיך יוצאים את תרשיט המישור ל־DXF.",
+    "prefs.sheet_metal_default_rule": "כלל ברירת המחדל",
+    "prefs.sheet_metal_dxf_export": "ייצוא DXF",
+    "prefs.sheet_dxf_units": "יחידות ייצוא ברירת המחדל",
+    "prefs.sheet_export_bend_lines": "ייצוא כולל קווי כיפוף",
+    "prefs.sheet_export_bend_lines_help": "שומר את קווי המרכז של הכיפוף (BEND_UP, BEND_DOWN) בקובץ DXF של תרשיט המישור. לכבה אם המכונה תחתום אותם.",
+    "prefs.sheet_export_markings": "ייצוא כולל סימון",
+    "prefs.sheet_export_markings_help": "שומר את האותיות (TEXT, ETCH) וההערות ליד הכיפופים בקובץ DXF. לכבה אם המכונה תחוק אותן."
+  },
+  "ja": {
+    "prefs.structure.sheet_metal": "板金",
+    "prefs.structure.sheet_metal_note": "新しい設計の板金に関する初期値と、フラットパターンの DXF 出力の方法です。",
+    "prefs.sheet_metal_default_rule": "デフォルトルール",
+    "prefs.sheet_metal_dxf_export": "DXF 出力",
+    "prefs.sheet_dxf_units": "出力のデフォルト単位",
+    "prefs.sheet_export_bend_lines": "曲げ線付きで出力",
+    "prefs.sheet_export_bend_lines_help": "出力するフラットパターンの DXF に曲げセンターライン (BEND_UP、BEND_DOWN) を残します。切られてしまう切断機ではオフにしてください。",
+    "prefs.sheet_export_markings": "マーキング付きで出力",
+    "prefs.sheet_export_markings_help": "出力するフラットパターンの DXF に文字 (TEXT、ETCH) と曲げ注記を残します。エッチされてしまう機器ではオフにしてください。"
+  },
+  "ko": {
+    "prefs.structure.sheet_metal": "시트 메탈",
+    "prefs.structure.sheet_metal_note": "새 디자인의 시트 메탈 초기값과 플랫 패턴의 DXF 내보내기 방법입니다.",
+    "prefs.sheet_metal_default_rule": "기본 규칙",
+    "prefs.sheet_metal_dxf_export": "DXF 내보내기",
+    "prefs.sheet_dxf_units": "기본 내보내기 단위",
+    "prefs.sheet_export_bend_lines": "굽힘선 포함 내보내기",
+    "prefs.sheet_export_bend_lines_help": "내보내는 플랫 패턴 DXF에 굽힘 중심선(BEND_UP, BEND_DOWN)을 유지합니다. 이를 절단하게 되는 기계에는 끄세요.",
+    "prefs.sheet_export_markings": "마크 포함 내보내기",
+    "prefs.sheet_export_markings_help": "내보내는 플랫 패턴 DXF에 글자(TEXT, ETCH)와 굽힘 주석을 유지합니다. 이를 각인하게 되는 기계에는 끄세요."
+  },
+  "vi": {
+    "prefs.structure.sheet_metal": "Thép tấm",
+    "prefs.structure.sheet_metal_note": "Những gì các thiết kế mới bắt đầu với thép tấm, và cách xuất sơ đồ phẳng ra DXF.",
+    "prefs.sheet_metal_default_rule": "Quy tắc mặc định",
+    "prefs.sheet_metal_dxf_export": "Xuất DXF",
+    "prefs.sheet_dxf_units": "Đơn vị xuất mặc định",
+    "prefs.sheet_export_bend_lines": "Xuất kèm đường gập",
+    "prefs.sheet_export_bend_lines_help": "Giữ các đường tâm gập (BEND_UP, BEND_DOWN) trong file DXF của sơ đồ phẳng đã xuất. Tắt với máy sẽ cắt chúng.",
+    "prefs.sheet_export_markings": "Xuất kèm đánh dấu",
+    "prefs.sheet_export_markings_help": "Giữ các chữ cái (TEXT, ETCH) và chú thích gập trong file DXF đã xuất. Tắt với máy sẽ khắc chúng."
+  },
+  "zh": {
+    "prefs.structure.sheet_metal": "钣金",
+    "prefs.structure.sheet_metal_note": "新设计的钣金初始内容，以及展开图导出为 DXF 的方式。",
+    "prefs.sheet_metal_default_rule": "默认规则",
+    "prefs.sheet_metal_dxf_export": "DXF 导出",
+    "prefs.sheet_dxf_units": "默认导出单位",
+    "prefs.sheet_export_bend_lines": "导出折弯线",
+    "prefs.sheet_export_bend_lines_help": "在导出的展开图 DXF 中保留折弯中心线（BEND_UP、BEND_DOWN）。会被切掉的切割机请关闭。",
+    "prefs.sheet_export_markings": "导出标记",
+    "prefs.sheet_export_markings_help": "在导出的展开图 DXF 中保留文字（TEXT、ETCH）和折弯注释。会被刻掉的设备请关闭。"
+  },
+  "zh-TW": {
+    "prefs.structure.sheet_metal": "板金",
+    "prefs.structure.sheet_metal_note": "新設計的板金初始內容，以及展開圖導出為 DXF 的方式。",
+    "prefs.sheet_metal_default_rule": "預設規則",
+    "prefs.sheet_metal_dxf_export": "DXF 導出",
+    "prefs.sheet_dxf_units": "預設導出單位",
+    "prefs.sheet_export_bend_lines": "導出彎曲線",
+    "prefs.sheet_export_bend_lines_help": "在導出的展開圖 DXF 中保留彎曲中心線（BEND_UP、BEND_DOWN）。會被切掉的切割機請關閉。",
+    "prefs.sheet_export_markings": "導出標記",
+    "prefs.sheet_export_markings_help": "在導出的展開圖 DXF 中保留文字（TEXT、ETCH）與彎曲註釋。會被刻掉的設備請關閉。"
+  }
+}
