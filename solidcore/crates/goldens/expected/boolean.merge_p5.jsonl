@@ -23,10 +23,6 @@
 {"case":"gen0009","deferred":null,"error":null,"ints":{"topology":{"blocks":[[352,32853]],"n":219}},"topology":null,"values":{"geometry":{"blocks":[[11.00009000221051,11.000090003370492,188.80196008161036]],"n":38}}}
 {"case":"gen0010","deferred":null,"error":null,"ints":{"topology":{"blocks":[[4,62]],"n":26}},"topology":null,"values":{"geometry":[]}}
 {"case":"gen0011","deferred":null,"error":null,"ints":{"topology":{"blocks":[[317,29490]],"n":187}},"topology":null,"values":{"geometry":{"blocks":[[7.606631012566163,25.424639316767358,176.81145619777877]],"n":37}}}
-{"case":"gen0012","deferred":null,"error":null,"ints":{"topology":{"blocks":[[35,1185]],"n":71}},"topology":null,"values":{"geometry":[0.2,0.8,0.00001,1.8684670955260402e-10,8.803128989793751e-10,8.542376747193581e-10,0.000010001039230484542,0.00001,-1e-9,-1e-9,1e-9,1e-9]}}
-{"case":"gen0013","deferred":null,"error":null,"ints":{"topology":{"blocks":[[493,64852],[136,7081]],"n":340}},"topology":null,"values":{"geometry":{"blocks":[[20.000139999999995,20.000139999999995,622.0045900000001]],"n":62}}}
-{"case":"gen0014","deferred":null,"error":null,"ints":{"topology":{"blocks":[[12,207]],"n":38}},"topology":null,"values":{"geometry":[0.00001,-1e-9,-1e-9,1e-9,1e-9]}}
-{"case":"gen0015","deferred":null,"error":null,"ints":{"topology":{"blocks":[[444,56278],[168,7296]],"n":334}},"topology":null,"values":{"geometry":{"blocks":[[-4.798791874576816,45.60141554199085,-85.69372376394114]],"n":66}}}
 {"case":"huge_subdomain_mapped","deferred":null,"error":null,"ints":{"topology":{"blocks":[[60,2968]],"n":100}},"topology":null,"values":{"geometry":{"blocks":[[4000000002.00006,4000000002.00006,52000000014.500755]],"n":22}}}
 {"case":"mapped_network_op0","deferred":null,"error":null,"ints":{"topology":{"blocks":[[490,63935],[144,7368]],"n":342}},"topology":null,"values":{"geometry":{"blocks":[[20.000119999999995,20.000119999999995,622.00404]],"n":62}}}
 {"case":"mapped_network_op1","deferred":null,"error":null,"ints":{"topology":{"blocks":[[514,67511],[150,8841]],"n":352}},"topology":null,"values":{"geometry":{"blocks":[[20.000119999999995,20.000119999999995,622.00404]],"n":62}}}

@@ -3,7 +3,9 @@
 //! far smaller than the tolerance (`smlib_fuzz` leak-000bffce). Pinned `CreateBox` drops
 //! every face and stitch status and returns success with a 4-face body that fails its
 //! own check; the fork returns the failing status (1001), and so does the port's
-//! `create_box` (tangency-labs/solidcraft#15350: no longer opt-in).
+//! `create_box` (tangency-labs/solidcraft#15350: no longer opt-in). The face
+//! constructor now refuses the degenerate side itself, so the tiny box may also
+//! report that described refusal instead of reaching the stitch status.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -35,7 +37,11 @@ fn tiny_box() -> solidcore::Result<Brep> {
 fn wr_596_tiny_box_is_sm_err() {
     let r = tiny_box();
     assert!(
-        matches!(&r, Err(e) if solidcore::error::upstream_status(e) == Some(1001)),
+        matches!(
+            &r,
+            Err(e) if solidcore::error::upstream_status(e) == Some(1001)
+                || matches!(e, solidcore::error::SolidError::InvalidInput { .. })
+        ),
         "{:?}",
         r.map(|b| b.face_list().len())
     );

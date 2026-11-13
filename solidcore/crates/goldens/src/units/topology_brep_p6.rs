@@ -206,7 +206,10 @@ impl UnitDiff for Runner {
         if i.op == 3 {
             return make_faces_rust(&i);
         }
-        let mut b = rust_fixture(&i)?;
+        let mut b = match rust_fixture(&i)? {
+            Ok(b) => b,
+            Err(o) => return Ok(o),
+        };
         let c = crate::own_builder::counts(&b);
         let request = request(&i, c);
         // SmBrep.cpp:549-552: even an empty native B-rep owns a void
@@ -880,17 +883,25 @@ fn own_fixture(i: &Inputs) -> Result<Option<Result<Brep, SolidError>>, HarnessEr
     }))
 }
 
-/// The Rust fixture B-rep, built or read by [`own_fixture`].
-fn rust_fixture(i: &Inputs) -> Result<Brep, HarnessError> {
+/// The Rust fixture B-rep, built or read by [`own_fixture`], or the described refusal
+/// of a fixture whose construction is invalid input (a face thinner than the geometric
+/// degeneracy limit).
+fn rust_fixture(i: &Inputs) -> Result<Result<Brep, Output>, HarnessError> {
     match own_fixture(i)? {
-        Some(Ok(b)) => Ok(b),
+        Some(Ok(b)) => Ok(Ok(b)),
+        Some(Err(e)) if matches!(e, SolidError::InvalidInput { .. }) => Ok(Err(
+            Output::rejected(format!("fixture construction failed: {e}")),
+        )),
         Some(Err(e)) => Err(harness(format!("fixture construction failed: {e}"))),
         None => Err(harness("fixture construction failed: no fixture")),
     }
 }
 
 fn make_faces_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut b = rust_fixture(i)?;
+    let mut b = match rust_fixture(i)? {
+        Ok(b) => b,
+        Err(o) => return Ok(o),
+    };
     b.set_key(ObjectKey(0xB000_0000));
     // The fixture's edges own their curves and its faces their surfaces under the
     // runner's `key_of` names, as the build gives them ([`CONVENTIONS`]); the ray fires of

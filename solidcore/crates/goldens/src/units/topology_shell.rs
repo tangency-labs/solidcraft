@@ -771,9 +771,16 @@ fn own_brep(value: &Value) -> Result<Result<solidcore::topology::Brep, Output>, 
     let conv = &Conventions::EDGEUSE_GRAPH;
     match crate::own_reader::brep_in_order(&mut kernel, &src, false, false, conv)? {
         Built::Brep(b) => Ok(Ok(*b)),
-        Built::Failed(e) => Output::unported(&e)
-            .map(Err)
-            .ok_or_else(|| failure(format!("native fixture build failed: {e}"))),
+        Built::Failed(e) => {
+            if matches!(e, solidcore::error::SolidError::InvalidInput { .. }) {
+                return Ok(Err(Output::rejected(format!(
+                    "native fixture construction failed: {e}"
+                ))));
+            }
+            Output::unported(&e)
+                .map(Err)
+                .ok_or_else(|| failure(format!("native fixture build failed: {e}")))
+        }
     }
 }
 

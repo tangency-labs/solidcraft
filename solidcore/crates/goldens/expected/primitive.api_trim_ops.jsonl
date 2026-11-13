@@ -190,7 +190,7 @@
 {"case":"pp_box_line_split","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[879.30024,879.30024,103976.82207999998],[902.0001400000001,902.0001400000001,114725.81834],[289.30004,289.30004,12277.301480000002]],"n":593}}}
 {"case":"pp_box_misses","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[-2.0]}}
 {"case":"pp_box_zero_direction","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[1007.0]}}
-{"case":"pp_degenerate_surface","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[1001.0]}}
+{"case":"pp_degenerate_surface","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[1007.0]}}
 {"case":"pp_surface_bspline_keep","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[398.78331553625776,398.78331553625776,23600.90119764575]],"n":111}}}
 {"case":"pp_surface_bspline_line_keep","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[-2.0]}}
 {"case":"pp_surface_line_delete_point","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[640.1000899999999,640.1000899999999,35576.7535]],"n":111}}}
