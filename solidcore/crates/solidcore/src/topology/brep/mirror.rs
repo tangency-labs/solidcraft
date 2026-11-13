@@ -529,6 +529,189 @@ mod tests {
     use crate::primitive::api_primitives::create_box;
     use crate::topology::brep::p1;
 
+    fn concave_arc_round(k: &mut Kernel) -> Brep {
+        use crate::blend::fillet_executive::session::FilletSession;
+        use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+        use crate::curve::composite_curve::OffsetCornerType;
+        use crate::curve::curve::Curve;
+        use crate::curve::ellipse::Ellipse;
+        use crate::curve::line::Line;
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::geom::extent1d::Extent1d;
+        use crate::math::{Point3, Vec3};
+        use crate::query::api_queries::edge_closest_point;
+        use crate::sweep::api_brep::TaperExtrude;
+        use crate::sweep::extrude::{extrude, Draft, ExtrudeTolerances};
+        let p = [
+            Point3::new(-20., 0., 0.),
+            Point3::new(20., 0., 0.),
+            Point3::new(20., 0., -10.),
+            Point3::new(-20., 0., -10.),
+        ];
+        let line = |a, b| Curve::from(Line::create_line_segment(3, a, b, None).unwrap());
+        let angle = 100.0_f64.atan2(20.).to_degrees();
+        let arc = Ellipse::create_canonical_circle(
+            k,
+            &Axis2Placement::new(Point3::new(0., 0., -110.), Vec3::X, Vec3::Z),
+            10_400.0_f64.sqrt(),
+            Some(&Extent1d::from_min_max(angle, 180. - angle)),
+            None,
+        )
+        .unwrap();
+        let curves = [
+            line(p[0], p[1]),
+            line(p[1], p[2]),
+            Curve::from(arc),
+            line(p[3], p[0]),
+        ];
+        let TaperExtrude::Solid(mut body) = extrude(
+            k,
+            &curves,
+            Vec3::Y,
+            10.,
+            Some(Draft {
+                angle_deg: 12.,
+                corner: OffsetCornerType::CurveExtension,
+            }),
+            true,
+            &ExtrudeTolerances {
+                loop_gap: 1e-6,
+                parallel: 1e-9,
+            },
+        )
+        .unwrap() else {
+            panic!("draft refused")
+        };
+        let at = Point3::new(
+            0.0,
+            10.0,
+            -110.0 + 10_400.0_f64.sqrt() + 10.0 * 12.0_f64.to_radians().tan(),
+        );
+        let edge = *body
+            .edge_list()
+            .iter()
+            .find(|&&edge| {
+                edge_closest_point(k, &body, edge, at).is_ok_and(|r| r.closest.distance < 0.01)
+            })
+            .unwrap();
+        let mut session = FilletSession::new(k, &mut body).unwrap();
+        session
+            .prepare_per_edge_constant_radius(
+                k,
+                &[edge],
+                &[0.2],
+                &[FilletSurfaceGeneratorType::Circular],
+                1,
+                1.,
+            )
+            .unwrap();
+        session.do_fillet(k).unwrap();
+        drop(session);
+        crate::topology::brep::p5::stitch_and_orient(
+            k,
+            &mut body,
+            &crate::topology::brep::p5::StitchAndOrientOptions::default(),
+        )
+        .unwrap();
+        body.refresh_cached_topology();
+        body
+    }
+
+    /// A round on a drafted concave circular wall keeps its revolution parameterization
+    /// when copied and reflected. The profile, draft and radius are independently chosen.
+    #[test]
+    fn mirrored_revolution_patches_keep_their_parameterization() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::math::Point3;
+        use crate::topology::brep::mirror::mirror;
+        use crate::topology::brep::valid_and_outward_failure;
+
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut body = concave_arc_round(&mut k);
+        // Reload the exact round as modelling operations do before copying the body.
+        let mut rounds = 0;
+        let mut parameter_error = 0.0_f64;
+        for face in body.face_list().to_vec() {
+            let source = body.face(face).unwrap().surface.as_ref().unwrap();
+            if matches!(
+                source.procedural_blend(),
+                Some(crate::surface::procedural_blend::BlendRef::Exact { .. })
+            ) {
+                rounds += 1;
+                let record =
+                    crate::surface::procedural_blend::convert::exact_to_record(&k, source).unwrap();
+                assert_eq!(
+                    record.net.kind,
+                    crate::surface::procedural_blend::record::ExactNetKindRecord::Revolution
+                );
+                let mut restored =
+                    crate::surface::procedural_blend::convert::exact_from_record(&k, &record)
+                        .unwrap();
+                let domain = body.face(face).unwrap().uv_domain;
+                for u in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    for v in [0.0, 0.5, 1.0] {
+                        let uv = domain.evaluate(u, v);
+                        let expected = source.evaluate_point(&k, uv).unwrap();
+                        let step_uv = restored.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+                        let actual = restored.evaluate_step_point(&k, step_uv).unwrap();
+                        let error = (actual - expected).length();
+                        parameter_error = parameter_error.max(error);
+                        assert!(error < 1e-9);
+                    }
+                }
+                restored.set_owner(source.owner());
+                restored.set_owner_zone_tol_3d(Some(body.face(face).unwrap().tolerance));
+                body.face_mut(face).unwrap().surface = Some(restored);
+            }
+        }
+        assert_eq!(rounds, 1);
+        assert_eq!(valid_and_outward_failure(&mut k, &mut body).unwrap(), None);
+        let checked = crate::topology::brep::validation::check_brep(
+            &mut k,
+            &mut body,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )
+        .unwrap();
+        assert!(checked.is_valid(), "{:?}", checked.lines());
+        let attributes = AttributeStore::default();
+        let attrs = PropertyAttributes {
+            store: &attributes,
+            key_of: &|_| ObjectKey(0),
+        };
+        let before_volume = brep_volume(&k, &mut body, 1e-6, &attrs).unwrap();
+        assert!(before_volume > 0.0);
+        let vertices = p1::vertices(&body, None).unwrap();
+        let before: Vec<Point3> = vertices
+            .iter()
+            .map(|&v| body.vertex(v).unwrap().point)
+            .collect();
+        let plane = Axis2Placement::new(Point3::ZERO, Vec3::X, Vec3::Z);
+        mirror(&mut k, &mut body, &plane).unwrap();
+        assert_eq!(valid_and_outward_failure(&mut k, &mut body).unwrap(), None);
+        let checked = crate::topology::brep::validation::check_brep(
+            &mut k,
+            &mut body,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )
+        .unwrap();
+        assert!(checked.is_valid(), "{:?}", checked.lines());
+        let after_volume = brep_volume(&k, &mut body, 1e-6, &attrs).unwrap();
+        assert!((after_volume - before_volume).abs() < 1e-6 * before_volume);
+        let mut vertex_error = 0.0_f64;
+        for (&vertex, point) in vertices.iter().zip(before) {
+            let expected = Point3::new(point.x, -point.y, point.z);
+            let error = (body.vertex(vertex).unwrap().point - expected).length();
+            vertex_error = vertex_error.max(error);
+            assert!(error < 1e-10);
+        }
+        eprintln!("source volume={before_volume:.12}, mirrored volume={after_volume:.12}, parameter error={parameter_error:e}, vertex error={vertex_error:e}");
+    }
+
     #[test]
     fn mirrors_a_box_in_a_plane_through_its_side() {
         let mut k = Kernel::default();
