@@ -134,7 +134,6 @@ crates/engine/src/frames.rs:frame_at picks the body a point lies on by the displ
 crates/kernel/src/blend_smlib.rs:imp::corner_vertices finds the vertices nearest points by a mesh
 crates/kernel/src/blend_smlib.rs:imp::reblend finds a blend's new edges by a mesh
 crates/kernel/src/blend_smlib.rs:imp::resolve resolves edge picks for SMLib by a mesh
-crates/kernel/src/body.rs:Body::edges gives edge points and lengths from a mesh
 crates/kernel/src/body.rs:Body::faces gives face areas and centroids from a mesh
 crates/kernel/src/body.rs:Body::meets decides whether bodies meet by meshes
 crates/kernel/src/body.rs:Body::meets_each decides whether tools meet a body by meshes
