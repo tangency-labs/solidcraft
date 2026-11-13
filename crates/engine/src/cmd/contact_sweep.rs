@@ -3,18 +3,20 @@
 //! into each other at a sample ([`ContactGeometry::overlaps`]) and closes in on where they first
 //! touch through placements known to be clear ([`ContactGeometry::gap`]); gaps and interference
 //! depths are measured on the bodies' contact meshes.
+use solidcraft_geom::prelude::*;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
+use solidcore_record::Vec3;
 use solidcraft_doc::joints;
 use solidcraft_doc::{Document, IDENTITY, Mat, apply_point, mat_mul};
-use solidcraft_geom::{Aabb3, Bvh, Mesh, Vec3};
+use solidcraft_geom::{Aabb3, Bvh, Mesh};
 
 use crate::params::bad;
 use crate::{Result, Session};
 
-const MAX_SAMPLES: usize = 4096;
+pub(super) const MAX_SAMPLES: usize = 4096;
 const MAX_PLACEMENTS: usize = 4096;
 const MAX_BODIES: usize = 256;
 const MAX_TRIANGLES: usize = 50_000;
@@ -25,6 +27,29 @@ const MAX_INTERSECTIONS: usize = 2048;
 
 fn limit(message: &str) -> crate::EngineError {
     bad("contact.sweep", message)
+}
+
+const OUT_OF_SAMPLES: &str = "motion exceeds contact sweep sampling budget; drive the joint in smaller increments";
+const OUT_OF_TRANSFORMS: &str = "motion exceeds contact sweep transform budget; simplify the contact set or use smaller increments";
+const OUT_OF_INTERSECTIONS: &str = "motion exceeds contact sweep intersection budget; simplify the contact set or use smaller increments";
+const OUT_OF_COLLISION_WORK: &str = "motion exceeds contact sweep collision budget; simplify the contact set or use smaller increments";
+const OUT_OF_GAP_WORK: &str = "gaps exceed the work budget; check fewer parts or leave out report_gaps";
+
+/// Which work cap an error is, for the checks that stop there with what they found instead of
+/// failing (#5963): `samples`, `intersections` or `work`; `None`: another error.
+pub(super) fn ran_out(e: &crate::EngineError) -> Option<&'static str> {
+    let crate::EngineError::BadParams { msg, .. } = e else { return None };
+    // A command's own wrapping may add to the message.
+    [
+        (OUT_OF_SAMPLES, "samples"),
+        (OUT_OF_TRANSFORMS, "work"),
+        (OUT_OF_INTERSECTIONS, "intersections"),
+        (OUT_OF_COLLISION_WORK, "work"),
+        (OUT_OF_GAP_WORK, "work"),
+    ]
+    .into_iter()
+    .find(|(m, _)| msg.starts_with(m))
+    .map(|(_, budget)| budget)
 }
 
 #[derive(Clone)]
@@ -223,6 +248,27 @@ impl ContactGeometry {
         self.pairs.retain(|(_, _, a, b)| keep(a.0, b.0));
     }
 
+    /// Leaves out the pairs of bodies one of `excluded` names: (occurrence, occurrence), each
+    /// side matching a body under that occurrence, either way round.
+    pub(super) fn exclude(&mut self, excluded: &[(u64, u64)]) {
+        if excluded.is_empty() {
+            return;
+        }
+        let bodies = &self.bodies;
+        let under = |i: usize, o: u64| bodies.get(i).is_some_and(|b| b.path.contains(&o));
+        self.pairs.retain(|(a, b, _, _)| !excluded.iter().any(|&(x, y)| (under(*a, x) && under(*b, y)) || (under(*a, y) && under(*b, x))));
+    }
+
+    /// The occurrence path (ids, from the top) body `i` is placed through.
+    pub(super) fn body_path(&self, i: usize) -> &[u64] {
+        self.bodies.get(i).map_or(&[], |b| b.path.as_slice())
+    }
+
+    /// The bodies pair `i` is between.
+    pub(super) fn pair_bodies(&self, i: usize) -> Option<(usize, usize)> {
+        self.pairs.get(i).map(|(a, b, _, _)| (*a, *b))
+    }
+
     /// Move the pairs of set members `take` picks into a geometry of their own (with the same
     /// bodies), leaving the rest here.
     pub(super) fn take_pairs(&mut self, take: impl Fn(u64, u64) -> bool) -> ContactGeometry {
@@ -271,7 +317,9 @@ impl ContactGeometry {
         Ok(bounds)
     }
 
-    pub(super) fn samples(&self, start: &Session, end: &Session) -> Result<usize> {
+    /// How many samples the motion from `start` to `end` needs (no part passes through another
+    /// between two), and how many the sampling and transform budgets allow.
+    pub(super) fn samples_within(&self, start: &Session, end: &Session) -> Result<(usize, usize)> {
         let a = joints::joint_values(&start.doc.assembly);
         let b = joints::joint_values(&end.doc.assembly);
         let bounds = self.bounds(start)?.union(&self.bounds(end)?);
@@ -305,14 +353,25 @@ impl ContactGeometry {
             }
         }
         let required = ((linear + angular * (radius + linear)) / self.step).max(angular / 1_f64.to_radians()).ceil().max(1.0);
-        if !required.is_finite() || required > MAX_SAMPLES as f64 {
-            return Err(limit("motion exceeds contact sweep sampling budget; drive the joint in smaller increments"));
+        if !required.is_finite() {
+            return Err(limit(OUT_OF_SAMPLES));
         }
         let vertices: usize = self.bodies.iter().map(|body| body.mesh.positions.len()).sum();
-        if (required as usize).saturating_mul(vertices.saturating_add(self.pairs.len())) > MAX_WORK {
-            return Err(limit("motion exceeds contact sweep transform budget; simplify the contact set or use smaller increments"));
+        let allowed = MAX_SAMPLES.min(MAX_WORK / vertices.saturating_add(self.pairs.len()).max(1));
+        Ok((required.min(usize::MAX as f64) as usize, allowed))
+    }
+
+    /// How many samples the motion from `start` to `end` needs, refused past the sampling and
+    /// transform budgets.
+    pub(super) fn samples(&self, start: &Session, end: &Session) -> Result<usize> {
+        let (required, allowed) = self.samples_within(start, end)?;
+        if required > MAX_SAMPLES {
+            return Err(limit(OUT_OF_SAMPLES));
         }
-        Ok(required as usize)
+        if required > allowed {
+            return Err(limit(OUT_OF_TRANSFORMS));
+        }
+        Ok(required)
     }
 
     /// Each body's mesh placed where `s` has it.
@@ -346,7 +405,7 @@ impl ContactGeometry {
             }
             *intersections = intersections.saturating_add(1);
             if *intersections > MAX_INTERSECTIONS {
-                return Err(limit("motion exceeds contact sweep intersection budget; simplify the contact set or use smaller increments"));
+                return Err(limit(OUT_OF_INTERSECTIONS));
             }
             let undecided = |e: &dyn std::fmt::Display| {
                 bad("contact.sweep", format!("whether {} and {} pass into each other could not be decided ({e})", oa.1, ob.1))
@@ -523,7 +582,7 @@ impl ContactGeometry {
             .saturating_add(mb.positions.len().saturating_add(mb.triangles.len().saturating_mul(7)).saturating_mul(ma.triangles.len()));
         *work = work.saturating_add(cost);
         if *work > budget {
-            return Err(limit("motion exceeds contact sweep collision budget; simplify the contact set or use smaller increments"));
+            return Err(limit(OUT_OF_COLLISION_WORK));
         }
         Ok(super::mesh_overlap(ma, mb, tol))
     }
@@ -537,6 +596,8 @@ pub(super) struct Gap {
     pub(super) mm: f64,
     /// The nearest points (world), on a's body and on b's.
     pub(super) at: (Vec3, Vec3),
+    /// The bodies (indices in [`ContactGeometry`]) those points are on.
+    pub(super) bodies: (usize, usize),
 }
 
 impl ContactGeometry {
@@ -567,7 +628,7 @@ impl ContactGeometry {
             }
             let Some(Some(tree)) = trees.get(*b) else { return Err(limit_error("invalid contact geometry pair")) };
             let Some((mm, pa, pb)) = mesh_gap(ta, tb, tree, ba, bb, limit, work, budget)? else { continue };
-            nearest.insert(key, Gap { a: oa.clone(), b: ob.clone(), mm, at: (pa, pb) });
+            nearest.insert(key, Gap { a: oa.clone(), b: ob.clone(), mm, at: (pa, pb), bodies: (*a, *b) });
         }
         let mut out: Vec<Gap> = nearest.into_values().collect();
         out.sort_by(|x, y| x.mm.total_cmp(&y.mm));
@@ -689,7 +750,7 @@ fn mesh_gap(
         let visits = visits.get();
         *work = work.saturating_add(visits);
         if *work > budget {
-            return Err(limit_error("gaps exceed the work budget; check fewer parts or leave out report_gaps"));
+            return Err(limit_error(OUT_OF_GAP_WORK));
         }
         if bound <= 0.0 {
             return Ok(best);

@@ -9,12 +9,11 @@ license.workspace = true
 workspace = true
 
 [features]
-default = []
+default = ["plugins"]
+plugins = ["dep:craft-plugin-wasm"]
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
 bundled-render-library = []
 raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
-# Link SMLib into the kernel (solidcraft-kernel/smlib; needs scripts/fetch-smlib.sh).
-smlib = ["solidcraft-kernel/smlib"]
 # Turns on the parameter-contract audit recorder (`SOLIDCRAFT_PARAM_AUDIT`, see
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []
@@ -37,6 +36,11 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+craft-plugin = { workspace = true }
+solidcraft-viewport = { workspace = true }
+solidcore-record = { workspace = true }
+solidcraft-color = { workspace = true }
+solidcraft-control = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
@@ -48,6 +52,7 @@ solidcraft-profile = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 toml_edit = "0.25"
 schemars = { workspace = true }
 serde_path_to_error = { workspace = true }
@@ -65,3 +70,14 @@ solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
 [[example]]
 name = "render_resource_workflow"
 required-features = ["raytrace-cpu"]
+
+[[example]]
+name = "wood_texture_workflow"
+required-features = ["raytrace-cpu"]
+
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
+# Component-model sandbox; no WASI, cache deserialization, network or process imports.
+craft-plugin-wasm = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wat = "1"

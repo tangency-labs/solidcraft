@@ -1,8 +1,9 @@
 # The kernel rig and the complexity ladder as a regression gate. A plan job maps a pull request's
 # changed files to the rig areas they can affect (scripts/ci/kernel_rig_plan.py): an area runs
 # when a file its tests/kernel-cases/<area>/PATHS lists changes, or one of its cases; every area
-# runs when the shared core in tests/kernel-cases/PATHS-ALL changes; the ladder runs whenever any
-# area does. One job then builds solidcraft-cli once (release, SMLib prebuilt), checks that every
+# runs when the shared core in tests/kernel-cases/PATHS-ALL changes, including the vendored
+# SolidCore source in solidcore; the ladder runs whenever any
+# area does. One job then builds solidcraft-cli once (release), checks that every
 # registry command has a case or an exemption (tests/kernel-cases/EXEMPT), and hands the CLI to a
 # matrix of shards as an artifact, one per selected area plus the ladder, in parallel, so the
 # wall time is the build plus the slowest shard. See tests/kernel-cases/README.md.
@@ -16,8 +17,8 @@
 # The trigger paths are whole folders that hold every area's PATHS (a self-test,
 # scripts/ci/test_kernel_rig_plan.py, checks they do), so a pull request that touches none of
 # them (the UI, docs, packaging) starts no runner at all, and a new area needs no edit here: the
-# plan finds the areas from the folders. Pushes to main and develop on the same paths, merge groups
-# (once the queue is on), the release gate (release-gate.yml, workflow_call) and a run by hand run
+# plan finds the areas from the folders. Merge groups run the areas their batch's diff reaches, like a
+# pull request. Pushes to main and develop on the same paths, the release gate (release-gate.yml, workflow_call) and a run by hand run
 # every area; those pushes also commit the compiler cache (a Blacksmith sticky disk) that every
 # other run mounts read-only.
 name: Kernel rig
@@ -29,16 +30,16 @@ on:
       - "crates/kernel/**"
       - "crates/geom/**"
       - "crates/smlib/**"
-      - "crates/step/**"
       - "crates/io/src/**"
       - "crates/doc/src/**"
       - "crates/engine/src/**"
       - "tests/kernel-cases/**"
+      # The vendored kernel: a change here runs every area (tests/kernel-cases/PATHS-ALL).
+      - "solidcore/**"
       # The rig itself: the grading, the runner, the selection and this workflow.
       - "apps/solidcraft-cli/src/kernel_cases.rs"
       - "xtask/src/kernel_cases.rs"
       - "xtask/src/kernel_ladder.rs"
-      - "scripts/fetch-smlib.sh"
       - "scripts/ci/kernel_rig_plan.py"
       - "scripts/ci/test_kernel_rig_plan.py"
       - ".github/workflows/kernel-rig.yml"
@@ -49,16 +50,16 @@ on:
       - "crates/kernel/**"
       - "crates/geom/**"
       - "crates/smlib/**"
-      - "crates/step/**"
       - "crates/io/src/**"
       - "crates/doc/src/**"
       - "crates/engine/src/**"
       - "tests/kernel-cases/**"
+      # The vendored kernel: a change here runs every area (tests/kernel-cases/PATHS-ALL).
+      - "solidcore/**"
       # The rig itself: the grading, the runner, the selection and this workflow.
       - "apps/solidcraft-cli/src/kernel_cases.rs"
       - "xtask/src/kernel_cases.rs"
       - "xtask/src/kernel_ladder.rs"
-      - "scripts/fetch-smlib.sh"
       - "scripts/ci/kernel_rig_plan.py"
       - "scripts/ci/test_kernel_rig_plan.py"
       - ".github/workflows/kernel-rig.yml"
@@ -83,7 +84,8 @@ jobs:
     # Draft pull requests run no CI, as in ci.yml.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    # The checkout fetches history without file contents (below), so this takes well under a minute.
+    timeout-minutes: 10
     outputs:
       # The shard matrix (JSON list of areas and the ladder; [] when nothing is selected).
       shards: ${{ steps.plan.outputs.shards }}
@@ -92,22 +94,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # A pull request's diff needs its base's history.
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          # A pull request's diff needs its base's history: the commits and trees, not every file
+          # version. A full clone of every blob took over the 5-minute timeout on a 2-vCPU runner and
+          # cancelled the merge queue's rig selection (Select the rig areas) again and again.
+          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && '0' || '1' }}
+          filter: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'blob:none' || '' }}
       - name: Selection self-test
         run: python3 -I scripts/ci/test_kernel_rig_plan.py
       - id: plan
         name: Map the changed files to areas
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
-          # Pull requests run the areas their diff reaches; pushes, merge groups, the release
-          # gate and a run by hand run every area.
-          if [ "$EVENT_NAME" = pull_request ]; then
+          # Pull requests and merge groups run the areas their diff reaches (a batch that touches no
+          # kernel path runs none); pushes to main, the release gate and a run by hand run every area.
+          if [ "$EVENT_NAME" = pull_request ] || [ "$EVENT_NAME" = merge_group ]; then
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/rig-paths"
-            python3 -I scripts/ci/kernel_rig_plan.py --paths "$RUNNER_TEMP/rig-paths" --github-output "$GITHUB_OUTPUT"
+            python3 -I scripts/ci/kernel_rig_plan.py --paths "$RUNNER_TEMP/rig-paths" \
+              --github-output "$GITHUB_OUTPUT"
           else
             python3 -I scripts/ci/kernel_rig_plan.py --all --github-output "$GITHUB_OUTPUT"
           fi
@@ -127,7 +133,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # Only pushes to main and develop commit the cache; pull requests, merge groups and forks
       # mount a clone and never write back.
       - name: Mount the compiler cache
@@ -141,16 +147,19 @@ jobs:
         with:
           key: kernel-rig
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
+        id: sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
-      - name: Build the CLI (release, SMLib) and the rig's runner
+        # A failed download of sccache (GitHub release outages answer 504) must not fail the build.
+        continue-on-error: true
+      - name: Build without the compiler cache if it could not be set up
+        if: steps.sccache.outcome == 'failure'
+        run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+      - name: Build the CLI (release) and the rig's runner
         run: |
-          cargo build --release --locked -p solidcraft-cli --features smlib
+          cargo build --release --locked -p solidcraft-cli
           cargo build --locked -p xtask
       # A tar keeps the executable bits, which an artifact drops. xtask finds the repository from
       # the path it was built in (CARGO_MANIFEST_DIR), which is the same checkout path in every
@@ -170,7 +179,7 @@ jobs:
           retention-days: 1
       - name: Compiler cache statistics
         if: always()
-        run: sccache --show-stats
+        run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
 
   shard:
     name: Kernel rig (${{ matrix.shard }})
@@ -209,7 +218,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kernel-rig-results-${{ matrix.shard }}
-          path: ${{ runner.temp }}/kernel-rig/results.json
+          path: ${{ runner.temp }}/kernel-rig/**/results.json
           if-no-files-found: ignore
 
   # One check for the whole gate, for branch protection and the merge queue.

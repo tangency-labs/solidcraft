@@ -259,3 +259,35 @@ fn seeded_hostile_float_admission_never_publishes_nonfinite_geometry() {
         assert_eq!(Triangle::new([p; 3]).is_ok(), accepted);
     }
 }
+
+#[test]
+fn optical_contact_hierarchy_matches_bounds_and_scales_without_triangle_pair_scans() {
+    use crate::optical_boundary::ContactIndex;
+    let triangles: Vec<_> = (0..4096)
+        .map(|i| {
+            let p = Vec3::new(f64::from(i % 64) * 2.0, f64::from(i / 64) * 2.0, 0.0);
+            [p, p + Vec3::X, p + Vec3::Y]
+        })
+        .collect();
+    let cancel = CancelToken::default();
+    let mut index = ContactIndex::new(triangles.len()).unwrap();
+    let mut operations = 0;
+    while !index.step(|i| triangles.get(i).copied(), &cancel).unwrap() {
+        operations += 1;
+    }
+    for (ordinal, triangle) in triangles.iter().enumerate() {
+        let mut query = index.query(*triangle).unwrap();
+        let mut candidates = Vec::new();
+        while let Some(candidate) = index.query_step(&mut query, &cancel).unwrap() {
+            operations += 1;
+            if let Some(at) = candidate {
+                candidates.push(at);
+            }
+        }
+        assert_eq!(candidates, vec![ordinal]);
+    }
+    assert!(operations < 250_000, "{operations} bounded operations for4096 disjoint triangles must be far below all8millionpairs");
+    let mut query = index.query(triangles[0]).unwrap();
+    cancel.cancel();
+    assert_eq!(index.query_step(&mut query, &cancel).unwrap_err().code, crate::job::ErrorCode::Cancelled);
+}

@@ -2,7 +2,8 @@
 //! case gives an error or a result, never a panic, within the time budget and the reader's own
 //! caps. The mutations and the check are `solidcraft_testkit`'s.
 
-use solidcraft_geom::{Mesh, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::Mesh;
 use solidcraft_testkit::{mutations, survives};
 
 fn cube() -> Mesh {
@@ -228,6 +229,7 @@ fn designs_survive_mutation() {
         positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0].into(),
         triangles: vec![0, 1, 2].into(),
         color: None,
+        corner_normals: Default::default(),
     };
     let preview = crate::DesignPreview { meshes: vec![mesh] };
     let container = crate::write_design_container_with_preview(&doc, crate::DesignCompression::Fast, Some(&preview)).unwrap();
@@ -271,8 +273,8 @@ fn drawings_survive_mutation() {
 /// never a panic.
 #[test]
 fn paper_scenes_survive_mutation_into_svg() {
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
     use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
-    use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
     let p = Vec2::new;
     let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
     let items = vec![

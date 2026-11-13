@@ -7,9 +7,9 @@
 //! `SOLIDCRAFT_BENCH_PARTS=400 cargo test --release -p solidcraft-engine bench_generated_assembly -- --ignored --nocapture`
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_doc::BodyName;
 use solidcraft_doc::{Document, FeatureKind, Operation, mat_inverse, point_expr, rigid};
-use solidcraft_geom::Vec3;
 
 use crate::Session;
 
@@ -29,7 +29,14 @@ fn generated_assembly(parts: usize) -> Document {
     let mut made = Vec::new();
     for i in 0..parts {
         let o = Vec3::new(30.0 * (i % 20) as f64, 30.0 * (i / 20) as f64, 0.0);
-        let block = FeatureKind::Box { corner: point_expr(o), length: mm(20.0), width: mm(12.0), height: mm(6.0), operation: Operation::NewBody };
+        let block = FeatureKind::Box {
+            corner: point_expr(o),
+            length: mm(20.0),
+            width: mm(12.0),
+            height: mm(6.0),
+            operation: Operation::NewBody,
+            centred: false,
+        };
         made.push((i, doc.add_feature(block, Some(&format!("Plate {i}"))).unwrap()));
         for (k, x) in [2.0, 9.0, 16.0].into_iter().enumerate() {
             let pin = FeatureKind::Cylinder {

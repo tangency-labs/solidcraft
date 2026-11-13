@@ -1,6 +1,7 @@
 use crate::Session;
 use serde_json::{Value, json};
 use solidcraft_doc::config::{Column, ConfigFaceTarget};
+use solidcraft_geom::prelude::*;
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|error| panic!("{command} {params}: {error}"))
 }
@@ -130,7 +131,7 @@ fn strict_face_missing_lineage_never_retargets_and_rolls_back() {
     let look = solidcraft_doc::appearance::library("ABS - Red").unwrap();
     s.doc_mut().appearances.faces.push(solidcraft_doc::appearance::FaceLook {
         body: body.clone(),
-        point: solidcraft_geom::Vec3::new(5., 5., 10.),
+        point: solidcore_record::Vec3::new(5., 5., 10.),
         name: Some(format!("F{other}:+z")),
         strict_name: true,
         certificate: None,
@@ -150,11 +151,11 @@ fn face_occurrence_pick_uses_definition_identity_and_coordinates() {
     let world = s.world_state().unwrap();
     let placed = world.bodies.iter().find(|body| body.name != body.definition_name()).unwrap();
     let placed_name = placed.name.clone();
-    let point = solidcraft_doc::apply_point(&placed.source_transform, solidcraft_geom::Vec3::new(5., 5., 10.));
+    let point = solidcraft_doc::apply_point(&placed.source_transform, solidcore_record::Vec3::new(5., 5., 10.));
     let key = face_column(&mut s, &placed_name, json!(point));
     let Column::FaceAppearance(target) = &s.doc.configs.columns[0] else { panic!() };
     assert_eq!(target.body, body);
-    assert!(target.point.dist(solidcraft_geom::Vec3::new(5., 5., 10.)) < 1e-8);
+    assert!(target.point.dist(solidcore_record::Vec3::new(5., 5., 10.)) < 1e-8);
     run(&mut s, "config.row", json!({"name":"Paint","values":{key:"ABS - Blue"}}));
     run(&mut s, "config.activate", json!({"row":"Paint"}));
     assert!(s.world_state().unwrap().bodies.iter().all(|body| s.doc.face_colors(body).len() == 1));
@@ -216,7 +217,7 @@ fn hostile_and_uncertified_face_targets_are_rejected() {
         body: body.clone(),
         origin_feature: id,
         name: format!("F{id}:face:0"),
-        point: solidcraft_geom::Vec3::ZERO,
+        point: solidcore_record::Vec3::ZERO,
         certificate: None,
     };
     assert!(s.doc.certify_config_face(&target).is_err());
@@ -229,4 +230,22 @@ fn hostile_and_uncertified_face_targets_are_rejected() {
     }
     assert!(s.execute("config.column", &json!({"component_appearance":0})).is_err());
     assert!(s.execute("config.column", &json!({"face_appearance":{"body":body,"point":[0,0,1e20]}})).is_err());
+}
+
+#[test]
+fn configuration_face_indices_verifies_exact_planar_faces() {
+    let mut s = Session::default();
+    let body_name = block(&mut s);
+    let state = s.model.state();
+    let mb = state.body(&body_name).unwrap();
+    let id = s.doc.features[0].id;
+    let target = ConfigFaceTarget {
+        body: body_name.clone(),
+        origin_feature: id,
+        name: format!("F{id}:+z"),
+        point: solidcore_record::Vec3::new(5., 5., 10.),
+        certificate: None,
+    };
+    let indices = s.doc.configuration_face_indices(mb, &target).unwrap();
+    assert!(!indices.is_empty());
 }

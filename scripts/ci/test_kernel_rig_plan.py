@@ -42,7 +42,7 @@ class Synthetic(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         r = self.root = self.tmp.name
-        write(r, "tests/kernel-cases/PATHS-ALL", "# shared\ncrates/geom/**\n\n.github/workflows/kernel-rig.yml\n")
+        write(r, "tests/kernel-cases/PATHS-ALL", "# shared\ncrates/geom/**\nsolidcore/**\n\n.github/workflows/kernel-rig.yml\n")
         write(r, "tests/kernel-cases/fillets/PATHS", "# blends\ncrates/kernel/src/blend*.rs\n")
         write(r, "tests/kernel-cases/shell/PATHS", "crates/kernel/src/offset*.rs\ncrates/kernel/src/blend_smlib.rs\n")
         write(r, "tests/kernel-cases/ladder/ladder.json", "{}")
@@ -64,7 +64,7 @@ class Synthetic(unittest.TestCase):
         self.assertEqual(self.select("tests/kernel-cases/ladder/golden.json"), (["ladder"], True))
 
     def test_the_shared_core_runs_every_area(self):
-        for p in ["crates/geom/src/brep.rs", ".github/workflows/kernel-rig.yml"]:
+        for p in ["crates/geom/src/brep.rs", "solidcore/crates/solidcore/src/kernel.rs", ".github/workflows/kernel-rig.yml"]:
             self.assertEqual(self.select("docs/a.md", p), (["fillets", "shell", "ladder"], True), p)
 
     def test_unrelated_changes_run_nothing(self):

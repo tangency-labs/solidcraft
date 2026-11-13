@@ -1,0 +1,75 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/5322",
+ "test": "S33.json in SolidCraft #5322 (reported by urishab): one-sided negative extrude cut, distance 4999 versus 5000",
+ "summary": "A radius 2.5 through-hole along +Y in a 40 x 30 x 10 block works with a 4999 mm tool but fails with a 5000 mm tool in SolidCraft 0.20.0. Reproduce the issue's rectangular extrusion as a box and circular extrusion as a cylinder, with no tool nudge. The XZ sketch has normal -Y, so its negative extrusion runs along +Y from (20, 0, 5). The disk lies strictly inside the block's XZ cross-section and either tool spans its entire 30 mm depth. Both results must be one lump with volume 40*30*10 - pi*2.5^2*30, independently of tool length. Expectations are analytic, not the issue's tessellated measurements; 0.01 mm^3 is the existing analytic fixtures' absolute tolerance. No fixing PR exists yet.",
+ "cases": [
+  {
+   "name": "control_tool_4999",
+   "note": "The issue's last working one-sided tool length; the entrance cap is flush with y = 0.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [0, 0, 0],
+     "size": [40, 30, 10]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [20, 0, 5],
+     "axis": [0, 1, 0],
+     "radius": 2.5,
+     "height": 4999
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 11410.951377451914,
+     "tol": 0.01,
+     "formula": "40*30*10 - pi*2.5^2*30"
+    }
+   }
+  },
+  {
+   "name": "regression_tool_5000",
+   "note": "The issue's first failing one-sided tool length; the geometry removed inside the block is identical to the control.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [0, 0, 0],
+     "size": [40, 30, 10]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [20, 0, 5],
+     "axis": [0, 1, 0],
+     "radius": 2.5,
+     "height": 5000
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 11410.951377451914,
+     "tol": 0.01,
+     "formula": "40*30*10 - pi*2.5^2*30"
+    }
+   }
+  }
+ ]
+}

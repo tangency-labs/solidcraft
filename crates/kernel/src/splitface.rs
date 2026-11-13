@@ -17,12 +17,14 @@
 //! point. Every patch's normal points to the tool's positive side: a plane's normal, a face's
 //! outward side, the left of a sketch curve (inside a closed one, counter-clockwise).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
+use solidcore_record::brep::{self, Frame, Surface};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::Aabb3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::{self, Frame, Surface};
 use solidcraft_geom::tess::uv::Starts;
-use solidcraft_geom::{Aabb3, Plane, Seg2, Vec2, Vec3};
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceOrigin, History};
@@ -49,8 +51,8 @@ fn invalid(what: impl Into<String>) -> KernelError {
     KernelError::Invalid(what.into())
 }
 
-fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib {what}: {e}"))
+fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+    KernelError::smlib(format!("SMLib {what}"), e)
 }
 
 fn a3(v: Vec3) -> [f64; 3] {
@@ -838,6 +840,31 @@ mod tests {
         let mut v: Vec<f64> = parts.iter().map(|b| measure(b).unwrap().volume).collect();
         v.sort_by(f64::total_cmp);
         v
+    }
+
+    /// A cylinder r 5 along z through a sphere r 15 on its axis, split by the sphere's face:
+    /// the core inside the sphere and the two ends outside it. The sphere is closed, so its face
+    /// has no edge to extend past; the split takes the sphere as it is (SMLib refused it with
+    /// status 1001, and Extrude To a sphere fell back to its old trim).
+    #[test]
+    fn a_cylinder_through_a_sphere_splits_by_its_face_into_core_and_ends() {
+        let rod = cylinder(Vec3::new(0.0, 0.0, -30.0), Vec3::Z, 5.0, 60.0).unwrap();
+        let ball = crate::sphere(Vec3::ZERO, 15.0).unwrap();
+        let face = ball.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_none()).unwrap();
+        let parts = split_body(&rod, &SplitTool::Face { body: &ball, face }).unwrap();
+        let v = volumes(&parts);
+        let pi = std::f64::consts::PI;
+        // The rod inside the sphere: twice the integral of sqrt(225 - r^2) over the r 5 disc.
+        let core = 4.0 * pi / 3.0 * (15.0_f64.powi(3) - 200.0_f64.powf(1.5));
+        let whole = pi * 25.0 * 60.0;
+        let end = (whole - core) / 2.0;
+        assert!(v.len() == 3, "{v:?}");
+        assert!(rel(v[0], end) < 1e-4 && rel(v[1], end) < 1e-4 && rel(v[2], core) < 1e-4, "{v:?}, core {core}, ends {end}");
+        // The same rod across the sphere, its poles outside the rod: the same parts.
+        let across = cylinder(Vec3::new(-30.0, 0.0, 0.0), Vec3::X, 5.0, 60.0).unwrap();
+        let v = volumes(&split_body(&across, &SplitTool::Face { body: &ball, face }).unwrap());
+        assert!(v.len() == 3, "{v:?}");
+        assert!(rel(v[0], end) < 1e-4 && rel(v[1], end) < 1e-4 && rel(v[2], core) < 1e-4, "{v:?}, core {core}, ends {end}");
     }
 
     #[test]

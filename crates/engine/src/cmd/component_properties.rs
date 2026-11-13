@@ -1,12 +1,17 @@
 //! Physical properties of an assembly placement, with original body material assignments.
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::{Value, json};
+use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Mat};
+use solidcraft_geom::Aabb3;
 use solidcraft_geom::inertia::{self, Tensor3};
-use solidcraft_geom::{Aabb3, Vec3};
 
 use crate::params::bad;
+use crate::schema::component::{
+    BodyProperties, BoundingBox, InertiaAbout, OccurrencePropertiesResult, PhysicalProperties, PropertiesResult, TotalProperties,
+};
 use crate::{Result, Session};
 
 fn descendants(p: &Value, cmd: &str) -> Result<bool> {
@@ -82,10 +87,8 @@ pub(super) fn component(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         doc.components.iter().find(|c| c.id == id).map(|c| c.name.clone()).ok_or_else(|| bad(cmd, "no active component"))?
     };
-    let mut out = properties(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
-    out["component"] = json!(id);
-    out["name"] = json!(name);
-    Ok(out)
+    let properties = measure(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
+    super::reply(PropertiesResult { component: id, name, properties, param_warnings: Vec::new() })
 }
 
 pub(super) fn occurrence(s: &mut Session, p: &Value) -> Result<Value> {
@@ -103,10 +106,9 @@ pub(super) fn occurrence(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "occurrence has multiple placements; supply its `path`")),
         }
     };
-    let mut out = properties(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
-    out["occurrence"] = json!(id);
-    out["name"] = json!(doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.as_str()));
-    Ok(out)
+    let properties = measure(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
+    let name = doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone());
+    super::reply(OccurrencePropertiesResult { occurrence: id, name, properties, param_warnings: Vec::new() })
 }
 
 /// The linear part of `m` is a rotation (no scale, shear or mirror), to rounding.
@@ -155,21 +157,19 @@ struct Placed {
 /// and the box: the body's own measurement (worked out once and shared by every placement of it,
 /// [`solidcraft_doc::ModelBody::measure`]) is reused, where measuring each placed copy again took
 /// three fine tessellations per copy and made Properties of a large assembly take minutes
-/// (#8706). A placement that turns the body off the axes takes its box from the body's mesh
-/// placed there (shared with the display). Any other placement (scaled or mirrored) is measured
-/// as placed, as before.
+/// (#8706). A placement that turns the body off the axes takes its box from the body's exact
+/// bounds placed there. Any other placement (scaled or mirrored) is measured as placed, as before.
 fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Placed> {
     if proper_rotation(&transform) {
         let m = body.measure()?;
         let bbox = if square_to_axes(&transform) {
             placed_box(&transform, &m.bbox)
+        } else if let Ok(placed) = solidcraft_kernel::transform_matrix(&body.body, transform)
+            && let Ok(b) = placed.exact_bounds()
+        {
+            b
         } else {
-            let mesh = body.mesh();
-            let mut b = Aabb3::EMPTY;
-            for p in &mesh.positions {
-                b.add(solidcraft_doc::apply_point(&transform, *p));
-            }
-            if b.is_empty() { placed_box(&transform, &m.bbox) } else { b }
+            placed_box(&transform, &m.bbox)
         };
         return Ok(Placed {
             volume: m.volume,
@@ -198,7 +198,7 @@ fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Pl
     })
 }
 
-fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, about: Option<Vec3>, cmd: &str) -> Result<Value> {
+fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, about: Option<Vec3>, cmd: &str) -> Result<PhysicalProperties> {
     let state = s.model.state();
     let mut bodies = Vec::new();
     let (mut volume, mut area, mut mass) = (0.0, 0.0, 0.0);
@@ -232,7 +232,12 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     #[cfg(test)]
     work::count(|w| w.spreads += spread_bodies.len());
     let spreads = solidcraft_kernel::map_on_threads(&spread_bodies, 16, |&i| {
-        state.bodies.get(i).and_then(|b| solidcraft_io::mass_properties(&b.body).ok().flatten()).and_then(|m| m.gyration())
+        let body = state.bodies.get(i)?;
+        let mut measured = solidcraft_io::mass_properties(&body.body).ok().flatten()?;
+        if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name()) {
+            sheet.correct_perforation_mass_properties(&mut measured, &solidcraft_doc::IDENTITY).ok()?;
+        }
+        measured.gyration()
     });
     let spread: BTreeMap<usize, Tensor3> = spread_bodies.into_iter().zip(spreads).filter_map(|(i, g)| Some((i, g.flatten()?))).collect();
     // A window waiting for the result (the Properties window) sees how far it is and can stop it.
@@ -252,7 +257,17 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
             }
             done += 1;
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);
-            let measured = measure_placed(body, transform)?;
+            let mut measured = measure_placed(body, transform)?;
+            if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
+                let mut corrected = body.measure()?;
+                corrected.volume = measured.volume;
+                corrected.area = measured.area;
+                corrected.centroid = measured.centroid;
+                sheet.correct_perforation_properties(&mut corrected, &transform)?;
+                measured.volume = corrected.volume;
+                measured.area = corrected.area;
+                measured.centroid = corrected.centroid;
+            }
             let density = doc.density(&body.name);
             let body_mass = measured.volume * density / 1000.0;
             let closed = measured.closed;
@@ -275,13 +290,20 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
             faces += measured.faces;
             edges += measured.edges;
             vertices += measured.vertices;
-            bodies.push(json!({"name": body.name, "component": component, "path": path,
-                "material": doc.body_material(&body.name),
-                "closed": closed, "density_g_cm3": closed.then_some(density),
-                "mass_g": closed.then_some(body_mass), "volume_mm3": closed.then_some(measured.volume),
-                "area_mm2": measured.area, "center_of_mass": closed.then_some(measured.centroid),
-                "inertia_g_mm2": body_inertia,
-                "bbox": {"min": measured.bbox.min, "max": measured.bbox.max}}));
+            bodies.push(BodyProperties {
+                name: body.name.to_string(),
+                component,
+                path: path.clone(),
+                material: doc.body_material(&body.name),
+                closed,
+                density_g_cm3: closed.then_some(density),
+                mass_g: closed.then_some(body_mass),
+                volume_mm3: closed.then_some(measured.volume),
+                area_mm2: measured.area,
+                center_of_mass: closed.then_some(measured.centroid),
+                inertia_g_mm2: body_inertia,
+                bbox: BoundingBox { min: measured.bbox.min, max: measured.bbox.max },
+            });
         }
     }
     if let Some(w) = &watch {
@@ -304,19 +326,36 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     });
     let at_centre = at_centre.filter(|i| i.iter().flatten().all(|x| x.is_finite()));
     let principal = at_centre.and_then(|i| inertia::principal(&i, EQUAL_MOMENTS));
-    let bbox = if bodies.is_empty() { Value::Null } else { json!({"min": bounds.min, "max": bounds.max}) };
-    let mut out = json!({"path": selected, "coordinate_frame": "world", "descendants": descendants,
-        "placement_count": placement_count, "body_count": bodies.len(), "bodies": bodies,
-        "total": {"open_bodies_skipped": skipped, "volume_mm3": volume, "area_mm2": area, "mass_g": mass,
-            "center_of_mass": centroid, "first_moment_g_mm": moment, "inertia_g_mm2": at_centre,
-            "principal_moments_g_mm2": principal.map(|(moments, _)| moments), "principal_axes": principal.map(|(_, axes)| axes),
-            "bbox": bbox, "faces": faces, "edges": edges, "vertices": vertices}});
-    if let Some(point) = about {
+    let bbox = (!bodies.is_empty()).then_some(BoundingBox { min: bounds.min, max: bounds.max });
+    let inertia_about = about.map(|point| {
         let shifted =
             centroid.zip(at_centre).map(|(c, i)| inertia::shifted(&i, mass, point - c)).filter(|i| i.iter().flatten().all(|x| x.is_finite()));
-        out["total"]["inertia_about"] = json!({"point": point, "inertia_g_mm2": shifted});
-    }
-    Ok(out)
+        InertiaAbout { point, inertia_g_mm2: shifted }
+    });
+    Ok(PhysicalProperties {
+        path: selected.to_vec(),
+        coordinate_frame: "world".to_string(),
+        descendants,
+        placement_count,
+        body_count: bodies.len(),
+        bodies,
+        total: TotalProperties {
+            open_bodies_skipped: skipped,
+            volume_mm3: volume,
+            area_mm2: area,
+            mass_g: mass,
+            center_of_mass: centroid,
+            first_moment_g_mm: moment,
+            inertia_g_mm2: at_centre,
+            principal_moments_g_mm2: principal.map(|(moments, _)| moments),
+            principal_axes: principal.map(|(_, axes)| axes),
+            bbox,
+            faces,
+            edges,
+            vertices,
+            inertia_about,
+        },
+    })
 }
 
 /// The tessellating work a properties command did on this thread, for tests: placed copies

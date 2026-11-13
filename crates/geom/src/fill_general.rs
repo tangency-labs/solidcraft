@@ -52,9 +52,10 @@
 //! - **A crown** fills the middle out along the surface's own normals, on control points clear of
 //!   the loop, so it moves neither the loop nor the conditions across it.
 
-use crate::Vec3;
 use crate::bspline::{HPoint, NurbsSurface, SplineError, SplineResult, invalid};
 use crate::fill::{Band, Grid, MAX_LOOP_POINTS, SMOOTHNESS, inside_loop, segments_meet};
+use crate::prelude::*;
+use solidcore_record::Vec3;
 
 /// Most spans of the surface along the domain's longer side.
 pub const MAX_GENERAL_SPANS: usize = 64;

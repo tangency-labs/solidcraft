@@ -6,7 +6,7 @@ use super::*;
 use crate::bridge::{Continuity, Frame};
 use crate::build::SEAM_ANGLE;
 use crate::{cylinder, stitch};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 /// The radius of the cylinder a sheet is matched to, the radius the sheet starts at, its height,
 /// and how far round the cylinder the sheet runs.

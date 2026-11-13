@@ -13,11 +13,11 @@
 //! The history is SMLib's tags, renumbered into the body's orders; a blend face, which SMLib
 //! leaves untagged, comes from the edge it replaces ([`solidcraft_smlib::history::blends`]).
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::blend_variable::RadiusSpline;
 use crate::body::Body;
-use crate::{KernelError, Result};
+use crate::{FilletTurn, KernelError, Result};
 
 /// What SMLib cannot build yet.
 pub(crate) fn unsupported(what: &str) -> KernelError {
@@ -25,22 +25,24 @@ pub(crate) fn unsupported(what: &str) -> KernelError {
 }
 
 /// A constant-radius round of the edges nearest `edges` ([`crate::fillet`]).
-pub(crate) fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
-    imp::blend(body, "fillet", Kind::Round, edges, &vec![radius; edges.len()])
+/// The rounds turn at side edges as `turn` says.
+pub(crate) fn fillet(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Body> {
+    imp::blend(body, "fillet", Kind::Round(turn), edges, &vec![radius; edges.len()])
 }
 
 /// [`fillet`], with the picks whose edges a larger, overflowing round removed whole.
-pub(crate) fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Vec3>)> {
-    let (b, dropped) = imp::blend_dropping(body, "fillet", Kind::Round, edges, &vec![radius; edges.len()])?;
+pub(crate) fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
+    let (b, dropped) = imp::blend_dropping(body, "fillet", Kind::Round(turn), edges, &vec![radius; edges.len()])?;
     Ok((b, edges.iter().zip(dropped).filter(|(_, d)| *d).map(|(p, _)| *p).collect()))
 }
 
-/// Each edge rounded at its own radius ([`crate::fillet_each`]).
-pub(crate) fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
+/// Each edge rounded at its own radius ([`crate::fillet_each`]), turning at side edges as `turn`
+/// says.
+pub(crate) fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Body> {
     if radii.len() != edges.len() {
         return Err(KernelError::Invalid("one radius per edge".into()));
     }
-    imp::blend(body, "fillet", Kind::Round, edges, radii)
+    imp::blend(body, "fillet", Kind::Round(turn), edges, radii)
 }
 
 /// A constant-radius round whose corners at `setbacks` (a point at each corner's vertex, and the
@@ -63,7 +65,7 @@ pub(crate) struct OpenCorners {
 /// that would fill each corner, for the caller to fill.
 /// `curvature`: the rounds' sections are curvature-continuous ([`fillet_g2`]), else circular.
 pub(crate) fn fillet_setback_open(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)], curvature: bool) -> Result<OpenCorners> {
-    let kind = if curvature { Kind::Curvature } else { Kind::Round };
+    let kind = if curvature { Kind::Curvature } else { Kind::Round(FilletTurn::Mitre) };
     imp::blend_setback_open(body, kind, edges, &vec![radius; edges.len()], setbacks)
 }
 
@@ -88,6 +90,12 @@ pub(crate) fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::C
     imp::sides(body, edges, d1, side, flip)
 }
 
+/// [`chamfer_sides`] with `d1` back along the face whose outward normal at the middle of its edge
+/// leans most along `first` (the first of the edge's two faces where they lean alike).
+pub(crate) fn chamfer_sides_along(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, first: Vec3) -> Result<Body> {
+    imp::sides_along(body, edges, d1, side, first)
+}
+
 /// One edge rounded with the radius `spline` (checked by the caller) along it from the end
 /// nearest `start` ([`crate::fillet_variable_spline`]).
 pub(crate) fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
@@ -104,17 +112,19 @@ pub(crate) fn picked_edges(body: &Body, picks: &[Vec3]) -> Result<(Vec<usize>, V
 
 #[derive(Clone, Copy)]
 enum Kind {
-    Round,
+    /// Constant-radius rounds, turning at side edges as the [`FilletTurn`] says.
+    Round(FilletTurn),
     Curvature,
     Chord,
     Chamfer,
 }
 
 mod imp {
+    use solidcraft_geom::prelude::*;
     use std::collections::BTreeSet;
 
-    use solidcraft_geom::Vec3;
-    use solidcraft_smlib::{Blend, Brep, ChamferSecond, CheckLevel, Error as SmError};
+    use solidcore_record::Vec3;
+    use solidcraft_smlib::{Blend, Brep, ChamferSecond, CheckLevel, Error as SmError, Turn};
 
     use super::Kind;
     use crate::blend_variable::RadiusSpline;
@@ -123,8 +133,8 @@ mod imp {
     use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
     use crate::{KernelError, Result, guard, record};
 
-    fn failed(what: &str, step: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib {what}: {step}: {e}"))
+    fn failed(what: &str, step: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib {what}: {step}"), e)
     }
 
     /// How far a pick may lie from its edge.
@@ -224,10 +234,18 @@ mod imp {
     /// SMLib's blend of each kind.
     fn blend_kind(kind: Kind) -> Blend {
         match kind {
-            Kind::Round => Blend::Round,
+            Kind::Round(_) => Blend::Round,
             Kind::Curvature => Blend::Curvature,
             Kind::Chord => Blend::Chord,
             Kind::Chamfer => Blend::Chamfer,
+        }
+    }
+
+    /// SMLib's turn of each kind of turn.
+    fn smlib_turn(turn: crate::FilletTurn) -> Turn {
+        match turn {
+            crate::FilletTurn::Mitre => Turn::Mitre,
+            crate::FilletTurn::Swept => Turn::Swept,
         }
     }
 
@@ -242,21 +260,22 @@ mod imp {
         sizes_ok(what, sizes)?;
         let picked = resolve(body, edges)?;
         let next = crate::blend::unfinished_chain(body, edges, &picked.edges, &picked.hidden)?;
-        if matches!(kind, Kind::Round) {
+        if matches!(kind, Kind::Round(_)) {
             crate::blend::rounds_too_small(body, edges, &picked.edges, sizes)?;
             crate::blend::rounds_into_hollow(body, edges, &picked.edges, sizes)?;
         }
         let tol = pick_tolerance(body);
-        let Kind::Round = kind else {
+        let Kind::Round(turn) = kind else {
             let kind = blend_kind(kind);
-            return run_with(body, what, &picked.edges, &[], |b| b.blend_dropping(kind, &picked.points, sizes, tol))
+            return run_with(body, what, &picked.edges, &[], |b| b.blend_dropping(kind, Turn::Mitre, &picked.points, sizes, tol))
                 .map(|(out, dropped, _)| (out, dropped))
                 .map_err(|e| crate::blend::with_continuation(e, next));
         };
         // Constant-radius rounds: the body keeps what they were made on, and a later round at a
         // corner where they meet blends them again with it (crate::blend_corner).
+        let turn = smlib_turn(turn);
         let out = match crate::blend_corner::later_corners(body, &picked.edges, sizes)? {
-            Some((later, new)) => reblend(body, what, &later).map(|(b, dropped_new)| {
+            Some((later, new)) => reblend(body, what, &later, turn).map(|(b, dropped_new)| {
                 // A picked seam has no round of its own: only the new edges can be removed.
                 let dropped = picked
                     .edges
@@ -265,7 +284,7 @@ mod imp {
                     .collect();
                 (b.with_rounds(body, new), dropped)
             }),
-            None => run_with(body, what, &picked.edges, &[], |b| b.blend_dropping(Blend::Round, &picked.points, sizes, tol))
+            None => run_with(body, what, &picked.edges, &[], |b| b.blend_dropping(Blend::Round, turn, &picked.points, sizes, tol))
                 .map(|(out, dropped, _)| (out.with_rounds(body, picked.edges.iter().copied().zip(sizes.iter().copied()).collect()), dropped)),
         };
         out.map_err(|e| crate::blend::with_continuation(e, next))
@@ -274,8 +293,9 @@ mod imp {
     /// The blend `later` makes of its base, every round from the earliest meeting the new edges'
     /// corners on and the new edges in one, with its history over `body`, the body the later
     /// round was given ([`crate::blend_corner::rebase`]), and whether each new edge (in
-    /// `later`'s order) was removed whole by a larger, overflowing round.
-    fn reblend(body: &Body, what: &str, later: &crate::blend_corner::Later) -> Result<(Body, Vec<bool>)> {
+    /// `later`'s order) was removed whole by a larger, overflowing round. The rounds turn at side
+    /// edges as `turn` says.
+    fn reblend(body: &Body, what: &str, later: &crate::blend_corner::Later, turn: Turn) -> Result<(Body, Vec<bool>)> {
         let base = &later.base;
         let mesh = base.mesh(&crate::MeshTolerance::chord((base.size() * 2e-3).max(1e-3)))?;
         let mut indices = Vec::with_capacity(later.edges.len());
@@ -290,7 +310,7 @@ mod imp {
         }
         sizes_ok(what, &radii)?;
         let tol = pick_tolerance(base);
-        let (out, dropped, _) = run_with(base, what, &indices, &[], |b| b.blend_dropping(Blend::Round, &points, &radii, tol))?;
+        let (out, dropped, _) = run_with(base, what, &indices, &[], |b| b.blend_dropping(Blend::Round, turn, &points, &radii, tol))?;
         // The new edges are the last of `later.edges`.
         let dropped_new = dropped.get(dropped.len().saturating_sub(later.new_count())..).map(<[bool]>::to_vec).unwrap_or_default();
         let history = out.history().and_then(|h| crate::blend_corner::rebase(h, later, body));
@@ -380,6 +400,10 @@ mod imp {
     }
 
     pub(super) fn sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, flip: bool) -> Result<Body> {
+        sides_along(body, edges, d1, side, Vec3::new(0.0, 0.0, if flip { -1.0 } else { 1.0 }))
+    }
+
+    pub(super) fn sides_along(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, first: Vec3) -> Result<Body> {
         body.require_brep("chamfer")?;
         sizes_ok("chamfer", &vec![d1; edges.len()])?;
         let picked = resolve(body, edges)?;
@@ -388,9 +412,8 @@ mod imp {
             crate::ChamferSide::Distance(d) => ChamferSecond::Distance(d),
             crate::ChamferSide::Angle(a) => ChamferSecond::Angle(a),
         };
-        let up = if flip { [0.0, 0.0, -1.0] } else { [0.0, 0.0, 1.0] };
         let tol = pick_tolerance(body);
-        run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, up))
+        run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, [first.x, first.y, first.z]))
             .map_err(|e| crate::blend::with_continuation(e, next))
     }
 
@@ -444,15 +467,41 @@ mod imp {
                     "not supported yet: the {what} meets a corner of this kind, which SMLib's blends do not handle yet (where its edges \
                      run on tangentially into each other, or meet in a way no blend corner builds)"
                 )),
-                // A setback too short for its corner's fill (SMLib certifies it convex only from
-                // its least on) names that least; any other is a blend too large for its room.
-                SmError::NoRoom => match solidcraft_smlib::blend_fit() {
-                    Some(solidcraft_smlib::Fit::SetbackAtLeast(least)) => KernelError::Invalid(format!(
-                        "the setback is too short for its corner: {}{least:.4} mm (the corner's patch is convex only from there)",
-                        crate::SETBACK_AT_LEAST
-                    )),
-                    _ => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
-                },
+                SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
+                // Not a size a smaller radius fixes: solidcore builds no swept turn there.
+                SmError::TurnRefused { why, at, .. } => {
+                    let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
+                    KernelError::Invalid(format!("the {what}'s swept corner{at} is not built: {why}"))
+                }
+                SmError::TooLarge { size, kind, at, why } => {
+                    let mut beside = match at {
+                        Some([x, y, z]) => format!(", at the edge at ({x:.3}, {y:.3}, {z:.3})"),
+                        None => String::new(),
+                    };
+                    if let Some(why) = why {
+                        beside = format!("{beside}: {}", why.words());
+                    }
+                    let fits = match kind {
+                        solidcraft_smlib::FitKind::Scale => {
+                            format!("the largest that fits is {} times the distances given", crate::blend::trimmed_mm(size))
+                        }
+                        kind => crate::blend::largest_fit_note(kind.word(), size),
+                    };
+                    KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow{beside}; {fits}"))
+                }
+                SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
+                // Not too large: a longer setback. Named as building only where solidcore's fill
+                // is the corner; where another patch replaces it (a G2 corner) it is what
+                // solidcore's corner needs, which that patch may not fit.
+                SmError::SetbackTooShort { least, at, builds } => {
+                    let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
+                    let least = crate::blend::trimmed_mm(least);
+                    KernelError::Invalid(if builds {
+                        format!("the setback{at} of the {what} is too short for its corner's fill; {}{least} mm", crate::blend::SETBACK_AT_LEAST)
+                    } else {
+                        format!("the setback{at} of the {what} is too short for its corner's fill: solidcore's corner needs a setback of at least {least} mm")
+                    })
+                }
                 e => failed(what, "operation", e),
             })?;
             // Checked here unless the evaluation's validation mode leaves it to the feature's end
@@ -553,7 +602,7 @@ mod imp {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     use super::*;
     use crate::history::{Change, FaceOrigin};
@@ -584,7 +633,7 @@ mod tests {
     fn a_round_loses_its_corner_and_its_face_comes_from_the_edge() {
         let b = cube();
         let at = Vec3::new(10.0, 20.0, 20.0);
-        let r = imp::blend(&b, "fillet", Kind::Round, &[at], &[2.0]).unwrap();
+        let r = imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[at], &[2.0]).unwrap();
         assert!(near(volume(&r), 8000.0 - QUARTER * 4.0 * 20.0), "{}", volume(&r));
         assert_eq!(r.face_count(), 7);
         let h = r.history().expect("a history");
@@ -598,8 +647,8 @@ mod tests {
         // (20, 20, 10) is on the vertical edge only; (20, 20, 20) is a corner of three edges, which
         // the body's own order resolves, never left to SMLib.
         let b = cube();
-        assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(20.0, 20.0, 20.0)], &[1.0]).is_ok());
-        assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(60.0, 60.0, 60.0)], &[1.0]).is_err());
+        assert!(imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[Vec3::new(20.0, 20.0, 20.0)], &[1.0]).is_ok());
+        assert!(imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[Vec3::new(60.0, 60.0, 60.0)], &[1.0]).is_err());
     }
 
     /// A ball's rim on a block's back face, tangent to the back face's bottom edge at (2.5, 22.5, 0).
@@ -667,7 +716,7 @@ mod tests {
     fn each_edge_takes_its_own_size() {
         let b = cube();
         let picks = [Vec3::new(10.0, 20.0, 20.0), Vec3::new(10.0, 0.0, 20.0)];
-        let r = imp::blend(&b, "fillet", Kind::Round, &picks, &[2.0, 3.0]).unwrap();
+        let r = imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &picks, &[2.0, 3.0]).unwrap();
         assert!(near(volume(&r), 8000.0 - QUARTER * 13.0 * 20.0), "{}", volume(&r));
         let c = imp::blend(&b, "chamfer", Kind::Chamfer, &picks, &[2.0, 3.0]).unwrap();
         assert!(near(volume(&c), 8000.0 - 0.5 * 13.0 * 20.0), "{}", volume(&c));
@@ -740,9 +789,9 @@ mod tests {
         // A radius law down to zero inside the edge would pinch the round to a point.
         let pinch = RadiusSpline { degree: 1, knots: vec![0.0, 0.0, 0.5, 1.0, 1.0], radii: vec![4.0, 0.0, 4.0] };
         assert!(imp::variable(&b, Vec3::new(10.0, 20.0, 20.0), Vec3::new(0.0, 20.0, 20.0), &pinch).is_err());
-        assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(10.0, 20.0, 20.0)], &[f64::NAN]).is_err());
-        assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(f64::NAN, 20.0, 20.0)], &[1.0]).is_err());
-        assert!(imp::blend(&b, "fillet", Kind::Round, &[], &[]).is_err());
+        assert!(imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[Vec3::new(10.0, 20.0, 20.0)], &[f64::NAN]).is_err());
+        assert!(imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[Vec3::new(f64::NAN, 20.0, 20.0)], &[1.0]).is_err());
+        assert!(imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[], &[]).is_err());
     }
 
     /// A smooth edge (a round's seam with the face it runs into) has nothing to round: refused
@@ -754,30 +803,30 @@ mod tests {
     #[test]
     fn smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why() {
         let b = cube();
-        let rounded = fillet(&b, &[Vec3::new(10.0, 20.0, 20.0)], 3.0).unwrap();
+        let rounded = fillet(&b, &[Vec3::new(10.0, 20.0, 20.0)], 3.0, FilletTurn::Mitre).unwrap();
         // the seam where the r3 round meets the top, 3 in from the old edge
-        let seam = imp::blend(&rounded, "fillet", Kind::Round, &[Vec3::new(10.0, 17.0, 20.0)], &[1.0]).unwrap_err().to_string();
+        let seam = imp::blend(&rounded, "fillet", Kind::Round(FilletTurn::Mitre), &[Vec3::new(10.0, 17.0, 20.0)], &[1.0]).unwrap_err().to_string();
         assert!(seam.contains("is smooth: its faces meet tangentially, so there is nothing to round"), "{seam}");
         // the end face's top edge runs on tangentially into the round's end arc: its r1 round
         // goes on along y through the r3 round until that drops below it, at y = 17 + sqrt(5)
         // (the rig case's closed form: 8000 - 20 (9 - 9 pi/4) - 17 (1 - pi/4) - 0.218236)
         let top = Vec3::new(0.0, 8.0, 20.0);
-        let alone = fillet(&rounded, &[top], 1.0).unwrap();
+        let alone = fillet(&rounded, &[top], 1.0, FilletTurn::Mitre).unwrap();
         assert!((volume(&alone) - 7957.505202).abs() < 1e-3, "{}", volume(&alone));
         let chain = crate::tangent_chain(&rounded, &[top]).unwrap();
         assert!(chain.len() > 1, "{chain:?}");
-        let whole = fillet(&rounded, &chain, 1.0).unwrap();
+        let whole = fillet(&rounded, &chain, 1.0, FilletTurn::Mitre).unwrap();
         assert!(volume(&whole) < volume(&rounded));
 
         // r5 and r3 on two top edges at a corner, then r2 on the vertical edge under them: it
         // runs on up the r5 round's end arc, and SMLib ends it there
         let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 40.0, 20.0)).unwrap();
-        let b = fillet(&b, &[Vec3::new(30.0, 40.0, 20.0)], 5.0).unwrap();
-        let b = fillet(&b, &[Vec3::new(60.0, 20.0, 20.0)], 3.0).unwrap();
+        let b = fillet(&b, &[Vec3::new(30.0, 40.0, 20.0)], 5.0, FilletTurn::Mitre).unwrap();
+        let b = fillet(&b, &[Vec3::new(60.0, 20.0, 20.0)], 3.0, FilletTurn::Mitre).unwrap();
         let vertical = Vec3::new(60.0, 40.0, 8.0);
         let chain = crate::tangent_chain(&b, &[vertical]).unwrap();
         assert!(chain.len() > 1, "{chain:?}");
-        let run_on = fillet(&b, &[vertical], 2.0).unwrap();
+        let run_on = fillet(&b, &[vertical], 2.0, FilletTurn::Mitre).unwrap();
         assert!(volume(&run_on) < volume(&b));
     }
 }

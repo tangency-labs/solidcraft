@@ -355,14 +355,14 @@ fn conic_curves_take_the_n_prefix_not_the_constraints_k() {
 }
 
 /// A curve id goes into the face names of the features that use the curve, so an id with a
-/// character the name grammar reads (`|`, `,`, `~`, `]`, `#`) would split every name it
-/// lands in: an id of `c|1` gave the edges of an extrusion the names
+/// character the name grammar reads (`|`, `,`, `~`, `]`, `#`, `(` and `)`) would split every
+/// name it lands in: an id of `c|1` gave the edges of an extrusion the names
 /// `F2:side:c|1#1|F2:side:c|1#2~1`, three separators where an edge has two faces and one
 /// separator. An id that cannot be written into a name whole is refused instead (#5858).
 #[test]
 fn a_curve_id_that_cannot_be_written_into_a_name_is_refused() {
     let mut s = new_sketch();
-    for id in ["c|1", "c,1", "c~1", "c]1", "c#1"] {
+    for id in ["c|1", "c,1", "c~1", "c]1", "c#1", "c(1", "c)1"] {
         let p = json!({"center": [0, 0], "radius": 5, "id": id});
         let e = match s.execute("sketch.circle.center", &p) {
             Ok(v) => panic!("the id `{id}` was taken: {v:?}"),

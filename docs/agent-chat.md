@@ -44,14 +44,30 @@ when you send a message or press **Connect** (or at launch, when you turned that
 
 ## The panel
 
-In the floating layout, Assistant fills the viewport height in the shared rounded panel, with
-space around its edges. The compass and navigation bar move into the remaining space beside it. It overlays the model without changing the viewport projection;
-clicks and scrolling over the panel stay in the chat. The docked layout retains its side panel.
+Assistant uses the shared panel layout. Narrow panels keep the conversation above
+the composer. A wide floating panel places the conversation beside the provider
+controls and composer when both columns have enough width. The conversation,
+unsent draft and scroll state stay with the same Assistant when its placement
+changes. The shared header reports the agent state and pending approvals.
+The Assistant’s own native window keeps its existing layout.
+
+Assistant fills the available side height. The compass and navigation bar use the
+remaining viewport space. Clicks and scrolling over the panel stay in the chat.
 
 After clicking in Assistant, keyboard input stays in the chat, including when selecting text
 in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. Moving the
 pointer back over the model does not change this: click outside Assistant to return the
 keyboard to CAD. Closing or minimising the panel also releases it.
+
+To select more of the conversation than fits in the panel, drag the selection to its top or
+bottom edge and hold it there: the conversation scrolls, faster the further past the edge you
+go, and the selection grows with it. It stays when its start scrolls out of view, and Copy takes
+all of it.
+
+In Assistant, outside the message box, Ctrl+A (Cmd+A on macOS) selects the whole conversation:
+every prompt and answer, including those scrolled out of view, but not thoughts, tool cards, plans or
+notices. Ctrl+C then copies them in order as plain text, each under who wrote it. Esc or a
+click ends the selection; in the message box Ctrl+A selects only the draft.
 
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
@@ -180,6 +196,13 @@ messages go as one prompt, in order, when the turn ends normally.
   fresh session on the same agent, keeping the agent and its mode. It asks first when a message
   is running or queued, or files are waiting. The design's undo history is untouched.
 
+When you change the design yourself between two messages (a parameter, a feature, an undo, the
+History marker), your next message tells the agent so first, in a short note the conversation
+doesn't show: which parameters changed and from what to what, which features are new, edited or
+removed, and where the History marker went. The note asks the agent to read the design again
+instead of picking edges and faces where they were before. A new chat or a new agent session has
+seen nothing yet, so its first message carries no note.
+
 ## Agents
 
 Preferences → AI → **Agents** lists every agent the chat can use, each with its kind (a program or
@@ -217,10 +240,15 @@ doesn't change the last known login state.
 | Codex | `npm install -g @agentclientprotocol/codex-acp` |
 | Google Antigravity | Google's ACP server, a separate download from Google's `agy` command (which has no ACP mode): take the zip for your system from the [ACP registry](https://agentclientprotocol.com/registry), unzip it and put `agy_acp_server.par` (`agy_acp_server.exe` on Windows) on your `PATH`. The zip also holds `localharness_external`: leave the two together. It signs in itself (browser). |
 | OpenCode | `npm install -g opencode-ai` (`opencode acp`) |
+| Mistral Vibe | `uv tool install mistral-vibe` (`vibe-acp`) |
 | XAI Grok | [Grok Build installer](https://docs.x.ai/build/overview), then `grok login` (`grok agent stdio` speaks ACP) |
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
+
+For Mistral Vibe, put `vibe-acp` on your PATH and refresh the agent list. Follow Vibe's sign-in
+prompt, run `vibe --setup` in a terminal, or set `MISTRAL_API_KEY` before launching SolidCraft.
+See [Mistral's ACP setup guide](https://docs.mistral.ai/vibe/code/use-vibe-in-other-ides).
 **Refresh** looks again after you install one. An agent whose program is there but fails its
 `--version` check without printing a version (an install that didn't finish, such as an npm
 install whose setup script didn't run, or a program built for another kind of computer) is
@@ -272,8 +300,12 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **Custom command:** any other program that speaks ACP on stdin and stdout, such as
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
-  `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mammouth AI
-  `https://api.mammouth.ai/v1`, OpenCode Go `https://opencode.ai/zen/go/v1`, OpenRouter
+  `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mistral AI
+  `https://api.mistral.ai/v1`, Google Gemini `https://generativelanguage.googleapis.com/v1beta/openai`,
+  Mammouth AI `https://api.mammouth.ai/v1`,
+  OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
+  Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
+  `https://api.cheaperinference.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
@@ -283,7 +315,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   the mismatch.
   For OpenClaw, turn on its chat endpoint (`gateway.http.endpoints.chatCompletions.enabled` in its
   config) and use its gateway token as the key; the models it lists are its agents, such as `openclaw/default`.
-- **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
+- **Anthropic-compatible API:** a preset (Anthropic, DeepSeek `https://api.deepseek.com/anthropic`,
+  Qwen `https://dashscope-intl.aliyuncs.com/apps/anthropic`) or a custom URL, for an endpoint that
   speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
 - The **Model** picker lists the endpoint's models, without a key where the endpoint allows that
@@ -294,7 +327,7 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   and a pick becomes the model for its next connection. While it runs, a pick changes the chat's
   model at once.
 - The key goes into the system keychain (Keychain on macOS, Credential Manager on Windows, the
-  Secret Service on Linux) and is only ever sent over HTTPS or to this computer. **Test** asks an
+  Secret Service on Linux). By default it is only sent over HTTPS or to this computer. **Test** asks an
   OpenAI-compatible endpoint for its models; an Anthropic-compatible one gets a short message,
   because not every such endpoint lists models (Qwen's has no model list). For these agents
   SolidCraft runs the conversation itself, with the same tools, limits and questions as for a
@@ -312,10 +345,19 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 **Edit** on an agent you added opens the same dialog filled with its name and command, or its
 protocol, endpoint, model and request timeout, and **Save** changes it in place: it keeps its id,
 its permission setting and the tools you always allow for it. A stored key is never shown: leave
-the key field empty to keep it, or type a new one to replace it. A saved key still only goes to
-HTTPS or this computer, so moving an endpoint with a key to a plain `http://` address elsewhere is
-refused. The running conversation takes a new request timeout at once; a new command, endpoint
+the key field empty to keep it, or type a new one to replace it. Moving an endpoint with a key to
+a plain `http://` address elsewhere requires the confirmation described below. The running
+conversation takes a new request timeout at once; a new command, endpoint
 or model applies the next time the agent connects.
+
+For a private or on-premises OpenAI-compatible endpoint that requires a key over HTTP, enable
+**Allow insecure HTTP** in its Add/Edit dialog and confirm the displayed endpoint. This option is
+off by default and applies only to that endpoint. The API key and conversation travel unencrypted:
+anyone with access to the network may read or change them. Use it only on a network you trust.
+The key remains in the system keychain. **Test**, model discovery and chat all use the same
+permission; redirects are not followed. Changing the URL or preset clears consent and requires
+confirmation again. Turning the option off keeps the stored key and disconnects that endpoint's
+conversations, including those in other document tabs.
 
 For Ollama, choosing a model checks its reported capabilities in the background. If its
 capabilities list lacks `tools`, a warning below the model picker explains that the model can
@@ -398,17 +440,43 @@ The agent reaches the open design only through SolidCraft's own tools (the
   Faces and edges go with the names and numbers the agent's tools take and with their size and
   place (so they can be found again after an edit), features with their name and kind, bodies with
   their name. The agent gets them as text after your message; the conversation shows your message
-  as typed with the things as chips below it, grouped (Elements, Features, Bodies) with a count;
-  hover a chip for what the agent was told about it. At most 64 things go with one message; the
+  as typed (picks as pills) with the things that are not in a pill as chips below it, grouped (Elements, Features, Bodies) with a count;
+  hover a chip to light its target in the model and to see what the agent was told about it. A chip
+  whose target has since left the design (deleted, or changed so its face or edge is gone) is
+  struck through, with a note on hover. At most 64 things go with one message; the
   rest are counted ("+N more"), not dropped silently. The selection is read when you send, also for
   a message that waits in the queue.
 - **Pick context:** press it to choose what the message is about on purpose. A picker opens with
   three lists, **Elements** (faces, edges, vertices), **Features** (steps of the timeline) and
-  **Bodies**; click things in the model, the timeline or the browser to put them in the list that
-  is active (click a list to make it active; click a picked thing again to take it out). **OK**
-  puts them as chips above the message box, each with a **×**; they go with the next message like
-  an attached selection (and are shown the same way), and the box is empty again afterwards.
-  **Cancel** keeps what was picked before.
+  **Bodies**. A click in the model goes into the list that is active (click a list to make it
+  active). A step clicked in the History or the Browser goes into Features, and a body clicked in
+  the Browser into Bodies, whichever list is active. Click a picked thing again to take it out.
+  The arrow beside a list shows what it holds by name, as in every dialog; the × on a name takes
+  it out. **OK**
+  puts the pick into the message as a **pill**, `«1: Plate · 3 faces»`, at the text cursor (at the
+  end when the box was never used). Typing `@` where a word starts does the same: the `@` is
+  taken out and the picker opens, and the pill goes where it was. Pick as often as you like; each
+  pick is a pill of its own, so "make `«1: …»` match `«2: …»`" says which is which. A pill is part
+  of the text: it is edited, selected, cut and pasted like text, drawn as a pill, and Backspace
+  or Delete next to it takes it whole (taking the mark out drops the pick). Hold the pointer on a
+  pill to light its target in the model and to list what it holds; a pill whose target has left
+  the design is struck through. The agent gets your text with the marks numbered 1, 2, 3 in
+  reading order, and under it each numbered group with the faces, edges, features and bodies in
+  it; what **Attach selection** adds is listed apart, as not placed in the message.
+  **Cancel**, or **OK** with nothing picked, adds nothing.
+
+## Custom instructions
+
+Preferences → AI → **Custom instructions** holds your own text for the agent: how you like to
+work, rules to keep to ("don't start a new design from the chat", "sketch on XZ with explicit
+plane vectors"). Every chat starts with it, after SolidCraft's own note about where the agent
+is, by the same route that note takes: the system prompt of an endpoint's requests, or the
+session an ACP agent opens. An agent that reads neither doesn't get it. A change applies from
+the next chat (**Connect** or **New chat**), not to the one running. Blank text adds nothing;
+at most 4000 characters are kept.
+
+They are for this chat only: an MCP client you run yourself keeps its own instruction files,
+and one text applies to every design.
 
 ## Permissions
 

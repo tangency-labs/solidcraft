@@ -1,7 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{FeatureKind, ProfileSel};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 
@@ -19,7 +20,7 @@ fn breaking_offset_preserves_downstream_material_history_and_source_independence
         run(&mut session, "sketch.finish", json!({}));
         run(&mut session, "solid.extrude", json!({"sketch":sketch,"profiles":{"offset_boundaries":[association]},"distance":2,"operation":"new"}));
         let before_volume = session.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs();
-        run(&mut session, "sketch.edit", json!({"sketch":sketch}));
+        run(&mut session, "sketch.edit", json!({"sketch":sketch,"restore_marker":false}));
         let before = session.doc.to_json();
         let history = session.undo.len();
         run(&mut session, "sketch.offset.break", json!({"curve":association}));

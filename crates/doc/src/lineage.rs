@@ -9,9 +9,10 @@
 //! bodies the feature built itself (whose faces are named by their role: the sketch curve they
 //! sweep, the cap they are). Naming (`history_names`) reads it; nothing here samples geometry.
 
+use solidcraft_geom::prelude::*;
 use std::sync::{Arc, OnceLock};
 
-use solidcraft_geom::{Region2, Vec3};
+use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
 use solidcraft_kernel::history::{BodyHistory, Change, FaceOrigin, FaceProv, History};
 
@@ -26,7 +27,7 @@ pub(crate) enum Operand {
     /// or mirror: its faces are named after their sources (`<name>@F<feature>.<instance>`).
     Copy { body: String, instance: usize },
     /// The cavity side of a shell grown from a body's faces (by name): each face is the inner
-    /// wall of the face it offsets (`F<feature>:inner:<name>`).
+    /// wall of the face it offsets (`F<feature>:inner(<name>)`).
     Inner(String),
     /// A body the feature built: each face's role (`side:<curve>`, `top`, `+x`, …; the first is
     /// its name, the others aliases), empty where the role is not known exactly.
@@ -147,6 +148,9 @@ impl Lineage {
 pub(crate) struct Traced {
     pub body: Body,
     pub lineage: Option<Lineage>,
+    /// How the feature built it, when that alone fixes it (a primitive from its numbers, a copy
+    /// of one moved): what a cut by it is remembered by (see `ModelBody::cut`).
+    pub recipe: Option<u64>,
 }
 
 impl Traced {
@@ -154,13 +158,13 @@ impl Traced {
     /// geometry, those of the bodies it is combined with by their history.
     pub fn unnamed(body: Body) -> Traced {
         let roles = vec![Vec::new(); body.face_count()];
-        Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body }
+        Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body, recipe: None }
     }
 
     /// A body the feature built, its faces' roles given (one per face), else not known.
     pub fn made(body: Body, roles: Option<Vec<Vec<String>>>) -> Traced {
         match roles.filter(|r| r.len() == body.face_count()) {
-            Some(roles) => Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body },
+            Some(roles) => Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body, recipe: None },
             None => Traced::unnamed(body),
         }
     }
@@ -169,14 +173,19 @@ impl Traced {
     /// which built it.
     pub fn copied(&self, copy: Body, feature: u64, instance: usize) -> Traced {
         let lineage = self.lineage.as_ref().and_then(|l| Lineage::step(&copy, &[&l.copied(feature, instance)]));
-        Traced { body: copy, lineage }
+        Traced { body: copy, lineage, recipe: None }
+    }
+
+    /// This tool, built by `recipe`.
+    pub fn with_recipe(self, recipe: Option<u64>) -> Traced {
+        Traced { recipe, ..self }
     }
 
     /// `result`, made by one kernel operation from `inputs` (in its operand order).
     pub fn step(result: Body, inputs: &[&Traced]) -> Traced {
         let lineages: Option<Vec<&Lineage>> = inputs.iter().map(|t| t.lineage.as_ref()).collect();
         let lineage = lineages.and_then(|l| Lineage::step(&result, &l));
-        Traced { body: result, lineage }
+        Traced { body: result, lineage, recipe: None }
     }
 
     /// `result`, made by one kernel operation from this body alone. Where that operation's
@@ -197,7 +206,7 @@ impl Traced {
             let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: l.clone(), names: OnceLock::new() })));
             Some(Lineage { history, operands: vec![stage] })
         });
-        Traced { body: result, lineage }
+        Traced { body: result, lineage, recipe: None }
     }
 }
 
@@ -232,13 +241,16 @@ impl<'a> ProfileRoles<'a> {
         if history.operands != 0 {
             return None;
         }
-        let segments: Vec<&solidcraft_geom::Seg2> =
+        let segments: Vec<&solidcore_record::Seg2> =
             self.region.map(|r| std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs).collect()).unwrap_or_default();
         let curves = self.sketch.map(crate::config::ExactSketchCurves::new);
         // Every curve the segment is drawn on (one, or several coincident or collinear ones).
         let curve = |segment: usize| -> Vec<String> {
             let (Some(curves), Some(segment)) = (curves.as_ref(), segments.get(segment)) else { return Vec::new() };
-            let drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            let mut drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            if drawn.is_empty() {
+                drawn.extend(curves.find_free_form(segment).map(|id| format!("side:{id}")));
+            }
             match self.thin {
                 // A thin wall's side beside its curve (the other side may lie on it).
                 Some(thin) if drawn.is_empty() => curves.find_offset(segment, &thin.curves, thin.distances),
@@ -294,7 +306,7 @@ impl<'a> ProfileRoles<'a> {
 /// numbered through the chains in order. It has no caps.
 pub(crate) struct ChainRoles<'a> {
     pub sketch: &'a SolvedSketch,
-    pub chains: &'a [Vec<solidcraft_geom::Seg2>],
+    pub chains: &'a [Vec<solidcore_record::Seg2>],
 }
 
 impl ChainRoles<'_> {
@@ -305,7 +317,7 @@ impl ChainRoles<'_> {
     }
 
     fn of(&self, history: &History) -> Vec<Vec<String>> {
-        let segments: Vec<&solidcraft_geom::Seg2> = self.chains.iter().flatten().collect();
+        let segments: Vec<&solidcore_record::Seg2> = self.chains.iter().flatten().collect();
         let curves = crate::config::ExactSketchCurves::new(self.sketch);
         history
             .faces
@@ -336,7 +348,7 @@ impl ChainRoles<'_> {
 /// answering to the others; its caps `start` and `end`.
 pub(crate) struct SectionRoles<'a> {
     /// Each section's sketch and loops (outer, then holes), in the order given.
-    pub sections: Vec<(&'a SolvedSketch, Vec<&'a solidcraft_geom::Loop2>)>,
+    pub sections: Vec<(&'a SolvedSketch, Vec<&'a solidcore_record::Loop2>)>,
 }
 
 impl SectionRoles<'_> {
@@ -423,6 +435,24 @@ pub(crate) fn cylinder_tool(body: Body) -> Traced {
             .collect()
     });
     Traced::made(body, roles)
+}
+
+/// The roles of a cone primitive's faces, from the body revolved from its half section (base
+/// side first, then the sloped side, then the top side of a cut-off cone; the side on the axis
+/// makes no face): `bottom`, `side` and `top`, as a cylinder's are (#7476). `None` when the body
+/// has no history of its own.
+pub(crate) fn cone_roles(body: &Body) -> Option<Vec<Vec<String>>> {
+    body.history().filter(|h| h.operands == 0).map(|h| {
+        h.faces
+            .iter()
+            .map(|f| match f.origins.as_slice() {
+                [FaceOrigin::Profile { segment: 0 }] => vec!["bottom".to_string()],
+                [FaceOrigin::Profile { segment: 1 }] => vec!["side".to_string()],
+                [FaceOrigin::Profile { segment: 2 }] => vec!["top".to_string()],
+                _ => Vec::new(),
+            })
+            .collect()
+    })
 }
 
 /// A tool a feature builds without a sketch (a boss's post, a rib, a lip's band), its faces named
@@ -532,6 +562,15 @@ impl crate::ModelBody {
         crate::ModelBody::new(name, made.body, feature).with_lineage(made.lineage)
     }
 
+    /// This body as the feature changed it: under its name, from the feature that made it and with
+    /// its `component`, so a later step of the same feature still counts it among that
+    /// component's bodies (the copies of a pattern's second cut, #14305).
+    pub(crate) fn remade(&self, made: Traced) -> Self {
+        let mut remade = Self::traced_new(self.name.clone(), made, self.feature);
+        remade.component = self.component;
+        remade
+    }
+
     /// This body with what it came from during the feature (`None`: not known).
     pub(crate) fn with_lineage(mut self, lineage: Option<Lineage>) -> Self {
         self.made = match lineage {
@@ -549,14 +588,14 @@ impl crate::ModelBody {
             Made::Traced(l) => Some(l.as_ref().clone()),
             Made::Unknown => None,
         };
-        Traced { body: self.body.clone(), lineage }
+        Traced { body: self.body.clone(), lineage, recipe: None }
     }
 
     /// This body, as it was before the feature, as an operand named by `operand` (a moved copy of
     /// it, the cavity side of a shell grown from it); `None` once the feature has changed it.
     pub(crate) fn before_as(&self, operand: Operand) -> Traced {
         let lineage = matches!(self.made, Made::Before).then(|| Lineage::of(&self.body, operand));
-        Traced { body: self.body.clone(), lineage }
+        Traced { body: self.body.clone(), lineage, recipe: None }
     }
 
     /// The lineage a feature left this body with, when it made or changed it with one.
@@ -753,10 +792,19 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
         // the `body_names` of the feature a body says made it (#10438).
         let names: Vec<(String, u64)> = members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature))).collect();
-        for ((name, feature), (_, i)) in names.into_iter().zip(keys) {
-            if let Some(b) = bodies.get_mut(i) {
-                b.name = name;
-                b.feature = feature;
+        // The pieces take the family's places in that order too, so the state lists them as
+        // their names run. The session pins a feature's body names in state order, and the next
+        // evaluation hands them out in this order: listed in the kernel's order, the pieces
+        // swapped names once the design was evaluated again from its pinned names (opened).
+        let moved: Vec<crate::ModelBody> = keys.iter().filter_map(|(_, i)| bodies.get(*i).cloned()).collect();
+        if moved.len() != members.len() || names.len() != members.len() {
+            continue;
+        }
+        for ((mut b, (name, feature)), place) in moved.into_iter().zip(names).zip(&members) {
+            b.name = name;
+            b.feature = feature;
+            if let Some(slot) = bodies.get_mut(*place) {
+                *slot = b;
             }
         }
     }

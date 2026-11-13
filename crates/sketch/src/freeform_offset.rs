@@ -6,7 +6,8 @@
 //! identical parameter speeds; stored nodes and interpolation remain unchanged.
 use crate::{CurveKind, Sketch, SketchError, fit_beziers_mode};
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 mod trim;
 pub use trim::FreeformOffsetOutput;
@@ -140,7 +141,7 @@ impl H {
         let (points, weights) = match *seg {
             Seg2::Line { a, b } => (vec![a, b], vec![1.0; 2]),
             Seg2::Cubic { p0, p1, p2, p3 } => (vec![p0, p1, p2, p3], vec![1.0; 4]),
-            Seg2::Bezier { n, p } if (1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) => {
+            Seg2::Bezier { n, p } if (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(&n) => {
                 (p[..=usize::from(n)].to_vec(), vec![1.0; usize::from(n) + 1])
             }
             Seg2::Conic { a, apex, b, w } if w.is_finite() && w > 0.0 => (vec![a, apex, b], vec![1.0, w, 1.0]),
@@ -484,7 +485,8 @@ impl Sketch {
                 p.fixed = true;
             }
         }
-        let output = candidate.add_curve(CurveKind::Spline { pts: indices, control: false, degree: 3, periodic: closed, nurbs: None }, None)?;
+        let output = candidate
+            .add_curve(CurveKind::Spline { pts: indices, control: false, degree: 3, periodic: closed, nurbs: None, handles: Vec::new() }, None)?;
         candidate.freeform_offsets.push(FreeformOffset {
             source: source_id,
             output: candidate.curves[output].id.clone(),
@@ -584,7 +586,7 @@ impl Sketch {
                 p.fixed = true;
             }
             candidate.curves[output].kind =
-                CurveKind::Spline { pts: indices, control: false, degree: 3, periodic: record.certificate == 2, nurbs: None };
+                CurveKind::Spline { pts: indices, control: false, degree: 3, periodic: record.certificate == 2, nurbs: None, handles: Vec::new() };
             candidate.freeform_offsets[record_index].divisions = divisions;
             candidate.freeform_offsets[record_index].pieces = pieces;
         }
@@ -633,7 +635,8 @@ mod tests {
             .into_iter()
             .map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap())
             .collect();
-        let source = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
+        let source =
+            sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None).unwrap();
         let original = sk.clone();
         for (forward, distance) in [(true, 2.0), (false, -2.0)] {
             let mut sk = original.clone();

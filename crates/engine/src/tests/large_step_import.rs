@@ -11,8 +11,8 @@ use crate::*;
 fn step_file(name: &str, count: usize) -> String {
     let bodies: Vec<_> = (0..count)
         .map(|i| {
-            let at = solidcraft_geom::Vec3::new((i % 32) as f64 * 12.0, (i / 32) as f64 * 12.0, 0.0);
-            solidcraft_kernel::box_solid(at, at + solidcraft_geom::Vec3::new(10.0, 10.0, 10.0)).unwrap()
+            let at = solidcore_record::Vec3::new((i % 32) as f64 * 12.0, (i / 32) as f64 * 12.0, 0.0);
+            solidcraft_kernel::box_solid(at, at + solidcore_record::Vec3::new(10.0, 10.0, 10.0)).unwrap()
         })
         .collect();
     let text = solidcraft_kernel::step_export(&bodies.iter().collect::<Vec<_>>(), name).unwrap();
@@ -147,14 +147,20 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     // The preference raises both limits; the design is now read (and refused only for not being one).
     limits::set_preferred(FileLimits { step: GB, design: GB }).unwrap();
     assert_eq!((limits::max_step_bytes(), limits::max_design_bytes()), (1 << 30, 1 << 30));
+    // The STEP parser's own cap follows, so it doesn't refuse what the size check let in (#13329).
+    assert_eq!(solidcraft_kernel::step_max_bytes(), 1 << 30);
     assert!(limits::check(Kind::Step, 512 * MB + 1).is_ok());
     let error = s.execute("doc.open", &json!({"path": design})).unwrap_err().to_string();
     assert!(!error.contains("too large"), "{error}");
     // The flag overrides the preference for the run, and the ceiling holds for both.
     limits::set_override(Some(2 * GB)).unwrap();
     assert_eq!(limits::effective(), FileLimits { step: 2 * GB, design: 2 * GB });
+    assert_eq!(solidcraft_kernel::step_max_bytes(), 2 << 30);
     assert!(limits::set_override(Some(16 * GB + 1)).is_err());
     assert!(limits::set_preferred(FileLimits { step: 17 * GB, design: GB }).is_err());
     assert_eq!(limits::preferred(), FileLimits { step: GB, design: GB }, "a refused value changes nothing");
+    let _ = limits::set_override(None);
+    let _ = limits::set_preferred(FileLimits::DEFAULT);
+    assert_eq!(solidcraft_kernel::step_max_bytes(), 512 << 20, "the defaults put the parser's cap back");
     let _ = std::fs::remove_dir_all(&dir);
 }

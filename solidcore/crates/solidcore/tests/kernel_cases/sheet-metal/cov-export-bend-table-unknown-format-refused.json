@@ -1,0 +1,35 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-export-bend-table-unknown-format-refused",
+  "expected": {
+    "method": "the table is written as csv or json only: any other format is refused, naming the two",
+    "outcome": "refused",
+    "refusal": "`format` must be csv or json",
+    "source": "invariants",
+    "sources": [],
+    "what": "sheet.export_bend_table asked for a format it does not write (xlsx)"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 7 (sheet.export_bend_table): invalid parameters for `sheet.export_bend_table`: `format` must be csv or json",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 7 (sheet.export_bend_table): invalid parameters for `sheet.export_bend_table`: `format` must be csv or json",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "sheet.export_bend_table asked for a format it does not write (xlsx)",
+  "why_not": [
+    "no kernel operation ran before the failure: step 7 (sheet.export_bend_table): invalid parameters for `sheet.export_bend_table`: `format` must be csv or json"
+  ]
+}

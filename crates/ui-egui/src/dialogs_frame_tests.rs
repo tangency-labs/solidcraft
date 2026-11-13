@@ -1,6 +1,7 @@
 use crate::test_support::run_all;
 use serde_json::json;
 use solidcraft_engine::Session;
+use solidcraft_engine::geom::prelude::*;
 
 use super::*;
 use crate::Services;
@@ -150,6 +151,23 @@ fn a_whole_sketch_section_stays_whole_through_an_edit() {
     assert_eq!(apply_commands(&app, &e).unwrap()[0].1["params"]["profile"]["kind"], "rect_tube");
 }
 
+/// A member placed by a profile point (`locate`, which the dialog has no field for) keeps it
+/// through an edit, so it stays attached where it was.
+#[test]
+fn an_edit_keeps_a_located_point() {
+    let mut app = frame_app();
+    let profile = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": profile, "locate": [10, 5]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    member(&mut e).angle = "90 deg".into();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["locate"], json!([10.0, 5.0]), "{}", c[0].1);
+    run_all(&mut app, c);
+    let FeatureKind::FrameMember { locate, .. } = &app.session.doc.feature(f).unwrap().kind else { panic!() };
+    assert_eq!(*locate, Some([10.0, 5.0]));
+}
+
 /// Without lines there is nothing to place; lines and the section in one sketch are refused.
 #[test]
 fn missing_or_mixed_picks_are_refused() {
@@ -198,4 +216,51 @@ fn picked_lines_stay_in_the_sketch_they_were_picked_in() {
     // Lines picked in two sketches are refused.
     d.inputs[0].items.push(Sel::ExternalSketchCurve { sketch: rails, id: ids[0].clone() });
     assert!(apply_commands(&app, &d).unwrap_err().contains("one sketch"));
+}
+
+/// Editing an end cap shows a face for each saved end. When one cannot be found, the faces start
+/// empty and OK names the missing end instead of dropping it unasked; what is picked again is taken,
+/// even fewer ends.
+#[test]
+fn an_end_cap_edit_refuses_to_drop_an_end_it_cannot_find() {
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0});
+    let mut app = app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Post path"})),
+        ("sketch.options", json!({"sketch_3d": true})),
+        ("sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Post path", "body_name": "Post", "profile": tube})),
+    ]);
+    let end = |app: &SolveApp, z: f64| {
+        let st = app.session.model.state();
+        let b = st.body("Post").unwrap();
+        let i = (0..b.body.face_count())
+            .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().z.abs() > 0.999 && (pl.origin.z - z).abs() < 1e-6))
+            .unwrap();
+        Sel::Face { body: "Post".into(), index: i, point: solidcore_record::Vec3::new(18.5, 0.0, z) }
+    };
+    let (top, bottom) = (end(&app, 300.0), end(&app, 0.0));
+    let faces: Vec<Value> = [&top, &bottom]
+        .iter()
+        .map(|s| match s {
+            Sel::Face { body, index, point } => json!({"body": body, "index": index, "face": point}),
+            _ => Value::Null,
+        })
+        .collect();
+    app.session.execute("frame.end_cap", &json!({"faces": faces, "thickness": 6})).unwrap();
+    let kind = app.session.doc.find_feature("EndCap1").unwrap().kind.clone();
+    let (crate::dialogs::Kind::EndCap(c), inputs, extra) = crate::dialogs_end_cap::for_feature(&app, &kind).unwrap() else { panic!() };
+    assert!(c.unresolved.is_empty() && inputs[0].items.len() == 2, "{c:?}");
+    assert!(crate::dialogs_end_cap::commands(&app, &c, &inputs, &extra).is_ok());
+    // The second end could not be found: nothing is picked, and OK says which end is missing.
+    let c = crate::dialogs_end_cap::EndCap { unresolved: vec![2], ..c };
+    let mut inputs = inputs;
+    inputs[0].items.clear();
+    let e = crate::dialogs_end_cap::commands(&app, &c, &inputs, &extra).unwrap_err();
+    assert!(e.contains('2'), "{e}");
+    // Picked again, the remaining end alone is a deliberate choice, as are both.
+    inputs[0].items = vec![top.clone()];
+    assert!(crate::dialogs_end_cap::commands(&app, &c, &inputs, &extra).is_ok());
+    inputs[0].items = vec![top, bottom];
+    assert!(crate::dialogs_end_cap::commands(&app, &c, &inputs, &extra).is_ok());
 }

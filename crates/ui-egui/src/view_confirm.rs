@@ -6,11 +6,12 @@
 //! below the pair while it is shown (`viewport_layout::Layout::with_content`), and the pair is
 //! one of the shell's covered rects, so a click on it never picks or navigates.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Sense, vec2};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit::{Action, Container, Surface};
+use solidcraft_theme::Tokens;
 
 /// Each target's side: large enough to hit without aiming.
 const TARGET: f32 = 40.0;
@@ -63,6 +64,7 @@ struct Choice {
 /// (`ViewportState::corner`), which acts on it as on its own OK and Cancel; a sketch's runs at
 /// once, the way the ribbon's Finish Sketch and Cancel do (a refusal shows as their errors do).
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    app.viewport.host_confirm = Some(Rect::NOTHING);
     let (Some(answers), Some(rect)) = (answers(app), rect(app)) else { return };
     let choices = match answers {
         Answers::Dialog => {
@@ -95,27 +97,34 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let container = Container::new(ctx, Surface::Navigation);
     let frame = container.frame(ctx, t.overlay, crate::frame::Side::Right);
     let mut clicked = None;
-    container.area(egui::Id::new("sc_view_confirm")).order(egui::Order::Middle).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
+    let mut painted = false;
+    container.area(egui::Id::unique("sc_view_confirm")).order(egui::Order::Middle).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
+        painted = ui.is_visible() && !ui.is_sizing_pass();
         let (outer, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         Container::paint_frame(ui.painter(), frame, outer.shrink(frame.stroke.width));
         // The check, then the cross in the very corner, where a close sits on a title bar.
         for (index, choice) in choices.iter().enumerate() {
             let at = Rect::from_min_size(outer.min + vec2(t.space_4 + index as f32 * (TARGET + t.space_4), t.space_4), vec2(TARGET, TARGET));
-            let response = ui.interact(at, ui.id().with(choice.key), if choice.enabled { Sense::click() } else { Sense::hover() });
+            let response = ui.interact(at, ui.scope_id().with(choice.key), if choice.enabled { Sense::click() } else { Sense::hover() });
             if choice.enabled && response.hovered() {
                 ui.painter().rect_filled(at, t.radius_sm, t.hover);
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             crate::icons::paint_icon(ui.painter(), at.shrink(t.space_6), choice.icon, if choice.enabled { 1.0 } else { 0.35 });
-            let label = crate::i18n::tr_label(choice.label);
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, choice.enabled, label));
-            crate::scenario::publish_target(choice.key, at);
-            if response.on_hover_text(label).clicked() && choice.enabled {
+            let label = solidcraft_ui_text::tr_label(choice.label);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, choice.enabled, label));
+            if painted {
+                crate::scenario::publish_target(choice.key, at);
+            }
+            if response.backing_on_hover_text(label).clicked() && choice.enabled {
                 clicked = Some(choice.action);
             }
         }
     });
-    crate::scenario::publish_rect("view:confirm", rect);
+    app.viewport.host_confirm = Some(if painted { rect } else { Rect::NOTHING });
+    if painted {
+        crate::scenario::publish_rect("view:confirm", rect);
+    }
     crate::scenario::publish_count("view:confirm:ok:enabled", f64::from(choices.first().is_some_and(|choice| choice.enabled)));
     match (answers, clicked) {
         (Answers::Dialog, Some(action)) => app.viewport.corner = Some(action),

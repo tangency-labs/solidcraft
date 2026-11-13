@@ -13,6 +13,7 @@ A 120x64 figure at the left (`sketch-guides`), the checkboxes at the right.
 | Guides from sketch points too | Checkbox | `Prefs.sketch_tracking_points` | `true` | none | none | Disabled while the first is off (`sketch_tracking_guides`). |
 | Snap to where two guides cross | Checkbox | `Prefs.sketch_recent_snap` | `false` | none | none | Catalog label today: "Auto snap to recent centers and midpoints". |
 | Line up with other sketch points | Checkbox | `Prefs.sketch_align_points` | `false` | "Drawing lines align with points on both axes at once." | none | |
+| Snap to the grid's visible crossings | Checkbox | `Prefs.sketch_snap_to_visible_grid` | `true` | "A point snaps to the crossings of the lines the grid draws when the pointer means one, and to the finer lattice between them otherwise. Off: the point snaps to the finer lattice only, as before." | none | |
 | Hold to stop snapping | Dropdown (200 wide, "Alt / Option") | `Prefs.suppress_sketch_snap` (`ModifierCombo`) | Ctrl + Alt (`ModifierCombo::CTRL_ALT`) | none | none | The board sample shows "Alt / Option" and the key caps "Ctrl / Cmd"; the default in the code is Ctrl+Alt. |
 
 ## Drawing
@@ -22,19 +23,25 @@ Two columns of checkboxes.
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
 | Press and drag draws one line | Checkbox | `Prefs.line_drag_draws_one` | `false` | none | none | |
+| Rest on a line's last point to switch to a tangent arc | Checkbox | `Prefs.line_hover_tangent_arc` | `false` | Existing `prefs.line_hover_tangent_arc_note`: leaving, returning to and resting on the last point toggles line / tangent arc. | none | Retained newer control; immediately after press-and-drag, before centre-point arc. |
 | Centre-point arc follows the cursor | Checkbox | `Prefs.center_arc_follows_cursor` | `true` | none | none | |
 | Extended construction line tools | Checkbox | `Prefs.sketch_construction_lines` | `true` | none | none | |
+| Draw ellipses with their axes | Checkbox | `Prefs.ellipse_axes` | `true` | "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its minor radius wherever the value is pulled, drawn and labelled R as before." | none | New in #9292; not in `PROFILE_KEYS` (that list is the frozen pre-split baseline). |
 | Dimension new shapes fully | Checkbox | `Prefs.sketch_auto_dimensions` | `false` | "Typed values plus every dimension that fixes the shape." | none | |
 | Place from the sketch origin | Checkbox (dimmed on the board while the one above is off) | `Prefs.sketch_auto_locate` | `false` | "With full dimensions." | none | Dimmed unless "Dimension new shapes fully" is on. |
 | Shortcut again switches mode | Checkbox | `Prefs.shortcut_cycles_modes` | `false` | "Off: it starts the tool again." | none | |
+| Clicking the running tool's button ends it | Checkbox | `Prefs.ribbon_click_ends_tool` | `true` | Existing `prefs.ribbon_click_ends_tool_note`: the lit ribbon button ends the tool and restores selection; off restarts it. | none | Retained newer control; immediately after shortcut cycling, before the Project pair. |
 | Project face edges into new sketches | Checkbox | `app.session.auto_project` (session; in the Snapshot) | per session | none | none | Not a `Prefs` field. |
 | Ask for Project options first | Checkbox | `Prefs.project_options_dialog` | `true` | none | none | |
+| Show the cursor's coordinates in a sketch | Checkbox | `Prefs.sketch_cursor_coordinates` | `true` | `prefs.sketch.cursor_coordinates_note`: X and Y from the sketch origin beside the pointer, also with no tool running; off shows them only while a tool places a point. | none | New in #11070; last row of the second column. |
 
 ## Opening and closing
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
+| Sketching on a part's face makes that part active | Checkbox | `Prefs.sketch_face_activates_part` | `false` | Existing `prefs.sketch_face_activates_part_note`: activate the other component before creating the sketch; it stays active. Off keeps the active component. | none | Retained newer control; first row, immediately before turn-to-face. |
 | Turn to face a sketch when it opens | Checkbox | `Prefs.sketch_open_look_at` | `true` | none | none | |
+| Double Esc finishes the sketch | Checkbox | `Prefs.escape_twice_finishes_sketch` | `true` | `prefs.sketch.escape_twice_finishes_note`: two quick presses of Esc end the sketch; off, Esc only cancels the tool or the selection. | none | #12069; immediately after turn-to-face. |
 | When a sketch ends: Return to the view before / Keep (default) / Unless turned (return if not rotated) | Three picture cards (196 x 152.5), a before / sketch / after trio each | `Prefs.sketch_exit_view` (`SketchExitView`: Previous, Keep, UnlessRotated) | Keep | none | `sketch-exit-previous`, `sketch-exit-keep`, `sketch-exit-unless-turned` | Card labels: "Return to the view before" / "Keep" with sub-label "default" / "Unless turned" with sub-label "return if not rotated". The 30x30 panels are nested SVGs inside the figure. |
 
 ## Marks in the sketch
@@ -46,6 +53,7 @@ Three toggle tiles (208.8 x 140).
 | State icons | Toggle tile | `Prefs.sketch_state_icons` | `true` | none | `sketch-state-icons` | |
 | Conflict colour | Toggle tile | `Prefs.sketch_conflict_colour` | `true` | none | `sketch-conflict` | |
 | Hide glyphs zoomed out | Toggle tile | `Prefs.hide_constraint_glyphs_zoomed_out` | `true` | none | `sketch-hide-glyphs` | |
+| Constraint glyph size | Slider, 100% to 300% in 25% steps | `Prefs.constraint_glyph_scale` | `1.0` | "How large constraint glyphs and their letters or icons are drawn in a sketch." | none | Not on the board yet (#10794); today a slider row under the toggles. |
 
 ## Selecting
 
@@ -59,6 +67,11 @@ Three toggle tiles (208.8 x 140).
 | Alt / Option also frees manipulator arrows | Checkbox | `Prefs.manipulator_free_alt` | `true` | none | none | |
 
 ## Mismatches
+
+* The three retained newer controls above are absent from the old board. Their placements were
+  accepted in #9881 from source-only recommendations; existing labels, help, defaults, profile
+  membership and behavior remain authoritative. Drawing flows down the first column through
+  origin placement, then down the second from shortcut cycling; dependent pairs stay together.
 
 * "Hold to stop snapping" default differs between the board sample and the code (see above).
 * "Project face edges into new sketches" and "Click selects" are session values, not `Prefs`.

@@ -3,11 +3,12 @@
 //! when the part changes (also after the design is saved and reopened), and a bad reference is
 //! refused with an error. A cylinder takes the same references for its base (#6380).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
-use solidcraft_geom::Vec3;
 
 use crate::{EngineError, Session};
 
@@ -77,6 +78,18 @@ fn a_hole_sits_at_its_distances_from_two_edges() {
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "solid.hole", referenced(json!([{"edge": [0, 20, 10], "distance": 10}])));
     bore_at(&s, 10.0, 25.0, 10.0);
+}
+
+#[test]
+fn a_reference_edge_is_found_on_its_own_part_when_another_part_touches_the_hole() {
+    // A pad lies on the plate where the hole is picked, so both surfaces are as near as can be
+    // and the pad comes first: the plate's edges must still be found on the plate.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 4, "corner": [25, 20, 10], "operation": "new", "body_name": "Pad"}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 40, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.hole", referenced(json!([{"edge": [0, 20, 10], "distance": 10}, {"edge": [25, 0, 10], "distance": "12 mm"}])));
+    let (position, _) = hole(&s);
+    assert!(position.dist(Vec3::new(10.0, 12.0, 10.0)) < 1e-6, "the hole is placed at (10, 12), not {position:?}");
 }
 
 #[test]

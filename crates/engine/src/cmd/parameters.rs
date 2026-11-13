@@ -9,10 +9,38 @@ use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, solve
 
 use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_, str_};
+use crate::schema::parameters::{
+    AddedValue, Completion, CompletionKind, DrivenFeature, EvalKind, ExprCompleteParams, ExprCompletions, ExprEvaluateParams, ExprEvaluated,
+    ExprEvaluatedBody, FailedFeature, ParamAddParams, ParamAdded, ParamChangeParams, ParamChanged, ParamChangedBody, ParamChangedOne,
+    ParamCommentParams, ParamCommented, ParamDeleted, ParamExportParams, ParamExportResult, ParamFavoriteParams, ParamFavorited, ParamGraphParams,
+    ParamGraphResult, ParamImportParams, ParamImportResult, ParamListParams, ParamListResult, ParamMoveParams, ParamMoved, ParamNameParams,
+    ParamRename, ParamRenameParams, ParamRenamed, ParamUsersParams, ParamUsersResult, ParameterRow, ParameterUser, SwitchedFeature,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const ADD_CONTRACT: TypedContract<ParamAddParams> = TypedContract::new();
+const RENAME_CONTRACT: TypedContract<ParamRenameParams> = TypedContract::new();
+const NAME_CONTRACT: TypedContract<ParamNameParams> = TypedContract::new();
+const COMMENT_CONTRACT: TypedContract<ParamCommentParams> = TypedContract::new();
+const FAVORITE_CONTRACT: TypedContract<ParamFavoriteParams> = TypedContract::new();
+const MOVE_CONTRACT: TypedContract<ParamMoveParams> = TypedContract::new();
+const CHANGE_CONTRACT: TypedContract<ParamChangeParams> = TypedContract::new();
+const LIST_CONTRACT: TypedContract<ParamListParams> = TypedContract::new();
+const USERS_CONTRACT: TypedContract<ParamUsersParams> = TypedContract::new();
+const GRAPH_CONTRACT: TypedContract<ParamGraphParams> = TypedContract::new();
+const EXPORT_CONTRACT: TypedContract<ParamExportParams> = TypedContract::new();
+const IMPORT_CONTRACT: TypedContract<ParamImportParams> = TypedContract::new();
+const EVALUATE_CONTRACT: TypedContract<ExprEvaluateParams> = TypedContract::new();
+const COMPLETE_CONTRACT: TypedContract<ExprCompleteParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("parameters.change", "Change Parameters", change_param).at("SOLID", "MODIFY").icon("params").params(
+    CommandSpec::new("parameters.change", "Change Parameters", crate::checked!("parameters.change", change_param))
+        .at("SOLID", "MODIFY")
+        .icon("params")
+        .contract(&CHANGE_CONTRACT)
+        .output(output_schema_for::<ParamChanged>)
+        .params(
         "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit, a length the design's units; \
          a text parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
              favorite?: bool, new_name?: rename (references follow; an expression `new = value` renames to `new` and sets value, \
@@ -22,48 +50,82 @@ pub static COMMANDS: &[CommandSpec] = &[
          (the configuration rules that switch a feature's suppression and read a parameter whose value changed run in their order, as on \
          activation; driven parameters and restrictions wait for a configuration edit or activation)",
     ),
-    CommandSpec::new("parameters.list", "List Parameters", list).icon("list").noundo().doc_only().params(
+    CommandSpec::new("parameters.list", "List Parameters", crate::checked!("parameters.list", list))
+        .icon("list")
+        .noundo()
+        .doc_only()
+        .contract(&LIST_CONTRACT)
+        .output(output_schema_for::<ParamListResult>)
+        .params(
         "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value (mm/deg in every \
          reply), display_value (in its own unit), source, feature/input, comment, favorite, uses, used_by, error) and cycles",
     ),
-    CommandSpec::new("parameters.add", "Add User Parameter", add)
+    CommandSpec::new("parameters.add", "Add User Parameter", crate::checked!("parameters.add", add))
         .icon("new")
+        .contract(&ADD_CONTRACT)
+        .output(output_schema_for::<ParamAdded>)
         .params("name, expression, unit?: as parameters.change (text: a text parameter, its expression the text), comment?, favorite?: bool"),
-    CommandSpec::new("parameters.rename", "Rename Parameter", rename)
+    CommandSpec::new("parameters.rename", "Rename Parameter", crate::checked!("parameters.rename", rename))
         .icon("rename")
+        .contract(&RENAME_CONTRACT)
+        .output(output_schema_for::<ParamRenamed>)
         .params("name, new_name (expressions, feature inputs and dimensions that use it follow)"),
-    CommandSpec::new("parameters.delete", "Delete Parameter", delete)
+    CommandSpec::new("parameters.delete", "Delete Parameter", crate::checked!("parameters.delete", delete))
         .icon("delete")
+        .contract(&NAME_CONTRACT)
+        .output(output_schema_for::<ParamDeleted>)
         .params("name (refused while something uses it; the error lists the users)"),
-    CommandSpec::new("parameters.favorite", "Favorite Parameter", favorite).icon("star").params("name, favorite?: bool (default true)"),
-    CommandSpec::new("parameters.move", "Move Parameter", move_param)
+    CommandSpec::new("parameters.favorite", "Favorite Parameter", crate::checked!("parameters.favorite", favorite))
+        .icon("star")
+        .contract(&FAVORITE_CONTRACT)
+        .output(output_schema_for::<ParamFavorited>)
+        .params("name, favorite?: bool (default true)"),
+    CommandSpec::new("parameters.move", "Move Parameter", crate::checked!("parameters.move", move_param))
         .icon("reorder")
+        .contract(&MOVE_CONTRACT)
+        .output(output_schema_for::<ParamMoved>)
         .params("name, before | after: another user parameter; the user parameter is listed just before or after it"),
-    CommandSpec::new("parameters.comment", "Comment Parameter", comment).icon("text").params("name, comment"),
-    CommandSpec::new("parameters.users", "Parameter Users", users)
+    CommandSpec::new("parameters.comment", "Comment Parameter", crate::checked!("parameters.comment", comment))
+        .icon("text")
+        .contract(&COMMENT_CONTRACT)
+        .output(output_schema_for::<ParamCommented>)
+        .params("name, comment"),
+    CommandSpec::new("parameters.users", "Parameter Users", crate::checked!("parameters.users", users))
         .icon("graph")
         .noundo()
+        .contract(&USERS_CONTRACT)
+        .output(output_schema_for::<ParamUsersResult>)
         .params("name → users (parameters, feature inputs, dimensions) and the features it drives"),
-    CommandSpec::new("parameters.graph", "Parameter Graph", graph)
+    CommandSpec::new("parameters.graph", "Parameter Graph", crate::checked!("parameters.graph", graph))
         .icon("graph")
         .noundo()
+        .contract(&GRAPH_CONTRACT)
+        .output(output_schema_for::<ParamGraphResult>)
         .params("→ nodes, edges [user, used] (users include Feature:<name>), cycles, errors"),
-    CommandSpec::new("parameters.export", "Export Parameters", export)
+    CommandSpec::new("parameters.export", "Export Parameters", crate::checked!("parameters.export", export))
         .icon("export")
         .noundo()
+        .contract(&EXPORT_CONTRACT)
+        .output(output_schema_for::<ParamExportResult>)
         .params("format?: csv|json (default csv, or from the path), path?: write to a file → text"),
-    CommandSpec::new("parameters.import", "Import Parameters", import)
+    CommandSpec::new("parameters.import", "Import Parameters", crate::checked!("parameters.import", import))
         .icon("import")
+        .contract(&IMPORT_CONTRACT)
+        .output(output_schema_for::<ParamImportResult>)
         .params("text: CSV (header with name, expression, unit?, comment?) or JSON [{name, expression, unit?, comment?}] | path; all or nothing"),
-    CommandSpec::new("expr.evaluate", "Evaluate Expression", evaluate)
+    CommandSpec::new("expr.evaluate", "Evaluate Expression", crate::checked!("expr.evaluate", evaluate))
         .icon("params")
         .noundo()
         .doc_only()
+        .contract(&EVALUATE_CONTRACT)
+        .output(output_schema_for::<ExprEvaluated>)
         .params("expression, kind?: length|angle|unitless (or unit?: mm|in|deg…; text: the text a text parameter would hold, as `text`) → ok, value (mm/rad), display_value, references, error"),
-    CommandSpec::new("parameters.complete", "Complete Expression", complete)
+    CommandSpec::new("parameters.complete", "Complete Expression", crate::checked!("parameters.complete", complete))
         .icon("params")
         .noundo()
         .doc_only()
+        .contract(&COMPLETE_CONTRACT)
+        .output(output_schema_for::<ExprCompletions>)
         .params("prefix?: the text before the cursor → word, suggestions [{text, kind: parameter|function|unit|constant, detail}]"),
 ];
 
@@ -80,8 +142,8 @@ fn param_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
 }
 
 /// Features that fail (name and error).
-fn failing(s: &Session) -> Vec<Value> {
-    s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.name, "error": e}))).collect()
+fn failing(s: &Session) -> Vec<FailedFeature> {
+    FailedFeature::of(&s.model.results)
 }
 
 pub(super) fn known(s: &Session, name: &str) -> bool {
@@ -102,19 +164,20 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(n) = str_(p, "delete") {
         s.doc_mut().remove_param(n.trim())?;
         s.settle_value_edit(&solved)?;
-        return Ok(json!({"deleted": n.trim()}));
+        return reply(cmd, ParamChanged { body: ParamChangedBody::Deleted { deleted: n.trim().to_string() }, param_warnings: Vec::new() });
     }
     let mut name = param_name(cmd, p)?.to_string();
-    let mut out = json!({});
+    let mut renamed: Option<ParamRename> = None;
+    let mut changed_through: Option<String> = None;
     if let Some(new) = str_(p, "new_name") {
         let n = s.doc_mut().rename_param(&name, new)?;
-        out["renamed"] = json!({"from": name, "to": new.trim(), "references_updated": n});
+        renamed = Some(ParamRename { from: name, to: new.trim().to_string(), references_updated: n });
         name = new.trim().to_string();
     }
     let has_expr = p.get("expression").is_some() || p.get("value").is_some();
     let mut e = if has_expr {
         Some(expr_arg(p, "expression").or_else(|| expr_arg(p, "value")).ok_or_else(|| bad(cmd, "`expression` must be a number or text"))?)
-    } else if out.get("renamed").is_some() || p.get("favorite").is_some() || p.get("comment").is_some() {
+    } else if renamed.is_some() || p.get("favorite").is_some() || p.get("comment").is_some() {
         None
     } else {
         return Err(bad(cmd, "`expression` must be a number or text"));
@@ -123,7 +186,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     // `d7`, a feature input's) is renamed, references following, and takes the expression. A
     // text parameter's text is only text.
     if let Some((new, rhs)) = e.as_deref().filter(|_| !is_text(s, &name, str_(p, "unit"))).and_then(expr::definition) {
-        if out.get("renamed").is_some() {
+        if renamed.is_some() {
             return Err(bad(cmd, format!("`{new} = …` renames `{name}` already: give `new_name` or `name = expression`, not both")));
         }
         if rhs.is_empty() {
@@ -134,7 +197,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         // `w = 20` shows `w`, and `w = 30` typed over it sets `w`.
         let refers_to = s.doc.all_param_exprs().into_iter().find(|(n, _, _)| *n == name).map(|(_, e, _)| e);
         if refers_to.as_deref().map(str::trim) == Some(new.as_str()) && s.doc.param(&new).is_some() {
-            out["changed_through"] = json!(name);
+            changed_through = Some(name);
             name = new.clone();
         }
         if new != name {
@@ -142,7 +205,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, format!("there is already a parameter `{new}`: type `{new}` to use it, or change it in Parameters")));
             }
             let n = s.doc_mut().rename_param(&name, &new)?;
-            out["renamed"] = json!({"from": name, "to": new, "references_updated": n});
+            renamed = Some(ParamRename { from: name, to: new.clone(), references_updated: n });
             name = new;
         }
         e = Some(rhs);
@@ -169,52 +232,96 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.settle_value_edit(&solved)?;
     let (vals, _) = s.doc.param_values();
-    if !switched.is_empty() {
-        out["switched"] = json!(switched);
-    }
-    out["name"] = json!(name);
-    out["expression"] = json!(e);
-    if let Some(t) = s.doc.text_param(&name) {
-        out["text"] = json!(t.text);
-    }
-    out["value"] = json!(vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))));
-    out["display_value"] = json!(s.doc.param_display_value(&vals, &name).map(expr::round_reported));
-    out["recomputed"] = json!(s.model.last_recomputed);
-    out["restored"] = json!(s.model.last_restored);
-    out["errors"] = json!(failing(s));
-    Ok(out)
+    let one = ParamChangedOne {
+        renamed,
+        changed_through,
+        switched,
+        text: s.doc.text_param(&name).map(|t| t.text.clone()),
+        value: vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))),
+        display_value: s.doc.param_display_value(&vals, &name).map(expr::round_reported),
+        recomputed: s.model.last_recomputed,
+        restored: s.model.last_restored,
+        errors: failing(s),
+        name,
+        expression: e,
+    };
+    reply(cmd, ParamChanged { body: ParamChangedBody::One(Box::new(one)), param_warnings: Vec::new() })
 }
 
-/// The point a length dimension keeps when its value changes: the first it measures from (a
-/// line's start). None for other dimensions.
-fn dimension_start(sk: &Sketch, kind: &ConstraintKind) -> Option<usize> {
+/// Points a driving dimension keeps when its own parameter changes. A length keeps the first
+/// point it measures from (a line's start, #6070). A point-to-line distance is a construction
+/// offset measured from the reference line, so that line stays and the offset point moves.
+fn dimension_held_points(sk: &Sketch, kind: &ConstraintKind) -> Vec<usize> {
     match kind {
-        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => Some(*p),
-        ConstraintKind::Length { l, .. } => match sk.curves.get(*l)?.kind {
-            CurveKind::Line { a, .. } => Some(a),
-            _ => None,
+        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => vec![*p],
+        ConstraintKind::Length { l, .. } => match sk.curves.get(*l).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, .. }) => vec![*a],
+            _ => Vec::new(),
         },
-        _ => None,
+        ConstraintKind::PointLineDistance { l, .. } => reference_line_ends(sk, *l),
+        _ => Vec::new(),
     }
+}
+
+fn reference_line_ends(sk: &Sketch, line: usize) -> Vec<usize> {
+    match sk.curves.get(line).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => vec![*a, *b],
+        _ => Vec::new(),
+    }
+}
+
+/// Held points for a construction offset whose expression mentions `name`, not for an ordinary
+/// dimension that happens to reference it. A parallel offset holds the reference line. A
+/// horizontal or vertical offset is a distance from the sketch origin, and holds that origin.
+fn construction_offset_hold(sk: &Sketch, kind: &ConstraintKind) -> Vec<usize> {
+    match kind {
+        ConstraintKind::PointLineDistance { l, .. } => reference_line_ends(sk, *l),
+        ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } if sk.point_index("origin") == Some(*p) => vec![*p],
+        _ => Vec::new(),
+    }
+}
+
+/// The points to hold while `name` changes. The first dimension whose parameter is `name` wins,
+/// as it did before, including when that dimension holds nothing. An earlier dimension that only
+/// mentions `name` in its expression is skipped when it holds no points, so it cannot hide that
+/// direct dimension. A construction offset is the expression match that does hold its reference.
+fn held_for_parameter(sketch: &Sketch, doc: &solidcraft_doc::Document, name: &str) -> Option<Vec<usize>> {
+    let mut offset = None;
+    for c in sketch.constraints.iter().filter(|c| !c.driven) {
+        let Some(param) = c.param.as_deref() else { continue };
+        if param == name {
+            let points = dimension_held_points(sketch, &c.kind);
+            return (!points.is_empty()).then_some(points);
+        }
+        let mentions = doc.param(param).is_some_and(|p| expr::references(&p.expr).iter().any(|r| r == name));
+        if !mentions {
+            continue;
+        }
+        let points = construction_offset_hold(sketch, &c.kind);
+        if points.is_empty() || offset.is_some() {
+            continue;
+        }
+        offset = Some(points);
+    }
+    offset
 }
 
 /// A length dimension driven by `name` keeps its first point where it is when the value
-/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). The
-/// sketch is solved here with that point held, before the design evaluates from its stored
-/// positions. Where holding it can't solve (a symmetry moves both ends), evaluation solves as
-/// before.
+/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). A
+/// construction offset whose expression mentions `name` keeps its reference instead. An ordinary
+/// dimension that merely references `name` (a length of `width * 2`) is left to the normal
+/// solve, so both ends can still move. The sketch is solved here with those points held, before
+/// the design evaluates from its stored positions. Where holding them can't solve (a symmetry
+/// moves both ends), evaluation solves as before. A sketch that already has offset curves pins
+/// that dimension's first point and runs the full solve, so a tangent cap does not jump to
+/// another branch (#4823).
 fn keep_dimension_start(s: &mut Session, name: &str) {
-    let targets: Vec<(u64, usize)> = s
+    let targets: Vec<(u64, Vec<usize>)> = s
         .doc
         .features
         .iter()
         .filter_map(|f| match &f.kind {
-            FeatureKind::Sketch { sketch, .. } => sketch
-                .constraints
-                .iter()
-                .find(|c| !c.driven && c.param.as_deref() == Some(name))
-                .and_then(|c| dimension_start(sketch, &c.kind))
-                .map(|p| (f.id, p)),
+            FeatureKind::Sketch { sketch, .. } => held_for_parameter(sketch, &s.doc, name).map(|points| (f.id, points)),
             _ => None,
         })
         .collect();
@@ -222,19 +329,20 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
         return;
     }
     let vals = s.doc.evaluation_values();
-    for (id, start) in targets {
+    for (id, points) in targets {
         let Ok(stored) = sketch_store::read(&s.doc, id) else { continue };
         let mut trial = stored.clone();
         if s.doc.apply_dimension_values(&vals, &mut trial).is_err() {
             continue;
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
-        let hold = Hold { points: vec![start], radii: Vec::new() };
         let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+            let hold = Hold { points, radii: Vec::new() };
             solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
         } else {
             // A solve against stale offset points can stretch an attached cap into a different
             // tangency branch. Keep the start through the complete solve/refresh sequence.
+            let Some(&start) = points.first() else { continue };
             let Some(p) = trial.points.get_mut(start) else { continue };
             p.fixed = true;
             s.doc
@@ -280,19 +388,15 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     }
     s.settle_value_edit(solved)?;
     let (vals, _) = s.doc.param_values();
-    let values: serde_json::Map<String, Value> =
-        list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)))))).collect();
-    let mut out = json!({"changed": values, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored, "errors": failing(s)});
-    if !switched.is_empty() {
-        out["switched"] = json!(switched);
-    }
-    Ok(out)
+    let changed = list.iter().map(|(n, _)| (n.clone(), vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v))))).collect();
+    let body = ParamChangedBody::Many { changed, recomputed: s.model.last_recomputed, restored: s.model.last_restored, errors: failing(s), switched };
+    reply(cmd, ParamChanged { body, param_warnings: Vec::new() })
 }
 
 /// The configuration rules that switch a feature's suppression and read a parameter this edit
 /// changed (`Document::apply_suppression_rules`), applied before the design is rebuilt, so that
 /// one rebuild has them: `[{feature, name, suppressed}]` for each feature they switched.
-fn switch_by_rules(s: &mut Session, before: &std::collections::BTreeMap<String, expr::Value>) -> Vec<Value> {
+fn switch_by_rules(s: &mut Session, before: &std::collections::BTreeMap<String, expr::Value>) -> Vec<SwitchedFeature> {
     if s.doc.configs.rules.is_empty() {
         return Vec::new();
     }
@@ -301,12 +405,13 @@ fn switch_by_rules(s: &mut Session, before: &std::collections::BTreeMap<String, 
         .into_iter()
         .map(|(id, suppressed)| {
             let name = s.doc.features.iter().find(|f| f.id == id).map(|f| f.name.clone());
-            json!({"feature": id, "name": name, "suppressed": suppressed})
+            SwitchedFeature { feature: id, name, suppressed }
         })
         .collect()
 }
 
 fn list(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "parameters.list";
     let filter = match (bool_(p, "favorites"), str_(p, "filter")) {
         (Some(true), _) => "favorites".to_string(),
         (_, Some(f)) => f.to_ascii_lowercase(),
@@ -326,7 +431,9 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     // Favourites first; otherwise the table order (user, sketch, feature).
     rows.sort_by_key(|r| !r.favorite);
     let cycles = solidcraft_doc::cycles(&s.doc.all_param_exprs());
-    Ok(json!({"parameters": rows, "count": rows.len(), "cycles": cycles}))
+    let count = rows.len();
+    let parameters = rows.into_iter().map(ParameterRow::from).collect();
+    reply(cmd, ParamListResult { parameters, count, cycles: cycles.into_iter().collect(), param_warnings: Vec::new() })
 }
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
@@ -340,35 +447,46 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().set_favorite(&name, f)?;
     }
     let (vals, _) = s.doc.param_values();
-    if let Some(t) = s.doc.text_param(&name) {
-        return Ok(json!({"name": name, "unit": solidcraft_doc::text_params::TEXT_UNIT, "text": t.text, "value": null}));
-    }
-    Ok(
-        json!({"name": name, "unit": s.doc.param(&name).map(|x| x.unit.clone()), "value": vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))), "display_value": s.doc.param_display_value(&vals, &name).map(expr::round_reported)}),
-    )
+    let value = match s.doc.text_param(&name) {
+        Some(t) => AddedValue::Text { unit: solidcraft_doc::text_params::TEXT_UNIT.into(), text: t.text.clone(), value: None },
+        None => AddedValue::Number {
+            unit: s.doc.param(&name).map(|x| x.unit.clone()),
+            value: vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))),
+            display_value: s.doc.param_display_value(&vals, &name).map(expr::round_reported),
+        },
+    };
+    reply(cmd, ParamAdded { name, value, param_warnings: Vec::new() })
+}
+
+/// A reply as JSON: these commands build their replies from the types their output schemas
+/// describe, so the two can't drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.rename";
     let name = param_name(cmd, p)?.to_string();
     let new = str_(p, "new_name").ok_or_else(|| bad(cmd, "`new_name` is required"))?;
-    let n = s.doc_mut().rename_param(&name, new)?;
-    Ok(json!({"from": name, "to": new.trim(), "references_updated": n}))
+    let references_updated = s.doc_mut().rename_param(&name, new)?;
+    reply(cmd, ParamRenamed { from: name, to: new.trim().to_string(), references_updated, param_warnings: Vec::new() })
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
-    let name = param_name("parameters.delete", p)?.to_string();
+    let cmd = "parameters.delete";
+    let name = param_name(cmd, p)?.to_string();
     let solved = s.solved_sketches();
     s.doc_mut().remove_param(&name)?;
     s.settle_value_edit(&solved)?;
-    Ok(json!({"deleted": name}))
+    reply(cmd, ParamDeleted { deleted: name, param_warnings: Vec::new() })
 }
 
 fn favorite(s: &mut Session, p: &Value) -> Result<Value> {
-    let name = param_name("parameters.favorite", p)?.to_string();
-    let on = bool_(p, "favorite").unwrap_or(true);
-    s.doc_mut().set_favorite(&name, on)?;
-    Ok(json!({"name": name, "favorite": on}))
+    let cmd = "parameters.favorite";
+    let name = param_name(cmd, p)?.to_string();
+    let favorite = bool_(p, "favorite").unwrap_or(true);
+    s.doc_mut().set_favorite(&name, favorite)?;
+    reply(cmd, ParamFavorited { name, favorite, param_warnings: Vec::new() })
 }
 
 fn move_param(s: &mut Session, p: &Value) -> Result<Value> {
@@ -380,8 +498,8 @@ fn move_param(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad(cmd, "give one of `before` or `after`: another user parameter")),
     };
     s.doc_mut().move_user_param(&name, &target, after)?;
-    let order: Vec<&str> = s.doc.params.iter().filter(|q| !q.model).map(|q| q.name.as_str()).collect();
-    Ok(json!({"name": name, "order": order}))
+    let order = s.doc.params.iter().filter(|q| !q.model).map(|q| q.name.clone()).collect();
+    reply(cmd, ParamMoved { name, order, param_warnings: Vec::new() })
 }
 
 fn comment(s: &mut Session, p: &Value) -> Result<Value> {
@@ -389,7 +507,7 @@ fn comment(s: &mut Session, p: &Value) -> Result<Value> {
     let name = param_name(cmd, p)?.to_string();
     let c = str_(p, "comment").ok_or_else(|| bad(cmd, "`comment` must be text"))?;
     s.doc_mut().set_param_comment(&name, c)?;
-    Ok(json!({"name": name, "comment": c}))
+    reply(cmd, ParamCommented { name, comment: c.to_string(), param_warnings: Vec::new() })
 }
 
 fn users(s: &mut Session, p: &Value) -> Result<Value> {
@@ -399,17 +517,24 @@ fn users(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("no parameter `{name}`")));
     }
     let users = s.doc.param_users(name);
-    let drives: Vec<Value> =
-        s.doc.features_using_param(name).iter().filter_map(|id| s.doc.feature(*id)).map(|f| json!({"id": f.id, "name": f.name})).collect();
-    Ok(json!({"name": name, "users": users, "drives": drives}))
+    let users = users.into_iter().map(ParameterUser::from).collect();
+    let drives = s
+        .doc
+        .features_using_param(name)
+        .iter()
+        .filter_map(|id| s.doc.feature(*id))
+        .map(|f| DrivenFeature { id: f.id, name: f.name.clone() })
+        .collect();
+    reply(cmd, ParamUsersResult { name: name.to_string(), users, drives, param_warnings: Vec::new() })
 }
 
 fn graph(s: &mut Session, _p: &Value) -> Result<Value> {
+    let cmd = "parameters.graph";
     let (_, errs) = s.doc.param_values();
     let nodes: Vec<String> = s.doc.param_defs().into_iter().map(|d| d.name).collect();
     let edges: Vec<[String; 2]> = s.doc.param_graph().into_iter().map(|(a, b)| [a, b]).collect();
     let cycles = solidcraft_doc::cycles(&s.doc.all_param_exprs());
-    Ok(json!({"nodes": nodes, "edges": edges, "cycles": cycles, "errors": errs}))
+    reply(cmd, ParamGraphResult { nodes, edges, cycles: cycles.into_iter().collect(), errors: errs, param_warnings: Vec::new() })
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
@@ -438,7 +563,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(path) = path {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     }
-    Ok(json!({"format": format, "path": path, "text": text}))
+    reply(cmd, ParamExportResult { format, path: path.map(str::to_string), text, param_warnings: Vec::new() })
 }
 
 /// Largest parameter table we read from a file.
@@ -456,7 +581,7 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let solved = s.solved_sketches();
     let names = s.doc_mut().import_params(&text)?;
     s.settle_value_edit(&solved)?;
-    Ok(json!({"imported": names, "errors": failing(s)}))
+    reply(cmd, ParamImportResult { imported: names, errors: failing(s), param_warnings: Vec::new() })
 }
 
 fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
@@ -465,7 +590,8 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
     let unit = str_(p, "unit");
     // A text parameter's expression is its text.
     if unit.is_some_and(solidcraft_doc::text_params::is_text_unit) {
-        return Ok(json!({"ok": true, "kind": "text", "text": solidcraft_doc::text_params::unquote(&e), "references": []}));
+        let body = ExprEvaluatedBody::Text { ok: true, kind: "text".into(), text: solidcraft_doc::text_params::unquote(&e), references: Vec::new() };
+        return reply(cmd, ExprEvaluated { body, param_warnings: Vec::new() });
     }
     if let Some(u) = unit
         && expr::unit_info(u).is_none()
@@ -492,7 +618,7 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
     });
     // `name = expression` is worth its expression, and names what it would define (#4071).
     let defines = expr::definition(&e).map(|(n, _)| n);
-    let mut out = match r {
+    let body = match r {
         Ok((v, k)) => {
             let value = match k {
                 Kind::Length => expr::Value::length(v),
@@ -504,30 +630,43 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
                 (None, Kind::Angle) => v.to_degrees(),
                 (None, _) => v,
             };
-            json!({"ok": true, "value": expr::round_reported(v), "kind": k, "display_value": expr::round_reported(shown), "references": refs})
+            ExprEvaluatedBody::Value {
+                ok: true,
+                value: expr::round_reported(v),
+                kind: EvalKind::from(k),
+                display_value: expr::round_reported(shown),
+                references: refs,
+                defines: defines.map(str::to_string),
+            }
         }
-        Err(err) => json!({"ok": false, "error": err.to_string().trim_start_matches("expression: ").to_string(), "references": refs}),
+        Err(err) => ExprEvaluatedBody::Failed {
+            ok: false,
+            error: err.to_string().trim_start_matches("expression: ").to_string(),
+            references: refs,
+            defines: defines.map(str::to_string),
+        },
     };
-    if let Some(name) = defines {
-        out["defines"] = json!(name);
-    }
-    Ok(out)
+    reply(cmd, ExprEvaluated { body, param_warnings: Vec::new() })
 }
 
 fn complete(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "parameters.complete";
     let text = str_(p, "prefix").unwrap_or("");
     // The identifier being typed: trailing letters, digits and underscores.
     let word: String = text.chars().rev().take_while(|c| c.is_alphanumeric() || *c == '_').collect::<Vec<_>>().into_iter().rev().collect();
     let lower = word.to_ascii_lowercase();
     let starts = |n: &str| word.is_empty() || n.to_ascii_lowercase().starts_with(&lower);
     // A parameter matches wherever the word appears in its name (`side` finds
-    // `cab_side_thickness`, #2757); functions, constants and units match from the start.
-    let within = |n: &str| word.is_empty() || n.to_ascii_lowercase().contains(&lower);
-    let mut out: Vec<Value> = Vec::new();
+    // `cab_side_thickness`, #2757) or by the starts of its words in order (`toodia` finds
+    // `tooth_outward_flange_diameter`, #11978); functions, constants and units match from the
+    // start.
+    let contains = |n: &str| word.is_empty() || n.to_ascii_lowercase().contains(&lower);
+    let within = |n: &str| contains(n) || solidcraft_doc::name_words_match(n, &word);
+    let mut out: Vec<Completion> = Vec::new();
     let mut rows: Vec<solidcraft_doc::ParamRow> = s.doc.param_rows().into_iter().filter(|r| within(&r.name)).collect();
-    // Names that start with the word, then the rest; within each, favourites, then user
-    // parameters, then the others.
-    rows.sort_by_key(|r| (!starts(&r.name), !r.favorite, r.source != "user"));
+    // Names that start with the word, then names that contain it, then names matched only by
+    // the starts of their words; within each, favourites, then user parameters, then the others.
+    rows.sort_by_key(|r| (!starts(&r.name), !contains(&r.name), !r.favorite, r.source != "user"));
     for r in rows.into_iter().take(200) {
         // The completion shows the parameter's own unit, so it reads `display_value`.
         let v = r.display_value.or(r.value).map(|v| format!("{v:.4} {}", r.unit).trim().to_string()).unwrap_or_else(|| "error".into());
@@ -538,22 +677,22 @@ fn complete(s: &mut Session, p: &Value) -> Result<Value> {
         if !r.comment.is_empty() {
             detail.push_str(&format!(" — {}", r.comment));
         }
-        out.push(json!({"text": r.name, "kind": "parameter", "detail": detail}));
+        out.push(Completion { text: r.name, kind: CompletionKind::Parameter, detail });
     }
     for (f, sig) in expr::FUNCTIONS {
         if starts(f) {
-            out.push(json!({"text": format!("{f}("), "kind": "function", "detail": sig}));
+            out.push(Completion { text: format!("{f}("), kind: CompletionKind::Function, detail: sig.to_string() });
         }
     }
     if starts("pi") {
-        out.push(json!({"text": "pi", "kind": "constant", "detail": "3.14159…"}));
+        out.push(Completion { text: "pi".into(), kind: CompletionKind::Constant, detail: "3.14159…".into() });
     }
     for (u, k, _) in expr::UNITS {
         if !word.is_empty() && starts(u) {
-            out.push(json!({"text": u, "kind": "unit", "detail": k}));
+            out.push(Completion { text: u.to_string(), kind: CompletionKind::Unit, detail: EvalKind::from(*k).word().to_string() });
         }
     }
-    Ok(json!({"word": word, "suggestions": out}))
+    reply(cmd, ExprCompletions { word, suggestions: out, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

@@ -122,6 +122,27 @@ pub(crate) const ISO_COARSE: &[(f64, f64)] = &[
     (56.0, 5.5),
 ];
 
+/// The other ISO 261 coarse sizes (second and third choice), with their ISO 262 coarse pitches:
+/// known by name (M33 is M33x3.5) and offered in the Thread window, but not chosen for a face
+/// automatically, which still picks from [`ISO_COARSE`] (#4153, #11901).
+const ISO_COARSE_MORE: &[(f64, f64)] = &[
+    (1.0, 0.25),
+    (1.1, 0.25),
+    (1.2, 0.25),
+    (1.4, 0.3),
+    (1.8, 0.35),
+    (2.2, 0.45),
+    (3.5, 0.6),
+    (4.5, 0.75),
+    (7.0, 1.0),
+    (33.0, 3.5),
+    (39.0, 4.0),
+    (45.0, 4.5),
+    (52.0, 5.0),
+    (60.0, 5.5),
+    (64.0, 6.0),
+];
+
 /// The ISO 2902 diameter-pitch series' middle pitch per diameter, which ISO 2904 (trapezoidal)
 /// and DIN 513-2 (buttress, from 10 mm) share: (nominal diameter, pitch).
 const ISO_2902_MEDIUM: &[(f64, f64)] = &[
@@ -343,11 +364,15 @@ impl ThreadForm {
         }
     }
 
-    /// The standard sizes, (nominal diameter, pitch) in mm; none for ASME buttress (its pitch is
-    /// always given) and the square thread.
+    /// The standard sizes, (nominal diameter, pitch) in mm, by diameter; none for ASME buttress
+    /// (its pitch is always given) and the square thread.
     pub fn sizes(self) -> Vec<(f64, f64)> {
         match self {
-            ThreadForm::Metric => ISO_COARSE.to_vec(),
+            ThreadForm::Metric => {
+                let mut all: Vec<(f64, f64)> = ISO_COARSE.iter().chain(ISO_COARSE_MORE).copied().collect();
+                all.sort_by(|a, b| a.0.total_cmp(&b.0));
+                all
+            }
             ThreadForm::Trapezoidal => ISO_2902_MEDIUM.to_vec(),
             ThreadForm::Buttress => ISO_2902_MEDIUM.iter().copied().filter(|(d, _)| *d >= 10.0).collect(),
             ThreadForm::Acme => ACME_SIZES.iter().map(|(_, d, n)| (d * INCH, INCH / n)).collect(),
@@ -553,10 +578,35 @@ impl ThreadForm {
         }
     }
 
+    /// The sizes [`fit`](Self::fit) chooses from: [`sizes`](Self::sizes), less the metric sizes
+    /// that are only known by name ([`ISO_COARSE_MORE`]), so a face is sized as it was before
+    /// they were added.
+    fn fit_sizes(self) -> Vec<(f64, f64)> {
+        match self {
+            ThreadForm::Metric => ISO_COARSE.to_vec(),
+            _ => self.sizes(),
+        }
+    }
+
     /// The standard size a cylinder of this diameter takes: a shaft is the major diameter, a hole
-    /// the drill. None when no size is within 15% (or the form has no size table).
+    /// its nominal diameter, else the drill ([`fit_with`](Self::fit_with)). None when no size is within 15% (or the form has no size table).
     pub fn fit(self, diameter: f64, internal: bool) -> Option<(f64, f64)> {
-        self.sizes()
+        self.fit_with(diameter, internal, false)
+    }
+
+    /// [`fit`](Self::fit) as designs saved before the nominal rule had it (`old_rule`: a hole is
+    /// matched by the tap drill alone, so a 12 mm hole is M14's) or as it is now: a hole as wide
+    /// as a size's nominal diameter (within 1% and 0.03 mm) is that size, a 12 mm hole is M12,
+    /// and only a hole near no nominal diameter is matched by tap drill.
+    pub fn fit_with(self, diameter: f64, internal: bool, old_rule: bool) -> Option<(f64, f64)> {
+        let sizes = self.fit_sizes();
+        if internal && !old_rule {
+            let near = |n: f64| (n - diameter).abs() <= 0.01 * diameter + 0.03;
+            if let Some((n, p)) = sizes.iter().copied().find(|(n, _)| near(*n)) {
+                return Some((n, p));
+            }
+        }
+        sizes
             .into_iter()
             .map(|(n, p)| (n, p, if internal { self.drill(n, p) } else { n }))
             .min_by(|a, b| (a.2 - diameter).abs().total_cmp(&(b.2 - diameter).abs()))

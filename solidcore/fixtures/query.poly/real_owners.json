@@ -1,0 +1,118 @@
+{
+  "description": "Explicit real SmFace provenance. Bezier nets are non-rational single-span SmBSplineSurfaces on [0,1]^2, not analytic stand-ins. Native IsDegenerate decisions and independent raw/domain/mapped samples are compared. No geometry is supplied for legacy generated labels.",
+  "upstream_ref": "source/SMLib/src/SmPoly.cpp:21279-21419",
+  "cases": [
+    {
+      "name": "owner_plane_stretch",
+      "inputs": {
+        "brep": {"tol": 0.00001, "regions": [1], "vertices": [[0.25,0.5,0,0.00001],[0.5,0.5,0,0.00001]], "faces": [{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}], "orig_faces":[[0,1]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"plane","origin":[8,-2,1],"x":[1,0,0],"y":[0,1,0],"scale":[4,2],"domain":[0,0,1,1]}}],"calls":[[0,0.5],[0,null]]}
+      }
+    },
+    {
+      "name": "owner_plane_compress",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0.25,0.5,0,0.00001],[0.5,0.5,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,1]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"plane","origin":[8,-2,1],"x":[1,0,0],"y":[0,1,0],"scale":[0.25,2],"domain":[0,0,1,1]}}],"calls":[[0,0.03125],[0,0.125],[0,null]]}
+      }
+    },
+    {
+      "name": "owner_face_without_surface",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0.25,0.5,0,0.00001],[0.5,0.5,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,3]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":3,"surface":null}],"calls":[[0,0.125],[0,0.5],[0,null]]}
+      }
+    },
+    {
+      "name": "owner_invalid_back_pointers",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0.25,0.5,0,0.00001],[0.5,0.5,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,1]],"ok_back_ptrs":false},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"plane","origin":[8,-2,1],"x":[1,0,0],"y":[0,1,0],"scale":[0.25,2],"domain":[0,0,1,1]}}],"calls":[[0,0.125]]}
+      }
+    },
+    {
+      "name": "owner_xyz_not_uv",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0.25,0.5,2,0.00001],[0.5,0.5,2,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,1]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"plane","origin":[8,-2,1],"x":[1,0,0],"y":[0,1,0],"scale":[0.25,2],"domain":[0,0,1,1]}}],"calls":[[0,0.125]]}
+      }
+    },
+    {
+      "name": "owner_no_original_face",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0.25,0.5,0,0.00001],[0.5,0.5,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[],"calls":[[0,0.125]]}
+      }
+    },
+    {
+      "name": "owner_u_pole",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0,0,0,0.00001],[1,0,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,1]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"bezier","net":[[[0,0,2],[1,0,3]],[[0,0,2],[-1,0,3]],[[0,0,2],[1,0,3]]]}}],"calls":[[0,null],[0,0.001]]}
+      }
+    },
+    {
+      "name": "owner_u_seam_midpoint",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0,1,0,0.00001],[1,1,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,1]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"bezier","net":[[[0,0,2],[1,0,3]],[[0,0,2],[-1,0,3]],[[0,0,2],[1,0,3]]]}}],"calls":[[0,null],[0,0.001],[0,2]]}
+      }
+    },
+    {
+      "name": "owner_u_seam_reversed",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[1,1,0,0.00001],[0,1,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,2]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":2,"surface":{"kind":"bezier","net":[[[0,0,2],[1,0,3]],[[0,0,2],[-1,0,3]],[[0,0,2],[1,0,3]]]}}],"calls":[[0,null]]}
+      }
+    },
+    {
+      "name": "owner_u_seam_interior",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0,0.5,0,0.00001],[1,0.5,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,1]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"bezier","net":[[[0,0,2],[1,0,3]],[[0,0,2],[-1,0,3]],[[0,0,2],[1,0,3]]]}}],"calls":[[0,0.001]]}
+      }
+    },
+    {
+      "name": "owner_partial_pole",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0.25,0,0,0.00001],[0.75,0,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,1]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"bezier","net":[[[0,0,2],[1,0,3]],[[0,0,2],[-1,0,3]],[[0,0,2],[1,0,3]]]}}],"calls":[[0,null]]}
+      }
+    },
+    {
+      "name": "owner_v_pole",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0,0,0,0.00001],[0,1,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,3]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":3,"surface":{"kind":"bezier","net":[[[0,0,2],[0,0,2],[0,0,2]],[[1,0,3],[-1,0,3],[1,0,3]]]}}],"calls":[[0,null]]}
+      }
+    },
+    {
+      "name": "owner_v_seam_midpoint",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[1,0,0,0.00001],[1,1,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,3]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":3,"surface":{"kind":"bezier","net":[[[0,0,2],[0,0,2],[0,0,2]],[[1,0,3],[-1,0,3],[1,0,3]]]}}],"calls":[[0,null],[0,2]]}
+      }
+    },
+    {
+      "name": "owner_v_seam_reversed",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[1,1,0,0.00001],[1,0,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,2]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":2,"surface":{"kind":"bezier","net":[[[0,0,2],[0,0,2],[0,0,2]],[[1,0,3],[-1,0,3],[1,0,3]]]}}],"calls":[[0,null]]}
+      }
+    },
+    {
+      "name": "owner_shared_face_identity",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0.25,0.5,0,0.00001],[0.5,0.5,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]},{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[1,0]}]}],"orig_faces":[[0,1],[1,1]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"plane","origin":[8,-2,1],"x":[1,0,0],"y":[0,1,0],"scale":[0.25,2],"domain":[0,0,1,1]}}],"calls":[[0,0.125],[1,0.125]]}
+      }
+    },
+    {
+      "name": "owner_distinct_face_identity",
+      "inputs": {
+        "brep": {"tol":0.00001,"regions":[1],"vertices":[[0.25,0.5,0,0.00001],[0.5,0.5,0,0.00001]],"faces":[{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]},{"shell":0,"tol":0.00001,"loops":[{"mode":2,"edge_tol":0.00001,"verts":[0,1]}]}],"orig_faces":[[0,1],[1,3]],"ok_back_ptrs":true},
+        "op": {"kind":"owner_degenerate","owners":[{"label":1,"surface":{"kind":"plane","origin":[8,-2,1],"x":[1,0,0],"y":[0,1,0],"scale":[0.25,2],"domain":[0,0,1,1]}},{"label":3,"surface":{"kind":"plane","origin":[-4,8,2],"x":[1,0,0],"y":[0,1,0],"scale":[4,2],"domain":[0,0,1,1]}}],"calls":[[0,0.125],[1,0.125]]}
+      }
+    }
+  ]
+}

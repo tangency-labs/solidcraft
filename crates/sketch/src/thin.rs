@@ -12,9 +12,10 @@
 //! merged into regions. Walls that cross or meet (a honeycomb, a ring and a cross) come out as
 //! one region where they touch.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
 use crate::model::{CurveKind, Result, Sketch, SketchError};
 use crate::profiles::{find_profiles, merge_regions};
@@ -293,7 +294,9 @@ fn offset_seg(s: &Seg2, d: f64) -> Result<Vec<Seg2>> {
             // The centre is on the left of a counter-clockwise arc.
             let r = if sweep > 0.0 { radius - d } else { radius + d };
             if r <= 1e-6 {
-                return Err(bad(format!("the wall is thicker than the radius of an arc it follows ({radius:.3} mm)")));
+                // The wall reaches the arc's centre or past it: that side has no outline of its
+                // own, the band is the whole sector (its square ends already close it).
+                return Ok(Vec::new());
             }
             Ok(vec![Seg2::Arc { center, radius: r, start, sweep }])
         }
@@ -378,7 +381,7 @@ fn outline_sketch(boundary: &[Seg2]) -> Result<Sketch> {
             }
             Seg2::Cubic { p0, p1, p2, p3 } => {
                 let pts = [p0, p1, p2, p3].iter().map(|p| sk.add_point(*p, None)).collect::<Result<Vec<_>>>()?;
-                sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None }, None)?;
+                sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)?;
             }
             _ => return Err(bad("not supported yet: this kind of wall curve")),
         }

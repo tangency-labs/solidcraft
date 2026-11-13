@@ -27,7 +27,7 @@ fn dense_error(s: &Seg2, plane: &Plane, v: &PixelCurveView, path: &SampledPath) 
 
 #[test]
 fn exact_arcs_ellipses_rational_and_looping_control_hulls_bound_pixels() {
-    let mut degree7 = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+    let mut degree7 = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
     for (i, p) in degree7.iter_mut().enumerate() {
         *p = Vec2::new(i as f64 / 4.0 - 0.875, if i % 2 == 0 { -0.8 } else { 0.8 });
     }
@@ -139,7 +139,7 @@ fn reference_controls(segment: &Seg2, plane: &Plane) -> Option<(Vec<Vec<H>>, H)>
         Seg2::Line { a, b } => vec![vec![h(a, 1.0), h(b, 1.0)]],
         Seg2::Cubic { p0, p1, p2, p3 } => vec![vec![h(p0, 1.0), h(p1, 1.0), h(p2, 1.0), h(p3, 1.0)]],
         Seg2::Conic { a, apex, b, w } if w > 0.0 => vec![vec![h(a, 1.0), h(apex, w), h(b, 1.0)]],
-        Seg2::Bezier { n, p } if (1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) => {
+        Seg2::Bezier { n, p } if (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(&n) => {
             vec![p[..=n as usize].iter().map(|p| h(*p, 1.0)).collect()]
         }
         Seg2::Arc { center, radius, start, sweep }
@@ -323,7 +323,7 @@ fn same_path(a: &SampledPath, b: &SampledPath) -> bool {
 /// unclipped, with ample and with nearly spent budgets.
 #[test]
 fn samples_the_same_points_bit_for_bit_as_the_reference() {
-    let mut degree9 = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+    let mut degree9 = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
     for (i, p) in degree9.iter_mut().enumerate().take(10) {
         let t = i as f64 / 9.0;
         *p = Vec2::new(t * 2.0 - 1.0, ((i % 3) as f64 - 1.0) * 0.8);

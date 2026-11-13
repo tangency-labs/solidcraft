@@ -14,21 +14,22 @@ name = "solidcraft-web"
 path = "src/main.rs"
 
 [features]
-default = ["smlib", "profile"]
+default = ["profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
-# Link SMLib into the kernel (solidcraft-engine/smlib; needs scripts/fetch-smlib.sh
-# wasm32-unknown-unknown, or the sources and wasi-sdk in WASI_SDK_PATH, crates/smlib/build.rs). SMLib
-# is the only kernel, so without it the web app models nothing.
-smlib = ["solidcraft-engine/smlib"]
 # The profiler, compiled in so any build can say where its time goes (the Profile operations
 # preference, SOLIDCRAFT_PROFILE=1, diagnostics.profile); it records nothing until asked.
 profile = ["solidcraft-engine/profile"]
 
 [dependencies]
 solidcraft-engine = { workspace = true }
+solidcraft-control = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+# SolidCraft's look (icons, glyphs, built-in themes), installed at startup.
+solidcraft-look = { workspace = true }
+solidcraft-ui-text = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
+serde_json = { workspace = true }
 url = "2"
 percent-encoding = "2"
 
@@ -37,12 +38,12 @@ eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-serde_json = { workspace = true }
 web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "Location", "Navigator", "StorageManager",
-    "FileSystemHandle", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemWritableFileStream",
+    "FileSystemHandle", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemGetDirectoryOptions", "FileSystemWritableFileStream",
     "WritableStream", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "Storage", "StorageEvent",
     "IdbFactory", "IdbDatabase", "IdbObjectStore", "IdbOpenDbRequest", "IdbRequest", "IdbTransaction", "IdbTransactionMode",
     "Headers", "ReadableStream", "ReadableStreamDefaultReader",
     "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "FormData", "RequestInit", "MediaQueryList", "Gamepad", "Performance",
+    "PointerEvent", "Node", "VisibilityState",
 ] }

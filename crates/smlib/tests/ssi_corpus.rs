@@ -11,9 +11,9 @@
 //!   cargo test -p solidcraft-smlib --test ssi_corpus -- --ignored --nocapture
 //! ```
 //!
-//! With the `native` feature, [`smlib_global_intersect_at_1e_6`] runs every case through SMLib's
+//! [`solidcore_global_intersect_at_1e_6`] runs every case through solidcore's
 //! GlobalSurfaceIntersect (via `solidcraft_smlib::ssi`, as the corpus runner calls it) and checks
-//! exactly which cases pass.
+//! that every case SMLib passed passes.
 
 mod ssi_score;
 
@@ -363,11 +363,10 @@ fn parity_with_python_scorer() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-// ---- SMLib itself (feature `native`) ---------------------------------------------------------
+// ---- The kernel --------------------------------------------------------------------------------
 
 /// The cases SMLib's GlobalSurfaceIntersect passes at approximation tolerance 1e-6, as score.py
 /// grades the corpus runner's output. A fix that makes another case pass adds it here.
-#[cfg(feature = "native")]
 const GSI_1E6_PASS: &[&str] = &[
     "c1_cone_plane_ellipse",
     "c1_cone_plane_hyperbola",
@@ -483,10 +482,8 @@ const GSI_1E6_PASS: &[&str] = &[
 ];
 
 /// The corpus runner's samples per curve.
-#[cfg(feature = "native")]
 const RUNNER_SAMPLES: usize = 4001;
 
-#[cfg(feature = "native")]
 fn surface(s: &Value) -> Result<solidcraft_smlib::ssi::Surface, String> {
     use solidcraft_smlib::ssi::Surface;
     let f = |k: &str| s.get(k).map(ssi_score::geom::num).ok_or(format!("{k}: missing"));
@@ -535,14 +532,14 @@ fn surface(s: &Value) -> Result<solidcraft_smlib::ssi::Surface, String> {
 /// interval, each UV curve over its own, the surfaces at the UV samples), samples that cannot be
 /// evaluated dropped, empty UV arrays for a UV curve the method did not return, the runner's type
 /// names, and no isolated points (the runner only reports those in face mode).
-#[cfg(feature = "native")]
 fn runner_output(
     r: solidcraft_smlib::Result<solidcraft_smlib::ssi::SsiResult>,
     a: &solidcraft_smlib::ssi::Surface,
     b: &solidcraft_smlib::ssi::Surface,
     ms: f64,
 ) -> Outcome {
-    use solidcraft_geom::brep::{Curve2, eval::CurveEval};
+    use solidcore_record::brep::Curve2;
+    use solidcraft_geom::brep::eval::CurveEval;
     use solidcraft_smlib::ssi::{CurveType, Surface};
     let r = match r {
         Ok(r) => r,
@@ -555,7 +552,7 @@ fn runner_output(
     let on = |c: &Option<Curve2>, s: &Surface| -> (Vec<[f64; 2]>, Vec<V3>) {
         let Some(c) = c else { return (Vec::new(), Vec::new()) };
         let Some(ivl) = c.interval() else { return (Vec::new(), Vec::new()) };
-        params(ivl).filter_map(|t| c.eval(t)).filter_map(|q| s.evaluate(q[0], q[1]).ok().map(|p| (q, p))).unzip()
+        params(ivl).filter_map(|t| solidcore_ops::pcurve::eval(c, t)).filter_map(|q| s.evaluate(q[0], q[1]).ok().map(|p| (q, p))).unzip()
     };
     let mut curves = Vec::new();
     for c in r.curves {
@@ -568,7 +565,6 @@ fn runner_output(
             CurveType::Coincident => "COINCIDENT",
             CurveType::NearTangent => "NEAR_TANGENT",
             CurveType::RegionBoundary => "REGION_BOUNDARY",
-            CurveType::Other(_) => "?",
         };
         let xyz = match CurveEval::new(&c.curve) {
             Ok(e) => params(c.interval).filter_map(|t| e.point(t)).map(|p| [p.x, p.y, p.z]).collect(),
@@ -581,15 +577,13 @@ fn runner_output(
     Outcome::Ran(EngineResult { status: ssi_score::SM_SUCCESS, status_name: None, time_ms: ms, curves, points: Vec::new() })
 }
 
-/// Every case through SMLib's GlobalSurfaceIntersect at approximation tolerance 1e-6, scored as
-/// score.py scores the corpus runner's `gsi 1e-6` run: exactly [`GSI_1E6_PASS`] pass.
-#[cfg(feature = "native")]
-#[test]
-fn smlib_global_intersect_at_1e_6() {
+/// Every case through GlobalSurfaceIntersect at approximation tolerance 1e-6, scored as score.py
+/// scores the corpus runner's `gsi 1e-6` run. Prints each case that does not pass.
+fn global_intersect_scores() -> Vec<Score> {
     use solidcraft_smlib::ssi::{Method, intersect};
     let t0 = std::time::Instant::now();
     let cases = all_cases();
-    // SMLib serialises its calls, so the cases run one after another; only the scoring is parallel.
+    // The kernel serialises its calls, so the cases run one after another; only the scoring is parallel.
     let outcomes: Vec<Outcome> = cases
         .iter()
         .map(|case| {
@@ -601,23 +595,6 @@ fn smlib_global_intersect_at_1e_6() {
         })
         .collect();
     let ran = t0.elapsed();
-    // Status names for the flags, from the SMLib sources the build used, as score.py has them.
-    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let src = std::env::var_os("SOLIDCRAFT_SMLIB_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| {
-        let rev = std::fs::read_to_string(manifest.join("SMLIB_REV")).unwrap_or_default();
-        manifest.join("../../target").join(format!("smlib-{}", rev.trim().get(..12).unwrap_or_default()))
-    });
-    let names = std::fs::read_to_string(src.join("source/SMLib/inc/SmMessages.h")).map(|h| ssi_score::status_names(&h)).unwrap_or_default();
-    let outcomes: Vec<Outcome> = outcomes
-        .into_iter()
-        .map(|o| match o {
-            Outcome::Ran(mut r) if r.status_name.is_none() => {
-                r.status_name = names.get(&r.status).cloned();
-                Outcome::Ran(r)
-            }
-            o => o,
-        })
-        .collect();
     let pairs: Vec<(&Case, &Outcome)> = cases.iter().zip(&outcomes).collect();
     let scores = par_map(&pairs, |(case, out)| score_case(case, out, Tolerances::at(1e-6)));
 
@@ -626,7 +603,7 @@ fn smlib_global_intersect_at_1e_6() {
         by_verdict.entry(s.verdict).or_default().push(&s.id);
     }
     println!(
-        "SMLib GlobalSurfaceIntersect, approx tol 1e-6 ({} cases, SMLib {:.1} s, total {:.1} s)",
+        "GlobalSurfaceIntersect, approx tol 1e-6 ({} cases, kernel {:.1} s, total {:.1} s)",
         scores.len(),
         ran.as_secs_f64(),
         t0.elapsed().as_secs_f64()
@@ -637,7 +614,16 @@ fn smlib_global_intersect_at_1e_6() {
     for s in scores.iter().filter(|s| s.verdict != Verdict::Pass) {
         println!("  {:<40} {:<15} {}", s.id, s.verdict.as_str(), s.flags.join("; "));
     }
+    scores
+}
 
+/// solidcore passes exactly the cases [`GSI_1E6_PASS`] lists: a case that starts passing is
+/// added there, one that stops is a regression. The self-crossing curves (Viviani's figure eight,
+/// the crossing loops) are split at their crossings since solidcore's
+/// `ssi_split_curves_at_singular_points` (tangency-labs/solidcore#2110).
+#[test]
+fn solidcore_global_intersect_at_1e_6() {
+    let scores = global_intersect_scores();
     let passed: std::collections::BTreeSet<&str> = scores.iter().filter(|s| s.verdict == Verdict::Pass).map(|s| s.id.as_str()).collect();
     let listed: std::collections::BTreeSet<&str> = GSI_1E6_PASS.iter().copied().collect();
     assert_eq!(listed.len(), GSI_1E6_PASS.len(), "GSI_1E6_PASS lists a case twice");

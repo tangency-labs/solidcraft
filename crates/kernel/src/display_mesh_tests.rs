@@ -1,10 +1,12 @@
 //! The display mesh of a large body with small radii: bends and holes look round, the mesh
 //! stays closed, and the cost stays bounded.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use solidcraft_geom::{Loop2, Mesh, Plane, Region2, Seg2, UnitVec3, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Mesh, UnitVec3};
 
 use super::{Body, DISPLAY_ANGLE};
 use crate::{FaceSurface, extrude, face_surface};
@@ -281,7 +283,7 @@ fn a_face_crowded_with_holes_gets_a_coarser_angle_and_bounded_work() {
     let coarse = b.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
     let round = b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap();
     let boundary = |m: &Mesh, z: f64| m.edges.iter().filter(|e| e.iter().all(|p| (p.z - z).abs() < 1e-6)).map(|e| e.len() - 1).sum::<usize>();
-    let budget = crate::tess::size::MAX_ANGLE_BOUNDARY;
+    let budget = solidcore_tess::MAX_ANGLE_BOUNDARY;
     for z in [0.0, 2.0] {
         // At the chord tolerance alone each rim is divided only as far as a face can be bounded
         // by it (two segments, a line, are divided again).

@@ -2,15 +2,21 @@
 # (scripts/ci/kernel_rig_plan.py). One git pathspec glob a line, relative to the repository root:
 # `*` stays within a folder, `**` crosses folders. Each area's own sources are in <area>/PATHS.
 #
-# SMLib: the bindings, the schema 4 record bridge and the pinned revision (SMLIB_REV,
-# SMLIB_PREBUILT), and the script that fetches it.
+# The kernel: solidcore's wrapper and the schema 4 record bridge.
 crates/smlib/**
-scripts/fetch-smlib.sh
+# The kernel itself, vendored in this repository (SolidCore): a change to its source reruns every
+# area, as a solidcore pin change did before it was vendored (#13153).
+solidcore/**
+# SolidCraft's mesher and its plan evaluator, moved into it (RFC 0003, item 1.1; within the line
+# above, named so the move is visible here).
+solidcore/crates/solidcore-tess/src/mesher/**
+solidcore/crates/solidcore/src/eval/plan.rs
+solidcore/crates/solidcore/src/eval/plan/**
 # The geometry every body is made of: B-rep record, curves, surfaces, meshes.
 crates/geom/**
 # The kernel's core, which every case goes through: bodies, extrude/revolve/primitives, booleans
-# and placements, the planar prisms, the SMLib sweeps and booleans, history and provenance, the
-# native bridge to SMLib, tessellation, and what the grader measures (measure, validity, counts).
+# and placements, the planar prisms, the sweeps and booleans, history and provenance, the
+# native bridge to the kernel, tessellation, and what the grader measures (measure, validity, counts).
 crates/kernel/Cargo.toml
 crates/kernel/src/body.rs
 crates/kernel/src/boolean_record.rs
@@ -37,7 +43,6 @@ crates/kernel/src/record.rs
 crates/kernel/src/shell_groups.rs
 crates/kernel/src/smlib_boolean.rs
 crates/kernel/src/smlib_sweeps.rs
-crates/kernel/src/tess/**
 crates/kernel/src/topo.rs
 crates/kernel/src/validity.rs
 crates/kernel/src/watch.rs

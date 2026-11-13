@@ -1,9 +1,10 @@
 //! Original fixed direct-light studio used by opaque product preview consumers.
 //! Relative linear radiance, not a calibrated illuminance or an HDRI environment.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
-use crate::surface::{OpaqueSurface, SurfaceError, unit_direction};
+use solidcraft_viewport::surface::{OpaqueSurface, SurfaceError, unit_direction};
 
 /// Fixed, neutral directional lights in the project's world frame (Z up).
 /// Directions point towards each light and are analytically unit length.

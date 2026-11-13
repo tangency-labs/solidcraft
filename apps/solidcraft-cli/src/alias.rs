@@ -11,7 +11,7 @@ use std::process::{Command, ExitCode};
 const TARGET: &str = "solidcraft-cli";
 
 fn main() -> ExitCode {
-    eprintln!("solvecraft-cli is deprecated and will be removed in a later release: use solidcraft-cli");
+    solidcraft_engine::note!("solvecraft-cli is deprecated and will be removed in a later release: use solidcraft-cli");
     let sibling = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join(format!("{TARGET}{}", std::env::consts::EXE_SUFFIX))))
@@ -23,7 +23,7 @@ fn main() -> ExitCode {
             None => ExitCode::FAILURE,
         },
         Err(e) => {
-            eprintln!("solvecraft-cli: could not run {}: {e}", program.to_string_lossy());
+            solidcraft_engine::note!("solvecraft-cli: could not run {}: {e}", program.to_string_lossy());
             ExitCode::FAILURE
         }
     }

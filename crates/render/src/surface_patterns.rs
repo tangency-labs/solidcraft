@@ -1,11 +1,12 @@
 //! Original periodic preview fields in an explicit world-space millimetre frame.
 //! Only roughness and shading normals change; geometry and visibility do not.
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use crate::job::{ErrorCode, JobError, Result};
-use crate::surface::{MIN_ROUGHNESS, OpaqueSurface, unit_direction};
+use solidcraft_viewport::surface::{MIN_ROUGHNESS, OpaqueSurface, unit_direction};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -202,7 +203,8 @@ impl PreparedEffect {
                 (surface.roughness() + self.roughness * field).clamp(MIN_ROUGHNESS, 1.0),
                 surface.dielectric_ior(),
             )
-            .map_err(|_| invalid("invalid procedural surface"))?;
+            .map_err(|_| invalid("invalid procedural surface"))?
+            .with_metal_energy_compensation(surface.metal_energy_compensation());
             // GPU2 shares this surface type. Changing the substrate roughness
             // must retain an already captured coat for direct-light evaluation.
             surface.clear_coat().map_or(changed, |coat| changed.with_clear_coat(coat))

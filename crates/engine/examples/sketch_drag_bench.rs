@@ -2,8 +2,8 @@
 use std::{error::Error, io::Write, path::PathBuf, sync::Arc, time::Instant};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::Session;
-use solidcraft_geom::Vec2;
 use solidcraft_sketch::{Analysis, ConstraintKind, Hold, Sketch, profiling::capture, solve_with};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;

@@ -3,8 +3,8 @@
 
 use serde_json::json;
 
-use solidcraft_engine::geom::Vec3;
-use solidcraft_engine::render::Camera;
+use solidcore_record::Vec3;
+use solidcraft_viewport::Camera;
 
 use crate::scenario::Harness;
 

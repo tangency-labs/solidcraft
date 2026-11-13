@@ -13,10 +13,11 @@
 //! case that passes fails the test (take it off the list), and so does an unlisted one that fails.
 //! `HOLE_MATRIX_BLESS=1 cargo test -p solidcraft-engine hole_matrix` rewrites the list.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 
@@ -176,6 +177,15 @@ fn radial(rr: f64, r: f64, depth: f64) -> f64 {
         sum += w * ((rr * rr - y * y).sqrt() - (rr - depth)) * h;
     }
     sum
+}
+
+/// The bridge layers of a counterbore of radius `rc` over a hole of radius r: one 0.2 mm layer of
+/// the slot (out to the counterbore wall) and one of the square, both 0.02 mm wider than the
+/// hole, each less the bore's disc.
+fn bridges(rc: f64, r: f64) -> f64 {
+    let q = r + 0.01;
+    let slot = 2.0 * (q * (rc * rc - q * q).sqrt() + rc * rc * (q / rc).asin());
+    0.2 * (slot - PI * r * r) + 0.2 * (4.0 * q * q - PI * r * r)
 }
 
 // ---- the cases -------------------------------------------------------------------------------
@@ -411,6 +421,33 @@ fn cases() -> Vec<Case> {
         )
         .faces(3),
         Case::new(
+            "type/counterbore-bridged/blind",
+            block(),
+            hole(json!({"position": [20, 15, 20], "depth": 10, "type": "counterbore", "cb_diameter": 12, "cb_depth": 3, "bridge": "0.2 mm"})),
+            cyl(6.0, 3.0) + cyl(r, 7.0) + bridges(6.0, r),
+            r,
+            vec![spot([20.0, 15.0, 20.0], DOWN, 10.0, Some(10.0))],
+        )
+        .faces(12),
+        Case::new(
+            "type/counterbore-bridged/blind-drill-point",
+            block(),
+            hole(json!({"position": [20, 15, 20], "depth": 10, "type": "counterbore", "cb_diameter": 12, "cb_depth": 3, "tip_angle": "118 deg", "bridge": "0.2 mm"})),
+            cyl(6.0, 3.0) + cyl(r, 7.0) + tip(r) + bridges(6.0, r),
+            r,
+            vec![spot([20.0, 15.0, 20.0], DOWN, 10.0, Some(10.0 + r / 59f64.to_radians().tan()))],
+        )
+        .faces(12),
+        Case::new(
+            "type/counterbore-bridged/through",
+            block(),
+            hole(json!({"position": [20, 15, 20], "type": "counterbore", "cb_diameter": 12, "cb_depth": 3, "bridge": "0.2 mm"})),
+            cyl(6.0, 3.0) + cyl(r, 17.0) + bridges(6.0, r),
+            r,
+            vec![spot([20.0, 15.0, 20.0], DOWN, 20.0, None)],
+        )
+        .faces(11),
+        Case::new(
             "type/countersink/blind",
             block(),
             hole(json!({"position": [20, 15, 20], "depth": 10, "type": "countersink", "cs_diameter": 12})),
@@ -446,6 +483,16 @@ fn cases() -> Vec<Case> {
             vec![spot([20.0, 15.0, 20.0], DOWN, 20.0, None)],
         )
         .faces(1),
+        // A counterbore for the screw's head: ISO 4762 M4 (dk 7, k 4) plus the 0.5 mm gap.
+        Case::new(
+            "type/counterbore-head-m4/through",
+            block(),
+            json!({"position": [20, 15, 20], "clearance": "M4", "head": "ISO 4762", "name": "H"}),
+            cyl(4.0, 4.5) + cyl(2.25, 15.5),
+            2.25,
+            vec![spot([20.0, 15.0, 20.0], DOWN, 20.0, None)],
+        )
+        .faces(3),
         // Extents: to an object.
         Case::new(
             "extent/to-face/bottom",
@@ -891,4 +938,246 @@ fn a_hole_on_a_cones_side_drills_along_its_normal() {
     let solidcraft_doc::FeatureKind::Hole { direction, .. } = &f.kind else { panic!("not a hole") };
     let d = direction.0;
     assert!((d.x + 0.8).abs() < 1e-6 && d.y.abs() < 1e-6 && (d.z + 0.6).abs() < 1e-6, "{d:?}");
+}
+
+#[test]
+fn bridged_counterbore_layers_along_x_save_and_refuse_bad_values() {
+    let block = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        s
+    };
+    let mut s = block();
+    let mut p = json!({"position":[20,15,20],"diameter":6,"type":"counterbore","cb_diameter":12,"cb_depth":3,"bridge":"0.2 mm"});
+    run(&mut s, "solid.hole", p.clone()).unwrap();
+    // Layer 1 (z 16.8 to 17): the slot runs along X out to the counterbore wall, beside it is solid.
+    assert!(!solid_at(&s, Vec3::new(25.5, 15.0, 16.9)), "the slot reaches the counterbore wall along X");
+    assert!(solid_at(&s, Vec3::new(20.0, 19.5, 16.9)), "beside the slot the layer bridges the counterbore");
+    // Layer 2 (z 16.6 to 16.8): the square's corners are open, the slot's ends are bridged.
+    assert!(!solid_at(&s, Vec3::new(22.9, 17.9, 16.7)), "the square's corner is open");
+    assert!(solid_at(&s, Vec3::new(25.5, 15.0, 16.7)), "past the square the second layer is solid");
+    // Below both layers the bore is round again.
+    assert!(solid_at(&s, Vec3::new(22.9, 17.9, 16.5)), "the bore is round below the layers");
+    let saved = s.doc.to_json();
+    assert!(saved.contains("\"bridge\""), "the design saves the layer");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert!(!solid_at(&reopened, Vec3::new(22.9, 17.9, 16.7)), "the layers survive reopening");
+    // A thicker layer moves the square down with it.
+    let mut thick = block();
+    p["bridge"] = json!("0.5 mm");
+    run(&mut thick, "solid.hole", p.clone()).unwrap();
+    assert!(!solid_at(&thick, Vec3::new(22.9, 17.9, 16.2)), "a 0.5 mm square spans z 16 to 16.5");
+    assert!(solid_at(&thick, Vec3::new(22.9, 17.9, 15.9)));
+    // Left out, nothing is saved and the counterbore is plain.
+    let mut plain = block();
+    p.as_object_mut().unwrap().remove("bridge");
+    run(&mut plain, "solid.hole", p.clone()).unwrap();
+    // The key, quoted: `format_pending` names `bridged-counterbore` in every design.
+    assert!(!plain.doc.to_json().contains("\"bridge\""));
+    assert!(solid_at(&plain, Vec3::new(22.9, 17.9, 16.7)));
+    // Refused: a layer that is not a positive length, layers that don't fit in the hole, and a
+    // bridge on a hole that has no counterbore.
+    let refusal = |p: &Value| {
+        let mut s = block();
+        let refused = s.execute("solid.hole", p).err().map(|e| e.to_string()).unwrap_or_default();
+        let failed = s.doc.features.last().and_then(|f| s.model.result(f.id)).and_then(|r| r.error.clone()).unwrap_or_default();
+        format!("{refused}{failed}")
+    };
+    for bad in [json!("0 mm"), json!("-0.2 mm"), json!("30 deg")] {
+        p["bridge"] = bad.clone();
+        assert!(!refusal(&p).is_empty(), "bridge {bad} is refused");
+    }
+    p["bridge"] = json!("0.2 mm");
+    p["depth"] = json!(3.3);
+    assert!(refusal(&p).contains("must fit in the hole"), "too shallow: {}", refusal(&p));
+    p.as_object_mut().unwrap().remove("depth");
+    // Through all, the layers must end inside the 20 mm block, short of its far face.
+    p["cb_depth"] = json!(19.7);
+    assert!(refusal(&p).contains("must fit in the hole"), "past the exit face: {}", refusal(&p));
+    p["cb_depth"] = json!(19.5);
+    assert_eq!(refusal(&p), "", "0.1 mm short of the exit face fits");
+    p["cb_depth"] = json!(3);
+    // A counterbore too narrow for the slot's clearance (a plain one that wide is fine).
+    p["cb_diameter"] = json!(6.02);
+    assert!(refusal(&p).contains("wider than the hole"), "too narrow: {}", refusal(&p));
+    p["cb_diameter"] = json!(12);
+    // Given but not a length expression: refused, never a plain counterbore. Null leaves it out.
+    for bad in [json!(true), json!([]), json!("")] {
+        p["bridge"] = bad.clone();
+        assert!(refusal(&p).contains("`bridge`"), "bridge {bad}: {}", refusal(&p));
+    }
+    p["bridge"] = Value::Null;
+    assert_eq!(refusal(&p), "", "a null bridge is left out");
+    p["bridge"] = json!("0.2 mm");
+    p["type"] = json!("countersink");
+    p["cs_diameter"] = json!(12);
+    assert!(refusal(&p).contains("counterbore"), "countersink: {}", refusal(&p));
+}
+
+/// A refused hole names the value at fault, not a check it passed (#9625): an unknown fit is not
+/// an unknown bolt size, a countersink angle out of range is not a countersink too narrow, and a
+/// diameter too large is not a missing one.
+#[test]
+fn a_refused_hole_names_the_value_at_fault() {
+    let refused = |extra: Value| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5]})).unwrap();
+        let mut p = json!({"position": [0, 0, 10]});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let before = measure(&mut s).unwrap();
+        let e = s.execute("solid.hole", &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("{p} was accepted"));
+        assert_eq!(measure(&mut s).unwrap(), before, "{p} changed the part");
+        e
+    };
+    let e = refused(json!({"clearance": "M6", "fit": "tight"}));
+    assert!(e.contains("`fit` must be close, normal or loose, not `tight`") && !e.contains("M1.6"), "{e}");
+    let e = refused(json!({"clearance": "M100"}));
+    assert!(e.contains("no clearance hole for `M100`") && e.contains("M1.6 to M64"), "{e}");
+    // A counterbore for a screw's head: the standard, the size in it, the screw size, the type
+    // and the gap are each named when they are at fault.
+    let e = refused(json!({"clearance": "M4", "head": "DIN 912"}));
+    assert!(e.contains("no head standard `DIN 912`") && e.contains("ISO 4762") && e.contains("ISO 7380-1"), "{e}");
+    let e = refused(json!({"clearance": "M2.5", "head": "ISO 7380-1"}));
+    assert!(e.contains("no ISO 7380-1 head for `M2.5`") && e.contains("M3 to M16"), "{e}");
+    let e = refused(json!({"diameter": 4.5, "head": "ISO 4762"}));
+    assert!(e.contains("`head` needs `clearance`"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "type": "countersink", "cs_diameter": 9}));
+    assert!(e.contains("`head` needs `type: counterbore`"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "head_gap": -1}));
+    assert!(e.contains("`head_gap` must be 0 to 7 mm") && e.contains("not -1"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "head_gap": "width"}));
+    assert!(e.contains("head_gap:"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "cb_depth": true}));
+    assert!(e.contains("`cb_depth` must be a number or an expression"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": 4762}));
+    assert!(e.contains("`head` must be a text"), "{e}");
+    for angle in [json!(0), json!(200), json!(-90), json!(0.1)] {
+        let e = refused(json!({"diameter": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": angle}));
+        assert!(e.contains("the countersink angle must be more than 0.115° and less than 180°") && !e.contains("wider"), "{angle}: {e}");
+    }
+    // 0.1° is refused by the floor the message names, and gives the angle as typed.
+    let e = refused(json!({"diameter": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": 0.1}));
+    assert!(e.contains("not 0.1°"), "{e}");
+    // An angle that is no usable number is refused, not replaced by the 90° default.
+    let e = refused(json!({"diameter": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": 1e9}));
+    assert!(e.contains("`cs_angle` must be a number between -1e9 and 1e9"), "{e}");
+    // A blank angle field still means the 90° default, as an omitted one does.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5]})).unwrap();
+    let blank = json!({"position": [0, 0, 10], "diameter": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": " "});
+    s.execute("solid.hole", &blank).unwrap_or_else(|e| panic!("a blank cs_angle was refused: {e}"));
+    let e = refused(json!({"diameter": 6, "type": "countersink", "cs_diameter": 3}));
+    assert!(e.contains("the countersink must be wider than the hole") && !e.contains("angle"), "{e}");
+    for d in [json!(1e9), json!(-2e12)] {
+        let e = refused(json!({"diameter": d}));
+        assert!(e.contains("`diameter` must be a number between -1e9 and 1e9") && !e.contains("needs"), "{d}: {e}");
+    }
+    let e = refused(json!({}));
+    assert!(e.contains("needs `diameter`, `thread` (a tapped hole) or `clearance` (a bolt size)"), "{e}");
+}
+
+// ---- the run-on above the entry face (#10695) ----------------------------------------------
+
+fn body_volume(s: &mut Session, name: &str) -> f64 {
+    run(s, "inspect.measure", json!({"bodies": [name]})).ok().and_then(|m| m["bodies"][0]["volume_mm3"].as_f64()).unwrap_or(f64::NAN)
+}
+
+/// #10695: a counterbored hole down into a 500 mm plate leaves a bracket floating 3 mm above
+/// the plate whole. The tool's run-on above the entry face (1 % of the plate's size, 7 mm here)
+/// used to pocket the bracket from below.
+#[test]
+fn a_hole_leaves_a_body_floating_above_its_face_whole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 500, "width": 500, "height": 10, "center": [0, 0, 5], "body_name": "Plate"})).unwrap();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "center": [0, 0, 15.5], "operation": "new", "body_name": "Bracket"}))
+        .unwrap();
+    let hole =
+        json!({"position": [0, 0, 10], "direction": [0, 0, -1], "diameter": 6, "depth": 5, "type": "counterbore", "cb_diameter": 11, "cb_depth": 2});
+    run(&mut s, "solid.hole", hole).unwrap();
+    let bracket = body_volume(&mut s, "Bracket");
+    assert!((bracket - 8000.0).abs() < 1e-3, "bracket {bracket}, want 8000");
+    assert!(solid_at(&s, Vec3::new(0.0, 0.0, 13.2)), "the bracket's underside over the hole is cut");
+    let plate = body_volume(&mut s, "Plate");
+    let want = 2_500_000.0 - cyl(5.5, 2.0) - cyl(3.0, 3.0);
+    assert!(close(plate, want, 2_500_000.0), "plate {plate}, want {want}");
+}
+
+/// #10695: a hole down into a plate from the face a separate block stands on leaves the block
+/// whole and drills the plate.
+#[test]
+fn a_hole_from_under_a_stacked_body_leaves_it_whole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 200, "width": 200, "height": 10, "center": [0, 0, 5], "body_name": "Plate"})).unwrap();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "center": [0, 0, 15], "operation": "new", "body_name": "Block"}))
+        .unwrap();
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 10], "direction": [0, 0, -1], "diameter": 6, "depth": 5})).unwrap();
+    let block = body_volume(&mut s, "Block");
+    assert!((block - 4000.0).abs() < 1e-3, "block {block}, want 4000");
+    assert!(solid_at(&s, Vec3::new(0.0, 0.0, 10.5)), "the block's foot over the hole is cut");
+    assert!(!solid_at(&s, Vec3::new(0.0, 0.0, 7.5)), "the plate is not drilled");
+    let plate = body_volume(&mut s, "Plate");
+    let want = 400_000.0 - cyl(3.0, 5.0);
+    assert!(close(plate, want, 400_000.0), "plate {plate}, want {want}");
+}
+
+/// #10695: a hole on the lower step of an L-shaped block, its circle reaching 1 mm under the
+/// upper step's wall, leaves the wall whole: only the hole below the step's face is taken.
+#[test]
+fn a_hole_beside_a_wall_of_its_own_body_leaves_the_wall_whole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "Block"})).unwrap();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 40, "height": 10, "center": [10, 0, 15], "operation": "join", "targets": ["Block"]}))
+        .unwrap();
+    run(&mut s, "solid.hole", json!({"position": [-2, 0, 10], "direction": [0, 0, -1], "diameter": 6, "depth": 5})).unwrap();
+    assert!(solid_at(&s, Vec3::new(0.5, 0.0, 10.3)), "the wall's foot over the hole is notched");
+    assert!(!solid_at(&s, Vec3::new(0.5, 0.0, 9.7)), "the hole under the wall's foot is not drilled");
+    let (got, _) = measure(&mut s).unwrap();
+    let want = 24_000.0 - cyl(3.0, 5.0);
+    assert!(close(got, want, 24_000.0), "volume {got}, want {want}");
+}
+
+/// #10695: a counterbore wider than the bore it is drilled from the floor of stops at that floor:
+/// the bore's wall above it stays as it was.
+#[test]
+fn a_counterbore_on_a_bore_floor_stops_at_the_floor() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "center": [0, 0, 10], "body_name": "Block"})).unwrap();
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 20], "diameter": 5, "depth": 10})).unwrap();
+    let hole =
+        json!({"position": [0, 0, 10], "direction": [0, 0, -1], "diameter": 4, "depth": 5, "type": "counterbore", "cb_diameter": 8, "cb_depth": 2});
+    run(&mut s, "solid.hole", hole).unwrap();
+    assert!(solid_at(&s, Vec3::new(3.0, 0.0, 10.3)), "the bore's wall above the floor is cut");
+    assert!(!solid_at(&s, Vec3::new(3.0, 0.0, 9.7)), "the counterbore is not cut");
+    let (got, _) = measure(&mut s).unwrap();
+    let want = 32_000.0 - cyl(2.5, 10.0) - cyl(4.0, 2.0) - cyl(2.0, 3.0);
+    assert!(close(got, want, 32_000.0), "volume {got}, want {want}");
+}
+
+/// #10695: a countersink wider than the bore it is drilled from the floor of has its rim on that
+/// floor: the bore's wall above it is not stepped out.
+#[test]
+fn a_countersink_on_a_bore_floor_keeps_its_rim_on_the_floor() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    run(&mut s, "solid.hole", json!({"position": [5, 5, 10], "diameter": 5, "depth": 5})).unwrap();
+    run(&mut s, "solid.hole", json!({"position": [5, 5, 5], "diameter": 2, "depth": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": 90}))
+        .unwrap();
+    assert!(solid_at(&s, Vec3::new(7.9, 5.0, 5.05)), "the bore's wall above the floor is cut");
+    assert!(!solid_at(&s, Vec3::new(7.4, 5.0, 4.95)), "the countersink's rim is not on the floor");
+}
+
+/// #10695: on a round bar the counterbore's floor is measured from its rim's lowest point, so
+/// the hole's entry point lies just inside the bar: the bar's rise over it is the face being
+/// drilled, cut as before, not material standing over the face.
+#[test]
+fn a_counterbore_on_a_round_bar_drills_its_whole_rim() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 100, "height": 40, "name": "Bar"})).unwrap();
+    let hole = json!({"position": [100, 0, 20], "diameter": 3, "depth": 4, "type": "counterbore", "cb_diameter": 5, "cb_depth": 1});
+    run(&mut s, "solid.hole", hole).unwrap();
+    // On the axis, under the bar's surface (x 100) and over the rim's lowest point (x 99.969).
+    assert!(!solid_at(&s, Vec3::new(99.985, 0.0, 20.0)), "the bar's cap over the counterbore is left");
+    assert!(!solid_at(&s, Vec3::new(99.95, 0.0, 20.0)), "the counterbore is not cut");
+    // Beside the counterbore (radius 2.5), under the surface (x 99.964 at y 2.7).
+    assert!(solid_at(&s, Vec3::new(99.95, 2.7, 20.0)), "the bar beside the counterbore is cut");
 }

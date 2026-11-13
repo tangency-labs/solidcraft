@@ -1,4 +1,5 @@
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::*;
 
@@ -45,8 +46,8 @@ fn a_setback_off_the_rounded_corner_is_refused() {
 
 /// A setback that does not reach past where the corner's rounds meet without one (on faces square
 /// to each other, the radius) is refused before SMLib runs, naming that least setback. Past it, a
-/// setback still too short for SMLib's corner fill (certified convex only from a setback on,
-/// smlib_blend_fit_size's SMLIB_FIT_SETBACK_AT_LEAST) is refused naming the smallest that builds,
+/// setback still too short for the corner fill (certified convex only from a setback on, as SMLib
+/// f916a8d's setback corner does) is refused naming the smallest that builds,
 /// at most twice the one asked for (the certificate scales the setbacks up to 2); that one builds.
 #[test]
 fn a_setback_not_past_the_radius_is_refused_naming_the_least() {
@@ -72,4 +73,23 @@ fn a_setback_not_past_the_radius_is_refused_naming_the_least() {
     let least = crate::fillet_least_setback(&b, Vec3::new(60.0, 40.0, 20.0), 5.0).unwrap();
     assert!(least.is_some_and(|l| (l - 5.0).abs() < 1e-9), "{least:?}");
     assert_eq!(crate::fillet_least_setback(&b, Vec3::new(30.0, 20.0, 10.0), 5.0).unwrap(), None);
+}
+
+/// tangency-labs/solidcraft#13913: the 40 x 30 x 20 box's corner (40, 30, 20), its three edges
+/// rounded r3, set back 3.5. The corner's fill (solidcore's own here, no patch replaces it) is
+/// certified convex only from a setback of 3.5595 (solidcore's `SetbackTooShort`, from the fill's
+/// convex test), so 3.5 is refused naming it as the smallest that builds; set back that far, it
+/// builds, a valid body.
+#[test]
+fn a_setback_too_short_for_the_fill_is_refused_naming_the_one_that_builds() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let edges = [Vec3::new(20.0, 30.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(40.0, 30.0, 10.0)];
+    let corner = Vec3::new(40.0, 30.0, 20.0);
+    let why = match fillet_setback(&b, &edges, 3.0, &[(corner, 3.5)]) {
+        Err(KernelError::Invalid(why)) => why,
+        other => panic!("setback 3.5: {:?}", other.map(|b| b.face_count())),
+    };
+    assert!(why.contains(&format!("{SETBACK_AT_LEAST}3.5595 mm")), "{why}");
+    let out = fillet_setback(&b, &edges, 3.0, &[(corner, 3.5595)]).unwrap();
+    assert!(out.validity().is_empty(), "{:?}", out.validity());
 }

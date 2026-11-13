@@ -1,0 +1,2996 @@
+{
+ "cases": [
+  {
+   "name": "prog_test8_left_round_shell",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, OffsetProfile(0.8, LEFT, round, shell) as there (through SmApiCreateOffsetProfile, so at SM_ZONE_TOL_3D instead of 1e-4).",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.8,
+     1,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t1_r0_s0",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 1, round 0, shell 0.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     1,
+     0,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t1_r0_s1",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 1, round 0, shell 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     1,
+     0,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t1_r1_s0",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 1, round 1, shell 0.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     1,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t1_r1_s1",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 1, round 1, shell 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     1,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t2_r0_s0",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 2, round 0, shell 0.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     2,
+     0,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t2_r0_s1",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 2, round 0, shell 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     2,
+     0,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t2_r1_s0",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 2, round 1, shell 0.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     2,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t2_r1_s1",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 2, round 1, shell 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     2,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t3_r0_s0",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 3, round 0, shell 0.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     3,
+     0,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t3_r0_s1",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 3, round 0, shell 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     3,
+     0,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t3_r1_s0",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 3, round 1, shell 0.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     3,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "prog_test8_t3_r1_s1",
+   "note": "tests/prog_test/src/smSweepTest.cpp test 8: the 5 x 5 square [10,15]^2 of degree-3 B-spline lines with circle segments r 1 at (12,12) and r 0.8 at (14,14) in turned frames, offset 0.3, type 3, round 1, shell 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.3,
+     3,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       15.0,
+       15,
+       0
+      ],
+      "end": [
+       15.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       15,
+       0
+      ]
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       12.0,
+       12,
+       0
+      ],
+      "x_axis": [
+       -1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       14.0,
+       14,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       -1,
+       0
+      ],
+      "radius": 0.8,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t1_r0_s0",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     0,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t1_r0_s1",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     0,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t1_r1_s0",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t1_r1_s1",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t2_r0_s0",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     2,
+     0,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t2_r0_s1",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     2,
+     0,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t2_r1_s0",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     2,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t2_r1_s1",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     2,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t3_r0_s0",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     3,
+     0,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t3_r0_s1",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     3,
+     0,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t3_r1_s0",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     3,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_t3_r1_s1",
+   "note": "A 10 x 10 square of SmApiCreateLineSegment lines, offset 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     3,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_reversed_shuffled",
+   "note": "The square's sides reversed and out of order, left offset 1 with round corners.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_negative_distance",
+   "note": "A negative distance swaps left and right.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     -1.0,
+     1,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_inset_past_center",
+   "note": "An inset wider than half the square: the trimmed offsets vanish.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     6.0,
+     1,
+     0,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_type0",
+   "note": "Offset type 0 is refused by CreateOffsetsOfManyCurves.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     0,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "square_type4",
+   "note": "Offset type 4 is refused.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     4,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_left_shell",
+   "note": "An analytic circle r 5 (SmApiCreateCircle), left 1 shelled: an annulus.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0.0,
+       0,
+       0
+      ],
+      "radius": 5.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_right_shell",
+   "note": "The circle, right 1 shelled.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     2,
+     1,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0.0,
+       0,
+       0
+      ],
+      "radius": 5.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_both",
+   "note": "The circle, both sides.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     3,
+     0,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0.0,
+       0,
+       0
+      ],
+      "radius": 5.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "bspline_circle_left",
+   "note": "A B-spline circle r 5, left 1.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     0,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "bspline_circle",
+      "origin": [
+       0.0,
+       0,
+       0
+      ],
+      "x_axis": [
+       1.0,
+       0,
+       0
+      ],
+      "y_axis": [
+       0.0,
+       1,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "slot_right_round",
+   "note": "A slot of two lines and two SmApiCreateArc half circles, right 0.5 round.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.5,
+     2,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "arc",
+      "center": [
+       10.0,
+       2,
+       0
+      ],
+      "radius": 2.0,
+      "start_deg": -90.0,
+      "end_deg": 90.0
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       4,
+       0
+      ],
+      "end": [
+       0.0,
+       4,
+       0
+      ]
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0.0,
+       2,
+       0
+      ],
+      "radius": 2.0,
+      "start_deg": 90.0,
+      "end_deg": 270.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "slot_left_shell",
+   "note": "The slot, left 0.5 shelled.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     0.5,
+     1,
+     0,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "arc",
+      "center": [
+       10.0,
+       2,
+       0
+      ],
+      "radius": 2.0,
+      "start_deg": -90.0,
+      "end_deg": 90.0
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       4,
+       0
+      ],
+      "end": [
+       0.0,
+       4,
+       0
+      ]
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0.0,
+       2,
+       0
+      ],
+      "radius": 2.0,
+      "start_deg": 90.0,
+      "end_deg": 270.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "raised_plane",
+   "note": "The square at z = 3, right 1 extended corners shelled.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     2,
+     0,
+     1
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       3
+      ],
+      "end": [
+       10.0,
+       0,
+       3
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       3
+      ],
+      "end": [
+       10.0,
+       10,
+       3
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       3
+      ],
+      "end": [
+       0.0,
+       10,
+       3
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       3
+      ],
+      "end": [
+       0.0,
+       0,
+       3
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "open_profile",
+   "note": "Three sides of the square: no closed loop, CreatePlanarFacesWith3DCurves fails.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "non_planar",
+   "note": "A square with one corner lifted out of plane.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     1,
+     0
+    ],
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       0,
+       0
+      ],
+      "end": [
+       10.0,
+       10,
+       2
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10.0,
+       10,
+       2
+      ],
+      "end": [
+       0.0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.0,
+       10,
+       0
+      ],
+      "end": [
+       0.0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_profile",
+   "note": "No curves.",
+   "inputs": {
+    "op": "offset_profile",
+    "args": [
+     1.0,
+     1,
+     1,
+     0
+    ],
+    "profile": []
+   }
+  }
+ ]
+}

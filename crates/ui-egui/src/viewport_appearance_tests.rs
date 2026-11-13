@@ -1,11 +1,12 @@
 use super::build_scene;
 use crate::{Services, SolveApp};
 use serde_json::json;
-use solidcraft_engine::{Session, doc, geom::Vec3, kernel};
+use solidcore_record::Vec3;
+use solidcraft_engine::{Session, doc, kernel};
 
 #[test]
 fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
-    use crate::theme::{self, ColorVision, Tokens};
+    use solidcraft_theme::{ColorVision, Tokens};
 
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
@@ -14,16 +15,16 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
     app.run("sketch.circle.center", json!({"center":[0,0],"radius":3})).unwrap();
     app.run("sketch.line", json!({"points":[[-4,0],[4,0]]})).unwrap();
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
-    let original_dark = theme::is_dark();
-    let original_vision = theme::vision();
+    let original_dark = solidcraft_theme::is_dark();
+    let original_vision = solidcraft_theme::vision();
     for finished in [false, true] {
         if finished {
             app.run("sketch.finish", json!({})).unwrap();
         }
         for dark in [false, true] {
             for vision in ColorVision::ALL {
-                theme::set_dark(dark);
-                theme::set_vision(vision);
+                solidcraft_theme::set_dark(dark);
+                solidcraft_theme::set_vision(vision);
                 let tokens = Tokens::get();
                 crate::prefs::set(&mut app, &json!({"sketch_halo": true})).unwrap();
                 let projection = super::projection(&app, rect);
@@ -73,8 +74,8 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
             }
         }
     }
-    theme::set_dark(original_dark);
-    theme::set_vision(original_vision);
+    solidcraft_theme::set_dark(original_dark);
+    solidcraft_theme::set_vision(original_vision);
 }
 
 #[test]
@@ -82,7 +83,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))
         .unwrap()
         .with_color(Some([0.2, 0.6, 0.8]))
-        .with_paint(Some(kernel::Paint { opacity: 0.4, faces: Vec::new() }));
+        .with_paint(Some(kernel::Paint { opacity: 0.4, faces: Vec::new(), name: None }));
     let step =
         kernel::step_export_bodies(&[kernel::ExportBody { name: "Imported glass".into(), body: &body, color: body.color() }], &Default::default())
             .unwrap();
@@ -131,7 +132,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
 
 /// The colour of a built triangle vertex: its palette index resolves through the scene.
 fn vertex_color(scene: &crate::gpu::GpuScene, v: &[u8]) -> [u8; 4] {
-    let index = v.get(crate::gpu::TRI_SIZE - 4..crate::gpu::TRI_SIZE).and_then(|b| b.try_into().ok()).map_or(0, u32::from_le_bytes);
+    let index = v.get(24..28).and_then(|b| b.try_into().ok()).map_or(0, u32::from_le_bytes);
     scene.palette.get(crate::gpu::PaletteIndex(index)).unwrap_or([0; 4])
 }
 
@@ -242,9 +243,8 @@ fn an_opacity_class_change_keeps_vertices_and_rewrites_only_the_runs() {
     assert!(block.bytes.opaque.is_empty() && !block.bytes.glass.is_empty(), "the triangles moved to the glass runs");
     let triangles: u32 = block.bytes.glass.iter().map(|r| r.len() as u32).sum::<u32>() / 3;
     assert_eq!(block.bytes.glass.len(), 1, "one body of one class is one run, drawn with no index buffer");
-    // The planner's grids, no side longer than a fifth of the box's 26.9 mm diagonal: edges in
-    // 4, 3 and 2 pieces, faces of 4 × 3, 4 × 2 and 3 × 2 cells, 2 · (12 + 8 + 6) · 2 triangles.
-    assert_eq!(triangles, 104, "every triangle of the box");
+    // Flat faces are their outline alone: two triangles a face.
+    assert_eq!(triangles, 12, "every triangle of the box");
     let vertex = block.bytes.glass.first().map_or(0, |r| r.start) as usize;
     let at = vertex * crate::gpu::TRI_SIZE;
     let colour = first_vertex(&second, block.bytes.vertices.get(at..).unwrap_or_default()).1;
@@ -326,7 +326,7 @@ fn bodies_out_of_the_view_are_not_drawn() {
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
     let both = frames.stats().triangles;
     assert_eq!(both, near + far, "both boxes in view");
-    app.cam.target = solidcraft_engine::geom::Vec3::new(5.0, 5.0, 5.0);
+    app.cam.target = solidcore_record::Vec3::new(5.0, 5.0, 5.0);
     app.cam.distance = 40.0;
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
     assert_eq!(frames.stats().triangles, near, "the far box is not drawn");
@@ -366,7 +366,7 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
         let scene = h.app.viewport.slot.lock().unwrap().take().expect("new model colours uploaded").merged();
         let (vertices, remainder) = scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
         assert!(remainder.is_empty() && !vertices.is_empty());
-        let colour = super::c4(crate::theme::Tokens::get().body);
+        let colour = super::c4(solidcraft_theme::Tokens::get().body);
         assert!(vertices.iter().all(|v| vertex_color(&scene, v) == colour), "{theme}: stale body colour");
         assert_eq!(h.app.session.revision, revision, "theme changes must not edit the design");
         assert!(std::sync::Arc::ptr_eq(&mesh, &crate::open_meshing::session_world(&h.app.session).bodies[0].cached_mesh().unwrap()));
@@ -411,6 +411,12 @@ fn cancelling_theme_preview_restores_viewport_palette_keys() {
     assert_ne!(keys(&h.app), first);
 }
 
+/// The on/off state a screen reader hears for the widget labelled `label`.
+fn announced_state(h: &crate::scenario::Harness, label: &str) -> Option<egui::accesskit::Toggled> {
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    tree.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.toggled())
+}
+
 #[test]
 fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() {
     let mut h = crate::scenario::Harness::new();
@@ -418,26 +424,30 @@ fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() 
     h.frames(3);
     let command = solidcraft_engine::find_command("inspect.colored_components").unwrap();
     let info = command.info(&h.app.session);
-    assert_eq!((info.label, info.icon), ("Enable Component Colors", "colored_components"));
+    assert_eq!((info.label, info.icon), ("Component Colors", "colored_components"));
     h.step(&json!({"click": {"handle": "tab:INSPECT"}})).unwrap();
     h.frames(2);
     let original_key = super::scene_key(&h.app);
     h.step(&json!({"click": {"handle": "panel:INSPECT:CHECK"}})).unwrap();
     h.frames(2);
-    assert!(h.widget("Enable Component Colors").is_some());
+    assert!(h.widget("Component Colors").is_some());
+    assert!(!crate::toolbar::persistent_pressed(&h.app, "inspect.colored_components"));
+    assert_eq!(announced_state(&h, "Component Colors"), Some(egui::accesskit::Toggled::False));
     h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_some());
     assert!(h.app.dialog.is_none());
     assert_ne!(super::scene_key(&h.app), original_key);
     let info = command.info(&h.app.session);
-    assert_eq!((info.label, info.icon), ("Disable Component Colors", "colored_components_off"));
+    assert_eq!((info.label, info.icon), ("Component Colors", "colored_components"));
     h.step(&json!({"click": {"handle": "panel:INSPECT:CHECK"}})).unwrap();
     h.frames(2);
-    assert!(h.widget("Disable Component Colors").is_some());
+    assert!(h.widget("Component Colors").is_some());
+    assert!(crate::toolbar::persistent_pressed(&h.app, "inspect.colored_components"));
+    assert_eq!(announced_state(&h, "Component Colors"), Some(egui::accesskit::Toggled::True));
     h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_none());
     let info = command.info(&h.app.session);
-    assert_eq!((info.label, info.icon), ("Enable Component Colors", "colored_components"));
+    assert_eq!((info.label, info.icon), ("Component Colors", "colored_components"));
 }
 
 /// Every shape the last frame painted in `colour`: point squares, glyph outlines, dimension
@@ -468,7 +478,7 @@ fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_unti
         json!({"theme_import": {"format":"solidcraft-theme/1","name":"Conflict marker","base":"light","colors":{"sketch_conflict":"#12ab34"}}}),
     );
     h.frame();
-    assert_eq!(crate::theme::Tokens::get().sketch_conflict, marker);
+    assert_eq!(solidcraft_theme::Tokens::get().sketch_conflict, marker);
     // `w` places a guide line; a second sketch ends a 12 mm line on it. Moving the guide out of
     // reach makes the second sketch's constraints conflict (#7244).
     let app = &mut h.app;
@@ -537,7 +547,7 @@ fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_unti
             assert_eq!((lines, shapes), (0, 0), "w = {w}, preference {preference}: nothing in the conflict colour");
         }
         if conflicting && !preference {
-            let error = crate::theme::Tokens::get().error;
+            let error = solidcraft_theme::Tokens::get().error;
             assert!(painted_in(&h.shapes, error) > 0, "the failing glyphs and dimensions stay red");
         }
     }
@@ -602,4 +612,35 @@ fn the_ambient_occlusion_radius_follows_what_is_drawn() {
     app.ui.visual_style = 0;
     app.preferences.ambient_occlusion = false;
     assert_eq!(super::ao_radius(&app), 0.0, "off");
+}
+
+/// A body whose appearance has a PBR finish (brass) carries it in the model scene's palette on
+/// its body, instance and face slots; a plain body has none (the shader gives it a satin finish).
+/// The finish is shown by default, and the preference that turns it off reaches the shader.
+#[test]
+fn a_pbr_appearance_reaches_the_model_palette_and_the_finish_preference_the_shader() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 20, "width": 15, "height": 10, "body_name": "Part"})).unwrap();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Plain", "operation": "new"})).unwrap();
+    app.run("render.library.appearance.apply", json!({"id": "SURF-010", "variant": "uniform_opaque", "bodies": ["Part"]})).unwrap();
+    assert!(app.preferences.viewport_material_finish, "on by default");
+    let scene = build_scene(&app);
+    let slots = |name: &str| app.viewport.palette.lock().unwrap().slots(name).unwrap();
+    let at =
+        |scene: &crate::gpu::GpuScene, slot: crate::gpu::PaletteIndex| scene.palette.materials().get(slot.0 as usize).copied().unwrap_or_default();
+    let (part, plain) = (slots("Part"), slots("Plain"));
+    for slot in [part.body, part.instance, part.face(0), part.face(5)] {
+        let m = at(&scene, slot);
+        assert!(m.pbr && m.metallic == 1.0 && (m.roughness - 0.29).abs() < 1e-6, "brass on slot {slot:?}: {m:?}");
+    }
+    for slot in [plain.body, plain.instance, plain.face(0)] {
+        assert!(!at(&scene, slot).pbr, "a plain body has no finish");
+    }
+    let old: crate::prefs::Prefs = serde_json::from_value(json!({"msaa": 4})).unwrap();
+    assert!(old.viewport_material_finish, "older preferences get the finish too (a changed default)");
+    let up = solidcraft_viewport::UpAxis::Z;
+    let sky = |app: &SolveApp| super::sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, up);
+    assert_eq!(sky(&app), [0.0, 0.0, 1.0, 2.0]);
+    crate::prefs::set(&mut app, &json!({"viewport_material_finish": false})).unwrap();
+    assert_eq!(sky(&app), [0.0, 0.0, 1.0, 0.0], "off: shaded flat, as before");
 }

@@ -1,5 +1,5 @@
 use super::*;
-use solidcraft_geom::Plane;
+use solidcore_record::Plane;
 
 fn stamped_stock() -> Body {
     crate::box_solid(Vec3::new(-20., -15., 0.), Vec3::new(20., 15., 24.)).unwrap().with_box_certificate(7).unwrap()
@@ -14,7 +14,11 @@ fn stamped_shell_keeps_authored_painted_and_split_boundaries() {
     let stock = stamped_stock();
     let ordinary = cup(&stock);
     assert!(!ordinary.regularization_protected);
-    let painted = stock.clone().with_paint(Some(Paint { opacity: 1., faces: vec![FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }] }));
+    let painted = stock.clone().with_paint(Some(Paint {
+        opacity: 1.,
+        faces: vec![FacePaint { face: 0, color: [1., 0., 0.], opacity: 1., name: None }],
+        name: None,
+    }));
     let side = (0..stock.face_count()).find(|i| stock.planar_face(*i).is_some_and(|p| p.normal().dot(Vec3::X) > 0.999 && p.origin.x == 20.)).unwrap();
     let split = crate::split_faces(&stock, &[side], &crate::SplitTool::Plane(Plane { origin: Vec3::new(0., 0., 8.), ..Plane::XY })).unwrap();
     assert!(split.split_lines().is_some());
@@ -49,7 +53,11 @@ fn stamped_shell_keeps_authored_painted_and_split_boundaries() {
 #[test]
 fn protection_is_identity_and_survives_tool_operand_and_compounds() {
     let a = stamped_stock();
-    let protected = a.clone().with_paint(Some(Paint { opacity: 1., faces: vec![FacePaint { face: 0, color: [0., 1., 0.], opacity: 1. }] }));
+    let protected = a.clone().with_paint(Some(Paint {
+        opacity: 1.,
+        faces: vec![FacePaint { face: 0, color: [0., 1., 0.], opacity: 1., name: None }],
+        name: None,
+    }));
     let cleared = protected.with_paint(None);
     assert!(!a.same(&cleared));
     let tool = crate::box_solid(Vec3::new(-5., -5., 23.), Vec3::new(5., 5., 30.)).unwrap().inherit_regularization_protection(&cleared);

@@ -1,6 +1,7 @@
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI};
 
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 
 use crate::*;
 
@@ -32,6 +33,15 @@ thread_local! {
 /// A linear search for a point or curve by id on this thread.
 pub(crate) fn count_id_search() {
     ID_SEARCHES.with(|c| c.set(c.get() + 1));
+}
+
+thread_local! {
+    static ID_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A search of every id in a sketch (is this id taken?) on this thread.
+pub(crate) fn count_id_scan() {
+    ID_SCANS.with(|c| c.set(c.get() + 1));
 }
 
 /// Run `f` with the constructive seed on or off, without the seed-on/seed-off comparison (for
@@ -210,6 +220,39 @@ fn zero_distance_edits_preserve_dimension_rank() {
     }
 }
 
+/// A horizontal or vertical distance edited from 0 to a positive value moves the point off the
+/// axis again, on the side the dimension measures towards (`q` past the origin).
+#[test]
+fn component_distance_edited_from_zero_opens_again() {
+    for seed in [false, true] {
+        seeded(seed, || {
+            for vertical in [false, true] {
+                let mut sk = Sketch::new();
+                let q = sk.add_point(v(3.0, 4.0), None).unwrap();
+                let (edited, other) = if vertical {
+                    (ConstraintKind::DistanceY { p: 0, q, value: 4.0 }, ConstraintKind::DistanceX { p: 0, q, value: 3.0 })
+                } else {
+                    (ConstraintKind::DistanceX { p: 0, q, value: 3.0 }, ConstraintKind::DistanceY { p: 0, q, value: 4.0 })
+                };
+                let id = sk.add_constraint(edited, None).unwrap();
+                sk.add_constraint(other, None).unwrap();
+                let last = sk.constraints.len() - 2;
+                for value in [0.0, 0.5, 0.0, 3.0] {
+                    let old = sk.driving_values();
+                    sk.constraints[last].kind.set_value(value);
+                    let report = solve_after_value_edit(&mut sk, &old);
+                    assert!(report.ok(), "{vertical}, {value}: {report:?}");
+                    assert_eq!(report.dof, 0, "{vertical}, {value}: {report:?}");
+                    assert!(!report.redundant.contains(&id), "{report:?}");
+                    assert!(constraint_residual(&sk, last).unwrap() < 1e-6);
+                    let at = sk.point(q).unwrap();
+                    assert!(((if vertical { at.y } else { at.x }) - value).abs() < 1e-6, "{vertical}, {value}: {at:?}");
+                }
+            }
+        });
+    }
+}
+
 /// A length dimension of zero still constrains the sketch: the two ends of the line meet, and
 /// the dimension holds them together instead of leaving a degree of freedom behind (#5505).
 #[test]
@@ -276,6 +319,94 @@ fn circles_tangent_equal_concentric() {
     sk.add_constraint(Concentric { a: c3, b: c2 }, None).unwrap();
     assert!(solve(&mut sk).ok());
     assert!(sk.center(c3).unwrap().dist(sk.center(c2).unwrap()) < 1e-7);
+}
+
+/// The least and greatest of `gap` over many points along a free-form curve, read from its own
+/// definition (not the solver's polyline).
+fn freeform_gap_range(sk: &Sketch, c: usize, gap: impl Fn(Vec2) -> f64) -> (f64, f64) {
+    let p = |i: usize| sk.points[i].pos;
+    let n = 20_000;
+    let at: Box<dyn Fn(f64) -> Vec2> = match sk.curves[c].kind {
+        CurveKind::Ellipse { c, m, r } => Box::new(move |t| crate::curves::ellipse_point(p(c), p(m), r, t * 2.0 * PI)),
+        CurveKind::Conic { a, b, apex, rho } => Box::new(move |t| crate::curves::conic_point(p(a), p(apex), p(b), rho, t)),
+        _ => panic!("not an ellipse or a conic"),
+    };
+    (0..=n).map(|i| gap(at(i as f64 / n as f64))).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), g| (lo.min(g), hi.max(g)))
+}
+
+/// Touching means the gap reaches zero on one side only: `(least, greatest)` crossing zero is a
+/// crossing.
+fn assert_touches(what: &str, (lo, hi): (f64, f64)) {
+    let near = if lo.abs() < hi.abs() { lo } else { hi };
+    assert!(near.abs() < 1e-3 && (lo > -1e-3 || hi < 1e-3), "{what}: the gap runs from {lo} to {hi}");
+}
+
+/// A tangent to an ellipse or a conic keeps the curves touching, also once the geometry moves:
+/// a crossing has a zero gap as well, and was taken for a touch (#11535).
+#[test]
+fn a_tangent_to_an_ellipse_or_a_conic_touches_and_never_crosses() {
+    use ConstraintKind::*;
+    let side = |a: Vec2, b: Vec2| move |q: Vec2| (b - a).cross(q - a) / a.dist(b);
+    // A line on an ellipse (a 30, b 15), then the line's end dragged to (38, 6).
+    let mut sk = Sketch::new();
+    let (ec, em) = (sk.add_point(v(0.0, 0.0), None).unwrap(), sk.add_point(v(30.0, 0.0), None).unwrap());
+    let e = sk.add_curve(CurveKind::Ellipse { c: ec, m: em, r: 15.0 }, None).unwrap();
+    let l = sk.add_line(v(-20.0, 25.0), v(40.0, 20.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: e }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line", freeform_gap_range(&sk, e, side(a, b)));
+    let CurveKind::Line { b: end, .. } = sk.curves[l].kind else { panic!("a line") };
+    sk.points[end].pos = v(38.0, 6.0);
+    let hold = Hold { points: vec![ec, em, end], radii: vec![e] };
+    assert!(solve_holding(&mut sk, &hold).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line dragged", freeform_gap_range(&sk, e, side(a, b)));
+
+    // A circle of radius 10 on the same ellipse, then the major axis's end dragged from 30 to 36.
+    let mut sk = Sketch::new();
+    let (ec, em) = (sk.add_point(v(0.0, 0.0), None).unwrap(), sk.add_point(v(30.0, 0.0), None).unwrap());
+    let e = sk.add_curve(CurveKind::Ellipse { c: ec, m: em, r: 15.0 }, None).unwrap();
+    let c = sk.add_circle(v(45.0, 12.0), 10.0, None, None).unwrap();
+    sk.add_constraint(Radius { c, value: 10.0 }, None).unwrap();
+    sk.add_constraint(Tangent { a: e, b: c }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let round = |sk: &Sketch| {
+        let (cc, r) = (sk.center(c).unwrap(), sk.radius(c).unwrap());
+        move |q: Vec2| q.dist(cc) - r
+    };
+    assert_touches("the circle", freeform_gap_range(&sk, e, round(&sk)));
+    sk.points[em].pos = v(36.0, 0.0);
+    assert!(solve_holding(&mut sk, &Hold { points: vec![ec, em], radii: vec![e] }).ok());
+    assert_touches("the circle on the longer ellipse", freeform_gap_range(&sk, e, round(&sk)));
+
+    // A line on a conic arch, then the line's end dragged down to (45, 2).
+    let mut sk = Sketch::new();
+    let [ca, cb, apex] = [v(0.0, 0.0), v(40.0, 0.0), v(20.0, 20.0)].map(|p| sk.add_point(p, None).unwrap());
+    let k = sk.add_curve(CurveKind::Conic { a: ca, b: cb, apex, rho: 0.5 }, None).unwrap();
+    let l = sk.add_line(v(-10.0, 15.0), v(50.0, 12.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: k }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line on the conic", freeform_gap_range(&sk, k, side(a, b)));
+    let CurveKind::Line { b: end, .. } = sk.curves[l].kind else { panic!("a line") };
+    sk.points[end].pos = v(45.0, 2.0);
+    assert!(solve_holding(&mut sk, &Hold { points: vec![ca, cb, apex, end], radii: vec![] }).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line on the conic dragged", freeform_gap_range(&sk, k, side(a, b)));
+
+    // A line that crosses the arch from end to end (x = 20 through the apex's span): the gap is
+    // monotone and ~0 at the crossing, which is not a touch.
+    let mut sk = Sketch::new();
+    let [ca, cb, apex] = [v(0.0, 0.0), v(40.0, 0.0), v(20.0, 20.0)].map(|p| sk.add_point(p, None).unwrap());
+    let k = sk.add_curve(CurveKind::Conic { a: ca, b: cb, apex, rho: 0.5 }, None).unwrap();
+    let l = sk.add_line(v(20.0, -10.0), v(20.0, 40.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: k }, None).unwrap();
+    // The solver may report it cannot do it, but it must never call the crossing a touch.
+    if solve(&mut sk).ok() {
+        let (a, b) = line_pts(&sk, l);
+        assert_touches("the line across the conic", freeform_gap_range(&sk, k, side(a, b)));
+    }
 }
 
 #[test]
@@ -407,6 +538,110 @@ fn profiles_join_unconstrained_nearby_line_arc_endpoints() {
     assert_eq!(profiles.len(), 1, "{profiles:?}");
     assert!(profiles[0].region.outer.is_closed(1e-6), "{:?}", profiles[0].region.outer.segs);
     assert!((profiles[0].area - (200.0 + PI * 25.0)).abs() < 1e-6, "{}", profiles[0].area);
+}
+
+/// #14512: the reporter's sketch, a Ø3 circle cut off by three lines that touch it. Splitting the
+/// circle at the 135-degree line, which touches it at 225 degrees, left two arcs of 0.00003 and
+/// 0.00001 mm next to the corner. With them the sketch had no profile at all.
+#[test]
+fn profiles_ignore_near_zero_arcs_left_by_a_split_at_a_touching_line() {
+    let mut sk = Sketch::new();
+    let centre = v(0.0, 0.0);
+    let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+    let bottom_left = p(&mut sk, -0.6213203435596425, -1.5);
+    let bottom_right = p(&mut sk, 0.6213203435596425, -1.5);
+    let right = p(&mut sk, 1.0606601717798214, -1.0606601717798212);
+    let corner = p(&mut sk, -1.0606821956789731, -1.060638147870911);
+    let sliver = p(&mut sk, -1.0606633888849604, -1.0606569546649243);
+    let sliver_end = p(&mut sk, -1.060656954688482, -1.0606633888614028);
+    let arc = |sk: &mut Sketch, a: usize, b: usize| {
+        let (pa, pb) = (sk.points[a].pos, sk.points[b].pos);
+        sk.add_arc(centre, pa, pb, [None, Some(a), Some(b)], None).unwrap()
+    };
+    sk.add_line_pts(bottom_left, bottom_right, None).unwrap();
+    sk.add_line_pts(bottom_right, right, None).unwrap();
+    sk.add_line_pts(bottom_left, corner, None).unwrap();
+    arc(&mut sk, right, corner);
+    arc(&mut sk, corner, sliver);
+    arc(&mut sk, sliver, sliver_end);
+
+    // The 270-degree sector and the polygon from the centre through the four line ends.
+    let r = 1.5;
+    let polygon = 1.8639610306789276;
+    let ps = find_profiles(&sk);
+    assert_eq!(ps.len(), 1, "{ps:?}");
+    assert!((ps[0].area - (0.75 * PI * r * r + polygon)).abs() < 1e-6, "{}", ps[0].area);
+}
+
+/// The end plate of #14256: an outline whose 25 mm arc meets a horizontal and a vertical line
+/// tangentially, each joint held by two "point on curve" constraints instead of one shared point.
+/// The solver leaves the arc's ends on the lines only to its 1e-9 mm residual, which along the
+/// tangent puts them 5e-5 mm and 2.25e-4 mm from the lines' ends. The horizontal line is raised
+/// by `lift`.
+fn tangent_joint_end_plate(lift: f64) -> Sketch {
+    let mut sk = Sketch::new();
+    let knee = (50.0_f64.powi(2) - 11.125_f64.powi(2)).sqrt();
+    let mut point = |x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+    let top_left = point(-14.0, 90.0);
+    let top_right = point(14.0, 90.0);
+    let shoulder = point(14.0, 48.0);
+    let knee = point(knee, 11.125);
+    let right_top = point(90.0, 11.125);
+    let right_bottom = point(90.0, -11.125);
+    let step_bottom = point(25.0, -11.125);
+    let step_top = point(25.0, 0.0);
+    let arc_start = point(24.999999999949498, 5.025035674136865e-5);
+    let arc_end = point(0.0002252128472149822, 24.999999999324313);
+    let ledge_right = point(0.0, 25.0 + lift);
+    let ledge_left = point(-14.0, 25.0 + lift);
+    let big_centre = point(0.0, 0.0);
+    let small_centre = point(0.0, 0.0);
+    sk.add_line_pts(top_left, top_right, None).unwrap();
+    sk.add_line_pts(top_right, shoulder, None).unwrap();
+    sk.add_arc(v(0.0, 0.0), sk.points[knee].pos, sk.points[shoulder].pos, [Some(big_centre), Some(knee), Some(shoulder)], None).unwrap();
+    sk.add_line_pts(right_top, knee, None).unwrap();
+    sk.add_line_pts(right_bottom, right_top, None).unwrap();
+    sk.add_line_pts(step_bottom, right_bottom, None).unwrap();
+    sk.add_line_pts(step_top, step_bottom, None).unwrap();
+    sk.add_arc(v(0.0, 0.0), sk.points[arc_start].pos, sk.points[arc_end].pos, [Some(small_centre), Some(arc_start), Some(arc_end)], None).unwrap();
+    sk.add_line_pts(ledge_left, ledge_right, None).unwrap();
+    sk.add_line_pts(top_left, ledge_left, None).unwrap();
+    sk
+}
+
+#[test]
+fn profiles_join_line_and_arc_ends_that_lie_on_each_other_at_a_tangent_joint() {
+    let profiles = find_profiles(&tangent_joint_end_plate(0.0));
+    assert_eq!(profiles.len(), 1, "{profiles:?}");
+    assert!(profiles[0].region.outer.is_closed(1e-9), "{:?}", profiles[0].region.outer.segs);
+    assert_eq!(profiles[0].outer_curves.len(), 10, "{:?}", profiles[0].outer_curves);
+    // The polygon through the corners, plus the segment the 50 mm arc adds, less the quarter
+    // disc's segment the 25 mm arc takes away.
+    let knee = (50.0_f64.powi(2) - 11.125_f64.powi(2)).sqrt();
+    let corners = [
+        (25.0, -11.125),
+        (90.0, -11.125),
+        (90.0, 11.125),
+        (knee, 11.125),
+        (14.0, 48.0),
+        (14.0, 90.0),
+        (-14.0, 90.0),
+        (-14.0, 25.0),
+        (0.0, 25.0),
+        (25.0, 0.0),
+    ];
+    let polygon = (0..corners.len()).map(|i| {
+        let ((x0, y0), (x1, y1)) = (corners[i], corners[(i + 1) % corners.len()]);
+        x0 * y1 - x1 * y0
+    });
+    let segment = |r: f64, sweep: f64| r * r / 2.0 * (sweep - sweep.sin());
+    let area = polygon.sum::<f64>() / 2.0 + segment(50.0, 48.0_f64.atan2(14.0) - 11.125_f64.atan2(knee)) - segment(25.0, FRAC_PI_2);
+    assert!((profiles[0].area - area).abs() < 1e-6, "{} vs {area}", profiles[0].area);
+
+    // Raised 1e-5 mm, the line's end is off the arc's circle and the arc's end off the line:
+    // the 2.5e-4 mm gap is a real one and the outline stays open.
+    let open = find_profiles(&tangent_joint_end_plate(1e-5));
+    assert!(open.is_empty(), "{open:?}");
 }
 
 #[test]
@@ -709,7 +944,7 @@ fn near_overlaps_that_are_not_one_path_keep_their_regions() {
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     sk.add_line_pts(ids[3], ids[0], None).unwrap();
     let ps = find_profiles(&sk);
     assert_eq!(ps.len(), 1, "{:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
@@ -787,13 +1022,15 @@ fn curves_lying_on_one_another_do_not_chain_past_the_tolerance() {
 
 #[test]
 fn merging_adjacent_regions() {
-    let a =
-        solidcraft_geom::Region2 { outer: solidcraft_geom::Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]), holes: vec![] };
-    let b = solidcraft_geom::Region2 {
-        outer: solidcraft_geom::Loop2::polygon(&[v(10.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(10.0, 10.0)]),
+    let a = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]),
         holes: vec![],
     };
-    let c = solidcraft_geom::Region2 { outer: solidcraft_geom::Loop2::polygon(&[v(50.0, 0.0), v(60.0, 0.0), v(60.0, 10.0)]), holes: vec![] };
+    let b = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2::polygon(&[v(10.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(10.0, 10.0)]),
+        holes: vec![],
+    };
+    let c = solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&[v(50.0, 0.0), v(60.0, 0.0), v(60.0, 10.0)]), holes: vec![] };
     let m = merge_regions(&[a, b, c]);
     assert_eq!(m.len(), 2);
     let mut areas: Vec<f64> = m.iter().map(|r| r.area()).collect();
@@ -802,6 +1039,53 @@ fn merging_adjacent_regions() {
     // The two squares make one rectangle: the outline isn't left split where the shared edge was.
     let sides = m.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>();
     assert!(sides.contains(&4) && sides.contains(&3), "{sides:?}");
+}
+
+/// Two regions on either side of an arc whose end is a tangent touch: the sketch splits the
+/// touch into two corners a few hundredths of a micron apart, so each region's copy of the arc
+/// ends at its own corner (#12612, 3e-5 to 6e-5 mm apart). Ends that close are one corner of a
+/// profile ([`ENDPOINT_JOIN_TOL`]), so the arc is a shared boundary and the merged region is the
+/// square without it. Before, the copies were not matched (within 1e-5 mm only) and stayed in the
+/// outline as a slit, out along the arc and back, which SMLib's extrusion refused (status 1005).
+#[test]
+fn regions_sharing_an_arc_whose_tangent_end_is_split_merge_without_a_slit() {
+    let delta: f64 = 5e-6; // radians on r 10: 5e-5 mm
+    let q = v(10.0 * delta.cos(), 10.0 * delta.sin());
+    let quarter = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2 {
+            segs: vec![
+                Seg2::Line { a: v(0.0, 0.0), b: v(10.0, 0.0) },
+                Seg2::Arc { center: v(0.0, 0.0), radius: 10.0, start: 0.0, sweep: FRAC_PI_2 },
+                Seg2::Line { a: v(0.0, 10.0), b: v(0.0, 0.0) },
+            ],
+        },
+        holes: vec![],
+    };
+    let rest = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2 {
+            segs: vec![
+                Seg2::Line { a: q, b: v(20.0, 0.0) },
+                Seg2::Line { a: v(20.0, 0.0), b: v(20.0, 20.0) },
+                Seg2::Line { a: v(20.0, 20.0), b: v(0.0, 20.0) },
+                Seg2::Line { a: v(0.0, 20.0), b: v(0.0, 10.0) },
+                Seg2::Arc { center: v(0.0, 0.0), radius: 10.0, start: FRAC_PI_2, sweep: -(FRAC_PI_2 - delta) },
+            ],
+        },
+        holes: vec![],
+    };
+    let m = merge_regions(&[quarter, rest]);
+    assert_eq!(m.len(), 1, "{m:?}");
+    let r = &m[0];
+    assert!(r.holes.is_empty(), "{r:?}");
+    assert!((r.area() - 400.0).abs() < 1e-3, "{}", r.area());
+    assert!(r.outer.segs.iter().all(|s| matches!(s, Seg2::Line { .. })), "the arc is left in the outline: {r:?}");
+    assert_eq!(r.outer.segs.len(), 4, "{r:?}");
+    // Every corner closes exactly: each side starts where the one before it ends.
+    let n = r.outer.segs.len();
+    for i in 0..n {
+        let (s, t) = (r.outer.segs[i], r.outer.segs[(i + 1) % n]);
+        assert_eq!(s.end(), t.start(), "corner {i}: {r:?}");
+    }
 }
 
 /// A sketch holding `text` the way `sketch.text` makes it: one text link of the built-in font's
@@ -953,7 +1237,7 @@ fn links_update_in_place_rebuild_and_break() {
 /// end in "face of " with nothing after the "of" (#4929).
 #[test]
 fn a_source_without_a_body_name_names_its_kind_alone() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let at = Vec3::ZERO;
     for (source, expected) in [
         (LinkSource::Edge { body: String::new(), at }, "edge"),
@@ -1017,7 +1301,7 @@ fn long_connected_chain_solves() {
 /// cut in two by a line through it (each side gets an exact sub-curve ending on the line).
 #[test]
 fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     let exact_loop = |p: &Profile| p.region.outer.segs.iter().all(|s| !matches!(s, Seg2::Line { .. }) || s.length() > 1.0);
     let closed = |p: &Profile| p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9);
     // Degree 5 over six points, closed by a line.
@@ -1026,7 +1310,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 5, periodic: false, nurbs: None }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 5, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     sk.add_line_pts(ids[5], ids[0], None).unwrap();
     let pr = find_profiles(&sk);
     assert_eq!(pr.len(), 1);
@@ -1035,7 +1319,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
     // A fit spline arch over a base line, cut by a vertical line at x = 10.
     let mut sk = Sketch::default();
     let ids: Vec<usize> = [v(0.0, 0.0), v(6.0, 9.0), v(14.0, 9.0), v(20.0, 0.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     sk.add_line_pts(ids[3], ids[0], None).unwrap();
     let (a, b) = (sk.add_point(v(10.0, -5.0), None).unwrap(), sk.add_point(v(10.0, 20.0), None).unwrap());
     sk.add_line_pts(a, b, None).unwrap();
@@ -1098,6 +1382,85 @@ fn projected_boundary_keeps_its_pieces_when_only_stations_go() {
     assert_eq!(sk.link_curves(&j).len(), 4);
 }
 
+/// A projection that changes shape is rebuilt, and what was drawn on it stays: a line from a
+/// projected corner starts at that corner again, points held on a side or a corner stay held
+/// there (on a piece of a side that was split), and a line whose corner is gone is left where
+/// it was, loose, instead of being deleted with the corner.
+#[test]
+fn rebuilt_projection_keeps_the_lines_drawn_on_it() {
+    use crate::{LinkGeom, LinkKind, LinkSource};
+    let mut sk = Sketch::new();
+    let square = |s: f64| {
+        vec![
+            LinkGeom::Line(v(0.0, 0.0), v(s, 0.0)),
+            LinkGeom::Line(v(s, 0.0), v(s, s)),
+            LinkGeom::Line(v(s, s), v(0.0, s)),
+            LinkGeom::Line(v(0.0, s), v(0.0, 0.0)),
+        ]
+    };
+    let j = sk.add_link(LinkKind::Project, LinkSource::Origin, &square(10.0)).unwrap();
+    let sides = sk.link_curves(&j);
+    let corner = |sk: &Sketch, at: Vec2| sk.link_points(&j).into_iter().find(|p| sk.points[*p].pos.dist(at) < 1e-9).unwrap();
+    let ends = |sk: &Sketch, id: &str| match sk.curves[sk.curve_index(id).unwrap()].kind {
+        CurveKind::Line { a, b } => (a, b),
+        _ => panic!("{id} is not a line"),
+    };
+    // A line drawn from the top right corner shares the projected point.
+    let from_corner = sk.add_line(v(10.0, 10.0), v(20.0, 20.0), Some(corner(&sk, v(10.0, 10.0))), None, None).unwrap();
+    // Lines held on the bottom side, on the right side and on the top left corner.
+    let on_bottom = sk.add_line(v(4.0, 0.0), v(4.0, -6.0), None, None, None).unwrap();
+    let on_right = sk.add_line(v(10.0, 3.0), v(16.0, 3.0), None, None, None).unwrap();
+    let to_corner = sk.add_line(v(-5.0, 15.0), v(0.0, 10.0), None, None, None).unwrap();
+    let ids: Vec<String> = [from_corner, on_bottom, on_right, to_corner].iter().map(|c| sk.curves[*c].id.clone()).collect();
+    let (bottom_foot, _) = ends(&sk, &ids[1]);
+    let (right_foot, _) = ends(&sk, &ids[2]);
+    let (_, tip) = ends(&sk, &ids[3]);
+    sk.add_constraint(ConstraintKind::PointOnCurve { p: bottom_foot, c: sides[0] }, None).unwrap();
+    sk.add_constraint(ConstraintKind::PointOnCurve { p: right_foot, c: sides[1] }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: tip, q: corner(&sk, v(0.0, 10.0)) }, None).unwrap();
+    let (corner_id, bottom_id) = (sk.points[corner(&sk, v(10.0, 10.0))].id.clone(), sk.curves[sides[0]].id.clone());
+    // The projection grows and its right side comes in two pieces: another shape, rebuilt.
+    let grown = vec![
+        LinkGeom::Line(v(0.0, 0.0), v(15.0, 0.0)),
+        LinkGeom::Line(v(15.0, 0.0), v(15.0, 7.0)),
+        LinkGeom::Line(v(15.0, 7.0), v(15.0, 15.0)),
+        LinkGeom::Line(v(15.0, 15.0), v(0.0, 15.0)),
+        LinkGeom::Line(v(0.0, 15.0), v(0.0, 0.0)),
+    ];
+    assert!(sk.update_link(&j, &grown).unwrap());
+    assert_eq!(sk.link_curves(&j).len(), 5);
+    for id in &ids {
+        assert!(sk.curve_index(id).is_some(), "{id} was deleted with the projection");
+    }
+    let (start, _) = ends(&sk, &ids[0]);
+    assert_eq!(sk.points[start].link.as_deref(), Some(j.as_str()), "the line starts at the new projected corner");
+    assert!(sk.points[start].pos.dist(v(15.0, 15.0)) < 1e-9);
+    // The corner and the side that were matched keep their ids: they moved, they are not new.
+    assert_eq!(sk.points[start].id, corner_id);
+    assert!(sk.curve_index(&bottom_id).is_some_and(|c| sk.is_linked_curve(c)));
+    assert_eq!(sk.constraints.len(), 3, "{:?}", sk.constraints);
+    assert!(solve(&mut sk).ok());
+    let at = |sk: &Sketch, id: &str, end: usize| {
+        let (a, b) = ends(sk, id);
+        sk.points[if end == 0 { a } else { b }].pos
+    };
+    assert!(at(&sk, &ids[1], 0).y.abs() < 1e-9, "held on the bottom side");
+    assert!((at(&sk, &ids[2], 0).x - 15.0).abs() < 1e-9, "held on the right side");
+    assert!(at(&sk, &ids[3], 1).dist(v(0.0, 15.0)) < 1e-9, "held on the top left corner");
+    // The projection becomes a circle: no corner or side is left to hold the lines. They stay
+    // where they were, and the one that shared a corner gets a point of its own there.
+    let before: Vec<(Vec2, Vec2)> = ids.iter().map(|id| (at(&sk, id, 0), at(&sk, id, 1))).collect();
+    assert!(sk.update_link(&j, &[LinkGeom::Circle(v(7.5, 7.5), 4.0)]).unwrap());
+    for (id, (a, b)) in ids.iter().zip(&before) {
+        assert!(sk.curve_index(id).is_some(), "{id} was deleted with the projection");
+        assert_eq!((at(&sk, id, 0), at(&sk, id, 1)), (*a, *b));
+    }
+    let (start, _) = ends(&sk, &ids[0]);
+    assert!(sk.points[start].link.is_none() && !sk.points[start].fixed);
+    assert!(sk.constraints.is_empty(), "{:?}", sk.constraints);
+    assert!(solve(&mut sk).ok());
+}
+
 #[test]
 fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A G4 blend curve is one degree-9 Bézier; a sketch keeps it as a control spline whose exact
@@ -1106,7 +1469,9 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     let bump =
         [v(0.0, 0.0), v(1.5, 4.0), v(3.0, 7.0), v(5.0, 9.5), v(7.5, 11.0), v(12.5, 11.0), v(15.0, 9.5), v(17.0, 7.0), v(18.5, 4.0), v(20.0, 0.0)];
     let pts: Vec<usize> = bump.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
-    let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 9, periodic: false, nurbs: None }, None).unwrap();
+    let s = sk
+        .add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 9, periodic: false, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
     let pieces = sk.exact_pieces(s);
     assert_eq!(pieces.len(), 1, "{pieces:?}");
     let Seg2::Bezier { n, p } = pieces[0] else { panic!("{:?}", pieces[0]) };
@@ -1141,7 +1506,9 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A degree above the cap is still refused.
     let mut high: Vec<usize> = pts.clone();
     high.push(sk.add_point(v(21.0, -2.0), None).unwrap());
-    assert!(sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false, nurbs: None }, None).is_err());
+    assert!(
+        sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false, nurbs: None, handles: Vec::new() }, None).is_err()
+    );
 }
 
 /// How far apart two curves run: the largest distance from a sample of either to the other.
@@ -1161,7 +1528,8 @@ fn wave_spline(sk: &mut Sketch, periodic: bool) -> (Vec<usize>, usize) {
         pts.pop();
         pts.push(pts[0]);
     }
-    let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: false, degree: 3, periodic, nurbs: None }, None).unwrap();
+    let s =
+        sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: false, degree: 3, periodic, nurbs: None, handles: Vec::new() }, None).unwrap();
     (pts, s)
 }
 
@@ -1201,7 +1569,7 @@ fn a_fit_point_inserted_into_a_spline_keeps_the_curve_through_its_points() {
     assert!(k.insert_spline_point(s, old[2]).is_err());
     assert_eq!(k, sk, "a refused insertion changes nothing");
     let cv: Vec<usize> = old.iter().map(|q| k.add_point(*q + v(0.0, 30.0), None).unwrap()).collect();
-    let c = k.add_curve(CurveKind::Spline { pts: cv, control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    let c = k.add_curve(CurveKind::Spline { pts: cv, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     assert!(k.insert_spline_point(c, v(20.0, 38.0)).is_err());
     let l = k.add_line(v(0.0, -10.0), v(50.0, -10.0), None, None, None).unwrap();
     assert!(k.insert_spline_point(l, v(20.0, -10.0)).is_err());
@@ -1315,7 +1683,9 @@ fn a_spline_keeps_its_joined_ends_and_closing_point() {
     let mut sk = Sketch::new();
     let places = [v(0.0, 0.0), v(10.0, 10.0), v(20.0, -10.0), v(30.0, 0.0)];
     let cv: Vec<usize> = places.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
-    let c = sk.add_curve(CurveKind::Spline { pts: cv.clone(), control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    let c = sk
+        .add_curve(CurveKind::Spline { pts: cv.clone(), control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
     assert_eq!(sk.remove_spline_point(c, cv[1]), Ok(true));
     assert!(matches!(sk.curves[c].kind, CurveKind::Spline { control: true, .. }));
     assert_eq!(spline_places(&sk, c), vec![places[0], places[2], places[3]]);
@@ -1557,7 +1927,7 @@ fn a_spline_with_its_own_knots_is_its_spans_exactly() {
     let ctrl = [v(0.0, 0.0), v(1.0, 2.0), v(2.0, 2.0), v(3.0, 0.0), v(4.0, -2.0), v(5.0, -2.0), v(6.0, 0.0)];
     let nurbs = Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() };
     let pts: Vec<usize> = ctrl.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
-    let kind = CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()) };
+    let kind = CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()), handles: Vec::new() };
     let s = sk.add_curve(kind.clone(), None).unwrap();
     let pieces = sk.exact_pieces(s);
     assert_eq!(pieces.len(), 2, "{pieces:?}");
@@ -1600,14 +1970,20 @@ fn a_spline_with_its_own_knots_is_its_spans_exactly() {
     for (i, k) in bad.iter().enumerate() {
         assert!(k.check(ctrl.len(), 3).is_err(), "{i}");
         assert!(
-            sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(k.clone()) }, None).is_err(),
+            sk.add_curve(
+                CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(k.clone()), handles: Vec::new() },
+                None,
+            )
+            .is_err(),
             "{i}"
         );
         assert!(k.point(&ctrl, 3, 0.5).is_none() && k.segs(&ctrl, 3).is_none() && k.polyline(&ctrl, 3).is_empty(), "{i}");
     }
     let fourfold = Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() };
     assert!(fourfold.check(8, 3).is_err());
-    assert!(sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: Some(nurbs) }, None).is_err());
+    assert!(
+        sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: Some(nurbs), handles: Vec::new() }, None).is_err()
+    );
 }
 
 /// #8639: two rounded rectangles drawn as closed control-point splines with the same straight
@@ -1633,7 +2009,7 @@ fn rounded_rectangles_sharing_their_sides_leave_every_profile_closed() {
         }
         let mut ids: Vec<usize> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
         ids.push(ids[0]);
-        sk.add_curve(CurveKind::Spline { pts: ids, control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+        sk.add_curve(CurveKind::Spline { pts: ids, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     }
     let mut sk = Sketch::new();
     rounded(&mut sk, 0.55);
@@ -1648,6 +2024,67 @@ fn rounded_rectangles_sharing_their_sides_leave_every_profile_closed() {
             assert!(lp.is_closed(1e-6), "a loop of {:?} is open by {gap:.3e}", crate::distinct_curves(&p.outer_curves));
         }
     }
+}
+
+/// A Pierce constraint holds a point of this sketch where a curve of another sketch crosses
+/// the plane of this one (#3599): the point of the XY sketch sits where the XZ sketch's line
+/// crosses it, and stays there.
+#[test]
+fn a_pierce_constraint_holds_its_point_where_the_other_sketches_curve_crosses_this_plane() {
+    let mut sk = Sketch::new();
+    let p = sk.add_point(v(20.0, 20.0), None).unwrap();
+    // The other sketch's line on the XZ plane: it crosses the XY plane at (5, 0, 0).
+    let world = vec![Vec3::new(5.0, 0.0, -5.0), Vec3::new(5.0, 0.0, 5.0)];
+    sk.add_constraint(ConstraintKind::Pierce { p, sketch: 7, curve: "l1".into(), plane: Plane::XY, world }, None).unwrap();
+    let report = solve(&mut sk);
+    assert!(report.ok(), "{report:?}");
+    let at = sk.points[p].pos;
+    assert!((at.x - 5.0).abs() < 1e-9 && at.y.abs() < 1e-9, "{at:?}");
+    // The point sits in the plane: nothing off it.
+    assert!(Plane::XY.height(Plane::XY.to_world(at)).abs() < 1e-9);
+}
+
+/// The point follows the curve of the other sketch: the curve moves across this plane, the
+/// pierced point moves with it.
+#[test]
+fn a_pierced_point_follows_the_curve_of_the_other_sketch() {
+    let mut sk = Sketch::new();
+    let p = sk.add_point(v(20.0, 20.0), None).unwrap();
+    let world = vec![Vec3::new(5.0, 0.0, -5.0), Vec3::new(5.0, 0.0, 5.0)];
+    sk.add_constraint(ConstraintKind::Pierce { p, sketch: 7, curve: "l1".into(), plane: Plane::XY, world }, None).unwrap();
+    solve(&mut sk);
+    assert!((sk.points[p].pos.x - 5.0).abs() < 1e-9, "{:?}", sk.points[p].pos);
+
+    // The other sketch's line moves across this plane.
+    if let ConstraintKind::Pierce { world, .. } = &mut sk.constraints[0].kind {
+        *world = vec![Vec3::new(7.0, 0.0, -5.0), Vec3::new(7.0, 0.0, 5.0)];
+    }
+    solve(&mut sk);
+    assert!((sk.points[p].pos.x - 7.0).abs() < 1e-9, "{:?}", sk.points[p].pos);
+}
+
+/// A pierce needs a curve that meets this sketch's plane: a curve that never crosses it has
+/// no point to pierce, and the constraint is refused.
+#[test]
+fn a_pierce_constraint_whose_curve_never_crosses_the_plane_is_refused() {
+    let mut sk = Sketch::new();
+    let p = sk.add_point(v(20.0, 20.0), None).unwrap();
+    // A line on the XZ plane that stays above the XY plane: it never reaches it.
+    let world = vec![Vec3::new(5.0, 0.0, 1.0), Vec3::new(5.0, 0.0, 5.0)];
+    let e = sk.add_constraint(ConstraintKind::Pierce { p, sketch: 7, curve: "l1".into(), plane: Plane::XY, world }, None).unwrap_err().to_string();
+    assert!(e.contains("cross"), "{e}");
+}
+
+/// A pierce renumbers with the sketch: its point is renumbered, the curve of the other
+/// sketch is not (it has no index here).
+#[test]
+fn a_pierce_constraint_remaps_its_point() {
+    let mut kind = ConstraintKind::Pierce { p: 3, sketch: 7, curve: "l1".into(), plane: Plane::XY, world: vec![] };
+    assert!(kind.remap(&|i| Some(i + 1), &|_| Some(0)));
+    assert!(matches!(kind, ConstraintKind::Pierce { p: 4, .. }), "{kind:?}");
+    // A point with no new number leaves the constraint partly renumbered: it must go.
+    let mut kind = ConstraintKind::Pierce { p: 3, sketch: 7, curve: "l1".into(), plane: Plane::XY, world: vec![] };
+    assert!(!kind.remap(&|_| None, &|_| Some(0)));
 }
 
 /// A drag step that cannot succeed gives up once the iteration has stalled (#6606). Holding
@@ -1709,4 +2146,243 @@ fn pattern_upkeep_does_not_search_ids_per_copy() {
     sk.refresh_pattern_shapes();
     assert_eq!(ID_SEARCHES.with(std::cell::Cell::get), 0, "id searches in pattern upkeep");
     assert!(sk.curves.iter().all(|c| c.reversed));
+}
+
+/// Inserting a dense drawing searched the whole sketch for every new id, so the insert took time
+/// in proportion to the square of its size (about 40 s for 60000 lines). A batch searches no
+/// sketch for an id, and gives the points and curves exactly the ids, checks and refusals that
+/// adding them one at a time does, including after ids a damaged counter would reuse.
+#[test]
+fn a_batch_adds_points_and_curves_without_searching_for_ids() {
+    let mut base = Sketch::new();
+    base.add_point(v(0.0, 0.0), Some("p2")).unwrap();
+    base.add_point(v(1.0, 0.0), Some("l1")).unwrap();
+    let mut one_by_one = base.clone();
+    let mut batched = base.clone();
+    let lines = 2000;
+    for i in 0..lines {
+        let (x, y) = (f64::from(i % 50), f64::from(i / 50));
+        let a = one_by_one.add_point(v(x, y), None).unwrap();
+        let b = one_by_one.add_point(v(x + 0.5, y + 0.5), None).unwrap();
+        one_by_one.add_curve(CurveKind::Line { a, b }, None).unwrap();
+    }
+    ID_SCANS.with(|c| c.set(0));
+    {
+        let mut batch = batched.batch();
+        for i in 0..lines {
+            let (x, y) = (f64::from(i % 50), f64::from(i / 50));
+            let a = batch.add_point(v(x, y), None).unwrap();
+            let b = batch.add_point(v(x + 0.5, y + 0.5), None).unwrap();
+            batch.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        }
+        assert!(matches!(batch.add_point(v(0.0, 0.0), Some("p2")), Err(SketchError::Duplicate(_))), "a taken id is refused");
+        assert!(matches!(batch.add_curve(CurveKind::Line { a: 0, b: usize::MAX }, None), Err(SketchError::Invalid(_))), "the same checks");
+        assert_eq!(batch.sketch().points.len(), one_by_one.points.len());
+    }
+    assert_eq!(ID_SCANS.with(std::cell::Cell::get), 0, "id searches of the whole sketch in a batch");
+    assert_eq!(batched, one_by_one, "the same ids as one at a time");
+    assert_eq!(batched.fresh("p").unwrap(), one_by_one.fresh("p").unwrap(), "the counters carry on alike");
+}
+
+/// A fillet whose corner the solve leaves where it is stays that corner's arc, even when the
+/// reference it is judged against (the positions before a move, here the corner mirrored) shows
+/// it the other way round: ending its sweep where it started is no turn of the corner, and
+/// swapping its ends would make the fillet its long complement. A corner of 135° (lines turning
+/// by 45°), all its points fixed.
+#[test]
+fn a_fillet_the_solve_leaves_in_place_keeps_its_short_arc_against_a_mirrored_reference() {
+    let mut sk = Sketch::new();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let l1 = sk.add_line(v(10.0, 10.0), v(35.0, 10.0), None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let end = v(35.0 + 5.0 * s, 15.0 - 5.0 * s);
+    let arc = sk.add_arc(v(35.0, 15.0), v(35.0, 10.0), end, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(end, end + v(10.0, 10.0), Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    for p in &mut sk.points {
+        p.fixed = true;
+    }
+    assert!(solve(&mut sk).ok());
+    assert!((sweep_deg(&sk, arc) - 45.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    let mirrored: Vec<Vec2> = sk.points.iter().map(|p| v(80.0 - p.pos.x, p.pos.y)).collect();
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&mirrored), Analysis::Full, None);
+    assert!(rep.ok(), "{rep:?}");
+    assert!((sweep_deg(&sk, arc) - 45.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+}
+
+/// A fillet over three quarters of a turn (the round end of a drop shape) whose corner really
+/// mirrored, its arc's ends as they were, stays the long arc its lines leave: judged against the
+/// corner before the mirror its sweep jumps, but its lines already leave it, so no swap makes it
+/// the short complement with both lines cutting back through it.
+#[test]
+fn a_mirrored_fillet_over_three_quarters_of_a_turn_stays_the_arc_its_lines_leave() {
+    let mut sk = Sketch::new();
+    let (fa, fb) = (-FRAC_PI_2, -FRAC_PI_2 + 300f64.to_radians());
+    let (pa, pb) = (Vec2::from_angle(fa) * 5.0, Vec2::from_angle(fb) * 5.0);
+    let (da, db) = (v(-fa.sin(), fa.cos()), v(-fb.sin(), fb.cos()));
+    let l1 = sk.add_line(pa - da * 10.0, pa, None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let arc = sk.add_arc(v(0.0, 0.0), pa, pb, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(pb, pb + db * 10.0, Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+    let before: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    for p in &mut sk.points {
+        p.pos = v(-p.pos.x, p.pos.y);
+        p.fixed = true;
+    }
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&before), Analysis::Full, None);
+    assert!(rep.ok(), "{rep:?}");
+    assert!((sweep_deg(&sk, arc) - 300.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+}
+
+/// #10521: a circle drawn twice inside a ring is one hole of the ring, not two. The ring between
+/// the outer circles keeps the area of the disc less that hole once.
+#[test]
+fn a_circle_drawn_twice_is_one_hole() {
+    for twin_radius in [1.6, 1.6 + 8.9e-11, 1.6 - 8.9e-11] {
+        let mut b = Sketch::new();
+        let inner = b.add_circle(v(0.0, 0.0), 1.6, None, None).unwrap();
+        let twin = b.add_circle(v(0.0, 0.0), twin_radius, None, None).unwrap();
+        let middle = b.add_circle(v(0.0, 0.0), 3.25, None, None).unwrap();
+        let outer = b.add_circle(v(0.0, 0.0), 4.0, None, None).unwrap();
+        let ps = find_profiles(&b);
+        let disc = |r: f64| PI * r * r;
+        let of = |c: usize| ps.iter().find(|p| p.outer_curves == vec![b.curves[c].id.clone()]).unwrap_or_else(|| panic!("no profile for curve {c}"));
+        assert!((of(inner).area - disc(1.6)).abs() < 1e-6);
+        assert!((of(twin).area - disc(1.6)).abs() < 1e-6);
+        // The ring around the twins has one hole: 33.18 - 8.04.
+        let ring = of(middle);
+        assert_eq!(ring.hole_curves.len(), 1, "radius {twin_radius}: {:?}", ring.hole_curves);
+        assert!((ring.area - (disc(3.25) - disc(1.6))).abs() < 1e-6, "radius {twin_radius}: {}", ring.area);
+        assert!((of(outer).area - (disc(4.0) - disc(3.25))).abs() < 1e-6);
+    }
+}
+
+/// A short piece with no other piece beside it is a gap, not a point (#14520 review): a square
+/// whose top-left ends miss by 0.00003 splits its left side where the top line ends, and the
+/// 0.00003 piece left above that stays open, as the import's tighter join tolerance asked.
+#[test]
+fn profiles_keep_a_lone_short_piece_open() {
+    let mut sk = Sketch::new();
+    let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+    let bottom_left = p(&mut sk, 0.0, 0.0);
+    let bottom_right = p(&mut sk, 10.0, 0.0);
+    let right_bottom = p(&mut sk, 10.00005, 0.0);
+    let top_right = p(&mut sk, 10.0, 10.0);
+    let top_left = p(&mut sk, 0.0, 10.0);
+    let left_top = p(&mut sk, 0.0, 10.00003);
+    let left_bottom = p(&mut sk, 0.0, 0.00004);
+    sk.add_line_pts(bottom_left, bottom_right, None).unwrap();
+    sk.add_line_pts(right_bottom, top_right, None).unwrap();
+    sk.add_line_pts(top_right, top_left, None).unwrap();
+    sk.add_line_pts(left_top, left_bottom, None).unwrap();
+    let ps = find_profiles(&sk);
+    assert!(ps.is_empty(), "{ps:?}");
+}
+
+/// Scaling a fit spline's points and tangent handles scales its curve alike: a handle is measured
+/// against the chords beside its point, not an absolute length (#6502).
+#[test]
+fn scaling_a_spline_with_handles_scales_its_curve() {
+    let p = [Vec2::new(0.0, 0.0), Vec2::new(8.0, 6.0), Vec2::new(17.0, 2.0), Vec2::new(25.0, 10.0)];
+    let mut handles = crate::curves::fit_tangent_handles(&p, false).unwrap();
+    // A turned handle, so the curve is not the natural one.
+    handles[1] += Vec2::new(1.5, -2.0);
+    let before = crate::curves::fit_beziers_with_handles(&p, &handles, false).unwrap();
+    for f in [0.1, 3.0] {
+        let scaled: Vec<Vec2> = p.iter().map(|q| *q * f).collect();
+        let scaled_handles: Vec<Vec2> = handles.iter().map(|q| *q * f).collect();
+        let after = crate::curves::fit_beziers_with_handles(&scaled, &scaled_handles, false).unwrap();
+        for (a, b) in after.iter().zip(&before) {
+            for (x, y) in a.iter().zip(b) {
+                assert!(x.dist(*y * f) < 1e-9 * f.max(1.0), "scale {f}: {x:?} vs {:?}", *y * f);
+            }
+        }
+    }
+}
+
+/// Deleting a point a spline with tangent handles needs removes the spline, its tangent lines
+/// and its handle points: the sketch stays valid (#6502).
+#[test]
+fn deleting_a_fit_point_takes_the_splines_tangent_lines() {
+    let mut sk = Sketch::new();
+    let pts: Vec<usize> = [v(0.0, 0.0), v(8.0, 6.0), v(17.0, 2.0), v(25.0, 10.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    let fit = pts[1];
+    let spline = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+    sk.add_spline_handles(spline).unwrap();
+    let before = sk.points.len();
+    sk.remove_points(&[fit]);
+    assert!(sk.curves.iter().all(|c| c.spline_handle_of.is_none()), "no tangent line is left without its spline");
+    assert!(!sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Spline { .. })));
+    assert_eq!(sk.points.len(), before - 1 - 4, "the point and the four handle points go");
+    sk.validate_spline_handles().unwrap();
+}
+
+/// #6502: a fit spline without stored handles previews them where storing them puts them; a
+/// spline with handles, or a control point spline, previews none.
+#[test]
+fn spline_handle_preview_matches_the_stored_handles() {
+    let mut sk = Sketch::new();
+    let fit = [Vec2::new(-40.0, 0.0), Vec2::new(-15.0, 20.0), Vec2::new(15.0, -10.0), Vec2::new(40.0, 10.0)];
+    let pts: Vec<usize> = fit.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    let spline = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+    let preview = sk.spline_handle_preview(spline).expect("a fit spline previews its handles");
+    assert_eq!(preview.len(), fit.len());
+    sk.add_spline_handles(spline).unwrap();
+    let CurveKind::Spline { handles, .. } = &sk.curves[spline].kind else { panic!("a fit spline") };
+    for (shown, stored) in preview.iter().zip(handles) {
+        assert!(shown.dist(sk.point(*stored).unwrap()) < 1e-12, "{shown:?}");
+    }
+    assert!(sk.spline_handle_preview(spline).is_none(), "stored handles are not previewed");
+    let control_pts: Vec<usize> = fit.iter().map(|p| sk.add_point(*p + Vec2::new(0.0, 50.0), None).unwrap()).collect();
+    let control = sk
+        .add_curve(CurveKind::Spline { pts: control_pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
+    assert!(sk.spline_handle_preview(control).is_none(), "a control point spline has no tangent handles");
+}
+
+/// A band of rounded caps over the top of a ring (two arcs of radius 15 tangent to the ring's
+/// sides, joined by a line). On the left the cap's arc and the ring's corner arc leave the ring's
+/// side along one tangent, apart only by the solver's round-off; on the right the cap's arc ends
+/// a hair short of the top line's end. Both corners must still close the band.
+#[test]
+fn a_cap_whose_arcs_leave_a_ring_along_its_sides_closes_a_profile() {
+    for lift in [1e-6, -1e-6] {
+        let mut sk = Sketch::new();
+        let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+        // The ring: sides from y = -100 to 0, corners of radius 6, top at y = 6.
+        let (bl, left, left_top) = (p(&mut sk, 0.0, -100.0), p(&mut sk, 0.0, 0.0), p(&mut sk, 6.0, 6.0));
+        let (right_top, right, br) = (p(&mut sk, 94.0, 6.0), p(&mut sk, 100.0, 0.0), p(&mut sk, 100.0, -100.0));
+        sk.add_line_pts(bl, left, None).unwrap();
+        sk.add_arc(v(6.0, 0.0), v(6.0, 6.0), v(0.0, 0.0), [None, Some(left_top), Some(left)], None).unwrap();
+        sk.add_line_pts(left_top, right_top, None).unwrap();
+        sk.add_arc(v(94.0, 0.0), v(100.0, 0.0), v(94.0, 6.0), [None, Some(right), Some(right_top)], None).unwrap();
+        sk.add_line_pts(right, br, None).unwrap();
+        sk.add_line_pts(br, bl, None).unwrap();
+        // The cap: its left arc's centre a round-off off the ring's side, its right arc ending
+        // 2e-5 along the top line from the line's end.
+        let (cap_left, cap_right) = (p(&mut sk, 15.0, 15.0), p(&mut sk, 85.0, 15.0));
+        sk.add_arc(v(15.0, lift), v(15.0, 15.0), v(0.0, 0.0), [None, Some(cap_left), Some(left)], None).unwrap();
+        sk.add_line_pts(cap_right, cap_left, None).unwrap();
+        let short = v(85.0 + 2e-5, (225.0 - 4e-10_f64).sqrt());
+        sk.add_arc(v(85.0, 0.0), v(100.0, 0.0), short, [None, Some(right), None], None).unwrap();
+        let ps = find_profiles(&sk);
+        let band = ps.iter().find(|p| p.outer_curves.contains(&sk.curves[6].id));
+        let Some(band) = band else { panic!("lift {lift}: no profile through the cap: {ps:?}") };
+        // The cap less the ring's rounded top: 70 x 15 + two quarter discs of 15 - (88 x 6 + two of 6).
+        let want = 70.0 * 15.0 + PI * 225.0 / 2.0 - (88.0 * 6.0 + PI * 36.0 / 2.0);
+        assert!((band.area - want).abs() < 1e-3, "lift {lift}: {} vs {want}", band.area);
+        for p in &ps {
+            assert!(p.region.outer.is_closed(1e-6), "lift {lift}: {:?}", p.outer_curves);
+        }
+    }
 }

@@ -11,11 +11,12 @@
 //! The two-curve bridge with G0–G3 against a sketch's plane is [`crate::boundary`]; this is the
 //! general case: three or four sides, interior curves, 3D curves and edges.
 
-use solidcraft_geom::brep::Brep;
+use solidcore_record::brep::Brep;
+use solidcore_record::{Plane, Seg2, Vec3};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::bspline::{CurveN, NurbsSurface, SplineError};
 use solidcraft_geom::network::{self, CrossFace, FaceFrame, NetCurve, NetworkCurve, PointCurve, Tolerances};
-use solidcraft_geom::{Plane, Seg2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::continuity_order::{Construction, Continuity};
@@ -336,7 +337,7 @@ impl EdgeFaces {
             // How the face's loop (counter-clockwise about its surface's natural normal) runs the edge.
             let face = r.faces.get(u.face as usize).ok_or_else(|| KernelError::Failed("boundary surface: an edge's face".into()))?;
             let in_loop = match face.loops.get(u.r#loop as usize) {
-                Some(solidcraft_geom::brep::Loop::Edges { edges }) => edges.get(u.position as usize).map(|x| x.forward),
+                Some(solidcore_record::brep::Loop::Edges { edges }) => edges.get(u.position as usize).map(|x| x.forward),
                 _ => None,
             };
             let in_loop = in_loop.ok_or_else(|| KernelError::Failed("boundary surface: an edge's face".into()))?;
@@ -395,8 +396,8 @@ impl CrossFace for EdgeFaces {
 /// The face of a network surface: its four sides from the surface's boundary rows, each split
 /// at the `corners` that lie on it (inner vertices of edge chains), the pieces edges on the side's
 /// own curve over parts of its interval. A side collapsed to a point (a three-sided patch) is left
-/// out: the two sides beside it meet at one vertex there. Refused when more than one side
-/// shrinks to a point.
+/// out: the two sides beside it meet at one vertex there. Two sides shrunk to a point leave a
+/// lens of two edges; refused when fewer than two sides are left.
 fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
     let fail = |m: &str| KernelError::Failed(format!("boundary surface: {m}"));
     let [nu, nv] = s.count();
@@ -419,19 +420,24 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
         (column(0), kv, [0, 3], false, [Some(u0), None]),
     ];
     let collapsed: Vec<bool> = sides.iter().map(|(_, _, [a, z], ..)| c[*a].dist(c[*z]) <= size * 1e-9).collect();
-    if collapsed.iter().filter(|x| **x).count() > 1 {
-        return Err(KernelError::Invalid("not supported yet: a boundary surface with more than one side shrunk to a point".into()));
+    // Two sides left at least: a lens (the two opposite sides, or two beside each other, shrunk).
+    if collapsed.iter().filter(|x| !**x).count() < 2 {
+        return Err(KernelError::Invalid("not supported yet: a boundary surface with fewer than two sides left".into()));
     }
-    // Vertices: the corners, a collapsed side's two ends one vertex.
+    // Vertices: the corners, a collapsed side's two ends one vertex (chains of them one vertex).
     let mut vertex_of = [0usize, 1, 2, 3];
-    for (k, (_, _, [a, z], ..)) in sides.iter().enumerate() {
-        if collapsed.get(k).copied().unwrap_or(false) {
-            vertex_of[*z] = vertex_of[*a];
+    for _ in 0..4 {
+        for (k, (_, _, [a, z], ..)) in sides.iter().enumerate() {
+            if collapsed.get(k).copied().unwrap_or(false) {
+                let low = vertex_of[*a].min(vertex_of[*z]);
+                vertex_of[*a] = low;
+                vertex_of[*z] = low;
+            }
         }
     }
     let tolerance = (size * 1e-6).max(1e-5);
     let mut parts = Parts { tolerance, ..Parts::default() };
-    parts.vertices = c.iter().map(|p| solidcraft_geom::brep::Vertex { point: [p.x, p.y, p.z], tolerance }).collect();
+    parts.vertices = c.iter().map(|p| solidcore_record::brep::Vertex { point: [p.x, p.y, p.z], tolerance }).collect();
     let mut uses = Vec::new();
     for (k, (ctrl, knots, [a, z], forward, fixed)) in sides.into_iter().enumerate() {
         if collapsed.get(k).copied().unwrap_or(false) {
@@ -446,7 +452,7 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
         let mut ends = vec![vertex_of[a]];
         for (_, p) in &cuts {
             ends.push(parts.vertices.len());
-            parts.vertices.push(solidcraft_geom::brep::Vertex { point: [p.x, p.y, p.z], tolerance });
+            parts.vertices.push(solidcore_record::brep::Vertex { point: [p.x, p.y, p.z], tolerance });
         }
         ends.push(vertex_of[z]);
         let uv = |t: f64| [fixed[0].unwrap_or(t), fixed[1].unwrap_or(t)];
@@ -455,19 +461,19 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
             let interval = [w[0], w[1]];
             let edge = index(parts.edges.len())?;
             let vertices = [index(e[0])?, index(e[1])?];
-            parts.edges.push(solidcraft_geom::brep::Edge { nurbs: None, curve: curve.clone(), interval, vertices, tolerance, uses: Vec::new() });
-            pieces.push(solidcraft_geom::brep::OrientedEdge { edge, forward, pcurve: uv_line(uv(w[0]), uv(w[1]), interval) });
+            parts.edges.push(solidcore_record::brep::Edge { nurbs: None, curve: curve.clone(), interval, vertices, tolerance, uses: Vec::new() });
+            pieces.push(solidcore_record::brep::OrientedEdge { edge, forward, pcurve: uv_line(uv(w[0]), uv(w[1]), interval) });
         }
         if !forward {
             pieces.reverse();
         }
         uses.extend(pieces);
     }
-    let face = solidcraft_geom::brep::Face {
+    let face = solidcore_record::brep::Face {
         nurbs: None,
         surface: spline_surface(s),
         domain: s.domain(),
-        loops: vec![solidcraft_geom::brep::Loop::Edges { edges: uses }],
+        loops: vec![solidcore_record::brep::Loop::Edges { edges: uses }],
     };
     parts.faces.push((face, true));
     let body = surface_body(&parts.canonical()?.brep)?;
@@ -513,7 +519,7 @@ fn index(i: usize) -> Result<u32> {
 mod tests {
     use super::*;
     use crate::patch_region;
-    use solidcraft_geom::{Loop2, Region2, Vec2};
+    use solidcore_record::{Loop2, Region2, Vec2};
 
     fn sketch(label: &str, plane: Plane, segs: Vec<Seg2>) -> BoundaryCurve<'static> {
         BoundaryCurve { label: label.into(), source: CurveSource::Sketch { plane, segs }, continuity: Continuity::G0 }
@@ -577,12 +583,12 @@ mod tests {
     }
 
     /// A stadium: two half-circle arcs (radius 5) bulging out of the 10 × 8 rectangle between two
-    /// lines. Each arc meets its lines at 180°, so the patch is singular at its corners, and the
-    /// reference mesher's walk round the boundary used to run from such a corner onto the
-    /// surface's extrapolation past its domain (a planar spline passes through every point of its
-    /// plane there): the face measured 289 mm² for its 158.5. The vendored mesher's bounded
-    /// projection (`nearest_projection`, vendor/README.md) keeps the walk on the domain. Its area
-    /// is the stadium's, 80 + 25π, by the faces, the measuring mesh and the display mesh.
+    /// lines. Each arc meets its lines at 180°, so the patch is singular at its corners, and a
+    /// boundary walk can run from such a corner onto the surface's extrapolation past its domain
+    /// (a planar spline passes through every point of its plane there): the face measured
+    /// 289 mm² for its 158.5. The mesher is SolidCraft's own (`crate::tess::plan`), which keeps
+    /// the walk on the domain. Its area is the stadium's, 80 + 25π, by the faces, the measuring
+    /// mesh and the display mesh.
     #[test]
     fn a_patch_with_straight_corners_measures_its_own_area() {
         use std::f64::consts::PI;
@@ -630,13 +636,29 @@ mod tests {
         assert!(near(tess), "measuring mesh: {tess}");
         let display = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(display), "display mesh: {display}");
-        // Two collapsed sides are no patch.
         let p = |l: &str, q: Vec3| BoundaryCurve { label: l.into(), source: CurveSource::Point(q), continuity: Continuity::G0 };
-        assert!(
-            boundary_surface(&[sketch("arc", pl, vec![arc]), p("o", Vec3::ZERO)], &[p("a", Vec3::new(r, 0.0, 0.0)), sketch("y", pl, vec![y])])
-                .is_err()
-        );
         assert!(boundary_surface(&[sketch("arc", pl, vec![arc]), p("nan", Vec3::new(f64::NAN, 0.0, 0.0))], &[]).is_err());
+    }
+
+    /// Two arcs that meet at both ends (#11878) are a lens: both side curves collapse to a point,
+    /// the face has the two arcs for its edges and the two ends for its vertices, and it measures
+    /// the lens's area, two segments of radius 10 over a 12 mm chord.
+    #[test]
+    fn two_curves_meeting_at_both_ends_are_a_lens() {
+        use std::f64::consts::PI;
+        let r = 10.0_f64;
+        let half = 6.0_f64;
+        let h = (r * r - half * half).sqrt();
+        let theta = (half / r).asin();
+        let up = Seg2::Arc { center: Vec2::new(0.0, -h), radius: r, start: PI / 2.0 + theta, sweep: -2.0 * theta };
+        let down = Seg2::Arc { center: Vec2::new(0.0, h), radius: r, start: -PI / 2.0 - theta, sweep: 2.0 * theta };
+        let pl = Plane::XY;
+        let body = boundary_surface(&[sketch("up", pl, vec![up]), sketch("down", pl, vec![down])], &[]).unwrap();
+        assert!(body.is_surface() && body.face_count() == 1);
+        assert_eq!(body.edge_count(), 2, "the two collapsed sides are no edges");
+        let want = 2.0 * (r * r * theta - half * h);
+        let faces = body.faces(0.01).unwrap();
+        assert!((faces[0].area - want).abs() < 0.25, "area {} vs {want}", faces[0].area);
     }
 
     /// The angle between the two faces' normals across the edge at `p`.

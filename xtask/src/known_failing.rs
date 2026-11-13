@@ -1,12 +1,19 @@
 //! `cargo xtask known-failing --junit PATH... [--list FILE]`: grades a nextest run (its junit
-//! report) against the tests known to fail today, `tests/KNOWN_FAILING_TESTS`. CI's test jobs
-//! run it after nextest, in place of failing on any failed test. It fails on a test that failed
+//! report) against the tests known to fail today,
+//! `tests/KNOWN_FAILING_TESTS` (or `--list FILE`). CI's test jobs run it after nextest, in place of
+//! failing on any failed test. It fails on a test that failed
 //! and is not listed, and on a listed test that passed (fixed: its line comes off in the same
 //! pull request); a listed test that did not run (a pull request tests only the packages it
 //! touches) is neither. The list has the kernel rig's format (`kernel_cases::known_failing`):
 //! one test a line, `<test> <why it fails today>`, sorted, with `<test>` nextest's
 //! `<binary id>::<test name>` (`solidcraft-kernel::tests::...`, or
 //! `solidcraft-cli::action_matrix::action_matrix_sample` for an integration test binary).
+//!
+//! A flaky test goes on `tests/QUARANTINED_TESTS` (`--quarantine FILE`) instead:
+//! `<test> <issue> <date added> [why]`. It still runs and is reported (in the log and the job
+//! summary), but its failure never fails the gate, so it cannot fail a merge-queue batch. One
+//! that passes is reported too, so it can be released. `cargo xtask lists` requires the issue
+//! and fails an entry older than 14 days.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,15 +22,20 @@ use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 
 pub const LIST: &str = "tests/KNOWN_FAILING_TESTS";
+pub const QUARANTINE: &str = "tests/QUARANTINED_TESTS";
+/// A test may stay quarantined this many days (`cargo xtask lists` fails after that).
+const QUARANTINE_DAYS: i64 = 14;
 
 pub fn run(root: &Path, rest: &[&str]) -> Result<(), String> {
     let mut reports = Vec::new();
     let mut list = root.join(LIST);
+    let mut quarantine = root.join(QUARANTINE);
     let mut args = rest.iter();
     while let Some(arg) = args.next() {
         match *arg {
             "--junit" => reports.push(PathBuf::from(args.next().ok_or("--junit needs a junit file or a directory of them")?)),
             "--list" => list = PathBuf::from(args.next().ok_or("--list needs a file")?),
+            "--quarantine" => quarantine = PathBuf::from(args.next().ok_or("--quarantine needs a file")?),
             other => return Err(format!("known-failing: unknown argument `{other}`")),
         }
     }
@@ -45,6 +57,19 @@ pub fn run(root: &Path, rest: &[&str]) -> Result<(), String> {
         let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
         add(&mut outcomes, &text).map_err(|e| format!("{}: {e}", file.display()))?;
     }
+    let qtext = std::fs::read_to_string(&quarantine).map_err(|e| format!("{}: {e}", quarantine.display()))?;
+    let quarantined = parse_quarantine(&qtext).map_err(|e| format!("{}: {e}", quarantine.display()))?;
+    let report = quarantine_report(&quarantined, &outcomes);
+    if !report.is_empty() {
+        println!("{}", report.join("\n"));
+        if let Some(summary) = std::env::var_os("GITHUB_STEP_SUMMARY") {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(summary) {
+                let _ = writeln!(f, "### Quarantined tests\n\n{}\n", report.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n"));
+            }
+        }
+    }
+    outcomes.retain(|test, _| !quarantined.iter().any(|q| q.test == *test));
     let text = std::fs::read_to_string(&list).map_err(|e| format!("{}: {e}", list.display()))?;
     println!("{}", grade(&text, &outcomes).map_err(|e| format!("{}: {e}", list.display()))?);
     Ok(())
@@ -62,7 +87,81 @@ fn add(all: &mut BTreeMap<String, bool>, xml: &str) -> Result<(), String> {
 pub fn check_list(root: &Path) -> Result<(), String> {
     let file = root.join(LIST);
     let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-    crate::kernel_cases::known_failing(&text).map(|_| ()).map_err(|e| format!("{LIST}: {e}"))
+    let known = crate::kernel_cases::known_failing(&text).map_err(|e| format!("{LIST}: {e}"))?;
+    let file = root.join(QUARANTINE);
+    let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let today = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| (d.as_secs() / 86_400) as i64);
+    check_quarantine(&text, &known, today).map_err(|e| format!("{QUARANTINE}: {e}"))
+}
+
+/// The quarantine list parses, none of its tests is also known failing, and none is older than 14 days at `today`.
+fn check_quarantine(text: &str, known: &[(&str, &str)], today: i64) -> Result<(), String> {
+    let mut problems = Vec::new();
+    for q in parse_quarantine(text)? {
+        if known.iter().any(|(t, _)| *t == q.test) {
+            problems.push(format!("{} is on both lists: a flaky test is quarantined, a test that always fails is known failing", q.test));
+        }
+        if today - q.added > QUARANTINE_DAYS {
+            problems.push(format!(
+                "{} has been quarantined {} days (limit {QUARANTINE_DAYS}): fix the test ({}) and remove the line, or take it off the list",
+                q.test,
+                today - q.added,
+                q.issue
+            ));
+        }
+    }
+    if problems.is_empty() { Ok(()) } else { Err(problems.join("\n  ")) }
+}
+
+/// One line of the quarantine list.
+#[derive(Debug)]
+struct Quarantined<'a> {
+    test: &'a str,
+    issue: &'a str,
+    /// Days since 1970-01-01 of the day it was added.
+    added: i64,
+}
+
+/// The quarantine list: the known-failing format (sorted, each test once) with
+/// `<issue> <YYYY-MM-DD> [why]` as the cause. The issue is `#N` or an issue URL.
+fn parse_quarantine(text: &str) -> Result<Vec<Quarantined<'_>>, String> {
+    let mut out = Vec::new();
+    for (test, rest) in crate::kernel_cases::known_failing(text)? {
+        let mut words = rest.split_whitespace();
+        let issue = words.next().unwrap_or("");
+        let number = issue.strip_prefix('#').or_else(|| issue.strip_prefix("https://github.com/tangency-labs/solidcraft/issues/"));
+        if !number.is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) {
+            return Err(format!("{test}: needs its issue first, `#N` or an issue URL, then the date added (`<test> #N YYYY-MM-DD [why]`)"));
+        }
+        let added = words.next().and_then(parse_date).ok_or_else(|| format!("{test}: needs the date it was added, YYYY-MM-DD, after the issue"))?;
+        out.push(Quarantined { test, issue, added });
+    }
+    Ok(out)
+}
+
+/// `YYYY-MM-DD` as days since 1970-01-01 (proleptic Gregorian).
+fn parse_date(s: &str) -> Option<i64> {
+    let mut p = s.split('-');
+    let (y, m, d): (i64, i64, i64) = (p.next()?.parse().ok()?, p.next()?.parse().ok()?, p.next()?.parse().ok()?);
+    if p.next().is_some() || s.len() != 10 || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146097 + doe - 719468)
+}
+
+/// What each quarantined test did in this run, one line each; a test that did not run is left out.
+fn quarantine_report(list: &[Quarantined], outcomes: &BTreeMap<String, bool>) -> Vec<String> {
+    list.iter()
+        .filter_map(|q| match outcomes.get(q.test)? {
+            true => Some(format!("quarantined, failed: {}; see {}", q.test, q.issue)),
+            false => Some(format!("quarantined, passed: {}; see {}, release it from tests/QUARANTINED_TESTS if it keeps passing", q.test, q.issue)),
+        })
+        .collect()
 }
 
 /// `path` itself, or every `.xml` file under it (sorted), into `out`.
@@ -174,7 +273,7 @@ fn grade(list: &str, outcomes: &BTreeMap<String, bool>) -> Result<String, String
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{add, grade, junit_outcomes};
+    use super::{add, check_quarantine, grade, junit_outcomes, parse_date, parse_quarantine, quarantine_report};
 
     /// A nextest report in miniature: a library and an integration test binary, a pass, a
     /// failure, an error, a skipped case and a pass on a retry.
@@ -263,5 +362,29 @@ mod tests {
         assert!(grade("b x\na y\n", &none).unwrap_err().contains("out of order"));
         assert!(grade("a x\na y\n", &none).unwrap_err().contains("a repeat of"));
         assert!(grade("a\n", &none).unwrap_err().contains("gives no cause"));
+    }
+
+    #[test]
+    fn a_quarantined_test_is_reported_and_needs_an_issue_a_date_and_to_be_under_14_days_old() {
+        assert_eq!(parse_date("1970-01-02"), Some(1));
+        assert_eq!(parse_date("2026-11-11"), Some(20_768));
+        assert_eq!(parse_date("2026-13-01"), None);
+        let list = "# flaky\n\
+            solidcraft-kernel::tests::fails #12 2026-11-01 times out under load\n\
+            solidcraft-kernel::tests::passes https://github.com/tangency-labs/solidcraft/issues/13 2026-11-10\n";
+        let q = parse_quarantine(list).unwrap();
+        let report = quarantine_report(&q, &outcomes(REPORT));
+        assert_eq!(report.len(), 2, "{report:?}");
+        assert!(report[0].starts_with("quarantined, failed: solidcraft-kernel::tests::fails; see #12"), "{report:?}");
+        assert!(report[1].starts_with("quarantined, passed: solidcraft-kernel::tests::passes"), "{report:?}");
+        let day = |s| parse_date(s).unwrap();
+        check_quarantine(list, &[], day("2026-11-15")).unwrap();
+        let old = check_quarantine(list, &[], day("2026-11-16")).unwrap_err();
+        assert!(old.contains("fails has been quarantined 15 days") && !old.contains("passes"), "{old}");
+        assert!(parse_quarantine("a why 2026-11-01\n").unwrap_err().contains("needs its issue"));
+        assert!(parse_quarantine("a #5\n").unwrap_err().contains("needs the date"));
+        assert!(parse_quarantine("a #5 2026-11-01x\n").unwrap_err().contains("needs the date"));
+        let both = check_quarantine(list, &[("solidcraft-kernel::tests::fails", "x")], day("2026-11-11")).unwrap_err();
+        assert!(both.contains("on both lists"), "{both}");
     }
 }
