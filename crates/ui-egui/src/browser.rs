@@ -1551,6 +1551,7 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     // Only the floating card folds; the docked column keeps its full height.
     let render = crate::render_workspace::active(app);
     if !render {
+        crate::drawing_workspace::sheets_section(app, ui);
         browser_header(app, ui, collapsible);
     }
     let stacked = !render && !crate::drawing_workspace::active(app) && crate::timeline_left::stacked(app);
@@ -1580,6 +1581,7 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
 /// Existing Browser content without placement, title or collapse chrome.
 pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     sync_reveals(app);
+    crate::drawing_workspace::sheets_section(app, ui);
     let render = crate::render_workspace::active(app);
     if render {
         ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_compact_tree"), true));

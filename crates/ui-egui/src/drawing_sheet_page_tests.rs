@@ -302,7 +302,7 @@ fn marks_draw_each_item_of_the_scene() {
 #[test]
 fn the_plate_sheet_draws_its_lines_and_text() {
     let (mut h, _) = plate_sheet();
-    let sheet = h.app.drawing_workspace.page.sheet.unwrap();
+    let sheet = active_sheet(&h.app).unwrap();
     let view = solidcraft_engine::drawing_scene::extract(&mut h.app.session, sheet).unwrap();
     let glyphs: usize = view.scene.groups.iter().flat_map(|g| &g.items).map(|i| if let Item::Text(run) = i { run.glyphs.len() } else { 0 }).sum();
     assert!(glyphs > 20, "the title block has text: {glyphs}");

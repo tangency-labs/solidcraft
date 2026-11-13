@@ -177,7 +177,8 @@ pub struct Page {
     /// fitted again when the canvas changes size (a window resized, a panel opened).
     fitted_on: Option<egui::Vec2>,
     /// The sheet shown, when the drawing still has it.
-    pub(crate) sheet: Option<u64>,
+    sheet: Option<u64>,
+    drawing: Option<(u64, u64)>,
     marks: Option<Marks>,
     /// The zoom card, so the canvas under it takes no camera input.
     pub(crate) card: Option<Rect>,
@@ -188,7 +189,33 @@ pub struct Page {
 impl Default for Page {
     fn default() -> Self {
         let cam = Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, fov: 0.0, distance: 1000.0, ..Camera::default() };
-        Page { cam, scale: true_size(1.0, 1.0), fitted: None, fitted_on: None, sheet: None, marks: None, card: None, shown: None }
+        Page { cam, scale: true_size(1.0, 1.0), fitted: None, fitted_on: None, sheet: None, drawing: None, marks: None, card: None, shown: None }
+    }
+}
+
+/// The canvas sheet, also used by actions that need a default sheet.
+pub(crate) fn active_sheet(app: &SolveApp) -> Option<u64> {
+    let drawing = app.session.drawing(drawing_scene::CMD).ok()?;
+    let page = &app.drawing_workspace.page;
+    page.sheet
+        .filter(|id| page.drawing == Some((app.session.uid, drawing.id)) && drawing.sheets.iter().any(|s| s.id == *id))
+        .or_else(|| drawing.sheets.first().map(|s| s.id))
+}
+
+pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
+    let Ok(drawing) = app.session.drawing(drawing_scene::CMD) else { return };
+    if !drawing.sheets.iter().any(|s| s.id == sheet) {
+        return;
+    }
+    let page = &mut app.drawing_workspace.page;
+    let owner = (app.session.uid, drawing.id);
+    if page.drawing != Some(owner) || page.sheet != Some(sheet) {
+        page.drawing = Some(owner);
+        page.sheet = Some(sheet);
+        page.fitted = None;
+        page.fitted_on = None;
+        page.marks = None;
+        page.shown = None;
     }
 }
 
@@ -316,16 +343,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     // The zoom card stays covered from last frame while the camera reads this frame's input.
     app.drawing_workspace.page.shown = None;
     let Ok(drawing) = app.session.drawing(drawing_scene::CMD).cloned() else {
+        app.drawing_workspace.page = Page::default();
+        return false;
+    };
+    let Some(sheet) = active_sheet(app) else {
         app.drawing_workspace.page.card = None;
         return false;
     };
-    let page = &mut app.drawing_workspace.page;
-    let sheet = page.sheet.filter(|id| drawing.sheets.iter().any(|s| s.id == *id)).or_else(|| drawing.sheets.first().map(|s| s.id));
-    let Some(sheet) = sheet else {
-        page.card = None;
-        return false;
-    };
-    page.sheet = Some(sheet);
+    select_sheet(app, sheet);
     let t = Tokens::get();
     let canvas = ui.max_rect();
     let (stage, paper, ink) = sheet_colours(app);

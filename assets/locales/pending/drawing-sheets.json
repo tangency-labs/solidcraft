@@ -1,0 +1,52 @@
+{
+  "de": {
+    "ui.drawing_sheets.active": "Aktives Blatt",
+    "ui.drawing_sheets.add": "Blatt hinzufügen",
+    "ui.drawing_sheets.always": "Immer anzeigen",
+    "ui.drawing_sheets.legacy": "Schwebende Blattleiste",
+    "ui.drawing_sheets.multiple": "Nur bei mehreren Blättern",
+    "ui.drawing_sheets.off": "Aus",
+    "ui.drawing_sheets.title": "Blätter",
+    "ui.drawing_sheets.visibility": "Blattbereich"
+  },
+  "en": {
+    "ui.drawing_sheets.active": "Active sheet",
+    "ui.drawing_sheets.add": "Add sheet",
+    "ui.drawing_sheets.always": "Always show",
+    "ui.drawing_sheets.legacy": "Floating sheet strip",
+    "ui.drawing_sheets.multiple": "Multiple sheets only",
+    "ui.drawing_sheets.off": "Off",
+    "ui.drawing_sheets.title": "Sheets",
+    "ui.drawing_sheets.visibility": "Sheets section"
+  },
+  "ja": {
+    "ui.drawing_sheets.active": "アクティブシート",
+    "ui.drawing_sheets.add": "シートを追加",
+    "ui.drawing_sheets.always": "常に表示",
+    "ui.drawing_sheets.legacy": "フローティングシートバー",
+    "ui.drawing_sheets.multiple": "複数のシートがある場合のみ",
+    "ui.drawing_sheets.off": "オフ",
+    "ui.drawing_sheets.title": "シート",
+    "ui.drawing_sheets.visibility": "シートセクション"
+  },
+  "ko": {
+    "ui.drawing_sheets.active": "활성 시트",
+    "ui.drawing_sheets.add": "시트 추가",
+    "ui.drawing_sheets.always": "항상 표시",
+    "ui.drawing_sheets.legacy": "떠 있는 시트 표시줄",
+    "ui.drawing_sheets.multiple": "시트가 여러 개일 때만",
+    "ui.drawing_sheets.off": "끔",
+    "ui.drawing_sheets.title": "시트",
+    "ui.drawing_sheets.visibility": "시트 섹션"
+  },
+  "zh": {
+    "ui.drawing_sheets.active": "当前图纸",
+    "ui.drawing_sheets.add": "添加图纸",
+    "ui.drawing_sheets.always": "始终显示",
+    "ui.drawing_sheets.legacy": "浮动图纸栏",
+    "ui.drawing_sheets.multiple": "仅在有多张图纸时",
+    "ui.drawing_sheets.off": "关闭",
+    "ui.drawing_sheets.title": "图纸",
+    "ui.drawing_sheets.visibility": "图纸区域"
+  }
+}
