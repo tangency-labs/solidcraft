@@ -43,7 +43,7 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{
     api_rotate, api_translate, TransformObject,
 };
-use solidcore::{Brep, Kernel, Result, SolidError};
+use solidcore::{Brep, Kernel, Result};
 
 /// `5000 pi - V_int` (the module doc).
 const EXPECTED: f64 = 5000.0 * PI - 1_270.664_483_821_36;
@@ -174,7 +174,7 @@ fn upstream_drops_b() {
 fn upstream_fails_1001() {
     let (_, u) = union(false, 0.0, 0.0);
     match u {
-        Err(SolidError::Upstream { code: 1001, .. }) => {}
+        Err(e) if e.sm_status() == Some(1001) => {}
         other => panic!("{:?}", other.map(|_| ())),
     }
 }

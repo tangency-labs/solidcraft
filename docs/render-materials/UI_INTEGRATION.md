@@ -96,7 +96,7 @@ Current defaults include 28-point controls, a 40-point header, 48-point footer, 
 
 The literal icon IDs `sun`, `light`, `lighting`, `environment`, `scene`, `texture`, `quality`, `floor` and `stop` are not present in the inspected set. Use clear text for proposed actions until a semantically appropriate existing icon or reviewed alias/new master is assigned. A reused drawing cannot change the behavior of an existing command.
 
-No SVG or acceptance record is changed by this contribution. Existing accepted `ws_render`, `appearance` and `render_image` masters were inspected at 64, 24 and 16 pixels in both themes through the repository palette renderer. Those checks concern artwork only. Future icon work must follow `assets/icons/ui/STYLE_GUIDE.md`, aliases and review protection; never copy a private variant into Render.
+No SVG or acceptance record is changed by this contribution. Existing accepted `ws_render`, `appearance` and `render_image` masters were inspected at 64, 24 and 16 pixels in both themes through the repository palette renderer. Those checks concern artwork only. Future icon work must follow `crates/look/icons/STYLE_GUIDE.md`, aliases and review protection; never copy a private variant into Render.
 
 ## 3. Library and preset discovery
 

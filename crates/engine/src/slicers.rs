@@ -189,7 +189,34 @@ const TARGETS: &[Target] = &[
         ..Target::SLICER
     },
     Target { id: "ideamaker", name: "ideaMaker", keys: &["ideamaker"], exes: &["ideamaker", "ideaMaker.exe"], ..Target::SLICER },
-    Target { id: "lychee", name: "Lychee Slicer", keys: &["lycheeslicer"], exes: &["lychee-slicer", "Lychee Slicer.exe"], ..Target::SLICER },
+    Target {
+        id: "lychee",
+        name: "Lychee Slicer",
+        keys: &["lycheeslicer"],
+        exes: &["lychee-slicer", "Lychee Slicer.exe", "LycheeSlicer.exe"],
+        ..Target::SLICER
+    },
+    // QIDI Studio is a Bambu Studio fork and takes what it takes.
+    Target { id: "qidi", name: "QIDI Studio", keys: &["qidistudio"], exes: &["qidi-studio", "QIDIStudio", "qidi-studio.exe"], ..Target::SLICER },
+    // The resin slicers read STL.
+    Target {
+        id: "chitubox",
+        name: "CHITUBOX",
+        keys: &["chituboxbasic", "chituboxpro", "chitubox"],
+        exes: &["CHITUBOX_Basic.exe", "CHITUBOX Pro.exe"],
+        formats: &["stl"],
+        default_format: "stl",
+        ..Target::SLICER
+    },
+    Target {
+        id: "creatware",
+        name: "CreatWare",
+        keys: &["creatware"],
+        exes: &["CreatWare-slicer.exe"],
+        formats: &["stl"],
+        default_format: "stl",
+        ..Target::SLICER
+    },
     Target { id: "slic3r", name: "Slic3r", keys: &["slic3r"], exes: &["slic3r", "Slic3r", "slic3r.exe"], ..Target::SLICER },
 ];
 
@@ -694,9 +721,9 @@ fn mac_icon(app: &Path) -> Option<IconSource> {
 fn windows_programs(env: &Env, add: &mut impl FnMut(Slicer, &Path)) {
     for root in &env.install_dirs {
         let mut dirs: Vec<PathBuf> = entries(root).into_iter().filter(|p| p.is_dir()).collect();
-        // PrusaSlicer installs one level down, in `Prusa3D\PrusaSlicer`.
-        let nested: Vec<PathBuf> =
-            dirs.iter().filter(|d| normalize(&file_name(d)) == "prusa3d").flat_map(|d| entries(d)).filter(|p| p.is_dir()).collect();
+        // Some install one level down, under their maker's folder (`Prusa3D\PrusaSlicer`,
+        // `CBD\CHITUBOX_Basic`, `CreatBot\CreatWare`): every folder is looked into once.
+        let nested: Vec<PathBuf> = dirs.iter().flat_map(|d| entries(d)).filter(|p| p.is_dir()).collect();
         dirs.extend(nested);
         for dir in dirs {
             let Some(known) = known_for(&file_name(&dir)) else { continue };
@@ -1282,6 +1309,43 @@ mod tests {
         assert_eq!(found[1].command, ["open", "-a", apps.join("BambuStudio.app").to_str().unwrap()]);
         assert!(matches!(found[1].icon, Some(IconSource::Icns(_))));
         assert_eq!(found[2].icon, Some(IconSource::Exe(prog.join("OrcaSlicer/orca-slicer.exe"))));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// #13171: slicers as their Windows installers lay them out. Lychee's program is
+    /// `LycheeSlicer.exe`; QIDI Studio and CHITUBOX are not in the table before; CHITUBOX Basic and
+    /// CreatWare sit one folder below a vendor's (`CBD\CHITUBOX_Basic`, `CreatBot\CreatWare`).
+    #[test]
+    fn finds_windows_slicers_by_their_installed_layouts() {
+        let root = scratch("win-slicers");
+        let prog = root.join("Program Files");
+        for (dir, exe) in [
+            ("LycheeSlicer", "LycheeSlicer.exe"),
+            ("QIDIStudio", "qidi-studio.exe"),
+            ("CHITUBOX Pro", "CHITUBOX Pro.exe"),
+            ("CBD/CHITUBOX_Basic", "CHITUBOX_Basic.exe"),
+            ("CreatBot/CreatWare", "CreatWare-slicer.exe"),
+        ] {
+            std::fs::create_dir_all(prog.join(dir)).unwrap();
+            std::fs::write(prog.join(dir).join(exe), b"x").unwrap();
+        }
+        // A vendor folder with nothing known in it, and a program with a name like a slicer's one
+        // level too deep, are not listed.
+        std::fs::create_dir_all(prog.join("Vendor/Tools/Cura")).unwrap();
+        std::fs::write(prog.join("Vendor/Tools/Cura/Cura.exe"), b"x").unwrap();
+        let found = detect_in(&Env { install_dirs: vec![prog.clone()], ..Env::default() });
+        let mut ids: Vec<&str> = found.iter().map(|f| f.base_id()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["chitubox", "chitubox", "creatware", "lychee", "qidi"], "{found:?}");
+        let exe_of = |id: &str| found.iter().filter(|f| f.base_id() == id).map(|f| f.command[0].clone()).collect::<Vec<_>>();
+        assert_eq!(exe_of("lychee"), [prog.join("LycheeSlicer").join("LycheeSlicer.exe").to_string_lossy()]);
+        assert_eq!(exe_of("qidi"), [prog.join("QIDIStudio").join("qidi-studio.exe").to_string_lossy()]);
+        assert_eq!(exe_of("creatware"), [prog.join("CreatBot").join("CreatWare").join("CreatWare-slicer.exe").to_string_lossy()]);
+        assert_eq!(exe_of("chitubox").len(), 2);
+        // The resin slicers take STL.
+        let chitubox = found.iter().find(|f| f.base_id() == "chitubox").unwrap();
+        assert_eq!(chitubox.target().default_format, "stl");
+        assert!(!chitubox.target().accepts("3mf"));
         std::fs::remove_dir_all(root).unwrap();
     }
 

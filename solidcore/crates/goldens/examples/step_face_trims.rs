@@ -82,7 +82,7 @@ fn main() {
     };
     let Some(body) = std::fs::read(file)
         .ok()
-        .and_then(|b| step_import::import(&b, &step_import::Limits::default()).ok())
+        .and_then(|b| step_export::import(&b, &step_export::Limits::default()).ok())
         .and_then(|m| m.bodies.into_iter().nth(bi))
     else {
         eprintln!("no body {bi}");
@@ -93,8 +93,7 @@ fn main() {
             report("stitch recipe (alone)", &k, &mut b, f);
         }
     }
-    let script =
-        step_import::script::from_body(&body, step_import::script::FromBodyOptions::default());
+    let script = goldens::script::from_body(&body, goldens::script::FromBodyOptions::default());
     let (k, b, _) = goldens::constructor::build_brep(&script);
     if let Some(mut b) = b {
         if let Some(&f) = solidcore::topology::brep::p1::faces(&b, None)

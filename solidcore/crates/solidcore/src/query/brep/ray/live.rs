@@ -430,7 +430,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
             .curves
             .get(slot_of(edge.index()))
             .and_then(Option::as_ref)
-            .ok_or(SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve slot"))?;
         if let Some(curve) = cell.get() {
             return Ok(curve.as_ref());
         }
@@ -438,7 +438,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
             b.edge(edge)?
                 .curve
                 .as_ref()
-                .ok_or(SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve"))?
                 .clone_for_evaluation()
                 .map(Box::new)
         })?;
@@ -452,7 +452,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
             .surfaces
             .get(slot_of(face.index()))
             .and_then(Option::as_ref)
-            .ok_or(SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::query_missing(OP, "the face's surface slot"))?;
         if let Some(surface) = cell.get() {
             return Ok(surface.as_ref());
         }
@@ -460,7 +460,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
             b.face(face)?
                 .surface
                 .as_ref()
-                .ok_or(SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
                 .clone_for_evaluation()
                 .map(Box::new)
         })?;

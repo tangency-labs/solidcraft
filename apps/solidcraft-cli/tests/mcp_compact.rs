@@ -35,12 +35,12 @@ fn inspect_schema(args: &[&str], env: Option<&str>) -> Result<Value, String> {
 fn compact_output_is_off_unless_asked() {
     let plain = inspect_schema(&[], None).unwrap();
     assert_eq!(plain["properties"]["sketches"]["type"], "boolean", "{plain}");
-    assert!(plain["properties"].get("bodies").is_none(), "{plain}");
+    assert_eq!(plain["properties"]["bodies"]["type"], json!(["boolean", "string"]), "no list of names: {plain}");
     assert_eq!(inspect_schema(&[], Some("0")).unwrap(), plain);
 
     for (args, env) in [(&["--compact"][..], None), (&[][..], Some("1")), (&[][..], Some("true"))] {
         let compact = inspect_schema(args, env).unwrap();
-        assert!(compact["properties"]["bodies"].is_object(), "{args:?} {env:?}: {compact}");
+        assert!(compact["properties"]["bodies"]["type"].as_array().is_some_and(|t| t.contains(&json!("array"))), "{args:?} {env:?}: {compact}");
     }
 
     let e = inspect_schema(&[], Some("maybe")).unwrap_err();

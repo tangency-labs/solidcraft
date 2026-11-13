@@ -1,0 +1,350 @@
+{
+ "plate": {
+  "spec": "A rectangular plate 60 mm (X) by 40 mm (Y) by 8 mm thick (Z), spanning x 0..60, y 0..40, z 0..8. Four through holes of diameter 6 mm go straight down through it (along Z), centred at (8,8), (52,8), (8,32) and (52,32).",
+  "bodies": [
+   {
+    "name": "plate",
+    "volume": 18295.2213,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      60,
+      40,
+      8
+     ]
+    ]
+   }
+  ]
+ },
+ "bracket": {
+  "spec": "An L-bracket as one solid. Base: 80 (X) by 40 (Y) by 6 (Z) mm, spanning x 0..80, y 0..40, z 0..6. Upright wall: 80 (X) by 6 (Y) mm, standing on the back edge of the base, spanning x 0..80, y 34..40, z 0..50. The inside corner where the top of the base meets the front face of the wall (the edge along X at y=34, z=6) has a 5 mm radius fillet. The base has two through slots (along Z), each 6 mm wide with fully rounded ends and 20 mm long overall in X; the slot centres are at (20, 17) and (60, 17).",
+  "bodies": [
+   {
+    "name": "bracket",
+    "volume": 39401.9117,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      80,
+      40,
+      50
+     ]
+    ]
+   }
+  ]
+ },
+ "enclosure": {
+  "spec": "An open-top electronics enclosure as one solid. Outer block 100 (X) by 60 (Y) by 40 (Z) mm, spanning x 0..100, y 0..60, z 0..40. Round its four vertical outside edges with a 5 mm radius. Hollow it out with a 2.5 mm wall on the four sides and a 2.5 mm floor, open at the top (z=40), so the cavity follows the outside shape 2.5 mm in. Inside, four cylindrical screw bosses of diameter 8 mm stand on the floor (from z=2.5 up to z=40), centred at (8,8), (92,8), (8,52) and (92,52); each has a 3 mm diameter hole 30 mm deep drilled down from its top (z=40 to z=10). Finally a 10 mm diameter hole goes through the front wall only (the wall at y=0..2.5), centred at x=50, z=20, along Y.",
+  "bodies": [
+   {
+    "name": "enclosure",
+    "volume": 49900.5247,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      100,
+      60,
+      40
+     ]
+    ]
+   }
+  ]
+ },
+ "flange": {
+  "spec": "A round flange as one solid, on the Z axis. A disc of diameter 80 mm and 10 mm thick (z 0..10), centred on the Z axis. On top a hub of diameter 40 mm from z=10 to z=30. A bore of diameter 20 mm goes through the whole flange along Z. Six bolt holes of diameter 8 mm go through the disc along Z, equally spaced on a 60 mm diameter circle, the first one centred at (30, 0).",
+  "bodies": [
+   {
+    "name": "flange",
+    "volume": 62957.5168,
+    "bbox": [
+     [
+      -40,
+      -40,
+      0
+     ],
+     [
+      40,
+      40,
+      30
+     ]
+    ]
+   }
+  ]
+ },
+ "shaft": {
+  "spec": "A stepped round shaft as one solid along the X axis (its axis is the X axis). From x=0 to 30 it is 20 mm in diameter, from x=30 to 70 it is 30 mm, and from x=70 to 95 it is 16 mm. The two outer end edges (the circular edge at x=0 and the circular edge at x=95) have a 1 mm x 45 degree chamfer; no other edges are chamfered.",
+  "bodies": [
+   {
+    "name": "shaft",
+    "volume": 42671.2058,
+    "bbox": [
+     [
+      0,
+      -15,
+      -15
+     ],
+     [
+      95,
+      15,
+      15
+     ]
+    ]
+   }
+  ]
+ },
+ "spacer": {
+  "spec": "A hexagonal spacer as one solid: a regular hexagonal prism 24 mm across the flats and 10 mm tall (z 0..10), centred on the Z axis, with two of its flats parallel to the X axis (flats at y = -12 and y = +12). A 12 mm diameter hole goes through it along the Z axis.",
+  "bodies": [
+   {
+    "name": "spacer",
+    "volume": 3857.333,
+    "bbox": [
+     [
+      -13.856406460551018,
+      -12,
+      0
+     ],
+     [
+      13.856406460551018,
+      12,
+      10
+     ]
+    ]
+   }
+  ]
+ },
+ "channel": {
+  "spec": "A U-channel as one solid, 50 mm long along X (x 0..50). Its cross-section (in Y and Z) is 40 mm wide (y 0..40) and 30 mm tall (z 0..30): a 4 mm thick bottom (z 0..4) and two 4 mm thick side walls (y 0..4 and y 36..40), open at the top. Two 6 mm diameter holes go through the bottom along Z, centred at (15, 20) and (35, 20).",
+  "bodies": [
+   {
+    "name": "channel",
+    "volume": 18173.8053,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      50,
+      40,
+      30
+     ]
+    ]
+   }
+  ]
+ },
+ "rounded": {
+  "spec": "A rounded block as one solid: a box 50 (X) by 30 (Y) by 20 (Z) mm spanning x 0..50, y 0..30, z 0..20, with all twelve of its edges rounded with a 3 mm radius fillet.",
+  "bodies": [
+   {
+    "name": "rounded",
+    "volume": 29263.5927,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      50,
+      30,
+      20
+     ]
+    ]
+   }
+  ]
+ },
+ "frustum": {
+  "spec": "A cone frustum as one solid on the Z axis: base diameter 40 mm at z=0, top diameter 20 mm at z=30. A 10 mm diameter hole goes through it along the Z axis.",
+  "bodies": [
+   {
+    "name": "frustum",
+    "volume": 19634.9541,
+    "bbox": [
+     [
+      -20,
+      -20,
+      0
+     ],
+     [
+      20,
+      20,
+      30
+     ]
+    ]
+   }
+  ]
+ },
+ "rail": {
+  "spec": "A mounting rail as one solid: a plate 100 (X) by 20 (Y) by 5 (Z) mm spanning x 0..100, y 0..20, z 0..5, with eight 4 mm diameter through holes along Z in a row at y=10, centred at x = 15, 25, 35, 45, 55, 65, 75 and 85.",
+  "bodies": [
+   {
+    "name": "rail",
+    "volume": 9497.3452,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      100,
+      20,
+      5
+     ]
+    ]
+   }
+  ]
+ },
+ "clamp": {
+  "spec": "A pinned clamp assembly made of four separate parts (each its own part/component, or its own separate solid if your tools have no parts), named Base, Lid, Pin1 and Pin2. Base: a block spanning x 0..60, y 0..40, z 0..20, with two blind holes of diameter 5 mm drilled down from its top face 15 mm deep (z 20 down to 5), centred at (10, 20) and (50, 20). Lid: a plate spanning x 0..60, y 0..40, z 20..25 sitting on the Base, with two 5 mm diameter through holes along Z at the same two centres. Pin1 and Pin2: cylinders of diameter 5 mm from z=5 to z=25, centred at (10, 20) and (50, 20). The parts stay separate solids; do not merge them.",
+  "bodies": [
+   {
+    "name": "Base",
+    "volume": 47410.9514,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      60,
+      40,
+      20
+     ]
+    ]
+   },
+   {
+    "name": "Lid",
+    "volume": 11803.6505,
+    "bbox": [
+     [
+      0,
+      0,
+      20
+     ],
+     [
+      60,
+      40,
+      25
+     ]
+    ]
+   },
+   {
+    "name": "Pin1",
+    "volume": 392.6991,
+    "bbox": [
+     [
+      7.5,
+      17.5,
+      5
+     ],
+     [
+      12.5,
+      22.5,
+      25
+     ]
+    ]
+   },
+   {
+    "name": "Pin2",
+    "volume": 392.6991,
+    "bbox": [
+     [
+      47.5,
+      17.5,
+      5
+     ],
+     [
+      52.5,
+      22.5,
+      25
+     ]
+    ]
+   }
+  ]
+ },
+ "bearing": {
+  "spec": "A shaft-and-housing assembly made of four separate parts (each its own part/component, or its own separate solid if your tools have no parts), named Housing, Shaft, CollarL and CollarR. Housing: a block spanning x 0..80, y 0..50, z 0..40, with a 30 mm diameter bore going through it along X whose axis is the line y=25, z=20; and four 6 mm diameter mounting holes going through it along Z, centred at (10, 6), (70, 6), (10, 44) and (70, 44). Shaft: a 30 mm diameter cylinder on the same axis (y=25, z=20), from x=-20 to x=100. CollarL and CollarR: tubes with 40 mm outside diameter and 30 mm inside diameter, each 10 mm long, on the same axis, CollarL from x=-12 to x=-2 and CollarR from x=82 to x=92. The parts stay separate solids; do not merge them.",
+  "bodies": [
+   {
+    "name": "Housing",
+    "volume": 98927.4388,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      80,
+      50,
+      40
+     ]
+    ]
+   },
+   {
+    "name": "Shaft",
+    "volume": 84823.0016,
+    "bbox": [
+     [
+      -20,
+      10,
+      5
+     ],
+     [
+      100,
+      40,
+      35
+     ]
+    ]
+   },
+   {
+    "name": "CollarL",
+    "volume": 5497.7871,
+    "bbox": [
+     [
+      -12,
+      5,
+      0
+     ],
+     [
+      -2,
+      45,
+      40
+     ]
+    ]
+   },
+   {
+    "name": "CollarR",
+    "volume": 5497.7871,
+    "bbox": [
+     [
+      82,
+      5,
+      0
+     ],
+     [
+      92,
+      45,
+      40
+     ]
+    ]
+   }
+  ]
+ }
+}

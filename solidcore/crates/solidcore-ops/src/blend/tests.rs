@@ -24,3 +24,13 @@ fn laws_are_checked_as_their_data() {
         &[1.0, 1.0, 0.0, 1.0, 1.0]
     ));
 }
+
+/// The crease trim's refusal (a blend past its faces would crease the face that runs on
+/// tangentially from a face it rolls on) names why: its rail leaves the face it rolls on.
+#[test]
+fn a_crease_across_a_tangent_edge_is_a_rail_leaving_its_face() {
+    assert_eq!(
+        room_reason(NoRoomReason::CreaseAcrossTangentEdge),
+        Some(RoomReason::RailLeavesFace)
+    );
+}

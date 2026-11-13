@@ -1,6 +1,5 @@
-//! The exact UV curve of a curve lying on a cylinder: the opt-in replacement
-//! ([`UpstreamFixes::cylinder_plane_section_trims_exact`](crate::kernel::UpstreamFixes::cylinder_plane_section_trims_exact),
-//! issue #2109, WR-680) of the traced fit `SmSurface::DropCurve` makes for it.
+//! The exact UV curve of a curve lying on a cylinder: the replacement (WR-680) of the
+//! traced fit `SmSurface::DropCurve` makes for it.
 //!
 //! Upstream: none. `SmSurface::DropCurve` (`source/SMLib/src/SmSurfaceDropLib.cpp`,
 //! [`Surface::drop_curve_base`]) traces every curve on a surface other than a plane and
@@ -8,7 +7,7 @@
 //!
 //! | Rust                     | Upstream                                                |
 //! |--------------------------|---------------------------------------------------------|
-//! | `exact_uv_curve` (crate) | none: the opt-in fix's exact UV curve, tried before the trace |
+//! | `exact_uv_curve` (crate) | none: the exact UV curve, tried before the trace        |
 //!
 //! **The construction.** The cylinder's NURB sweeps a rational quadratic circle along
 //! its axis with degree 1. On one Bezier segment of the circle, control points `q0`,
@@ -1037,18 +1036,14 @@ mod tests {
                 ObjectKind::Curve
             }
         }
-        for enabled in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.cylinder_plane_section_trims_exact = enabled;
-            let (s, domain) = cylinder(&k);
-            let curve = degree_zero_curve();
-            let interval = Extent1d::from_min_max(0.0, 1.0);
-            let out = s.drop_curve_base::<Obj>(&k, &domain, &curve, &interval, 1e-6, false, None);
-            assert_eq!(
-                out.as_ref().err().and_then(SolidError::sm_status),
-                Some(crate::error::SM_ERR_NULL_POINTER),
-                "exact UV enabled: {enabled}"
-            );
-        }
+        let k = Kernel::default();
+        let (s, domain) = cylinder(&k);
+        let curve = degree_zero_curve();
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let out = s.drop_curve_base::<Obj>(&k, &domain, &curve, &interval, 1e-6, false, None);
+        assert_eq!(
+            out.as_ref().err().and_then(SolidError::sm_status),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 }

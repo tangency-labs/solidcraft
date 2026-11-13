@@ -538,7 +538,7 @@ fn batch_fixture(count: usize) -> Session {
     let mut s = Session::default();
     s.set_render_job_host(Some(solidcraft_render::job::CpuHost::cooperative())).unwrap();
     for index in 0..count {
-        let camera = solidcraft_render::Camera { yaw: index as f64 * 0.2, roll: index as f64 * 0.01, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { yaw: index as f64 * 0.2, roll: index as f64 * 0.01, ..Default::default() };
         s.execute("render.settings.set", &json!({"name":format!("Shot {index:02}"),"set":{"camera":camera,"width":8+index,"height":8}})).unwrap();
     }
     s
@@ -660,7 +660,7 @@ fn render_results_batch_cameras_and_common_setup_are_captured_before_later_shot_
     let original = s.doc.render.setups.get("Shot 01").unwrap().camera;
     s.execute("render.batch", &json!({"request":{"setup":"Shot 00"}})).unwrap();
     let first = s.render_queue_state().job.unwrap();
-    let changed = solidcraft_render::Camera { yaw: 2.0, ..Default::default() };
+    let changed = solidcraft_viewport::Camera { yaw: 2.0, ..Default::default() };
     s.execute("render.settings.set", &json!({"name":"Shot 01","set":{"camera":changed}})).unwrap();
     s.execute("render.settings.set", &json!({"name":"Shot 00","set":{"width":64}})).unwrap();
     let document = s.doc.clone();

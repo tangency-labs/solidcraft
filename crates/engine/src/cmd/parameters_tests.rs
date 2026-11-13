@@ -1231,6 +1231,42 @@ fn feature_error(s: &Session, name: &str) -> Option<String> {
     s.model.results.iter().find(|r| r.name == name).and_then(|r| r.error.clone())
 }
 
+/// A horizontal distance from the origin to a point that is 0 (the point on the y axis) can be
+/// changed to a positive value through its parameter, and back: the point moves along x and the
+/// circle centred on it with it, instead of the sketch failing as a conflict.
+#[test]
+fn a_horizontal_distance_from_the_origin_changed_from_zero_moves_the_point() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Offset", "expression": "0 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 5], [30, 5]], "ids": ["floor"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "floor", "mode": "horizontal"}));
+    for (entities, kind, value) in [
+        (json!(["origin", "floor.start"]), "vertical", json!(5)),
+        (json!(["origin", "floor.start"]), "horizontal", json!(30)),
+        (json!(["floor.start", "floor.end"]), "horizontal", json!(60)),
+    ] {
+        run(&mut s, "sketch.dimension", json!({"entities": entities, "type": kind, "value": value}));
+    }
+    run(&mut s, "sketch.point", json!({"point": [3, 20], "id": "hole", "construction": true, "connect": false}));
+    run(&mut s, "sketch.circle.center", json!({"center": "hole", "diameter": 8}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["floor.start", "hole"], "type": "vertical", "value": 15}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "hole"], "type": "horizontal", "value": "Offset"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    let disc = std::f64::consts::PI * 16.0 * 5.0;
+    for (value, x) in [("0.5 mm", 0.5), ("0 mm", 0.0), ("0.5 mm", 0.5), ("-0 mm", 0.0)] {
+        let r = run(&mut s, "parameters.change", json!({"name": "Offset", "expression": value}));
+        assert_eq!(r["errors"], json!([]), "{value}: {r}");
+        assert!(rel(volume(&mut s), disc) < 1e-3, "{value}");
+        // The disc is centred on the point, so its box's middle in x is where the point went.
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let b = &m["bodies"][0]["bbox"];
+        let middle = (b["min"][0].as_f64().unwrap_or(f64::NAN) + b["max"][0].as_f64().unwrap_or(f64::NAN)) / 2.0;
+        assert!((middle - x).abs() < 1e-3, "{value}: the point is at x = {middle}, want {x}: {m}");
+    }
+}
+
 /// A sketch dimension set negative fails its sketch; the features built from it fail naming that
 /// sketch, not as a sketch that must come earlier in the timeline (#9075). Their errors follow
 /// the sketch's own (never an earlier one from the cache) and clear when the value is set back.

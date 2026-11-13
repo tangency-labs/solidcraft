@@ -189,7 +189,7 @@ impl PhotographicState {
             source,
             linear,
             output,
-            lookup: std::array::from_fn(|i| crate::surface::srgb8_to_linear(i as u8)),
+            lookup: std::array::from_fn(|i| solidcraft_viewport::surface::srgb8_to_linear(i as u8)),
             tiles: [Highlight::default(); 144],
             highlights: [Highlight::default(); 4],
             source_count: 0,

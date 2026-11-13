@@ -787,9 +787,9 @@
 {"case":"target_scale1e-09_side1_degree4_ratio1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"target_stage":[0.0,4e-9,-2e-9,1e-9,0.00001]}}
 {"case":"target_scale1e-09_side1_degree4_ratio1.000001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"target_stage":[0.0,4.0000010000000006e-9,-2e-9,1e-9,0.00001]}}
 {"case":"target_scale1e-09_side1_degree4_ratio2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"target_stage":[0.0,5e-9,-2e-9,1e-9,0.00001]}}
-{"case":"tracker-lifetime-k0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"notification_stage":{"blocks":[[12000029.0,12000033.0,189000434.0]],"n":29}}}
-{"case":"tracker-lifetime-k1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"notification_stage":{"blocks":[[20000045.0,20000049.0,379000826.0]],"n":33}}}
-{"case":"tracker-lifetime-k2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"notification_stage":{"blocks":[[24000039.0,24000043.0,469000689.0]],"n":33}}}
+{"case":"tracker-lifetime-k0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"notification_stage":{"blocks":[[8000026.0,8000030.0,106000347.0]],"n":27}}}
+{"case":"tracker-lifetime-k1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"notification_stage":{"blocks":[[8000026.0,8000030.0,106000347.0]],"n":27}}}
+{"case":"tracker-lifetime-k2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"notification_stage":{"blocks":[[8000026.0,8000030.0,106000347.0]],"n":27}}}
 {"case":"tracker-preexisting-k0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"notification_stage":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"tracker-preexisting-k1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"notification_stage":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"tracker-preexisting-k2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"notification_stage":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}

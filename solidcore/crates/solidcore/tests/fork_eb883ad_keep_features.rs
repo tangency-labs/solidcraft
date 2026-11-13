@@ -179,7 +179,6 @@ fn fork_kernel() -> Kernel {
     fixes.fillet_cliff_overflow = true;
     fixes.fillet_overflow_trim_at_creases = true;
     fixes.linear_sweep_arc_is_cylinder = true;
-    fixes.precise_properties_body_length_scale = true;
     k.fixes = fixes;
     k
 }
@@ -366,4 +365,24 @@ fn walls_are_read_from_one_copy_per_body() {
     assert!((v - want).abs() <= 1e-9 * want, "volume {v}, want {want}");
     assert_eq!(b.face_list().len(), 17);
     assert_eq!(copies, 2);
+}
+
+/// The same pocket and boss: keep features classifies the crease pieces on each wall on one
+/// snapshot of the body copy the wall lies in, not on a new copy of the whole body per piece
+/// (34 snapshots when each piece made its own).
+#[test]
+fn crease_pieces_are_classified_on_one_snapshot_per_copy() {
+    fn pocket_and_boss(k: &mut Kernel, block: Brep) -> Result<Brep> {
+        let pocket = create_box(k, Point3::new(8.0, 2.0, 15.0), 4.0, 4.0, 6.0)?;
+        let block = boolean_difference(k, block, pocket)?;
+        let boss = create_box(k, Point3::new(28.0, 2.0, 20.0), 4.0, 4.0, 5.0)?;
+        boolean_union(k, block, boss)
+    }
+    let mut k = fork_kernel();
+    let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let mut b = pocket_and_boss(&mut k, block).unwrap();
+    let e = pick(&k, &b, Point3::new(20.0, 0.0, 20.0));
+    k.work_counters.reset();
+    fillet_edges(&mut k, &mut b, &[e], 8.0, 1, 1, 1.0).unwrap();
+    assert_eq!(k.work_counters.classification_snapshots(), 24);
 }

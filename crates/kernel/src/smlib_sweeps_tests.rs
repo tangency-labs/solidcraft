@@ -77,6 +77,33 @@ fn an_extrusion_names_its_caps_and_walls_and_keeps_their_sources() {
 }
 
 #[test]
+fn an_extrusion_of_one_curve_drawn_in_many_pieces_names_every_piece_on_its_wall() {
+    // An ellipse in 256 cubic pieces, tangent through each joint, extruded as the one B-spline
+    // they are: its one wall comes from every piece, each found on the wall's edge in the sketch
+    // plane by its own middle (a search of that edge in too few places misses the last pieces).
+    let (n, a, b) = (256usize, 20.0, 7.0);
+    let h = TAU / n as f64;
+    let at = |i: usize| {
+        let t = (i % n) as f64 * h;
+        (Vec2::new(a * t.cos(), b * t.sin()), Vec2::new(-a * t.sin(), b * t.cos()) * (h / 3.0))
+    };
+    let segs = (0..n)
+        .map(|i| {
+            let ((p0, d0), (p3, d3)) = (at(i), at(i + 1));
+            Seg2::Cubic { p0, p1: p0 + d0, p2: p3 - d3, p3 }
+        })
+        .collect();
+    let ellipse = region(Loop2 { segs });
+    let mut pieces = pieces_of(&ellipse);
+    pieces.iter_mut().skip(1).for_each(|x| x.joins_previous = true);
+    let body = smlib_sweeps::extrude(&Plane::XY, &pieces, Some(&ellipse), 0.0, 3.0, 1.0, None).unwrap();
+    let every = format!("{:?}", (0..n).map(|segment| FaceOrigin::Profile { segment }).collect::<Vec<_>>());
+    let mut want = vec![cap(false), cap(true), every];
+    want.sort();
+    assert_eq!(origins(&body), want);
+}
+
+#[test]
 fn a_revolution_names_its_walls_by_segment_and_skips_the_axis() {
     // A half disc on the y axis of the xy plane: a sphere, every wall from the arc.
     let half = Loop2 {
@@ -254,6 +281,26 @@ fn a_drafted_extrusion_stands_on_a_straight_foot() {
 }
 
 #[test]
+fn a_drafted_extrusion_with_a_hole_names_each_side_on_its_foot_and_its_slope() {
+    // A 20 x 20 square round a 6 x 6 hole, 2 straight, then sloping 3 degrees (taken from the
+    // base) up to 10: the outer side grows to 20 + 2 x 10 tan 3, the hole's narrows to
+    // 6 - 2 x 10 tan 3, and each of the eight sides gives a foot and a sloping wall.
+    let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 20.0), Vec2::new(0.0, 20.0)]);
+    let hole = Loop2::polygon(&[Vec2::new(7.0, 7.0), Vec2::new(7.0, 13.0), Vec2::new(13.0, 13.0), Vec2::new(13.0, 7.0)]);
+    let r = Region2 { outer, holes: vec![hole] };
+    let taper = 3f64.to_radians();
+    let b = crate::extrude_tapered_between(&Plane::XY, &r, 0.0, 10.0, 2.0, 1.0, taper, crate::DraftCorner::default()).unwrap();
+    let frustum = |s1: f64, s2: f64| 8.0 / 3.0 * (s1 * s1 + s2 * s2 + s1 * s2);
+    let grow = 2.0 * 10.0 * taper.tan();
+    close(volume(&b), (400.0 - 36.0) * 2.0 + frustum(20.0, 20.0 + grow) - frustum(6.0, 6.0 - grow), 1e-9, "drafted ring");
+    let o = origins(&b);
+    assert!(o.contains(&cap(false)) && o.contains(&cap(true)), "{o:?}");
+    for k in 0..8 {
+        assert_eq!(o.iter().filter(|x| **x == profile(k)).count(), 2, "segment {k}: {o:?}");
+    }
+}
+
+#[test]
 fn a_twisted_sweep_round_a_closed_path_joins_its_ends() {
     // An 8 x 8 square round a circle of radius 30, a quarter turn of twist (onto itself): Pappus.
     let xz = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
@@ -410,4 +457,40 @@ fn a_controlled_sweep_takes_a_profile_drawn_part_way_along_its_path_as_its_start
         let (b, w) = (got.exact_bounds().unwrap(), want.exact_bounds().unwrap());
         assert!(b.min.dist(w.min) < 1e-6 && b.max.dist(w.max) < 1e-6, "{what}: {b:?} vs {w:?}");
     }
+}
+
+#[test]
+fn an_extrusion_of_a_cubic_whose_control_points_fold_back_passes_the_check() {
+    // #13243, #12107: a smooth cubic whose control polygon runs 6 left, steps 0.02 back to the
+    // right and runs 4 left again (the handles of an imported outline pulled past each other).
+    // Its wall's control net turned back by 174 degrees and SMLib's check refused the extrusion
+    // ("Bad NonMonotonic CPts"); the curve itself has no cusp.
+    let top = Seg2::Cubic { p0: Vec2::new(10.0, 10.0), p1: Vec2::new(4.0, 10.0), p2: Vec2::new(4.02, 10.002), p3: Vec2::new(0.0, 10.0) };
+    let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+    let segs = vec![
+        line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
+        line(Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0)),
+        top,
+        line(Vec2::new(0.0, 10.0), Vec2::new(0.0, 0.0)),
+    ];
+    let r = region(Loop2 { segs });
+    let b = smlib_sweeps::extrude(&Plane::XY, &pieces_of(&r), Some(&r), 0.0, 3.0, 1.0, None).unwrap();
+    assert_eq!(b.validity(), Vec::<String>::new());
+    // The area under the cubic, by Green's theorem on a fine polyline of it.
+    let at = |t: f64| {
+        let s = 1.0 - t;
+        Vec2::new(10.0, 10.0) * (s * s * s)
+            + Vec2::new(4.0, 10.0) * (3.0 * s * s * t)
+            + Vec2::new(4.02, 10.002) * (3.0 * s * t * t)
+            + Vec2::new(0.0, 10.0) * (t * t * t)
+    };
+    let n = 20_000;
+    let mut pts: Vec<Vec2> = (0..=n).map(|i| at(f64::from(i) / f64::from(n))).collect();
+    pts.extend([Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)]);
+    let area = 0.5 * pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| a.x * b.y - b.x * a.y).sum::<f64>();
+    close(volume(&b), 3.0 * area, 1e-3, "folded cubic prism");
+    // One wall for the cubic, as for any other piece.
+    let mut want = vec![cap(false), cap(true), profile(0), profile(1), profile(2), profile(3)];
+    want.sort();
+    assert_eq!(origins(&b), want);
 }

@@ -47,6 +47,11 @@
 //!   takes the station of a definition another kernel (another thread) made (#2388).
 //! - **Ownership.** The supports, the leader, the seeds and the law are owned values, not
 //!   pointers; a copy is a deep copy, as the fork's `CopyDefinition`.
+//! - **Sides at the domain's ends.** The fork takes the partials on the side of s its
+//!   caller's flags name everywhere. At an end of the domain the side is the one inside
+//!   it here, as a B-spline's end is its end span's: an end station on a support's knot
+//!   line (the old boundary of a support's extension, only G1 there) took the support's
+//!   partials past it, and the round's tangent along s at its end was the extension's.
 //! - **Nesting.** A support may itself be a procedural blend, at most
 //!   [`BLEND_MAX_DEPTH`] deep (the fork's cap, checked at [`ProceduralBlend::create`]),
 //!   so every walk over the supports is bounded by 3.
@@ -325,7 +330,10 @@ fn read_curve(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<BSpli
             Ok(b)
         }
         // "a curve of its definition is not a B-spline"
-        _ => Err(SolidError::sm_err(OP_READ)),
+        _ => Err(SolidError::surface_failed(
+            OP_READ,
+            "a curve of the definition is not a B-spline",
+        )),
     }
 }
 
@@ -851,7 +859,7 @@ impl ProceduralBlend {
         let (order, swapped, has_law, values) = if ascii {
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
             let order = st.extract_ulong();
             let swapped = st.extract_int();
             let has_law = st.extract_int();
@@ -859,7 +867,7 @@ impl ProceduralBlend {
             let mut values = [0.0_f64; 10];
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
             let mut read = true;
             for v in &mut values {
                 match st.extract_double() {
@@ -872,7 +880,12 @@ impl ProceduralBlend {
             match (order, swapped, has_law) {
                 (Some(o), Some(s), Some(h)) if read && !failed => (o, s != 0, h != 0, values),
                 // "its definition could not be read"
-                _ => return Err(SolidError::sm_err(OP_READ)),
+                _ => {
+                    return Err(SolidError::surface_failed(
+                        OP_READ,
+                        "the definition could not be read",
+                    ))
+                }
             }
         } else {
             let order = db.read_long()?;
@@ -896,7 +909,7 @@ impl ProceduralBlend {
             let (kind, sizes) = if ascii {
                 let st = db
                     .in_stream_mut()
-                    .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                    .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
                 let kind = st.extract_int();
                 let mut sizes = [0.0_f64; 3];
                 let mut read = true;
@@ -911,7 +924,12 @@ impl ProceduralBlend {
                 match kind {
                     Some(kd) if read && !failed => (i64::from(kd), sizes),
                     // "its definition could not be read"
-                    _ => return Err(SolidError::sm_err(OP_READ)),
+                    _ => {
+                        return Err(SolidError::surface_failed(
+                            OP_READ,
+                            "the definition could not be read",
+                        ))
+                    }
                 }
             } else {
                 let kind = db.read_long()?;
@@ -976,7 +994,10 @@ impl ProceduralBlend {
             seeds.first(),
             seeds.get(1),
         ) else {
-            return Err(SolidError::sm_err(OP_READ));
+            return Err(SolidError::surface_failed(
+                OP_READ,
+                "the definition has fewer than two supports or seeds",
+            ));
         };
         let input = BlendDefinitionInput {
             supports: [s0, s1],
@@ -1165,8 +1186,18 @@ impl ProceduralBlend {
             (highest_u_deriv, highest_v_deriv)
         };
         // the side of s the partials are taken on: the upper interval of the parameter
-        // driving s (FromLeft TRUE) is the side after s where s grows with it (c5b6bb7)
-        let upper = if swapped {
+        // driving s (FromLeft TRUE) is the side after s where s grows with it (c5b6bb7);
+        // at an end of the domain, the side inside it (not the fork's)
+        let (along, lo, hi) = if swapped {
+            (s_uv.y, domain.min().y, domain.max().y)
+        } else {
+            (s_uv.x, domain.min().x, domain.max().x)
+        };
+        let upper = if along >= hi {
+            false
+        } else if along <= lo {
+            true
+        } else if swapped {
             flags.v_side == Side::Left
         } else {
             flags.u_side == Side::Left
@@ -1360,7 +1391,10 @@ impl ProceduralBlend {
         if let Some(sc) = scale {
             #[allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-refusing test
             if !are_same(sc.x, sc.y) || !are_same(sc.x, sc.z) || !(sc.x > EFF_ZERO) {
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::surface_failed(
+                    OP_TRANSFORM,
+                    "the scale is not uniform and positive",
+                ));
             }
             factor = sc.x;
         }
@@ -1406,11 +1440,13 @@ pub fn recertify_faces(k: &Kernel, b: &crate::topology::Brep) -> Result<()> {
                 if e.is_cancelled() {
                     return e;
                 }
-                SolidError::Upstream {
-                    operation: OP_RECERTIFY,
-                    code: crate::error::SM_ERR,
-                    entity: Some(crate::error::EntityRef::Face(f)),
-                }
+                SolidError::surface_at(
+                    OP_RECERTIFY,
+                    crate::error::surface::SurfaceFailure::Failed(
+                        "the face's net is not proved within its bound of its definition",
+                    ),
+                    crate::error::EntityRef::Face(f),
+                )
             })?;
         }
     }
@@ -1456,11 +1492,19 @@ pub enum BlendRef<'a> {
         /// The surface, its net.
         net: &'a Surface,
     },
+    /// A multi-section blend's surface ([`crate::sweep::section_blend`], #3140) and its
+    /// definition.
+    SectionBlend {
+        /// The definition.
+        blend: &'a crate::sweep::section_blend::SectionBlendDefinition,
+        /// The surface, its net.
+        net: &'a Surface,
+    },
 }
 
 /// The definition a surface keeps beside its kind ([`Surface::procedural_blend`],
 /// [`Surface::procedural_sweep`]): a round of an exact class (#2485), a blend corner's face
-/// (#2488), a screw-swept wall (#2572) or a drafted face's.
+/// (#2488), a screw-swept wall (#2572), a drafted face's or a multi-section blend's (#3140).
 #[derive(Debug, Clone)]
 pub enum KeptDefinition {
     /// An exact round's.
@@ -1471,29 +1515,33 @@ pub enum KeptDefinition {
     Sweep(crate::surface::procedural_sweep::ProceduralSweep),
     /// A drafted face's ([`crate::offset::draft`]).
     Draft(crate::offset::draft::DraftDefinition),
+    /// A multi-section blend's ([`crate::sweep::section_blend`], #3140).
+    SectionBlend(crate::sweep::section_blend::SectionBlendDefinition),
 }
 
 impl KeptDefinition {
     /// Whether the definition follows a motion of its net by `scale`: a sweep's only
     /// under a uniform one ([`crate::surface::procedural_sweep::ProceduralSweep::follows`]);
     /// a round's, a corner's and a drafted face's always (their own transforms refuse what
-    /// they cannot follow: a draft, a scale that is not uniform).
+    /// they cannot follow: a draft, a scale that is not uniform); a section blend's always (it
+    /// keeps the motion).
     #[must_use]
     pub fn follows(&self, scale: Option<Vec3>) -> bool {
         match self {
             Self::Sweep(_) => crate::surface::procedural_sweep::ProceduralSweep::follows(scale),
-            Self::Round(_) | Self::Corner(_) | Self::Draft(_) => true,
+            Self::Round(_) | Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => true,
         }
     }
 
     /// Moves the definition with its net ([`exact::ExactRound::transform`],
     /// [`corner::CornerDefinition::transform`],
     /// [`crate::surface::procedural_sweep::ProceduralSweep::transform`],
-    /// [`crate::offset::draft::DraftDefinition::transform`]).
+    /// [`crate::offset::draft::DraftDefinition::transform`],
+    /// [`crate::sweep::section_blend::SectionBlendDefinition::transform`]).
     ///
     /// # Errors
     ///
-    /// Those of the four motions.
+    /// Those of the motions.
     pub fn transform(
         &mut self,
         k: &Kernel,
@@ -1506,13 +1554,18 @@ impl KeptDefinition {
             Self::Corner(c) => c.transform(k, rotate_n_move, scale, depth),
             Self::Sweep(s) => s.transform(rotate_n_move, scale),
             Self::Draft(d) => d.transform(k, rotate_n_move, scale, depth),
+            Self::SectionBlend(b) => {
+                b.transform(rotate_n_move, scale);
+                Ok(())
+            }
         }
     }
 
     /// Whether the definition is read through a map of the net's parameters, which the
     /// net's reversals, reparametrisations and swaps move: an exact round's leader map, a
     /// sweep's map. A corner's definition is a set's, and a drafted face's is in model space
-    /// (its net is the drafted plane or cone itself): neither has one.
+    /// (its net is the drafted plane or cone itself): neither has one. A section blend's is
+    /// its net's own parametrisation, compared in any orientation: it has none.
     #[must_use]
     pub const fn has_parameter_map(&self) -> bool {
         matches!(self, Self::Round(_) | Self::Sweep(_))
@@ -1524,7 +1577,7 @@ impl KeptDefinition {
         match self {
             Self::Round(r) => r.reparametrize_map(u, alpha, beta),
             Self::Sweep(s) => s.reparametrize_map(u, alpha, beta),
-            Self::Corner(_) | Self::Draft(_) => {}
+            Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => {}
         }
     }
 
@@ -1533,7 +1586,7 @@ impl KeptDefinition {
         match self {
             Self::Round(r) => r.swap_map(),
             Self::Sweep(s) => s.swap_map(),
-            Self::Corner(_) | Self::Draft(_) => {}
+            Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => {}
         }
     }
 }
@@ -1544,7 +1597,9 @@ impl<'a> BlendRef<'a> {
     pub fn net(&self) -> BlendNet<'a> {
         match *self {
             Self::Procedural(p) => BlendNet::Approx(&p.net),
-            Self::Exact { net, .. } | Self::Draft { net, .. } => BlendNet::Exact(net),
+            Self::Exact { net, .. } | Self::Draft { net, .. } | Self::SectionBlend { net, .. } => {
+                BlendNet::Exact(net)
+            }
             Self::Corner { corner, net } => match (corner.is_exact(), net.kind()) {
                 (false, SurfaceKind::BSpline(b)) => BlendNet::Approx(b),
                 _ => BlendNet::Exact(net),
@@ -1560,6 +1615,7 @@ impl<'a> BlendRef<'a> {
             Self::Exact { round, .. } => round.bound(),
             Self::Corner { corner, .. } => corner.bound(),
             Self::Draft { draft, .. } => draft.bound(),
+            Self::SectionBlend { blend, .. } => blend.bound(),
         }
     }
 
@@ -1572,6 +1628,12 @@ impl<'a> BlendRef<'a> {
             Self::Corner { corner, .. } => corner.order(),
             // (a drafted face meets its neighbours where they are cut to it)
             Self::Draft { .. } => 0,
+            // the least of the orders its two ends hold their frames to
+            Self::SectionBlend { blend, .. } => {
+                let [a, b] = blend.orders();
+                let c = a.conditions().min(b.conditions());
+                u32::try_from(c.saturating_sub(1)).unwrap_or(0)
+            }
         }
     }
 
@@ -1583,6 +1645,8 @@ impl<'a> BlendRef<'a> {
             Self::Exact { round, .. } => round.support(i),
             Self::Corner { corner, .. } => corner.support(i),
             Self::Draft { draft, .. } => (i == 0).then(|| draft.source()),
+            // (a section blend runs through its sections; it rolls on no surface)
+            Self::SectionBlend { .. } => None,
         }
     }
 
@@ -1591,7 +1655,10 @@ impl<'a> BlendRef<'a> {
     pub const fn exact(&self) -> Option<&'a exact::ExactRound> {
         match *self {
             Self::Exact { round, .. } => Some(round),
-            Self::Procedural(_) | Self::Corner { .. } | Self::Draft { .. } => None,
+            Self::Procedural(_)
+            | Self::Corner { .. }
+            | Self::Draft { .. }
+            | Self::SectionBlend { .. } => None,
         }
     }
 
@@ -1600,7 +1667,10 @@ impl<'a> BlendRef<'a> {
     pub const fn corner(&self) -> Option<&'a corner::CornerDefinition> {
         match *self {
             Self::Corner { corner, .. } => Some(corner),
-            Self::Procedural(_) | Self::Exact { .. } | Self::Draft { .. } => None,
+            Self::Procedural(_)
+            | Self::Exact { .. }
+            | Self::Draft { .. }
+            | Self::SectionBlend { .. } => None,
         }
     }
 
@@ -1609,7 +1679,23 @@ impl<'a> BlendRef<'a> {
     pub const fn draft(&self) -> Option<&'a crate::offset::draft::DraftDefinition> {
         match *self {
             Self::Draft { draft, .. } => Some(draft),
-            Self::Procedural(_) | Self::Exact { .. } | Self::Corner { .. } => None,
+            Self::Procedural(_)
+            | Self::Exact { .. }
+            | Self::Corner { .. }
+            | Self::SectionBlend { .. } => None,
+        }
+    }
+
+    /// The multi-section blend's definition, for a section blend's face (#3140).
+    #[must_use]
+    pub const fn section_blend(
+        &self,
+    ) -> Option<&'a crate::sweep::section_blend::SectionBlendDefinition> {
+        match *self {
+            Self::SectionBlend { blend, .. } => Some(blend),
+            Self::Procedural(_) | Self::Exact { .. } | Self::Corner { .. } | Self::Draft { .. } => {
+                None
+            }
         }
     }
 
@@ -1625,6 +1711,7 @@ impl<'a> BlendRef<'a> {
             Self::Exact { round, net } => round.recertify(k, net),
             Self::Corner { corner, net } => corner.recertify(k, net),
             Self::Draft { draft, net } => draft.recertify(k, net),
+            Self::SectionBlend { blend, net } => blend.recertify(net),
         }
     }
 }

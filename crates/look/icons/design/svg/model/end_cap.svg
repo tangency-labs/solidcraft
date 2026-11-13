@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>End Cap</title>
+  <path d="M8.88 22.39L37.62 38.98L37.62 52.25L8.88 35.66Z" fill="#b8c3cf"/>
+  <path d="M20.38 15.75L49.12 32.34L37.62 38.98L8.88 22.39Z" fill="#e2e8ef"/>
+  <path d="M49.12 32.34L37.62 38.98L37.62 52.25L49.12 45.61Z" fill="#8e9faf"/>
+  <path d="M20.38 15.75L49.12 32.34L49.12 45.61L37.62 52.25L8.88 35.66L8.88 22.39Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.88 22.39L37.62 38.98L49.12 32.34" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.62 38.98L37.62 52.25" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47.74 34.73L39.00 39.78L44.20 42.78L52.94 37.73Z" fill="#b9ddf8"/>
+  <path d="M39.00 39.78L39.00 49.86L44.20 52.86L44.20 42.78Z" fill="#236ead"/>
+  <path d="M52.94 37.73L44.20 42.78L44.20 52.86L52.94 47.81Z" fill="#328bd3"/>
+  <path d="M47.74 34.73L39.00 39.78L39.00 49.86L44.20 52.86L52.94 47.81L52.94 37.73Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M44.20 42.78L52.94 37.73M44.20 42.78L44.20 52.86M39.00 39.78L44.20 42.78" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

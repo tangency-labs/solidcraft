@@ -1,5 +1,5 @@
 use super::*;
-use solidcraft_geom::{Aabb3, Mesh};
+use solidcraft_geom::{Aabb3, Mesh, MeshGeom};
 
 fn fixed_request_metadata_bytes() -> u64 {
     request().retained_resource_metadata_bytes()
@@ -1814,7 +1814,7 @@ mod prepared_optical_submission {
             }],
         };
         let mut request = ImageRequest { integrator: Integrator::Raytrace, width: 1, height: 1, ..request() };
-        request.camera.set_view(crate::StandardView::Top);
+        request.camera.set_view(solidcraft_viewport::StandardView::Top);
         request.raytrace = Some(RaytraceOptions {
             lights: Some(Vec::new()),
             environment: Some(crate::job::RaytraceEnvironmentOptions { color: [1.0; 3], intensity: 1.0 }),
@@ -2254,10 +2254,10 @@ mod capture_credit {
                 CpuProgressiveOptions, DirectionalLightOptions, OutputOptions, RaytraceOptions,
                 textures::{BaseColorMode, PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
             },
-            surface::OpaqueSurface,
             texture_input::MapRole,
         };
         use image::ImageEncoder;
+        use solidcraft_viewport::surface::OpaqueSurface;
         let mut bytes = Vec::new();
         image::codecs::png::PngEncoder::new(&mut bytes).write_image(&[128, 64, 32, 255], 1, 1, image::ExtendedColorType::Rgba8).unwrap();
         let map = TextureMap::new(bytes, MapRole::BaseColor).unwrap();
@@ -2303,7 +2303,7 @@ mod capture_credit {
         image.width = 2;
         image.height = 2;
         image.camera.distance = 4.;
-        image.camera.set_view(crate::StandardView::Top);
+        image.camera.set_view(solidcraft_viewport::StandardView::Top);
         image.integrator = Integrator::Raytrace;
         image.textures = Some(maps);
         image.raytrace = Some(RaytraceOptions {
@@ -2625,6 +2625,42 @@ fn actual_cpu_texture_worker_releases_sources_after_completion_or_cancel_while_s
         drop(job);
         assert_eq!(host.admitted_bytes(), 0);
     }
+}
+
+// The native worker checks `stop` and starts waiting while it holds the queue lock. A stop sent
+// in between must still wake it, else joining the worker waits for good (#14500).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_stop_sent_while_the_worker_is_about_to_wait_still_wakes_it() {
+    use std::sync::mpsc::sync_channel;
+    use std::time::Duration;
+    let shared = ImageHost::shared(MEMORY_LIMIT);
+    let (checked, on_checked) = sync_channel(1);
+    let (stopped, on_stopped) = sync_channel(1);
+    let worker = {
+        let shared = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            // Hold the lock between the check and the wait, as native_worker does.
+            let queue = shared.queue.lock().unwrap();
+            assert!(!shared.stop.load(Ordering::Acquire));
+            checked.send(()).unwrap();
+            // A stop that takes the lock cannot finish here; one that doesn't finishes now.
+            let _ = on_stopped.recv_timeout(Duration::from_millis(500));
+            // One wait, without checking `stop` again, as native_worker's wait.
+            let (_queue, waited) = shared.wake.wait_timeout(queue, Duration::from_secs(10)).unwrap();
+            !waited.timed_out()
+        })
+    };
+    on_checked.recv().unwrap();
+    let stopper = {
+        let shared = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            shared.stop_worker();
+            let _ = stopped.send(());
+        })
+    };
+    assert!(worker.join().unwrap(), "the worker missed the stop and waited until its timeout");
+    stopper.join().unwrap();
 }
 
 #[cfg(not(target_arch = "wasm32"))]

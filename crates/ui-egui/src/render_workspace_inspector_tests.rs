@@ -15,18 +15,21 @@ fn fixture() -> Harness {
 fn reveal_inspector_target(h: &mut Harness, target: &str) -> egui::Rect {
     for _ in 0..8 {
         let rect = crate::scenario::rect_of(target).unwrap();
-        let inspector = crate::scenario::rect_of("render:inspector").unwrap();
-        let top = crate::scenario::rect_of("render:inspector:header").unwrap().bottom() + Tokens::get().space_8;
-        let bottom = inspector.bottom() - Tokens::get().space_8;
-        if rect.top() >= top && rect.bottom() <= bottom {
+        let panel = super::super::test_panel(&h.app, "render-inspector").unwrap();
+        let body = crate::panel_runtime::egui_rect(panel.body.unwrap());
+        if body.expand(0.5).contains_rect(rect) {
             return rect;
         }
-        let at = rect.center();
-        let delta = at.y.clamp(top + rect.height() / 2.0, bottom - rect.height() / 2.0) - at.y;
-        h.call("ui.scroll", json!({"x":inspector.center().x,"y":(top+bottom)/2.0,"delta":delta}));
+        let delta = body.center().y - rect.center().y;
+        h.call("ui.scroll", json!({"x":body.center().x,"y":body.center().y,"delta":delta}));
         h.frames(20);
     }
     panic!("inspector target {target} is still clipped");
+}
+
+fn click_host_control(h: &mut Harness, bounds: solidcraft_engine::panels::LogicalRect) {
+    let at = crate::panel_runtime::egui_rect(bounds).center();
+    h.step(&json!({"click":[at.x, at.y]})).unwrap();
 }
 
 fn ordered_sections(keys: &[&str], app: &SolveApp) {
@@ -180,9 +183,9 @@ fn render_workspace_shot_e7_order_disabled_reasons_output_link_and_confirm_remov
     h.frames(3);
     assert_eq!(selected_editor(&h.app), Editor::Camera);
     assert!(crate::scenario::rect_of("render:job-footer").is_none(), "Shot owns its actions");
-    assert!(crate::scenario::rect_of("dialog:editor_footer").is_none(), "Appearance footer stays in Appearance");
+    assert!(crate::scenario::rect_of("render:appearance-footer").is_none(), "Appearance footer stays in Appearance");
     let inspector = crate::scenario::rect_of("render:inspector").unwrap();
-    let header = crate::scenario::rect_of("render:inspector:header").unwrap();
+    let header = super::super::test_panel_header(&h.app, "render-inspector");
     assert!(inspector.contains_rect(header));
     assert!(h.widget(&name).is_some(), "selected Shot names the inspector");
     ordered_sections(&["render.page_camera", "render.shot_lens", "render.shot_exposure_section", "render.stage_frame"], &h.app);
@@ -211,14 +214,14 @@ fn render_workspace_shot_camera_controls_save_undo_and_refuse_hostile_values() {
     setups::save(&mut h.app).unwrap();
     let name = h.app.render_workspace.view.name.clone();
     let before = h.app.session.doc.to_json();
-    let camera = solidcraft_engine::render::Camera { yaw: 0.7, roll: 0.2, distance: 123.0, ..h.app.cam };
+    let camera = solidcraft_viewport::Camera { yaw: 0.7, roll: 0.2, distance: 123.0, ..h.app.cam };
     super::super::shot::set_camera(&mut h.app, &name, camera).unwrap();
     assert_eq!(h.app.cam, camera);
     assert_eq!(h.app.session.doc.render.setups[&name].camera, camera);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), before);
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, f64::MAX] {
-        let camera = solidcraft_engine::render::Camera { distance: value, ..camera };
+        let camera = solidcraft_viewport::Camera { distance: value, ..camera };
         assert!(super::super::shot::set_camera(&mut h.app, &name, camera).is_err());
         assert_eq!(h.app.session.doc.to_json(), before);
     }
@@ -230,7 +233,7 @@ fn render_workspace_shot_lens_saves_only_lens_and_orthographic_keeps_faded_contr
     let mut h = fixture();
     h.call("ui.resize", json!({"width":1600,"height":1800}));
     let name = "Lens shot";
-    let camera = solidcraft_engine::render::Camera { fov: 0.6, ..h.app.cam };
+    let camera = solidcraft_viewport::Camera { fov: 0.6, ..h.app.cam };
     h.app
         .run("render.settings.set", json!({"name":name,"set":{"camera":camera,"job":{"method":"gpu_path","options":{"samples":128,"seed":42}}}}))
         .unwrap();
@@ -306,7 +309,7 @@ fn inspector_dispatch_has_one_editor_per_selection_independent_of_every_stage() 
                     assert!(crate::scenario::rect_of("render:setups").is_none());
                     assert!(crate::scenario::rect_of("render:setup-name").is_none());
                     assert_eq!(crate::scenario::rect_of("render:output-footer").is_some(), kind == "output");
-                    assert_eq!(crate::scenario::rect_of("dialog:editor_footer").is_some(), kind == "appearance");
+                    assert_eq!(crate::scenario::rect_of("render:appearance-footer").is_some(), kind == "appearance");
                     assert!(h.widget(h.app.tr("render.studio_title")).is_none());
                     assert_eq!(h.app.render_workspace.view.method, ImageMethod::CpuRaytrace);
                     assert_eq!(h.app.session.doc.to_json(), before);
@@ -486,7 +489,10 @@ fn surface_stage_contains_preview_target_plane_repeat_angle_and_method_reason_in
     let repeat = crate::scenario::rect_of("render:surface:repeat").unwrap();
     let angle = crate::scenario::rect_of("render:surface:grain-angle").unwrap();
     let reason = crate::scenario::rect_of("dialog:note:surface:gpu:reason").unwrap();
-    assert!(note.bottom() < target.top());
+    let panel_rect = |instance| crate::panel_runtime::egui_rect(super::super::test_panel(&h.app, instance).unwrap().outer);
+    assert!(panel_rect("render-library").contains_rect(note));
+    assert!(panel_rect("render-inspector").contains_rect(target));
+    assert!(!note.intersect(target).is_positive());
     assert!(target.bottom() <= plane.top());
     assert!(plane.bottom() <= repeat.top());
     assert!(repeat.bottom() <= angle.top());
@@ -514,17 +520,12 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
             h.ctx = crate::fonts::test_context();
             solidcraft_theme::set_dark(dark);
             h.ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
-            // A resizable 290 pt card needs the floating, wide-screen policy.
-            h.app.ui.layout = crate::ui_kit::LayoutMode::Floating;
-            h.app.preferences.render_browser_width = 290.0;
-            h.app.preferences.render_browser_side = "left".into();
             super::super::select_image_method(&mut h.app, method);
             library::open_category(&mut h.app, kind);
             h.app.publish_tab_accent(&h.ctx);
             let document = h.app.session.doc.to_json();
             let history = (h.app.session.undo.len(), h.app.session.redo.len());
-            // Panel::workspace reserves an 8 pt bottom gap in these bounds.
-            let bounds = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 538.0));
+            let bounds = Rect::from_min_size(Pos2::ZERO, vec2(290.0, 530.0));
             let mut textures = std::collections::HashMap::new();
             let mut output = None;
             let mut unselected_height = 0.0;
@@ -539,19 +540,18 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
                 }
                 let mut frame = h.ctx.run_ui(RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
                     scenario::clear_handles();
-                    library::card(&mut h.app, ui, bounds);
+                    library::shared_library(&mut h.app, ui);
                 });
                 ui_kit::test_textures_update(&mut textures, &frame.textures_delta);
                 frame.textures_delta.clear();
                 output = Some(frame);
             }
-            let panel = h.app.shell.workspace_panels.get("render:appearances").unwrap().0;
-            assert!((panel.width() - 290.0).abs() < 2.0 && (panel.height() - 530.0).abs() < 2.0, "{panel:?}");
+            let panel = bounds;
             let content = scenario::rect_of(&format!("{key}:content")).unwrap();
             let body = scenario::rect_of(&format!("{key}:body")).unwrap();
             let footer = scenario::rect_of(&format!("{key}:footer")).unwrap();
             assert!(body.height() >= 0.7 * (content.height() - footer.height()), "{kind} {selected:?}: {content:?} {body:?} {footer:?}");
-            assert!(panel.contains_rect(body) && panel.contains_rect(footer), "{kind}: {panel:?} {body:?} {footer:?}");
+            assert!(panel.expand(0.5).contains_rect(body) && panel.expand(0.5).contains_rect(footer), "{kind}: {panel:?} {body:?} {footer:?}");
             assert!(body.bottom() <= footer.top() + 0.1, "{kind}: overlapping body and footer");
             assert!((content.bottom() - footer.bottom()).abs() <= 1.0, "{kind}: footer is not at the bottom");
             if key == "render:surface:catalog" {
@@ -1131,7 +1131,7 @@ fn native_composition_review_actions_are_visible_before_auxiliary_resource_detai
         let before = h.app.session.doc.to_json();
         let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
         h.step(&json!({"click":{"handle":"render:light:NATIVE-STUDIO-002"}})).unwrap();
-        let library = h.app.shell.workspace_panels.get("render:appearances").unwrap().0;
+        let library = crate::panel_runtime::egui_rect(super::super::test_panel(&h.app, "render-library").unwrap().outer);
         let review = crate::scenario::rect_of("render:light:review").unwrap();
         let note = crate::scenario::rect_of("catalog:footer").unwrap();
         assert!(library.contains_rect(review), "the review action must remain inside the library card: {library:?} {review:?}");
@@ -1297,7 +1297,7 @@ fn ribbon_frame_preserves_explicit_roll_world_up_and_saved_view_authority() {
     h.app.cam.roll = 0.37;
     h.app.cam.yaw = 0.21;
     h.app.cam.pitch = 0.43;
-    h.app.cam.up = solidcraft_engine::render::UpAxis::Y;
+    h.app.cam.up = solidcraft_viewport::UpAxis::Y;
     let orientation = (h.app.cam.roll, h.app.cam.yaw, h.app.cam.pitch, h.app.cam.up);
     let document = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
@@ -1450,7 +1450,7 @@ fn aging_tab_adds_reorders_disables_and_persists_layers_without_engineering_edit
 fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
     fn assert_header(h: &Harness, title: &str) {
         let inspector = crate::scenario::rect_of("render:inspector").unwrap();
-        let header = crate::scenario::rect_of("render:inspector:header").unwrap();
+        let header = super::super::test_panel_header(&h.app, "render-inspector");
         assert!(inspector.contains_rect(header));
         let tree = h.output.accesskit_update.as_ref().unwrap();
         let context = format!(
@@ -1459,10 +1459,9 @@ fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
             selected_editor(&h.app),
             h.ctx.pixels_per_point(),
         );
-        // egui stores Role::Label text in value(), not label(). Each pass supplies the
-        // title node; its bounds are UI points (the root carries the pixel-scale transform).
+        // The shared draggable title is a button with the current selection as its accessible name.
         let titles: Vec<_> =
-            tree.nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::Label && node.value() == Some(title)).collect();
+            tree.nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(title)).collect();
         assert!(!titles.is_empty(), "missing inspector title: {context}");
         let bounds: Vec<_> = titles.iter().map(|(id, node)| (id, node.bounds())).collect();
         eprintln!(
@@ -1502,8 +1501,7 @@ fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
             h.frames(3);
             assert_header(&h, h.app.tr("render.wear_title"));
             assert!(crate::scenario::rect_of("render:wear:controls").is_some());
-            assert!(crate::scenario::rect_of("render:appearance:close").is_none());
-            assert!(crate::scenario::rect_of("dialog:editor_footer").is_none());
+            assert!(crate::scenario::rect_of("render:appearance-footer").is_none());
             assert!(crate::scenario::rect_of("render:job-footer").is_none());
             assert_eq!(h.app.session.doc.to_json(), before);
             assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), wear_history);
@@ -1516,7 +1514,6 @@ fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
         assert_header(&h, h.app.tr("render.page_output"));
         assert!(crate::scenario::rect_of("render:wear:controls").is_none());
         assert!(crate::scenario::rect_of("render:job-footer").is_none());
-        assert!(crate::scenario::rect_of("render:appearance:close").is_none());
         h.app.run("view.render_select", json!({"kind":"nothing"})).unwrap();
         // Clearing semantic focus opens Scene; choose Appearance to test its header recovery.
         assert_eq!(selected_editor(&h.app), Editor::Scene);
@@ -1528,9 +1525,10 @@ fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
         h.frames(3);
         assert_header(&h, "Subject");
         let inspector = crate::scenario::rect_of("render:inspector").unwrap();
-        let header = crate::scenario::rect_of("render:inspector:header").unwrap();
-        assert!(header.contains_rect(crate::scenario::rect_of("render:appearance:close").unwrap()));
-        assert!(inspector.contains_rect(crate::scenario::rect_of("dialog:editor_footer").unwrap()));
+        let header = super::super::test_panel_header(&h.app, "render-inspector");
+        let menu = super::super::test_panel(&h.app, "render-inspector").unwrap().menu;
+        assert!(header.contains_rect(crate::panel_runtime::egui_rect(menu)));
+        assert!(inspector.contains_rect(crate::scenario::rect_of("render:appearance-footer").unwrap()));
         assert_eq!(h.app.session.doc.to_json(), before);
         assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), output_history);
     }
@@ -1744,7 +1742,7 @@ fn camera_draft_uses_render_command_and_keeps_saved_design_unchanged() {
     let mut h = fixture();
     let document = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
-    for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+    for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
         let mut camera = h.app.cam;
         camera.up = up;
         camera.roll = 0.41;
@@ -2554,9 +2552,12 @@ fn appearance_inspector_component_and_face_overrides_remove_to_material_from_rea
             "component" => "render.pick_component", "body" => "render.pick_body", _ => "render.pick_face",
         }))}}))
         .unwrap();
+        h.frames(3);
         let undo = h.app.session.undo.len();
-        h.step(&json!({"widget":"…"})).unwrap();
-        h.step(&json!({"widget":h.app.tr("render.inspector_remove")})).unwrap();
+        let panel = super::super::test_panel(&h.app, "render-inspector").unwrap();
+        let remove = panel.actions.iter().find(|(id, _)| id.0 == "remove").unwrap().1;
+        click_host_control(&mut h, remove);
+        h.frames(3);
         assert_eq!(h.app.session.undo.len(), undo + 1, "clearing {step}: {:?}", h.app.render_workspace.view.inspector.selection_appearance);
     }
     assert!(h.app.session.doc.appearances.is_empty());
@@ -2571,7 +2572,6 @@ fn appearance_inspector_capture(h: &mut Harness, name: &str) {
     for dark in [false, true] {
         h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
         h.app.ui.dark = dark;
-        h.app.preferences.render_inspector_width = 305.0;
         // Texture handles belong to the Harness context. Keep that context and
         // reupload cached artwork so this CPU renderer has the complete images,
         // including textures uploaded before evidence recording began.
@@ -2623,7 +2623,6 @@ fn appearance_inspector_approved_layout_is_305_wide_and_preserves_stage_bounds()
         let selection = super::super::object_selection(&h.app);
         super::super::selection_editor(&mut h.app, &selection);
     }
-    h.app.preferences.render_inspector_width = 305.0;
     h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
     h.frames(3);
     let before = h.app.session.doc.to_json();
@@ -2631,7 +2630,7 @@ fn appearance_inspector_approved_layout_is_305_wide_and_preserves_stage_bounds()
     appearance_inspector_capture(&mut h, "approved");
     h.frames(3);
     let inspector = crate::scenario::rect_of("render:inspector").unwrap();
-    let browser = crate::scenario::rect_of("browser:card").unwrap();
+    let browser = crate::panel_runtime::egui_rect(super::super::test_panel(&h.app, "render-browser").unwrap().outer);
     let shots = crate::scenario::rect_of("render:shots_strip").unwrap();
     assert!((inspector.width() - 305.0).abs() <= 1.0, "{inspector:?}");
     assert!((inspector.top() - browser.top()).abs() <= 1.0);
@@ -2640,7 +2639,15 @@ fn appearance_inspector_approved_layout_is_305_wide_and_preserves_stage_bounds()
     assert!(h.widget(h.app.tr("render.inspector_save_library")).is_some());
     assert_eq!(h.app.session.doc.to_json(), before);
     assert_eq!(h.app.session.undo.len(), undo);
-    h.step(&json!({"click":{"handle":"render:appearance:close"}})).unwrap();
+    use crate::panel_runtime::{HostControlTarget, HostSharedAction};
+    let menu = super::super::test_panel(&h.app, "render-inspector").unwrap().menu;
+    click_host_control(&mut h, menu);
+    h.frames(3);
+    let close = h.app.universal_panel_frame().unwrap().controls.iter().find(|control| {
+        matches!(&control.target, HostControlTarget::Shared { instance, action: HostSharedAction::Close } if instance.0 == "render-inspector")
+    }).unwrap().bounds;
+    click_host_control(&mut h, close);
+    h.frames(3);
     assert!(h.app.render_workspace.view.inspector.hidden);
     h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
     h.frames(3);
@@ -2657,7 +2664,7 @@ fn appearance_editor_e2_sections_are_ordered_collapsed_and_expand_for_each_metho
     use solidcraft_engine::Sel;
     let mut h = fixture();
     h.call("ui.resize", json!({"width":1440,"height":4000}));
-    h.app.preferences.render_inspector_width = 308.0;
+    super::super::resize_test_panel(&mut h, "render-inspector", 308.0);
     h.app.session.selection = vec![Sel::Body { name: "Subject".into() }];
     {
         let selection = super::super::object_selection(&h.app);
@@ -2821,12 +2828,12 @@ fn output_children_select_their_editor_with_all_sections_in_design_order() {
             // The capped Browser can publish rows below its clip after Lights adds more entries.
             // Reveal the Output group before exercising each real child-row click.
             h.frames(3);
-            let browser = crate::scenario::rect_of("browser:card").unwrap();
-            let header = crate::scenario::rect_of("render:browser:header").unwrap();
+            let browser = crate::panel_runtime::egui_rect(super::super::test_panel(&h.app, "render-browser").unwrap().outer);
+            let header = super::super::test_panel_header(&h.app, "render-browser");
             h.call("ui.scroll", json!({"x":browser.center().x,"y":(header.bottom()+browser.bottom())/2.0,"delta":-2000}));
             h.frames(20);
-            let browser = crate::scenario::rect_of("browser:card").unwrap();
-            let header = crate::scenario::rect_of("render:browser:header").unwrap();
+            let browser = crate::panel_runtime::egui_rect(super::super::test_panel(&h.app, "render-browser").unwrap().outer);
+            let header = super::super::test_panel_header(&h.app, "render-browser");
             let target = crate::scenario::handle_at(&handle).unwrap();
             assert!(browser.shrink(Tokens::get().space_8).contains(target) && target.y > header.bottom(), "{handle} is outside the visible Browser");
             h.step(&json!({"click":{"handle":handle}})).unwrap();
@@ -3361,14 +3368,14 @@ fn explicit_shot_thumbnail_restores_saved_cameras_and_keeps_dirty_current_shot_c
     h.app.render_workspace.view.live_paused = true;
     super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
     h.app.render_workspace.view.name = "A".into();
-    let saved_a = solidcraft_engine::render::Camera { fov: 0.6, distance: 123.0, yaw: 0.7, roll: 0.2, ..h.app.cam };
+    let saved_a = solidcraft_viewport::Camera { fov: 0.6, distance: 123.0, yaw: 0.7, roll: 0.2, ..h.app.cam };
     apply_camera_draft(&mut h.app, saved_a).unwrap();
     setups::save(&mut h.app).unwrap();
-    let saved_b = solidcraft_engine::render::Camera { fov: 0.8, distance: 170.0, yaw: -0.2, up: solidcraft_engine::render::UpAxis::Y, ..saved_a };
+    let saved_b = solidcraft_viewport::Camera { fov: 0.8, distance: 170.0, yaw: -0.2, up: solidcraft_viewport::UpAxis::Y, ..saved_a };
     h.app.run("render.settings.set", json!({"name":"B","set":{"camera":saved_b,"width":321,"job":{"method":"gpu_path"}}})).unwrap();
     let document = h.app.session.doc.clone();
     let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
-    let navigated = solidcraft_engine::render::Camera { yaw: saved_a.yaw + 0.25, ..saved_a };
+    let navigated = solidcraft_viewport::Camera { yaw: saved_a.yaw + 0.25, ..saved_a };
     apply_camera_draft(&mut h.app, navigated).unwrap();
     h.frames(3);
     h.app.run("view.render_select", json!({"kind":"shot","id":"A"})).unwrap();
@@ -3412,7 +3419,7 @@ fn saved_numeric_reload_and_undo_do_not_activate_a_shot_camera() {
     setups::save(&mut h.app).unwrap();
     let name = h.app.render_workspace.view.name.clone();
     let saved = h.app.session.doc.render.setups[&name].clone();
-    let navigation = solidcraft_engine::render::Camera { yaw: h.app.cam.yaw + 0.4, distance: h.app.cam.distance * 1.2, ..h.app.cam };
+    let navigation = solidcraft_viewport::Camera { yaw: h.app.cam.yaw + 0.4, distance: h.app.cam.distance * 1.2, ..h.app.cam };
     apply_camera_draft(&mut h.app, navigation).unwrap();
     let before = setups::draft(&h.app).unwrap();
     h.app.render_workspace.view.draft.width = 513;
@@ -3436,9 +3443,9 @@ fn physical_tree_shot_activation_pairs_saved_cpu_lens_with_its_perspective_camer
     h.app.render_workspace.view.live_paused = true;
     super::super::select_image_method(&mut h.app, ImageMethod::Raster);
     h.app.render_workspace.view.name = "A".into();
-    apply_camera_draft(&mut h.app, solidcraft_engine::render::Camera::default()).unwrap();
+    apply_camera_draft(&mut h.app, solidcraft_viewport::Camera::default()).unwrap();
     setups::save(&mut h.app).unwrap();
-    let camera = solidcraft_engine::render::Camera { fov: 35f64.to_radians(), distance: 168.6, ..h.app.cam };
+    let camera = solidcraft_viewport::Camera { fov: 35f64.to_radians(), distance: 168.6, ..h.app.cam };
     let lens = ThinLens { aperture_radius_mm: 1.0, focus_distance_mm: 168.6 };
     h.app
         .run(
@@ -3475,7 +3482,7 @@ fn explicit_revert_and_restore_clean_only_the_saved_camera_and_keep_real_numeric
             h.app.render_workspace.view.live_paused = true;
             super::super::select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
             h.app.render_workspace.view.name = "A".into();
-            let camera = solidcraft_engine::render::Camera { fov: 0.6, distance: 168.6, ..h.app.cam };
+            let camera = solidcraft_viewport::Camera { fov: 0.6, distance: 168.6, ..h.app.cam };
             apply_camera_draft(&mut h.app, camera).unwrap();
             setups::save(&mut h.app).unwrap();
             h.app.run("render.settings.set", json!({"name":"B","set":{"job":{"method":"raster"}}})).unwrap();
@@ -4317,7 +4324,7 @@ mod saved_clear_coat_contract {
             let bounds = node.bounds().unwrap();
             let flip = egui::Rect::from_min_max(egui::pos2(bounds.x0 as f32, bounds.y0 as f32), egui::pos2(bounds.x1 as f32, bounds.y1 as f32));
             assert!(crate::scenario::rect_of("render:inspector").unwrap().contains_rect(flip));
-            assert!(flip.top() > crate::scenario::rect_of("render:inspector:header").unwrap().bottom());
+            assert!(flip.top() > super::super::super::test_panel_header(&h.app, "render-inspector").bottom());
             h.step(&json!({"click":[flip.center().x,flip.center().y]})).unwrap();
             h.frames(3);
             let mut expected_maps = maps.clone();
