@@ -100,7 +100,7 @@ fn of(comb: Vec<(Point3, Point3)>, bound: Option<f64>) -> Result<Deviation> {
 pub fn curve_deviation(k: &Kernel, a: &Curve, b: &Curve, samples: usize) -> Result<Deviation> {
     let ts = stations(a, samples)?;
     let over = b.natural_interval();
-    let mut comb = Vec::with_capacity(ts.len());
+    let mut comb = Vec::new();
     for t in ts {
         let p = a.evaluate_point(k, t)?;
         let d = b.drop_point(
@@ -133,7 +133,7 @@ pub fn curve_surface_deviation(
     samples: usize,
 ) -> Result<Deviation> {
     let ts = stations(c, samples)?;
-    let mut comb = Vec::with_capacity(ts.len());
+    let mut comb = Vec::new();
     for t in ts {
         let p = c.evaluate_point(k, t)?;
         let d = surface.drop_point::<NoObject>(k, p, domain, &DropPointOptions::default())?;
