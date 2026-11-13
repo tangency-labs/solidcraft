@@ -252,11 +252,11 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
         return Ok(None);
     }
     let point = |k: (i64, i64)| Vec2::new(k.0 as f64 * epsilon, k.1 as f64 * epsilon);
-    let Some((raw_loops, loops)) = cap_loops(adjacency, &positions, point, tolerance, epsilon) else { return Ok(None) };
+    let Some((raw_loops, loops)) = cap_loops(adjacency, &positions, point, tolerance, epsilon)? else { return Ok(None) };
     // The two caps are one section: the same number of loops, and each cap's boundary nodes on
     // the other's fitted loops. A mesh need not sample them alike (a mesher that refines a side
     // splits only that side's edge), so they are compared as curves, within the tolerance.
-    let Some((other_raw, other_loops)) = cap_loops(other, &positions, point, tolerance, epsilon) else { return Ok(None) };
+    let Some((other_raw, other_loops)) = cap_loops(other, &positions, point, tolerance, epsilon)? else { return Ok(None) };
     let on = |loops: &[Loop2], p: Vec2| loops.iter().flat_map(|l| &l.segs).any(|s| s.point_at(s.closest_param(p)).dist(p) <= tolerance);
     let nodes = |raw: &[Loop2]| raw.iter().flat_map(|l| l.segs.iter().map(|s| s.start())).collect::<Vec<_>>();
     let segments = |l: &[Loop2]| l.iter().map(|l| l.segs.len()).sum::<usize>();
@@ -323,13 +323,16 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
 /// plane) walked into loops: each loop's polygon through the nodes (`positions`, else the key's
 /// point) and its fitted form ([`fit_loop`]). `None` for a boundary that does not walk into
 /// closed loops of three nodes or more.
+///
+/// # Errors
+/// A loop's straight runs over their work bound ([`fitted_loop`]).
 fn cap_loops(
     mut adjacency: BTreeMap<(i64, i64), Vec<(i64, i64)>>,
     positions: &BTreeMap<(i64, i64), Vec2>,
     point: impl Fn((i64, i64)) -> Vec2,
     tolerance: f64,
     epsilon: f64,
-) -> Option<(Vec<Loop2>, Vec<Loop2>)> {
+) -> Result<Option<(Vec<Loop2>, Vec<Loop2>)>> {
     let mut loops = Vec::new();
     let mut raw_loops = Vec::new();
     while let Some((&start, _)) = adjacency.first_key_value() {
@@ -337,9 +340,9 @@ fn cap_loops(
         let mut previous = None;
         let mut chain = Vec::new();
         for _ in 0..=MAX_BOUNDARY {
-            let neighbours = adjacency.remove(&current)?;
+            let Some(neighbours) = adjacency.remove(&current) else { return Ok(None) };
             chain.push(*positions.get(&current).unwrap_or(&point(current)));
-            let next = neighbours.into_iter().find(|n| Some(*n) != previous)?;
+            let Some(next) = neighbours.into_iter().find(|n| Some(*n) != previous) else { return Ok(None) };
             if next == start {
                 break;
             }
@@ -347,12 +350,12 @@ fn cap_loops(
             current = next;
         }
         if chain.len() < 3 || current == start {
-            return None;
+            return Ok(None);
         }
         raw_loops.push(Loop2::polygon(&chain));
-        loops.push(fit_loop(&chain, tolerance, epsilon));
+        loops.push(fitted_loop(&chain, tolerance, epsilon)?);
     }
-    Some((raw_loops, loops))
+    Ok(Some((raw_loops, loops)))
 }
 
 /// The mesh as one sewn faceted solid (#358): each run of coplanar neighbour triangles fused
@@ -595,12 +598,23 @@ fn certify_nesting(raw: &[Loop2], fitted: &[Loop2], epsilon: f64, size: f64) -> 
     Ok(())
 }
 
+/// [`fitted_loop`] for the tests, which give it loops well within its bound.
+#[cfg(test)]
 fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
+    fitted_loop(points, tolerance, epsilon).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// The loop through `points`, as a circle where they are one within `tolerance`, else as the
+/// polygon of their corners (straight runs joined).
+///
+/// # Errors
+/// More node tests than the bound the loop's size gives ([`straight_runs_joined`]).
+fn fitted_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Result<Loop2> {
     // Fit a complete circular boundary only with enough samples to distinguish it
     // from a polygon. Certify the chord deviation, not just the vertex residual.
     if points.len() >= 12 {
         let (Some(&a), Some(&b), Some(&c)) = (points.first(), points.get(points.len() / 3), points.get(2 * points.len() / 3)) else {
-            return Loop2::polygon(points);
+            return Ok(Loop2::polygon(points));
         };
         let u = b - a;
         let v = c - a;
@@ -625,56 +639,70 @@ fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
                     angle <= std::f64::consts::PI / 6. + 1e-8 && radius * (1. - (angle * 0.5).cos()) + epsilon * 10. <= tolerance
                 });
                 if valid && (sweep.abs() - std::f64::consts::TAU).abs() <= 1e-7 {
-                    return Loop2::circle(center, radius);
+                    return Ok(Loop2::circle(center, radius));
                 }
             }
         }
     }
-    // Drop the nodes that lie on a straight run: a node goes where every node between its kept
-    // neighbours, those dropped before it included, lies within the rounding allowance (three
-    // times `epsilon`, as STL's f32 coordinates are allowed for elsewhere) of the line between
-    // them. Measured against the original nodes, so dropping one after another never drifts: a
-    // mesher that samples a straight edge with nodes along it (a quality mesh does) gives the
-    // edge's one segment.
-    let allowance = epsilon * 3.;
+    Ok(Loop2::polygon(&straight_runs_joined(points, epsilon)?))
+}
+
+/// The corners of the closed polygon through `points`: each straight run of nodes (a mesher that
+/// samples a straight edge with nodes along it, as a quality mesh does) becomes one side. A run
+/// is grown from its first node while every node it spans lies within the rounding allowance
+/// (three times `epsilon`, as STL's f32 coordinates are allowed for elsewhere) of the side from
+/// its first node to its last; the first node of all is dropped too where it lies on the side
+/// through it. Every node is measured against the side that replaces it, never against a side
+/// already simplified, so joining never drifts.
+///
+/// # Errors
+/// More node tests than n² + n for n nodes. Growing a run of m nodes tests at most m²/2 of
+/// them, and the first node's check at most n, so that bound is never reached; it is kept as a
+/// refusal rather than a loop that could run on.
+fn straight_runs_joined(points: &[Vec2], epsilon: f64) -> Result<Vec<Vec2>> {
     let n = points.len();
-    let mut kept: Vec<usize> = (0..n).collect();
-    // The nodes from `from` to `to` going forward round the loop, both excluded.
-    let between = |from: usize, to: usize| (1..n).map(move |k| (from + k) % n).take_while(move |&i| i != to);
-    // At most a budget of node tests: the boundary is bounded (`MAX_BOUNDARY`), and so is this.
-    let mut budget = 16_000_000usize;
-    // Passes until one drops nothing: dropping a node can make its kept neighbour's run straight.
-    let mut dropped = true;
-    while dropped {
-        dropped = false;
-        let mut k = 0usize;
-        while kept.len() > 3 && k < kept.len() {
-            let m = kept.len();
-            let (Some(&p), Some(&q)) = (kept.get((k + m - 1) % m), kept.get((k + 1) % m)) else { break };
-            let (Some(&a), Some(&c)) = (points.get(p), points.get(q)) else { break };
-            let edge = solidcore_record::Seg2::Line { a, b: c };
-            let mut straight = true;
-            for i in between(p, q) {
-                if budget == 0 {
-                    straight = false;
-                    break;
-                }
-                budget -= 1;
-                let Some(&x) = points.get(i) else { continue };
-                if edge.point_at(edge.closest_param(x)).dist(x) > allowance {
-                    straight = false;
-                    break;
-                }
+    if n <= 3 {
+        return Ok(points.to_vec());
+    }
+    let allowance = epsilon * 3.;
+    let bound = n.saturating_mul(n).saturating_add(n);
+    let mut tests = 0usize;
+    let at = |i: usize| points.get(i % n).copied().unwrap_or_default();
+    // Whether every node strictly between `i` and `j` (going forward, `j` may pass `n`) lies
+    // within the allowance of the side from node `i` to node `j`.
+    let straight = |i: usize, j: usize, tests: &mut usize| -> Result<bool> {
+        let side = solidcore_record::Seg2::Line { a: at(i), b: at(j) };
+        for k in i + 1..j {
+            *tests += 1;
+            if *tests > bound {
+                return Err(invalid(&format!("joining the straight runs of a boundary loop of {n} nodes took more than {bound} node tests")));
             }
-            if straight {
-                kept.remove(k);
-                dropped = true;
-            } else {
-                k += 1;
+            let p = at(k);
+            if side.point_at(side.closest_param(p)).dist(p) > allowance {
+                return Ok(false);
             }
         }
+        Ok(true)
+    };
+    let mut kept = vec![0usize];
+    let mut i = 0usize;
+    let mut j = 2usize;
+    while j <= n {
+        if straight(i, j, &mut tests)? {
+            j += 1;
+        } else {
+            kept.push(j - 1);
+            i = j - 1;
+            j = i + 2;
+        }
     }
-    Loop2::polygon(&kept.iter().filter_map(|&i| points.get(i).copied()).collect::<Vec<_>>())
+    if let (Some(&last), Some(&second)) = (kept.last(), kept.get(1))
+        && kept.len() > 3
+        && straight(last, second + n, &mut tests)?
+    {
+        kept.remove(0);
+    }
+    Ok(kept.iter().map(|&k| at(k)).collect())
 }
 
 #[cfg(test)]
@@ -745,6 +773,66 @@ mod tests {
         // The L's six sides, the two caps and the bore.
         assert_eq!(converted.faces(0.01).unwrap().len(), 9);
         assert!((crate::measure(&converted).unwrap().volume - crate::measure(&source).unwrap().volume).abs() < 1e-7);
+    }
+
+    /// A box's quality mesh with every point moved by `f`, welded as conversion welds it: the
+    /// extrusion along z it gives, if any.
+    fn extruded_after(f: impl Fn(Vec3) -> Vec3, tolerance: f64) -> Option<Body> {
+        let source = crate::box_solid(Vec3::ZERO, Vec3::new(10., 10., 5.)).unwrap();
+        let m = source.export_mesh(&crate::MeshSpec::chord(source.size() * 2e-4)).unwrap().mesh;
+        let moved: Vec<Vec3> = m.positions.iter().map(|p| f(*p)).collect();
+        let welded = weld(crate::mesh_body(&moved, &m.triangles).unwrap().mesh.as_ref().unwrap(), tolerance).unwrap();
+        extrusion(welded.mesh.as_ref().unwrap(), Vec3::Z, tolerance).unwrap()
+    }
+
+    /// A quality mesh off a straight extrusion by more than the tolerance is no prism: tapered
+    /// (its walls lean in by 0.2 mm over its height, the tolerance 0.05 mm) or stepped (its +x
+    /// wall 0.2 mm further out above half its height, its top cap with it).
+    #[test]
+    fn a_tapered_or_stepped_quality_mesh_is_no_prism() {
+        assert!(extruded_after(|p| p, 0.05).is_some(), "the box itself is one");
+        let taper = |p: Vec3| Vec3::new(5. + (p.x - 5.) * (1. - 0.04 * p.z / 5.), 5. + (p.y - 5.) * (1. - 0.04 * p.z / 5.), p.z);
+        assert!(extruded_after(taper, 0.05).is_none());
+        let step = |p: Vec3| if p.x > 10. - 1e-9 && p.z > 2.5 { Vec3::new(p.x + 0.2, p.y, p.z) } else { p };
+        assert!(extruded_after(step, 0.05).is_none());
+    }
+
+    /// Caps sampled differently still make one prism: a 10 x 10 x 5 block whose bottom cap has a
+    /// node in the middle of each side (and one at its centre) and whose top cap has its four
+    /// corners alone, each wall three triangles between them. Six faces, volume 500.
+    #[test]
+    fn caps_sampled_differently_still_convert() {
+        let c = [Vec2::new(0., 0.), Vec2::new(10., 0.), Vec2::new(10., 10.), Vec2::new(0., 10.)];
+        let at = |p: Vec2, z: f64| Vec3::new(p.x, p.y, z);
+        // Bottom ring: corner i at 2i, the middle of side i at 2i + 1; then the top corners
+        // (8..12) and the bottom's centre (12).
+        let mut positions = Vec::new();
+        for i in 0..4 {
+            positions.push(at(c[i], 0.));
+            positions.push(at((c[i] + c[(i + 1) % 4]) * 0.5, 0.));
+        }
+        for p in c {
+            positions.push(at(p, 5.));
+        }
+        positions.push(Vec3::new(5., 5., 0.));
+        let mut triangles = Vec::new();
+        for k in 0..8u32 {
+            triangles.push([12, (k + 1) % 8, k]);
+        }
+        triangles.push([8, 9, 10]);
+        triangles.push([8, 10, 11]);
+        for i in 0..4u32 {
+            let (a, m, b) = (2 * i, 2 * i + 1, (2 * i + 2) % 8);
+            let (ta, tb) = (8 + i, 8 + (i + 1) % 4);
+            triangles.extend([[a, m, ta], [m, b, tb], [m, tb, ta]]);
+        }
+        let body = crate::mesh_body(&positions, &triangles).unwrap();
+        // The extrusion itself, not the faceted solid (which would also give six faces here).
+        let welded = weld(body.mesh.as_ref().unwrap(), 0.05).unwrap();
+        let prism = extrusion(welded.mesh.as_ref().unwrap(), Vec3::Z, 0.05).unwrap().expect("one prism");
+        assert!(prism.validity().is_empty());
+        assert_eq!(prism.faces(0.01).unwrap().len(), 6);
+        assert!((crate::measure(&prism).unwrap().volume - 500.).abs() < 1e-9);
     }
 
     #[test]
