@@ -534,21 +534,26 @@ fn sheet_for(st: &ModelState, body: &Option<crate::BodyName>, pick: Option<Vec3>
 }
 
 /// Whether a point touches sheet `i`'s material: inside it, on one of its faces, or within its
-/// display tolerance of one (picks land on the display mesh). A sheet with no mesh to test
-/// against counts as touched.
+/// tolerance of one.
 fn on_sheet_material(st: &ModelState, i: usize, p: Vec3) -> bool {
     let Some(mb) = st.sheets.get(i).and_then(|sh| st.body(&sh.body)) else { return true };
-    let mesh = mb.mesh();
-    if mesh.triangles.is_empty() {
+    if matches!(mb.body.classify_point(p), Ok(solidcraft_kernel::PointClass::OnBoundary | solidcraft_kernel::PointClass::Inside)) {
         return true;
     }
-    // Twice the display mesh's chord tolerance (see `ModelBody::mesh`), and a quarter of the
-    // thickness: on a large thin sheet the first steps from a point on its face clean through
-    // it, so a point on the face would touch nothing (#685).
+    // Twice the body's size tolerance and a quarter of the thickness:
     let step = 2.0 * (mb.body.size() * 1e-3).max(1e-3);
     let thin = st.sheets.get(i).map_or(step, |sh| (sh.t * 0.25).min(step));
-    let offsets = [-step, -thin, 0.0, thin, step];
-    offsets.iter().any(|&dx| offsets.iter().any(|&dy| offsets.iter().any(|&dz| mesh.contains(p + Vec3::new(dx, dy, dz)))))
+    let offsets = [-step, -thin, thin, step];
+    offsets.iter().any(|&dx| {
+        offsets.iter().any(|&dy| {
+            offsets.iter().any(|&dz| {
+                matches!(
+                    mb.body.classify_point(p + Vec3::new(dx, dy, dz)),
+                    Ok(solidcraft_kernel::PointClass::OnBoundary | solidcraft_kernel::PointClass::Inside)
+                )
+            })
+        })
+    })
 }
 
 /// A region mirrored in the sketch x axis (y → −y), exactly: free-form curves through their
