@@ -1514,6 +1514,91 @@ mod tests {
         assert_eq!(seen.len(), keyed.len(), "{seen:?} computed from, {keyed:?} keyed");
     }
 
+    /// Builds without `.git` (Docker, Nix, source archives) still get a deterministic evaluation
+    /// source digest from disk, ignoring build/editor artifacts and release version bumps while
+    /// changing whenever any model-computing input changes.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn evaluation_source_hashes_disk_tree_without_git() {
+        use crate::build_script;
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = Scratch(std::env::temp_dir().join(format!(
+            "solidcraft-eval-source-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )));
+        let put = |rel: &str, text: &str| {
+            let path = dir.0.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        for c in build_script::EVALUATION_CRATES {
+            put(&format!("crates/{c}/src/lib.rs"), &format!("pub const CRATE: &str = \"{c}\";\n"));
+        }
+        for t in build_script::EVALUATION_TREES {
+            put(&format!("{t}/src/lib.rs"), "pub fn kernel() {}\n");
+        }
+        for f in build_script::EVALUATION_FILES {
+            put(f, "// evaluation file\n");
+        }
+        put("vendor/winit/src/lib.rs", "pub fn window() {}\n");
+        put("vendor/egui-wgpu/src/lib.rs", "pub fn ui_only() {}\n");
+        put("vendor/README.md", "notes\n");
+        let lock_v = |app_ver: &str, dep_ver: &str| {
+            format!(
+                "# lock\n\n[[package]]\nname = \"solidcraft\"\nversion = \"{app_ver}\"\n\n[[package]]\nname = \"sha2\"\nversion = \"{dep_ver}\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n"
+            )
+        };
+        let manifest_v = |app_ver: &str, opt: u8| {
+            format!("[workspace.package]\nversion = \"{app_ver}\"\nedition = \"2024\"\n\n[profile.release]\nopt-level = {opt}\n")
+        };
+        put("Cargo.lock", &lock_v("0.40.1", "0.10.9"));
+        put("Cargo.toml", &manifest_v("0.40.1", 3));
+
+        // Without `.git`, git-based hashing returns None while disk hashing yields a trusted SHA-256.
+        assert_eq!(build_script::evaluation_source(&dir.0), None);
+        let base = build_script::evaluation_source_from_disk(&dir.0, false).expect("complete source tree hashes without git");
+        assert_eq!(base.len(), 64);
+        assert!(base.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()), "{base}");
+        assert!(native_cache::source_trusted(&base, false));
+
+        // CRLF checkouts, build outputs, excluded vendor crates, and release version bumps keep the digest.
+        put("crates/doc/src/lib.rs", "pub const CRATE: &str = \"doc\";\r\n");
+        put("Cargo.lock", &lock_v("0.41.0", "0.10.9").replace('\n', "\r\n"));
+        put("Cargo.toml", &manifest_v("0.41.0", 3).replace('\n', "\r\n"));
+        put("crates/doc/target/artifact.bin", "ignored");
+        put("solidcore/.git/HEAD", "ref: refs/heads/main\n");
+        put("vendor/egui-wgpu/src/lib.rs", "pub fn changed_ui_renderer() {}\n");
+        put("vendor/README.md", "updated notes\n");
+        assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false).as_deref(), Some(base.as_str()));
+
+        // Every model-computing input invalidates the digest when changed.
+        for (rel, altered, original) in [
+            ("crates/doc/src/lib.rs", "pub const CRATE: &str = \"doc_v2\";\n".to_string(), "pub const CRATE: &str = \"doc\";\n".to_string()),
+            ("solidcore/src/lib.rs", "pub fn kernel() { let _ = 1; }\n".into(), "pub fn kernel() {}\n".into()),
+            (".cargo/config.toml", "[build]\nrustflags = [\"-C\", \"target-cpu=native\"]\n".into(), "// evaluation file\n".into()),
+            ("vendor/winit/src/lib.rs", "pub fn window_v2() {}\n".into(), "pub fn window() {}\n".into()),
+            ("Cargo.lock", lock_v("0.41.0", "0.10.10"), lock_v("0.41.0", "0.10.9")),
+            ("Cargo.toml", manifest_v("0.41.0", 2), manifest_v("0.41.0", 3)),
+        ] {
+            put(rel, &altered);
+            let changed = build_script::evaluation_source_from_disk(&dir.0, false).unwrap();
+            assert_ne!(changed, base, "{rel} must change the evaluation digest");
+            put(rel, &original);
+            assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false).as_deref(), Some(base.as_str()));
+        }
+
+        // Missing required inputs fail closed (`None` -> `"unknown"`).
+        std::fs::remove_file(dir.0.join("Cargo.lock")).unwrap();
+        assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false), None);
+    }
+
     #[test]
     fn native_cache_round_trip_and_preview_defer_original_sources() {
         let mut doc = Document::new("Native cache");

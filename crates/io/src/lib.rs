@@ -7,6 +7,10 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(dead_code)]
+#[path = "../build.rs"]
+mod build_script;
 pub mod catalog;
 mod design;
 pub mod design_lock;
