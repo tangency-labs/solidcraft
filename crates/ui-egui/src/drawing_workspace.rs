@@ -21,6 +21,28 @@ pub struct State {
     settings: Option<Rect>,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
     pub(crate) page: crate::drawing_sheet_page::Page,
+    status_revision: Option<u64>,
+    pub(crate) status_controller: crate::drawing_status_controller::DrawingStatusController,
+    status_dirty: bool,
+    status_error: Option<String>,
+    repair_ui: crate::drawing_repair_ui::RepairUiState,
+}
+
+pub(crate) fn invalidate_status(app: &mut SolveApp) {
+    app.drawing_workspace.status_controller.invalidate();
+    app.drawing_workspace.status_dirty = true;
+    app.drawing_workspace.status_error = None;
+    app.drawing_workspace.repair_ui.clear();
+}
+
+fn refresh_status_if_needed(app: &mut SolveApp) {
+    let revision = app.session.revision;
+    if !app.drawing_workspace.status_dirty && app.drawing_workspace.status_revision == Some(revision) {
+        return;
+    }
+    app.drawing_workspace.status_revision = Some(revision);
+    app.drawing_workspace.status_dirty = false;
+    app.drawing_workspace.status_error = crate::drawing_status_engine::refresh(&mut app.session, &mut app.drawing_workspace.status_controller).err();
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -112,6 +134,29 @@ pub(crate) fn left_inset(app: &SolveApp) -> f32 {
 
 /// Reuse Browser's existing content-hugging host and resize seam, with Drawing contents.
 pub(crate) fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
+    refresh_status_if_needed(app);
+    ui.push_id("drawing_attention_status", |ui| {
+        if let Some(error) = &app.drawing_workspace.status_error {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.heading("Drawing status");
+                ui.label(format!("Status unavailable: {error}"));
+            });
+        } else if let Some(snapshot) = app.drawing_workspace.status_controller.snapshot() {
+            crate::drawing_attention_card::show(ui, &snapshot);
+            let repaired = crate::drawing_repair_ui::show(
+                ui,
+                &mut app.session,
+                &mut app.drawing_workspace.repair_ui,
+                &snapshot,
+            );
+            if repaired {
+                invalidate_status(app);
+            }
+        } else {
+            ui.label("Drawing status not yet available");
+        }
+    });
+    ui.add_space(Tokens::get().space_8);
     if let Ok(drawing) = app.session.drawing("drawing.inspect") {
         for sheet in &drawing.sheets {
             let id = ui.make_persistent_id(("drawing_browser_sheet", app.session.uid, drawing.id, sheet.id));
@@ -155,6 +200,7 @@ pub(crate) fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// The sheet page draws the open drawing's sheet; with no drawing open there is no paper, sample
 /// geometry or camera, only a note.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    refresh_status_if_needed(app);
     if crate::drawing_sheet_page::show(app, ui) {
         return;
     }
