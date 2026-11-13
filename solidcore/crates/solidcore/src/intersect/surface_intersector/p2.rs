@@ -56,6 +56,15 @@
 //!   than a tenth of the one before only when the merged span passes the trace's span
 //!   test (`SurfaceIntersector::span_keeps_accuracy`); the fork (18e96f1) merges it
 //!   untested, as pinned SMLib does.
+//! - **A point at a pole is the pole (not upstream).** A trace point that
+//!   `ComputePointValues` finds singular on a surface and that lies on that surface's
+//!   degenerate boundary (within the UV tolerance `TestPoint` reads "on a boundary" with)
+//!   is given the boundary's parameter across it, the pole as its point on that surface,
+//!   and the pole's foot on the other surface
+//!   ([`SurfaceIntersector::place_at_pole`]): the curves that end at one pole end at one
+//!   point, and their trims end on the degenerate boundary, before
+//!   `StepBackFromSingularity` places the singular parameter along the curve's tangent
+//!   (part 1).
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps) and the
 //!   `SM_ASSERT`s (no-ops in release builds).
 
@@ -684,6 +693,8 @@ impl SurfaceIntersector<'_> {
                     };
                     let (sing, sing_dir) = is_singularity(k, self.surface(s), uv)?;
                     if sing {
+                        // Not upstream: a point on the degenerate boundary is the pole
+                        self.place_at_pole(k, s, sing_dir, point)?;
                         // step back along the 3D curve and recompute the tangents
                         let mut p = prev.clone();
                         self.step_back_from_singularity_points(
@@ -759,6 +770,118 @@ impl SurfaceIntersector<'_> {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Not upstream: places `point`, singular on surface `s` (collapsing along
+    /// `sing_dir`), at the pole when it lies on that surface's degenerate boundary.
+    ///
+    /// A trace that runs into a pole, or passes it within the tolerance it refines with,
+    /// ends a curve at a point `RefinePoint` put on the degenerate boundary only to within
+    /// its convergence: its parameter across the boundary, its point on the other surface
+    /// and so its curve point differ from those of another curve ending at the same pole
+    /// by the solves' noise (1e-11 in UV, 1e-9 in 3D). The edges meeting at the pole are
+    /// then trimmed short of their curves' ends by that much, and the trims end off the
+    /// degenerate boundary, where nothing closes the face's loop along the pole: the body's
+    /// volume enclosure, which bounds a closing segment on the pole only on the side
+    /// itself, could not decide the volume's sign. The pole is one point. When the point's
+    /// parameter across the boundary is within the UV tolerance `TestPoint` reads "on a
+    /// boundary" with (`100 SM_EFF_ZERO` scaled by the domain), the point is the pole: that
+    /// parameter is the boundary's, its point on `s` is the pole, its point on the other
+    /// surface is the pole's foot there (`LocalPointSolve` from the refined point), and its
+    /// curve point, deviation and tangent (`n0 x n1`, the sense kept) follow from those. A
+    /// point off the boundary, a surface collapsing in both directions or neither, and a
+    /// pole whose foot is itself singular are left as upstream leaves them.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Failed`] when the foot is not found or has no normal, or the surfaces
+    /// are tangent there; those of the
+    /// evaluations and the solve.
+    pub(super) fn place_at_pole(
+        &self,
+        k: &Kernel,
+        s: SrfIndex,
+        sing_dir: SurfParamType,
+        point: &mut TsectPnt,
+    ) -> Result<()> {
+        let (si, oi) = if s == SrfIndex::First {
+            (0, SrfIndex::Second)
+        } else {
+            (1, SrfIndex::First)
+        };
+        let dom = self
+            .uv_domains
+            .get(si)
+            .copied()
+            .ok_or_else(|| SolidError::invalid_input(OP_CPV, "no domain for the surface"))?;
+        let odom =
+            self.uv_domains.get(1 - si).copied().ok_or_else(|| {
+                SolidError::invalid_input(OP_CPV, "no domain for the other surface")
+            })?;
+        let on_tol = EFF_ZERO * (1.0 + dom.max_dimension()) * 100.0;
+        let mut uv = point.uv_pos(s);
+        let (across, lo, hi) = match sing_dir {
+            SurfParamType::U => (&mut uv.y, dom.min().y, dom.max().y),
+            SurfParamType::V => (&mut uv.x, dom.min().x, dom.max().x),
+            _ => return Ok(()),
+        };
+        if (*across - lo).abs() <= on_tol {
+            *across = lo;
+        } else if (*across - hi).abs() <= on_tol {
+            *across = hi;
+        } else {
+            return Ok(());
+        }
+        // a pole on the other surface's pole is left as upstream has it
+        if is_singularity(k, self.surface(oi), point.uv_pos(oi))?.0 {
+            return Ok(());
+        }
+        let pole = self.surface(s).evaluate_point(k, uv)?;
+        let Some([fu, fv]) = surface_local_point_solve_normalize(
+            k,
+            self.surface(oi),
+            &odom,
+            pole,
+            point.uv_pos(oi),
+        )?
+        else {
+            return Err(SolidError::intersect_failed(
+                OP_CPV,
+                "the pole's foot on the other surface was not found",
+            ));
+        };
+        let foot = Point2::new(fu, fv);
+        let m = self.surface(oi).evaluate(k, foot, 2, 2, LEFT_UPPER)?;
+        *point.uv_pos_mut(s) = uv;
+        point.srf_eval_matrix_mut(s)[0][0] = pole;
+        *point.uv_pos_mut(oi) = foot;
+        copy_upper_half(point.srf_eval_matrix_mut(oi), &m, 2);
+        let norm = point.srf_du(oi).cross(point.srf_dv(oi));
+        if norm.length_squared() < EFF_ZERO_SQ {
+            return Err(SolidError::intersect_failed(
+                OP_CPV,
+                "the pole's foot on the other surface has no normal",
+            ));
+        }
+        point.srf_eval_matrix_mut(oi)[2][2] = norm.unitize_or_z();
+        point.curve_pv[0] =
+            (point.srf_pos(SrfIndex::First) + point.srf_pos(SrfIndex::Second)) / 2.0;
+        point.deviation = point.crv_pos().distance(point.srf_pos(SrfIndex::First));
+        let mut tangent = point
+            .srf_norm(SrfIndex::First)
+            .cross(point.srf_norm(SrfIndex::Second));
+        if tangent.dot(point.crv_deriv()) < 0.0 {
+            tangent = -tangent;
+        }
+        let length = tangent.length();
+        if length < self.start_parallel_tol_radians {
+            return Err(SolidError::intersect_failed(
+                OP_CPV,
+                "the surfaces are tangent at the pole",
+            ));
+        }
+        point.curve_pv[1] = tangent / length;
         Ok(())
     }
 
