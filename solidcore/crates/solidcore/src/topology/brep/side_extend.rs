@@ -24,7 +24,7 @@ use crate::topology::brep::p1::{edges as brep_edges, faces as brep_faces};
 use crate::topology::brep::p3::new_brep;
 use crate::topology::brep::p4::stitch_faces;
 use crate::topology::brep::sheet::face_on;
-use crate::topology::brep::trim_extend::{build_into, grown, Move};
+use crate::topology::brep::trim_extend::{build_into, grown, Built, Move};
 use crate::topology::brep::validation::{check_brep_with_keys, CheckLevel};
 use crate::topology::face::p2 as fp2;
 use crate::topology::face::p4::edges as face_edges;
@@ -336,7 +336,9 @@ pub fn extended_side(
     }
     let mut face_map = vec![(c, nc)];
     for (leg, g) in grown_legs {
-        let (nf, edges, _added) = build_into(k, &mut nb, g)?;
+        let Built {
+            face: nf, edges, ..
+        } = build_into(k, &mut nb, g)?;
         face_map.push((leg, nf));
         pre.extend(edges);
     }

@@ -296,7 +296,7 @@ pub fn extend_trim(
     let g = grown(k, b, f, e, Move::By(distance))?;
     let mut nb = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
     nb.set_tolerance(g.tol);
-    let (face, edges, added) = build_into(k, &mut nb, g)?;
+    let Built { face, edges, added } = build_into(k, &mut nb, g)?;
     let check = check_brep_with_keys(k, &mut nb, CheckLevel::Level2, &notify_ref)?;
     if !check.is_valid() {
         return Err(unsupported(
@@ -332,7 +332,7 @@ pub fn extend_trim_through(
     let g = grown(k, b, f, e, Move::Through(through))?;
     let mut nb = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
     nb.set_tolerance(g.tol);
-    let (face, edges, added) = build_into(k, &mut nb, g)?;
+    let Built { face, edges, added } = build_into(k, &mut nb, g)?;
     let check = check_brep_with_keys(k, &mut nb, CheckLevel::Level2, &notify_ref)?;
     if !check.is_valid() {
         return Err(unsupported(
@@ -628,20 +628,26 @@ pub(crate) fn grown(k: &Kernel, b: &Brep, f: FaceId, e: EdgeId, how: Move) -> Re
     })
 }
 
+/// A grown face made in a body ([`build_into`]).
+pub(crate) struct Built {
+    /// The face.
+    pub(crate) face: FaceId,
+    /// Each old edge with the edge it is now (the picked edge's the moved edge, a straight
+    /// neighbour's the lengthened one).
+    pub(crate) edges: Vec<(EdgeId, EdgeId)>,
+    /// The edges added along a curved neighbour's tangent.
+    pub(crate) added: Vec<EdgeId>,
+}
+
 /// The grown face `g` made in `nb` (on its own copy of the plane, the upward use the same way
-/// as the plane): the face, each old edge with the edge it is now (the picked edge's the moved
-/// edge, a straight neighbour's the lengthened one) and the edges added along a curved
-/// neighbour's tangent. `nb`'s other faces are untouched; its cached topology is refreshed.
+/// as the plane), as a [`Built`]. `nb`'s other faces are untouched; its cached topology is
+/// refreshed.
 ///
 /// # Errors
 ///
 /// `Unsupported` where the curves make no face or a curve makes no edge of it; those of the
 /// face constructor.
-pub(crate) fn build_into(
-    k: &mut Kernel,
-    nb: &mut Brep,
-    g: Grown,
-) -> Result<(FaceId, Vec<(EdgeId, EdgeId)>, Vec<EdgeId>)> {
+pub(crate) fn build_into(k: &mut Kernel, nb: &mut Brep, g: Grown) -> Result<Built> {
     let Grown {
         surface: grown,
         domain: grown_domain,
@@ -713,7 +719,7 @@ pub(crate) fn build_into(
             None => added.push(found),
         }
     }
-    Ok((face, edges, added))
+    Ok(Built { face, edges, added })
 }
 
 #[cfg(test)]
