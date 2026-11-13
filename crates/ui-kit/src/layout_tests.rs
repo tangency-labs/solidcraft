@@ -517,3 +517,30 @@ fn short_labels_keep_the_designs_label_column_and_long_ones_widen_it_for_every_r
     assert_eq!(a, b, "one column per form");
     assert!(a > t.form_label_width && a <= t.form_label_width * 1.6, "{a}");
 }
+
+/// An action row is a button across the control column, lined up with the field rows above it,
+/// and says when it is clicked; only then.
+#[test]
+fn an_action_row_is_a_button_in_the_control_column_that_says_when_it_is_clicked() {
+    let ctx = crate::test_support::context();
+    let mut width = "20 mm".to_string();
+    let mut clicks = Vec::new();
+    let mut draw = |ui: &mut Ui| {
+        scope(ui, |ui| {
+            expr_row(ui, "Width", &mut width);
+            clicks.push(action_row(ui, "fit", "Fit to box"));
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let field = registry::rect_of("dialog:control:Width").unwrap();
+    let action = registry::rect_of("dialog:action:fit").unwrap();
+    assert!((action.left() - field.left()).abs() < 0.5, "{action:?} under {field:?}");
+    assert!((action.right() - field.right()).abs() < 0.5, "{action:?} under {field:?}");
+    assert!((action.height() - row_height()).abs() < 0.5, "{action:?}");
+    assert!(action.top() >= field.bottom(), "{action:?} below {field:?}");
+    let at = registry::handle_at("dialog:action:fit").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(clicks, [false, false, true, false]);
+}
