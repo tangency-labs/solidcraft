@@ -268,6 +268,114 @@ fn wr_614_wider_protruding_box_keeps_exit_crossing() {
     assert!(shape(&inter).4, "manifold intersection");
 }
 
+/// The wider case with a pocket in A's face y = 20, beside the crossing: A is the wider box
+/// minus [2, 3] x [19, 21] x `cut`, and B the turned box of `strip_cubes` cut to z in
+/// [`z0`, `z0` + `h`]. The hole ([0.5, 3.5], B over [1, 3]) is an inner loop of A's face;
+/// its left edge x = 2 spans B's height, lies in the band of F1's plane and faces the
+/// crossing, while A's face goes on past it beyond the tolerance (x up to 10). The notch
+/// ([2, 5], B over [2.5, 3.5]) is the same edge on A's outer loop, made reentrant. In both,
+/// the crossing at x = 2 - d / SLOPE is an exit, as in
+/// `wr_614_wider_protruding_box_keeps_exit_crossing`: the union is one valid manifold solid
+/// of volume |A| + |B| - overlap, the intersection is empty and A minus B is A less the
+/// overlap (the pocket lies at x >= 2, clear of the wedge x <= 2).
+fn pocketed_wider_case(d: f64, cut: (f64, f64), z0: f64, h: f64) -> Vec<String> {
+    let mut failed = Vec::new();
+    let what = format!("pocket z {cut:?}, d = {d}");
+    let pocket = (cut.1 - cut.0).min(SIDE - cut.0);
+    let va = 12.0 * SIDE * SIDE - pocket;
+    let overlap = overlap_volume(d) / SIDE * h;
+    let bodies = |k: &mut Kernel| {
+        let a = create_box(k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
+        let p = create_box(k, Point3::new(2.0, 19.0, cut.0), 1.0, 2.0, cut.1 - cut.0).unwrap();
+        let a = boolean_difference(k, a, p).unwrap();
+        let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), SIDE, SIDE, h).unwrap();
+        api_rotate(
+            k,
+            Some(TransformObject::Brep(&mut b)),
+            Point3::ZERO,
+            Vec3::Z,
+            SLOPE.atan().to_degrees(),
+        )
+        .unwrap();
+        let half = d / SLOPE;
+        let shift = Vec3::new((2.0 - half) - half, 20.0 - d, z0);
+        api_translate(k, Some(TransformObject::Brep(&mut b)), shift).unwrap();
+        (a, b)
+    };
+    let mut k = Kernel::default();
+    let (a, b) = bodies(&mut k);
+    match boolean_union(&mut k, a, b) {
+        Err(e) => failed.push(format!("{what}: union refused: {e}")),
+        Ok(mut u) => {
+            let want = va + SIDE * SIDE * h - overlap;
+            let v = volume(&k, &mut u);
+            let check = check_brep(&mut k, &mut u, CheckLevel::Level2).unwrap();
+            if shape(&u).3 != 1
+                || !shape(&u).4
+                || check.failure_count() != 0
+                || (v - want).abs() > ACCURACY * want
+            {
+                failed.push(format!(
+                    "{what}: union {:?}, volume {v} (want {want}), check {:?}",
+                    shape(&u),
+                    check.lines()
+                ));
+            }
+        }
+    }
+    let (a, b) = bodies(&mut k);
+    match boolean_intersection(&mut k, a, b) {
+        Err(e) => failed.push(format!("{what}: intersection refused: {e}")),
+        Ok(mut inter) => {
+            let check = check_brep(&mut k, &mut inter, CheckLevel::Level2).unwrap();
+            if shape(&inter).0 != 0 || shape(&inter).3 != 0 || check.failure_count() != 0 {
+                failed.push(format!(
+                    "{what}: intersection {:?}, check {:?}",
+                    shape(&inter),
+                    check.lines()
+                ));
+            }
+        }
+    }
+    let (a, b) = bodies(&mut k);
+    match boolean_difference(&mut k, a, b) {
+        Err(e) => failed.push(format!("{what}: difference refused: {e}")),
+        Ok(mut diff) => {
+            let want = va - overlap;
+            let v = volume(&k, &mut diff);
+            let check = check_brep(&mut k, &mut diff, CheckLevel::Level2).unwrap();
+            if shape(&diff).3 != 1
+                || !shape(&diff).4
+                || check.failure_count() != 0
+                || (v - want).abs() > ACCURACY * want
+            {
+                failed.push(format!(
+                    "{what}: difference {:?}, volume {v} (want {want}), check {:?}",
+                    shape(&diff),
+                    check.lines()
+                ));
+            }
+        }
+    }
+    failed
+}
+
+/// A real exit beside an edge that looks like a bound: a hole in A's face y = 20 (an inner
+/// loop) and a reentrant notch (the outer loop) each put a straight edge in the band of F1's
+/// plane, spanning B's height and facing the crossing, while A's face goes on past it
+/// beyond the tolerance. A rule that takes such an edge as the end of its face drops the
+/// exit and leaves the union as two regions; the face-wide certificate keeps it
+/// (`pocketed_wider_case`). Unions 189 + 32 and 190 + 16 less the overlap, differences 189
+/// and 190 less the overlap.
+#[test]
+fn wr_614_wider_box_with_a_hole_or_notch_keeps_exit_crossing() {
+    let failed: Vec<String> = [((0.5, 3.5), 1.0, 2.0), ((2.0, 5.0), 2.5, 1.0)]
+        .into_iter()
+        .flat_map(|(cut, z0, h)| pocketed_wider_case(D, cut, z0, h))
+        .collect();
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
 /// The exact overlap of A and B (narrow or wider A): the prism over the triangle P0, Q4,
 /// Q1 between B's faces F4, F1 and A's face y = 20, 4 mm high. With s = SLOPE, P0 =
 /// (2 - 2d/s, 20 - d) and F4 (direction (-s, 1)) and F1 (direction (1, s)) meet y = 20 at
