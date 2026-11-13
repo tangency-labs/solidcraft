@@ -281,6 +281,15 @@ fn refuse_singular_offset(
 /// surface is `offset`) when it folds on the face's parameter box
 /// ([`crate::offset::construction::sheets::certify_regular`]), naming the largest wall
 /// that works.
+/// Whether `e` is a rounded offset's tube refusal (#13685), which the solid offset passes on
+/// where upstream drops a mapped edge's status.
+fn is_tube_refusal(e: &SolidError) -> bool {
+    matches!(
+        e.offset_failure(),
+        Some(OffsetFailure::TubeFolds { .. } | OffsetFailure::TubeNotCertified { .. })
+    )
+}
+
 fn refuse_folding_offset(
     kernel: &Kernel,
     original: &Brep,
@@ -664,8 +673,9 @@ impl OffsetExecutive {
                             continue;
                         }
                     }
-                    // SE upstream: propagate Unported, ignore other errors.
-                    crate::error::ignore_status(self.mapped_edge_prefix(
+                    // SE upstream: propagate Unported, ignore other errors. Not upstream
+                    // (#13685): a folding tube's refusal is passed on, never dropped.
+                    let status = self.mapped_edge_prefix(
                         kernel,
                         original,
                         edgeuse,
@@ -673,7 +683,13 @@ impl OffsetExecutive {
                         mark_type,
                         &marked,
                         notifications,
-                    ))?;
+                    );
+                    if let Err(e) = status {
+                        if is_tube_refusal(&e) {
+                            return Err(e);
+                        }
+                        crate::error::ignore_status(Err::<(), _>(e))?;
+                    }
                 }
                 Ok(())
             })??;

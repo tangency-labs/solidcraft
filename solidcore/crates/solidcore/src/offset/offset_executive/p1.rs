@@ -27,7 +27,9 @@
 //! | `build_boolean_offset_faces` (private) | `BuildOffsetOfFaceuse` 2D-boolean branch |
 //! | [`OffsetExecutive::map_edgeuses`] | `MapEdgeuses` |
 //!
-//! Deviations: RAII replaces the destructor. Constructor scalars are an immutable snapshot
+//! Deviations: not upstream (#13685), a rounded offset's cap whose tube folds over itself is
+//! refused (`refuse_folding_tube`, the certificate `query::tangent_edge::tube_regularity`).
+//! RAII replaces the destructor. Constructor scalars are an immutable snapshot
 //! of `SmOffsetGeometryCreation` parameters, not a retained creator reference or its implementation. `Relation` uses deterministic id order
 //! instead of upstream hash/pointer order; bubble sorting remains stable, including unordered
 //! floating-point comparisons. Extension identity is a caller-supplied key, never an address.
@@ -1356,6 +1358,7 @@ impl OffsetExecutive {
         };
         let creator = self.geometry_creator();
         let mut new_faces = Vec::new();
+        let mut tube_checked = false;
         // cpp:2918–3071: every mapped offset edge-use pair may need a cap face.
         for (index, offset) in synchronized.edgeuses.iter().copied().enumerate() {
             // sOtherEUS[ii]: the synchronized lists have one entry per pair.
@@ -1408,6 +1411,18 @@ impl OffsetExecutive {
             let Some(surface) = cap.surface else {
                 continue;
             };
+            // Not upstream (#13685): a rounded offset's cap is the tube of radius |d| about
+            // the edge; one that folds over itself is refused, naming the largest distance at
+            // which it is proved not to fold, never built into an unsound body. Checked once an edge, on the first cap
+            // built; a closing wall and a local operation's caps are no such tube.
+            if !tube_checked
+                && !cap.closing_wall
+                && self.local_faces.is_empty()
+                && self.operation() != OffsetOperation::LocalOperation
+            {
+                tube_checked = true;
+                self.refuse_folding_tube(kernel, original, edge)?;
+            }
             // Build a face in m_pOffsetBrep for the new cap surface; its own
             // `sLoopPoints` is empty.
             let new_face = self.make_cap_face(
@@ -1439,6 +1454,37 @@ impl OffsetExecutive {
             &new_faces,
             &mut notifications.rekey(offset_key_of),
         )
+    }
+
+    /// Not upstream (#13685): refuses the rounded offset when the tube of radius `|d|` its cap
+    /// about `edge` lies on folds over itself ([`crate::error::offset::OffsetFailure::TubeFolds`],
+    /// naming the largest distance at which it is proved not to fold) or is not proved regular
+    /// ([`crate::error::offset::OffsetFailure::TubeNotCertified`]). The tube runs along the
+    /// face use normals for an outset, against them for an inset.
+    fn refuse_folding_tube(
+        &self,
+        kernel: &Kernel,
+        original: &mut Brep,
+        edge: EdgeId,
+    ) -> Result<()> {
+        use crate::error::offset::OffsetFailure;
+        use crate::error::Failure;
+        use crate::query::tangent_edge::{tube_regularity, TubeRegularity};
+        let d = self.offset_distance.abs();
+        let outward = (self.offset_distance >= 0.0) != self.inset();
+        let reason = match tube_regularity(kernel, original, edge, d, outward)? {
+            TubeRegularity::Regular => return Ok(()),
+            TubeRegularity::Folds { largest } => OffsetFailure::TubeFolds {
+                edge,
+                distance: self.offset_distance,
+                largest,
+            },
+            TubeRegularity::NotCertified => OffsetFailure::TubeNotCertified {
+                edge,
+                distance: self.offset_distance,
+            },
+        };
+        Err(Failure::new(OP, reason).into_error())
     }
 
     /// The geometry creator this executive's scalars stand for
