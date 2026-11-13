@@ -162,14 +162,28 @@ pub(super) fn assert_test_edge13(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Res
 }
 
 /// `sm_AssertTestVertex1(this, &dMaxGap3d, &pMaxGapFace)`: `(passed, max_gap_3d)`, the
-/// vertex within the cross-section tolerance of its faces and on their corner
-/// (`IsWithinXSectTol3dOfFaces`, `IsOnFaceCorner`). Called at every level; its report
-/// (Vertex test 1) is level 2.
+/// vertex within its local tolerance of its faces and their solved corner. The
+/// body's intersection tolerance remains the floor. Strict corner queries keep
+/// their own semantics; this is the tolerant body's validity check. Called at
+/// every level; its report (Vertex test 1) is level 2.
 pub(super) fn assert_test_vertex1(
     k: &mut Kernel,
     b: &mut Brep,
     v: VertexId,
 ) -> Result<(bool, f64)> {
-    let (passed, max_gap_3d, _) = crate::topology::vertex::corner::assert_test_vertex1(k, b, v)?;
-    Ok((passed, max_gap_3d))
+    use crate::topology::vertex::corner;
+
+    let (_, face_gap, _) = corner::is_within_xsect_tol_3d_of_faces(k, b, v, false)?;
+    let tolerance = corner::xsect_tol_3d_of_brep(k, b).max(b.vertex(v)?.tolerance);
+    if face_gap > tolerance {
+        return Ok((false, face_gap));
+    }
+    let (_, corner) = corner::is_on_face_corner(k, b, v)?;
+    let corner_gap = if corner.found_point {
+        corner.best_point.distance(b.vertex(v)?.point)
+    } else {
+        0.0
+    };
+    let max_gap = face_gap.max(corner_gap);
+    Ok((max_gap <= tolerance, max_gap))
 }

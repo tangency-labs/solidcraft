@@ -11,6 +11,8 @@
 //! | `fix_reversed_on`, `end_turns_back`, `first_fundamental_form` | the SolidCraft fork's `PassesReverseDirectionCheckOn`, `nl_EndTurnsBack`, `sm_FirstFundamentalForm` (WR-406) |
 //!
 //! Deviations: no recursion; CCW walks are bounded at the native 100000 steps.
+//! Vertex tolerances must be finite, but have no upper ratio to the body's tolerance:
+//! imported local gaps do not change the accuracy of unrelated topology.
 //! Native const geometry repairs use mutable curve access. Warning-only checks
 //! retain their evaluations and repairs; diagnostic log strings are omitted.
 //! Not upstream (WR-406, tangency-labs/solidcore#891): a UV trim's turn at its
@@ -907,14 +909,9 @@ fn check_edges(
 fn check_vertices(b: &Brep, r: &mut Reports<'_>) -> Result<()> {
     for &v in b.vertex_list() {
         let data = b.vertex(v)?;
-        r.value(
-            b,
-            82,
-            data.tolerance < b.tolerance() * 1000.0,
-            EntityRef::Vertex(v),
-            b.tolerance() * 1000.0,
-            data.tolerance,
-        )?;
+        if !data.tolerance.is_finite() {
+            return Err(invalid("vertex tolerance is not finite"));
+        }
         r.value(
             b,
             83,

@@ -2501,18 +2501,7 @@ fn loop_junction_tolerance(
     if !k.fixes.check_loop_vertex_tolerance {
         return Ok(edge_limit);
     }
-    let Some(start_use) = eu1::vertexuse(b, current)? else {
-        return Ok(edge_limit);
-    };
-    let Some(end) = eu1::mate(b, previous)? else {
-        return Ok(edge_limit);
-    };
-    let Some(end_use) = eu1::vertexuse(b, end)? else {
-        return Ok(edge_limit);
-    };
-    let start_vertex = b.vertexuse(start_use)?.vertex;
-    let end_vertex = b.vertexuse(end_use)?.vertex;
-    if let Some(vertex) = start_vertex.filter(|v| Some(*v) == end_vertex) {
+    if let Some(vertex) = crate::topology::loopuse::junction_vertex(b, previous, current)? {
         return Ok(edge_limit.max(tol::zone_tol3d(k, b.vertex(vertex)?.tolerance)));
     }
     Ok(edge_limit)
