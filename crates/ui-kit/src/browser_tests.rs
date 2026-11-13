@@ -61,56 +61,68 @@ impl Host {
     fn rows(&self, rows: &mut Rows<'_>) {
         self.outs.borrow_mut().clear();
         let open = self.folds.is_open("bodies", true);
-        self.emit(rows, Node {
-            id: 1,
-            key: "bodies",
-            row: Row { fold: Some(open), eye: Some(!self.hidden.contains(&1)), icon: "folder", label: "Bodies", ..Default::default() },
-            click_folds: true,
-            drops: Drops { before: false, into: true },
-            ..Default::default()
-        });
+        self.emit(
+            rows,
+            Node {
+                id: 1,
+                key: "bodies",
+                row: Row { fold: Some(open), eye: Some(!self.hidden.contains(&1)), icon: "folder", label: "Bodies", ..Default::default() },
+                click_folds: true,
+                drops: Drops { before: false, into: true },
+                ..Default::default()
+            },
+        );
         if open {
             let extra: Vec<(NodeId, String)> = (0..self.extra).map(|i| (100 + i as NodeId, format!("Body {i}"))).collect();
             let mut bodies: Vec<(NodeId, &str)> = BODIES.to_vec();
             bodies.extend(extra.iter().map(|(id, label)| (*id, label.as_str())));
             for (id, label) in bodies {
-                self.emit(rows, Node {
-                    id,
-                    key: label,
-                    row: Row {
-                        depth: 1,
-                        eye: Some(!self.hidden.contains(&id)),
-                        icon: "body",
-                        label,
-                        name: true,
-                        selected: self.selected.contains(&id),
+                self.emit(
+                    rows,
+                    Node {
+                        id,
+                        key: label,
+                        row: Row {
+                            depth: 1,
+                            eye: Some(!self.hidden.contains(&id)),
+                            icon: "body",
+                            label,
+                            name: true,
+                            selected: self.selected.contains(&id),
+                            ..Default::default()
+                        },
+                        select: Selectable::Yes(0),
+                        rename: self.rename,
+                        drag: Some(0),
+                        drops: Drops { before: true, into: false },
                         ..Default::default()
                     },
-                    select: Selectable::Yes(0),
-                    rename: self.rename,
-                    drag: Some(0),
-                    drops: Drops { before: true, into: false },
-                    ..Default::default()
-                });
+                );
             }
         }
-        self.emit(rows, Node {
-            id: GROUP,
-            key: "g",
-            row: Row { fold: Some(self.folds.is_open("g", true)), icon: "folder", label: "G", name: true, ..Default::default() },
-            select: Selectable::Yes(1),
-            drag: Some(1),
-            drops: Drops { before: true, into: true },
-            menu: NodeMenu::Items(&group_menu),
-            ..Default::default()
-        });
-        self.emit(rows, Node {
-            id: SETTINGS,
-            key: "settings",
-            row: Row { icon: "settings", label: "Settings", ..Default::default() },
-            menu: NodeMenu::Host,
-            ..Default::default()
-        });
+        self.emit(
+            rows,
+            Node {
+                id: GROUP,
+                key: "g",
+                row: Row { fold: Some(self.folds.is_open("g", true)), icon: "folder", label: "G", name: true, ..Default::default() },
+                select: Selectable::Yes(1),
+                drag: Some(1),
+                drops: Drops { before: true, into: true },
+                menu: NodeMenu::Items(&group_menu),
+                ..Default::default()
+            },
+        );
+        self.emit(
+            rows,
+            Node {
+                id: SETTINGS,
+                key: "settings",
+                row: Row { icon: "settings", label: "Settings", ..Default::default() },
+                menu: NodeMenu::Host,
+                ..Default::default()
+            },
+        );
     }
 
     fn apply(&mut self, events: &[Event]) {
@@ -417,15 +429,27 @@ fn a_dragged_row_moves_before_a_row_or_into_one_by_the_host_rules() {
     let rig = Rig::new();
     let (a, b, c) = (rig.at("row:A"), rig.at("row:B"), rig.at("row:C"));
     // An unselected row drags alone.
-    assert_eq!(rig.drag(c, a), vec![Event::Move { ids: vec![4], target: 2, zone: Zone::Before, source: Source { scope: 7, presentation: 0 }, data: None }]);
+    assert_eq!(
+        rig.drag(c, a),
+        vec![Event::Move { ids: vec![4], target: 2, zone: Zone::Before, source: Source { scope: 7, presentation: 0 }, data: None }]
+    );
     // A selected row drags the selection of its kind.
     rig.click(a);
     rig.click_mods(b, Modifiers::COMMAND);
-    assert_eq!(rig.drag(b, c), vec![Event::Move { ids: vec![2, 3], target: 4, zone: Zone::Before, source: Source { scope: 7, presentation: 0 }, data: None }]);
+    assert_eq!(
+        rig.drag(b, c),
+        vec![Event::Move { ids: vec![2, 3], target: 4, zone: Zone::Before, source: Source { scope: 7, presentation: 0 }, data: None }]
+    );
     // G takes a drop before it in its top part, and inside it below that.
     let g = rig.rect(GROUP);
-    assert_eq!(rig.drag(c, pos2(g.center().x, g.top() + 3.0)), vec![Event::Move { ids: vec![4], target: GROUP, zone: Zone::Before, source: Source { scope: 7, presentation: 0 }, data: None }]);
-    assert_eq!(rig.drag(c, g.center()), vec![Event::Move { ids: vec![4], target: GROUP, zone: Zone::Into, source: Source { scope: 7, presentation: 0 }, data: None }]);
+    assert_eq!(
+        rig.drag(c, pos2(g.center().x, g.top() + 3.0)),
+        vec![Event::Move { ids: vec![4], target: GROUP, zone: Zone::Before, source: Source { scope: 7, presentation: 0 }, data: None }]
+    );
+    assert_eq!(
+        rig.drag(c, g.center()),
+        vec![Event::Move { ids: vec![4], target: GROUP, zone: Zone::Into, source: Source { scope: 7, presentation: 0 }, data: None }]
+    );
     rig.into_g.set(false);
     assert_eq!(rig.drag(c, g.center()), Vec::new(), "the host's rule refuses it");
     assert_eq!(rig.drag(c, c + vec2(0.0, 4.0)), Vec::new(), "never onto itself");
