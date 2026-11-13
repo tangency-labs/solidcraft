@@ -382,11 +382,51 @@ fn a_curved_face_or_edge_is_skipped() {
     );
 }
 
+/// A 40 x 30 x 30 block whose top slopes, z = 2 + 0.75 y (its outward normal (0, -0.6, 0.8):
+/// tan β = 0.75 from the z axis).
+fn sloped() -> Body {
+    let slope = make_box([-10.0, -30.0, 0.0], [60.0, 90.0, 60.0]).unwrap();
+    // A turn about x taking z to (0, -0.6, 0.8), then up 2.
+    slope
+        .transform(&[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.8, 0.6, 0.0],
+            [0.0, -0.6, 0.8, 0.0],
+            [0.0, 0.0, 2.0, 1.0],
+        ])
+        .unwrap();
+    cut(make_box([0.0; 3], [40.0, 30.0, 30.0]).unwrap(), vec![slope])
+}
+
 #[test]
 fn a_picked_face_with_no_corner_is_skipped() {
-    // A round post's top: planar, but its rim is one circle with no straight edge at it.
-    let r = record(&make_cylinder([0.0; 3], 5.0, 10.0).unwrap());
-    let top = flat_face(&r, 10.0, [-5.0, -5.0], [5.0, 5.0]);
+    // The sloped top: planar, but each straight edge at its corners runs up the block's sides,
+    // 36.87 degrees off its normal, so none is a corner of it. (A round post's top would not do:
+    // its side's seam is a straight edge along the axis at the rim's vertex.)
+    let r = record(&sloped());
+    let top = (0..r.faces.len())
+        .find(|&f| {
+            matches!(
+                r.faces[f].surface,
+                Surface::Plane { .. } | Surface::PlaneThrough { .. }
+            ) && r.faces[f].loops.iter().any(|lp| match lp {
+                Loop::Edges { edges } => {
+                    edges.iter().any(|oe| {
+                        r.edges[oe.edge as usize]
+                            .vertices
+                            .iter()
+                            .any(|v| (point(&r, *v)[2] - 24.5).abs() < 1e-9)
+                    }) && edges.iter().all(|oe| {
+                        r.edges[oe.edge as usize]
+                            .vertices
+                            .iter()
+                            .all(|v| point(&r, *v)[2] > 1.0)
+                    })
+                }
+                Loop::Vertex { .. } => false,
+            })
+        })
+        .unwrap();
     let p = plan(&r, &[], &[top], &options(Style::Normal)).unwrap();
     assert_eq!(p.tools, []);
     assert_eq!(p.skipped.len(), 1, "{:?}", p.skipped);
@@ -568,24 +608,10 @@ fn an_edge_is_relieved_alike_either_way_round() {
 
 #[test]
 fn a_relief_runs_past_a_sloped_open_end_by_more_than_the_radius() {
-    // A 40 x 30 x 30 block whose top slopes, z = 2 + 0.75 y (its outward normal
-    // (0, -0.6, 0.8): tan β = 0.75 from the z axis), with a 20 x 6 slot through it.
-    let slope = make_box([-10.0, -30.0, 0.0], [60.0, 90.0, 60.0]).unwrap();
-    // A turn about x taking z to (0, -0.6, 0.8), then up 2.
-    slope
-        .transform(&[
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 0.8, 0.6, 0.0],
-            [0.0, -0.6, 0.8, 0.0],
-            [0.0, 0.0, 2.0, 1.0],
-        ])
-        .unwrap();
+    // The sloped block (tan β = 0.75) with a 20 x 6 slot through it.
     let body = cut(
-        make_box([0.0; 3], [40.0, 30.0, 30.0]).unwrap(),
-        vec![
-            slope,
-            make_box([10.0, 12.0, -1.0], [20.0, 6.0, 40.0]).unwrap(),
-        ],
+        sloped(),
+        vec![make_box([10.0, 12.0, -1.0], [20.0, 6.0, 40.0]).unwrap()],
     );
     let r = record(&body);
     let corners = [[10.0, 12.0], [30.0, 12.0], [30.0, 18.0], [10.0, 18.0]];
