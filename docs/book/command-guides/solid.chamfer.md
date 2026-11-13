@@ -31,7 +31,6 @@ Cut a flat bevel along edges of a solid: the "break all edges" or "0.03 × 45°"
 
 - **Do** type the unit with the number when the print uses another unit. In a millimetre design, typing 0.03 in enters 0.762 mm.
 - **Do** chamfer all the edges of one size in a single Chamfer. It's one feature to change when the print changes.
-- **Do** pick the edges one by one for Two Distances or Distance and Angle. Picking a whole face works with Equal Distance, but the other two types can stop with "not supported yet: chamfers ending at a concave corner".
 - **Don't** chamfer an edge right next to an existing small chamfer with a larger size. If the chamfer would run past the neighbouring face, the dialog says so; make the chamfer smaller or chamfer those edges together in one feature.
 
 #### See also

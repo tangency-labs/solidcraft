@@ -398,6 +398,9 @@ mod tests {
             polled = worker.poll();
         }
         assert_eq!(polled, Poll::Done(7));
+        // The thread still holds its sender while it asks for a frame after sending, so a poll
+        // straight after the result can see Running; once the thread has ended it must be Failed.
+        assert!(worker.wait(std::time::Duration::from_secs(10)), "the thread ends after handing over");
         assert_eq!(worker.poll(), Poll::Failed, "the result is taken once");
     }
 

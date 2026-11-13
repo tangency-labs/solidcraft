@@ -306,6 +306,19 @@ impl WorkspacePanelHost {
         Ok(())
     }
 
+    pub(crate) fn set_header_action_visible(&mut self, instance: InstanceId, action: ControlId, visible: bool) {
+        let hidden = &mut self.options.geometry.hidden_header_actions;
+        let changed = if visible {
+            hidden.get_mut(&instance).is_some_and(|actions| actions.remove(&action))
+        } else {
+            hidden.entry(instance).or_default().insert(action)
+        };
+        hidden.retain(|_, actions| !actions.is_empty());
+        if changed {
+            self.invalidate_geometry();
+        }
+    }
+
     pub(crate) fn set_gap(&mut self, gap: f32) -> PanelResult<()> {
         let metrics = HostMetrics { gap, ..self.options.metrics };
         metrics.validate()?;
@@ -2405,6 +2418,12 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         }
                         _ => {}
                     });
+                    if let HostPointerTarget::HeaderAction { instance, action } = target
+                        && instance.0 == "history"
+                        && response.interact_rect.is_positive()
+                    {
+                        crate::scenario::publish_target(&format!("history:{}", action.0), response.interact_rect);
+                    }
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();
                     if let Some(status) = data.and_then(|value| value.status.as_deref()) {
@@ -2437,6 +2456,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 ),
                                 control.id,
                             )),
+                            HostPointerTarget::HeaderAction { instance, .. } if secondary => {
+                                if let Some(at) = response.interact_pointer_pos() {
+                                    self.frame_content.header_action_context_menu(instance, at);
+                                }
+                            }
                             HostPointerTarget::Menu { instance } => self.commands.push(HostCommand::OpenMenu {
                                 menu: HostMenu::Panel(instance.clone()),
                                 anchor: control.bounds,

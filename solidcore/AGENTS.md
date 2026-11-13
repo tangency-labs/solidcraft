@@ -147,7 +147,8 @@ change without that is not reviewed. Never loosen a tolerance or a floor to keep
 **The C++ is a reading reference.** `upstream/` is read for test inputs, expected values and
 known constructions (§4b). Nothing in this repository builds, links or runs it.
 
-**Git.** Work happens through pull requests to github.com/tangency-labs/solidcore. Never
+**Git.** Work happens through pull requests to github.com/tangency-labs/solidcraft (solidcore
+lives there at `solidcore/`; github.com/tangency-labs/solidcore is a mirror: no PRs there). Never
 push to `main` directly, never force-push shared branches, never rewrite `main`'s
 history, never `reset`/`checkout`/`restore` files you did not write. Stage explicit
 paths only (never `git add -A`/`git add .`). End every commit message with your
@@ -197,7 +198,7 @@ wasm32-unknown-unknown`; and, for kernel changes, the goldens of every unit you 
 (`cargo run --profile goldens -p goldens -- --unit <id> --goldens`). Every case your change
 moves is fixed, or blessed with the justification §1 asks for.
 
-**Finish:** rebase onto the latest `origin/main` (never merge `main` in), re-verify, put the
+**Finish:** bring the branch up to date with the latest `origin/main` (rebase is preferred; merging `main` in is fine; never force-push over someone else's history), re-verify, put the
 goldens summary lines in the description, and mark the PR ready. CI is the merge gate.
 
 **Records are files, never appended.** Every finding and upstream issue is its own new file

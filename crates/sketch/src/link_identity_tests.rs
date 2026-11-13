@@ -429,6 +429,7 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         source: face(),
         face_name: None,
         edge_name: None,
+        vertex_name: None,
         auto_face: false,
         lost: false,
     });

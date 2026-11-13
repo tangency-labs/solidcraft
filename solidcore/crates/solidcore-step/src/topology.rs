@@ -1,5 +1,5 @@
 //! STEP topology (ISO 10303-42 topology and geometric model entities) into the kernel-neutral
-//! B-rep, schema 4 ([`solidcraft_geom::brep`], docs/native-brep.md). Written from the public
+//! B-rep, schema 4 ([`solidcore_record::brep`]). Written from the public
 //! ISO 10303-42 specification.
 //!
 //! Each MANIFOLD_SOLID_BREP, BREP_WITH_VOIDS and SHELL_BASED_SURFACE_MODEL becomes one
@@ -80,7 +80,7 @@ const MAX_SPLINE_DEGREE: usize = 16;
 /// Samples along a curve when projecting a vertex onto it.
 const MAX_SAMPLES: usize = 4096;
 /// The largest tolerance (mm) an edge or vertex is given: SMLib takes none larger (smlib.h's
-/// EDGE_TOLERANCE and VERTEX_TOLERANCE, `solidcraft_smlib::flat::MAX_TOLERANCE`). Geometry that
+/// EDGE_TOLERANCE and VERTEX_TOLERANCE). Geometry that
 /// would need more is refused, with how far off it lies.
 const MAX_TOLERANCE: f64 = 1.0;
 /// A vertex's tolerance over its largest gap from its curves and surfaces.

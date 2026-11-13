@@ -1,0 +1,50 @@
+{
+  "en": {
+    "prefs.plugin_limits_invalid": "Enter a positive whole-number fuel ceiling and memory from 1 to 4096 MiB.",
+    "prefs.plugin_limits_note": "Press Enter, Apply or OK to accept both values. These ceilings do not increase a package’s requested budget or approve its code. Review each package before running. Run defaults remain 10,000,000 fuel and 64 MiB. Choose limits that fit available RAM; Wasm32 supports at most 4096 MiB of linear memory.",
+    "prefs.plugin_max_fuel": "Max plugin fuel",
+    "prefs.plugin_max_memory": "Max plugin memory (MiB)"
+  },
+  "ja": {
+    "prefs.plugin_limits_invalid": "fuelは正の整数、メモリは1～4096 MiBの整数で指定してください。",
+    "prefs.plugin_limits_note": "Enter、適用、OKで両方の値を確定します。許可上限を変更しても、プラグインの要求予算や実行承認は自動で変更されません。実行前に各パッケージを確認してください。実行予算の既定値は1000万fuelと64 MiBです。利用可能なRAMに合う上限を指定してください。Wasm32の線形メモリは最大4096 MiBです。",
+    "prefs.plugin_max_fuel": "プラグインのfuel許可上限",
+    "prefs.plugin_max_memory": "プラグインのメモリ許可上限（MiB）"
+  },
+  "zh": {
+    "prefs.plugin_limits_invalid": "fuel必须为正整数，内存必须为1至4096 MiB的整数。",
+    "prefs.plugin_limits_note": "按Enter、应用或确定以确认两个值。修改许可上限不会自动增加插件请求的预算或批准其代码。运行前请审查各个软件包。运行预算默认仍为1000万fuel和64 MiB。请选择适合可用RAM的上限；Wasm32线性内存最大为4096 MiB。",
+    "prefs.plugin_max_fuel": "插件fuel许可上限",
+    "prefs.plugin_max_memory": "插件内存许可上限（MiB）"
+  },
+  "de": {
+    "prefs.plugin_limits_invalid": "Fuel muss eine positive ganze Zahl sein; Speicher muss zwischen 1 und 4096 MiB liegen.",
+    "prefs.plugin_limits_note": "Enter, Anwenden oder OK übernimmt beide Werte. Diese Grenzen erhöhen weder das angeforderte Budget noch genehmigen sie Plug-in-Code. Prüfen Sie jedes Paket vor dem Start. Die Standardbudgets bleiben 10.000.000 Fuel und 64 MiB. Wählen Sie zum verfügbaren RAM passende Grenzen; Wasm32 unterstützt höchstens 4096 MiB linearen Speicher.",
+    "prefs.plugin_max_fuel": "Maximaler Plug-in-Fuel",
+    "prefs.plugin_max_memory": "Maximaler Plug-in-Speicher (MiB)"
+  },
+  "ko": {
+    "prefs.plugin_limits_invalid": "fuel은 양의 정수, 메모리는 1~4096 MiB의 정수로 입력하세요.",
+    "prefs.plugin_limits_note": "Enter, 적용 또는 확인으로 두 값을 확정합니다. 허용 상한을 변경해도 플러그인이 요청한 예산이나 코드 실행 승인은 자동으로 변경되지 않습니다. 실행 전에 각 패키지를 검토하세요. 실행 예산의 기본값은 1,000만 fuel과 64 MiB입니다. 사용 가능한 RAM에 맞는 상한을 선택하세요. Wasm32 선형 메모리는 최대 4096 MiB입니다.",
+    "prefs.plugin_max_fuel": "플러그인 fuel 허용 상한",
+    "prefs.plugin_max_memory": "플러그인 메모리 허용 상한(MiB)"
+  },
+  "ar": {
+    "prefs.plugin_limits_invalid": "أدخل حد fuel عدداً صحيحاً موجباً، وحد الذاكرة عدداً صحيحاً من 1 إلى 4096 MiB.",
+    "prefs.plugin_limits_note": "اضغط Enter أو تطبيق أو موافق لاعتماد القيمتين. لا ترفع هذه الحدود الميزانية التي طلبتها الحزمة ولا توافق على تشغيلها. راجع كل حزمة قبل تشغيلها. تبقى القيم الافتراضية للتشغيل 10,000,000 fuel و64 MiB. اختر حدوداً تناسب الذاكرة المتاحة؛ تدعم ذاكرة Wasm32 الخطية 4096 MiB كحد أقصى.",
+    "prefs.plugin_max_fuel": "الحد الأقصى لـ fuel الإضافات",
+    "prefs.plugin_max_memory": "الحد الأقصى لذاكرة الإضافات (MiB)"
+  },
+  "he": {
+    "prefs.plugin_limits_invalid": "יש להזין תקרת fuel כמספר שלם חיובי וזיכרון כמספר שלם בין 1 ל־4096 MiB.",
+    "prefs.plugin_limits_note": "לחצו על Enter, החל או אישור כדי לאשר את שני הערכים. תקרות אלה אינן מגדילות את התקציב שהחבילה ביקשה ואינן מאשרות את הקוד שלה. בדקו כל חבילה לפני ההפעלה. ברירות המחדל נשארות 10,000,000 fuel ו־64 MiB. בחרו מגבלות המתאימות לזיכרון הזמין; זיכרון ליניארי של Wasm32 מוגבל ל־4096 MiB.",
+    "prefs.plugin_max_fuel": "תקרת fuel מרבית לתוספים",
+    "prefs.plugin_max_memory": "תקרת זיכרון מרבית לתוספים (MiB)"
+  },
+  "vi": {
+    "prefs.plugin_limits_invalid": "Nhập giới hạn fuel là số nguyên dương và bộ nhớ là số nguyên từ 1 đến 4096 MiB.",
+    "prefs.plugin_limits_note": "Nhấn Enter, Áp dụng hoặc OK để xác nhận cả hai giá trị. Các giới hạn này không tự tăng ngân sách mà gói yêu cầu hoặc phê duyệt mã của gói. Hãy xem xét từng gói trước khi chạy. Giá trị mặc định khi chạy vẫn là 10.000.000 fuel và 64 MiB. Chọn giới hạn phù hợp với RAM hiện có; bộ nhớ tuyến tính Wasm32 tối đa là 4096 MiB.",
+    "prefs.plugin_max_fuel": "Giới hạn fuel tối đa cho plugin",
+    "prefs.plugin_max_memory": "Giới hạn bộ nhớ tối đa cho plugin (MiB)"
+  }
+}
