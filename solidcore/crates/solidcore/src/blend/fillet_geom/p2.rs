@@ -2053,14 +2053,19 @@ impl FilletBrep {
             // the corner, so the search starts where that section touches the side edge, not
             // at a fraction of the edge's length. Where the faces meet the rail end's solve
             // twice (two cylinders crossing: the round at each of their crossings), the first
-            // guess decides which ball the solve finds.
+            // guess decides which ball the solve finds. The section is the one at the corner's
+            // vertex also where the rail's end is looked for on a side edge past it (a rail
+            // rolled over a smooth far edge of its face, or one running on across a seam's
+            // vertex), where the side edge's near end `cp_vertex` ends no end of the solver's
+            // edge.
             let mut guess_edge_parameters = guess_edge_parameters;
             let si = RailSolvers::geom_solver(self, g1)?;
+            let section_vertex = corners.corner(corner)?.filleted_vertex();
             if let Some(t) = corner_section_on_side_edge(
                 k,
                 solvers.solver_ops_mut(si)?,
                 target,
-                cp_vertex,
+                section_vertex,
                 rail_index,
                 side_edge,
                 &ivl,
