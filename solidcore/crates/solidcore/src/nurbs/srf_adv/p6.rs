@@ -1767,13 +1767,19 @@ mod tests {
         assert!(create_sweep_scale(&bad, &c, Vec3::Z, &opts).is_err());
     }
 
-    /// A closed cubic through sixteen points of `(10 cos t, 10 sin t, lift cos 2t)`: the closed
-    /// fit takes its points closed, the first repeated last (`a[0] == a[n]`).
+    /// A closed cubic through sixteen points of the twisted loop `(r cos t, r sin t, lift sin 2t)`,
+    /// `r = 10 + lift cos 2t`: its radius and height swing a quarter period apart, so the loop is
+    /// chiral and its tangent indicatrix does not bound half the sphere, and the
+    /// rotation-minimising frame comes back turned (by about 1.58 radians at lift 3, its total
+    /// torsion; a saddle `lift cos 2t` with matching halves comes back unturned). Planar, the
+    /// circle of radius 10, at lift 0. The closed fit takes its points closed, the first repeated
+    /// last (`a[0] == a[n]`).
     fn loop_traj(lift: f64) -> Curve {
         let mut points: Vec<Vec3> = (0..16)
             .map(|i| {
                 let t = std::f64::consts::TAU * f64::from(i) / 16.0;
-                Vec3::new(10.0 * t.cos(), 10.0 * t.sin(), lift * (2.0 * t).cos())
+                let r = 10.0 + lift * (2.0 * t).cos();
+                Vec3::new(r * t.cos(), r * t.sin(), lift * (2.0 * t).sin())
             })
             .collect();
         points.push(points[0]);
@@ -1830,10 +1836,10 @@ mod tests {
         }
     }
 
-    /// Round a closed saddle loop the projection normal frame comes back turned; with the turn
+    /// Round a closed twisted loop the projection normal frame comes back turned; with the turn
     /// spread the last section's frame is the first's.
     #[test]
-    fn round_a_closed_saddle_loop_the_turn_is_spread_and_the_sweep_closes() {
+    fn round_a_closed_twisted_loop_the_turn_is_spread_and_the_sweep_closes() {
         let t = loop_traj(3.0);
         let near = |p: &Frame, q: &Frame, tol: f64| {
             (p.x - q.x).length() <= tol

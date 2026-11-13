@@ -16,14 +16,17 @@ use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::crv_fit::p1::ParamMethod;
 
-/// A closed cubic through sixteen points of the loop `(10 cos t, 10 sin t, lift cos 2t)`: a saddle
-/// loop (planar at `lift` 0), smooth at its seam.
+/// A closed cubic through sixteen points of the twisted loop `(r cos t, r sin t, lift sin 2t)`,
+/// `r = 10 + lift cos 2t` (planar at `lift` 0), smooth at its seam: its radius and height swing a
+/// quarter period apart, so its rotation-minimising frame comes back turned (about 1.58 radians
+/// at lift 3), which a saddle `lift cos 2t` with matching halves does not.
 fn loop_rail(lift: f64) -> BSplineCurve {
     // the closed fit takes its points closed: the first repeated last (`a[0] == a[n]`)
     let mut points: Vec<Point3> = (0..16)
         .map(|i| {
             let t = std::f64::consts::TAU * f64::from(i) / 16.0;
-            Point3::new(10.0 * t.cos(), 10.0 * t.sin(), lift * (2.0 * t).cos())
+            let r = 10.0 + lift * (2.0 * t).cos();
+            Point3::new(r * t.cos(), r * t.sin(), lift * (2.0 * t).sin())
         })
         .collect();
     if let Some(&first) = points.first() {
@@ -53,7 +56,7 @@ fn axes_near(a: &Axis2Placement, b: &Axis2Placement, tol: f64) -> bool {
 }
 
 #[test]
-fn round_a_closed_saddle_loop_the_last_section_lies_on_the_first() {
+fn round_a_closed_twisted_loop_the_last_section_lies_on_the_first() {
     let (_, placed) = BSplineSurface::create_sweep_surface_with_placements(
         &segment(),
         &loop_rail(3.0),
