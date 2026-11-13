@@ -13,6 +13,7 @@ solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcore-record = { workspace = true }
+solidcore-ops = { workspace = true }
 solidcore-tess = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }

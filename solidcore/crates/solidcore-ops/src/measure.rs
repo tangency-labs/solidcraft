@@ -49,6 +49,13 @@ fn point(p: [f64; 3]) -> Result<Point3> {
     Ok(Point3::new(p[0], p[1], p[2]))
 }
 
+fn point2(p: [f64; 2]) -> Result<solidcore::Point2> {
+    if !p.iter().all(|x| x.is_finite()) {
+        return Err(Error::Argument);
+    }
+    Ok(solidcore::Point2::new(p[0], p[1]))
+}
+
 /// Mass properties of a body at unit density (mm, mm², mm³, mm⁵), and what they are worth.
 ///
 /// **Requested accuracy, estimated, not proved.** The kernel's integrator holds its error
@@ -292,6 +299,37 @@ pub struct Normal {
 pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance> {
     let (a, b) = (point(a)?, point(b)?);
     q::point_distance(a, b).map(Distance::from).map_err(status)
+}
+
+/// A 2D point set's centroid and mean distance from that centroid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointSetSummary {
+    /// The arithmetic mean of the input points.
+    pub centroid: [f64; 2],
+    /// The arithmetic mean of each point's distance from `centroid`.
+    pub mean_distance: f64,
+}
+
+/// The arithmetic centroid and mean radial distance of a non-empty point set.
+pub fn point_set_summary(points: &[[f64; 2]]) -> Result<PointSetSummary> {
+    let points = points
+        .iter()
+        .copied()
+        .map(point2)
+        .collect::<Result<Vec<_>>>()?;
+    let summary = q::point_set_summary(&points).map_err(status)?;
+    Ok(PointSetSummary {
+        centroid: summary.centroid.to_array(),
+        mean_distance: summary.mean_distance,
+    })
+}
+
+/// The vector from point `from` to point `to`.
+pub fn point_displacement(from: [f64; 2], to: [f64; 2]) -> Result<[f64; 2]> {
+    let (from, to) = (point2(from)?, point2(to)?);
+    q::point_displacement(from, to)
+        .map(|v| v.to_array())
+        .map_err(status)
 }
 
 impl Body {
@@ -796,6 +834,24 @@ pub(crate) mod tests {
             edges: k.edge_list().to_vec(),
             vertices: k.vertex_list().to_vec(),
         }
+    }
+
+    #[test]
+    fn point_set_summary_and_displacement_adapt_kernel_results() {
+        let summary = point_set_summary(&[[0.0, 0.0], [6.0, 0.0], [0.0, 6.0]]).unwrap();
+        assert_eq!(summary.centroid, [2.0, 2.0]);
+        let expected = (2.0 * 2.0_f64.sqrt() + 4.0 * 5.0_f64.sqrt()) / 3.0;
+        assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
+        assert_eq!(
+            point_displacement([2.0, 2.0], [5.0, 6.0]).unwrap(),
+            [3.0, 4.0]
+        );
+        assert_eq!(point_set_summary(&[[f64::NAN, 0.0]]), Err(Error::Argument));
+        assert_eq!(
+            point_displacement([0.0, 0.0], [f64::INFINITY, 0.0]),
+            Err(Error::Argument)
+        );
+        assert!(point_set_summary(&[]).is_err());
     }
 
     #[test]

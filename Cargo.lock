@@ -6142,6 +6142,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-ops",
  "solidcore-record",
  "solidcore-tess",
  "solidcraft-color",
