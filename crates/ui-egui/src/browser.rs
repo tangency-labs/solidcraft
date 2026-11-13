@@ -998,11 +998,6 @@ impl Hit {
     }
 }
 
-/// Where a row drawn outside the panel has its name edited.
-pub(crate) fn name_at(r: &RowResp) -> NameAt {
-    NameAt { row_id: r.row_id, rect: r.rect, label_rect: r.label_rect }
-}
-
 /// Draw a Browser row through the panel and read its events. A renamable row asks to be renamed
 /// (the host's editor, `context_menu`), unless a dialog is open: then a second click picks again.
 pub(crate) fn node_row(rows: &mut Rows<'_>, spec: Spec<'_>, row: Row<'_>) -> Hit {
@@ -1824,7 +1819,7 @@ fn component_rows_inner(
         named_view_rows(app, rows, d, acts);
         origin_rows(app, rows, d, acts);
         canvas_rows(app, rows, d, acts);
-        point_clouds::rows(app, rows.ui(), d, acts);
+        point_clouds::rows(app, rows, d, acts);
         analysis_rows(app, rows, d, acts);
     }
     let render = crate::render_workspace::active(app);
@@ -1839,7 +1834,7 @@ fn component_rows_inner(
         features::rows(app, rows, id, &[], d, acts);
     }
     if id == 0 && !render {
-        acts.hover_joint = crate::dialogs_assembly::browser_joints(app, rows.ui(), d);
+        acts.hover_joint = crate::dialogs_assembly::browser_joints(app, rows, d);
     }
     for path in &root.children {
         occurrence_rows(app, rows, path, d, acts, cache);
@@ -2042,7 +2037,7 @@ fn occurrence_rows_inner(
     if !render {
         features::rows(app, rows, placement.component, path, depth + 1, acts);
         // The joints that attach this placement, as the root's Joints folder lists them (#9130).
-        if let Some(joint) = crate::dialogs_assembly::component_joints(app, rows.ui(), path, key, depth + 1) {
+        if let Some(joint) = crate::dialogs_assembly::component_joints(app, rows, path, key, depth + 1) {
             acts.hover_joint = Some(joint);
         }
     }
