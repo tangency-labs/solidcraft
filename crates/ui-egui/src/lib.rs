@@ -2957,6 +2957,10 @@ impl SolveApp {
     fn load_params(&self, path: &str, options: &serde_json::Map<String, Value>) -> Value {
         let mut params = options.clone();
         params.insert("path".into(), json!(path));
+        // The preferences' import options (a FreeCAD file's `history`), unless the caller chose.
+        for (k, v) in file_load::preferred_options(self, path) {
+            params.entry(k).or_insert(v);
+        }
         file_load::step_folder_option(self, path, &mut params);
         Value::Object(params)
     }
