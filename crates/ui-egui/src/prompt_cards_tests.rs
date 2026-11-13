@@ -156,6 +156,7 @@ fn capture_question_offers_capture_revert_and_cancel() {
     let body = h.app.session.model.state().bodies[0].name.clone();
     h.app.run("component.from_bodies", json!({"bodies": [body]})).unwrap();
     let occ = h.app.session.doc.occurrences[0].id;
+    h.app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
     h.app.run("occurrence.move", json!({"occurrence": occ, "translate": [10, 0, 0], "capture": false})).unwrap();
     h.app.start("sketch.create");
     card_is_drawn(&mut h);
@@ -184,6 +185,7 @@ fn occurrence_move_card_edits_distances_and_captures_or_reverts() {
     let body = h.app.session.model.state().bodies[0].name.clone();
     h.app.run("component.from_bodies", json!({"bodies": [body]})).unwrap();
     let occ = h.app.session.doc.occurrences[0].id;
+    h.app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
     h.app.tree.occurrence_move = Some(crate::browser::OccMove::new(occ));
     card_is_drawn(&mut h);
     for k in 0..3 {
@@ -210,12 +212,12 @@ fn settings_reset_notice_dismisses_or_opens_the_graphics_page() {
     h.app.settings_reset = vec![crate::prefs::SettingReset::Msaa { requested: 8, reset: 4, supported: vec![1, 4] }];
     card_is_drawn(&mut h);
     press(&mut h, "OK");
-    assert!(h.app.settings_reset.is_empty() && !h.app.prefs_window.open);
+    assert!(h.app.settings_reset.is_empty() && !h.app.prefs_window.shell.open);
     h.app.settings_reset = vec![crate::prefs::SettingReset::Msaa { requested: 8, reset: 4, supported: vec![1, 4] }];
     h.frames(3);
     press(&mut h, "Open Preferences");
-    assert!(h.app.settings_reset.is_empty() && h.app.prefs_window.open);
-    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS);
+    assert!(h.app.settings_reset.is_empty() && h.app.prefs_window.shell.open);
+    assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS);
 }
 
 #[test]
@@ -248,4 +250,74 @@ fn delete_confirm_resumes_after_the_issue_draft_closes() {
     assert!(h.app.menu.confirm.is_some() && h.app.session.doc.features.len() == features);
     press(&mut h, "Cancel");
     assert!(h.app.menu.confirm.is_none() && h.app.session.doc.features.len() == features);
+}
+
+#[test]
+fn save_prompt_frames_dont_save_and_clicking_it_discards_for_close_and_quit() {
+    for quit in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        if quit {
+            crate::documents::request_quit(&mut h.app);
+        } else {
+            let active = h.app.docs.active;
+            crate::documents::close(&mut h.app, active, false);
+        }
+        h.ctx = crate::fonts::test_context();
+        h.ctx.enable_accesskit();
+        let mut textures = std::collections::HashMap::new();
+        let mut output = egui::FullOutput::default();
+        for _ in 0..3 {
+            output = h.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    h.app.logic(ui.ctx());
+                    h.app.ui(ui);
+                },
+            );
+            crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+        }
+        h.output = output.platform_output.clone();
+        let discard = scenario::rect_of("dialog:apply").unwrap();
+        assert!(discard.contains(scenario::handle_at("dialog:Don't Save").unwrap()));
+        assert!(
+            h.output
+                .accesskit_update
+                .as_ref()
+                .unwrap()
+                .nodes
+                .iter()
+                .any(|(_, node)| { node.label() == Some("Don't Save") && node.role() == egui::accesskit::Role::Button }),
+            "discard remains an accessible button"
+        );
+        let t = solidcraft_theme::Tokens::get();
+        let mut framed = false;
+        for shape in &output.shapes {
+            crate::test_support::each_shape(&shape.shape, &mut |s| {
+                framed |= matches!(s, egui::Shape::Rect(r) if r.rect == discard
+                    && r.fill == t.control_fill && r.stroke.width > 0.0 && r.stroke.color == t.control_border);
+            });
+        }
+        assert!(framed, "Don't Save needs a visible secondary button frame before hover or selection");
+        if let Ok(dir) = std::env::var("SOLIDCRAFT_SAVE_PROMPT_EVIDENCE") {
+            let bounds = scenario::rect_of("dialog:header").unwrap().union(scenario::rect_of("dialog:footer").unwrap()).expand(t.space_24);
+            let image = crate::ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(std::path::Path::new(&dir).join(if quit { "save-quit.png" } else { "save-close.png" })).unwrap();
+        }
+        h.step(&serde_json::json!({"click": {"handle": "dialog:Don't Save"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.docs.closing.is_none());
+        assert!(!h.app.session.is_dirty(), "the changes were discarded");
+        assert_eq!(h.app.quit_requested, quit, "continue the requested close or quit");
+        if !quit {
+            assert!(h.app.session.doc.features.is_empty(), "closing the last tab leaves a blank design");
+        }
+    }
 }

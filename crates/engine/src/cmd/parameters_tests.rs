@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::{EngineError, Session};
 
@@ -60,7 +61,9 @@ fn width_follows_an_expression() {
     run(&mut s, "parameters.change", json!({"name": "len", "expression": "5", "unit": "in"}));
     assert!(rel(volume(&mut s), 40.0 * 63.5 * 10.0) < 1e-9);
     let l = run(&mut s, "parameters.list", json!({}));
-    assert_eq!(row(&l, "len")["value"], 5.0, "{l}");
+    // `value` is mm in every reply; the own-unit number is `display_value` (#10747).
+    assert_eq!(row(&l, "len")["value"], 127.0, "{l}");
+    assert_eq!(row(&l, "len")["display_value"], 5.0, "{l}");
     assert_eq!(row(&l, "len")["unit"], "in");
     // A failing parameter fails the features using it, with its error.
     let e = err(&mut s, "parameters.change", json!({"name": "len", "expression": "5 deg"}));
@@ -195,6 +198,125 @@ fn deleting_a_used_parameter_lists_its_users() {
     assert!(g["edges"].as_array().unwrap().iter().any(|e| e[0] == "Feature:Base" && e[1] == dim.as_str()), "{g}");
 }
 
+/// #12293: a parameter that only a sketch point's coordinate reads lists that sketch in the
+/// parameter list's `used_by`, as `parameters.graph` and `parameters.users` already show it.
+#[test]
+fn a_parameter_read_by_a_sketch_point_lists_the_sketch_as_its_user() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "20 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "5 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], ["a", 0], ["a", 10], [0, 10]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": "h", "name": "E"}));
+    let g = run(&mut s, "parameters.graph", json!({}));
+    assert!(g["edges"].as_array().unwrap().iter().any(|e| e[0] == "Feature:S" && e[1] == "a"), "{g}");
+    let list = run(&mut s, "parameters.list", json!({"filter": "user"}));
+    assert_eq!(row(&list, "a")["used_by"], json!(["Feature:S"]), "{list}");
+    // `h` is read through the extrude's named input, not by the extrude itself.
+    let h = row(&list, "h")["used_by"].clone();
+    assert_eq!(h.as_array().map(Vec::len), Some(1), "{list}");
+    assert!(h[0].as_str().is_some_and(|n| n.starts_with('d')), "{list}");
+    // The sketch still reads `a` after `a` changes.
+    run(&mut s, "parameters.change", json!({"name": "a", "expression": "30 mm"}));
+    let list = run(&mut s, "parameters.list", json!({"filter": "user"}));
+    assert_eq!(row(&list, "a")["used_by"], json!(["Feature:S"]), "{list}");
+}
+
+/// #4420: sheet metal and plastic rules and the plane of a canvas hold expressions too. Renaming a
+/// parameter they use renames it there, and they count as its users (so it can't be deleted).
+#[test]
+fn rules_and_canvases_follow_a_renamed_parameter() {
+    let mut s = Session::default();
+    for (name, expression) in [("gauge", "2 mm"), ("lift", "15 mm"), ("taper", "3 deg")] {
+        run(&mut s, "parameters.add", json!({"name": name, "expression": expression}));
+    }
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "thickness": "gauge", "active": true}));
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 2, "body_name": "Tray"}));
+    run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [30, 20, 2], "rule": "Steel"}));
+    run(&mut s, "plastic.manage_rules", json!({"name": "Housing", "draft": "taper", "clearance": "gauge / 10"}));
+    let users = |s: &mut Session, name: &str| -> Vec<String> {
+        let u = run(s, "parameters.users", json!({"name": name}));
+        u["users"].as_array().unwrap().iter().map(|x| x["type"].as_str().unwrap_or_default().to_string()).collect()
+    };
+    assert_eq!(users(&mut s, "gauge"), ["rule", "rule"], "the sheet metal thickness and the plastic clearance");
+    assert_eq!(users(&mut s, "lift"), ["canvas"]);
+    let e = err(&mut s, "parameters.delete", json!({"name": "taper"}));
+    assert!(e.contains("plastic rule Housing (draft)"), "{e}");
+    // The sheet metal features rebuild when a rule's parameter changes, so they are what it drives.
+    let u = run(&mut s, "parameters.users", json!({"name": "gauge"}));
+    assert_eq!(
+        u["drives"].as_array().map(|d| d.iter().map(|x| x["name"].clone()).collect::<Vec<_>>()),
+        Some(vec![json!("ConvertToSheetMetal1")]),
+        "{u}"
+    );
+    let g = run(&mut s, "parameters.graph", json!({}));
+    assert!(g["edges"].as_array().unwrap().iter().any(|e| e[0] == "Feature:ConvertToSheetMetal1" && e[1] == "gauge"), "{g}");
+    assert!(!g["edges"].as_array().unwrap().iter().any(|e| e[0] == "Feature:Box1" && e[1] == "gauge"), "{g}");
+    // Every field of the shared list follows: `gap` was set through `sheet.manage_rules` too.
+    run(&mut s, "parameters.add", json!({"name": "seam", "expression": "0.5 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "gap": "seam"}));
+    run(&mut s, "parameters.rename", json!({"name": "seam", "new_name": "joint_gap"}));
+    assert_eq!(s.doc.sheet.rules[0].gap, "joint_gap");
+    for (old, new) in [("gauge", "sheet_t"), ("lift", "raise"), ("taper", "draft_angle")] {
+        run(&mut s, "parameters.rename", json!({"name": old, "new_name": new}));
+    }
+    let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(failing.is_empty(), "{failing:?}");
+    assert_eq!(s.doc.sheet.rules[0].thickness, "sheet_t");
+    let housing = s.doc.plastic.rules.iter().find(|r| r.name == "Housing").unwrap();
+    assert_eq!((housing.draft.as_str(), housing.clearance.as_str()), ("draft_angle", "sheet_t / 10"));
+    assert!(run(&mut s, "plastic.rules", json!({}))["rules"].as_array().unwrap().iter().any(|r| r["name"] == "Housing" && !r["values"].is_null()));
+    match &s.doc.canvases[0].plane {
+        solidcraft_doc::PlaneRef::Offset { distance, .. } => assert_eq!(distance.as_ref(), "raise"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(users(&mut s, "raise"), ["canvas"]);
+    // Undo takes the old names back.
+    for _ in 0..3 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(s.doc.sheet.rules[0].thickness, "gauge");
+}
+
+/// #9623: outside a rule's own `thickness`, `Thickness` is the rule's thickness, not a design
+/// parameter of that name: renaming that parameter leaves it, and it doesn't count as a user.
+#[test]
+fn a_rules_own_thickness_is_not_a_parameter_named_thickness() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": "2 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "Thickness", "bend_radius": "Thickness", "active": true}));
+    run(&mut s, "plastic.manage_rules", json!({"name": "Housing", "thickness": "3 mm", "clearance": "Thickness / 10"}));
+    let u = run(&mut s, "parameters.users", json!({"name": "Thickness"}));
+    let fields: Vec<String> = u["users"].as_array().unwrap().iter().map(|x| x.to_string()).collect();
+    assert_eq!(fields.len(), 1, "only the sheet metal rule's thickness: {u}");
+    run(&mut s, "parameters.rename", json!({"name": "Thickness", "new_name": "Gauge"}));
+    let r = &s.doc.sheet.rules[0];
+    assert_eq!((r.thickness.as_str(), r.bend_radius.as_str(), r.gap.as_str()), ("Gauge", "Thickness", "Thickness"));
+    let housing = s.doc.plastic.rules.iter().find(|r| r.name == "Housing").unwrap();
+    assert_eq!(housing.clearance, "Thickness / 10");
+}
+
+/// #9623: renaming a parameter to `Thickness` is refused while a rule field other than its own
+/// thickness uses it (that field would then read the rule's thickness), and nothing changes.
+#[test]
+fn renaming_to_thickness_is_refused_where_a_rule_would_read_its_own() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Factor", "expression": "0.3", "unit": ""}));
+    run(&mut s, "parameters.add", json!({"name": "Gauge", "expression": "2 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "Gauge", "k_factor": "Factor", "active": true}));
+    let before = s.doc.clone();
+    let e = err(&mut s, "parameters.rename", json!({"name": "Factor", "new_name": "Thickness"}));
+    assert!(e.contains("sheet metal rule R (k_factor)"), "{e}");
+    assert!(s.doc == before, "a refused rename changes nothing");
+    // Used only by a rule's own thickness, the rename goes through.
+    run(&mut s, "parameters.rename", json!({"name": "Gauge", "new_name": "Thickness"}));
+    assert_eq!((s.doc.sheet.rules[0].thickness.as_str(), s.doc.sheet.rules[0].k_factor.as_str()), ("Thickness", "Factor"));
+}
+
 #[test]
 fn favorites_comments_and_completion() {
     let mut s = Session::default();
@@ -228,6 +350,17 @@ fn completion_matches_parameters_anywhere_in_their_name() {
     let c = run(&mut s, "parameters.complete", json!({"prefix": "THICK"}));
     assert_eq!(texts(&c), ["cab_side_thickness"], "any case: {c}");
     assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "xyz"}))).is_empty());
+    // #11978: the starts of the name's words, in order, find it; out of order they don't.
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "2 * cabthi"}));
+    assert_eq!(texts(&c), ["cab_side_thickness"], "{c}");
+    assert_eq!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "doowid"}))), ["door_width"]);
+    assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "thicab"}))).is_empty());
+    // A match by word starts alone comes after every name that contains the word, even a
+    // favourite: `inner_diameter` has no `id` in it.
+    run(&mut s, "parameters.add", json!({"name": "inner_diameter", "expression": "6 mm"}));
+    run(&mut s, "parameters.favorite", json!({"name": "inner_diameter", "favorite": true}));
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "id"}));
+    assert_eq!(texts(&c), ["cab_side_thickness", "side", "door_width", "inner_diameter"], "{c}");
     // Functions keep matching from the start: `in` is not `sin(`.
     let c = run(&mut s, "parameters.complete", json!({"prefix": "in"}));
     assert!(!c["suggestions"].as_array().unwrap().iter().any(|x| x["text"] == "sin("), "{c}");
@@ -265,6 +398,140 @@ fn csv_and_json_round_trip() {
     run(&mut v, "parameters.import", json!({"path": path.to_string_lossy()}));
     assert_eq!(v.doc.param("len").map(|p| p.expr.as_str()), Some("80 mm"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A value a spreadsheet would run as a formula is exported as text, with a `'` first, and
+/// imports back as it was (#12728). A plain number keeps its sign, and `;` makes a field quoted.
+#[test]
+fn csv_keeps_formulas_as_text_and_imports_them_back() {
+    let mut s = Session::default();
+    let rows = [("d3", "4", "plain"), ("a", "=d3", "+2 for the fit"), ("b", "=5", "'=kept"), ("c", "-5 mm", "@x"), ("e", "6", "one; two")];
+    for (name, expression, comment) in rows {
+        run(&mut s, "parameters.add", json!({"name": name, "expression": expression, "comment": comment}));
+    }
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    for written in [",'=d3,", ",'+2 for the fit,", ",'=5,", ",''=kept,", ",'-5 mm,-5,'@x,", ",\"one; two\","] {
+        assert!(csv.contains(written), "{written}: {csv}");
+    }
+    let mut t = Session::default();
+    run(&mut t, "parameters.import", json!({"text": csv}));
+    for (name, _, comment) in rows {
+        let (before, after) = (s.doc.param(name), t.doc.param(name));
+        assert_eq!(after.map(|p| (p.expr.as_str(), p.comment.as_str())), before.map(|p| (p.expr.as_str(), comment)), "{name}: {csv}");
+    }
+}
+
+#[test]
+fn csv_round_trips_comments_with_line_breaks() {
+    for comment in ["line one\nline two", "\r\nfirst, \"quoted\"\r\n\r\nlast\r\n", "one\rtwo"] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "L", "expression": "30", "comment": comment}));
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "10"}));
+        let exported = run(&mut s, "parameters.export", json!({"format": "csv"}));
+
+        let mut fresh = Session::default();
+        let imported = run(&mut fresh, "parameters.import", json!({"text": exported["text"]}));
+        assert_eq!(imported["imported"], json!(["L", "W"]));
+        let list = run(&mut fresh, "parameters.list", json!({}));
+        assert_eq!(row(&list, "L")["comment"], comment);
+        assert_eq!(row(&list, "L")["value"], 30.0);
+        assert_eq!(row(&list, "W")["value"], 10.0);
+    }
+}
+
+#[test]
+fn csv_import_accepts_a_bom_before_the_header() {
+    let mut s = Session::default();
+    let csv = "\u{feff}\"NAME\",expression\r\n\r\nA,5";
+    let imported = run(&mut s, "parameters.import", json!({"text": csv}));
+    assert_eq!(imported["imported"], json!(["A"]));
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "A")["value"], 5.0);
+}
+
+#[test]
+fn csv_import_with_an_unclosed_quote_leaves_parameters_alone() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "10"}));
+    let before = s.doc.to_json();
+    let csv = "name,expression,comment\nL,30,updated\nW,5,\"unfinished\n";
+    assert!(s.execute("parameters.import", &json!({"text": csv})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// #8960: the text marker accepts ASCII case variants without changing numeric units.
+#[test]
+fn text_parameter_imports_accept_mixed_case_units() {
+    for unit in ["text", "Text", "TEXT", "tExT", " Text "] {
+        let csv = format!("name,unit,expression,comment\nwidth,in,1,numeric control\nverID,{unit},\"\"\"REV-A\"\"\",quoted label\n");
+        let json_text = json!([
+            {"name": "width", "unit": "in", "expression": "1", "comment": "numeric control"},
+            {"name": "verID", "unit": unit, "expression": "\"REV-A\"", "comment": "quoted label"}
+        ])
+        .to_string();
+        for text in [csv, json_text] {
+            let mut s = Session::default();
+            // Check both adding and updating a text parameter through the import command.
+            for expected in ["REV-A", "REV-B"] {
+                let r = run(&mut s, "parameters.import", json!({"text": text.replace("REV-A", expected)}));
+                assert_eq!(r["imported"], json!(["width", "verID"]));
+                assert_eq!(r["errors"], json!([]));
+                let list = run(&mut s, "parameters.list", json!({}));
+                assert_eq!(list["count"], 2);
+                let label = row(&list, "verID");
+                assert_eq!(label["unit"], "text");
+                assert_eq!(label["text"], expected);
+                assert_eq!(label["expression"], expected);
+                assert_eq!(label["comment"], "quoted label");
+                assert!(label["value"].is_null());
+                assert_eq!(row(&list, "width")["unit"], "in");
+                assert_eq!(row(&list, "width")["value"], 25.4);
+                assert_eq!(row(&list, "width")["display_value"], 1.0);
+                assert_eq!(s.doc.param_values().0["width"].v, 25.4);
+            }
+            // Export still uses the canonical marker and round-trips the unquoted text.
+            let exported = run(&mut s, "parameters.export", json!({"format": "csv"}));
+            assert!(exported["text"].as_str().unwrap().contains("verID,text,REV-B,,quoted label,"), "{exported}");
+            let mut reopened = Session::default();
+            run(&mut reopened, "parameters.import", json!({"text": exported["text"]}));
+            assert_eq!(reopened.doc.text_param("verID").unwrap().text, "REV-B");
+        }
+    }
+}
+
+#[test]
+fn text_parameter_imports_keep_unknown_units_atomic() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "verID", "unit": "text", "expression": "original"}));
+    run(&mut s, "parameters.add", json!({"name": "width", "unit": "mm", "expression": "20"}));
+    let before = s.doc.to_json();
+    for unit in ["Textual", "MM"] {
+        let csv = format!("name,unit,expression\nverID,Text,replacement\nwidth,mm,30\nbad,{unit},1\n");
+        let json_text = json!([
+            {"name": "verID", "unit": "Text", "expression": "replacement"},
+            {"name": "width", "unit": "mm", "expression": "30"},
+            {"name": "bad", "unit": unit, "expression": "1"}
+        ])
+        .to_string();
+        for text in [csv, json_text] {
+            let why = err(&mut s, "parameters.import", json!({"text": text}));
+            assert!(why.contains(&format!("unknown unit `{unit}`")), "{why}");
+            assert_eq!(s.doc.to_json(), before, "a rejected row must roll back the entire import");
+        }
+    }
+}
+
+#[test]
+fn text_parameter_commands_accept_mixed_case_units() {
+    let mut s = Session::default();
+    let r = run(&mut s, "parameters.add", json!({"name": "Label", "unit": "Text", "expression": "\"TAG-A\""}));
+    assert_eq!(r["unit"], "text");
+    assert_eq!(r["text"], "TAG-A");
+    run(&mut s, "parameters.change", json!({"name": "Label", "unit": "TEXT", "expression": "'TAG-B'"}));
+    assert_eq!(s.doc.text_param("Label").unwrap().text, "TAG-B");
+    let r = run(&mut s, "expr.evaluate", json!({"unit": " tExT ", "expression": "\"TAG-C\""}));
+    assert_eq!(r["ok"], true);
+    assert_eq!(r["kind"], "text");
+    assert_eq!(r["text"], "TAG-C");
 }
 
 /// Two triangles joined by three links (a b c, d e f; links a–d, b–e, c–f), a on the origin,
@@ -494,7 +761,7 @@ fn a_failed_auto_constrain_keeps_the_stored_sketch_consistent() {
 }
 
 /// The stored sketch's points, by id.
-fn stored_points(s: &Session, feature: u64) -> Vec<solidcraft_geom::Vec2> {
+fn stored_points(s: &Session, feature: u64) -> Vec<solidcore_record::Vec2> {
     s.doc.sketch(feature).unwrap().points.iter().map(|p| p.pos).collect()
 }
 
@@ -525,7 +792,7 @@ fn an_unsolvable_value_edit_is_refused_and_changes_nothing() {
 fn value_edits_continue_from_the_last_solved_state() {
     // A → B → C, each a small edit solved in one jump; C is solved from B (the stored state),
     // and setting both values back reproduces A (the linkage is fully constrained).
-    let close = |a: &[solidcraft_geom::Vec2], b: &[solidcraft_geom::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
+    let close = |a: &[solidcore_record::Vec2], b: &[solidcore_record::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
     let (mut s, feature, params) = linkage_session();
     run(&mut s, "sketch.finish", json!({}));
     let a = stored_points(&s, feature);
@@ -693,4 +960,450 @@ fn flipped_offset_sketch_plane_follows_its_parameter() {
     assert!((volume(&mut s) - 400.0 * 30.0).abs() < 1e-6);
     run(&mut s, "parameters.change", json!({"name": "d", "expression": "50 mm"}));
     assert!((volume(&mut s) - 400.0 * 50.0).abs() < 1e-6, "{}", volume(&mut s));
+}
+
+/// A value typed as `name = expression` in any value input defines the user parameter `name`
+/// and leaves the input using it (#4071): a feature's distance, an angle, a count, a sheet metal
+/// rule and a canvas offset. The parameter takes the input's unit, the design's for a bare length.
+#[test]
+fn any_value_input_can_define_a_parameter() {
+    let mut s = Session::default();
+    block(&mut s);
+    let r = run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": "depth = 15", "operation": "new", "body_name": "Second"}));
+    assert_eq!(r["defined"], "depth", "{r}");
+    assert_eq!(r["definitions"], json!([{"name": "depth", "expression": "15", "unit": "mm"}]), "{r}");
+    let l = run(&mut s, "parameters.list", json!({}));
+    assert_eq!((row(&l, "depth")["source"].as_str(), row(&l, "depth")["expression"].as_str()), (Some("user"), Some("15")), "{l}");
+    // The input shows the name afterwards, and follows the parameter.
+    let input = l["parameters"].as_array().unwrap().iter().find(|r| r["feature"] == "Extrude2" && r["input"] == "Distance").unwrap().clone();
+    assert_eq!(input["expression"], "depth", "{input}");
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 10.0 + 40.0 * 30.0 * 15.0) < 1e-9);
+    run(&mut s, "parameters.change", json!({"name": "depth", "expression": "20 mm"}));
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 10.0 + 40.0 * 30.0 * 20.0) < 1e-9);
+    // One undo removes the feature and its parameter together.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.param("depth").is_none());
+    assert!(s.doc.features.iter().all(|f| f.name != "Extrude2"));
+    run(&mut s, "edit.redo", json!({}));
+    assert!(s.doc.param("depth").is_some());
+
+    // An angle input's parameter is in degrees; `#name` works as in a dimension.
+    let r = run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 5, "taper": "#draft = 2", "operation": "new"}));
+    assert_eq!(r["definitions"][0], json!({"name": "draft", "expression": "2", "unit": "deg"}), "{r}");
+
+    // Sheet metal rules and a canvas offset take one too.
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "thickness": "gauge = 2", "active": true}));
+    assert_eq!((s.doc.sheet.rules[0].thickness.as_str(), s.doc.param("gauge").map(|p| p.expr.as_str())), ("gauge", Some("2")));
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift = 15"}));
+    match &s.doc.canvases[0].plane {
+        solidcraft_doc::PlaneRef::Offset { distance, .. } => assert_eq!(distance.as_ref(), "lift"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(s.doc.param("lift").map(|p| (p.expr.as_str(), p.unit.as_str())), Some(("15", "mm")));
+}
+
+/// In an inch design a bare number defines a parameter in inches, as the bare value would read;
+/// a value with a unit keeps it.
+#[test]
+fn a_defined_length_takes_the_design_unit() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let r = run(&mut s, "solid.box", json!({"length": "l = 2", "width": "w = 25.4 mm", "height": 1}));
+    assert_eq!(
+        r["definitions"],
+        json!([{"name": "l", "expression": "2 in", "unit": "in"}, {"name": "w", "expression": "25.4 mm", "unit": "in"}]),
+        "{r}"
+    );
+    assert!(rel(volume(&mut s), 50.8 * 25.4 * 25.4) < 1e-9);
+}
+
+/// A parameter added without a unit takes the unit of its value, a length in the design's units
+/// as a typed length would be (#8865): `40/2` in an inch design is 20 in, as the Parameters
+/// dialog makes it. A unit given, an angle and a unit-less value keep their own.
+#[test]
+fn a_parameter_added_without_a_unit_takes_the_design_unit() {
+    let added = |s: &mut Session, p: Value| {
+        let r = run(s, "parameters.add", p);
+        (r["unit"].as_str().unwrap_or("?").to_string(), r["value"].as_f64().unwrap_or(f64::NAN), r["display_value"].as_f64().unwrap_or(f64::NAN))
+    };
+    let close = |got: (String, f64, f64), unit: &str, val: f64, shown: f64| {
+        assert!(got.0 == unit && rel(got.1, val) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {val} ({shown})");
+    };
+    // A millimetre design is as it was.
+    let mut s = Session::default();
+    close(added(&mut s, json!({"name": "v", "expression": "40/2"})), "mm", 20.0, 20.0);
+    close(added(&mut s, json!({"name": "w", "expression": "v + 1"})), "mm", 21.0, 21.0);
+
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    close(added(&mut s, json!({"name": "v", "expression": "40/2"})), "in", 508.0, 20.0);
+    close(added(&mut s, json!({"name": "given", "expression": "40/2", "unit": "in"})), "in", 508.0, 20.0);
+    close(added(&mut s, json!({"name": "metric", "expression": "40/2", "unit": "mm"})), "mm", 20.0, 20.0);
+    // A value with a unit keeps its size and shows in the design's units.
+    close(added(&mut s, json!({"name": "plate", "expression": "25.4 mm"})), "in", 25.4, 1.0);
+    // One that refers to another parameter: its bare number is an inch too.
+    close(added(&mut s, json!({"name": "more", "expression": "v + 1"})), "in", 533.4, 21.0);
+    close(added(&mut s, json!({"name": "half", "expression": "v / 2"})), "in", 254.0, 10.0);
+    // An angle reports degrees like every other reply, a unit-less count stays unit-less.
+    close(added(&mut s, json!({"name": "turn", "expression": "30 deg"})), "deg", 30.0, 30.0);
+    close(added(&mut s, json!({"name": "n", "expression": "4", "unit": ""})), "", 4.0, 4.0);
+    close(added(&mut s, json!({"name": "twice", "expression": "n * 2"})), "", 8.0, 8.0);
+    // parameters.change and parameters.import make a new parameter the same way.
+    run(&mut s, "parameters.change", json!({"name": "c", "expression": "3"}));
+    assert_eq!(s.doc.param("c").map(|p| p.unit.as_str()), Some("in"));
+    run(&mut s, "parameters.import", json!({"text": "name,expression\nimported,2\n"}));
+    assert_eq!(s.doc.param("imported").map(|p| p.unit.as_str()), Some("in"));
+    let (vals, _) = s.doc.param_values();
+    assert!(vals.get("imported").is_some_and(|v| rel(v.v, 50.8) < 1e-9), "{:?}", vals.get("imported"));
+    // An existing parameter changed without a unit keeps its own.
+    run(&mut s, "parameters.change", json!({"name": "metric", "expression": "30"}));
+    assert_eq!(s.doc.param("metric").map(|p| p.unit.as_str()), Some("mm"));
+    // A centimetre design works the same way.
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "cm"}));
+    close(added(&mut s, json!({"name": "v", "expression": "3"})), "cm", 30.0, 3.0);
+}
+
+/// Hostile parameters.add input in an inch design is refused with a reason and adds nothing.
+#[test]
+fn a_hostile_parameter_in_an_inch_design_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    // 1e308 inches is past any finite millimetre value.
+    for (name, e) in [("huge", "1e308"), ("inf", "1e308 * 1e308"), ("nan", "0/0"), ("bad", "2 furlong"), ("empty", " "), ("self_ref", "self_ref + 1")]
+    {
+        let why = err(&mut s, "parameters.add", json!({"name": name, "expression": e}));
+        assert!(!why.is_empty() && s.doc.param(name).is_none(), "{name}: {why}");
+    }
+    let why = err(&mut s, "parameters.add", json!({"name": "u", "expression": "1", "unit": "furlong"}));
+    assert!(why.contains("unknown unit"), "{why}");
+    assert!(s.doc.params.is_empty());
+}
+
+/// A definition that cannot be made fails the command and leaves the design as it was: a taken,
+/// reserved or malformed name, no value, a value that names itself, two different values for one
+/// name, and a parameter's or configuration cell's own expression.
+#[test]
+fn a_refused_definition_changes_nothing() {
+    let mut s = Session::default();
+    block(&mut s);
+    let undo = s.undo.len();
+    let features = s.doc.features.len();
+    let refused = [
+        (json!({"distance": "len = 5"}), "there is already a parameter `len`: type `len` to use it"),
+        (json!({"distance": "mm = 5"}), "`mm` is a unit name"),
+        (json!({"distance": "pi = 5"}), "`pi` is a constant"),
+        (json!({"distance": "w ="}), "`w =` needs a value after the `=`"),
+        (json!({"distance": "w = "}), "needs a value"),
+        (json!({"distance": "w = w + 1"}), "w"),
+        (json!({"distance": "w = = 3"}), "unexpected `=`"),
+        (json!({"distance": "= 5 ="}), ""),
+        (json!({"distance": "w = 5", "distance2": "w = 6"}), "`w` is defined twice"),
+    ];
+    for (p, message) in refused {
+        let mut q = json!({"sketch": "Base", "operation": "new"});
+        for (k, v) in p.as_object().unwrap() {
+            q[k] = v.clone();
+        }
+        let e = err(&mut s, "solid.extrude", q.clone());
+        assert!(e.contains(message), "{q}: {e}");
+        assert_eq!((s.undo.len(), s.doc.features.len()), (undo, features), "{q}: a refused definition changed the design");
+        assert!(s.doc.param("w").is_none(), "{q}");
+    }
+    // The same definition twice is one parameter.
+    let r = run(&mut s, "solid.extrude", json!({"sketch": "Base", "operation": "new", "distance": "w = 5", "distance2": "w = 5"}));
+    assert_eq!(r["definitions"].as_array().map(Vec::len), Some(1), "{r}");
+    run(&mut s, "edit.undo", json!({}));
+    // A parameter's own expression or a configuration cell defines nothing.
+    let e = err(&mut s, "parameters.add", json!({"name": "a", "expression": "b = 5"}));
+    assert!(e.contains("cannot define another parameter `b`"), "{e}");
+    assert!(s.doc.param("a").is_none() && s.doc.param("b").is_none());
+    let e = err(&mut s, "parameters.change", json!({"changes": {"len": "b = 5"}}));
+    assert!(e.contains("change it on its own to rename it"), "{e}");
+    // Text that only looks like a definition, where no value is read, is left alone.
+    let r = run(&mut s, "parameters.add", json!({"name": "label", "expression": "a = b", "unit": "text"}));
+    assert!(r.get("defined").is_none(), "{r}");
+}
+
+/// Several holes made one command at a time, each with its depth typed as `ScrewDepth = 5`: the
+/// first defines `ScrewDepth`, the later ones name it instead of being refused because it
+/// already exists. Typed again with another value, it is still refused and changes nothing.
+#[test]
+fn the_same_definition_typed_again_uses_the_parameter() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 12}));
+    let r = run(&mut s, "solid.hole", json!({"position": [15, 20, 12], "diameter": 5, "depth": "ScrewDepth = 5"}));
+    assert_eq!(r["definitions"].as_array().map(Vec::len), Some(1), "{r}");
+    let r = run(&mut s, "solid.hole", json!({"position": [45, 20, 12], "diameter": 5, "depth": "ScrewDepth = 5"}));
+    assert!(r.get("definitions").is_none_or(|d| d.as_array().is_some_and(Vec::is_empty)), "nothing new is defined: {r}");
+    assert_eq!(s.doc.params.iter().filter(|p| p.name == "ScrewDepth").count(), 1);
+    assert_eq!(expr_of(&mut s, "ScrewDepth"), "5");
+    let depths: Vec<&str> = s
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Hole { depth, .. } => depth.as_ref().map(|d| d.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(depths, ["ScrewDepth", "ScrewDepth"]);
+    run(&mut s, "parameters.change", json!({"changes": {"ScrewDepth": "8"}}));
+    // Another value for the name is still a parameter that already exists.
+    let undo = s.undo.len();
+    let e = err(&mut s, "solid.hole", json!({"position": [30, 30, 12], "diameter": 5, "depth": "ScrewDepth = 6"}));
+    assert!(e.contains("there is already a parameter `ScrewDepth`"), "{e}");
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(expr_of(&mut s, "ScrewDepth"), "8");
+}
+
+/// Changing a parameter to `name = expression` names it (#4071): the dimension's or feature
+/// input's own parameter is renamed, references follow, and it takes the expression; no other
+/// parameter is made. One undo takes both back.
+#[test]
+fn changing_a_parameter_to_a_definition_renames_it() {
+    let mut s = Session::default();
+    block(&mut s);
+    let l = run(&mut s, "parameters.list", json!({"filter": "feature"}));
+    let d = l["parameters"].as_array().unwrap().iter().find(|r| r["input"] == "Distance").unwrap()["name"].as_str().unwrap().to_string();
+    let count = run(&mut s, "parameters.list", json!({}))["count"].clone();
+    let r = run(&mut s, "parameters.change", json!({"name": d, "expression": "height = 12"}));
+    assert_eq!((r["name"].as_str(), r["renamed"]["from"].as_str()), (Some("height"), Some(d.as_str())), "{r}");
+    assert_eq!(expr_of(&mut s, "height"), "12");
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 12.0) < 1e-9);
+    assert_eq!(run(&mut s, "parameters.list", json!({}))["count"], count, "no extra parameter");
+    // A dimension's parameter too; whatever refers to it follows.
+    let width =
+        s.doc.sketch(s.doc.features[0].id).unwrap().constraints.iter().find_map(|c| c.param.clone().filter(|p| expr_of_now(&s, p) == "40")).unwrap();
+    run(&mut s, "solid.box", json!({"length": width.clone(), "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    run(&mut s, "parameters.change", json!({"name": width, "expression": "wide = 50"}));
+    assert_eq!(expr_of(&mut s, "wide"), "50");
+    assert!(rel(volume(&mut s), 50.0 * 30.0 * 12.0 + 50.0 * 25.0) < 1e-9);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.param("wide").is_none());
+    assert_eq!(expr_of_now(&s, &width), "40");
+    // Its own name is just a change; a taken name is refused.
+    run(&mut s, "parameters.change", json!({"name": "height", "expression": "height = 14"}));
+    assert_eq!(expr_of(&mut s, "height"), "14");
+    let e = err(&mut s, "parameters.change", json!({"name": "height", "expression": "len = 3"}));
+    assert!(e.contains("there is already a parameter `len`"), "{e}");
+    let e = err(&mut s, "parameters.change", json!({"name": "height", "new_name": "h", "expression": "x = 3"}));
+    assert!(e.contains("not both"), "{e}");
+}
+
+fn expr_of_now(s: &Session, name: &str) -> String {
+    s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default()
+}
+
+/// #9015: `expr.evaluate` of a length with a bare offset uses the design's units.
+#[test]
+fn expr_evaluate_bare_offsets_follow_design_units() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "parameters.add", json!({"name": "baseLength", "expression": "76"}));
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "baseLength - 1", "kind": "length"}));
+    assert_eq!(r["ok"], true, "{r}");
+    // 75 in in millimetres (without the fix this was 76 in − 1 mm).
+    assert!((r["value"].as_f64().unwrap_or(0.0) - 75.0 * 25.4).abs() < 1e-9, "{r}");
+}
+
+/// A dimension made as `w = 20` shows `w`; typing `w = 30` over it sets `w` rather than being
+/// refused as a taken name (#4071).
+#[test]
+fn a_definition_of_the_parameter_a_value_names_changes_it() {
+    let mut s = Session::default();
+    block(&mut s);
+    run(&mut s, "solid.box", json!({"length": "w = 20", "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    let l = run(&mut s, "parameters.list", json!({"filter": "feature"}));
+    let d = l["parameters"].as_array().unwrap().iter().find(|r| r["expression"] == "w").unwrap()["name"].as_str().unwrap().to_string();
+    let r = run(&mut s, "parameters.change", json!({"name": d, "expression": "w = 30"}));
+    assert_eq!((r["name"].as_str(), r["changed_through"].as_str()), (Some("w"), Some(d.as_str())), "{r}");
+    assert_eq!((expr_of(&mut s, "w"), expr_of(&mut s, &d)), ("30".to_string(), "w".to_string()));
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "q = w * 2", "kind": "length"}));
+    assert_eq!((r["ok"].as_bool(), r["value"].as_f64(), r["defines"].as_str()), (Some(true), Some(60.0), Some("q")), "{r}");
+}
+
+/// The error of the feature named `name` in the last evaluation.
+fn feature_error(s: &Session, name: &str) -> Option<String> {
+    s.model.results.iter().find(|r| r.name == name).and_then(|r| r.error.clone())
+}
+
+/// A horizontal distance from the origin to a point that is 0 (the point on the y axis) can be
+/// changed to a positive value through its parameter, and back: the point moves along x and the
+/// circle centred on it with it, instead of the sketch failing as a conflict.
+#[test]
+fn a_horizontal_distance_from_the_origin_changed_from_zero_moves_the_point() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Offset", "expression": "0 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 5], [30, 5]], "ids": ["floor"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "floor", "mode": "horizontal"}));
+    for (entities, kind, value) in [
+        (json!(["origin", "floor.start"]), "vertical", json!(5)),
+        (json!(["origin", "floor.start"]), "horizontal", json!(30)),
+        (json!(["floor.start", "floor.end"]), "horizontal", json!(60)),
+    ] {
+        run(&mut s, "sketch.dimension", json!({"entities": entities, "type": kind, "value": value}));
+    }
+    run(&mut s, "sketch.point", json!({"point": [3, 20], "id": "hole", "construction": true, "connect": false}));
+    run(&mut s, "sketch.circle.center", json!({"center": "hole", "diameter": 8}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["floor.start", "hole"], "type": "vertical", "value": 15}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "hole"], "type": "horizontal", "value": "Offset"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    let disc = std::f64::consts::PI * 16.0 * 5.0;
+    for (value, x) in [("0.5 mm", 0.5), ("0 mm", 0.0), ("0.5 mm", 0.5), ("-0 mm", 0.0)] {
+        let r = run(&mut s, "parameters.change", json!({"name": "Offset", "expression": value}));
+        assert_eq!(r["errors"], json!([]), "{value}: {r}");
+        assert!(rel(volume(&mut s), disc) < 1e-3, "{value}");
+        // The disc is centred on the point, so its box's middle in x is where the point went.
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let b = &m["bodies"][0]["bbox"];
+        let middle = (b["min"][0].as_f64().unwrap_or(f64::NAN) + b["max"][0].as_f64().unwrap_or(f64::NAN)) / 2.0;
+        assert!((middle - x).abs() < 1e-3, "{value}: the point is at x = {middle}, want {x}: {m}");
+    }
+}
+
+/// A sketch dimension set negative fails its sketch; the features built from it fail naming that
+/// sketch, not as a sketch that must come earlier in the timeline (#9075). Their errors follow
+/// the sketch's own (never an earlier one from the cache) and clear when the value is set back.
+#[test]
+fn a_feature_on_a_failed_sketch_names_the_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command": "sketch.rectangle.center", "params": {"center": [0, 0], "corner": [20, 10]}, "dimensions": {"width": 40, "height": 20}}),
+    );
+    let width = out["dimensions"]["width"]["param"].as_str().unwrap_or_default().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    // A healthy sketch and its extrude after them.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [60, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch2", "distance": 5, "operation": "new"}));
+    assert!(rel(volume(&mut s), 40.0 * 20.0 * 5.0 + 500.0) < 1e-9);
+
+    let r = run(&mut s, "parameters.change", json!({"name": width, "expression": "-10"}));
+    let sketch = feature_error(&s, "Sketch1").unwrap_or_default();
+    assert!(sketch.contains("dimension value -10"), "{sketch}");
+    let extrude = feature_error(&s, "Extrude1").unwrap_or_default();
+    assert!(extrude.contains("`Sketch1`") && extrude.contains("dimension value -10"), "{extrude}");
+    assert!(!extrude.contains("earlier in the timeline"), "{extrude}");
+    assert_eq!((feature_error(&s, "Sketch2"), feature_error(&s, "Extrude2")), (None, None), "{r}");
+    // Another failing value: its own error, not the earlier one from the cache.
+    run(&mut s, "parameters.change", json!({"name": width, "expression": "-5"}));
+    let extrude = feature_error(&s, "Extrude1").unwrap_or_default();
+    assert!(extrude.contains("dimension value -5"), "{extrude}");
+    // The failed sketch renamed: its new name.
+    run(&mut s, "timeline.rename", json!({"feature": "Sketch1", "name": "Outline"}));
+    let extrude = feature_error(&s, "Extrude1").unwrap_or_default();
+    assert!(extrude.contains("`Outline`") && !extrude.contains("Sketch1"), "{extrude}");
+    // Set back: both build again.
+    let r = run(&mut s, "parameters.change", json!({"name": width, "expression": "40"}));
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(rel(volume(&mut s), 40.0 * 20.0 * 5.0 + 500.0) < 1e-9);
+}
+
+/// A finished sketch with one line (0,0)-(30,0) whose length is dimensioned to parameter `L`.
+fn line_dimensioned_by_a_parameter() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "30"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "L"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let feature = s.doc.find_feature("Sketch1").map(|f| f.id).unwrap_or_default();
+    (s, feature)
+}
+
+/// #9729: `sketch.dimension` refuses 0 ("that would shrink l1 to a point") but a value edit
+/// let it through: the line collapsed to a point and every later value counted as a conflict,
+/// so only Undo recovered — and after a save and reopen there is no Undo. A value edit now
+/// runs the same shrink/fling checks `settle` runs, so the zero is refused where it happens.
+#[test]
+fn a_parameter_that_shrinks_a_dimensioned_line_to_a_point_is_refused() {
+    let (mut s, feature) = line_dimensioned_by_a_parameter();
+    let e = err(&mut s, "parameters.change", json!({"name": "L", "expression": "0"}));
+    assert!(e.contains("shrink l1 to a point") && e.contains("the values were not changed"), "{e}");
+    // The line is where it was and the sketch still solves.
+    assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+    assert!(s.model.state().sketch(feature).unwrap().report.keeps_orientation());
+    // Other values still work, in both directions: the sketch was never stored collapsed.
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "20"}));
+    assert!((far_x(&s, feature) - 20.0).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "30"}));
+    assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+}
+
+/// The largest x among the stored sketch's points: the line's far end.
+fn far_x(s: &Session, feature: u64) -> f64 {
+    stored_points(s, feature).iter().map(|p| p.x).fold(f64::MIN, f64::max)
+}
+
+/// The same through a configuration row: activating a row whose value collapses the line is
+/// refused, and the Default row can still be activated afterwards.
+#[test]
+fn a_configuration_row_that_shrinks_a_dimensioned_line_to_a_point_is_refused() {
+    let (mut s, feature) = line_dimensioned_by_a_parameter();
+    run(&mut s, "config.configure", json!({"params": ["L"]}));
+    run(&mut s, "config.row", json!({"name": "Zero", "values": {"param:L": "0"}}));
+    let e = err(&mut s, "config.activate", json!({"row": "Zero"}));
+    assert!(e.contains("shrink l1 to a point"), "{e}");
+    // The Default row still activates and the line is untouched.
+    run(&mut s, "config.activate", json!({"row": "Default"}));
+    assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+}
+
+/// #10747: `value` means millimetres (and degrees) in every reply — add, change and list —
+/// with the parameter's own unit in `display_value`. Reported numbers carry no float noise;
+/// stored values keep full precision.
+#[test]
+fn value_means_the_same_unit_in_every_reply() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let a = run(&mut s, "parameters.add", json!({"name": "L", "expression": "2"}));
+    assert_eq!((a["value"].as_f64(), a["display_value"].as_f64()), (Some(50.8), Some(2.0)), "{a}");
+    // The change reply is rounded too: 3 in is 76.2, not 76.19999999999999.
+    let c = run(&mut s, "parameters.change", json!({"name": "L", "expression": "3"}));
+    assert_eq!((c["value"].as_f64(), c["display_value"].as_f64()), (Some(76.2), Some(3.0)), "{c}");
+    run(&mut s, "parameters.add", json!({"name": "d1", "expression": "L"}));
+    run(&mut s, "parameters.add", json!({"name": "d2", "expression": "1 in"}));
+    let l = run(&mut s, "parameters.list", json!({}));
+    // Every row's `value` is mm, whatever the parameter's own unit (#10747).
+    for (name, mm) in [("L", 76.2), ("d1", 76.2), ("d2", 25.4)] {
+        assert_eq!(row(&l, name)["value"], mm, "{name}: {l}");
+    }
+    assert_eq!(row(&l, "L")["display_value"], 3.0, "{l}");
+    assert_eq!(row(&l, "d2")["display_value"], 1.0, "{l}");
+    // An angle reports degrees like every other reply, without the noise.
+    let a = run(&mut s, "parameters.add", json!({"name": "ang", "expression": "30 deg"}));
+    assert_eq!((a["value"].as_f64(), a["display_value"].as_f64()), (Some(30.0), Some(30.0)), "{a}");
+    // Only what is reported is rounded: the stored value keeps full precision — the raw
+    // own-unit conversion still says 29.999999999999996.
+    let (vals, _) = s.doc.param_values();
+    assert_eq!(s.doc.param_display_value(&vals, "ang"), Some(29.999999999999996), "the stored angle keeps its bits");
+}
+
+/// #10747: exports carry the numbers a person would read, not float noise. The `value`
+/// column keeps the number in the parameter's own unit, as it always did.
+#[test]
+fn exports_round_reported_numbers() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "ang", "expression": "30 deg"}));
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "1.2 in"}));
+    run(&mut s, "parameters.add", json!({"name": "s", "expression": "0.1 + 0.2"}));
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    assert!(csv.contains("ang,deg,30 deg,30,,false"), "{csv}");
+    assert!(csv.contains("w,mm,1.2 in,30.48,,false"), "{csv}");
+    assert!(csv.contains("s,mm,0.1 + 0.2,0.3,,false"), "{csv}");
+    let json_text = run(&mut s, "parameters.export", json!({"format": "json"}))["text"].as_str().unwrap_or_default().to_string();
+    let rows: Vec<Value> = serde_json::from_str(&json_text).unwrap_or_default();
+    let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
+    assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
 }

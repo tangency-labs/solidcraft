@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#416",
+  "tangency-labs/solidcraft#425",
+  "tangency-labs/solidcraft#1797",
+  "tangency-labs/solidcraft#1799"
+ ],
+ "what": "a 160 x 100 plate with a 90 degree flange, unfolded, a 20 mm round hole and a 10 x 24 slot turned 30 degrees cut across the bend zone, refolded: the cut-out walls fold to curves on the bend's cylinder",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5. Flat area: base 160 x (100 - 3) + bend 160*BA with BA = (pi/2)(1 + 1) = pi + flange straight 160*(30 - 3) = 160*(97 + pi + 27). The cut-outs lie wholly inside it: circle pi*10^2, slot 10*24. With K = 0.5 the neutral axis is the mid-surface, so a through cut of flat area A removes A*t of bent material exactly. V = 2*(160*(124 + pi) - 100*pi - 240)",
+ "body_count": 1,
+ "volume_mm3": 39576.99111843078
+}

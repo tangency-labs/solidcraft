@@ -203,7 +203,7 @@
   "params": {
    "command": "motion.play",
    "params": {
-    "study": 1,
+    "study": "Motion Study1",
     "step": 100
    }
   }

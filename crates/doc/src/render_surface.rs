@@ -1,0 +1,380 @@
+//! Portable opaque surface intent with built-in or design-owned encoded sources.
+//! Targets use definition/feature/occurrence identity, never a captured mesh ordinal.
+//! Frames are definition-local millimetres; no paths or device objects are saved.
+use crate::{DocError, Result, render_resources::HdrId};
+use serde::{Deserialize, Serialize};
+use solidcraft_render::job::textures::PlanarFrame;
+use std::{collections::BTreeSet, fmt};
+
+pub const MAX_SURFACE_BINDINGS: usize = 128;
+pub const MAX_SURFACE_PATH: usize = 64;
+fn invalid(message: impl Into<String>) -> DocError {
+    DocError::Invalid(message.into())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenderBodyTarget {
+    pub definition: String,
+    pub feature: u64,
+    pub component: u64,
+    #[serde(deserialize_with = "occurrence_path")]
+    pub occurrence_path: Vec<u64>,
+}
+impl RenderBodyTarget {
+    pub fn validate(&self) -> Result<()> {
+        if self.definition.is_empty()
+            || self.definition.len() > 1024
+            || self.definition.chars().any(char::is_control)
+            || self.feature == 0
+            || self.occurrence_path.len() > MAX_SURFACE_PATH
+            || self.occurrence_path.capacity() > MAX_SURFACE_PATH
+            || self.occurrence_path.contains(&0)
+            || self.occurrence_path.iter().collect::<BTreeSet<_>>().len() != self.occurrence_path.len()
+            || (self.component == 0) != self.occurrence_path.is_empty()
+        {
+            return Err(invalid("invalid render surface definition/feature/occurrence identity"));
+        }
+        Ok(())
+    }
+}
+fn occurrence_path<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Vec<u64>, D::Error> {
+    bounded_sequence::<D, u64, MAX_SURFACE_PATH>(d)
+}
+
+/// A material's four encoded SHA-256 receipts, in explicit role order. Height is
+/// intentionally excluded: an eight-bit surface is not a displacement resource.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuiltinSurfaceSource {
+    pub id: String,
+    pub version: String,
+    pub base_color_sha256: HdrId,
+    pub normal_sha256: HdrId,
+    pub roughness_sha256: HdrId,
+    pub metallic_sha256: HdrId,
+}
+impl BuiltinSurfaceSource {
+    pub fn validate(&self) -> Result<()> {
+        let valid_id = self.id.strip_prefix("SURF-").is_some_and(|n| n.len() == 3 && n.bytes().all(|b| b.is_ascii_digit()));
+        if !valid_id
+            || self.version.is_empty()
+            || self.version.len() > 32
+            || !self.version.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+        {
+            return Err(invalid("bounded versioned SURF-nnn source required"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedSurface {
+    pub target: RenderBodyTarget,
+    pub source: SurfaceSource,
+    pub local_frame: PlanarFrame,
+    pub normal_strength: f64,
+}
+
+/// Built-in records retain their original wire shape. Embedded records explicitly
+/// identify each role; one digest may have several independently prepared uses.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SurfaceSource {
+    Builtin(BuiltinSurfaceSource),
+    Embedded(EmbeddedSurfaceSource),
+}
+impl From<BuiltinSurfaceSource> for SurfaceSource {
+    fn from(source: BuiltinSurfaceSource) -> Self {
+        Self::Builtin(source)
+    }
+}
+impl SurfaceSource {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::Builtin(source) => source.validate(),
+            Self::Embedded(source) => source.validate(),
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddedSurfaceKind {
+    Embedded,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmbeddedSurfaceSource {
+    pub kind: EmbeddedSurfaceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_color: Option<HdrId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_open_gl: Option<HdrId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roughness: Option<HdrId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metallic: Option<HdrId>,
+    #[serde(default)]
+    pub flip_v: bool,
+}
+impl EmbeddedSurfaceSource {
+    pub fn role_resources(&self) -> impl Iterator<Item = (solidcraft_render::texture_input::MapRole, HdrId)> + '_ {
+        use solidcraft_render::texture_input::MapRole;
+        [
+            (MapRole::BaseColor, self.base_color),
+            (MapRole::NormalOpenGl, self.normal_open_gl),
+            (MapRole::Roughness, self.roughness),
+            (MapRole::Metallic, self.metallic),
+        ]
+        .into_iter()
+        .filter_map(|(role, id)| id.map(|id| (role, id)))
+    }
+    pub fn resources(&self) -> impl Iterator<Item = HdrId> + '_ {
+        [self.base_color, self.normal_open_gl, self.roughness, self.metallic].into_iter().flatten()
+    }
+    pub fn validate(&self) -> Result<()> {
+        if self.resources().next().is_none() {
+            return Err(invalid("an embedded surface requires at least one explicit map role"));
+        }
+        Ok(())
+    }
+}
+impl SavedSurface {
+    pub fn validate(&self) -> Result<()> {
+        self.target.validate()?;
+        self.source.validate()?;
+        self.local_frame.validate().map_err(|e| invalid(e.to_string()))?;
+        if !self.normal_strength.is_finite() || !(0.0..=1.0).contains(&self.normal_strength) {
+            return Err(invalid("saved surface normal strength must be finite in 0..1"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct SurfaceBindings(Vec<SavedSurface>);
+impl SurfaceBindings {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn iter(&self) -> impl Iterator<Item = &SavedSurface> {
+        self.0.iter()
+    }
+    pub fn validate(&self) -> Result<()> {
+        if self.0.len() > MAX_SURFACE_BINDINGS || self.0.capacity() > MAX_SURFACE_BINDINGS {
+            return Err(invalid("at most 128 saved surface bindings"));
+        }
+        let mut seen = BTreeSet::new();
+        for binding in &self.0 {
+            binding.validate()?;
+            if !seen.insert(&binding.target) {
+                return Err(invalid("duplicate saved surface target"));
+            }
+        }
+        Ok(())
+    }
+    /// Validate before mutation; explicit replacement never transfers to another target.
+    pub fn set(&mut self, binding: SavedSurface, replace: bool) -> Result<()> {
+        binding.validate()?;
+        if let Some(old) = self.0.iter_mut().find(|old| old.target == binding.target) {
+            if old == &binding {
+                return Ok(());
+            }
+            if !replace {
+                return Err(invalid("surface target already has a binding; explicit replacement required"));
+            }
+            *old = binding;
+        } else {
+            if self.len() >= MAX_SURFACE_BINDINGS {
+                return Err(invalid("at most 128 saved surface bindings"));
+            }
+            self.0.try_reserve_exact(1).map_err(|_| invalid("could not reserve saved surface binding"))?;
+            if self.0.capacity() > MAX_SURFACE_BINDINGS {
+                return Err(invalid("saved surface capacity exceeds admission"));
+            }
+            self.0.push(binding);
+        }
+        Ok(())
+    }
+    pub fn remove(&mut self, target: &RenderBodyTarget) -> bool {
+        let before = self.0.len();
+        self.0.retain(|binding| &binding.target != target);
+        self.0.len() != before
+    }
+}
+impl<'de> Deserialize<'de> for SurfaceBindings {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let result = Self(bounded_sequence::<D, SavedSurface, MAX_SURFACE_BINDINGS>(d)?);
+        result.validate().map_err(serde::de::Error::custom)?;
+        Ok(result)
+    }
+}
+pub(crate) fn bounded_sequence<'de, D, T, const N: usize>(d: D) -> std::result::Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct Sequence<T, const N: usize>(std::marker::PhantomData<T>);
+    impl<'de, T: Deserialize<'de>, const N: usize> serde::de::Visitor<'de> for Sequence<T, N> {
+        type Value = Vec<T>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "an array of at most {N} entries")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+            let mut entries = Vec::new();
+            while let Some(entry) = seq.next_element()? {
+                if entries.len() == N {
+                    return Err(serde::de::Error::custom(format!("at most {N} entries")));
+                }
+                entries.try_reserve_exact(1).map_err(serde::de::Error::custom)?;
+                entries.push(entry);
+            }
+            Ok(entries)
+        }
+    }
+    d.deserialize_seq(Sequence::<T, N>(std::marker::PhantomData))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    fn fixture() -> SavedSurface {
+        SavedSurface {
+            target: RenderBodyTarget { definition: "Panel".into(), feature: 7, component: 0, occurrence_path: vec![] },
+            source: BuiltinSurfaceSource {
+                id: "SURF-001".into(),
+                version: "1.0.0".into(),
+                base_color_sha256: HdrId::of(b"base"),
+                normal_sha256: HdrId::of(b"normal"),
+                roughness_sha256: HdrId::of(b"rough"),
+                metallic_sha256: HdrId::of(b"metal"),
+            }
+            .into(),
+            local_frame: PlanarFrame { origin: [1., 2., 3.], u: [100., 0., 0.], v: [0., 100., 0.] },
+            normal_strength: 0.75,
+        }
+    }
+    #[test]
+    fn saved_surface_origin_bounds_match_the_document_roundtrip() {
+        use crate::render_settings::{GpuJob, RenderJob, RenderSetup};
+        for coordinate in [-1e9, 1e9] {
+            let mut binding = fixture();
+            binding.local_frame.origin = [coordinate, 0.0, 0.0];
+            let mut setup = RenderSetup {
+                job: Some(RenderJob::GpuPath { transparent_background: false, options: Box::new(GpuJob::default()) }),
+                ..Default::default()
+            };
+            setup.surfaces.set(binding, false).unwrap();
+            let mut document = crate::Document::default();
+            std::sync::Arc::make_mut(&mut document.render).setups.insert("Frame".into(), setup);
+            document.render.validate().unwrap();
+            assert_eq!(crate::Document::from_json(&document.to_json()).unwrap(), document);
+        }
+        for coordinate in [-5e9, 5e9, 1e9_f64.next_up()] {
+            let mut binding = fixture();
+            binding.local_frame.origin = [coordinate, 0.0, 0.0];
+            assert!(binding.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn saved_surfaces_roundtrip_without_paths_or_ordinals() {
+        let mut bindings = SurfaceBindings::default();
+        bindings.set(fixture(), false).unwrap();
+        let wire = serde_json::to_value(&bindings).unwrap();
+        let restored: SurfaceBindings = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(bindings, restored);
+        assert!(wire[0].get("body_index").is_none());
+        let mut changed = fixture();
+        changed.normal_strength = 0.2;
+        assert!(bindings.set(changed.clone(), false).is_err());
+        assert_eq!(bindings, restored);
+        bindings.set(changed, true).unwrap();
+        assert_ne!(bindings, restored);
+    }
+    #[test]
+    fn malformed_and_duplicate_surface_intent_is_rejected() {
+        let valid = serde_json::to_value(fixture()).unwrap();
+        for (path, value) in
+            [("normal_strength", json!(1.1)), ("body_index", json!(0)), ("local_frame", json!({"origin":[0,0,0],"u":[0,0,0],"v":[0,1,0]}))]
+        {
+            let mut wire = valid.clone();
+            wire[path] = value;
+            assert!(serde_json::from_value::<SurfaceBindings>(json!([wire])).is_err());
+        }
+        assert!(serde_json::from_value::<SurfaceBindings>(json!([valid.clone(), valid.clone()])).is_err());
+        assert!(serde_json::from_value::<SurfaceBindings>(json!(vec![valid; 129])).is_err());
+        let mut target = fixture().target;
+        target.component = 1;
+        target.occurrence_path = vec![2, 2];
+        assert!(target.validate().is_err());
+    }
+    #[test]
+    fn saved_cpu_surface_maps_roundtrip_for_opaque_direct_and_path_and_preserve_unsupported_intent() {
+        use crate::render_settings::{CpuJob, RenderJob, RenderSetup};
+        let mut options = CpuJob::default();
+        let mut setup = RenderSetup {
+            job: Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) }),
+            ..Default::default()
+        };
+        setup.surfaces.set(fixture(), false).unwrap();
+        setup.validate().unwrap();
+        let mut direct_document = crate::Document::default();
+        std::sync::Arc::make_mut(&mut direct_document.render).setups.insert("Maps".into(), setup.clone());
+        assert_eq!(crate::Document::from_json(&direct_document.to_json()).unwrap(), direct_document);
+        options.progressive = Some(solidcraft_render::job::CpuProgressiveOptions { samples_per_pixel: 16, seed: 9 });
+        options.shadows = true;
+        options.path = Some(solidcraft_render::job::CpuPathOptions { max_depth: 3 });
+        setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) });
+        setup.validate().unwrap();
+        let mut document = crate::Document::default();
+        std::sync::Arc::make_mut(&mut document.render).setups.insert("Maps".into(), setup.clone());
+        assert_eq!(crate::Document::from_json(&document.to_json()).unwrap(), document);
+        options.path = None;
+        let saved_options_wire = serde_json::to_value(&options).unwrap();
+        let mut runtime = options.to_runtime(0.0).unwrap();
+        runtime.reflections = Some(solidcraft_render::job::ReflectionOptions {
+            bodies: vec![solidcraft_render::job::ReflectionBody { body: "Panel".into(), mode: solidcraft_render::job::ReflectionMode::Mirror }],
+            samples: 1,
+            max_bounces: 2,
+        });
+        runtime.validate().unwrap();
+        let runtime_wire = serde_json::to_value(&runtime).unwrap();
+        let error = solidcraft_render::job::textures::validate_cpu_options(&runtime).unwrap_err();
+        assert!(error.message.contains("selected reflections"));
+        assert_eq!(serde_json::to_value(&runtime).unwrap(), runtime_wire, "map refusal preserves the exact runtime selected override");
+        assert_eq!(serde_json::to_value(&options).unwrap(), saved_options_wire, "runtime overrides do not rewrite saved CPU fields");
+        setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) });
+        setup.validate().unwrap();
+        let mut unknown = serde_json::to_value(&setup).unwrap();
+        unknown["job"]["options"]["reflections"] = serde_json::to_value(&runtime.reflections).unwrap();
+        let error = serde_json::from_value::<RenderSetup>(unknown).unwrap_err();
+        assert!(error.to_string().contains("reflections"), "saved CPU intent must not silently discard runtime-only selected overrides");
+        // Prove the saved field is supported in fixed mode before checking
+        // its incompatibility with still-authored progressive sampling.
+        let mut fixed = options.clone();
+        fixed.progressive = None;
+        fixed.primary_samples = 4;
+        fixed.validate_surface_maps(0.0).unwrap();
+        let surfaces = setup.surfaces.clone();
+        options.primary_samples = 4;
+        setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options) });
+        let wire = serde_json::to_value(&setup).unwrap();
+        assert!(setup.validate().unwrap_err().to_string().contains("CPU progressive requires"));
+        assert_eq!(serde_json::to_value(&setup).unwrap(), wire);
+        assert_eq!(setup.surfaces, surfaces);
+        assert_eq!(setup.surfaces.len(), 1);
+        for job in [None, Some(RenderJob::Raster { transparent_background: false })] {
+            setup.job = job;
+            assert!(setup.validate().is_err());
+            assert_eq!(setup.surfaces, surfaces);
+            assert_eq!(setup.surfaces.len(), 1);
+        }
+    }
+}

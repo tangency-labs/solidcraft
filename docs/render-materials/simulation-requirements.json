@@ -1,0 +1,410 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "concept_catalog",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG"
+  },
+  "items": [
+    {
+      "id": "SIM-001",
+      "family": "Units",
+      "name": "Explicit SI dynamics boundary",
+      "acceptance": [
+        "Convert length, velocity, acceleration, volume, density, inertia, force and torque consistently at one documented SI boundary.",
+        "Millimeter-to-meter scale is 1e-3; kg*mm^2 to kg*m^2 is 1e-6 and N*mm to N*m is 1e-3; retain explicit mass/time units."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-002",
+      "family": "Units",
+      "name": "Gravity configuration",
+      "acceptance": [
+        "Use local constant lunar gravity for the small demo and keep its frame and source visible."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-003",
+      "family": "Bodies",
+      "name": "Mass center and inertia",
+      "acceptance": [
+        "Require finite positive mass and a finite symmetric inertia tensor in a declared center-of-mass frame with explicit units.",
+        "Principal inertia moments must be positive and satisfy physical triangle inequalities within a documented tolerance; positive definiteness alone is insufficient.",
+        "Mass distribution, density assumptions, source geometry and any approximation carry provenance."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-004",
+      "family": "Bodies",
+      "name": "Appearance-independent physical properties",
+      "acceptance": [
+        "Never infer friction, elasticity or density from visual roughness or color."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-005",
+      "family": "Integration",
+      "name": "Fixed simulation step",
+      "acceptance": [
+        "Separate simulation integration, viewport refresh and output frame rate."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-006",
+      "family": "Integration",
+      "name": "Deterministic replay manifest",
+      "acceptance": [
+        "Record seed, solver version, step policy and initial state; define cross-platform tolerances."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-007",
+      "family": "Integration",
+      "name": "Error-controlled substeps",
+      "acceptance": [
+        "Refine fast or stiff events within a bounded compute budget."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-008",
+      "family": "Contact",
+      "name": "Broad and narrow collision phases",
+      "acceptance": [
+        "Use bounded collision representations with documented shape correspondence."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-009",
+      "family": "Contact",
+      "name": "Continuous collision detection",
+      "acceptance": [
+        "Prevent a fast vial or gripper from tunneling through another shape."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-010",
+      "family": "Contact",
+      "name": "Contact friction and restitution",
+      "acceptance": [
+        "Use calibrated or explicitly illustrative contact pairs and solve energy-consistent impulses."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-011",
+      "family": "Contact",
+      "name": "Contact compliance and damping",
+      "acceptance": [
+        "Bound penetration and avoid unstable perfectly rigid capture constraints."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-012",
+      "family": "Contact",
+      "name": "Resting contact stabilization",
+      "acceptance": [
+        "Prevent stored vials and grounded wheels from drifting or gaining energy."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-013",
+      "family": "Articulation",
+      "name": "Revolute and prismatic joint limits",
+      "acceptance": [
+        "Read verified joint frames and limits; reject impossible assembly motions."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-014",
+      "family": "Articulation",
+      "name": "Motor effort and speed limits",
+      "acceptance": [
+        "Bound actuator torque, force, velocity and acceleration."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-015",
+      "family": "Articulation",
+      "name": "Inverse kinematics with reachability",
+      "acceptance": [
+        "Plan arm targets within joint and collision constraints."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-016",
+      "family": "Articulation",
+      "name": "Closed-loop mechanism support",
+      "acceptance": [
+        "Handle linkage constraints without silently breaking loops."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-017",
+      "family": "Articulation",
+      "name": "Hoses cables and clearances",
+      "acceptance": [
+        "Use a declared collision or visual approximation for flexible service lines."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-018",
+      "family": "Handoffs",
+      "name": "Kinematic-to-dynamic release",
+      "acceptance": [
+        "Transfer center-of-mass linear and angular velocity once at the release event, including v_COM = v_grip + omega_grip cross r.",
+        "Removing the grasp constraint introduces no unexplained position, orientation, linear-momentum or angular-momentum discontinuity."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-019",
+      "family": "Handoffs",
+      "name": "Free-flight propagation",
+      "acceptance": [
+        "Use gravity and declared forces; remove grip constraints during flight."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-020",
+      "family": "Handoffs",
+      "name": "Intercept planning",
+      "acceptance": [
+        "Choose a reachable catch pose and time based on relative motion."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-021",
+      "family": "Handoffs",
+      "name": "Contact-mediated capture",
+      "acceptance": [
+        "Require real contact and bounded impulse before establishing the grip."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-022",
+      "family": "Handoffs",
+      "name": "Storage and latch state",
+      "acceptance": [
+        "Confirm cassette contact and retention before releasing the gripper."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-023",
+      "family": "Samples",
+      "name": "Container open and sealed states",
+      "acceptance": [
+        "Track lid closure and reject sealed-sample claims when the geometry is open."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-024",
+      "family": "Samples",
+      "name": "Sample mass bookkeeping",
+      "acceptance": [
+        "Conserve collected, spilled and stored sample mass across state changes."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-025",
+      "family": "Samples",
+      "name": "Granular fill approximation levels",
+      "acceptance": [
+        "Distinguish aggregate mass, explicit particles and calibrated granular mechanics."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-026",
+      "family": "Samples",
+      "name": "Particle contact and cohesion",
+      "acceptance": [
+        "Keep particle size, shape, packing and cohesive assumptions explicit."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-027",
+      "family": "Samples",
+      "name": "Ballistic lunar dust",
+      "acceptance": [
+        "Use vacuum trajectories; additional electrostatic or plume forces require their own model."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-028",
+      "family": "Samples",
+      "name": "Scoop and terrain interaction",
+      "acceptance": [
+        "Define excavation, displacement and reaction forces instead of visual-only contact."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-029",
+      "family": "Verification",
+      "name": "Analytic ballistic references",
+      "acceptance": [
+        "Check apex, time of flight and landing location against closed-form cases."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-030",
+      "family": "Verification",
+      "name": "Energy and momentum diagnostics",
+      "acceptance": [
+        "Track integration drift and account for actuator work and collision losses."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-031",
+      "family": "Verification",
+      "name": "Time-step convergence",
+      "acceptance": [
+        "Repeat representative release and catch events at smaller steps."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-032",
+      "family": "Verification",
+      "name": "Scale and unit invariance",
+      "acceptance": [
+        "Compare equivalent millimeter and meter input fixtures after conversion."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-033",
+      "family": "Production",
+      "name": "Physics bake and cache",
+      "acceptance": [
+        "Store an immutable approved trajectory with source and parameter hashes."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-034",
+      "family": "Production",
+      "name": "Shutter-time interpolation",
+      "acceptance": [
+        "Provide physically coherent transforms at every requested exposure time."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-035",
+      "family": "Production",
+      "name": "Failure recovery",
+      "acceptance": [
+        "Report missed catch, collision or solver failure without teleporting to a success pose."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "SIM-036",
+      "family": "Production",
+      "name": "Non-destructive design integration",
+      "acceptance": [
+        "Keep simulation state and collision proxies separate from CAD design geometry."
+      ],
+      "priority": "P2",
+      "status": "future_animation_module",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    }
+  ]
+}

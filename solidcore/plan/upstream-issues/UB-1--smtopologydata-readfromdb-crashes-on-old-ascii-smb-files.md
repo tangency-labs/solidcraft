@@ -1,0 +1,12 @@
+#### UB-1. `SmTopologyData::ReadFromDB` crashes on old ASCII `.smb` files [PSIRT]
+- **Severity:** Crash / undefined behaviour
+- **Area:** File reading
+- **Location:** `source/SMLib/src/SmBrepData.cpp:4307`, `SmTopologyData::ReadFromDB` (def. `:4261`). Reached from `SmApiReadBrepFromFile` (`source/SM_API/src/SmApiImportExport.cpp:12`) and `SmBrep::ReadFromFile` (`SmBrep.cpp:31982`).
+- **What happens:** Reading `DB version 30` ASCII files writes through a NULL `SmShellData` (the `lDBVersionNumber <= 31` branch). Depending on heap state, the read either segfaults or fails with a non-success status.
+- **Trigger:** `SmApiReadBrepFromFile` on `TestFiles/pt_TestFiles/SmallBox.smb` or `Platform.smb` read as ASCII.
+- **How found:** crash in the C++ reference run (geom.object, geom.tools fixtures).
+- **Confirmed:** yes (intermittent; depends on heap layout).
+- **Severity:** crash/UB.
+- **Cause:** These files are part files (`ReadPartFromFile`, version 32). Read as version 30 the ASCII extractions fail, the uninitialised section count `lCount` reaches `SetSize` as `SM_BIG_ULONG` or more, `SetSize` refuses it and leaves the array `NULL`, and the record loop calls `ReadFromDB` on `NULL + i` (see UB-75).
+- **Rust port:** `topology.brep_data` reads B-reps without this: unreadable counts are bounded by the input left and return `InvalidInput`. Its difftest reads both files correctly as version 32 (fixtures `part_SmallBox_db_v32`, `part_Platform_db_v32`).
+- **Reconfirmed (boolean.merge_p5, PR #161):** `SmallBox.smb` passed to the shared `ReadFromFile` fixture builder segfaulted in `SmTopologyData::ReadFromDB` (GDB backtrace, 2026-10-16). The new unit's FFI validator rejects the part-container header before invoking that B-rep reader; solid-stage fixtures use the actual B-rep stream `box_with_large_fillet.smb`.

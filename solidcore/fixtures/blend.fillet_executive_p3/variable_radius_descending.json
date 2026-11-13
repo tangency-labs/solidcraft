@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "real-box-single-edge-linear-radius-two-to-half",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2142; source/SMLib/src/SmFilletExecutive.cpp:5393 (descending positive linear law over the actual edge parameter interval; complete result geometry and mass)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [10, 20, 30],
+          "radius": 2.0,
+          "radius_end": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [2]
+        }
+      }
+    }
+  ]
+}

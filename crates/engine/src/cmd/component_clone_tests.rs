@@ -1,11 +1,12 @@
 #![allow(clippy::unwrap_used)]
 use crate::Session;
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
     s.execute(cmd, &p).unwrap()
 }
 fn component(s: &mut Session, name: &str) -> u64 {
-    run(s, "component.create", json!({"name":name}))["component"].as_u64().unwrap()
+    run(s, "component.create", json!({"name":name,"grounded":false}))["component"].as_u64().unwrap()
 }
 fn volume(s: &mut Session, id: u64) -> f64 {
     run(s, "component.properties", json!({"component":id}))["total"]["volume_mm3"].as_f64().unwrap()
@@ -73,6 +74,25 @@ fn reassigned_body_is_an_independent_base_feature() {
     run(&mut s, "parameters.change", json!({"name":parameter,"expression":"3 mm"}));
     near(volume(&mut s, part), 12.0);
     near(volume(&mut s, new), 8.0);
+}
+
+#[test]
+fn deleting_an_independent_base_keeps_the_copied_component() {
+    let mut s = Session::default();
+    box2(&mut s);
+    let part = component(&mut s, "Part");
+    run(&mut s, "component.move_bodies", json!({"component":part,"bodies":["Cube"]}));
+    let new = copy(&mut s, part)["component"].as_u64().unwrap();
+    let base = s.doc.features.iter().find(|f| f.component == new && matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. })).unwrap();
+    assert!(!base.inserted && !s.doc.feature_owns_component(base));
+    let (base, others) = (base.id, s.doc.features.iter().filter(|f| f.component == new).count() - 1);
+    let (components, occurrences, joints) = (s.doc.components.clone(), s.doc.occurrences.clone(), s.doc.assembly.joints.clone());
+    let reply = run(&mut s, "timeline.delete", json!({"feature": base.to_string()}));
+    assert_eq!(reply["deleted"], json!([base]));
+    assert_eq!(s.doc.components, components);
+    assert_eq!(s.doc.occurrences, occurrences);
+    assert_eq!(s.doc.assembly.joints, joints);
+    assert_eq!(s.doc.features.iter().filter(|f| f.component == new).count(), others);
 }
 
 #[test]
@@ -222,7 +242,7 @@ fn renamed_pattern_outputs_and_later_body_operands_follow_clone() {
     let new = copied["component"].as_u64().unwrap();
     near(volume(&mut s, new), 24.0);
     let state = s.model.state();
-    let target = state.bodies.iter().find(|b| b.name == "Custom Output (copy)").unwrap();
+    let target = state.bodies.iter().find(|b| b.name == "Custom Output (2)").unwrap();
     near(solidcraft_kernel::measure(&target.body).unwrap().centroid.y, 6.0);
     assert_eq!(s.doc.features.iter().filter(|f| f.component == new && matches!(f.kind, solidcraft_doc::FeatureKind::Move { .. })).count(), 1);
 }
@@ -237,7 +257,7 @@ fn configuration_rows_follow_copied_parameters_material_and_strict_face_lineage(
         body: "Cube".into(),
         origin_feature: source,
         name: format!("F{source}:+z"),
-        point: solidcraft_geom::Vec3::new(1.0, 1.0, 2.0),
+        point: solidcore_record::Vec3::new(1.0, 1.0, 2.0),
         certificate: None,
     };
     run(&mut s, "config.configure", json!({"params":[length],"materials":["Cube"],"component_appearances":[part],"face_appearances":[target]}));
@@ -275,7 +295,7 @@ fn configured_extrude_cap_copy_keeps_independent_semantic_lineage() {
         body: body_name,
         origin_feature: feature,
         name: format!("F{feature}:top"),
-        point: solidcraft_geom::Vec3::new(1.0, 1.0, 2.0),
+        point: solidcore_record::Vec3::new(1.0, 1.0, 2.0),
         certificate: None,
     };
     run(&mut s, "config.configure", json!({"face_appearances":[target]}));
@@ -312,7 +332,7 @@ fn selected_second_occurrence_emboss_copy_remaps_target_and_author_paths_and_reo
     let placement = copied["occurrence"].as_u64().unwrap();
     let emboss = s.doc.features.iter().find(|f| f.component == new && matches!(f.kind, solidcraft_doc::FeatureKind::Emboss { .. })).unwrap();
     let solidcraft_doc::FeatureKind::Emboss { face: Some(face), .. } = &emboss.kind else { panic!("missing selected face") };
-    assert_eq!(face.body, "Sleeve (copy)");
+    assert_eq!(face.body, "Sleeve (2)");
     assert_eq!(face.path, vec![placement]);
     assert_eq!(face.author_path, vec![placement]);
     near(volume(&mut s, new), original_volume);
@@ -339,7 +359,7 @@ fn reassigned_sample_plate_paste_new_preserves_complex_frozen_geometry() {
     run(&mut s, "occurrence.ground", json!({"occurrence":occurrence,"grounded":true}));
     let original_volume = volume(&mut s, part);
     let source_mesh = s.model.state().body(&body).unwrap().mesh();
-    let boss_probe = solidcraft_geom::Vec3::new(40.0, 35.0, 12.0);
+    let boss_probe = solidcore_record::Vec3::new(40.0, 35.0, 12.0);
     let source_boss = source_mesh.contains(boss_probe);
     let copied = run(&mut s, "component.paste_new", json!({"component":part,"translate":[10,10,0]}));
     assert_eq!(s.doc.components.len(), 2);
@@ -354,7 +374,7 @@ fn reassigned_sample_plate_paste_new_preserves_complex_frozen_geometry() {
     for (point, expected) in
         [([5.0, 25.0, 4.0], true), ([12.0, 25.0, 4.0], false), ([68.0, 25.0, 4.0], false), ([40.0, 25.0, 12.0], false), ([0.0, 0.0, 4.0], false)]
     {
-        assert_eq!(mesh.contains(solidcraft_geom::Vec3::new(point[0], point[1], point[2])), expected, "{point:?}");
+        assert_eq!(mesh.contains(solidcore_record::Vec3::new(point[0], point[1], point[2])), expected, "{point:?}");
     }
     assert_eq!(mesh.contains(boss_probe), source_boss);
     assert_eq!(state.body(&body).unwrap().mesh().contains(boss_probe), source_boss);
@@ -413,14 +433,14 @@ fn external_transfer_entry_and_internal_rotated_transfer_clone_once() {
     let copied = copy(&mut s, parent);
     assert_eq!(copied["frozen_bodies"], json!(["Foreign"]));
     let state = s.model.state();
-    let body = state.body("Foreign (copy)").unwrap();
+    let body = state.body("Foreign (2)").unwrap();
     let after = body.mesh().bounds();
     assert!(before.min.dist(after.min) < 1e-6);
     assert!(before.max.dist(after.max) < 1e-6);
     assert!(body.transferred);
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
     reopened.refresh();
-    assert!(reopened.model.state().body("Foreign (copy)").unwrap().mesh().bounds().min.dist(before.min) < 1e-6);
+    assert!(reopened.model.state().body("Foreign (2)").unwrap().mesh().bounds().min.dist(before.min) < 1e-6);
 }
 
 #[test]
@@ -442,7 +462,7 @@ fn suppressed_external_entry_does_not_supply_clone_baseline() {
     run(&mut s, "component.move_bodies", json!({"component":part,"bodies":["Foreign"]}));
     let before = s.model.state().body("Foreign").unwrap().mesh().bounds();
     copy(&mut s, part);
-    let after = s.model.state().body("Foreign (copy)").unwrap().mesh().bounds();
+    let after = s.model.state().body("Foreign (2)").unwrap().mesh().bounds();
     assert!(before.min.dist(after.min) < 1e-6);
     assert!(before.max.dist(after.max) < 1e-6);
 }
@@ -454,32 +474,42 @@ fn transferred_frozen_face_paint_ignores_consumed_legacy_offset() {
     run(&mut s, "appearance.assign", json!({"body":"Foreign","faces":[[1,1,2]],"color":"#00ff00"}));
     s.doc_mut().body_offsets.insert(
         "Foreign".into(),
-        solidcraft_doc::rigid(solidcraft_geom::Vec3::new(7.0, 0.0, 0.0), solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::Z, 0.0),
+        solidcraft_doc::rigid(solidcore_record::Vec3::new(7.0, 0.0, 0.0), solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0),
     );
     s.refresh();
     let part = component(&mut s, "Part");
     run(&mut s, "component.move_bodies", json!({"component":part,"bodies":["Foreign"]}));
     let original = s.doc.appearances.faces.iter().find(|face| face.body == "Foreign").unwrap();
-    let expected = solidcraft_doc::naming::point_on_face(&s.model.state(), original.name.as_ref().unwrap(), original.point).unwrap().0;
+    let expected = solidcraft_doc::naming::point_on_face(&s.model.state(), original.name.as_ref().unwrap(), original.point).unwrap();
     copy(&mut s, part);
-    let paint = s.doc.appearances.faces.iter().find(|face| face.body == "Foreign (copy)").unwrap();
+    let paint = s.doc.appearances.faces.iter().find(|face| face.body == "Foreign (2)").unwrap();
     assert!(paint.point.dist(expected) < 1e-6, "{:?} versus {expected:?}", paint.point);
 }
 
 #[test]
 fn boundary_material_proof_requires_resolvable_stock_and_void() {
-    use solidcraft_geom::Vec3;
-    let a = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap().tessellate(1e-3).unwrap();
-    let b = solidcraft_kernel::box_solid(Vec3::new(1e-5, 0., 0.), Vec3::new(10.00001, 10., 10.)).unwrap().tessellate(1e-3).unwrap();
+    use solidcore_record::Vec3;
+    let a = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap().mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
+    let b = solidcraft_kernel::box_solid(Vec3::new(1e-5, 0., 0.), Vec3::new(10.00001, 10., 10.))
+        .unwrap()
+        .mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3))
+        .unwrap();
     let p = Vec3::new(5e-6, 5., 5.);
     assert_ne!(a.contains(p), b.contains(p));
     assert!((super::mesh_distance(&a, p) - 5e-6).abs() < 1e-12);
     assert!((super::mesh_distance(&b, p) - 5e-6).abs() < 1e-12);
     assert!(super::material_probe_matches(&a, &b, p, 1e-3, 1e-3));
-    let shifted = solidcraft_kernel::box_solid(Vec3::new(1., 0., 0.), Vec3::new(11., 10., 10.)).unwrap().tessellate(1e-3).unwrap();
+    let shifted = solidcraft_kernel::box_solid(Vec3::new(1., 0., 0.), Vec3::new(11., 10., 10.))
+        .unwrap()
+        .mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3))
+        .unwrap();
     assert!(!super::material_probe_matches(&a, &shifted, p, 1e-3, 1e-3));
-    let thin = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 1e-4)).unwrap().tessellate(1e-6).unwrap();
-    let thin_shifted = solidcraft_kernel::box_solid(Vec3::new(0., 0., 1e-4), Vec3::new(10., 10., 2e-4)).unwrap().tessellate(1e-6).unwrap();
+    let thin =
+        solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 1e-4)).unwrap().mesh(&solidcraft_kernel::MeshTolerance::chord(1e-6)).unwrap();
+    let thin_shifted = solidcraft_kernel::box_solid(Vec3::new(0., 0., 1e-4), Vec3::new(10., 10., 2e-4))
+        .unwrap()
+        .mesh(&solidcraft_kernel::MeshTolerance::chord(1e-6))
+        .unwrap();
     // Every resolvable replacement is void: thin ambiguous material is refused.
     assert!(!super::material_probe_matches(&thin, &thin_shifted, Vec3::new(5., 5., 5e-5), 1e-3, 1e-3));
     assert!(!super::material_probe_matches(&a, &b, p, f64::INFINITY, 1e-3));
@@ -487,7 +517,7 @@ fn boundary_material_proof_requires_resolvable_stock_and_void() {
 
 #[test]
 fn frozen_bore_boundary_copy_preserves_stock_void_and_reopen() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let bore = |center: f64| {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length":30,"width":20,"height":10,"body_name":"Drilled"}));
@@ -495,12 +525,13 @@ fn frozen_bore_boundary_copy_preserves_stock_void_and_reopen() {
         s
     };
     let mut s = bore(10.);
-    let source = s.model.state().body("Drilled").unwrap().body.tessellate(1e-3).unwrap();
+    let source = s.model.state().body("Drilled").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
     // The exact R4 wall passes through x6; a chord may end either side of that
     // cardinal angle, so its distance is bounded by the requested sag tolerance.
     assert!(super::mesh_distance(&source, Vec3::new(6., 10., 5.)) <= 1e-3);
-    let shifted = bore(11.).model.state().body("Drilled").unwrap().body.tessellate(1e-3).unwrap();
-    let lost = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(30., 20., 10.)).unwrap().tessellate(1e-3).unwrap();
+    let shifted = bore(11.).model.state().body("Drilled").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
+    let lost =
+        solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(30., 20., 10.)).unwrap().mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
     assert!(!super::material_probe_matches(&source, &shifted, Vec3::new(6.5, 10., 5.), 1e-3, 1e-3));
     assert!(!super::material_probe_matches(&source, &lost, Vec3::new(10., 10., 5.), 1e-3, 1e-3));
     let created = run(&mut s, "component.from_bodies", json!({"bodies":["Drilled"]}));
@@ -509,7 +540,7 @@ fn frozen_bore_boundary_copy_preserves_stock_void_and_reopen() {
     let check = |session: &Session| {
         let state = session.model.state();
         let body = state.bodies.iter().find(|body| session.doc.model_body_component(body) == copied).unwrap();
-        let mesh = body.body.tessellate(1e-3).unwrap();
+        let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
         for (point, stock) in
             [(Vec3::new(5.5, 10., 5.), true), (Vec3::new(6.5, 10., 5.), false), (Vec3::new(10., 10., 5.), false), (Vec3::new(18., 10., 5.), true)]
         {
@@ -522,7 +553,7 @@ fn frozen_bore_boundary_copy_preserves_stock_void_and_reopen() {
 
 #[test]
 fn frozen_r6_bore_copy_uses_current_geometry_despite_mesh_measure_bias() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Drilled"}));
     run(&mut s, "solid.cylinder", json!({"base":[10,10,0],"radius":6,"height":10,"operation":"cut"}));
@@ -536,7 +567,7 @@ fn frozen_r6_bore_copy_uses_current_geometry_despite_mesh_measure_bias() {
         let state = session.model.state();
         let body = state.bodies.iter().find(|b| session.doc.model_body_component(b) == copied).unwrap();
         assert_eq!(solidcraft_kernel::certified_prism_equivalent(&source, &body.body).unwrap(), Some(true));
-        let mesh = body.body.tessellate(1e-3).unwrap();
+        let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
         for (point, material) in
             [(Vec3::new(3., 10., 5.), true), (Vec3::new(5., 10., 5.), false), (Vec3::new(10., 10., 5.), false), (Vec3::new(18., 10., 5.), true)]
         {
@@ -677,8 +708,8 @@ fn paste_new_of_a_design_linked_twice_moves_the_copy_of_each_body() {
     assert_eq!(corners(&s, copied), lifted(), "{:?}", body_names(&s));
     // The material of a body goes to its copy, and no material is kept for a body that does not exist.
     let names = body_names(&s);
-    assert!(s.doc.materials.contains_key("Aa (2) (copy)"));
-    assert_eq!(s.doc.materials.get("Aa (2) (copy)"), s.doc.materials.get("Aa (2)"));
+    assert!(s.doc.materials.contains_key("Aa (2)(2)"));
+    assert_eq!(s.doc.materials.get("Aa (2)(2)"), s.doc.materials.get("Aa (2)"));
     assert!(s.doc.materials.keys().all(|body| names.contains(body)), "{:?} for {names:?}", s.doc.materials.keys().collect::<Vec<_>>());
 }
 
@@ -717,4 +748,52 @@ fn paste_new_of_a_mesh_import_with_one_label_on_all_objects_moves_the_copy_of_ea
     let copied = run(&mut s, "component.paste_new", json!({"component":part}))["component"].as_u64().unwrap();
     assert_eq!(corners(&s, part), lifted());
     assert_eq!(corners(&s, copied), lifted(), "{:?}", body_names(&s));
+}
+
+/// A construction axis through a nested placement's origin datum is copied with its datum path
+/// rebuilt through the copy (the source's ancestors are not in the occurrence map); an axis
+/// whose datum names a placement outside the copied tree refuses the copy - the reference could
+/// not follow, and a dangling one would resolve against whatever then sits at those ids.
+#[test]
+fn cloned_datum_references_follow_the_copy() {
+    let mut s = Session::default();
+    let parent = component(&mut s, "Parent");
+    run(&mut s, "component.create", json!({"name": "Child", "parent": "Parent"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new"}));
+    let parent_occ = s.doc.occurrence_of(parent).unwrap().id;
+    let child_occ = s.doc.occurrences.iter().find(|o| o.parent == parent).unwrap().id;
+    run(&mut s, "component.activate", json!({"component": "Parent"}));
+    run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({"a": format!("o:{parent_occ}/{child_occ}/origin/O"), "b": {"point": [12, 0, 0]}, "name": "DatumAxis"}),
+    );
+    let r = copy(&mut s, parent);
+    let new_comp = r["component"].as_u64().unwrap();
+    let new_parent_occ = r["occurrence"].as_u64().unwrap();
+    let new_child_occ = s.doc.occurrences.iter().find(|o| o.parent == new_comp).unwrap().id;
+    let axis =
+        s.doc.features.iter().find(|f| f.component == new_comp && matches!(f.kind, solidcraft_doc::FeatureKind::ConstructionAxis { .. })).unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionAxis { def } = &axis.kind else { panic!("expected a construction axis: {:?}", axis.kind) };
+    let solidcraft_doc::construct::AxisDef::TwoPoints { a, .. } = def else { panic!("expected a two-points axis: {def:?}") };
+    match a {
+        solidcraft_doc::construct::GeoRef::Datum { datum } => {
+            assert_eq!(datum.path, vec![new_parent_occ, new_child_occ], "the datum names the copy's own nested placement");
+        }
+        other => panic!("expected a datum reference, got {other:?}"),
+    }
+    // An axis whose datum names a placement outside the copied tree refuses the copy. Outside is
+    // made at the root: `component.create` places under the active component (the paste left
+    // Parent active), and a datum key names its placement from the root, so a placement inside
+    // Parent would be unreachable to the resolver and inside the copy's map at once.
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let outside = component(&mut s, "Outside");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new"}));
+    let outside_occ = s.doc.occurrence_of(outside).unwrap().id;
+    run(&mut s, "component.activate", json!({"component": "Parent"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": format!("o:{outside_occ}/origin/O"), "b": {"point": [12, 0, 0]}, "name": "OutsideAxis"}));
+    assert!(
+        s.execute("component.paste_new", &json!({"component": parent, "translate": [40, 0, 0]})).is_err(),
+        "a datum into another tree cannot follow the copy"
+    );
 }

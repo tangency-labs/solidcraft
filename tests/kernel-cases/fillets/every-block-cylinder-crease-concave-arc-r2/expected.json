@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "the concave arc where a block's top meets the taller cylinder it is joined to, rounded r2, the block's sides meeting the wall at creases",
+ "source": "analytic",
+ "method": "block 40x10x15 (x 0..40, y -5..5) joined to the cylinder R10 x 30 on the z axis, the block's end on the cylinder's diameter x = 0 so its sides y = +-5 meet the wall at vertical creases: V0 = 6000 + 3000 pi - 15 * (the disc's part with x > 0, |y| <= 5: 2 (y/2 sqrt(100-y^2) + 50 asin(y/10)) at y=5 = 95.661148) = 13989.8607. The arc (z = 15, rho = 10, |y| <= 5) rounded r2 adds the spandrel between the top plane and the wall (rho in [10,12], z in [15,17], outside the circle about (12,17) of radius 2), revolved about the axis and ended by the block's side planes |y| = 5, which the round runs into: at radius rho it spans 2 asin(5/rho). Added = int over the spandrel of 2 rho asin(5/rho) drho dz (rho = 10 + 2(1-cos th), Gauss-Legendre) = 8.9528. V = 13998.8136.",
+ "body_count": 1,
+ "volume_mm3": 13998.81358766597,
+ "continuity": {
+  "order": "g1"
+ }
+}

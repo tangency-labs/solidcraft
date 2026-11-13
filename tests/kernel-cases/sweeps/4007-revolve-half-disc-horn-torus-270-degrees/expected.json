@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4007"
+ ],
+ "what": "the half disc of radius 14 on the far side of a diameter 14 mm from the axis (the full circle would touch the axis: a horn torus) revolved 270 degrees",
+ "source": "analytic",
+ "method": "Pappus: the half disc (the side away from the axis) has area pi 14^2 / 2 and centroid at 14 + 4 * 14 / (3 pi) from the axis: V = (270/360) 2 pi (14 + 4*14/(3 pi)) pi 14^2 / 2 = 28932.2 (the design measures 28930.7).",
+ "body_count": 1,
+ "volume_mm3": 28932.17609889229
+}

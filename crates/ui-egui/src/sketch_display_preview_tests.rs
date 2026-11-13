@@ -2,16 +2,17 @@ use super::{Tool, polygon_outline, preview_curve};
 use crate::scenario::Harness;
 use crate::viewport::Proj;
 use serde_json::{Value, json};
-use solidcraft_engine::geom::{Plane, Vec2, Vec3};
-use solidcraft_engine::render::{Camera, Mat4};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::Sketch;
+use solidcraft_viewport::{Camera, Mat4};
 
 fn tool(command: &str, points: &[[f64; 2]]) -> Tool {
     let mut tool = Tool::for_command(command).unwrap();
     tool.pts = points.iter().map(|p| (Vec2::new(p[0], p[1]), None)).collect();
     tool
 }
-fn spans(sk: &Sketch) -> Vec<solidcraft_engine::geom::Seg2> {
+fn spans(sk: &Sketch) -> Vec<solidcore_record::Seg2> {
     sk.exact_segs(0).unwrap_or_else(|| sk.segs(0))
 }
 fn projection(scale: f64) -> Proj {
@@ -90,7 +91,7 @@ fn pixel_preview_temporary_curves_match_committed_geometry_and_sampling() {
         let mut h = Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run(command, params).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         let a = spans(&preview);
         let b = spans(committed);
@@ -205,16 +206,17 @@ fn slot_preview_matches_every_committed_side_and_cap() {
             .unwrap_or_else(|| panic!("{command}: no slot outline before the width click"));
         let ctx = egui::Context::default();
         let proj = projection(2.0);
-        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(proj.rect), ..Default::default() }, |ui| {
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(proj.rect), ..Default::default() }, |ui| {
             super::paint_preview_curve(preview.clone(), &Plane::XY, ui.painter(), &proj, egui::Stroke::new(1.5, egui::Color32::WHITE), 0);
         });
+        output.textures_delta.clear();
         assert_eq!(
             output.shapes.iter().filter(|shape| matches!(shape.shape, egui::Shape::Path(_))).count(),
             4,
             "{command}: paint all four outline curves"
         );
         h.app.run(command, params).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(preview.curves.len(), committed.curves.len(), "{command}");
         for index in 0..committed.curves.len() {
@@ -248,7 +250,8 @@ fn typed_small_slot_width_preview_matches_the_final_click() {
         let ctx = egui::Context::default();
         let proj = projection(2_000_000.0);
         let input = || egui::RawInput { screen_rect: Some(proj.rect), ..Default::default() };
-        let output = ctx.run_ui(input(), |ui| super::preview(&h.app, &t, ui.painter(), &proj));
+        let mut output = ctx.run_ui(input(), |ui| super::preview(&h.app, &t, ui.painter(), &proj));
+        output.textures_delta.clear();
         let paths = |output: egui::FullOutput| {
             output
                 .shapes
@@ -260,19 +263,20 @@ fn typed_small_slot_width_preview_matches_the_final_click() {
                 .collect::<Vec<_>>()
         };
         let preview = paths(output);
-        assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
+        assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
 
         let click = crate::sketch_dims::placed(&h.app, &t, t.hover.as_ref().unwrap());
         h.app.tool = Some(t);
         super::place(&mut h.app, click);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-        assert_eq!(committed.curves.len(), 4, "{command}: final click commits the typed width");
-        let solidcraft_engine::geom::Seg2::Arc { radius, .. } = committed.segs(1)[0] else { panic!("missing slot cap") };
+        assert_eq!(committed.curves.len(), 5, "{command}: final click commits the typed width (and the middle's centre line)");
+        let solidcore_record::Seg2::Arc { radius, .. } = committed.segs(1)[0] else { panic!("missing slot cap") };
         assert!((radius - 0.00005).abs() < 1e-10, "{command}: the typed width determines the cap radius");
-        let output = ctx.run_ui(input(), |ui| {
+        let mut output = ctx.run_ui(input(), |ui| {
             super::paint_preview_curve(committed.clone(), &Plane::XY, ui.painter(), &proj, egui::Stroke::new(1.5, egui::Color32::WHITE), 0);
         });
+        output.textures_delta.clear();
         let expected = paths(output);
         assert!(!expected.is_empty(), "{command}: the zoomed cap must be visible");
         assert_eq!(preview.len(), expected.len(), "{command}: preview and committed paths");

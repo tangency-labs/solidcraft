@@ -1,0 +1,132 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib rejected the input (SM_ERR_INVALID_INPUT)",
+      "inputs": [
+        "b5"
+      ],
+      "op": "chamfer_sides",
+      "params": {
+        "distance": 2.0,
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  20.0
+                ],
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  20.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              -8.17868193157977,
+              -5.754056122601739,
+              20.0
+            ]
+          ],
+          "tolerance": 1.529992074132168
+        },
+        "first": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "second": {
+          "angle": 1.580797063408824
+        }
+      }
+    }
+  ],
+  "case": "2893-chamfer-distance-and-angle-past-the-wall-refused",
+  "expected": {
+    "method": "at more than 90 deg from the top the chamfer runs out through the wall instead of down it: no chamfer of the rim between the top and the wall has those sizes, so the right answer is a refusal saying why",
+    "outcome": "refused",
+    "refusal": "angle",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2893"
+    ],
+    "what": "the top rim of a cylinder r10 x 20 chamfered 2 across the top at 90.573 deg from it: refused"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 2 (solid.chamfer): SMLib chamfer: operation: SMLib rejected the input (SM_ERR_INVALID_INPUT)",
+    "kernel_error": "SMLib rejected the input (SM_ERR_INVALID_INPUT)",
+    "ran": false
+  },
+  "records": "2893-chamfer-distance-and-angle-past-the-wall-refused.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "refused, but not because \"angle\": step 2 (solid.chamfer): SMLib chamfer: operation: SMLib rejected the input (SM_ERR_INVALID_INPUT)",
+    "known_failing": "[fail] refused, but not because \"angle\": step 2 (solid.chamfer): SMLib chamfer: operation: SMLib rejected the input (SM_ERR_INVALID_INPUT)",
+    "measured": null,
+    "refused_with": "step 2 (solid.chamfer): SMLib chamfer: operation: SMLib rejected the input (SM_ERR_INVALID_INPUT)",
+    "status": "fail"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2893"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "chamfer_sides"
+  ],
+  "ungraded": [
+    "refusal \"angle\": SolidCraft's wording of the kernel's error"
+  ],
+  "what": "the top rim of a cylinder r10 x 20 chamfered 2 across the top at 90.573 deg from it: refused",
+  "why_not": [],
+  "gallery_note": "at 90.573 degrees from the top the chamfer's line runs out through the wall: it meets the wall only below 90 degrees, pi less the wedge. The kernel refuses with the angle and that bound (BlendRefusal::ChamferAngleTooLarge). The picture is the operand the refusal leaves; the chamfer would run round its top rim."
+}

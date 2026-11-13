@@ -1,0 +1,905 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "specified_unbound",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "reviewed_on": "2026-10-21",
+    "kind": "ui_integration_specification_not_runtime_registration",
+    "readable_specification": "UI_INTEGRATION.md",
+    "runtime_ready": false
+  },
+  "id": "SOLIDCRAFT-RENDER-UI-001",
+  "source_snapshots": {
+    "integration_base": {
+      "repository": "0xlillith/solidcraft",
+      "branch": "lab/render-materials",
+      "commit": "93a2922c5ee272fb605703ae84c05825b4a74607",
+      "version": "0.18.2",
+      "policy": "Fixed integration base; this audit does not merge or rebase upstream."
+    },
+    "design_reference": {
+      "repository": "tangency-labs/solidcraft",
+      "ref": "main",
+      "commit": "728f753b8094e1a54c5cc8b7e453982afa028023",
+      "version": "0.18.4",
+      "policy": "Latest main observed at review time; read-only source reference, not a floating dependency."
+    }
+  },
+  "source_records": [
+    {
+      "id": "UI-SOURCE-001",
+      "path": "crates/ui-egui/src/workspace.rs",
+      "purpose": "Existing RENDER tab, SCENE/IMAGE ribbon groups and registry placement.",
+      "baseline_git_blob": "eab60311b991a9360bf5e1f3bfa7c323b7af5883",
+      "reference_git_blob": "eab60311b991a9360bf5e1f3bfa7c323b7af5883",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/workspace.rs"
+    },
+    {
+      "id": "UI-SOURCE-002",
+      "path": "crates/ui-egui/src/toolbar.rs",
+      "purpose": "Application bar, workspace card, tab painting, promoted commands, pins and overflow.",
+      "baseline_git_blob": "f619169ddb732bc62c1c832b393d120b27102ca3",
+      "reference_git_blob": "013d0a5f5fdc2f2434f55b7c018924f6d457a4c1",
+      "identical_between_revisions": false,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/toolbar.rs"
+    },
+    {
+      "id": "UI-SOURCE-003",
+      "path": "crates/ui-egui/src/shell.rs",
+      "purpose": "Floating/Docked cards, bounds, occlusion and compass clearance.",
+      "baseline_git_blob": "42a8771ec750cf26715a4c804e2fe03091451cbd",
+      "reference_git_blob": "42a8771ec750cf26715a4c804e2fe03091451cbd",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/shell.rs"
+    },
+    {
+      "id": "UI-SOURCE-004",
+      "path": "crates/ui-egui/src/render_workspace.rs",
+      "purpose": "Render lifecycle, per-document ViewState, fixed current inspector and image job controls.",
+      "baseline_git_blob": "f654379d6a7f20341ad824c5f9a825d4ca42aa1e",
+      "reference_git_blob": "f654379d6a7f20341ad824c5f9a825d4ca42aa1e",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/render_workspace.rs"
+    },
+    {
+      "id": "UI-SOURCE-005",
+      "path": "crates/ui-egui/src/theme.rs",
+      "purpose": "Tokens, TabAccent and semantic icon-accent selection.",
+      "baseline_git_blob": "eae1eb4f851bf61d368937f9b9e1936e780373d4",
+      "reference_git_blob": "eae1eb4f851bf61d368937f9b9e1936e780373d4",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/theme.rs"
+    },
+    {
+      "id": "UI-SOURCE-006",
+      "path": "assets/styles/ui/palettes.rs",
+      "purpose": "Current light/dark token values; no new palette is authored here.",
+      "baseline_git_blob": "6cd46af07a853d145a2c23cb7f86e097c4c0a9b9",
+      "reference_git_blob": "6cd46af07a853d145a2c23cb7f86e097c4c0a9b9",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/assets/styles/ui/palettes.rs"
+    },
+    {
+      "id": "UI-SOURCE-007",
+      "path": "docs/ui-kit.md",
+      "purpose": "Implemented shared controls, geometry, accessibility handles and extension rules.",
+      "baseline_git_blob": "a90f6fb132a406191de4e20277c2a06411ae6149",
+      "reference_git_blob": "a90f6fb132a406191de4e20277c2a06411ae6149",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/docs/ui-kit.md"
+    },
+    {
+      "id": "UI-SOURCE-008",
+      "path": "crates/ui-egui/src/ui_kit/mod.rs",
+      "purpose": "Crate-visible shared UI control exports.",
+      "baseline_git_blob": "16efb312697ba05abb474133ae414cbc55fb9813",
+      "reference_git_blob": "16efb312697ba05abb474133ae414cbc55fb9813",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/ui_kit/mod.rs"
+    },
+    {
+      "id": "UI-SOURCE-009",
+      "path": "assets/icons/ui/STYLE_GUIDE.md",
+      "purpose": "Mandatory original icon language and protection rules.",
+      "baseline_git_blob": "33c91585afb898e1722f79b4bbf48af6ec079f81",
+      "reference_git_blob": "33c91585afb898e1722f79b4bbf48af6ec079f81",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/assets/icons/ui/STYLE_GUIDE.md"
+    },
+    {
+      "id": "UI-SOURCE-010",
+      "path": "assets/icons/ui/design/palette.toml",
+      "purpose": "Authoritative source paint roles and theme/accessibility mappings.",
+      "baseline_git_blob": "aaed95b24893f13007c22b7fce9ce6e5b8cf26d5",
+      "reference_git_blob": "aaed95b24893f13007c22b7fce9ce6e5b8cf26d5",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/assets/icons/ui/design/palette.toml"
+    },
+    {
+      "id": "UI-SOURCE-011",
+      "path": "assets/icons/ui/design/references.toml",
+      "purpose": "Approved visual reference vocabulary.",
+      "baseline_git_blob": "73bf1044033924bb8512f4105ce9588fc4fdf08a",
+      "reference_git_blob": "73bf1044033924bb8512f4105ce9588fc4fdf08a",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/assets/icons/ui/design/references.toml"
+    },
+    {
+      "id": "UI-SOURCE-012",
+      "path": "assets/icons/ui/design/review.json",
+      "purpose": "Accepted master and alias records; unchanged by this contribution.",
+      "baseline_git_blob": "eb886ca08b33527db7dc5415a25d281064628756",
+      "reference_git_blob": "eb886ca08b33527db7dc5415a25d281064628756",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/assets/icons/ui/design/review.json"
+    },
+    {
+      "id": "UI-SOURCE-013",
+      "path": "crates/engine/src/cmd/render.rs",
+      "purpose": "Registered render commands and exact icon assignments.",
+      "baseline_git_blob": "e516b985f3f36f06106057d066709d4d300aca27",
+      "reference_git_blob": "e516b985f3f36f06106057d066709d4d300aca27",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "UI-SOURCE-014",
+      "path": "crates/engine/src/cmd/inspect.rs",
+      "purpose": "Registered appearance/material/library command assignments.",
+      "baseline_git_blob": "76394f113490d38d812e52a5342b4bd028ae5ff4",
+      "reference_git_blob": "76394f113490d38d812e52a5342b4bd028ae5ff4",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/engine/src/cmd/inspect.rs"
+    },
+    {
+      "id": "UI-SOURCE-015",
+      "path": "crates/ui-egui/src/dialogs_appearance.rs",
+      "purpose": "Existing appearance editor, target selection and assignment behavior.",
+      "baseline_git_blob": "5560a9d8d5dfcb5bd6953ea13a3f9211cff2f71d",
+      "reference_git_blob": "5560a9d8d5dfcb5bd6953ea13a3f9211cff2f71d",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/dialogs_appearance.rs"
+    },
+    {
+      "id": "UI-SOURCE-016",
+      "path": "crates/ui-egui/src/dialogs_library.rs",
+      "purpose": "LocalLibrary consumer inside the existing Appearance panel.",
+      "baseline_git_blob": "6633560ddb7129d2d79d679f097bf2632f8e5b57",
+      "reference_git_blob": "6633560ddb7129d2d79d679f097bf2632f8e5b57",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/dialogs_library.rs"
+    },
+    {
+      "id": "UI-SOURCE-017",
+      "path": "crates/ui-egui/src/selection.rs",
+      "purpose": "SelInput and shared selection identity.",
+      "baseline_git_blob": "7cf35660d44d758b52a37a9280cd519e2453cc35",
+      "reference_git_blob": "7cf35660d44d758b52a37a9280cd519e2453cc35",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/selection.rs"
+    },
+    {
+      "id": "UI-SOURCE-018",
+      "path": "crates/ui-egui/src/navigation.rs",
+      "purpose": "Shared camera controller; Render currently permits orbit and disables picking.",
+      "baseline_git_blob": "f56117213161acb901e29ef4e34e6998c076c9a4",
+      "reference_git_blob": "08ce207cace475032eddca1c8d55698be251747e",
+      "identical_between_revisions": false,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/navigation.rs"
+    },
+    {
+      "id": "UI-SOURCE-019",
+      "path": "docs/design/ux-redesign/README.md",
+      "purpose": "Historical picture proposal; secondary context, not current runtime authority.",
+      "baseline_git_blob": "a32a7aa288eea82acfd6c812238c650333368dcc",
+      "reference_git_blob": "a32a7aa288eea82acfd6c812238c650333368dcc",
+      "identical_between_revisions": true,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/docs/design/ux-redesign/README.md"
+    },
+    {
+      "id": "UI-SOURCE-020",
+      "path": "crates/ui-egui/src/documents.rs",
+      "purpose": "Per-document view and editor ownership; reconcile changes on the integration line.",
+      "baseline_git_blob": "5e80472c4155fbee489cd74b13971f94d53f0060",
+      "reference_git_blob": "06f1ca299190eb67f875041fbaf70449f2db6a07",
+      "identical_between_revisions": false,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/documents.rs"
+    },
+    {
+      "id": "UI-SOURCE-021",
+      "path": "crates/ui-egui/src/lib.rs",
+      "purpose": "Actual shell composition, model Browser and hidden modeling timeline while in Render.",
+      "baseline_git_blob": "b8c657e56d49c47c2d0279f5bce81a094a9209d5",
+      "reference_git_blob": "d2085b7dc10f61d1681a5ec56091a756061a0cdf",
+      "identical_between_revisions": false,
+      "reference_url": "https://github.com/tangency-labs/solidcraft/blob/728f753b8094e1a54c5cc8b7e453982afa028023/crates/ui-egui/src/lib.rs"
+    }
+  ],
+  "design_authority": [
+    "Use the implemented shell, UI kit, current Tokens and accepted SVG masters.",
+    "Historical redesign PNGs are proposal context, not evidence of current application behavior.",
+    "Reconcile these source pins with the actual render implementation before wiring new controls.",
+    "No commercial CAD extraction, external icon library, GPL implementation or replacement visual system is required."
+  ],
+  "workspace": {
+    "name": "Render",
+    "workspace_icon_id": "ws_render",
+    "visible_tab_ids_at_baseline": [
+      "RENDER"
+    ],
+    "existing_ribbon_groups": [
+      {
+        "id": "SCENE",
+        "registered_promoted_commands": [
+          "render.scene"
+        ]
+      },
+      {
+        "id": "IMAGE",
+        "registered_promoted_commands": [
+          "render.start"
+        ]
+      }
+    ],
+    "group_is_tab": false,
+    "layout_modes": [
+      "Floating",
+      "Docked"
+    ],
+    "application_bar": "Retain existing document tabs, Save, Undo/Redo and shared global actions.",
+    "entry_exit_owner": "render_workspace::enter",
+    "current_inspector": {
+      "owner": "render_workspace::panel",
+      "container": "egui::Panel::right",
+      "id": "sc_render_settings",
+      "width_logical_points": 285,
+      "uses_ui_kit_controls": true
+    },
+    "planned_inspector": {
+      "status": "proposed",
+      "container": "ui_kit::Panel",
+      "frame": "feature_frame",
+      "rule": "Use shared bounded layout, disclosure, scrolling, focus and action ownership."
+    },
+    "browser_policy": "Preserve the model Browser, selection and visibility; a local Model/Library view is an additional proposed presentation of shared ownership.",
+    "model_history_at_baseline": "Hidden while Render is active; restore the existing Design history on return.",
+    "navigation": {
+      "handler": "navigation::handle",
+      "capabilities": "NavCaps::RENDER",
+      "orbit_at_baseline": true,
+      "pick_at_baseline": false
+    },
+    "occlusion_owner": "shell::covered_rects"
+  },
+  "planned_ribbon_groups": [
+    {
+      "id": "SCENE",
+      "label": "Scene",
+      "status": "existing_group_with_future_actions",
+      "promoted_intents": [
+        "Scene presets",
+        "Saved shot"
+      ],
+      "boundaries": "Keep render.scene as metadata inspection; preset apply is a separate proposed action."
+    },
+    {
+      "id": "APPEARANCE",
+      "label": "Appearance",
+      "status": "proposed_group_extension",
+      "promoted_intents": [
+        "Assign appearance",
+        "Library"
+      ],
+      "boundaries": "Reuse current appearance commands; disclose only supported scopes and optics."
+    },
+    {
+      "id": "LIGHTING",
+      "label": "Lighting",
+      "status": "proposed_group_extension",
+      "promoted_intents": [
+        "Studio rig"
+      ],
+      "boundaries": "Requires owned-emitter and rig commands; no invented existing light icon ID."
+    },
+    {
+      "id": "ENVIRONMENT",
+      "label": "Environment",
+      "status": "proposed_group_extension",
+      "promoted_intents": [
+        "Environment"
+      ],
+      "boundaries": "Requires bound environment resources; analysis environment_map is not HDRI import."
+    },
+    {
+      "id": "CAMERA",
+      "label": "Camera",
+      "status": "proposed_group_extension",
+      "promoted_intents": [
+        "Frame subject",
+        "Saved camera"
+      ],
+      "boundaries": "Preserve shared navigation and supported camera commands; gate depth of field."
+    },
+    {
+      "id": "IMAGE",
+      "label": "Image",
+      "status": "existing_group_with_future_actions",
+      "promoted_intents": [
+        "Render image",
+        "Quality and output"
+      ],
+      "boundaries": "Reuse render.preflight/start/status/cancel/export and existing ribbon fitting."
+    }
+  ],
+  "library": {
+    "status": "proposed_shared_library_extension",
+    "existing_consumer": "dialogs_library::LocalLibrary",
+    "existing_consumer_path": "crates/ui-egui/src/dialogs_library.rs",
+    "category_labels": [
+      "Scenes",
+      "Materials",
+      "Lighting",
+      "Environments"
+    ],
+    "category_is_workspace": false,
+    "selector_component": "ui_kit::segmented",
+    "narrow_selector": "Use normal shared dropdown fallback, not clipped icon-only categories.",
+    "recommended_collections": [
+      "Product",
+      "Automotive",
+      "Electronics",
+      "Making",
+      "Aerospace",
+      "SELENE"
+    ],
+    "secondary_collections": [
+      "Recent",
+      "Favorites"
+    ],
+    "persistent_context": [
+      "query",
+      "category",
+      "filters",
+      "sort",
+      "selection",
+      "scroll_position"
+    ],
+    "filters": [
+      "domain",
+      "surface family",
+      "process",
+      "physical scale",
+      "capability",
+      "availability",
+      "provenance",
+      "memory cost"
+    ],
+    "preview_policy": "Declare calibration rig, camera, exposure and shape; separately label scene preview and approximation.",
+    "concept_policy": "Concept records remain identifiable and are never counted as renderable resources.",
+    "large_catalog_policy": "Virtualized rows/cards and bounded lazy thumbnail loading preserve focus, selection and viewport responsiveness.",
+    "apply_policy": "Selection inspects. Apply commits through the engine. Temporary preview does not dirty the document.",
+    "render_picking_policy": "Current Render picking is disabled. Add reviewed identity/hit testing before canvas drag/drop or light handles ship."
+  },
+  "disclosure": {
+    "default": "Quick",
+    "levels": [
+      "Quick",
+      "Detailed",
+      "Expert"
+    ],
+    "global_mode_switch": false,
+    "quick_adjustment_budget": 6,
+    "selectors_outside_adjustment_budget": [
+      "scene",
+      "quality"
+    ],
+    "detailed": "Open a named inspector section.",
+    "expert": "Expand Advanced within the owning section.",
+    "component": "ui_kit::section_count",
+    "collapsed_feedback": [
+      "override count",
+      "required warning"
+    ],
+    "preserved_on_disclosure": [
+      "scene",
+      "quality",
+      "executor",
+      "camera",
+      "draft",
+      "locks"
+    ]
+  },
+  "independent_choices": {
+    "quality": "Named resource/output budget; exact Q IDs from quality-presets.json.",
+    "canvas": "Local Viewport/Result navigation, only after a result surface is implemented.",
+    "detail": "Inspector disclosure depth; not a rendering mode or saved scene parameter.",
+    "physical_policy": "Scene-specific Physical lunar or Editorial assumptions, recorded in the request."
+  },
+  "quality_recommendations": [
+    {
+      "context": "product_still",
+      "preset_ids": [
+        "Q-001",
+        "Q-002",
+        "Q-003"
+      ]
+    },
+    {
+      "context": "lunar_hero",
+      "preset_ids": [
+        "Q-001",
+        "Q-003",
+        "Q-006"
+      ]
+    },
+    {
+      "context": "lunar_macro",
+      "preset_ids": [
+        "Q-001",
+        "Q-004",
+        "Q-007"
+      ]
+    }
+  ],
+  "quality_policy": "Three recommendations plus the full supported list. Exact names come from the catalog. Editing marks Custom; unsupported optics or executors are never silently replaced.",
+  "command_reuse": [
+    {
+      "id": "render.scene",
+      "icon_id": "render_scene",
+      "status": "registered_at_baseline",
+      "boundary": "Read-only product metadata; does not select or apply a scene preset.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "render.preflight",
+      "icon_id": "inspect",
+      "status": "registered_at_baseline",
+      "boundary": "Validate the same request later used by render.start; new fields require a shared contract extension.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "render.start",
+      "icon_id": "render_image",
+      "status": "registered_at_baseline",
+      "boundary": "Start the supported image request and capture immutable scene ownership.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "render.status",
+      "icon_id": "list",
+      "status": "registered_at_baseline",
+      "boundary": "Read the session-owned job state; do not infer convergence from elapsed time.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "render.cancel",
+      "icon_id": "delete",
+      "status": "registered_at_baseline",
+      "boundary": "Cancel the owned render job; display an explicit Cancel Render label.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "render.export",
+      "icon_id": "export",
+      "status": "registered_at_baseline",
+      "boundary": "Export the selected completed job with current path/overwrite semantics.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "render.backends",
+      "icon_id": "list",
+      "status": "registered_at_baseline",
+      "boundary": "Inspect installed capabilities and supported profiles.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "render.settings.get",
+      "icon_id": "settings",
+      "status": "registered_at_baseline",
+      "boundary": "Read the current supported named setup.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "render.settings.set",
+      "icon_id": "settings",
+      "status": "registered_at_baseline",
+      "boundary": "Save current-contract fields; future catalog fields are not accepted implicitly.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "render.settings.apply",
+      "icon_id": "camera",
+      "status": "registered_at_baseline",
+      "boundary": "Apply the existing saved camera as view state, not a complete scene preset.",
+      "registry_path": "crates/engine/src/cmd/render.rs"
+    },
+    {
+      "id": "appearance.assign",
+      "icon_id": "appearance",
+      "status": "registered_at_baseline",
+      "boundary": "Use current target/opaque parameters; new optics or occurrence scopes require reviewed support.",
+      "registry_path": "crates/engine/src/cmd/inspect.rs"
+    },
+    {
+      "id": "material.assign",
+      "icon_id": "material",
+      "status": "registered_at_baseline",
+      "boundary": "Engineering material ownership stays separate from appearance and dynamics.",
+      "registry_path": "crates/engine/src/cmd/inspect.rs"
+    },
+    {
+      "id": "appearance.library",
+      "icon_id": "library",
+      "status": "registered_at_baseline",
+      "boundary": "Preserve the existing appearance-library entry point.",
+      "registry_path": "crates/engine/src/cmd/inspect.rs"
+    }
+  ],
+  "proposed_commands": [
+    {
+      "candidate_id": "render.preset.resolve",
+      "status": "unregistered_proposal",
+      "intent": "Read-only resource, unit, capability, lock and scope resolution."
+    },
+    {
+      "candidate_id": "render.preset.apply",
+      "status": "unregistered_proposal",
+      "intent": "Apply one resolved scene transaction with one undo step or no mutation."
+    },
+    {
+      "candidate_id": "render.shot.duplicate",
+      "status": "unregistered_proposal",
+      "intent": "Duplicate shot references and independent overrides through the engine."
+    }
+  ],
+  "theme": {
+    "authority": "theme::Tokens",
+    "tab_accent_owner": "TabAccent::for_tab",
+    "render_tab_tokens": [
+      "render_fill",
+      "render_ink",
+      "render_soft"
+    ],
+    "tab_text_owner": "TabAccent::ink",
+    "render_icon_accent_override_at_baseline": null,
+    "global_semantics_preserved": true,
+    "control_tokens": [
+      "control_height",
+      "control_radius",
+      "control_fill",
+      "control_border",
+      "form_card_width",
+      "form_label_width",
+      "form_header_height",
+      "form_footer_height"
+    ],
+    "surface_tokens": [
+      "dialog_body",
+      "dialog_footer",
+      "dialog_border",
+      "dialog_rule",
+      "panel",
+      "toolbar"
+    ],
+    "text_status_tokens": [
+      "font_label",
+      "font_body",
+      "font_heading",
+      "font_small",
+      "form_ink",
+      "form_dim",
+      "form_primary",
+      "form_error",
+      "form_error_fill",
+      "form_success",
+      "selected_bg",
+      "selected_ink"
+    ],
+    "dimension_policy": "Consume current logical-unit tokens, shared spacing and frame metrics; do not derive production constants from screenshots.",
+    "selected_tab_background_owner": "TabAccent::soft",
+    "contextual_solid_tab_text_owner": "TabAccent::on_fill"
+  },
+  "component_reuse": [
+    {
+      "surface": "Inspector and manager cards",
+      "existing_exports": [
+        "Panel",
+        "Window",
+        "WindowPage",
+        "FeatureOptions"
+      ],
+      "rule": "Future migration of the current fixed right-panel container."
+    },
+    {
+      "surface": "Aligned parameter forms",
+      "existing_exports": [
+        "scope",
+        "row",
+        "expr_row",
+        "choice_row",
+        "selection_field"
+      ],
+      "rule": "Retain shared sizing, units and explicit target labels."
+    },
+    {
+      "surface": "Disclosure",
+      "existing_exports": [
+        "section",
+        "section_count",
+        "divider"
+      ],
+      "rule": "Quick default; Detailed and Expert are deeper sections of the same state."
+    },
+    {
+      "surface": "Resource selection",
+      "existing_exports": [
+        "search_field",
+        "searchable_dropdown",
+        "SearchOption",
+        "list_picker",
+        "dropdown_menu"
+      ],
+      "rule": "Caller owns ranking and engine-backed application."
+    },
+    {
+      "surface": "Local category and canvas navigation",
+      "existing_exports": [
+        "segmented",
+        "Segments"
+      ],
+      "rule": "Text choices; permit normal dropdown fallback when width is insufficient."
+    },
+    {
+      "surface": "Numeric and color controls",
+      "existing_exports": [
+        "number_field",
+        "length_field",
+        "angle_field",
+        "scalar_field",
+        "slider",
+        "Slider",
+        "color_field"
+      ],
+      "rule": "Typed input and unit labels; no private slider or color picker."
+    },
+    {
+      "surface": "Existing color samples",
+      "existing_exports": [
+        "color_swatch",
+        "swatch_grid",
+        "color_thumbnail"
+      ],
+      "rule": "Color-only swatches do not imply image-backed 3D thumbnails; extend the kit for those."
+    },
+    {
+      "surface": "Actions and progress",
+      "existing_exports": [
+        "button",
+        "Button",
+        "primary_button",
+        "footer",
+        "Footer",
+        "progress",
+        "ComputeStatus"
+      ],
+      "rule": "Use existing command routes, keyboard ownership and pinned actions."
+    },
+    {
+      "surface": "Tables and command discovery",
+      "existing_exports": [
+        "table",
+        "Column",
+        "CommandSearch",
+        "MenuItem"
+      ],
+      "rule": "Keep automation handles and accessible labels; MenuItem::search_row is the search row variant."
+    }
+  ],
+  "icon_policy": {
+    "new_artwork_in_this_contribution": false,
+    "existing_acceptance_records_unchanged": true,
+    "reviewed_existing_ids": [
+      "ws_render",
+      "appearance",
+      "render_image"
+    ],
+    "review_sizes_px": [
+      64,
+      24,
+      16
+    ],
+    "review_themes": [
+      "light",
+      "dark"
+    ],
+    "review_scope": "Existing artwork preview through the repository palette; not application UI evidence.",
+    "unavailable_literal_ids_at_reference": [
+      "sun",
+      "light",
+      "lighting",
+      "environment",
+      "scene",
+      "texture",
+      "quality",
+      "floor",
+      "stop"
+    ],
+    "environment_map_boundary": "Existing analysis icon/command; no current HDRI loading behavior is implied.",
+    "future_assignment": "Use an existing semantic match or reviewed alias/new master under the binding style guide; never private recoloring or acceptance-hash changes."
+  },
+  "state_and_safety": {
+    "document_owned": [
+      "draft setup",
+      "selected shot",
+      "applied overrides",
+      "source binding",
+      "job owner",
+      "selected completed result"
+    ],
+    "ui_context_owned": [
+      "library query and scroll",
+      "disclosure",
+      "focus",
+      "local canvas selection"
+    ],
+    "preview_dirty": false,
+    "draft_conflict_choices": [
+      "Apply",
+      "Discard",
+      "Keep editing"
+    ],
+    "preset_apply": "Resolve complete dependencies and locked scopes before an atomic document transaction.",
+    "existing_parameter_limits_preserved": true,
+    "request_policy": "Render checks and starts the same immutable request. A stale request is re-resolved; no hidden executor or feature fallback.",
+    "result_policy": "Captured job identity owns image and export; later scene edits mark the result stale without erasing it.",
+    "engineering_and_simulation_preserved": true
+  },
+  "selene": {
+    "flow": "../../assets/render/selene/ui/demo-flow.json",
+    "source_lock": "../../assets/render/selene/source-lock.json",
+    "source_status_at_review": "pinned_native",
+    "source_reviewed_on": "2026-10-22",
+    "native_package": "../../assets/render/selene/README.md",
+    "native_source": "../../assets/render/selene/source/SELENE-showcase.solidcraft",
+    "native_work": "../../assets/render/selene/MECHANISMS.md",
+    "source_status_scope": "The owner-supplied improved native source is pinned and reconstruction commands are available. Final derivative validation is separate; this does not make the catalog or UI specification runtime-ready.",
+    "physical_scene_default": "lunar_physical",
+    "primary_adjustments": [
+      "Sun azimuth",
+      "Sun elevation",
+      "exposure",
+      "camera framing",
+      "terrain seed",
+      "dust coverage when supported"
+    ],
+    "lunar_invariants": [
+      "one solar-source owner",
+      "no atmospheric scattering",
+      "no automatic sky or studio fill",
+      "Earth/stars off until reviewed",
+      "engineering and simulation properties preserved"
+    ],
+    "swatch_action": "Open prepared opaque swatches in a new isolated document/process; never execute file.new over the active source assembly.",
+    "swatches_executed_in_this_contribution": false,
+    "animation_boundary": "Reuse approved bakes when that module exists; physics edits invalidate a bake and quality edits preserve it."
+  },
+  "acceptance": [
+    {
+      "id": "UI-AC-001",
+      "area": "Shell continuity",
+      "requirement": "Render uses the existing workspace card, one RENDER tab, shared menus/pins/overflow and shared navigation in both layouts."
+    },
+    {
+      "id": "UI-AC-002",
+      "area": "Visual consistency",
+      "requirement": "Actual app captures use Tokens and approved SVGs in light, dark, custom and color-vision modes with readable labels/focus."
+    },
+    {
+      "id": "UI-AC-003",
+      "area": "Responsive layout",
+      "requirement": "At the declared viewports and scales, search, active field, Render/Cancel and close remain reachable without click-through."
+    },
+    {
+      "id": "UI-AC-004",
+      "area": "Few-click start",
+      "requirement": "A first-time user reaches a supported default still in the target three to five deliberate actions without undocumented expert repair."
+    },
+    {
+      "id": "UI-AC-005",
+      "area": "Full-library discovery",
+      "requirement": "Filtering and returning to a category preserve query, selection and scroll; concepts and unsupported resources are distinguishable."
+    },
+    {
+      "id": "UI-AC-006",
+      "area": "Scoped appearance",
+      "requirement": "A supported target scope is explicit, shared-instance effects are explained and appearance changes preserve engineering/physics values."
+    },
+    {
+      "id": "UI-AC-007",
+      "area": "Draft and locks",
+      "requirement": "Disclosure preserves drafts; preset conflicts resolve before an atomic apply; undo and cancel restore the correct state."
+    },
+    {
+      "id": "UI-AC-008",
+      "area": "Request and result",
+      "requirement": "Check and Start agree, results belong to their captured document/job, stale output is labeled, and export matches the selected result."
+    },
+    {
+      "id": "UI-AC-009",
+      "area": "Accessibility",
+      "requirement": "Keyboard and assistive-technology operation cover categories, search, numeric edits, scope, Apply, Render and Cancel without hover-only information."
+    },
+    {
+      "id": "UI-AC-010",
+      "area": "SELENE truthfulness",
+      "requirement": "Missing improved source and unsupported optics block affected shots; physical lunar scenes never add hidden fill or a historical-source substitute."
+    },
+    {
+      "id": "UI-AC-011",
+      "area": "Document isolation",
+      "requirement": "Switching documents preserves the right drafts, cameras and jobs; swatches open in a fresh document and preserve the source assembly."
+    },
+    {
+      "id": "UI-AC-012",
+      "area": "Runtime evidence",
+      "requirement": "Implementation passes relevant repository gates and actual application interaction/visual review; planning JSON or icon previews cannot substitute."
+    }
+  ],
+  "review_matrix": {
+    "logical_viewports": [
+      [
+        1024,
+        768
+      ],
+      [
+        1440,
+        900
+      ],
+      [
+        1920,
+        1080
+      ]
+    ],
+    "scale_percent_where_supported": [
+      100,
+      150,
+      200
+    ],
+    "layouts": [
+      "Floating",
+      "Docked"
+    ],
+    "themes": [
+      "light",
+      "dark",
+      "custom"
+    ],
+    "color_vision_modes": [
+      "off",
+      "protan",
+      "deutan",
+      "tritan"
+    ],
+    "interaction": [
+      "pointer",
+      "keyboard only",
+      "assistive technology",
+      "reduced motion",
+      "multiple documents",
+      "missing resource",
+      "unsupported optics"
+    ],
+    "subjects": [
+      "machined bracket",
+      "painted housing",
+      "PCB",
+      "FDM part",
+      "wooden jig",
+      "LED optic",
+      "SELENE"
+    ],
+    "status": "acceptance_targets_not_executed_runtime_results"
+  }
+}

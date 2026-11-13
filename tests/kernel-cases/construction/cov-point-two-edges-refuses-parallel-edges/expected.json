@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "two parallel box edges",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the edges y 0, z 0 and y 30, z 0 both run along X: they never meet nor have one closest point: refused",
+ "outcome": "refused",
+ "refusal": "the edges are parallel"
+}

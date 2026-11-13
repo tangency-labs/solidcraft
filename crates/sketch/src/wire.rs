@@ -3,10 +3,11 @@
 //! They are reference geometry: drawn and usable as paths, not part of profiles or the solver.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::link::{Link, LinkGeom, LinkKind, LinkSource};
-use crate::model::{Result, Sketch, SketchError, in_range3};
+use crate::model::{Result, Sketch, SketchError, in_range3, radius_in_range};
 
 /// Most points one wire may have.
 pub const MAX_WIRE_POINTS: usize = 100_000;
@@ -33,6 +34,18 @@ impl WireSpace {
     }
 }
 
+/// An exact circular arc drawn in 3D space: centre, unit normal of its plane, radius, and the
+/// arc from `start` to `end` counter-clockwise about `normal` (through the wire's middle fit
+/// point). All coordinates are in the wire's `space`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WireArc {
+    pub center: Vec3,
+    pub normal: Vec3,
+    pub radius: f64,
+    pub start: Vec3,
+    pub end: Vec3,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Wire {
     pub id: String,
@@ -46,53 +59,152 @@ pub struct Wire {
     /// line; more: a smooth spline). `pts` is made from them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fit: Vec<Vec3>,
+    /// Drawn in a 3D sketch as an exact circular arc: the analytic curve, whose `fit` points
+    /// are its three defining points (start, through, end) and whose `pts` are its samples.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc: Option<WireArc>,
+    /// A linked curve's exact geometry where its source has one (an included edge or sketch
+    /// curve, an intersection curve): record curves end to end along `pts`, in `space`
+    /// coordinates. Empty for a curve known only as its points (projected onto a face, iso
+    /// curves). Set when the link is resolved, with `pts`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exact: Vec<WireCurve>,
+}
+
+/// One exact piece of a 3D sketch curve ([`Wire::exact`]): a record curve on its interval.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WireCurve {
+    pub curve: solidcore_record::brep::Curve,
+    pub interval: [f64; 2],
+}
+
+impl WireCurve {
+    /// The piece carried by the rigid motion `point` of points and `vector` of directions (a
+    /// placement). `None` for an intersection curve, whose surfaces are not carried here.
+    pub fn mapped(&self, point: &impl Fn(Vec3) -> Vec3, vector: &impl Fn(Vec3) -> Vec3) -> Option<WireCurve> {
+        use solidcore_record::brep::{Curve, Frame};
+        let a = |q: [f64; 3]| Vec3::new(q[0], q[1], q[2]);
+        let b = |v: Vec3| [v.x, v.y, v.z];
+        let p = |q: [f64; 3]| b(point(a(q)));
+        let frame = |f: &Frame| Frame { origin: p(f.origin), x_axis: b(vector(a(f.x_axis))), y_axis: b(vector(a(f.y_axis))) };
+        let curve = match &self.curve {
+            Curve::Line { start, end } => Curve::Line { start: p(*start), end: p(*end) },
+            Curve::Circle { frame: f, radius } => Curve::Circle { frame: frame(f), radius: *radius },
+            Curve::Ellipse { frame: f, radii } => Curve::Ellipse { frame: frame(f), radii: *radii },
+            Curve::Polyline { points } => Curve::Polyline { points: points.iter().map(|q| p(*q)).collect() },
+            Curve::Spline { knots, points } => Curve::Spline { knots: knots.clone(), points: points.iter().map(|q| p(*q)).collect() },
+            Curve::RationalSpline { knots, homogeneous } => Curve::RationalSpline {
+                knots: knots.clone(),
+                homogeneous: homogeneous
+                    .iter()
+                    .map(|h| {
+                        let q = point(a([h[0], h[1], h[2]]) * (1.0 / h[3]));
+                        [q.x * h[3], q.y * h[3], q.z * h[3], h[3]]
+                    })
+                    .collect(),
+            },
+            Curve::SurfaceIntersection { .. } => return None,
+        };
+        Some(WireCurve { curve, interval: self.interval })
+    }
+}
+
+impl Wire {
+    /// The wire carried by the rigid motion `point` of points and `vector` of directions: its
+    /// points, fit points and exact curves (dropped where one cannot be carried, leaving the
+    /// points).
+    pub fn map(&mut self, point: impl Fn(Vec3) -> Vec3, vector: impl Fn(Vec3) -> Vec3) {
+        for q in self.pts.iter_mut().chain(&mut self.fit) {
+            *q = point(*q);
+        }
+        if let Some(arc) = &mut self.arc {
+            let normal = vector(arc.normal);
+            arc.center = point(arc.center);
+            arc.start = point(arc.start);
+            arc.end = point(arc.end);
+            arc.normal = normal.normalized().unwrap_or(arc.normal);
+            arc.radius = arc.center.dist(arc.start);
+        }
+        self.exact = self.exact.iter().map(|c| c.mapped(&point, &vector)).collect::<Option<_>>().unwrap_or_default();
+    }
 }
 
 /// Most fit points of a drawn 3D curve.
 pub const MAX_FIT_POINTS: usize = 500;
 
-/// Samples per span of a drawn 3D spline.
-const SPAN_SAMPLES: usize = 24;
-
-/// The polyline of a drawn 3D curve through `fit`: the point itself, the line, or a centripetal
-/// Catmull–Rom spline through the points (smooth, no overshoot loops).
+/// The polyline of a drawn 3D curve through `fit`: the point itself, the line, or the centripetal
+/// Catmull–Rom spline through the points (smooth, no overshoot loops), sampled
+/// ([`solidcraft_geom::catmull_rom`] has the curve itself, exactly).
 pub fn fit_polyline(fit: &[Vec3]) -> Vec<Vec3> {
-    if fit.len() <= 2 {
-        return fit.to_vec();
+    solidcraft_geom::catmull_rom::samples(fit)
+}
+
+/// Chord-height tolerance (mm) when sampling a drawn 3D arc into `pts`.
+const ARC_TOL: f64 = 1e-3;
+
+/// The circular arc through `start`, `through` and `end` — the three points uniquely define
+/// it — running counter-clockwise about the plane normal from `start` through `through` to
+/// `end`. `None` when the points coincide, are collinear (no circle through them) or the
+/// circle is out of range.
+pub fn arc_from_3_points(start: Vec3, through: Vec3, end: Vec3) -> Option<WireArc> {
+    let (b, c) = (through - start, end - start);
+    if b.len2() < 1e-18 || c.len2() < 1e-18 {
+        return None;
     }
-    let n = fit.len();
-    // A curve that ends where it starts is smooth through that point (its neighbours wrap).
-    let closed = n > 3 && fit[0].dist(fit[n - 1]) < 1e-9;
-    let at = |i: isize| -> Vec3 {
-        match usize::try_from(i) {
-            Ok(i) if i < n => fit[i],
-            Ok(_) if closed => fit[1],
-            Err(_) if closed => fit[n - 2],
-            // Mirrored end tangents.
-            Ok(_) => fit[n - 1] * 2.0 - fit[n - 2],
-            Err(_) => fit[0] * 2.0 - fit[1],
-        }
-    };
-    let mut out = vec![fit[0]];
-    for k in 0..n - 1 {
-        let k = k as isize;
-        let (p0, p1, p2, p3) = (at(k - 1), at(k), at(k + 1), at(k + 2));
-        let tj = |a: Vec3, b: Vec3| a.dist(b).sqrt().max(1e-9);
-        let t0 = 0.0;
-        let t1 = t0 + tj(p0, p1);
-        let t2 = t1 + tj(p1, p2);
-        let t3 = t2 + tj(p2, p3);
-        for s in 1..=SPAN_SAMPLES {
-            let t = t1 + (t2 - t1) * s as f64 / SPAN_SAMPLES as f64;
-            let a1 = p0 * ((t1 - t) / (t1 - t0)) + p1 * ((t - t0) / (t1 - t0));
-            let a2 = p1 * ((t2 - t) / (t2 - t1)) + p2 * ((t - t1) / (t2 - t1));
-            let a3 = p2 * ((t3 - t) / (t3 - t2)) + p3 * ((t - t2) / (t3 - t2));
-            let b1 = a1 * ((t2 - t) / (t2 - t0)) + a2 * ((t - t0) / (t2 - t0));
-            let b2 = a2 * ((t3 - t) / (t3 - t1)) + a3 * ((t - t1) / (t3 - t1));
-            out.push(b1 * ((t2 - t) / (t2 - t1)) + b2 * ((t - t1) / (t2 - t1)));
-        }
+    let n = b.cross(c);
+    // Collinear points make |n| vanish relative to the chord lengths; scale the test with them.
+    if n.len2() < 1e-18 * b.len2() * c.len2() {
+        return None;
+    }
+    let normal = n.normalized()?;
+    let center = start + (n.cross(b) * c.len2() + c.cross(n) * b.len2()) * (0.5 / n.len2());
+    let radius = center.dist(start);
+    if !center.is_finite() || !radius_in_range(radius) {
+        return None;
+    }
+    Some(WireArc { center, normal, radius, start, end })
+}
+
+/// The sweep of an exact 3D arc: the angle in (0, 2π) from `start` to `end` counter-clockwise
+/// about `normal`.
+pub fn arc_sweep(arc: &WireArc) -> f64 {
+    let (u, v) = (arc.start - arc.center, arc.end - arc.center);
+    let a = u.cross(v).dot(arc.normal).atan2(u.dot(v));
+    if a <= 0.0 { a + std::f64::consts::TAU } else { a }
+}
+
+/// The polyline of an exact 3D arc, sampled so every chord's sagitta stays within `tol`.
+pub fn arc_polyline(arc: &WireArc, tol: f64) -> Vec<Vec3> {
+    let sweep = arc_sweep(arc);
+    if !(arc.radius > 0.0) || !arc.radius.is_finite() || !sweep.is_finite() {
+        return vec![arc.start, arc.end];
+    }
+    // Sagitta of a chord spanning Δ on a circle r: r(1 − cos(Δ/2)) ≤ tol.
+    let max_step = (2.0 * (1.0 - (tol / arc.radius).clamp(0.0, 1.0)).acos()).max(1e-4);
+    let n = (sweep / max_step).ceil() as usize;
+    let n = n.clamp(2, MAX_WIRE_POINTS);
+    let u = arc.start - arc.center;
+    let e = arc.normal.cross(u); // in the arc's plane, perpendicular to u, same length
+    let mut out = Vec::with_capacity(n + 1);
+    for k in 0..=n {
+        let t = sweep * k as f64 / n as f64;
+        out.push(if k == n { arc.end } else { arc.center + u * t.cos() + e * t.sin() });
     }
     out
+}
+
+/// Is a saved arc consistent: in range, unit normal, and its ends on the circle?
+fn arc_ok(arc: &WireArc, fit: &[Vec3]) -> bool {
+    let on_circle = |p: Vec3| (arc.center.dist(p) - arc.radius).abs() < 1e-6 * arc.radius.max(1.0);
+    in_range3(arc.center)
+        && in_range3(arc.start)
+        && in_range3(arc.end)
+        && arc.normal.is_finite()
+        && (arc.normal.len() - 1.0).abs() < 1e-6
+        && radius_in_range(arc.radius)
+        && fit.len() == 3
+        && on_circle(arc.start)
+        && on_circle(arc.end)
 }
 
 fn clean(w: &[Vec3]) -> Option<Vec<Vec3>> {
@@ -168,6 +280,7 @@ impl Sketch {
                 || w.fit.len() > MAX_FIT_POINTS
                 || (w.pts.len() == 1 && w.fit.len() != 1)
                 || w.pts.iter().chain(&w.fit).any(|p| !in_range3(*p))
+                || w.arc.as_ref().is_some_and(|a| !arc_ok(a, &w.fit))
             {
                 return Err(SketchError::Invalid("3D curve arrays, ids or point bounds are invalid".into()));
             }
@@ -180,6 +293,12 @@ impl Sketch {
     pub fn legacy_wire_space(&self, wire: &Wire) -> WireSpace {
         let Some(link) = wire.link.as_deref().and_then(|id| self.link(id)) else { return WireSpace::World };
         WireSpace::from_legacy_link(link)
+    }
+
+    /// Whether a curve is reference geometry that planar corner tools cannot modify.
+    /// Shared by command validation and the Fillet/Chamfer pick filters.
+    pub fn is_spatial_corner_curve(&self, id: &str) -> bool {
+        self.wire_index(id).is_some()
     }
 
     pub fn wire_index(&self, id: &str) -> Option<usize> {
@@ -200,7 +319,16 @@ impl Sketch {
         }
         let id = if geom.is_empty() {
             let id = self.fresh("j")?;
-            self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, auto_face: false, lost: false });
+            self.links.push(Link {
+                id: id.clone(),
+                kind,
+                source,
+                face_name: None,
+                edge_name: None,
+                vertex_name: None,
+                auto_face: false,
+                lost: false,
+            });
             id
         } else {
             self.add_link(kind, source, geom)?
@@ -223,7 +351,30 @@ impl Sketch {
                 Some(o) => o.clone(),
                 None => self.fresh("w")?,
             };
-            self.wires.push(Wire { id: wid, pts, space: WireSpace::Component, link: Some(id.to_string()), fit: Vec::new() });
+            self.wires.push(Wire {
+                id: wid,
+                pts,
+                space: WireSpace::Component,
+                link: Some(id.to_string()),
+                fit: Vec::new(),
+                arc: None,
+                exact: Vec::new(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Give a link's wires their exact curves ([`Wire::exact`]), one list per wire in the order
+    /// [`Self::set_link_wires`] took them (an empty list: known only as points).
+    pub fn set_link_wire_curves(&mut self, id: &str, exact: &[Vec<WireCurve>]) -> Result<()> {
+        let wires = self.link_wires(id);
+        if wires.len() != exact.len() {
+            return Err(SketchError::Invalid(format!("link {id} has {} 3D curves, not {}", wires.len(), exact.len())));
+        }
+        for (i, curves) in wires.into_iter().zip(exact) {
+            if let Some(w) = self.wires.get_mut(i) {
+                w.exact = curves.clone();
+            }
         }
         Ok(())
     }
@@ -238,7 +389,27 @@ impl Sketch {
         let pts = drawn_polyline(fit)?;
         self.wire_budget(None, 1, pts.len() + fit.len())?;
         let id = self.fresh(if fit.len() == 1 { "q" } else { "w" })?;
-        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec() });
+        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: None, exact: Vec::new() });
+        Ok(id)
+    }
+
+    /// Add an exact circular arc drawn in a 3D sketch: `fit` is its three defining points
+    /// (start, through, end) in `space`; the wire keeps the analytic arc and its samples.
+    pub fn add_drawn_arc_in(&mut self, fit: &[Vec3], space: WireSpace) -> Result<String> {
+        let [start, through, end] = fit else {
+            return Err(SketchError::Invalid("a 3D arc needs exactly three points".into()));
+        };
+        for p in fit {
+            if !in_range3(*p) {
+                return Err(SketchError::Invalid("3D point out of range".into()));
+            }
+        }
+        let arc = arc_from_3_points(*start, *through, *end)
+            .ok_or_else(|| SketchError::Invalid("the three points of a 3D arc must differ and not be collinear".into()))?;
+        let pts = arc_polyline(&arc, ARC_TOL);
+        self.wire_budget(None, 1, pts.len() + fit.len())?;
+        let id = self.fresh("w")?;
+        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: Some(arc), exact: Vec::new() });
         Ok(id)
     }
 
@@ -267,13 +438,26 @@ impl Sketch {
                 n += 1;
             }
             if changed {
-                let pts = drawn_polyline(&fit)?;
-                changes.push((index, fit, pts));
+                // An exact arc keeps its analytic form: re-derive it from its three defining
+                // points; a spline keeps its fit-point polyline. Both before any change lands.
+                let (arc, pts) = match w.arc {
+                    Some(_) => {
+                        let [start, through, end] = fit.as_slice() else {
+                            return Err(SketchError::Invalid("a 3D arc needs exactly three points".into()));
+                        };
+                        let arc = arc_from_3_points(*start, *through, *end)
+                            .ok_or_else(|| SketchError::Invalid("a 3D arc's points must differ and not be collinear".into()))?;
+                        (Some(arc), arc_polyline(&arc, ARC_TOL))
+                    }
+                    None => (None, drawn_polyline(&fit)?),
+                };
+                changes.push((index, fit, arc, pts));
             }
         }
-        for (index, fit, pts) in changes {
+        for (index, fit, arc, pts) in changes {
             if let Some(w) = self.wires.get_mut(index) {
                 w.fit = fit;
+                w.arc = arc;
                 w.pts = pts;
             }
         }
@@ -345,9 +529,95 @@ mod tests {
         let n = pts.len();
         let (start, end) = (dir(pts[0], pts[1]), dir(pts[n - 2], pts[n - 1]));
         let mid = |i: usize| dir(pts[i - 1], pts[i]).dot(dir(pts[i], pts[i + 1]));
-        assert!(start.dot(end) >= mid(SPAN_SAMPLES) - 1e-9, "turn at the close {}, at a fit point {}", start.dot(end), mid(SPAN_SAMPLES));
+        assert!(
+            start.dot(end) >= mid(solidcraft_geom::catmull_rom::SPAN_SAMPLES) - 1e-9,
+            "turn at the close {}, at a fit point {}",
+            start.dot(end),
+            mid(solidcraft_geom::catmull_rom::SPAN_SAMPLES)
+        );
         let open = fit_polyline(&ring[..12]);
         assert_eq!(open.first(), ring.first());
         assert_eq!(open.last(), ring.get(11));
+    }
+
+    #[test]
+    fn an_arc_from_three_points_is_exact() {
+        // A quarter circle of radius 10 in the XY plane: 0° through 45° to 90°.
+        let arc = arc_from_3_points(
+            Vec3::new(10.0, 0.0, 0.0),
+            Vec3::new(5.0 * std::f64::consts::SQRT_2, 5.0 * std::f64::consts::SQRT_2, 0.0),
+            Vec3::new(0.0, 10.0, 0.0),
+        )
+        .unwrap();
+        assert!((arc.radius - 10.0).abs() < 1e-9, "radius {}", arc.radius);
+        assert!(arc.center.dist(Vec3::ZERO) < 1e-9, "centre {:?}", arc.center);
+        assert!((arc_sweep(&arc) - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "sweep {}", arc_sweep(&arc));
+        // A tilted plane: the same arc lifted onto a 45° plane keeps its radius and sweep.
+        let n = std::f64::consts::FRAC_PI_4;
+        let up = Vec3::new(0.0, n.sin(), n.cos());
+        let right = Vec3::new(1.0, 0.0, 0.0);
+        let at = |a: f64| up * (10.0 * a.sin()) + right * (10.0 * a.cos());
+        let tilted = arc_from_3_points(at(0.0), at(std::f64::consts::FRAC_PI_4), at(std::f64::consts::FRAC_PI_2)).unwrap();
+        assert!((tilted.radius - 10.0).abs() < 1e-9);
+        assert!((arc_sweep(&tilted) - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+        assert!(tilted.normal.dot(up.cross(right).normalized().unwrap()).abs() > 1.0 - 1e-9);
+    }
+
+    #[test]
+    fn an_arc_refuses_degenerate_and_hostile_points() {
+        // Collinear, coincident and out-of-range defining points never build an arc.
+        assert!(arc_from_3_points(Vec3::ZERO, Vec3::X, Vec3::X * 2.0).is_none());
+        assert!(arc_from_3_points(Vec3::ZERO, Vec3::ZERO, Vec3::Y).is_none());
+        assert!(arc_from_3_points(Vec3::ZERO, Vec3::new(1e-12, 0.0, 0.0), Vec3::Y).is_none());
+        let mut sk = Sketch::new();
+        assert!(sk.add_drawn_arc_in(&[Vec3::ZERO, Vec3::X, Vec3::X * 2.0], WireSpace::World).is_err());
+        assert!(sk.add_drawn_arc_in(&[Vec3::ZERO, Vec3::X], WireSpace::World).is_err());
+        assert!(sk.add_drawn_arc_in(&[Vec3::ZERO, Vec3::new(1e100, 0.0, 0.0), Vec3::Y], WireSpace::World).is_err());
+        assert!(sk.add_drawn_arc_in(&[Vec3::ZERO, Vec3::new(f64::NAN, 1.0, 0.0), Vec3::Y], WireSpace::World).is_err());
+        assert!(sk.wires.is_empty());
+    }
+
+    #[test]
+    fn an_arc_wire_stores_fit_points_samples_and_survives_a_round_trip() {
+        let mut sk = Sketch::new();
+        let id =
+            sk.add_drawn_arc_in(&[Vec3::new(10.0, 0.0, 5.0), Vec3::new(0.0, 10.0, 5.0), Vec3::new(-10.0, 0.0, 5.0)], WireSpace::Component).unwrap();
+        let w = sk.wires.iter().find(|w| w.id == id).unwrap();
+        assert_eq!(w.fit.len(), 3);
+        assert!(w.arc.is_some());
+        assert!(w.pts.len() >= 3);
+        assert_eq!(w.pts.first(), w.fit.first());
+        assert_eq!(w.pts.last(), w.fit.get(2));
+        // Every sample sits on the circle.
+        let arc = w.arc.unwrap();
+        assert!(w.pts.iter().all(|p| (arc.center.dist(*p) - arc.radius).abs() < 1e-6));
+        sk.validate_wires().unwrap();
+        let raw = serde_json::to_value(w).unwrap();
+        assert_eq!(serde_json::from_value::<Wire>(raw).unwrap(), *w);
+    }
+
+    #[test]
+    fn moving_an_arc_point_rebuilds_it_and_refuses_collinear() {
+        let mut sk = Sketch::new();
+        let id = sk.add_drawn_arc_in(&[Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(-10.0, 0.0, 0.0)], WireSpace::World).unwrap();
+        // Pull the through point onto the chord: collinear, refused, and nothing changed.
+        let before = sk.clone();
+        assert!(sk.move_drawn_point(&id, 1, Vec3::ZERO).is_err());
+        assert_eq!(sk, before);
+        // Pull it off again: the arc follows and stays exact.
+        sk.move_drawn_point(&id, 1, Vec3::new(0.0, 5.0, 0.0)).unwrap();
+        let w = sk.wires.iter().find(|w| w.id == id).unwrap();
+        assert_eq!(w.fit[1], Vec3::new(0.0, 5.0, 0.0));
+        let arc = w.arc.unwrap();
+        assert!(w.pts.iter().all(|p| (arc.center.dist(*p) - arc.radius).abs() < 1e-6));
+        sk.validate_wires().unwrap();
+    }
+
+    #[test]
+    fn a_saved_arc_that_lies_about_its_circle_is_refused() {
+        let mut sk = Sketch::new();
+        sk.add_drawn_arc_in(&[Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(-10.0, 0.0, 0.0)], WireSpace::World).unwrap();
+        sk.wires[0].arc.as_mut().unwrap().radius = 1.0; // claims a circle its ends are not on
+        assert!(sk.validate_wires().is_err());
     }
 }

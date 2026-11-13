@@ -1,88 +1,93 @@
-//! Original SolidCraft mark, shared by desktop, packaging and CLI.
+//! Original SolidCraft mark, shared by desktop, packaging and CLI: the borderless mark, five
+//! faces with transparent gaps between them, drawn from the macOS icon's
+//! `macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg`.
+type P = (f32, f32);
+
+/// One face in that SVG's units: its outline, and its linear gradient from one point and
+/// colour to another.
+struct Face {
+    outline: &'static [P],
+    from: (P, [u8; 3]),
+    to: (P, [u8; 3]),
+}
+
+const FACES: [Face; 5] = [
+    // Inner side of the upper step.
+    Face {
+        outline: &[(547.883, 282.66), (709.797, 188.211), (709.797, 375.985)],
+        from: ((619.14, 179.734), [29, 99, 198]),
+        to: ((694.687, 396.761), [21, 73, 158]),
+    },
+    // Top of the lower step.
+    Face {
+        outline: &[(727.797, 593.626), (727.797, 407.136), (889.571, 500.381)],
+        from: ((619.14, 413.244), [69, 159, 255]),
+        to: ((790.839, 605.547), [35, 121, 231]),
+    },
+    // Right face, with the recess.
+    Face {
+        outline: &[(530.0, 521.17), (691.797, 427.912), (691.797, 655.928), (907.594, 531.545), (907.594, 740.159), (530.0, 957.8)],
+        from: ((632.876, 399.508), [27, 102, 207]),
+        to: ((783.971, 968.175), [18, 69, 150]),
+    },
+    // Left face, stepped.
+    Face {
+        outline: &[(116.406, 510.769), (116.406, 303.529), (494.0, 521.17), (494.0, 957.8), (314.203, 854.167), (314.203, 624.777)],
+        from: ((207.063, 303.357), [37, 141, 245]),
+        to: ((426.837, 968.175), [20, 97, 218]),
+    },
+    // Top of the extruded profile.
+    Face {
+        outline: &[(134.374, 272.334), (512.0, 53.364), (691.828, 157.015), (476.117, 282.846), (673.752, 396.761), (512.0, 489.993)],
+        from: ((385.63, 53.364), [81, 173, 255]),
+        to: ((522.989, 510.769), [43, 131, 241]),
+    },
+];
+
+/// The mark's extent in SVG units: left, top, width, height.
+const BOUNDS: (f32, f32, f32, f32) = (116.406, 53.364, 791.188, 904.436);
+
 /// This block is the icon image data
 pub fn rgba(size: usize) -> Result<Vec<u8>, String> {
     if !(1..=2048).contains(&size) {
         return Err("icon size must be 1..=2048".into());
     }
-    type P = (f32, f32);
     // Coverage buffer at 4x4 samples per pixel (2x2 for big sizes), averaged down at the end.
     let ss = if size > 512 { 2 } else { 4 };
     let n = size * ss;
     let mut buf = vec![[0u8; 4]; n * n];
-    let s = n as f32 / 412.217; // SVG units -> samples: the logo fills the height
-    let ox = (n as f32 - 357.0 * s) / 2.0; // and is centred sideways
-    // Fill a convex polygon given in SVG units.
-    let mut fill = |pts: &[P], col: [u8; 3]| {
-        let v: Vec<P> = pts.iter().map(|p| (ox + p.0 * s, p.1 * s)).collect();
+    let (bx, by, bw, bh) = BOUNDS;
+    let s = n as f32 / bh; // SVG units -> samples: the mark fills the height
+    let (ox, oy) = ((n as f32 - bw * s) / 2.0 - bx * s, -by * s); // and is centred sideways
+    // Fill each face's outline (even-odd spans per row, so concave outlines work) with its gradient.
+    for face in &FACES {
+        let v: Vec<P> = face.outline.iter().map(|p| (ox + p.0 * s, oy + p.1 * s)).collect();
+        let (((fx, fy), c0), ((tx, ty), c1)) = (face.from, face.to);
+        let (gx, gy) = (tx - fx, ty - fy);
+        let g2 = gx * gx + gy * gy;
         let (top, bottom) = v.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+        let mut xs = Vec::with_capacity(v.len());
         for y in ((top - 0.5).ceil() as i32).max(0)..=((bottom - 0.5).floor() as i32).min(n as i32 - 1) {
             let cy = y as f32 + 0.5;
-            let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+            xs.clear();
             for i in 0..v.len() {
                 let (a, b) = (v[i], v[(i + 1) % v.len()]);
                 if (a.1 <= cy) != (b.1 <= cy) {
-                    let x = a.0 + (cy - a.1) / (b.1 - a.1) * (b.0 - a.0);
-                    lo = lo.min(x);
-                    hi = hi.max(x);
+                    xs.push(a.0 + (cy - a.1) / (b.1 - a.1) * (b.0 - a.0));
                 }
             }
-            if lo > hi {
-                continue;
+            xs.sort_by(f32::total_cmp);
+            for &[from, to] in xs.as_chunks::<2>().0 {
+                for x in ((from - 0.5).ceil() as i32).max(0)..=((to - 0.5).floor() as i32).min(n as i32 - 1) {
+                    // The sample's place along the gradient, in SVG units.
+                    let (px, py) = ((x as f32 + 0.5 - ox) / s, (cy - oy) / s);
+                    let t = (((px - fx) * gx + (py - fy) * gy) / g2).clamp(0.0, 1.0);
+                    let mix = |k: usize| (f32::from(c0[k]) + (f32::from(c1[k]) - f32::from(c0[k])) * t).round() as u8;
+                    buf[y as usize * n + x as usize] = [mix(0), mix(1), mix(2), 255];
+                }
             }
-            for x in ((lo - 0.5).ceil() as i32).max(0)..=((hi - 0.5).floor() as i32).min(n as i32 - 1) {
-                buf[y as usize * n + x as usize] = [col[0], col[1], col[2], 255];
-            }
         }
-    };
-    // Faces: each is a few overlapping convex pieces (the filler only does convex shapes).
-    let (light, mid, dark) = ([96, 158, 236], [58, 136, 238], [55, 108, 197]);
-    fill(&[(3.5, 105.9), (177.0, 5.8), (263.4, 55.6), (263.8, 156.0), (177.0, 406.4)], light);
-    fill(&[(177.0, 206.1), (263.8, 156.0), (350.5, 206.2), (350.5, 306.3), (177.0, 406.4)], light);
-    fill(&[(3.5, 105.9), (177.0, 206.1), (177.0, 406.4)], mid);
-    fill(&[(3.5, 105.9), (3.5, 205.7), (90.3, 256.2), (177.0, 206.1)], mid);
-    fill(&[(177.0, 206.1), (90.3, 256.2), (90.0, 356.2), (177.0, 406.4)], mid);
-    fill(&[(264.1, 155.8), (177.0, 206.1), (177.0, 406.4), (263.8, 256.2)], dark);
-    fill(&[(263.8, 256.2), (350.5, 206.2), (350.5, 306.3), (177.0, 406.4)], dark);
-    fill(&[(177.0, 206.1), (177.0, 406.4), (350.5, 306.3)], dark);
-    fill(&[(263.8, 55.9), (263.8, 156.0), (177.1, 105.9)], dark);
-    // White edge lines, 10 units wide: a rectangle per segment and a disc at each inner corner.
-    let white = [255, 255, 255];
-    let mut stroke = |pts: &[P], closed: bool| {
-        let m = pts.len();
-        for i in 0..(if closed { m } else { m - 1 }) {
-            let (a, b) = (pts[i], pts[(i + 1) % m]);
-            let l = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
-            let (nx, ny) = (-(b.1 - a.1) / l * 5.0, (b.0 - a.0) / l * 5.0);
-            fill(&[(a.0 + nx, a.1 + ny), (b.0 + nx, b.1 + ny), (b.0 - nx, b.1 - ny), (a.0 - nx, a.1 - ny)], white);
-        }
-        for c in &pts[if closed { 0 } else { 1 }..if closed { m } else { m - 1 }] {
-            let disc: Vec<P> = (0..16)
-                .map(|k| {
-                    let t = k as f32 * std::f32::consts::TAU / 16.0;
-                    (c.0 + 5.0 * t.cos(), c.1 + 5.0 * t.sin())
-                })
-                .collect();
-            fill(&disc, white);
-        }
-    };
-    stroke(&[(263.8, 55.9), (177.1, 105.9), (263.8, 156.0), (263.8, 256.2), (350.6, 206.1)], false);
-    stroke(&[(5.0, 105.9), (178.5, 206.1), (178.5, 406.4)], false);
-    stroke(&[(177.0, 206.1), (263.8, 156.0)], false);
-    stroke(
-        &[
-            (178.5, 5.8),
-            (5.0, 105.9),
-            (5.0, 206.1),
-            (91.7, 256.2),
-            (91.7, 356.4),
-            (178.5, 406.4),
-            (352.0, 306.3),
-            (352.0, 206.1),
-            (265.2, 156.0),
-            (265.2, 55.9),
-        ],
-        true,
-    );
+    }
     // Average each ss x ss block down to one pixel (straight alpha = covered share).
     let mut rgba = Vec::with_capacity(size * size * 4);
     for y in 0..size {
@@ -122,5 +127,21 @@ mod tests {
         }
         assert!(super::rgba(0).is_err());
         assert!(super::rgba(2049).is_err());
+    }
+
+    /// Borderless: no white edge lines, and the gaps between faces are see-through. At 256 px
+    /// the gap between the left and right faces (SVG x 494..530) is transparent on the row
+    /// through the middle of the mark, and no opaque pixel is white.
+    #[test]
+    fn shared_mark_is_borderless() {
+        let size = 256;
+        let pixels = super::rgba(size).expect("valid size");
+        let px = |x: usize, y: usize| pixels.as_chunks::<4>().0[y * size + x];
+        let s = size as f32 / 904.436;
+        let gap_x = ((size as f32 - 791.188 * s) / 2.0 + (512.0 - 116.406) * s) as usize;
+        let row = ((750.0 - 53.364) * s) as usize;
+        assert_eq!(px(gap_x, row)[3], 0, "the seam between the left and right faces is a gap");
+        assert!(px(gap_x - 8, row)[3] == 255 && px(gap_x + 8, row)[3] == 255, "faces on both sides of the gap");
+        assert!(pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 0 || p[0] < 200), "no white edges");
     }
 }

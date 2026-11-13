@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the four floor edges of a rectangular pocket rounded r2 (concave), the pocket's vertical corners left sharp",
+ "source": "analytic",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. Each concave floor edge gains the spandrel (1-pi/4) r^2 = 0.858407 along its whole length (30, 30, 20, 20: 100); at each sharp vertical corner the two rounds run into each other (a mitre), their spandrel prisms overlapping in int_0^r L(u)^2 du, L(u) = r - sqrt(r^2-(r-u)^2), = r^3 (5/3 - pi/2) = 0.766963. Added = 100 A - 4 overlap = 82.7729. V = 21082.7729. Faces 11 + 4 = 15.",
+ "body_count": 1,
+ "volume_mm3": 21082.772883765123,
+ "faces": 15,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

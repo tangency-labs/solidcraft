@@ -13,6 +13,11 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use nix::sys::signal::{Signal, killpg};
+#[cfg(unix)]
+use nix::unistd::Pid;
+
 /// Longest line read from the agent; a longer one is dropped.
 const MAX_LINE: usize = 8 << 20;
 /// Lines of the agent's stderr kept to explain a failed start.
@@ -73,13 +78,15 @@ fn signal_group(pgid: u32, signal: &str) {
     if pgid <= 1 {
         return;
     }
-    let mut c = Command::new("kill");
-    c.args(["-s", signal]);
-    // procps' kill reads `-123` as an option without `--`; BSD kill takes it as is.
-    if cfg!(target_os = "linux") {
-        c.arg("--");
-    }
-    let _ = c.arg(format!("-{pgid}")).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let Ok(pgid) = i32::try_from(pgid) else { return };
+    let signal = match signal {
+        "KILL" => Signal::SIGKILL,
+        _ => Signal::SIGTERM,
+    };
+    // The group is signalled with the system call, not with a `kill` program: busybox' `kill`
+    // takes no `--` and signals nothing, and the shell's builtin parses the group differently
+    // from one shell to the next (#4587).
+    let _ = killpg(Pid::from_raw(pgid), signal);
 }
 
 /// Windows: end the agent and every process it started.

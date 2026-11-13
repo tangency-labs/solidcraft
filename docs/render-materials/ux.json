@@ -1,0 +1,743 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "concept_catalog",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "integration_contract": "ui-integration.json",
+    "integration_status": "proposed_ui_not_runtime_registration"
+  },
+  "items": [
+    {
+      "id": "UX-001",
+      "area": "Entry",
+      "name": "Start from the current subject",
+      "behavior": "Enter the existing Render workspace with the selected subject retained; use intent and domain as local library filters, not another workspace or mandatory mode selector.",
+      "acceptance": [
+        "Render retains its single RENDER ribbon tab; SCENE and IMAGE remain ribbon groups rather than extra contextual tabs.",
+        "Scenes, Materials, Lighting and Environments are choices in one local resource-browser selector.",
+        "Changing a library filter preserves subject selection, scene values and pending inspector edits."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-002",
+      "area": "Entry",
+      "name": "Bounded and honest preview",
+      "behavior": "Show the actual preparation phase and a bounded preview supported by the selected executor, while retaining the last successful result with its captured revision.",
+      "acceptance": [
+        "A future scene without a bound renderer shows its availability and next action instead of a fabricated preview.",
+        "An older completed image is visibly identified when the scene or output settings change.",
+        "Thumbnail work and preview preparation do not block geometry selection or camera input."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-003",
+      "area": "Entry",
+      "name": "Progressive inspector disclosure",
+      "behavior": "Quick is the default collapsed inspector presentation; Detailed and Expert expand sections of the same inspector and persistent scene, without global mode switches or new ribbon tabs.",
+      "acceptance": [
+        "Expanding or collapsing a section never resets values, changes quality or applies a scene.",
+        "Expansion, scroll and focus state remain local to the document and inspected context.",
+        "The visible Quick area has at most six primary adjustment controls at once, excluding the scene and quality selectors."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-004",
+      "area": "Entry",
+      "name": "Reviewable scene recipes",
+      "behavior": "Preview a resolved scene replacement and its lock conflicts before a future atomic apply; scene selection and hover alone do not commit edits.",
+      "acceptance": [
+        "The change summary distinguishes retained fields, replacements, unresolved dependencies and blocked locked fields.",
+        "A successful future scene apply creates one undo record; cancel or failed resolution leaves the scene unchanged.",
+        "The current prepared appearance-overlay script remains explicitly non-atomic and is not represented as an implemented preset-apply command."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-005",
+      "area": "Library",
+      "name": "Everyday-language search",
+      "behavior": "Search resource names, stable IDs, intended use, finish and manufacturing process; keep one material concept with linked authored variants instead of counting the 48 opaque projections as new concepts.",
+      "acceptance": [
+        "An exact material ID finds its concept and available authored projections with distinct fidelity labels.",
+        "Search and result selection work without dragging or using a pointer.",
+        "A zero-result view retains the query, states the active filters and offers a clear-filter action."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-006",
+      "area": "Library",
+      "name": "Comparable resource previews",
+      "behavior": "Use one declared reference rig, exposure and appropriate sample geometry for comparable material thumbnails, with a separately requested current-scene preview.",
+      "acceptance": [
+        "Each thumbnail identifies whether it is an actual rendered result, an authored concept image or an unavailable preview.",
+        "Renderer, resource version and display-treatment changes invalidate the relevant thumbnail cache.",
+        "Scene cards and material swatches use consistent category-appropriate framing without implying unsupported optics."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-007",
+      "area": "Library",
+      "name": "Persistent and practical filters",
+      "behavior": "Prioritize family, domain and compatibility filters; place provenance, memory cost and specialized optical filters in expandable sections of the shared library.",
+      "acceptance": [
+        "Show current result counts and total counts for the selected resource type, with concepts and authored variants distinguished.",
+        "Query, filters, selected result and scroll position survive opening an inspector and returning to the same category.",
+        "Virtualized lists preserve stable keyboard focus and accessible item position; loading more records does not reorder the active selection."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-008",
+      "area": "Library",
+      "name": "Actionable resource information",
+      "behavior": "Keep a concise fidelity label and blocker summary visible on each resource card; disclose controls, provenance, versions and detailed dependencies in the inspector.",
+      "acceptance": [
+        "Authoring state, source readiness, executor support and validation evidence are reported separately.",
+        "A resource can show several blockers at once, with an action for each; one badge does not hide another requirement.",
+        "Priority, authored status and a successful data validator never produce an implemented or visually validated badge."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-009",
+      "area": "Library",
+      "name": "Explicit assignment scope",
+      "behavior": "Preview the exact face, body or shared component target before appearance assignment; offer occurrence-specific edits only where the executor actually supports them.",
+      "acceptance": [
+        "A shared-definition edit states its affected occurrence count and highlights the full scope before commit.",
+        "The current native opaque adapter is labelled as reviewed subject-body assignment, not independent occurrence styling.",
+        "Click-select and Apply provide a keyboard-accessible alternative to drag-and-drop; Escape cancels a temporary preview."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-010",
+      "area": "Library",
+      "name": "Versions favorites and offline state",
+      "behavior": "Keep favorites and recent resources linked to stable identities and pinned versions, with a clear indication of local availability.",
+      "acceptance": [
+        "Offline reopening retains the resource definition and reports missing dependencies without silently substituting a newer version.",
+        "A favorite with missing content keeps its identity and offers a locate or restore action.",
+        "Library navigation history is preserved per document; changing favorites does not apply a scene."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-011",
+      "area": "Materials",
+      "name": "Contextual primary controls",
+      "behavior": "Expose at most six meaningful primary adjustments for the selected context; move remaining parameters into Detailed and Expert sections without changing their values.",
+      "acceptance": [
+        "Scene and quality selectors are separate from the six-adjustment limit.",
+        "A selected opaque preview exposes supported color and surface controls while texture, coating, transmission and emission remain explained requirements.",
+        "Unavailable controls explain their blocker and cannot emit unsupported parameters to current commands."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-012",
+      "area": "Materials",
+      "name": "Visible physical layers",
+      "behavior": "Keep substrate, coating, wear and dust independently inspectable in advanced sections, with a clear boundary between the target stack and the current opaque projection.",
+      "acceptance": [
+        "Applying an opaque surrogate never silently overwrites the authored advanced stack.",
+        "A locked layer remains unchanged when another layer or a scene recipe is edited.",
+        "Dust coverage preserves uncovered substrate and is not represented as a whole-body flat replacement."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-013",
+      "area": "Materials",
+      "name": "Manufacturing direction on the part",
+      "behavior": "Align a supported finish to a local edge or axis and report lost mapping references through the existing selection and navigation systems.",
+      "acceptance": [
+        "Moving an articulated part carries its local texture direction rather than sliding a world-space pattern.",
+        "A lost reference blocks automatic remapping and identifies the affected appearance.",
+        "Appearance orientation never changes engineering material axes, geometry or joint coordinates."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-014",
+      "area": "Materials",
+      "name": "Physical texture scale",
+      "behavior": "Display texture dimensions in model units and keep render-detail scale independent of geometry resizing.",
+      "acceptance": [
+        "Changing texture size leaves native dimensions, placement and source units unchanged.",
+        "The inspector distinguishes geometric detail scale from a dimensionless roughness value.",
+        "Unsupported procedural detail remains an authored target instead of an active control."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-015",
+      "area": "Materials",
+      "name": "Guided transparent targets",
+      "behavior": "Explain surface response, wall thickness, absorption and nested contents in a contextual optical section, with explicit unsupported and opaque-surrogate states.",
+      "acceptance": [
+        "A transmitting vessel is never silently converted to an opaque material or approximate alpha blend.",
+        "Choosing an inspection surrogate creates an explicitly labelled appearance variant without changing the transparent target definition.",
+        "The current vial, window and diffuser swatches are labelled opaque and do not imply refraction or light transmission."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-016",
+      "area": "Materials",
+      "name": "Appearance and engineering separation",
+      "behavior": "Link to existing engineering-property tools while keeping density, inertia, friction and joint assumptions outside the Render appearance inspector.",
+      "acceptance": [
+        "Appearance assignment preserves physical materials, engineering axes, native transforms and motion constraints.",
+        "A missing engineering property remains unknown rather than being inferred from a visual material name.",
+        "Engineering, appearance and simulation state are clearly labelled without introducing competing global modes."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-017",
+      "area": "Materials",
+      "name": "Optional expert node editing",
+      "behavior": "Disclose a future node editor from the Expert section for a selected appearance while retaining the same versioned resource and exposed parameters.",
+      "acceptance": [
+        "Opening node details does not change the active workspace, quality profile or persistent appearance.",
+        "A graph that cannot map back to the recipe remains visibly custom instead of silently rewriting simplified controls.",
+        "Node editing remains capability-gated until typed resource and command support exists."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-018",
+      "area": "Lighting",
+      "name": "Selection-sized lighting rigs",
+      "behavior": "Fit a supported rig once to the selected subject and offer an explicit refit action that respects camera and rig locks.",
+      "acceptance": [
+        "Moving the camera or articulated arm after fitting does not change resolved source transforms.",
+        "Changing the selection does not continuously resize the rig.",
+        "Refit identifies its subject bounds and affected fields before one undoable apply."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-019",
+      "area": "Lighting",
+      "name": "Intent-based lighting controls",
+      "behavior": "Expose softness and contrast with the energy-normalization policy visible in the same section.",
+      "acceptance": [
+        "Changing source size states whether flux, radiance or a calibrated contribution is held fixed.",
+        "A locked source contribution is not modified by another lighting preset.",
+        "Unsupported lighting controls show requirements rather than pretending the current fixed studio can execute them."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-020",
+      "area": "Lighting",
+      "name": "Reflection placement assistance",
+      "behavior": "Place a future supported source from a selected surface and view through an advanced, cancelable preview using existing selection controls.",
+      "acceptance": [
+        "The preview states which source and physical parameters would change.",
+        "Keyboard selection and numeric placement remain available as alternatives to pointer placement.",
+        "Cancel, locked-source conflict or failed placement leaves the source and final camera unchanged."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-021",
+      "area": "Lighting",
+      "name": "Studio inspection view",
+      "behavior": "Inspect sources, flags and reflectors through the existing camera-navigation implementation without overwriting the saved shot camera.",
+      "acceptance": [
+        "The active inspection view and the saved output camera are visibly distinguished.",
+        "Returning to the shot restores its framing and camera-lock state.",
+        "No independent camera controller or extra global studio workspace is introduced."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-022",
+      "area": "Lighting",
+      "name": "Light-group adjustments",
+      "behavior": "Separate physically linear light-group gain changes from editorial RGB recoloring in an advanced lighting section.",
+      "acceptance": [
+        "A gain comparison preserves the captured scene, exposure and display transform unless its comparison scope is explicitly changed.",
+        "RGB recoloring is labelled an editorial image adjustment when it is not equivalent to a physical rerender.",
+        "The inspector shows the actual source owner rather than creating another emitter contribution."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-023",
+      "area": "Environment",
+      "name": "Environment background and ground",
+      "behavior": "Keep physical links visible by default while exposing background, ambient illumination and ground as distinct scene properties with independent locks.",
+      "acceptance": [
+        "Replacing a background image does not silently replace environment illumination or terrain geometry.",
+        "A preset change lists any deliberate link exception and retains locked fields.",
+        "Output transparency does not remove physically required ground or lighting contributions without an explicit supported action."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-024",
+      "area": "Environment",
+      "name": "Environment orientation",
+      "behavior": "Rotate linked illumination and reflection resources together only when supported, preserving the saved camera and any locked orientation.",
+      "acceptance": [
+        "A locked environment rotation disables automatic preset replacement and identifies the conflict.",
+        "Camera movement does not rotate an environment or refit a lighting rig.",
+        "The current unsupported environment controls cannot become editable merely by opening Detailed or Expert."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-025",
+      "area": "Environment",
+      "name": "Stage depth and parallax",
+      "behavior": "Identify photographic backgrounds, distant environments and nearby three-dimensional stage geometry in the scene inspector.",
+      "acceptance": [
+        "A scene card states which stage elements provide actual parallax and occlusion.",
+        "A camera or subject-fit operation preserves native model scale and reports stage-clearance requirements.",
+        "Unavailable geometry is shown as a blocker rather than replaced by a misleading flat image."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-026",
+      "area": "Environment",
+      "name": "Single Sun ownership",
+      "behavior": "Assign one owner to the solar contribution and expose conflicts between environment, sky and explicit Sun resources before applying a scene.",
+      "acceptance": [
+        "Composing a sky, environment and rig produces at most one owned solar emitter.",
+        "Physical lunar policy preserves zero atmospheric scattering and zero unrequested studio fill.",
+        "Resolving a conflict is explicit and undoable; it does not silently brighten a shadow region."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-027",
+      "area": "Camera",
+      "name": "Framing and scoped locks",
+      "behavior": "Provide separate camera-pose, projection, focus and exposure locks, with a labelled explicit fit action and a visible explanation of what each lock protects.",
+      "acceptance": [
+        "Camera fit is unavailable while pose or framing is locked and explains which lock blocks it.",
+        "Changing output aspect while pose is locked reports the resulting framing change rather than silently moving the camera.",
+        "Resetting a field or section respects user locks; unlocking and applying a conflicting preset is an explicit action."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-028",
+      "area": "Camera",
+      "name": "Accessible focus selection",
+      "behavior": "Set a supported focus distance from a selected scene point, with equivalent numeric entry and clear units.",
+      "acceptance": [
+        "Click-to-focus and keyboard numeric entry produce the same focus value through the shared command path.",
+        "A focus lock prevents automatic changes without blocking camera inspection.",
+        "Depth-of-field controls remain unavailable when the selected executor lacks the feature."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-029",
+      "area": "Camera",
+      "name": "Shots variants and document drafts",
+      "behavior": "Keep independently editable shot variants and per-document pending drafts, preserving edits when switching library categories or inspector sections.",
+      "acceptance": [
+        "Pending edits are visibly distinct from applied scene values; switching tabs or documents does not silently apply or discard them.",
+        "Apply and Discard are explicit, while document closing follows the existing unsaved-work flow.",
+        "Render either uses the clearly identified applied shot or requires the draft to be resolved; it never renders an ambiguous mixture."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-030",
+      "area": "Rendering",
+      "name": "Quality recommendations by shot",
+      "behavior": "Offer three recommended quality profiles for the selected shot using exact catalog IDs and names, with all other profiles available in the same selector.",
+      "acceptance": [
+        "Profile recommendations reference quality-presets.json and retain specified_unbound status until real resource and executor resolution succeeds.",
+        "Selecting a cheaper profile does not remove the shot optical, source or physical-policy requirements.",
+        "There is one quality choice, not a competing Preview/Final switch plus another quality mode selector."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-031",
+      "area": "Rendering",
+      "name": "Measured quality and time feedback",
+      "behavior": "Show actual output size, work budget and measured timing estimates; distinguish incomplete convergence from successful completion.",
+      "acceptance": [
+        "No render-time estimate is presented as measured before a relevant executor measurement exists.",
+        "Reaching a sample or time ceiling can produce an unconverged result with its diagnostics retained.",
+        "A higher profile name never serves as evidence of photorealism or optical accuracy."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-032",
+      "area": "Rendering",
+      "name": "Executor and capability disclosure",
+      "behavior": "Keep the selected executor and a concise compatibility summary visible, with detailed device and resource requirements in an expandable section.",
+      "acceptance": [
+        "The combined shot and quality requirements are checked before start, including source, material and output dependencies.",
+        "Changing the executor does not silently change materials, output format or scene policy.",
+        "Blocked controls and jobs name the actual missing feature and provide a relevant next action."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-033",
+      "area": "Rendering",
+      "name": "Actual phases and cancellation",
+      "behavior": "Display the phases exposed by the active executor, with a reachable Cancel control and the last successful image retained according to its actual lifetime.",
+      "acceptance": [
+        "The UI distinguishes queued, preparing, running, encoding, cancelling, cancelled, completed and failed states when provided.",
+        "Cancel affects the owned render job and does not undo an already applied scene or edit the source design.",
+        "Progress announcements are throttled for assistive technology and do not seize keyboard focus."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-034",
+      "area": "Rendering",
+      "name": "Actionable diagnostics",
+      "behavior": "List all relevant blockers with the affected resource or field and a focused action, keeping quality warnings distinct from hard admission failures.",
+      "acceptance": [
+        "Source absence and executor incompatibility can be shown together instead of hiding one behind a single status badge.",
+        "Opening a diagnostic preserves the current draft and returns focus to the initiating control.",
+        "A suggested approximation is explicitly labelled and never overwrites the original requested target silently."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-035",
+      "area": "Image",
+      "name": "Scoped before-after comparison",
+      "behavior": "Keep camera, exposure and display transform locked for A/B by default, with captured revisions and any deliberate comparison-scope change visible.",
+      "acceptance": [
+        "A/B conditions are comparison-local and do not silently create or remove persistent user locks.",
+        "Images from different scene revisions or finishing treatments remain identifiable.",
+        "Only an explicitly selected comparison parameter may differ; changing the comparison scope updates its label."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-036",
+      "area": "Image",
+      "name": "Reversible image finishing",
+      "behavior": "Keep scene-linear output, display treatment and artistic finishing distinct in the IMAGE workflow, exposing only buffers and controls the executor actually provides.",
+      "acceptance": [
+        "Raw/finished comparison is unavailable when no raw buffer exists, with an explanation rather than an invented result.",
+        "Finishing edits do not change physical source values or the approved motion bake.",
+        "Expert image controls are section disclosures and do not introduce a second global render mode."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-037",
+      "area": "Output",
+      "name": "Purpose-based export",
+      "behavior": "Offer supported presentation, transparent-product and production-master export intents through the existing export workflow.",
+      "acceptance": [
+        "Format and resolution choices reflect actual executor and encoder support before rendering.",
+        "The export identifies the exact retained job and captured scene revision.",
+        "Failure preserves the completed result where supported and offers a new destination; source native files are never export targets by default."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-038",
+      "area": "Output",
+      "name": "Reviewable render queue",
+      "behavior": "Disclose future batch and variant controls from IMAGE with captured shots, output paths and budgets visible before enqueueing.",
+      "acceptance": [
+        "Each queued item owns an immutable shot and resource manifest instead of following later inspector changes.",
+        "Cancellation and export remain attached to the originating document and job.",
+        "Batch tools are capability-gated extensions, not new top-level workspaces or claims about the current single-image host."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-039",
+      "area": "Accessibility",
+      "name": "Accessible controls and focus",
+      "behavior": "Use the existing UI kit and accessibility bridge for keyboard navigation, visible focus, scalable text, semantic labels and non-color-only feedback.",
+      "acceptance": [
+        "Complete search, filter, selection, numeric edit, Apply, Discard, preflight, Render, Cancel and Export without dragging or a pointer.",
+        "Virtualized results expose accessible names, selection state, item positions and total or filtered count without losing focus.",
+        "Primary actions have readable labels; icon-only secondary actions have accessible names and tooltips using approved icon assignments.",
+        "Text scaling and narrow panels preserve values and actions without overlapping or clipping essential controls.",
+        "Reduced motion disables automatic turntables, animated camera transitions and decorative preview motion while retaining understandable progress."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-040",
+      "area": "Automation",
+      "name": "Shared command authority",
+      "behavior": "Route actual appearance and render behavior through the existing registered commands; keep future recipe resolution and application explicitly unregistered until implemented.",
+      "acceptance": [
+        "appearance.assign and render.preflight/start/status/cancel/export remain the authorities rather than parallel UI-only aliases.",
+        "Saved setting changes use the existing render.settings command family and validated parameter contracts.",
+        "Assistant, CLI and UI requests use the same engine semantics; presentation-only focus and section disclosure remain UI state."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-041",
+      "area": "Lunar",
+      "name": "Physical lunar or editorial policy",
+      "behavior": "Expose physical versus editorial lighting as a saved shot policy, not another global interface mode.",
+      "acceptance": [
+        "Physical lunar policy prevents atmospheric scattering, automatic sky fill and undeclared editorial sources.",
+        "Selecting an editorial shot or adding fill records the change and updates the visible fidelity label.",
+        "Sun direction or exposure adjustments never silently enable an Earth disk or star background."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-042",
+      "area": "Lunar",
+      "name": "Cross-scale surface inspection",
+      "behavior": "Compare regolith detail, wheel features and vial size in the same model units from a contextual surface-scale section.",
+      "acceptance": [
+        "Texture and terrain-detail controls do not rescale the native rover.",
+        "Source bounds and local surface scale remain visible when a preset requests a close-up.",
+        "Unsupported geometric detail remains a target requirement rather than a false preview result."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-043",
+      "area": "Lunar",
+      "name": "Celestial assumptions",
+      "behavior": "Show site, epoch, stage orientation, local approximations and Earth visibility in an advanced context section.",
+      "acceptance": [
+        "Unresolved celestial bindings keep Earth and star overlays disabled.",
+        "Authored stage azimuth is not presented as a geographic ephemeris.",
+        "Changing context invalidates affected resolved fields and diagnostics without modifying the source model."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-044",
+      "area": "Lunar",
+      "name": "Emitter ownership inspection",
+      "behavior": "Identify environment, rig and rover-owned emitters in one scene inventory with their explicit contribution and sampling representation.",
+      "acceptance": [
+        "A visible emitter surface and its sampled representation are shown as one energy owner.",
+        "An unpowered LED appearance cannot be treated as an active emitter because of its color or material name.",
+        "Physical lunar source locks prevent a preset from introducing another Sun or unrequested fill."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-045",
+      "area": "SELENE",
+      "name": "Verified improved-source binding",
+      "behavior": "Check the pinned improved SELENE source and report unresolved semantic targets before model-specific scene application.",
+      "acceptance": [
+        "A different source hash or occurrence graph invalidates bindings and blocks automatic reuse.",
+        "The source native remains immutable; approved styling is saved as a named derivative.",
+        "Opening the standalone swatch script creates a fresh isolated document and never replays file.new into the source or current working design."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-046",
+      "area": "SELENE",
+      "name": "Reviewable material roles",
+      "behavior": "Preview chassis, foil, solar cell, optics, LED, vial and dust roles separately, including the exact supported scope and the fidelity of any chosen projection.",
+      "acceptance": [
+        "Current reviewed whole-body opaque assignments are visibly separated from future optical, emissive and layer bindings.",
+        "A shared component definition shows all affected copies before Apply.",
+        "Conflicting body or face overrides and locked appearances are resolved before mutation rather than being hidden by the role label."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-047",
+      "area": "SELENE",
+      "name": "SELENE shot guide",
+      "behavior": "Browse the twelve prepared SELENE shots in the local Scenes category, with intended framing, source readiness, required capabilities and three contextual quality recommendations.",
+      "acceptance": [
+        "Shot cards resolve their actual shot and quality IDs instead of inventing implemented presets from friendly names.",
+        "Unavailable shots remain inspectable with useful next actions; prepared opaque swatches are a distinct independent action.",
+        "Scene browsing preserves the active shot and pending draft until explicit application."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-048",
+      "area": "SELENE",
+      "name": "Realism diagnostics",
+      "behavior": "Expose scale, contact, light ownership, source evidence and unsupported optics as inspectable diagnostics before claiming a realistic result.",
+      "acceptance": [
+        "A dark lunar region explains its actual available lighting contributions without automatically adding fill.",
+        "An opaque surrogate, absent native source or unverified terrain generator prevents a validated-final claim.",
+        "Warnings link to the relevant field or resource and remain understandable without color coding."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-049",
+      "area": "Animation",
+      "name": "Animation and simulation clocks",
+      "behavior": "Show playback speed and render frame time separately from simulation time through the existing motion workflow.",
+      "acceptance": [
+        "Preview speed changes do not alter gravity, integration steps or the approved trajectory.",
+        "Render exposes a bound motion summary and links to motion tools instead of introducing another global timeline mode.",
+        "Reduced-motion preferences prevent automatic playback when opening a shot."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-050",
+      "area": "Animation",
+      "name": "Constraint handoff events",
+      "behavior": "Inspect grip, release, free flight, capture and stow events in the motion workflow, with a concise bound-state summary available to Render.",
+      "acceptance": [
+        "Render scene or quality changes preserve the approved event sequence.",
+        "Unbound or failed handoff states remain visible and prevent a false successful-catch presentation.",
+        "Any future editing action uses the motion command contract rather than a render-only physics shortcut."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-051",
+      "area": "Animation",
+      "name": "Trajectory evidence",
+      "behavior": "Distinguish analytic planning paths, kinematic studies and simulated trajectories in contextual diagnostics.",
+      "acceptance": [
+        "A planning overlay is never labelled a simulated or collision-validated path.",
+        "Displayed collision and reachability feedback identifies its data source and validity.",
+        "Appearance edits and thumbnail generation do not alter the trajectory or geometry."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-052",
+      "area": "Animation",
+      "name": "Contact diagnostics",
+      "behavior": "Show available impulses, penetration and relative speed near catch events from recorded simulation evidence.",
+      "acceptance": [
+        "Missing solver data remains unavailable rather than being inferred from a plausible animation.",
+        "Inspection does not change contact parameters or silently rebake motion.",
+        "Dense diagnostics use readable units, keyboard navigation and Detailed or Expert sections."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-053",
+      "area": "Animation",
+      "name": "Explicit sample state",
+      "behavior": "Show open, filling, sealed, airborne, captured and stored sample states with source evidence and failure paths.",
+      "acceptance": [
+        "State labels are distinct from visual material variants and render-quality profiles.",
+        "Closure and grasp state remain synchronized with the approved motion data.",
+        "A sealed appearance is not evidence of leak-tight containment or a successful capture."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-054",
+      "area": "Animation",
+      "name": "Bake and reproducible replay",
+      "behavior": "Bind approved motion to a versioned immutable bake while leaving render resolution, samples and display treatment independently editable.",
+      "acceptance": [
+        "Changing gravity, contact parameters, topology or motion settings invalidates the affected bake with an explicit reason.",
+        "Changing render samples or quality preserves the approved motion and joint state.",
+        "Pending render edits and motion drafts remain separate and are never silently committed together."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-055",
+      "area": "Presets",
+      "name": "Capability-aware scene composition",
+      "behavior": "Resolve material, quality, studio, environment, source and lock requirements before any future atomic preset application.",
+      "acceptance": [
+        "All missing capabilities are listed together before scene mutation.",
+        "Quality alternatives preserve shot optical requirements and source policy rather than acting as silent fallback modes.",
+        "The current six setup examples and standalone opaque swatches remain distinct from unbound complete-scene recipes."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    },
+    {
+      "id": "UX-056",
+      "area": "Presets",
+      "name": "Explicit conflicts and overrides",
+      "behavior": "Explain field ownership and source, camera, material and physics conflicts before applying a preset, with scoped keep, unlock or cancel choices.",
+      "acceptance": [
+        "The change summary identifies resource defaults, scene values, shot overrides and user locks for every conflicting field.",
+        "A locked required field blocks incompatible application; unlocking is explicit and part of the reviewed change.",
+        "Cancel preserves applied state and pending draft; a future successful apply is one undoable action.",
+        "Per-document pending edits remain visible during scene selection, render preflight and source switching."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified"
+    }
+  ]
+}

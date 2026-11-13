@@ -1,16 +1,18 @@
 //! Where MCP tool calls end up: a control-channel method call (`docs/control-protocol.md`).
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+mod remote;
 
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
-use solidcraft_engine::render::StandardView;
+use solidcraft_engine::schema::ParamCheck;
 use solidcraft_engine::view::Guides;
+use solidcraft_viewport::StandardView;
 
 /// Something that answers control-channel methods: `engine.execute`, `engine.commands`,
-/// `document.inspect`, `ui.view`, `ui.render`, `ui.screenshot`.
+/// `document.inspect`, `ui.view`, `ui.render`, `ui.screenshot`, `control.running`, and
+/// `control.pending` (the result of a request that was still running when its call returned:
+/// `{pending: what | null, done?, reply?, lost?, running_s?}`).
 pub trait Backend {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String>;
     /// True when a real window is attached (`ui.screenshot` can capture it).
@@ -26,197 +28,53 @@ pub trait Backend {
     fn in_process(&self) -> bool {
         false
     }
+    /// A line every tool result carries (a session that is not what the user expects).
+    fn notice(&self) -> Option<String> {
+        None
+    }
+    /// How calls are checked against their commands' typed contracts (`--param-check`): by the
+    /// headless session, or for `Remote` by the app or before the call is sent to it.
+    fn param_check(&self) -> ParamCheck {
+        ParamCheck::Off
+    }
+    /// The output options the app's Preferences ask for (its `mcp.options` reply), for a backend
+    /// bridged to the app. `Ok(None)`: nothing to ask (no app, or one from before the setting), so
+    /// the server's own options decide; `Err`: the app could not answer now (not running, busy),
+    /// ask again on a later call.
+    fn app_options(&mut self) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
+    /// A bridge to the same app on a connection of its own, for a backend bridged to one: the
+    /// server answers `running` on it while this backend is busy with a call (#14007), as the
+    /// app answers `control.running` on any connection at once. `None`: nothing to ask apart
+    /// (an in-process session answers only between calls).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn side_channel(&self) -> Option<Remote> {
+        None
+    }
 }
 
-/// Longest reply line accepted from the app.
-const MAX_REPLY: u64 = 64 << 20;
+/// How a tool error starts when a request is still running in the app after the wait: the
+/// request was not cancelled and its reply waits on the connection; the `pending` tool gets it.
+/// `batch` uses it to tell "still running" from "failed".
+pub(crate) use solidcraft_control::STILL_RUNNING;
 
-/// How long a reply may take: kernel operations (booleans, fillets) on big parts can take a while.
-const READ_TIMEOUT: Duration = Duration::from_secs(300);
-
-/// How long the app may take to run an `engine.batch` (its control server waits as long).
-const BATCH_TIMEOUT: Duration = Duration::from_secs(3600);
-
-/// A running SolidCraft app reached through its loopback control port
-/// (`solidcraft --control PORT`).
-pub struct Remote {
-    addr: String,
-    port: u16,
-    conn: Option<(BufReader<TcpStream>, TcpStream)>,
-    next_id: u64,
-    /// `--token`, when given. Otherwise each request looks the token up again, since every
-    /// launch of the app makes a new one (docs/control-protocol.md).
-    explicit_token: Option<String>,
-}
+#[cfg(test)]
+pub(crate) use remote::Waits;
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote::{Auto, Remote};
 
 /// How a tool error starts when no app listens at the bridged address. The agent reads it, and
 /// `batch` uses it to tell "never sent" from "sent, reply lost".
 pub(crate) const NOT_RUNNING: &str = "no SolidCraft app is listening at";
-
-impl Remote {
-    /// Connect to the app at `addr`, with its control token found the usual way
-    /// (`SOLIDCRAFT_CONTROL_TOKEN`, else the app's token file for that port).
-    pub fn connect(addr: &str) -> std::io::Result<Self> {
-        Self::connect_with_token(addr, None)
-    }
-
-    /// [`Remote::connect`] with the token given (`--token`); `None` finds it the usual way.
-    pub fn connect_with_token(addr: &str, token: Option<&str>) -> std::io::Result<Self> {
-        let mut r = Self::new(addr, token);
-        r.reconnect()?;
-        Ok(r)
-    }
-
-    /// A bridge to the app at `addr` that connects when a call needs it: an MCP server started
-    /// before the app keeps its tools, and they reach the app once it runs.
-    pub fn new(addr: &str, token: Option<&str>) -> Self {
-        let port = addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(0);
-        let explicit_token = token.map(str::to_string);
-        Self { addr: addr.to_string(), port, conn: None, next_id: 1, explicit_token }
-    }
-
-    /// Connect now, if the app is there (`new` does not); the error says why not.
-    pub fn try_connect(&mut self) -> std::io::Result<()> {
-        self.reconnect()
-    }
-
-    /// Failing to reach the app at all is `NotConnected`, so [`Remote::explain`] can tell it from
-    /// a connection lost during a call.
-    fn reconnect(&mut self) -> std::io::Result<()> {
-        self.conn = None;
-        let not_connected = |e: std::io::Error| std::io::Error::new(std::io::ErrorKind::NotConnected, e);
-        let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, format!("cannot resolve {}", self.addr));
-        for sa in self.addr.to_socket_addrs().map_err(not_connected)? {
-            match TcpStream::connect_timeout(&sa, Duration::from_millis(800)) {
-                Ok(s) => {
-                    s.set_nodelay(true).ok();
-                    s.set_read_timeout(Some(READ_TIMEOUT)).ok();
-                    let read = s.try_clone()?;
-                    self.conn = Some((BufReader::new(read), s));
-                    return Ok(());
-                }
-                Err(e) => last = e,
-            }
-        }
-        Err(not_connected(last))
-    }
-
-    /// The tool error for a failed call: whether the app is not running (and how to start it) or
-    /// went away during the call.
-    fn explain(&self, e: &std::io::Error) -> String {
-        let (addr, port) = (&self.addr, self.port);
-        if e.kind() == std::io::ErrorKind::NotConnected {
-            format!(
-                "{NOT_RUNNING} {addr} ({e}): it is not running, or it quit. Start it with `solidcraft --control {port}` \
-                 (or ask the user to); the next call connects to it"
-            )
-        } else {
-            format!(
-                "the SolidCraft app at {addr} did not answer ({e}): it may have quit or crashed during this call, after                  running it or not. Inspect the design before sending a change again; if the app quit, start it with                  `solidcraft --control {port}`"
-            )
-        }
-    }
-
-    fn roundtrip(&mut self, line: &str) -> std::io::Result<String> {
-        if self.conn.is_none() {
-            self.reconnect()?;
-        }
-        let Some((reader, writer)) = self.conn.as_mut() else { return Err(std::io::Error::other("not connected")) };
-        // One write: a request that loses its newline still reaches the app as a request.
-        let sent = writer.write_all(format!("{line}\n").as_bytes()).and_then(|()| writer.flush());
-        if let Err(e) = sent {
-            self.conn = None;
-            return Err(e);
-        }
-        let mut reply = String::new();
-        let n = match reader.by_ref().take(MAX_REPLY).read_line(&mut reply) {
-            Ok(n) => n,
-            Err(e) => {
-                // A timed-out read leaves a late reply on the stream: start afresh next time.
-                self.conn = None;
-                return Err(e);
-            }
-        };
-        if n == 0 || !reply.ends_with('\n') {
-            self.conn = None;
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "connection closed"));
-        }
-        Ok(reply)
-    }
-
-    fn set_read_timeout(&self, t: Duration) {
-        if let Some((_, writer)) = &self.conn {
-            writer.set_read_timeout(Some(t)).ok();
-        }
-    }
-
-    /// `engine.batch` is never sent twice (#743): it goes on a fresh connection (an idle one may
-    /// have been closed by an app restart; connecting again sends nothing), and once it is being
-    /// written any error is final, as the app may have run it.
-    fn send_batch(&mut self, line: &str) -> std::io::Result<String> {
-        self.reconnect().or_else(|_| self.reconnect())?;
-        self.set_read_timeout(BATCH_TIMEOUT);
-        let r = self.roundtrip(line);
-        self.set_read_timeout(READ_TIMEOUT);
-        r
-    }
-}
-
-impl Backend for Remote {
-    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
-        let id = self.next_id;
-        self.next_id += 1;
-        let mut params = params;
-        // The app confines the files this request reaches to the agent's folders (control.rs).
-        if let (Some(scope), Some(o)) = (solidcraft_engine::io::vfs::current_scope(), params.as_object_mut()) {
-            o.insert("allow_paths".into(), json!(scope.roots().iter().map(|r| r.to_string_lossy()).collect::<Vec<_>>()));
-        }
-        let mut msg = json!({"id": id, "method": method, "params": params});
-        // The token goes with every request (an app restarted mid-session has a new one).
-        if let Some(t) = solidcraft_engine::control_auth::client_token(self.port, self.explicit_token.as_deref()) {
-            msg["token"] = json!(t);
-        }
-        let line = msg.to_string();
-        let reply = if method == "engine.batch" {
-            self.send_batch(&line)
-        } else {
-            // One retry on a fresh connection (the app may have restarted). When nothing listens
-            // any more, the app went away, maybe while running this request: say that, not
-            // just "not running".
-            self.roundtrip(&line).or_else(|lost| {
-                self.roundtrip(&line).map_err(|e| if e.kind() == std::io::ErrorKind::NotConnected && lost.kind() != e.kind() { lost } else { e })
-            })
-        }
-        .map_err(|e| self.explain(&e))?;
-        let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
-        if v.get("ok").and_then(Value::as_bool) == Some(true) {
-            Ok(v.get("result").cloned().unwrap_or(Value::Null))
-        } else {
-            Err(v.get("error").and_then(Value::as_str).unwrap_or("error").to_string())
-        }
-    }
-    fn has_ui(&self) -> bool {
-        true
-    }
-    fn describe(&self) -> String {
-        if self.conn.is_some() {
-            format!("connected to the SolidCraft app at {} (the user watches the viewport)", self.addr)
-        } else {
-            // Still "connected to the SolidCraft app": the skills tell bridged from headless by it.
-            format!(
-                "connected to the SolidCraft app at {} once it runs (the user watches the viewport). It was not running \
-                 when this server started; until it is (`solidcraft --control {}`), tool calls say so",
-                self.addr, self.port
-            )
-        }
-    }
-}
 
 /// An in-process headless session (no window); renders with the CPU rasterizer.
 pub struct Headless {
     pub session: Session,
     /// Orientation for renders; the camera is refitted to the model every time.
     pub view: StandardView,
+    /// Application layout persists across calls, outside Session/document undo.
+    pub panels: solidcraft_engine::panels::PanelResult<solidcraft_engine::panels::commands::InMemoryPanelBackend>,
 }
 
 impl Default for Headless {
@@ -235,16 +93,78 @@ impl Headless {
             }
             Err(e) => session.log.push(format!("image host unavailable: {e}")),
         }
-        Headless { session, view: StandardView::Iso }
+        Headless { session, view: StandardView::Iso, panels: solidcraft_engine::panels::commands::InMemoryPanelBackend::empty() }
     }
+    pub fn with_panels(mut self, panels: solidcraft_engine::panels::commands::InMemoryPanelBackend) -> Self {
+        self.panels = Ok(panels);
+        self
+    }
+    fn execute_command(&mut self, id: &str, params: &Value) -> Result<Value, String> {
+        use solidcraft_engine::panels::commands;
+        if commands::is_command(id) {
+            self.panels.as_mut().map_err(|reason| commands::error_text(reason.clone()))?.execute(id, params).map_err(commands::error_text)
+        } else {
+            self.session.execute(id, params).map_err(|e| e.to_string())
+        }
+    }
+    fn panel_sequence(&mut self, method: &str, p: &Value, steps: &[Value]) -> Result<Value, String> {
+        use solidcraft_engine::panels::{Rule, commands, error};
+        if steps.len() > 100_000 {
+            return Err("script too long".into());
+        }
+        let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
+        if method == "engine.batch"
+            && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, self.session.param_check, &[])
+        {
+            return Ok(refusal.reply(steps.len(), rollback));
+        }
+        let panels = steps.iter().filter(|step| step_command(step).is_some_and(commands::is_command)).count();
+        if method == "engine.batch" && rollback {
+            if panels != steps.len() {
+                return Err(commands::error_text(error(
+                    Rule::Capability,
+                    "atomic mixed document/layout batches are unavailable; use rollback:false or separate transactions",
+                )));
+            }
+            return self.panels.as_mut().map_err(|reason| commands::error_text(reason.clone()))?.batch(steps).map_err(commands::error_text);
+        }
+        let mut results = Vec::new();
+        for (i, step) in steps.iter().enumerate() {
+            let empty = json!({});
+            let params = step.get("params").filter(|p| !p.is_null()).unwrap_or(&empty);
+            let result = step_command(step).ok_or_else(|| "missing command".to_string()).and_then(|id| self.execute_command(id, params));
+            match result {
+                Ok(result) => results.push(result),
+                Err(error) if method == "engine.batch" => return Ok(commands::sequential_failure(i, step_command(step), error, results)),
+                Err(error) => return Err(error),
+            }
+        }
+        if method == "engine.batch" { Ok(json!({"completed":results.len(),"results":results,"undone":0})) } else { Ok(json!(results)) }
+    }
+}
+
+fn step_command(step: &Value) -> Option<&str> {
+    step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)
 }
 
 fn dim(p: &Value, k: &str, default: f64) -> u32 {
     p.get(k).and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(default).clamp(16.0, 4096.0) as u32
 }
 
-impl Backend for Headless {
-    fn call(&mut self, method: &str, p: Value) -> Result<Value, String> {
+impl Headless {
+    fn call_at_current_level(&mut self, method: &str, p: Value) -> Result<Value, String> {
+        if matches!(method, "engine.execute" | "command") && step_command(&p).is_some_and(solidcraft_engine::panels::commands::is_command) {
+            let empty = json!({});
+            return self.execute_command(step_command(&p).unwrap_or_default(), p.get("params").filter(|p| !p.is_null()).unwrap_or(&empty));
+        }
+        if matches!(method, "engine.script" | "engine.batch")
+            && let Some(steps) = p
+                .as_array()
+                .or_else(|| p.get("commands").and_then(Value::as_array))
+                .filter(|steps| steps.iter().any(|step| step_command(step).is_some_and(solidcraft_engine::panels::commands::is_command)))
+        {
+            return self.panel_sequence(method, &p, steps);
+        }
         let s = &mut self.session;
         let str_p = |k: &str| p.get(k).and_then(Value::as_str);
         match method {
@@ -261,9 +181,9 @@ impl Backend for Headless {
                 match v {
                     // Fit keeps the orientation, also of a camera `view.apply` chose.
                     "fit" => {
-                        let b = solidcraft_engine::view::bounds(s);
+                        let b = solidcraft_engine::view::bounds(s).map_err(|e| e.to_string())?;
                         if let Some(c) = s.camera.as_mut() {
-                            c.fit(&b);
+                            c.fit(&solidcraft_engine::render::view_bounds(&b));
                         }
                     }
                     _ => {
@@ -276,18 +196,21 @@ impl Backend for Headless {
             "ui.render" => {
                 let (w, h) = (dim(&p, "width", 1280.0), dim(&p, "height", 800.0));
                 // The camera `view.apply` chose, else the standard view framing the model.
-                let cam = s.camera.unwrap_or_else(|| {
-                    let mut cam = solidcraft_engine::view::home_camera(s);
-                    cam.set_view(self.view);
-                    cam
-                });
+                let cam = match s.camera {
+                    Some(cam) => cam,
+                    None => {
+                        let mut cam = solidcraft_engine::view::home_camera(s).map_err(|e| e.to_string())?;
+                        cam.set_view(self.view);
+                        cam
+                    }
+                };
                 // The grid and the axes are drawn unless the request leaves them out.
                 let shown = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(true);
                 let guides = Guides { grid: shown("grid"), axes: shown("axes") };
                 let path = str_p("path").ok_or("missing `path`")?;
                 // A path outside the agent's folders is refused before anything is drawn.
                 solidcraft_engine::io::vfs::check(path).map_err(|e| format!("{path}: {e}"))?;
-                let scene = solidcraft_engine::view::scene_with_guides(s, &cam, s.section, guides);
+                let scene = solidcraft_engine::view::scene_with_guides(s, &cam, s.section, guides).map_err(|e| e.to_string())?;
                 // Drawn on the GPU by the renderer the host installed (`solidcraft-cli mcp`).
                 let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
                 solidcraft_engine::io::vfs::write(path, &png.bytes).map_err(|e| format!("{path}: {e}"))?;
@@ -301,8 +224,26 @@ impl Backend for Headless {
                 }))
             }
             "ui.screenshot" => Err("no window in headless mode; use ui.render".into()),
+            // Calls run here one at a time: none is running while this one is asked, and nothing
+            // is ever left running.
+            "control.running" => Ok(json!({"running": []})),
+            "control.pending" => Ok(json!({"pending": null})),
+            "control.cancel" => Err("nothing can be cancelled in headless mode: each call runs to its end before it returns".into()),
             other => Err(format!("unknown method `{other}`")),
         }
+    }
+}
+impl Backend for Headless {
+    fn call(&mut self, method: &str, p: Value) -> Result<Value, String> {
+        let own = self.session.param_check;
+        if matches!(method, "engine.execute" | "command" | "engine.batch" | "engine.script")
+            && let Some(value) = p.get("param_check")
+        {
+            self.session.param_check = value.as_str().and_then(ParamCheck::parse).ok_or("`param_check` must be off, warn or strict")?;
+        }
+        let reply = self.call_at_current_level(method, p);
+        self.session.param_check = own;
+        reply
     }
     fn has_ui(&self) -> bool {
         false
@@ -315,5 +256,8 @@ impl Backend for Headless {
     }
     fn in_process(&self) -> bool {
         true
+    }
+    fn param_check(&self) -> ParamCheck {
+        self.session.param_check
     }
 }

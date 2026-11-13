@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::persistent_name::{Base, EdgeName, FaceName, FeatureId};
 use crate::{FeatureKind, PlaneRef};
 
 /// Remap persistent topology tokens without rewriting arbitrary user expressions or labels.
@@ -17,10 +18,29 @@ pub fn remap_topology(name: &str, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<St
     }
     // Imported names belong to the complete canonical body prefix, even when that prefix
     // happens to contain text resembling a feature token.
-    if let Some((body, suffix)) = name.rsplit_once(":face:")
-        && let Some(new) = bodies.get(body)
+    let body_face = name.rsplit_once(":face:").and_then(|(body, suffix)| Some((bodies.get(body)?, body, suffix)));
+    // An edge name (`A|B`) is remapped one face at a time, so a body face on one side doesn't
+    // stop the other side's feature or body from being remapped (#13097). A body whose own
+    // name holds a `|` is a single face, not an edge.
+    if !body_face.is_some_and(|(_, body, _)| body.contains('|'))
+        && let Ok(edge) = EdgeName::parse(name)
+        && edge.faces.len() > 1
+        && edge.to_string() == name
     {
+        let faces: Vec<String> = edge.faces.iter().map(|face| remap_topology(&face.to_string(), ids, bodies)).collect();
+        let tie = edge.tie.map(|k| format!("~{k}")).unwrap_or_default();
+        return format!("{}{tie}", faces.join("|"));
+    }
+    if let Some((new, _, suffix)) = body_face {
         return format!("{new}:face:{suffix}");
+    }
+    // A name that reads is remapped by its structure: every feature it names, and a body
+    // face's body. Text of no known form is remapped token by token below.
+    if let Ok(face) = FaceName::parse(name)
+        && !matches!(face.base, Base::Other(_))
+        && let Some(mapped) = face.map(&mut |id, _| Some(ids.get(&id.0).map_or(id, |n| FeatureId(*n))), &mut |b| bodies.get(b).cloned())
+    {
+        return mapped.to_string();
     }
     let mut out = String::new();
     let mut at = 0;
@@ -80,9 +100,10 @@ pub fn clone_expression(source: &str, parameters: &BTreeMap<String, String>) -> 
 fn remap_geo(
     g: &mut crate::construct::GeoRef,
     ids: &BTreeMap<u64, u64>,
-    names: &BTreeMap<String, String>,
     bodies: &BTreeMap<String, String>,
     depth: usize,
+    occurrences: &BTreeMap<u64, u64>,
+    doc: &crate::Document,
 ) -> crate::Result<()> {
     use crate::construct::GeoRef;
     if depth > 64 {
@@ -100,8 +121,9 @@ fn remap_geo(
                 *n = remap_topology(n, ids, bodies);
             }
         }
-        GeoRef::ConstructPoint { name } | GeoRef::Axis { name } => mapped_name(name, names),
-        GeoRef::Plane { plane } => remap_plane(plane, ids, names, bodies, depth + 1)?,
+        GeoRef::Plane { plane } => remap_plane(plane, ids, bodies, depth + 1, occurrences, doc)?,
+        GeoRef::Datum { datum } => remap_datum_path(datum, occurrences, doc)?,
+        GeoRef::Snap { of, .. } => remap_geo(of, ids, bodies, depth + 1, occurrences, doc)?,
         _ => {}
     }
     Ok(())
@@ -110,18 +132,30 @@ fn remap_geo(
 fn remap_plane(
     p: &mut PlaneRef,
     ids: &BTreeMap<u64, u64>,
-    names: &BTreeMap<String, String>,
     bodies: &BTreeMap<String, String>,
     depth: usize,
+    occurrences: &BTreeMap<u64, u64>,
+    doc: &crate::Document,
 ) -> crate::Result<()> {
     if depth > 64 {
         return Err(crate::DocError::Invalid("clone plane reference depth exceeded".into()));
     }
     match p {
-        PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => {
-            remap_plane(base, ids, names, bodies, depth + 1)?
+        PlaneRef::Datum { datum } => remap_datum_path(datum, occurrences, doc)?,
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1, occurrences, doc)?,
+        PlaneRef::ThroughPoint { base, point } => {
+            remap_plane(base, ids, bodies, depth + 1, occurrences, doc)?;
+            remap_geo(point, ids, bodies, depth + 1, occurrences, doc)?;
         }
-        PlaneRef::Construction { name } => mapped_name(&mut name.0, names),
+        PlaneRef::AtAngle { base, line, pivot, .. } => {
+            remap_plane(base, ids, bodies, depth + 1, occurrences, doc)?;
+            if let Some(g) = line {
+                remap_geo(g, ids, bodies, depth + 1, occurrences, doc)?;
+            }
+            if let Some(g) = pivot {
+                remap_geo(g, ids, bodies, depth + 1, occurrences, doc)?;
+            }
+        }
         PlaneRef::Face { name, anchor, .. } => {
             if let Some(name) = name {
                 *name = remap_topology(name, ids, bodies);
@@ -132,14 +166,29 @@ fn remap_plane(
         }
         _ => {
             for r in p.refs_mut() {
-                remap_geo(r, ids, names, bodies, depth + 1)?;
+                remap_geo(r, ids, bodies, depth + 1, occurrences, doc)?;
             }
         }
     }
     Ok(())
 }
 
-fn remap_link(
+/// A datum reference names an exact placement by its complete occurrence path. A copy within one
+/// design rewrites the path to the copy's own walk (the copied subtree's source ancestors are not
+/// in the map); an empty occurrence map (a paste from another design) or a path that leaves the
+/// copied tree is refused - the reference could not follow, and a dangling one would resolve
+/// against whatever then sits at those ids.
+fn remap_datum_path(d: &mut crate::construct::DatumRef, occurrences: &BTreeMap<u64, u64>, doc: &crate::Document) -> crate::Result<()> {
+    let last = d.path.last().copied().ok_or_else(|| crate::DocError::Invalid("a copied datum names no placement".into()))?;
+    let new = occurrences
+        .get(&last)
+        .copied()
+        .ok_or_else(|| crate::DocError::Invalid("the copied reference names a placement outside the copied tree".into()))?;
+    d.path = doc.occurrence_path(new).ok_or_else(|| crate::DocError::Invalid("the copied placement's path is broken".into()))?;
+    Ok(())
+}
+
+pub(crate) fn remap_link(
     source: &mut solidcraft_sketch::LinkSource,
     ids: &BTreeMap<u64, u64>,
     names: &BTreeMap<String, String>,
@@ -172,7 +221,9 @@ fn remap_link(
             remap_link(a, ids, names, bodies, depth + 1);
             remap_link(b, ids, names, bodies, depth + 1);
         }
-        LinkSource::Plane { name } => mapped_name(name, names),
+        LinkSource::Plane { name } | LinkSource::ConstructionPoint { name } => mapped_name(name, names),
+        // A construction axis, by name (#9324); the origin axes are no feature's.
+        LinkSource::Axis { name } if !matches!(name.as_str(), "X" | "Y" | "Z") => mapped_name(name, names),
         _ => {}
     }
 }
@@ -185,6 +236,8 @@ impl crate::Feature {
         names: &BTreeMap<String, String>,
         bodies: &BTreeMap<String, String>,
         parameters: &BTreeMap<String, String>,
+        occurrences: &BTreeMap<u64, u64>,
+        doc: &crate::Document,
     ) -> crate::Result<()> {
         use FeatureKind as K;
         match &self.kind {
@@ -192,6 +245,11 @@ impl crate::Feature {
                 checked_plane(plane, 0)?;
                 for link in &sketch.links {
                     checked_link(&link.source, 0)?;
+                }
+            }
+            K::FrameEndCap { ends, .. } => {
+                for end in ends {
+                    checked_plane(&end.plane, 0)?;
                 }
             }
             K::ConstructionPlane { plane }
@@ -202,6 +260,7 @@ impl crate::Feature {
             K::Draft { neutral, .. } => checked_plane(neutral, 0)?,
             K::ReplaceFace { target, .. } => checked_plane(target, 0)?,
             K::SurfaceExtend { up_to: Some(crate::ExtendTo::Plane(plane)), .. } => checked_plane(plane, 0)?,
+            K::Thread { up_to: Some(crate::ThreadLimit::Plane(plane)), .. } => checked_plane(plane, 0)?,
             K::ConstructionAxis { def } => {
                 for r in def.refs() {
                     checked_geo(r, 0)?;
@@ -212,8 +271,13 @@ impl crate::Feature {
                     checked_geo(r, 0)?;
                 }
             }
+            K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => checked_geo(geo, 0)?,
             _ => {}
         }
+        // Feature names are remapped once here; the geometry pass below handles only
+        // sketch ids and topology, so a copy whose new name is also an old key is not remapped twice.
         self.kind.remap_refs(ids, names);
         for n in &mut self.body_names {
             mapped_name(n, bodies);
@@ -236,7 +300,7 @@ impl crate::Feature {
         self.kind.remap_bodies(bodies);
         match &mut self.kind {
             K::Sketch { plane, sketch } => {
-                remap_plane(plane, ids, names, bodies, 0)?;
+                remap_plane(plane, ids, bodies, 0, occurrences, doc)?;
                 for c in &mut sketch.constraints {
                     if let Some(n) = &mut c.param {
                         mapped_name(n, parameters);
@@ -245,29 +309,57 @@ impl crate::Feature {
                 for e in sketch.text_exprs_mut() {
                     *e = clone_expression(e, parameters);
                 }
+                // An equation curve's variable is its own: a parameter of that name is not renamed in it.
+                for (variable, e) in sketch.equation_exprs_mut() {
+                    let others: BTreeMap<String, String> =
+                        parameters.iter().filter(|(old, _)| old.as_str() != variable).map(|(o, n)| (o.clone(), n.clone())).collect();
+                    *e = clone_expression(e, &others);
+                }
                 for link in &mut sketch.links {
                     remap_link(&mut link.source, ids, names, bodies, 0);
-                    for n in link.face_name.iter_mut().chain(&mut link.edge_name) {
+                    for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name) {
                         *n = remap_topology(n, ids, bodies);
                     }
+                }
+            }
+            K::FrameEndCap { ends, .. } => {
+                for end in ends {
+                    remap_plane(&mut end.plane, ids, bodies, 0, occurrences, doc)?;
                 }
             }
             K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }
-            | K::SurfaceTrim { plane, .. } => remap_plane(plane, ids, names, bodies, 0)?,
-            K::Draft { neutral, .. } => remap_plane(neutral, ids, names, bodies, 0)?,
-            K::ReplaceFace { target, .. } => remap_plane(target, ids, names, bodies, 0)?,
-            K::SurfaceExtend { up_to: Some(crate::ExtendTo::Plane(plane)), .. } => remap_plane(plane, ids, names, bodies, 0)?,
+            | K::SurfaceTrim { plane, .. } => remap_plane(plane, ids, bodies, 0, occurrences, doc)?,
+            K::Draft { neutral, .. } => remap_plane(neutral, ids, bodies, 0, occurrences, doc)?,
+            K::ReplaceFace { target, .. } => remap_plane(target, ids, bodies, 0, occurrences, doc)?,
+            K::SurfaceExtend { up_to: Some(crate::ExtendTo::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0, occurrences, doc)?,
+            K::Thread { up_to: Some(crate::ThreadLimit::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0, occurrences, doc)?,
             K::ConstructionAxis { def } => {
                 for r in def.refs_mut() {
-                    remap_geo(r, ids, names, bodies, 0)?;
+                    remap_geo(r, ids, bodies, 0, occurrences, doc)?;
                 }
             }
             K::ConstructionPoint { def } => {
                 for r in def.refs_mut() {
-                    remap_geo(r, ids, names, bodies, 0)?;
+                    remap_geo(r, ids, bodies, 0, occurrences, doc)?;
+                }
+            }
+            K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => {
+                remap_geo(geo, ids, bodies, 0, occurrences, doc)?
+            }
+            // An Align frame's joint origin finds its faces and edges by name, as the feature's
+            // own face names are found.
+            K::Align { from_frame, to_frame, .. } => {
+                for fr in [from_frame, to_frame].into_iter().flatten() {
+                    if let crate::AlignFrame::Origin { origin } = fr {
+                        for n in origin.snap.face_names_mut() {
+                            *n = remap_topology(n, ids, bodies);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -290,8 +382,17 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
         return Err(crate::DocError::Invalid("copy reference nesting exceeds 64".into()));
     }
     match p {
-        PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => checked_plane(base, depth + 1)?,
-        PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => {
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => checked_plane(base, depth + 1)?,
+        PlaneRef::AtAngle { base, line, pivot, .. } => {
+            checked_plane(base, depth + 1)?;
+            if let Some(g) = line {
+                checked_geo(g, depth + 1)?;
+            }
+            if let Some(g) = pivot {
+                checked_geo(g, depth + 1)?;
+            }
+        }
+        PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => {
             checked_geo(a, depth + 1)?;
             checked_geo(b, depth + 1)?;
         }
@@ -299,12 +400,21 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
             checked_geo(plane, depth + 1)?;
             checked_geo(line, depth + 1)?;
         }
+        PlaneRef::ThroughPoint { base, point } => {
+            checked_plane(base, depth + 1)?;
+            checked_geo(point, depth + 1)?;
+        }
         PlaneRef::ThreePoints { a, b, c } => {
             checked_geo(a, depth + 1)?;
             checked_geo(b, depth + 1)?;
             checked_geo(c, depth + 1)?;
         }
-        PlaneRef::Tangent { face, .. } => checked_geo(face, depth + 1)?,
+        PlaneRef::Tangent { face, reference, .. } => {
+            checked_geo(face, depth + 1)?;
+            if let Some(r) = reference {
+                checked_geo(r, depth + 1)?;
+            }
+        }
         PlaneRef::AlongPath { path, .. } => checked_geo(path, depth + 1)?,
         _ => {}
     }
@@ -324,6 +434,30 @@ fn checked_link(source: &solidcraft_sketch::LinkSource, depth: usize) -> crate::
 #[cfg(test)]
 mod clone_tests {
     use super::*;
+
+    #[test]
+    fn construction_feature_names_are_remapped_only_once_when_copied() {
+        use serde_json::json;
+
+        let names = BTreeMap::from([("Old".into(), "New".into()), ("New".into(), "Wrong".into())]);
+        // Construction plane references are keyed by id (#1134): a copy remap moves the id map,
+        // not this one; the axis and point names below are what a rename and a copy rewrite.
+        let origin = json!({"type": "plane", "plane": {"type": "construction", "feature": 7}});
+        for kind in [
+            json!({"type": "construction_axis", "def": {"type": "two_points", "a": {"type": "construct_point", "name": "Old"}, "b": {"type": "point", "p": [1, 2, 3]}}}),
+            json!({"type": "construction_point", "def": {"type": "edge_and_plane", "edge": {"type": "axis", "name": "Old"}, "plane": origin}}),
+            json!({"type": "construction_plane", "plane": {"type": "perpendicular", "plane": origin, "line": {"type": "axis", "name": "Old"}}}),
+        ] {
+            let mut value = kind;
+            value["id"] = json!(1);
+            value["name"] = json!("Copy");
+            let mut feature: crate::Feature = serde_json::from_value(value).unwrap();
+            let before = serde_json::to_string(&feature).unwrap();
+            feature.remap_clone(&BTreeMap::new(), &names, &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &crate::Document::default()).unwrap();
+            assert_eq!(serde_json::to_string(&feature).unwrap(), before.replace("\"Old\"", "\"New\""));
+        }
+    }
+
     #[test]
     fn imported_names_and_topology_tokens_have_separate_identity() {
         let ids = BTreeMap::from([(1, 2), (10, 20)]);
@@ -331,6 +465,19 @@ mod clone_tests {
         assert_eq!(remap_topology("F1:Housing:face:0", &ids, &bodies), "F1:Housing (copy):face:0");
         assert_eq!(remap_topology("F1:+x|F10:end@F1.2", &ids, &bodies), "F2:+x|F20:end@F2.2");
         assert_eq!(remap_topology("UserF1:label", &ids, &bodies), "UserF1:label");
+    }
+    #[test]
+    fn an_edge_name_with_a_body_face_maps_every_face() {
+        // #13097: a body face on either side of an edge must not stop the other side's
+        // feature or body from being remapped.
+        let ids: BTreeMap<u64, u64> = [(2, 20)].into_iter().collect();
+        let bodies: BTreeMap<String, String> =
+            [("Plate".to_string(), "Plate (copy)".to_string()), ("A|B".to_string(), "A|B (copy)".to_string())].into_iter().collect();
+        assert_eq!(remap_topology("Plate:face:3|F2:top", &ids, &bodies), "Plate (copy):face:3|F20:top");
+        assert_eq!(remap_topology("F2:top|Plate:face:3", &ids, &bodies), "F20:top|Plate (copy):face:3");
+        assert_eq!(remap_topology("Plate:face:3|F2:top~1", &ids, &bodies), "Plate (copy):face:3|F20:top~1");
+        // A body whose name holds a `|` is still one face.
+        assert_eq!(remap_topology("A|B:face:0", &ids, &bodies), "A|B (copy):face:0");
     }
     #[test]
     fn a_sheet_face_follows_its_body_and_its_flange() {

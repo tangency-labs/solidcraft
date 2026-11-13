@@ -1,0 +1,8 @@
+#### WR-774. `SmApiCreatePipeSweep` builds a pipe whose radius reaches past a bend's centre, its wall folded through itself
+- **Severity:** Wrong result
+- **Area:** Topology
+- **Location:** `source/SM_API/src/SmApiBrep.cpp:1385`, `SmApiCreatePipeSweep` (def. `:1376`), and `source/SMLib/src/SmPrimitiveCreation.cpp:6906`, `SmPrimitiveCreation::CreatePipeSweep`.
+- **What happens:** The API checks only `dPipeRadius <= 0.0`, and `CreatePipeSweep` sweeps the circle along the path with no check against the path's curvature. Where the path bends with a radius smaller than the pipe's, the circles of neighbouring sections cross on the inside of the bend, so the swept wall folds through itself. The pipe surface is singular wherever the radius reaches 1/κ of the path (Maekawa, Patrikalakis, Sakkalis and Yu, "Analysis and applications of pipe surfaces", CAGD 15(5), 1998). The result is returned as a solid; its topology passes `brep_is_manifold_solid`.
+- **Trigger:** a pipe of radius 5.0526 along an ellipse with semi-axes 3.6098 and 8.0355, whose tightest bend has radius 3.6098² / 8.0355 = 1.6216 (the panic fuzz's `face_ops` case 3447330831849305406, tangency-labs/solidcraft#13766). A silhouette of that body along the ellipse's normal ran past 40 s.
+- **How found:** tracing the panic fuzz's long-running `face_ops` case (tangency-labs/solidcraft#13766).
+- **Confirmed:** by reading the C++ (no curvature check on either path) and on the port, which follows it: on solidcore main `3e2cc277e` the pipe builds. Solidcore now refuses the radius (`sweep::api_brep::create_pipe_sweep`, test `a_pipe_reaching_past_a_bend_centre_is_refused`).

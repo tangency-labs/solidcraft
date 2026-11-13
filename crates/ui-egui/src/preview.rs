@@ -1,47 +1,74 @@
 //! Live operation previews. While a feature dialog is open, its commands are evaluated on a
 //! scratch copy of the session ([`solidcraft_engine::Session::preview`]), off the UI thread
 //! where threads exist, and the result is drawn in place of the bodies it changes: new surface
-//! tinted, removed material as a translucent ghost. The last good preview stays up while the
-//! next one computes; once the current inputs make the feature fail, nothing is previewed and
-//! the error shows in the dialog (#3254).
+//! tinted (unless Graphics' Tint new surface in a preview is off, when a changed body is drawn
+//! as itself), removed material as a translucent ghost. The last good preview stays up while
+//! the next one computes; once the current inputs make the feature fail, nothing is previewed
+//! and the error shows in the dialog (#3254).
 //! Nothing here touches the document or the undo history.
 //!
 //! A feature that adds or removes a tool body (join, cut, intersect) shows only its tool. That
 //! is all its preview builds: its boolean, which can take seconds (a text joined onto a part),
 //! runs once, on OK, and an error it finds shows then, the dialog staying open.
 
+use solidcraft_engine::geom::prelude::*;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::ModelState;
-use solidcraft_engine::geom::{Aabb3, Mesh, Ring, Vec3};
+use solidcraft_engine::doc::progress::Progress;
+use solidcraft_engine::geom::{Aabb3, Mesh, Ring};
+use solidcraft_engine::kernel::history::Change;
 
 use crate::SolveApp;
 use crate::gpu::{GpuScene, SceneSlot};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// Colours a preview is drawn with (straight sRGBA).
 #[derive(Clone, Copy, Debug)]
 pub struct Colors {
     pub body: [u8; 4],
+    /// The tool a join, cut or intersect adds, a datum plane a preview creates, and, where the
+    /// preference asks for it (`tint_new`), the surface a feature adds to a body it changes.
     pub added: [u8; 4],
     /// A body the preview creates (New Body), so it doesn't look like a join.
     pub new_body: [u8; 4],
     pub removed: [u8; 4],
     pub edge: [u8; 4],
+    /// Whether a moved component's old place is drawn as a ghost (Drive Joints' Show ghost).
+    pub ghost: bool,
+    /// Whether the surface a feature adds to a body it changes is drawn in the added colour
+    /// (Graphics' Tint new surface in a preview). Off: that body is drawn as itself, and which
+    /// of its faces are new is never worked out.
+    pub tint_new: bool,
+    /// Whether removed material is filled in the cut colour (Graphics' Show removed material in
+    /// red): the see-through cut and the ghost of the shape a feature replaces. Off: those fills
+    /// are left out altogether, so they are fully transparent and only outlines are drawn.
+    pub cut_tint: bool,
 }
 
 impl Colors {
     pub fn from_tokens(t: &Tokens) -> Colors {
         let c = |c: egui::Color32| c.to_srgba_unmultiplied();
-        Colors { body: c(t.body), added: c(t.preview_add), new_body: c(t.preview_new), removed: c(t.preview_cut), edge: c(t.body_edge) }
+        Colors {
+            body: c(t.body),
+            added: c(t.preview_add),
+            new_body: c(t.preview_new),
+            removed: c(t.preview_cut),
+            edge: c(t.body_edge),
+            ghost: true,
+            tint_new: true,
+            cut_tint: true,
+        }
     }
 
     fn for_tool(t: &Tokens, tab: &str, active: bool) -> Colors {
         let mut colors = Self::from_tokens(t);
-        let accent = crate::theme::TabAccent::for_tab(t, tab);
+        let accent = crate::workspace::tab_accent(t, tab);
         if active && accent.color != t.accent {
             colors.added = accent.color.to_srgba_unmultiplied();
             colors.new_body = t.body.lerp_to_gamma(accent.color, 0.45).to_srgba_unmultiplied();
@@ -74,19 +101,40 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
+    /// how free the part is with the constraint it shows.
+    pub placed: Option<serde_json::Value>,
 }
 
 type Job = Result<Built, String>;
+
+/// How many obsolete preview jobs may still run, left behind for newer inputs (#7167). Beyond
+/// them, a new job waits for the running one as before, so a quick series of picks keeps at
+/// most this many kernel computations going beside the current one.
+const DETACHED: usize = 2;
+
+/// How long a joint pose for a slider value since moved past may keep computing (#14264). Past
+/// it, the pose is cancelled and the latest value starts, so only the latest keeps solving.
+const STALE_MOTION_MS: f64 = 500.0;
 
 #[derive(Default)]
 pub struct PreviewState {
     /// Key of the commands whose result (or error) is shown.
     shown_key: Option<u64>,
     running: Option<(u64, Receiver<Job>)>,
+    /// Asks the running job to stop between features once it is obsolete.
+    running_progress: Option<Arc<Progress>>,
+    /// Jobs left behind for inputs that changed to another setup (#7167): asked to stop, their
+    /// results are dropped when they come. With [`DETACHED`] of them running, the next obsolete
+    /// job is waited for.
+    detached: Vec<Receiver<Job>>,
     /// The running job builds a tool alone (for a join, cut or intersect).
     running_tool: bool,
     /// Inputs of a joint or distance preview, excluding only its driven values.
     running_stream_key: Option<u64>,
+    /// The running job is a joint pose (see [`motion_key`]): once obsolete, it gets
+    /// [`STALE_MOTION_MS`].
+    running_motion: bool,
     /// Bodies the preview stands in for (hidden in the model scene).
     pub replaced: Vec<String>,
     /// The preview scene for the GPU and its key (changes whenever the scene does).
@@ -108,9 +156,12 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (see [`Built::placed`]).
+    pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     straight: crate::extrude_preview::StraightPreview,
+    moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
     pub rolled_back: bool,
 }
@@ -119,11 +170,6 @@ impl PreviewState {
     /// Bodies the model scene should hide for the preview (empty while rolled back).
     pub fn effective_replaced(&self) -> &[String] {
         if self.rolled_back { &[] } else { &self.replaced }
-    }
-
-    /// Whether the preview scene should be drawn.
-    pub fn draw_active(&self) -> bool {
-        self.active && !self.rolled_back
     }
 
     /// Stop drawing the preview scene and give the bodies it stood in for back to the model.
@@ -138,13 +184,15 @@ impl PreviewState {
 
     fn clear(&mut self) {
         self.straight.clear();
-        self.running = None;
+        self.moving.clear();
+        self.detach();
         self.running_tool = false;
         self.running_stream_key = None;
         self.shown_key = None;
         self.error = None;
         self.applied = None;
         self.stopped = None;
+        self.placed = None;
         self.tapered.clear();
         self.sketches.clear();
         self.busy = false;
@@ -156,8 +204,9 @@ impl PreviewState {
     /// keeps drawing the last scene it took until the slot it reads hands it another, so a fresh
     /// state (another slot, empty) would leave the old preview drawn over the next design.
     pub fn reset(&mut self) {
-        let (slot, key) = (std::mem::take(&mut self.slot), self.key);
-        *self = PreviewState { slot, key, ..PreviewState::default() };
+        self.detach();
+        let (slot, key, detached) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached));
+        *self = PreviewState { slot, key, detached, ..PreviewState::default() };
         self.set_scene(GpuScene::default());
     }
 
@@ -180,6 +229,7 @@ impl PreviewState {
                 self.error = b.error;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.set_scene(b.scene);
             }
@@ -191,6 +241,7 @@ impl PreviewState {
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
+                self.placed = None;
                 self.tapered.clear();
             }
         }
@@ -199,9 +250,16 @@ impl PreviewState {
     /// Errors validate only the current inputs. Keep the last good geometry while
     /// computing new inputs, but never let an obsolete result block their Apply.
     fn poll(&mut self, key: u64, stream_key: Option<u64>) {
+        self.poll_at(key, stream_key, crate::now_ms());
+    }
+
+    fn poll_at(&mut self, key: u64, stream_key: Option<u64>, now: f64) {
         if self.shown_key != Some(key) {
             self.sketches.clear();
             self.error = None;
+            // A constraint's reply says how free its part is with the inputs it was for: with other
+            // picks it would describe the wrong rule, so the dialog falls back to the saved design.
+            self.placed = None;
         }
         if let Some((k, rx)) = &self.running {
             let k = *k;
@@ -216,6 +274,7 @@ impl PreviewState {
                 let intermediate = good && (self.running_tool || stream_key.is_some() && self.running_stream_key == stream_key);
                 self.running_stream_key = None;
                 self.running_tool = false;
+                self.running_motion = false;
                 // A held slider, a dragged arrow or an animation may advance faster than the
                 // worker. Show completed joint/distance results from the same setup, and tools built for
                 // inputs since changed, then compute the latest. Errors still require an exact
@@ -225,6 +284,36 @@ impl PreviewState {
                 }
             }
         }
+        // A detached job's result is never shown: drop it once it is done.
+        self.detached.retain(|rx| matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+        // The inputs moved to another setup (another selection, for the features whose distance,
+        // radius or pose streams) while a job runs: its result could only be dropped, so stop
+        // waiting for it and let the current inputs start now (#7167). A tool, or a value
+        // streaming within one setup, still shows each finished result; inputs that don't stream
+        // wait as before. At most `DETACHED` jobs are left behind; while they run, the next
+        // obsolete one is waited for as before.
+        let other_setup = !self.running_tool && stream_key.is_some() && self.running_stream_key.is_some() && self.running_stream_key != stream_key;
+        // A joint pose for a value the slider has left, still running after `STALE_MOTION_MS`:
+        // stop it and start the latest value (#14264).
+        let stale_motion = self.running_motion && stream_key.is_some() && now - self.started >= STALE_MOTION_MS;
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && (other_setup || stale_motion) && self.detached.len() < DETACHED {
+            self.detach();
+        }
+    }
+
+    /// Stop waiting for the running job: ask it to stop between features, and count it among the
+    /// detached jobs until its thread ends (also when a closed dialog or another design leaves it
+    /// behind, so `DETACHED` bounds what runs).
+    fn detach(&mut self) {
+        if let Some(progress) = self.running_progress.take() {
+            progress.cancel();
+        }
+        if let Some((_, rx)) = self.running.take() {
+            self.detached.push(rx);
+        }
+        self.running_tool = false;
+        self.running_stream_key = None;
+        self.running_motion = false;
     }
 }
 
@@ -245,6 +334,8 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.rack_pinion"
                     | "joint.screw"
                     | "joint.cam"
+                    | "assembly.constraint.create"
+                    | "assembly.constraint.edit"
             )
         })
     {
@@ -323,7 +414,12 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
     };
-    let colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, app.tool.is_some() || app.dialog.is_some());
+    let mut colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, app.tool.is_some() || app.dialog.is_some());
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { .. }))) {
+        colors.ghost = app.preferences.drive_joints_ghost;
+    }
+    colors.tint_new = app.preferences.preview_tint_new_faces;
+    colors.cut_tint = app.preferences.cut_preview_tint;
     let key = job_key(&cmds, app.session.revision, colors);
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
@@ -332,16 +428,22 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if pv.running.is_none() && pv.shown_key != Some(key) {
         pv.started = crate::now_ms();
         pv.running_stream_key = stream_key;
+        pv.running_motion = motion_key(&cmds, app.session.revision, colors).is_some();
         let mut straight = std::mem::take(&mut app.preview.straight);
-        let job = straight.compute(app, &cmds, colors);
+        let mut job = straight.compute(app, &cmds, colors);
         app.preview.straight = straight;
+        if job.is_none() {
+            let mut moving = std::mem::take(&mut app.preview.moving);
+            job = moving.compute(app, &cmds, colors);
+            app.preview.moving = moving;
+        }
         if let Some(job) = job {
             app.preview.apply(key, job);
             app.preview.busy = false;
             return;
         }
         let scratch = app.session.scratch();
-        spawn(&mut app.preview, key, scratch, cmds, colors, tool);
+        spawn(&mut app.preview, key, scratch, cmds, colors, tool, Arc::new(Progress::default()));
     }
     app.preview.busy = app.preview.running.is_some();
     if app.preview.busy {
@@ -361,14 +463,22 @@ fn job_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> u64 {
 
 /// Start computing the preview of `cmds`: for a tool feature (`tool`), only its tool.
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool) {
+fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, progress: Arc<Progress>) {
     let (tx, rx) = std::sync::mpsc::channel();
+    // Watched by `progress`, so a job left behind for other inputs skips its remaining features.
+    let watched = progress.clone();
     let spawned = std::thread::Builder::new().name("preview".into()).spawn(move || {
-        let _ = tx.send(if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) });
+        let job = scratch.stop_token().within(|| {
+            solidcraft_engine::doc::progress::watch(watched, || {
+                if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+            })
+        });
+        let _ = tx.send(job);
     });
     match spawned {
         Ok(_) => {
             pv.running = Some((key, rx));
+            pv.running_progress = Some(progress);
             pv.running_tool = tool;
         }
         Err(e) => pv.apply(key, Err(e.to_string())),
@@ -377,7 +487,7 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
 
 /// No threads on the web: compute right away.
 #[cfg(target_arch = "wasm32")]
-fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool) {
+fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, _progress: Arc<Progress>) {
     pv.apply(key, if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) });
 }
 
@@ -395,10 +505,13 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
                 | "sketch.pattern.rectangular"
                 | "sketch.pattern.circular"
                 | "sketch.offset"
+                | "sketch.point.divide"
                 | "sketch.fillet"
                 | "sketch.chamfer.equal_distance"
                 | "sketch.chamfer.two_distance"
                 | "sketch.chamfer.distance_angle"
+                | "sketch.insert_svg"
+                | "sketch.insert_dxf"
         ) || command == "construct.plane.along_path"
             || params.get("command").and_then(Value::as_str) == Some("construct.plane.along_path")
     }) {
@@ -441,7 +554,9 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
 /// error. Other features: their whole preview ([`compute`]).
 fn compute_tool(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     let Some((alt, op)) = as_new_body(cmds) else { return compute(s, cmds, colors) };
-    let tool = match s.preview(&alt) {
+    // Where the view shows it: in a component placed away from its own frame (an imported
+    // part stood upright) the model's frame would draw the tool at right angles to the face.
+    let tool = match s.preview_world(&alt) {
         Ok(t) => t,
         Err(e) => return Err(s.preview(cmds).err().map_or_else(|| e.to_string(), |r| r.to_string())),
     };
@@ -484,9 +599,14 @@ pub(crate) fn extrusion_target_error(s: &Session, cmds: &[(String, Value)], befo
                 }
             }
         } else {
+            // A cut or intersect from a component with no body of its own takes part in every
+            // body: the command decides that (#1234), and the preview asks it the same (#3085).
             found = params.get("faces").and_then(|_| params.get("face_body")).and_then(Value::as_str).map_or_else(
-                || before.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component),
-                |name| s.world_state().body(name).is_some(),
+                || {
+                    before.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component)
+                        || (matches!(op, "cut" | "intersect") && s.cut_takes_every_body(before))
+                },
+                |name| crate::open_meshing::session_world(s).body(name).is_some(),
             );
         }
         if !found && matches!(op, "cut" | "intersect") {
@@ -504,6 +624,10 @@ fn state_bounds(st: &ModelState) -> Aabb3 {
 /// (red) and intersect.
 fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> Built {
     let mut sc = GpuScene::default();
+    let removed = sc.color(c.removed);
+    let intersect = sc.color([c.added[0], c.added[1], c.added[2], c.removed[3]]);
+    let added = sc.color(c.added);
+    let edge = if op == "cut" { sc.color([c.removed[0], c.removed[1], c.removed[2], 255]) } else { sc.color(c.edge) };
     for a in after.bodies.iter().filter(|a| before.body(&a.name).is_none()) {
         let m = a.mesh();
         for t in &m.triangles {
@@ -511,14 +635,14 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
                     match op {
-                        "cut" => sc.xray_tri(p.to_f32(), n.to_f32(), c.removed),
-                        "intersect" => sc.xray_tri(p.to_f32(), n.to_f32(), [c.added[0], c.added[1], c.added[2], c.removed[3]]),
-                        _ => sc.tri(p.to_f32(), n.to_f32(), c.added),
+                        "cut" if !c.cut_tint => {}
+                        "cut" => sc.xray_tri(p.to_f32(), n.to_f32(), removed),
+                        "intersect" => sc.xray_tri(p.to_f32(), n.to_f32(), intersect),
+                        _ => sc.tri(p.to_f32(), n.to_f32(), added),
                     }
                 }
             }
         }
-        let edge = if op == "cut" { [c.removed[0], c.removed[1], c.removed[2], 255] } else { c.edge };
         for (ei, e) in m.edges.iter().enumerate() {
             if m.shaded_edge_visible(ei) {
                 for w in e.windows(2) {
@@ -536,6 +660,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        placed: None,
     }
 }
 
@@ -570,6 +695,12 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 /// version of changed or removed bodies.
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
     let mut sc = GpuScene::default();
+    let added_color = sc.color(c.added);
+    let added_plane = sc.color([c.added[0], c.added[1], c.added[2], 64]);
+    let body_color = sc.color(c.body);
+    let new_body = sc.color(c.new_body);
+    let removed = sc.color(c.removed);
+    let edge = sc.color(c.edge);
     let mut replaced = Vec::new();
     for construct in &after.construct {
         if before.construct.iter().any(|old| old == construct) {
@@ -578,14 +709,13 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         if let solidcraft_engine::doc::construct::ConstructGeom::Plane(plane) = construct.geom {
             let (o, x, y) = (plane.origin, plane.x * 10.0, plane.y * 10.0);
             let quad = [o - x - y, o + x - y, o + x + y, o - x + y];
-            let color = [c.added[0], c.added[1], c.added[2], 64];
             for triangle in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
                 for p in triangle {
-                    sc.xray_tri(p.to_f32(), plane.normal().to_f32(), color);
+                    sc.xray_tri(p.to_f32(), plane.normal().to_f32(), added_plane);
                 }
             }
             for (a, b) in Ring::from(quad).edges() {
-                sc.line(a.to_f32(), b.to_f32(), c.added, 1.3, true);
+                sc.line(a.to_f32(), b.to_f32(), added_color, 1.3, true);
             }
         }
     }
@@ -595,27 +725,44 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         if old.as_ref().is_some_and(|bm| same(bm, &am)) {
             continue;
         }
-        let nf = am.tri_face.iter().max().map_or(0, |m| *m as usize + 1);
-        let added: Vec<bool> = match &old {
-            Some(bm) => new_faces(&am, nf, bm),
-            None => vec![true; nf],
-        };
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side.
-        let cut = old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        let cut = c.cut_tint && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        // Which of the body's faces the feature made, asked only when something is drawn from
+        // the answer: the cut above, and the tint the preference offers. A changed body is
+        // otherwise drawn as itself, so a preview looks like the model and nothing has to be
+        // worked out face by face.
+        let new_face: Vec<bool> = match &old {
+            Some(bm) if cut || c.tint_new => {
+                let mut new = new_faces(&am, am.tri_face.iter().max().map_or(0, |m| *m as usize + 1), bm);
+                // The kernel recorded which faces the operation that made this body generated,
+                // i.e. has no face of an input under it. The two answers are taken together
+                // because each misses something on its own: geometry cannot see a round small
+                // beside the part, which lies within its tolerance of the faces it is tangent
+                // to all along both of its sides, while the record may be of a later operation
+                // than the one previewed (a parameter change re-evaluates the design, and a
+                // body keeps the history of whatever last made it), so the record only ever
+                // adds faces to the answer.
+                if let Some(history) = a.body.history() {
+                    for (is_new, face) in new.iter_mut().zip(&history.faces) {
+                        *is_new |= face.change == Change::Generated;
+                    }
+                }
+                new
+            }
+            _ => Vec::new(),
+        };
+        let kept = if old.is_some() { body_color } else { new_body };
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
-            let new = added.get(*f as usize).copied().unwrap_or(true);
-            let col = match (new, old.is_some()) {
-                (false, _) => c.body,
-                (true, true) => c.added,
-                (true, false) => c.new_body,
-            };
+            let new = new_face.get(*f as usize).copied().unwrap_or(false);
+            let col = if new && c.tint_new { added_color } else { kept };
+            let through = cut && new;
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (am.positions.get(i), am.normals.get(i)) {
                     sc.tri(p.to_f32(), n.to_f32(), col);
-                    if new && cut {
-                        sc.xray_tri(p.to_f32(), n.to_f32(), c.removed);
+                    if through {
+                        sc.xray_tri(p.to_f32(), n.to_f32(), removed);
                     }
                 }
             }
@@ -625,7 +772,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
                 continue;
             }
             for w in e.windows(2) {
-                sc.line(w[0].to_f32(), w[1].to_f32(), c.edge, 1.3, false);
+                sc.line(w[0].to_f32(), w[1].to_f32(), edge, 1.3, false);
             }
         }
         if old.is_some() {
@@ -638,11 +785,22 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             continue;
         }
         let m = b.mesh();
-        for t in &m.triangles {
-            for k in t {
-                let i = *k as usize;
-                if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
-                    sc.ghost_tri(p.to_f32(), n.to_f32(), c.removed);
+        if c.cut_tint {
+            // A changed body's surface it keeps is not removed material: drawn as ghost there it
+            // lies on the new body's face, and where that face is curved and meshed anew (its
+            // boundary moved) the two triangulations cross by up to their chord error, far past the
+            // ghost's depth bias, so the ghost showed through the new face in slivers.
+            let kept = if gone { None } else { after.body(&b.name).and_then(|a| SurfaceIndex::new(&a.mesh())) };
+            for t in &m.triangles {
+                let Some(corners) = m.tri(t) else { continue };
+                if kept.as_ref().is_some_and(|k| on_surface(k, corners)) {
+                    continue;
+                }
+                for k in t {
+                    let i = *k as usize;
+                    if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
+                        sc.ghost_tri(p.to_f32(), n.to_f32(), removed);
+                    }
                 }
             }
         }
@@ -650,34 +808,51 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             replaced.push(b.name.clone());
         }
     }
-    let sketches = after
-        .sketches
+    let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
+    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None, placed: None }
+}
+
+/// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
+/// and its centroid all on it?
+fn on_surface(index: &SurfaceIndex, [a, b, c]: [Vec3; 3]) -> bool {
+    [a, b, c, (a + b) / 2.0, (b + c) / 2.0, (c + a) / 2.0, (a + b + c) / 3.0].into_iter().all(|p| index.contains(p))
+}
+
+/// Points of one face the vote in [`new_faces`] asks about: every centroid of a face with no
+/// more than this many triangles, so its answer doesn't ride on where that face's rows of
+/// facets happen to fall, and a spread sample of a larger one. The lookups per face stay
+/// bounded, so a modeled thread's thousands of faces still cost little.
+const FACE_SAMPLES: usize = 24;
+
+/// What of `sketch` differs from `old`, the same sketch before a change: the curves whose shape
+/// or points moved and the points that moved (`None`: nothing did).
+pub(crate) fn sketch_changes(
+    old: Option<&solidcraft_engine::doc::SolvedSketch>,
+    sketch: &std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
+) -> Option<SketchPreview> {
+    let old_curves = old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), c))).collect::<std::collections::HashMap<_, _>>();
+    let old_points =
+        old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
+    let indices = sketch
+        .sketch
+        .curves
         .iter()
-        .filter_map(|sketch| {
-            let old = before.sketch(sketch.feature);
-            let old_curves = old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| c.id.as_str())).collect::<std::collections::HashSet<_>>();
-            let old_points = old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| p.id.as_str())).collect::<std::collections::HashSet<_>>();
-            let indices = sketch
-                .sketch
-                .curves
-                .iter()
-                .enumerate()
-                .filter_map(|(index, curve)| {
-                    let unchanged = old_curves.contains(curve.id.as_str());
-                    if unchanged { None } else { Some(index) }
-                })
-                .collect::<Vec<_>>();
-            let points = sketch
-                .sketch
-                .points
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| if old_points.contains(p.id.as_str()) { None } else { Some(i) })
-                .collect::<Vec<_>>();
-            if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
+        .enumerate()
+        .filter_map(|(index, curve)| {
+            let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
+                previous.kind == curve.kind && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
+            });
+            if unchanged { None } else { Some(index) }
         })
-        .collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+        .collect::<Vec<_>>();
+    let points = sketch
+        .sketch
+        .points
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
+        .collect::<Vec<_>>();
+    if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -699,12 +874,33 @@ fn new_faces(m: &Mesh, nf: usize, old: &Mesh) -> Vec<bool> {
             if cents.is_empty() {
                 return true;
             }
-            let step = cents.len().div_ceil(9);
-            let samples: Vec<&Vec3> = cents.iter().step_by(step.max(1)).collect();
+            let samples: Vec<&Vec3> = if cents.len() <= FACE_SAMPLES {
+                cents.iter().collect()
+            } else {
+                // Spread by the golden ratio rather than at a fixed step: a face's triangles
+                // come in rows across its curve, and a step that divides the row length would
+                // ask about the same place in every row (a blend's tangent sides, say), so two
+                // alike faces could be told apart by nothing but how long they are.
+                let len = cents.len() as f64;
+                (0..FACE_SAMPLES).filter_map(|i| cents.get(((i as f64 * 0.618_033_988_75).fract() * len) as usize)).collect()
+            };
             let off = samples.iter().filter(|p| !index.contains(***p)).count();
-            off * 3 > samples.len()
+            // More than an eighth of the face off the old surface is new surface. A blend meets
+            // the faces it rounds tangentially, so the rows of facets along both of its sides
+            // lie within the tolerance of the old surface and only the band through its middle
+            // is clearly off: a small round on a large part never reaches the third the vote
+            // asked for before, and was drawn as if it had always been there.
+            off * 8 > samples.len()
         })
         .collect()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The triangles [`SurfaceIndex::contains`] measured a point against, on this thread: the
+    /// work classifying each face against every triangle made quadratic, counted for the test that
+    /// checks it stays near linear, whatever else the machine is doing (#9901).
+    static TRIANGLES_MEASURED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The triangles of a mesh in a uniform grid, to ask whether a point lies on the surface (within
@@ -783,7 +979,11 @@ impl SurfaceIndex {
     fn contains(&self, p: Vec3) -> bool {
         let (x, y, z) = (self.cell_of(p.x, 0), self.cell_of(p.y, 1), self.cell_of(p.z, 2));
         let Some(cell) = self.cells.get((x * self.res + y) * self.res + z) else { return false };
-        cell.iter().filter_map(|i| self.tris.get(*i as usize)).any(|[a, b, c]| point_triangle_dist(p, *a, *b, *c) < self.tol)
+        cell.iter().filter_map(|i| self.tris.get(*i as usize)).any(|[a, b, c]| {
+            #[cfg(test)]
+            TRIANGLES_MEASURED.with(|n| n.set(n.get() + 1));
+            point_triangle_dist(p, *a, *b, *c) < self.tol
+        })
     }
 }
 
@@ -801,25 +1001,37 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     if app.preview.rolled_back {
         return;
     }
-    if !app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_)) && d.previews()) {
+    if !app
+        .dialog
+        .as_ref()
+        .is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_)) && d.previews())
+    {
         return;
     }
-    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let mut curves = 0;
-    for preview in &app.preview.sketches {
-        let sketch = &preview.sketch;
-        for index in &preview.curves {
-            crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, &mut budget);
-            curves += 1;
-        }
-        for index in &preview.points {
-            if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
-                painter.circle_filled(point, 3.0, stroke.color);
-            }
+    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget)).sum();
+    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
+}
+
+/// Draw what a change moves in a sketch, its curves and points, in the preview colour; returns
+/// how many curves it drew.
+pub(crate) fn paint_sketch(
+    preview: &SketchPreview,
+    painter: &egui::Painter,
+    proj: &crate::viewport::Proj,
+    budget: &mut solidcraft_engine::render::SamplingBudget,
+) -> usize {
+    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
+    let sketch = &preview.sketch;
+    for index in &preview.curves {
+        crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, budget);
+    }
+    for index in &preview.points {
+        if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
+            painter.circle_filled(point, 3.0, stroke.color);
         }
     }
-    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
+    preview.curves.len()
 }
 
 #[cfg(test)]
@@ -830,7 +1042,7 @@ mod tests {
     #[test]
     fn tool_preview_follows_tab_without_recolouring_removal_or_idle_previews() {
         for dark in [false, true] {
-            for vision in crate::theme::ColorVision::ALL {
+            for vision in solidcraft_theme::ColorVision::ALL {
                 let t = Tokens::themed(dark, vision);
                 let base = Colors::from_tokens(&t);
                 for tab in ["MODEL", "SKETCH", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW", "SHEET METAL", "RENDER"] {
@@ -839,11 +1051,11 @@ mod tests {
                         assert_eq!(colors.removed, base.removed);
                         assert_eq!(colors.body, base.body);
                         assert_eq!(colors.edge, base.edge);
-                        if !active || crate::theme::TabAccent::for_tab(&t, tab).color == t.accent {
+                        if !active || crate::workspace::tab_accent(&t, tab).color == t.accent {
                             assert_eq!(colors.added, base.added);
                             assert_eq!(colors.new_body, base.new_body);
                         } else {
-                            let accent = crate::theme::TabAccent::for_tab(&t, tab);
+                            let accent = crate::workspace::tab_accent(&t, tab);
                             assert_eq!(colors.added, accent.color.to_srgba_unmultiplied());
                             assert_ne!(colors.new_body, colors.added);
                         }
@@ -854,7 +1066,16 @@ mod tests {
     }
 
     fn colors() -> Colors {
-        Colors { body: [1, 1, 1, 255], added: [2, 2, 2, 255], new_body: [4, 4, 4, 255], removed: [3, 3, 3, 100], edge: [0, 0, 0, 255] }
+        Colors {
+            body: [1, 1, 1, 255],
+            added: [2, 2, 2, 255],
+            new_body: [4, 4, 4, 255],
+            removed: [3, 3, 3, 100],
+            edge: [0, 0, 0, 255],
+            ghost: true,
+            tint_new: true,
+            cut_tint: true,
+        }
     }
 
     #[test]
@@ -904,6 +1125,7 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            placed: None,
         }
     }
 
@@ -934,6 +1156,55 @@ mod tests {
         pv.poll(4, Some(42));
         assert_eq!(pv.shown_key, Some(4), "release catches up to the exact final pose");
         assert!(pv.running.is_none());
+    }
+
+    /// A constraint's reply belongs to the inputs it was computed for: when they change (other picks
+    /// in the Constrain dialog), it goes with the old error, and is kept while they stand.
+    #[test]
+    fn a_constraint_reply_goes_when_the_inputs_change() {
+        let mut pv = PreviewState { shown_key: Some(1), placed: Some(serde_json::json!({"dof": []})), ..PreviewState::default() };
+        pv.poll_at(1, None, 0.0);
+        assert!(pv.placed.is_some(), "the same inputs keep their reply");
+        pv.poll_at(2, None, 0.0);
+        assert!(pv.placed.is_none(), "other inputs drop the old reply");
+    }
+
+    /// A pose for a value the slider has left gets 500 ms (#14264): before that it keeps running
+    /// (and shows when done); past it, it is cancelled and the latest value may start.
+    #[test]
+    fn a_stale_joint_pose_is_cancelled_after_its_budget() {
+        let start = |pv: &mut PreviewState| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            let progress = Arc::new(Progress::default());
+            pv.running = Some((1, rx));
+            pv.running_progress = Some(progress.clone());
+            pv.running_stream_key = Some(42);
+            pv.running_motion = true;
+            pv.started = 1000.0;
+            (tx, progress)
+        };
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(2, Some(42), 1000.0 + STALE_MOTION_MS - 1.0);
+        assert!(pv.running.is_some(), "within the budget the pose keeps running");
+        assert!(!progress.is_cancelled());
+        pv.poll_at(2, Some(42), 1000.0 + STALE_MOTION_MS);
+        assert!(pv.running.is_none(), "past the budget the latest value can start");
+        assert!(progress.is_cancelled(), "the stale pose is asked to stop");
+        assert_eq!(pv.detached.len(), 1);
+
+        // The latest value itself is never cancelled, however long it takes.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(1, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
+
+        // Other streamed previews (a fillet radius) keep waiting for their running job.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.running_motion = false;
+        pv.poll_at(2, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
     }
 
     #[test]
@@ -1007,6 +1278,68 @@ mod tests {
         assert_eq!(motion_key(&cam("0 deg"), 7, colors()), motion_key(&cam("90 deg"), 7, colors()));
     }
 
+    #[test]
+    fn edited_pattern_preview_includes_moved_instances_only() -> Result<(), Box<dyn std::error::Error>> {
+        for (command, initial, edits) in [
+            (
+                "sketch.pattern.rectangular",
+                json!({"entities":["seed"],"count":3,"spacing":10,"count2":2,"spacing2":15}),
+                vec![(json!({"spacing":14}), 4), (json!({"spacing2":19}), 3)],
+            ),
+            (
+                "sketch.pattern.circular",
+                json!({"entities":["seed"],"center":"origin","count":5}),
+                vec![(json!({"count":20}), 19), (json!({"count":2}), 1)],
+            ),
+        ] {
+            let mut s = Session::default();
+            s.execute("sketch.create", &json!({"plane":"XY"}))?;
+            s.execute("sketch.circle.center", &json!({"center":[-50,0],"radius":2,"id":"seed"}))?;
+            let pattern = s.execute(command, &initial)?;
+            // An identical result must not draw the seed or any existing copies.
+            let unchanged = compute(&s, &[(command.into(), json!({"pattern":pattern["pattern"]}))], colors())?;
+            assert!(unchanged.sketches.is_empty());
+            for (mut edit, expected) in edits {
+                edit["pattern"] = pattern["pattern"].clone();
+                let built = compute(&s, &[(command.into(), edit)], colors())?;
+                assert_eq!(built.sketches.len(), 1, "{command}");
+                for preview in &built.sketches {
+                    assert_eq!(preview.curves.len(), expected, "{command}");
+                    assert_eq!(preview.points.len(), expected, "{command}");
+                    assert!(preview.curves.iter().all(|i| preview.sketch.sketch.curves.get(*i).is_some_and(|c| c.id != "seed")));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn sketch_preview_includes_changed_curve_shapes() -> Result<(), Box<dyn std::error::Error>> {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane":"XY"}))?;
+        s.execute("sketch.circle.center", &json!({"center":[0,0],"radius":2,"id":"circle"}))?;
+        s.execute("sketch.line", &json!({"points":[[10,0],[20,0]],"ids":["line"]}))?;
+        let before = s.model.state();
+        let mut after = before.as_ref().clone();
+        for sketch in &mut after.sketches {
+            let sketch = &mut std::sync::Arc::make_mut(sketch).sketch;
+            for curve in &mut sketch.curves {
+                match &mut curve.kind {
+                    solidcraft_engine::sketch::CurveKind::Circle { r, .. } => *r = 3.0,
+                    solidcraft_engine::sketch::CurveKind::Line { a, b } => std::mem::swap(a, b),
+                    _ => {}
+                }
+            }
+        }
+        let built = build(&before, &after, colors());
+        assert_eq!(built.sketches.len(), 1);
+        for preview in &built.sketches {
+            assert_eq!(preview.curves, vec![0, 1]);
+            assert!(preview.points.is_empty());
+        }
+        Ok(())
+    }
+
     /// Combine previews its result (cut, join or intersect between existing bodies) without an
     /// error, so its dialog's OK is enabled. Before, the preview also tried the command as a new
     /// body, which a combine has no form of, and always reported "operation must be join, cut or
@@ -1023,8 +1356,46 @@ mod tests {
         }
     }
 
-    fn count(bytes: &[u8], stride: usize, col: [u8; 4]) -> usize {
-        bytes.chunks(stride).filter(|v| v.get(24..28) == Some(&col[..])).count()
+    /// #7520: a Hole's preview leaves a hidden body out, drawn nor drilled, as OK does; before,
+    /// it replaced the hidden body with a drilled one while the dialog was open.
+    #[test]
+    fn a_hole_preview_leaves_hidden_bodies_out() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"})).unwrap();
+        s.execute("solid.box", &json!({"corner": [0, 0, 5], "length": 40, "width": 40, "height": 20, "operation": "new", "body_name": "Block"}))
+            .unwrap();
+        s.execute("browser.visibility", &json!({"items": ["Block"], "visible": false})).unwrap();
+        let cmd = ("solid.hole".to_string(), json!({"position": [20, 20, 0], "diameter": 5, "depth": 10}));
+        let built = compute(&s, &[cmd], colors()).unwrap();
+        assert!(built.error.is_none(), "{:?}", built.error);
+        assert_eq!(built.replaced, vec!["Plate".to_string()]);
+    }
+
+    /// A plate in its own component, stood up by its placement (an imported part set upright)
+    /// and edited with that component active: the extrusion's tool is drawn where the plate is
+    /// shown, on its top face, not at right angles to it in the component's own frame.
+    #[test]
+    fn a_tool_on_a_turned_component_previews_where_it_is_shown() {
+        let mut s = Session::default();
+        let made = s.execute("component.create", &json!({"name": "Plate", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 8, "height": 30, "corner": [0, 0, -30], "body_name": "Plate"})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": made["occurrence"], "axis": [1, 0, 0], "angle": "90 deg"})).unwrap();
+        s.execute("component.activate", &json!({"component": made["component"], "occurrence": made["occurrence"], "path": [made["occurrence"]]}))
+            .unwrap();
+        // Shown lying flat: 20 × 30, 8 high. Its top face pulled up 10.
+        let cmd = ("solid.extrude".to_string(), json!({"face": [10, 15, 8], "face_body": "Plate", "distance": "10 mm", "operation": "join"}));
+        let b = compute_tool(&s, &[cmd], colors()).unwrap().bounds;
+        assert!((b.max.z - 18.0).abs() < 1e-6 && (b.max.y - 30.0).abs() < 1e-6, "on top, not at right angles: {b:?}");
+    }
+
+    fn count(scene: &GpuScene, bytes: &[u8], stride: usize, col: [u8; 4]) -> usize {
+        bytes
+            .chunks(stride)
+            .filter(|v| {
+                let Some(i) = v.get(24..28).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes) else { return false };
+                scene.palette.get(crate::gpu::PaletteIndex(i)) == Some(col)
+            })
+            .count()
     }
 
     #[test]
@@ -1034,10 +1405,37 @@ mod tests {
         let p = s.preview(&[("solid.hole".to_string(), json!({"position": [20, 15, 20], "diameter": 5, "depth": 10}))]).unwrap();
         let b = build(&p.before, &p.after, colors());
         // The hole's walls are drawn see-through in the cut colour (seen from any side).
-        assert!(count(&b.scene.xray, 28, colors().removed) > 0);
+        assert!(count(&b.scene, &b.scene.xray, 28, colors().removed) > 0);
         // A feature that only adds material shows no cut.
         let p = s.preview(&[("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "join"}))]).unwrap();
-        assert_eq!(count(&build(&p.before, &p.after, colors()).scene.xray, 28, colors().removed), 0);
+        let b = build(&p.before, &p.after, colors());
+        assert_eq!(count(&b.scene, &b.scene.xray, 28, colors().removed), 0);
+    }
+
+    /// Graphics' Show removed material in red, off: the cut and the ghost of the shape the
+    /// feature replaces are left out, and the body itself is still drawn.
+    #[test]
+    fn removed_material_can_be_left_fully_transparent() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let cmds = [("solid.hole".to_string(), json!({"position": [20, 15, 20], "diameter": 5, "depth": 10}))];
+        let p = s.preview(&cmds).unwrap();
+        let plain = colors();
+        let b = build(&p.before, &p.after, plain);
+        assert!(count(&b.scene, &b.scene.ghost, 28, plain.removed) > 0, "the replaced shape is ghosted while the tint is on");
+        let quiet = Colors { cut_tint: false, ..plain };
+        let b = build(&p.before, &p.after, quiet);
+        assert_eq!(count(&b.scene, &b.scene.xray, 28, quiet.removed), 0, "no see-through cut");
+        assert_eq!(count(&b.scene, &b.scene.ghost, 28, quiet.removed), 0, "no ghost of the old shape");
+        assert!(count(&b.scene, &b.scene.tris, 28, quiet.body) > 0, "the body is still drawn");
+        // The tool of a cut is left out too, its outline alone showing where it goes.
+        let cmds = [("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "new"}))];
+        let p = s.preview(&cmds).unwrap();
+        let shown = build_tool(&p.before, &p.after, plain, "cut");
+        assert!(count(&shown.scene, &shown.scene.xray, 28, plain.removed) > 0, "the tool is see-through red while the tint is on");
+        let b = build_tool(&p.before, &p.after, quiet, "cut");
+        assert_eq!(count(&b.scene, &b.scene.xray, 28, quiet.removed), 0, "no see-through tool");
+        assert!(!b.scene.overlay.is_empty(), "the tool's outline still shows where the cut goes");
     }
 
     fn plate() -> Session {
@@ -1093,17 +1491,31 @@ mod tests {
         assert!(SurfaceIndex::new(&Mesh::default()).is_none());
     }
 
-    /// Thousands of faces (a modeled thread's) are classified at once, not face by face against
-    /// every triangle: filleting beside a thread froze the app for minutes.
-    #[test]
-    fn many_faces_are_classified_quickly() {
-        let started = std::time::Instant::now();
-        let n = 120;
+    /// How many triangles classifying the faces of a sheet of `n × n` squares, against an old
+    /// sheet of the same size, measured points against ([`TRIANGLES_MEASURED`]): the work that
+    /// used to freeze the app.
+    fn classify_sheet(n: usize) -> usize {
         let (old, same, lifted) = (sheet(n, 0.0), sheet(n, 0.0), sheet(n, 5.0));
         let nf = n * n;
-        assert!(new_faces(&same, nf, &old).iter().all(|new| !new), "faces on the old surface are not new");
-        assert!(new_faces(&lifted, nf, &old).iter().all(|new| *new), "faces off the old surface are new");
-        assert!(started.elapsed().as_secs() < 10, "took {:?}", started.elapsed());
+        let before = TRIANGLES_MEASURED.with(std::cell::Cell::get);
+        let on = new_faces(&same, nf, &old);
+        let off = new_faces(&lifted, nf, &old);
+        let measured = TRIANGLES_MEASURED.with(std::cell::Cell::get) - before;
+        assert!(on.iter().all(|new| !new), "faces on the old surface are not new");
+        assert!(off.iter().all(|new| *new), "faces off the old surface are new");
+        measured
+    }
+
+    /// Thousands of faces (a modeled thread's) are classified at once, not face by face against
+    /// every triangle: filleting beside a thread froze the app for minutes.
+    ///
+    /// The triangles measured are counted, not the time taken, so a busy machine can't fail it
+    /// (#9901). 900 faces are classified, then 3 600, four times as many: linear is 4x, the
+    /// face-against-triangle cost 16x or more; at most eight.
+    #[test]
+    fn many_faces_are_classified_quickly() {
+        let (small, big) = (classify_sheet(30), classify_sheet(60));
+        assert!(small > 0 && big <= 8 * small, "900 faces measured {small} triangles, 3 600 measured {big}");
     }
 
     /// A fillet preview stands in for the body: the round face is new, the rest is kept, and the
@@ -1114,12 +1526,71 @@ mod tests {
         let (rev, undo) = (s.revision, s.undo.len());
         let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[0, 0, 10]], "radius": 3}))], colors()).unwrap();
         assert_eq!(b.replaced, vec!["Body1".to_string()]);
-        let added = count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().added);
-        let kept = count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().body);
+        let added = count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().added);
+        let kept = count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().body);
         assert!(added > 0 && kept > 0, "added {added} kept {kept}");
         assert!(!b.scene.ghost.is_empty());
         assert_eq!(s.revision, rev);
         assert_eq!(s.undo.len(), undo);
+    }
+
+    /// A fillet running into a boss: the boss's cylinder face keeps its surface but is meshed
+    /// anew (the fillet's end moves its boundary), so the ghost leaves it out. Drawn as ghost it
+    /// crossed the new triangulation and showed through the face in slivers.
+    #[test]
+    fn a_fillet_preview_ghosts_only_the_removed_material() {
+        let s = session_of(&[
+            ("solid.box", json!({"length": 60, "width": 40, "height": 30, "center": [0, 0, 15]})),
+            ("solid.cylinder", json!({"radius": 12, "height": 50, "base": [10, -20, 0], "operation": "join"})),
+        ]);
+        let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[-16, -20, 30]], "radius": 4}))], colors()).unwrap();
+        assert_eq!(b.replaced, vec!["Body1".to_string()]);
+        // Ghost triangles on the boss's side, well away from the fillet.
+        let on_boss = b.scene.ghost.as_chunks::<28>().0.as_chunks::<3>().0.iter().filter(|t| {
+            t.iter().all(|v| {
+                let f = |k: usize| f32::from_le_bytes([v[4 * k], v[4 * k + 1], v[4 * k + 2], v[4 * k + 3]]) as f64;
+                let (x, y, z) = (f(0), f(1), f(2));
+                (((x - 10.0).powi(2) + (y + 20.0).powi(2)).sqrt() - 12.0).abs() < 1e-3 && z > 36.0
+            })
+        });
+        assert_eq!(on_boss.count(), 0, "the boss keeps its surface: no ghost on it");
+        assert!(!b.scene.ghost.is_empty(), "the edge the fillet removes is still shown as ghost");
+    }
+
+    /// Graphics' Tint new surface in a preview, off: the changed body is drawn as itself, and
+    /// no face of it is worked out.
+    #[test]
+    fn the_tint_on_new_surface_can_be_turned_off() {
+        let s = plate();
+        let cmds = [("solid.fillet".to_string(), json!({"edges": [[0, 0, 10]], "radius": 3}))];
+        let plain = Colors { tint_new: false, ..colors() };
+        let b = compute(&s, &cmds, plain).unwrap();
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, plain.added), 0, "nothing is tinted");
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, plain.body) > 0, "the body is drawn as itself");
+    }
+
+    /// With the tint on, a round far smaller than the part is new surface too. Every facet of
+    /// this one lies within the preview's tolerance (half a millimetre here) of the faces it is
+    /// tangent to, so no point on it is off the old body and only the kernel's record of what
+    /// the fillet generated can tell.
+    #[test]
+    fn a_small_round_on_a_large_part_is_tinted_as_new() {
+        let mut s = Session::default();
+        for (id, p) in [
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [200, 150]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance": 10})),
+        ] {
+            s.execute(id, &p).unwrap();
+        }
+        // The plate's diagonal is 250 mm, so a point counts as on the old surface within half a
+        // millimetre: a 0.5 mm round never leaves it, bulging 0.15 mm at the most.
+        let tinted = Colors { tint_new: true, ..colors() };
+        let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[100, 0, 10]], "radius": 0.5}))], tinted).unwrap();
+        let added = count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, tinted.added);
+        assert!(added > 0, "the round is drawn as new surface, not as part of the old body");
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, tinted.body) > 0, "the rest of the plate is kept");
     }
 
     /// A cut shows its tool see-through and replaces nothing.
@@ -1144,10 +1615,10 @@ mod tests {
         s.execute("sketch.finish", &json!({})).unwrap();
         let b = compute(&s, &[("solid.extrude".into(), json!({"distance": "15 mm"}))], colors()).unwrap();
         assert!(b.replaced.is_empty());
-        assert_eq!(count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().body), 0);
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().body), 0);
         // #1805: a new body has its own colour, not a join's.
-        assert!(count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().new_body) > 0);
-        assert_eq!(count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().added), 0);
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().new_body) > 0);
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().added), 0);
         assert!(b.scene.ghost.is_empty());
         assert!(compute(&s, &[("solid.extrude".into(), json!({"distance": "1 +"}))], colors()).is_err());
         assert!(s.model.state().bodies.is_empty());
@@ -1192,6 +1663,27 @@ mod tests {
         assert_eq!(whole.scene.xray.len(), tool.scene.xray.len());
     }
 
+    /// #3085: a cut sketched in the root, where every body lives in a component, cuts every body
+    /// it meets (#1234). The preview said "there is no body to cut or intersect" all the same,
+    /// while the cut itself went through.
+    #[test]
+    fn a_cut_from_an_empty_root_is_not_refused_by_its_preview() {
+        let mut s = session_of(&[
+            ("component.create", json!({"name": "Part"})),
+            ("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})),
+            ("component.activate", json!({"component": "root"})),
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.rectangle.two_point", json!({"p0": [3, 3], "p1": [7, 7]})),
+            ("sketch.finish", json!({})),
+        ]);
+        let params = json!({"distance": 20, "operation": "cut"});
+        let cmds = vec![("solid.extrude".to_string(), params.clone())];
+        assert_eq!(extrusion_target_error(&s, &cmds, &s.model.state()), None);
+        s.execute("solid.extrude", &params).unwrap();
+        let volume = s.model.state().body("Block").map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0);
+        assert!((volume - (1000.0 - 160.0)).abs() < 1e-6, "{volume}");
+    }
+
     /// While an arrow is dragged the inputs change faster than a tool is built: a tool built
     /// for inputs since changed is shown anyway (then the latest computed), an error only for
     /// the inputs it belongs to.
@@ -1221,7 +1713,8 @@ mod tests {
     fn reset_hands_the_viewport_an_empty_scene() {
         let mut pv = PreviewState::default();
         let mut sc = GpuScene::default();
-        sc.xray_tri([0.0; 3], [0.0, 0.0, 1.0], [255; 4]);
+        let white = sc.color([255; 4]);
+        sc.xray_tri([0.0; 3], [0.0, 0.0, 1.0], white);
         pv.set_scene(sc);
         pv.active = true;
         pv.replaced = vec!["Body1".into()];

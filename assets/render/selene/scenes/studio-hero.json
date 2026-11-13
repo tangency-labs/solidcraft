@@ -1,0 +1,1803 @@
+{
+  "schema": "solidcraft-native-selene-showcase/1",
+  "title": "SELENE — full-detail native studio render",
+  "source": {
+    "path": "assets/render/selene/models/SELENE-functional.solidcraft",
+    "sha256": "3bd2bfa1c6336394c4a4208d30b52c80d06658a3bd7ea57cc93b774411d1bd68",
+    "functional_master_commit": "cf8e651022deee528b26c303fde58bf3eb8a22a5",
+    "original_author": "0xlillith",
+    "showcase_author": "SychPL / Mateusz Sych",
+    "provenance": "assets/render/selene/SOURCE.md",
+    "native_file_modified": false
+  },
+  "renderer": {
+    "binary_source_commit": "895704a2fdc96dabb9a2afb2e548a8896e4b1e79",
+    "binary_source_tree": "d16a5c4d132e8169f31d24ca9673d6b23e53e1cf",
+    "executable_sha256": "3421d538c571647c1f24fd74d63487c4ba4ab597980cfeea111a01c0db94e699",
+    "executor": "gpu-path",
+    "device_policy": "hardware",
+    "backend_filter": "Vulkan"
+  },
+  "authoring": {
+    "recipe": "tools/render-library/selene_recipe.py",
+    "recipe_sha256_lf_normalized": "3b99dd1cfc1c0280412dea82b87f1721f9f77e728b7c8d5cf67a247f68c3c8c0",
+    "rig": "RIG-002",
+    "rig_variant": "complete",
+    "rig_radiance_gain": 0.0625,
+    "units": "millimeters and radians; authored relative linear-sRGB light radiance",
+    "camera_fit": "all captured body AABB corners; 8 percent frame margin"
+  },
+  "geometry": {
+    "evaluated_native_bodies": 2116,
+    "visible_native_bodies": 2094,
+    "native_triangles": 2144099,
+    "passive_stage_panels": 1,
+    "render_triangles": 2144101,
+    "original_visibility_preserved": true,
+    "simplification": "none",
+    "engineering_property_reassignment": "none"
+  },
+  "output": {
+    "path": "assets/render/selene/exports/SELENE-studio-4k.png",
+    "width": 3840,
+    "height": 2400,
+    "rgba_bits_per_channel": 8,
+    "color_encoding": "sRGB",
+    "crc_and_bounded_scanline_verification": "PASS",
+    "bytes": 2388114,
+    "sha256": "40a492e7979137d0f4027300da3d8af7ca1008c1aab2c309259e65d309a17316"
+  },
+  "request": {
+    "progressive": true,
+    "samples": 1024,
+    "max_depth": 16,
+    "seed": 21026,
+    "tone_map": "aces_fitted",
+    "denoise": true,
+    "settings": {
+      "width": 3840,
+      "height": 2400,
+      "camera": {
+        "target": [
+          132.0,
+          0.0,
+          146.24875698650803
+        ],
+        "yaw": -0.66,
+        "pitch": 0.53,
+        "roll": 0.0,
+        "fov": 0.46,
+        "distance": 1116.9521284541001
+      },
+      "background": [
+        232,
+        236,
+        242
+      ],
+      "exposure_ev": -1.1,
+      "stage": [
+        {
+          "id": "studio-ground",
+          "center_mm": [
+            132.0,
+            0.0,
+            -0.1
+          ],
+          "half_u_mm": [
+            1700.0,
+            0,
+            0
+          ],
+          "half_v_mm": [
+            0,
+            1700.0,
+            0
+          ],
+          "reflectance_linear": [
+            0.32,
+            0.34,
+            0.38
+          ]
+        }
+      ]
+    },
+    "environment": {
+      "kind": "builtin_hdr",
+      "id": "HDR-002",
+      "rotation_rad": 0.35,
+      "intensity": 0.12
+    },
+    "lighting": {
+      "area_lights": [
+        {
+          "center": [
+            -684.0000000000001,
+            -816.0000000000001,
+            826.248756986508
+          ],
+          "radiance": [
+            22.330605321625,
+            22.330605321625,
+            22.330605321625
+          ],
+          "u": [
+            -192.333044482864,
+            192.333044482864,
+            0.0
+          ],
+          "v": [
+            122.05288696506001,
+            122.05288696506001,
+            292.92692871594
+          ]
+        },
+        {
+          "center": [
+            948.0000000000001,
+            -680.0,
+            554.248756986508
+          ],
+          "radiance": [
+            2.82126149636875,
+            2.82126149636875,
+            2.82126149636875
+          ],
+          "u": [
+            -261.19523506291205,
+            -313.43428207557605,
+            -1.1324274851164802e-14
+          ],
+          "v": [
+            -93.65640527068,
+            78.04700439246001,
+            317.39115119546
+          ]
+        },
+        {
+          "center": [
+            608.0,
+            748.0,
+            826.248756986508
+          ],
+          "radiance": [
+            29.691586369625,
+            29.691586369625,
+            29.691586369625
+          ],
+          "u": [
+            71.71122645722,
+            -45.634416836405,
+            2.359223927326e-15
+          ],
+          "v": [
+            -133.30666399965602,
+            -209.48190057048004,
+            323.7447554273281
+          ]
+        }
+      ],
+      "environment": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "sun": null
+    },
+    "raytrace": {
+      "dielectrics": [
+        {
+          "body_index": 1078,
+          "body_name": "Glass sample vial (-160, -22)",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.002,
+            0.0006,
+            0.0004
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1079,
+          "body_name": "Glass sample vial (-160, 0)",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.002,
+            0.0006,
+            0.0004
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1080,
+          "body_name": "Glass sample vial (-160, 22)",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.002,
+            0.0006,
+            0.0004
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1081,
+          "body_name": "Glass sample vial (-136, -22)",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.002,
+            0.0006,
+            0.0004
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1082,
+          "body_name": "Glass sample vial (-136, 0)",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.002,
+            0.0006,
+            0.0004
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1083,
+          "body_name": "Glass sample vial (-136, 22)",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.002,
+            0.0006,
+            0.0004
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1192,
+          "body_name": "Stereo lens glass -10",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.008,
+            0.003,
+            0.001
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1194,
+          "body_name": "Stereo lens glass 10",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.008,
+            0.003,
+            0.001
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1201,
+          "body_name": "Searchlight glass -33",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.0002,
+            0.0002,
+            0.0002
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1208,
+          "body_name": "Searchlight glass 33",
+          "ior": 1.5,
+          "absorption_per_mm": [
+            0.0002,
+            0.0002,
+            0.0002
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1226,
+          "body_name": "Underbody LED diffuser -1",
+          "ior": 1.49,
+          "absorption_per_mm": [
+            0.015,
+            0.003,
+            0.001
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        },
+        {
+          "body_index": 1258,
+          "body_name": "Underbody LED diffuser 1",
+          "ior": 1.49,
+          "absorption_per_mm": [
+            0.015,
+            0.003,
+            0.001
+          ],
+          "boundary": "closed_mesh",
+          "thickness_mm": 0.0,
+          "shadow_transmission": true
+        }
+      ],
+      "clear_coats": [],
+      "textures": [
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 0,
+          "body_name": "Structural electronics tub",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              1.4210854715202004e-14,
+              0.0,
+              123.49999999999997
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 13,
+          "body_name": "Suspension chassis shoe -1:-90",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -95.5,
+              -50.0,
+              102.99999999991937
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 28,
+          "body_name": "Suspension chassis shoe -1:0",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -5.5,
+              -50.0,
+              102.99999999991937
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 43,
+          "body_name": "Suspension chassis shoe -1:90",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              84.5,
+              -50.0,
+              102.99999999991937
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 58,
+          "body_name": "Suspension chassis shoe 1:-90",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -95.5,
+              50.0,
+              102.99999999991935
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 73,
+          "body_name": "Suspension chassis shoe 1:0",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -5.5,
+              50.0,
+              102.99999999991935
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 88,
+          "body_name": "Suspension chassis shoe 1:90",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              84.5,
+              50.0,
+              102.99999999991937
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 103,
+          "body_name": "Arm structural nose",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              154.0,
+              7.105427357601002e-15,
+              118.0
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 123,
+          "body_name": "Solar outrigger beam (-1, -62)",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -62.0,
+              -94.5,
+              152.5
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 137,
+          "body_name": "Solar outrigger beam (-1, 62)",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              62.0,
+              -94.5,
+              152.5
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 151,
+          "body_name": "Solar outrigger beam (1, -62)",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -62.0,
+              94.5,
+              152.5
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 165,
+          "body_name": "Solar outrigger beam (1, 62)",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              62.0,
+              94.5,
+              152.5
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 178,
+          "body_name": "Rear science outrigger",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -154.0,
+              0.0,
+              117.99999999999999
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 241,
+          "body_name": "TPU wheel tyre -1:-90",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -90.0,
+              -86.0,
+              40.00000000000001
+            ],
+            "u": [
+              0.0,
+              0.0,
+              80.0
+            ],
+            "v": [
+              80.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-024/metallic",
+          "normal_opengl": "builtin://SURF-024/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-024/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 308,
+          "body_name": "TPU wheel tyre -1:0",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              0.0,
+              -86.00000000000001,
+              40.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              80.0
+            ],
+            "v": [
+              80.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-024/metallic",
+          "normal_opengl": "builtin://SURF-024/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-024/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 375,
+          "body_name": "TPU wheel tyre -1:90",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              90.0,
+              -86.0,
+              40.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              80.0
+            ],
+            "v": [
+              80.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-024/metallic",
+          "normal_opengl": "builtin://SURF-024/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-024/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 442,
+          "body_name": "TPU wheel tyre 1:-90",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -90.0,
+              86.0,
+              40.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              80.0
+            ],
+            "v": [
+              80.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-024/metallic",
+          "normal_opengl": "builtin://SURF-024/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-024/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 509,
+          "body_name": "TPU wheel tyre 1:0",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              3.552713678800501e-15,
+              86.0,
+              40.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              80.0
+            ],
+            "v": [
+              80.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-024/metallic",
+          "normal_opengl": "builtin://SURF-024/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-024/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 576,
+          "body_name": "TPU wheel tyre 1:90",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              90.0,
+              86.0,
+              40.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              80.0
+            ],
+            "v": [
+              80.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-024/metallic",
+          "normal_opengl": "builtin://SURF-024/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-024/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 603,
+          "body_name": "Raspberry Pi 5 PCB",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              64.50000000000009,
+              -3.552713678800501e-15,
+              120.79999999992509
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-036/metallic",
+          "normal_opengl": "builtin://SURF-036/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-036/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 616,
+          "body_name": "18650 removable battery tray",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -63.5,
+              0.0,
+              111.0
+            ],
+            "u": [
+              100.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              100.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 637,
+          "body_name": "Battery management board",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -64.5,
+              26.5,
+              135.8
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-036/metallic",
+          "normal_opengl": "builtin://SURF-036/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-036/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 680,
+          "body_name": "Payload rail -46",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              0.0,
+              -46.0,
+              148.5
+            ],
+            "u": [
+              100.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              100.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 681,
+          "body_name": "Payload rail fixing (-76, -46) shank",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -76.0,
+              -45.999999999999986,
+              145.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 682,
+          "body_name": "Payload rail fixing (-76, -46) head",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -76.0,
+              -46.0,
+              153.5
+            ],
+            "u": [
+              100.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              100.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 683,
+          "body_name": "Payload rail fixing (76, -46) shank",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              76.0,
+              -45.99999999999999,
+              145.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 684,
+          "body_name": "Payload rail fixing (76, -46) head",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              76.0,
+              -46.0,
+              153.50000000000003
+            ],
+            "u": [
+              100.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              100.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 685,
+          "body_name": "Payload rail 46",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              0.0,
+              46.0,
+              148.5
+            ],
+            "u": [
+              100.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              100.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 686,
+          "body_name": "Payload rail fixing (-76, 46) shank",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -76.0,
+              45.99999999999999,
+              145.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 687,
+          "body_name": "Payload rail fixing (-76, 46) head",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -76.0,
+              46.0,
+              153.50000000000003
+            ],
+            "u": [
+              100.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              100.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 688,
+          "body_name": "Payload rail fixing (76, 46) shank",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              76.0,
+              45.999999999999986,
+              145.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 689,
+          "body_name": "Payload rail fixing (76, 46) head",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              76.0,
+              46.0,
+              153.5
+            ],
+            "u": [
+              100.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              100.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 722,
+          "body_name": "Shoulder link -9",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              209.5,
+              -7.000000000000002,
+              223.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 723,
+          "body_name": "Shoulder link 5",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              209.5,
+              7.0,
+              222.99999999999997
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 748,
+          "body_name": "Elbow link -9",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              295.9999999999999,
+              -11.200000000000003,
+              265.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 749,
+          "body_name": "Elbow link 5",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              295.9999999999999,
+              11.2,
+              265.00000000000006
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 758,
+          "body_name": "Forearm cross brace 0.28",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              272.24,
+              -1.7763568394002505e-15,
+              272.03999999999996
+            ],
+            "u": [
+              0.0,
+              80.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              0.0,
+              80.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-014/metallic",
+          "normal_opengl": "builtin://SURF-014/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-014/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 761,
+          "body_name": "Forearm cross brace 0.68",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              315.44,
+              -8.881784197001252e-16,
+              259.24
+            ],
+            "u": [
+              0.0,
+              80.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              0.0,
+              80.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-014/metallic",
+          "normal_opengl": "builtin://SURF-014/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-014/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 776,
+          "body_name": "Distal wrist link -9",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              380.0,
+              -7.0,
+              258.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 777,
+          "body_name": "Distal wrist link 5",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              380.0,
+              7.0,
+              258.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 819,
+          "body_name": "Orange side service strip -1",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              0.0,
+              -64.0,
+              126.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 832,
+          "body_name": "Orange side service strip 1",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              0.0,
+              64.0,
+              126.0
+            ],
+            "u": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "v": [
+              100.0,
+              0.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 845,
+          "body_name": "Orange solar frame -1",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              0.0,
+              -191.93874647735953,
+              179.03251326780926
+            ],
+            "u": [
+              100.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              100.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 912,
+          "body_name": "Orange solar frame 1",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              0.0,
+              191.93874647735953,
+              179.03251326780926
+            ],
+            "u": [
+              100.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              100.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-015/metallic",
+          "normal_opengl": "builtin://SURF-015/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-015/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 979,
+          "body_name": "Sample compartment",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              67.0,
+              0.0,
+              161.0
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-007/base_color",
+          "body_index": 1189,
+          "body_name": "Unified sensor crossbeam",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -45.0,
+              0.0,
+              249.00000000000006
+            ],
+            "u": [
+              80.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              80.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-007/metallic",
+          "normal_opengl": "builtin://SURF-007/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-007/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "body_index": 1211,
+          "body_name": "Sensor rear cover",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              -55.5,
+              0.0,
+              249.0
+            ],
+            "u": [
+              0.0,
+              80.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              0.0,
+              80.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-014/metallic",
+          "normal_opengl": "builtin://SURF-014/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-014/roughness"
+        },
+        {
+          "base_color_mode": "replace",
+          "base_color_srgb": "builtin://SURF-047/base_color",
+          "body_index": 1351,
+          "body_name": "Basalt pebble",
+          "flip_v": true,
+          "frame": {
+            "origin": [
+              329.99999999999994,
+              59.99999999999999,
+              9.000000000000002
+            ],
+            "u": [
+              240.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              240.0,
+              0.0
+            ]
+          },
+          "metallic_linear": "builtin://SURF-047/metallic",
+          "normal_opengl": "builtin://SURF-047/normal_open_gl",
+          "normal_strength": 1.0,
+          "roughness_linear": "builtin://SURF-047/roughness"
+        }
+      ]
+    }
+  },
+  "authored_resource_receipts": [
+    {
+      "id": "HDR-002",
+      "role": "environment_radiance",
+      "path": "assets/render/starter/environments/exports/white-enveloping-studio.hdr",
+      "sha256": "36bb4ee24d9c5dd98806469b04b226fbe9e46a9d5a86d0f90e9a001ae5ff2854"
+    },
+    {
+      "id": "SURF-007",
+      "role": "base_color",
+      "path": "assets/render/starter/materials/exports/SURF-007/base_color.png",
+      "sha256": "e7512f7490f4187627427a7671be23b8f0abcbb6c7df16a48e00d8659029c168"
+    },
+    {
+      "id": "SURF-007",
+      "role": "metallic",
+      "path": "assets/render/starter/materials/exports/SURF-007/metallic.png",
+      "sha256": "bcd735b2fd94028e2f7b9109c5d6a2180c7128ecaf1a8ccf2e0b08788fda9493"
+    },
+    {
+      "id": "SURF-007",
+      "role": "normal_open_gl",
+      "path": "assets/render/starter/materials/exports/SURF-007/normal_open_gl.png",
+      "sha256": "d9df47f7e4052a452cbfb031137e83507c9623d73d1154245e11b28530052854"
+    },
+    {
+      "id": "SURF-007",
+      "role": "roughness",
+      "path": "assets/render/starter/materials/exports/SURF-007/roughness.png",
+      "sha256": "be1b0cebf761e92ec539ed660b7f2a45773961f6aa6bf3c173840dbf217e0963"
+    },
+    {
+      "id": "SURF-014",
+      "role": "metallic",
+      "path": "assets/render/starter/materials/exports/SURF-014/metallic.png",
+      "sha256": "f5df0628643ba99754cee39c30291c6fca5a9fe242838fbbb57dc7926aec76de"
+    },
+    {
+      "id": "SURF-014",
+      "role": "normal_open_gl",
+      "path": "assets/render/starter/materials/exports/SURF-014/normal_open_gl.png",
+      "sha256": "f8a2b166d04ad4bcf4a5d8b961b9c4b16ebb8663e2ea8ecde285eeadf3bc0f0f"
+    },
+    {
+      "id": "SURF-014",
+      "role": "roughness",
+      "path": "assets/render/starter/materials/exports/SURF-014/roughness.png",
+      "sha256": "004cc3fb88fe00b36fa9463b91a300b2957933c51633135da18df39012b064b2"
+    },
+    {
+      "id": "SURF-015",
+      "role": "metallic",
+      "path": "assets/render/starter/materials/exports/SURF-015/metallic.png",
+      "sha256": "f5df0628643ba99754cee39c30291c6fca5a9fe242838fbbb57dc7926aec76de"
+    },
+    {
+      "id": "SURF-015",
+      "role": "normal_open_gl",
+      "path": "assets/render/starter/materials/exports/SURF-015/normal_open_gl.png",
+      "sha256": "f958938aab87ff752f1b3cfa54ae1ea0f40b87b7dd42007528a0d9f18c800ee9"
+    },
+    {
+      "id": "SURF-015",
+      "role": "roughness",
+      "path": "assets/render/starter/materials/exports/SURF-015/roughness.png",
+      "sha256": "17c4fb2300614c49a85fd4a86b753f54b4b94722becee04268f9dfc0a6211b17"
+    },
+    {
+      "id": "SURF-024",
+      "role": "metallic",
+      "path": "assets/render/starter/materials/exports/SURF-024/metallic.png",
+      "sha256": "f5df0628643ba99754cee39c30291c6fca5a9fe242838fbbb57dc7926aec76de"
+    },
+    {
+      "id": "SURF-024",
+      "role": "normal_open_gl",
+      "path": "assets/render/starter/materials/exports/SURF-024/normal_open_gl.png",
+      "sha256": "8ec4959cc4ce0c93afa3cd8563287ff29cb3dd76960d2a72e296b2d8bba54c84"
+    },
+    {
+      "id": "SURF-024",
+      "role": "roughness",
+      "path": "assets/render/starter/materials/exports/SURF-024/roughness.png",
+      "sha256": "81b51b95294b6e15503bcfb50a6830aa22171aa38be81432f6ddb2dc9fdd1a85"
+    },
+    {
+      "id": "SURF-036",
+      "role": "metallic",
+      "path": "assets/render/starter/materials/exports/SURF-036/metallic.png",
+      "sha256": "f5df0628643ba99754cee39c30291c6fca5a9fe242838fbbb57dc7926aec76de"
+    },
+    {
+      "id": "SURF-036",
+      "role": "normal_open_gl",
+      "path": "assets/render/starter/materials/exports/SURF-036/normal_open_gl.png",
+      "sha256": "8476b440effc7e05788a3a03f02d2f3e7386fb316c4b78e546418cad82555003"
+    },
+    {
+      "id": "SURF-036",
+      "role": "roughness",
+      "path": "assets/render/starter/materials/exports/SURF-036/roughness.png",
+      "sha256": "0d0390ea6e3a5f57c8bf78699bbea1c07a5b265f197ccd3e966c9e7373d472f1"
+    },
+    {
+      "id": "SURF-047",
+      "role": "base_color",
+      "path": "assets/render/starter/materials/exports/SURF-047/base_color.png",
+      "sha256": "7e2cdaf776755f2f70f88a58b240f4c73312d1320d91584d729ea57f41bb904d"
+    },
+    {
+      "id": "SURF-047",
+      "role": "metallic",
+      "path": "assets/render/starter/materials/exports/SURF-047/metallic.png",
+      "sha256": "f5df0628643ba99754cee39c30291c6fca5a9fe242838fbbb57dc7926aec76de"
+    },
+    {
+      "id": "SURF-047",
+      "role": "normal_open_gl",
+      "path": "assets/render/starter/materials/exports/SURF-047/normal_open_gl.png",
+      "sha256": "9d8b806f0a9bd553506139924eed8d09f4b998d2ca65a50852715804c4b3f054"
+    },
+    {
+      "id": "SURF-047",
+      "role": "roughness",
+      "path": "assets/render/starter/materials/exports/SURF-047/roughness.png",
+      "sha256": "35bc395ce5acc7df01c4b389308d463d28094e994e9d8c1369d18b3a6cc3049b"
+    }
+  ],
+  "visual_review": {
+    "status": "ACCEPTED",
+    "reviewer": "agent",
+    "scope": "whole-frame composition plus native-pixel detail crops; not quantitative convergence certification"
+  },
+  "limitations": [
+    "Residual Monte Carlo grain remains visible at native pixel scale in some glass/vial regions; the denoiser does not reconstruct those optical paths.",
+    "Authored RGB material/absorption values are not measured optical or engineering data.",
+    "Normal maps affect shading, not CAD silhouette or geometric displacement.",
+    "LED diffusers are transmission surfaces, not validated volumetric or mesh-emission sources.",
+    "The image is a static pose, not a dynamics or collision-envelope certification.",
+    "No cross-driver bit-identical reproduction or full GUI/CI approval is implied."
+  ]
+}

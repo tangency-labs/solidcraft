@@ -2,7 +2,8 @@
 //!
 //! Serves six release builds, a site without the app and a development build at
 //! `/solidcraft/app/` (as on GitHub Pages, with its 10-minute HTTP caching) from a local server
-//! that can also act offline, flaky, hung or mid-deployment, plus another copy of the app at
+//! that can also act offline, flaky, hung or mid-deployment, or hold chosen responses until the
+//! test lets them go (nothing here depends on how fast the network or the machine is), plus another copy of the app at
 //! `/solidcraft/elsewhere/` on the same origin, and drives headless Chrome through the DevTools
 //! protocol through these steps (twenty-two page launches, which failures are numbered by):
 //!
@@ -14,18 +15,21 @@
 //!    page whose code can't be fetched);
 //! 5. the same for build v3: v1 starts, and v2's unfinished download is dropped (failed updates
 //!    don't pile up);
-//! 6. build v2 deployed again: its page fails at once while its other files are still coming:
-//!    v1 starts, and its download doesn't stay in progress (so it can be dropped);
+//! 6. build v2 deployed again: its page fails at once while its other files are held back:
+//!    v1 starts, and once they are let go its download doesn't stay in progress (so it can be
+//!    dropped);
 //! 7. v3's files download, but v4 is deployed meanwhile (its `index.html` comes): v1 starts, and
 //!    v3 isn't marked complete (a kept build never mixes deployments);
 //! 8. online: the first launch already gets v3 (resuming its download), and only v3 stays kept;
 //! 9. offline: v3 starts;
 //! 10. network hangs: after waiting for it a few seconds, v3 starts from the kept copy;
-//! 11. build v4 deployed, but the check for it is slow while v4's worker takes over (as when
-//!     another tab updates): the kept v3 starts and works, its copy retired but not deleted;
+//! 11. build v4 deployed, but the check for it is held back while v4's worker takes over (as
+//!     when another tab updates, which starts once the launch is waiting for the check): the kept
+//!     v3 starts and works, its copy retired but not deleted;
 //! 12. no open page uses the retired copies any more: a launch (v4) deletes them;
-//! 13. build v5's worker downloads slowly while a launch finds v6 deployed and downloads it:
-//!     v6 starts, v5's download isn't dropped from under its worker, then v6's worker takes over;
+//! 13. build v5's worker downloads, its files held back by the server, while a launch finds v6
+//!     deployed and downloads it: v6 starts, v5's download (let go afterwards) isn't dropped
+//!     from under its worker, then v6's worker takes over;
 //! 14. with no launch in between (a page left open), updates to v2 and then v3 both fail: the
 //!     second one's install drops the first's unfinished download;
 //! 15. the app removed (no `sw.js`, no `build.json`): the site's page starts, from the network;
@@ -43,15 +47,19 @@
 //! `cargo xtask web-offline`'s generator and a `data-build` marker on `<html>`. Chrome comes from
 //! `CHROME` or the usual install locations; `cargo xtask ci` skips this test when there is none.
 //!
+//! A real build's copies each get a file of their own, as successive deployments have files
+//! named differently.
+//!
 //! The stand-in app has a content-named script, a `shared.js` whose name is the same in every
-//! build (a page must get its own build's), and an on-demand file under `fonts/` (not kept).
+//! build (a page must get its own build's), more files under `icons/` than the browser asks for
+//! at once, and an on-demand file under `fonts/` (not kept).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -67,10 +75,11 @@ const ELSEWHERE: &str = "/solidcraft/elsewhere/";
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(240);
 /// sw.js's NAVIGATE_TIMEOUT_MS, less a margin: a hung network is waited for at least this long.
 const SLOW_NETWORK_WAIT: Duration = Duration::from_secs(3);
-/// How long a file takes in Mode::SlowFiles.
-const SLOW_FILE: Duration = Duration::from_secs(6);
 /// Where Mode::SignIn redirects to (on `localhost`: another origin than the 127.0.0.1 app).
 const SIGN_IN: &str = "/sign-in";
+/// How many requests Chrome sends to one server at a time over HTTP/1.1; the rest wait for a
+/// free connection.
+const CONNECTIONS_PER_SERVER: usize = 6;
 
 /// Exercise the real browser build's command bridge, using the same Chrome harness as the offline test.
 pub fn run_api(site: &str) -> Result<(), String> {
@@ -84,13 +93,115 @@ pub fn run_api(site: &str) -> Result<(), String> {
     server.set(Mode::Serve(site));
     let browser = Chrome::launch(&chrome, &work.0.join("profile"))?;
     let mut cdp = browser.connect()?;
+    let downloads = work.0.join("downloads");
+    std::fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
+    cdp.call("Browser.setDownloadBehavior", json!({"behavior": "allow", "downloadPath": downloads}))?;
     cdp.call("Emulation.setDeviceMetricsOverride", json!({"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}))?;
-    cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}?webgl", server.port)}))?;
+    // The page has the keyboard, as a tab the user is looking at does (for KEYS_TEST).
+    cdp.call("Emulation.setFocusEmulationEnabled", json!({"enabled": true}))?;
+    // Use the app's normal backend selection, including WebGPU where available.
+    cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}", server.port)}))?;
     wait_for(&mut cdp, "!!window.solidcraft && !document.getElementById('solidcraft_loading')", "the browser API is ready", |v| v == true)?;
+    println!("web-api-test: mouse buttons: {}", mouse_test(&mut cdp)?);
     let result = cdp.eval(API_TEST)?;
+    let path = downloads.join("Untitled-view.dxf");
+    let started = Instant::now();
+    loop {
+        if let Ok(dxf) = std::fs::read_to_string(&path) {
+            if !(dxf.contains("ENTITIES") && dxf.contains("VISIBLE") && dxf.contains("EOF")) {
+                return Err("web-api-test: the view download is not a complete DXF drawing".into());
+            }
+            break;
+        }
+        if started.elapsed() > LAUNCH_TIMEOUT {
+            return Err("web-api-test: Export Current View did not download its DXF".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
     println!("web-api-test: {result}");
+    let keys = cdp.eval(KEYS_TEST)?;
+    println!("web-api-test: {keys}");
     Ok(())
 }
+
+/// The app's mouse buttons follow the browser's: a chord leaves none held (a second button
+/// pressed while one is held fires `pointermove`, not `pointerdown`), and so do a drag let go
+/// outside the window, a release the page never heard of and the window losing focus.
+fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
+    // The model viewport, not the start page, under the pointer.
+    let ui = cdp.eval("window.solidcraft.request('ui.home', {open: false}).then(() => window.solidcraft.request('ui.inspect'))")?;
+    let at = |i: usize| ui["viewport"][i].as_f64().ok_or("web-api-test: no model viewport");
+    let (x, y) = (at(0)? + at(2)? / 2.0, at(1)? + at(3)? / 2.0);
+    let mouse = |cdp: &mut Cdp, kind: &str, (x, y): (f64, f64), button: &str, buttons: u32| {
+        let clicks = if kind == "mouseMoved" { 0 } else { 1 };
+        cdp.call("Input.dispatchMouseEvent", json!({"type": kind, "x": x, "y": y, "button": button, "buttons": buttons, "clickCount": clicks}))
+            .map(|_| ())
+    };
+    // The buttons egui holds once two frames have run.
+    let held = |cdp: &mut Cdp| -> Result<u64, String> {
+        let v = cdp.eval("(async () => { await window.solidcraft.request('ui.inspect'); await window.solidcraft.request('ui.inspect'); return window.solidcraft.buttons(); })()")?;
+        v.as_u64().ok_or_else(|| format!("web-api-test: buttons() gave {v}"))
+    };
+    let expect = |cdp: &mut Cdp, want: u64, what: &str| -> Result<(), String> {
+        let got = held(cdp)?;
+        if got == want { Ok(()) } else { Err(format!("web-api-test: {what}: the app holds buttons {got:#b}, the browser {want:#b}")) }
+    };
+    let c = (x, y);
+    mouse(cdp, "mouseMoved", c, "none", 0)?;
+    // Right, then left; right let go, then left.
+    mouse(cdp, "mousePressed", c, "right", 2)?;
+    mouse(cdp, "mousePressed", c, "left", 3)?;
+    expect(cdp, 3, "a chord's second button")?;
+    mouse(cdp, "mouseReleased", c, "right", 1)?;
+    expect(cdp, 1, "one of a chord's buttons let go")?;
+    mouse(cdp, "mouseReleased", c, "left", 0)?;
+    expect(cdp, 0, "right then left, let go in the same order")?;
+    // Left, then right; let go in reverse order.
+    mouse(cdp, "mousePressed", c, "left", 1)?;
+    mouse(cdp, "mousePressed", c, "right", 3)?;
+    mouse(cdp, "mouseReleased", c, "right", 1)?;
+    mouse(cdp, "mouseReleased", c, "left", 0)?;
+    expect(cdp, 0, "left then right, let go in reverse order")?;
+    // A right drag let go outside the window: the canvas has the pointer, so the release arrives.
+    mouse(cdp, "mousePressed", c, "right", 2)?;
+    mouse(cdp, "mouseMoved", (x + 40.0, y + 20.0), "right", 2)?;
+    mouse(cdp, "mouseMoved", (-30.0, -30.0), "right", 2)?;
+    expect(cdp, 2, "a drag outside the window")?;
+    mouse(cdp, "mouseReleased", (-30.0, -30.0), "right", 0)?;
+    expect(cdp, 0, "a drag let go outside the window")?;
+    // A release the page never heard of: the next move has no buttons held.
+    mouse(cdp, "mouseMoved", c, "none", 0)?;
+    mouse(cdp, "mousePressed", c, "right", 2)?;
+    mouse(cdp, "mouseMoved", (x + 10.0, y), "none", 0)?;
+    expect(cdp, 0, "a move with no buttons after a lost release")?;
+    mouse(cdp, "mouseReleased", (x + 10.0, y), "right", 0)?;
+    // The window loses focus with a button held.
+    mouse(cdp, "mousePressed", c, "middle", 4)?;
+    cdp.eval("window.dispatchEvent(new Event('blur'))")?;
+    expect(cdp, 0, "the window lost focus")?;
+    mouse(cdp, "mouseReleased", c, "middle", 0)?;
+    cdp.call("Input.dispatchKeyEvent", json!({"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
+    cdp.call("Input.dispatchKeyEvent", json!({"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
+    Ok("chords, a drag let go outside, a lost release and blur leave none held".into())
+}
+
+/// The browser's own tab switching keys reach it while the app has the keyboard (#5227): their
+/// default action isn't cancelled, while Tab's is (the app moves between its fields with it).
+const KEYS_TEST: &str = r#"(async () => {
+    const check = (condition, message) => { if (!condition) throw new Error(message); };
+    const canvas = document.getElementById('solidcraft_canvas');
+    canvas.focus();
+    canvas.dispatchEvent(new FocusEvent('focus'));
+    const cancelled = init => {
+        const e = new KeyboardEvent('keydown', {key: 'Tab', code: 'Tab', bubbles: true, cancelable: true, ...init});
+        canvas.dispatchEvent(e);
+        return e.defaultPrevented;
+    };
+    check(!cancelled({ctrlKey: true}), 'Ctrl+Tab is left to the browser');
+    check(!cancelled({ctrlKey: true, shiftKey: true}), 'Ctrl+Shift+Tab is left to the browser');
+    check(cancelled({}), 'the app takes Tab (it has the keyboard)');
+    return {ctrl_tab: 'browser', ctrl_shift_tab: 'browser', tab: 'app'};
+})()"#;
 
 const API_TEST: &str = r#"(async () => {
     const app = window.solidcraft;
@@ -128,9 +239,66 @@ const API_TEST: &str = r#"(async () => {
     check(settled.filter(r => r.status === 'rejected' && r.reason instanceof Error && r.reason.message.includes('pending')).length === 1,
         'queue limit rejects excess work');
     check((await app.inspect()).bodies.length === 1, 'API still works after rejected requests');
+    // A host page keeps the design itself (#8517): out, changed, and back in its place.
+    const kept = await app.request('document.export');
+    check(kept.format === 'json' && kept.dirty === true && kept.text.includes('Browser API box'), 'export gives the design as its file holds it');
+    check((await app.request('document.saved', {revision: kept.revision})).dirty === false, 'the host saved that revision');
+    await app.execute('solid.box', {length: 10, width: 10, height: 10, body_name: 'Second box'});
+    await rejects(() => app.request('document.saved', {revision: kept.revision}), 'changed since');
+    await rejects(() => app.request('document.import', {text: 'not a design'}), '');
+    check((await app.inspect()).bodies.length === 2, 'a refused import leaves the design as it was');
+    check((await app.request('document.import', {text: kept.text})).errors === 0, 'import evaluates the kept design');
+    check((await app.inspect()).bodies.length === 1, 'import puts the kept design back');
+    check((await app.request('document.export')).dirty === false, 'an imported design opens saved');
     const ui = await app.request('ui.inspect');
     check(ui.home === false && ui.viewport[2] > 600, 'model viewport is visible');
-    return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected'};
+    // #3431: a native Instant compiles for wasm but panics when exporting in the browser.
+    // Exercise both the command timer and the projection/occlusion timers on the real target.
+    // A wasm abort stops the frame loop before it can settle the command's reply.
+    const crashed = new Promise((_, reject) => {
+        window.addEventListener('error', event => reject(event.error || new Error(event.message)), {once: true});
+    });
+    for (const hidden of ['omit', 'dashed']) {
+        const drawing = await Promise.race([app.execute('file.export_view_dxf', {camera: ui.camera, hidden}), crashed]);
+        check(drawing.units === 'mm' && drawing.visible > 0, 'view export contains visible edges in mm');
+        check(drawing.dxf.includes('ENTITIES') && drawing.dxf.includes('VISIBLE'), 'view export returns a DXF drawing');
+        check(drawing.dxf.includes('HIDDEN') === (hidden === 'dashed'), 'view export respects the hidden-edge option');
+        for (const stage of ['prepare_ms', 'projection_ms', 'occlusion_ms']) {
+            check(Number.isFinite(drawing.stats[stage]) && drawing.stats[stage] >= 0, stage + ' is a valid browser timing');
+        }
+    }
+    check((await app.inspect()).bodies.length === 1, 'view export preserves the document');
+    await app.request('ui.start', {command: 'file.export_view_dxf'});
+    // Let the new dialog finish its initial layout before taking the button's position.
+    await app.request('ui.inspect');
+    await app.request('ui.inspect');
+    const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
+    await app.request('ui.click', {x, y});
+    // Browser files exist only in the VFS: native filesystem metadata cannot find them.
+    await app.execute('file.save', {path: '/upload/linked-part.sc'});
+    await app.execute('file.new');
+    const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.sc'});
+    await app.execute('file.save', {path: '/opfs/linked-assembly.sc'});
+    const links = await app.execute('component.links');
+    check(links.links[0].found === true, 'linked part is found in browser storage');
+    check(links.links[0].path === '../upload/linked-part.sc', 'assembly stores a relative link');
+    check(links.links[0].file === '/upload/linked-part.sc', 'relative link resolves to a browser storage key');
+    await app.request('ui.menu', {x: 200, y: 300, target: {type: 'occurrence', path: [linked.occurrence]}});
+    let menu;
+    for (let frame = 0; frame < 120; frame++) {
+        menu = await app.request('ui.menu');
+        if (menu.items?.some(item => item.id === 'ui.openLinkedDesign')) break;
+    }
+    check(menu.items?.some(item => item.id === 'ui.openLinkedDesign'), 'occurrence menu offers the source design');
+    await app.request('ui.menuPick', {item: 'ui.openLinkedDesign'});
+    const tabs = await app.request('ui.documents');
+    check(tabs.documents.length === 2 && tabs.active === 1, 'linked source opens in another tab');
+    check((await app.inspect()).bodies[0].name === 'Browser API box', 'source design is active');
+    await app.request('ui.documents', {action: 'switch', index: 0});
+    check((await app.execute('component.links')).links[0].component === linked.component, 'assembly remains in its tab');
+    return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected',
+        dxf: 'omit and dashed exported; dialog download checked', linked: 'source opened from browser storage',
+        host: 'exported, saved and imported back'};
 })()"#;
 
 /// Run the test; `required: false` (from `cargo xtask ci`) skips it when Chrome is missing.
@@ -149,6 +317,16 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
             check_site(root, Path::new(dir), &work.0.join("check"))?;
             for (to, build) in &builds {
                 copy_dir(Path::new(dir), to)?;
+                // Trunk names files after their contents, so two real deployments differ in more
+                // than `index.html`; copies of one build don't. A file of its own per copy lets
+                // a step hold back what one build has and the next lacks (step 13).
+                std::fs::write(to.join(format!("own-{build}.txt")), format!("{build}\n")).map_err(|e| format!("{}: {e}", to.display()))?;
+                // And a file of one name with each build's own content, as the stand-in has
+                // (`shared.js`): the update-in-another-tab step asks for it to tell which build's
+                // copy answered. A real build has no such file, and the network's 404 would fail
+                // the step whatever the worker does.
+                std::fs::write(to.join("shared.js"), format!("document.documentElement.dataset.shared = \"{build}\";\n"))
+                    .map_err(|e| format!("{}: {e}", to.display()))?;
                 let index = to.join("index.html");
                 let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
                 std::fs::write(&index, mark(&html, build)?).map_err(|e| format!("{}: {e}", index.display()))?;
@@ -191,6 +369,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     }
     let state_js = STATE_JS.replace("STARTED", started).replace("BUILD_FILES", &json!(files.into_iter().collect::<Vec<_>>()).to_string());
     let count = std::cell::Cell::new(0);
+    // Run once, just before the next launch's page navigation is issued (see the update in another
+    // tab below).
+    let on_navigate: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
     let launch_at = |cdp: &mut Cdp, at: &str, build: &str| -> Result<Duration, String> {
         let n = count.get() + 1;
         count.set(n);
@@ -200,6 +381,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
         // One retry: on a heavily loaded machine a launch can stall past the timeout. Loading the
         // same page again must still start the same build.
         for attempt in 1..=2 {
+            if let Some(f) = on_navigate.borrow_mut().take() {
+                f();
+            }
             let r = cdp.call("Page.navigate", json!({ "url": format!("http://127.0.0.1:{}{at}?launch={n}", server.port) }))?;
             if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
                 return Err(format!("launch {n} (build {build}): the page didn't load: {e}"));
@@ -251,11 +435,18 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     })?;
     step("flaky again: build v3 neither, so v1 starts; v2's unfinished download is dropped", t);
 
+    let name2_ = cache_name(PREFIX, &kept.get(1).map(|(v, _)| v.clone()).unwrap_or_default());
+    let asked = server.slow.load(Ordering::SeqCst);
     server.set(Mode::FailFast(v2.clone()));
     let t = launch(&mut cdp, "v1")?;
-    // Past the time the slow files would have arrived.
-    std::thread::sleep(SLOW_FILE + Duration::from_secs(1));
-    wait_for(&mut cdp, &state_js, "no download is left marked in progress", |s| s["filling"] == json!([]))?;
+    // The other files of v2 are asked for (and held) around the page's failure; let them go.
+    // Only as many as the browser sends at once (less the page's connection) are sure to be
+    // asked for: the page's failure cancels the download, and with it the files still waiting
+    // for a connection (a real build has more files than that).
+    let others = kept.get(1).map_or(0, |(_, n)| n.saturating_sub(1));
+    server.wait_asked_slowly(asked + others.min(CONNECTIONS_PER_SERVER - 1))?;
+    server.release();
+    wait_for(&mut cdp, &state_js, "no download is left marked in progress", |s| s["caches"].get(&name2_).is_some() && s["filling"] == json!([]))?;
     step("one file fails at once, others are still coming: v1 starts; v2's isn't left in progress", t);
 
     server.set(Mode::Mixed(v3.clone(), v4.clone()));
@@ -297,20 +488,73 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     server.set(Mode::SlowCheck(v4.clone()));
     cdp.call("Network.clearBrowserCache", json!({}))?;
     other.eval(age)?;
-    other.eval(
-        "navigator.serviceWorker.getRegistration().then((r) => {
-          setTimeout(() => { r.update(); location.replace('about:blank'); }, 1000);
-          return true;
-        })",
-    )?;
     cdp.call("Page.navigate", json!({ "url": "about:blank" }))?;
+    // The other tab updates once the launch is waiting for build.json, and leaves.
+    // Only a check made after this launch's navigation begins counts: another tab's check, late on a
+    // loaded machine, must not start the update before the launch has loaded its files (the new
+    // worker would then serve the new build's files to the old build's page).
+    let waiting = server.checks.clone();
+    let before = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(usize::MAX));
+    *on_navigate.borrow_mut() = Some(Box::new({
+        let (before, waiting) = (before.clone(), waiting.clone());
+        move || before.store(waiting.load(Ordering::SeqCst), Ordering::SeqCst)
+    }));
+    let updater = std::thread::spawn(move || -> Result<Cdp, String> {
+        let t = Instant::now();
+        loop {
+            let b = before.load(Ordering::SeqCst);
+            if b != usize::MAX && waiting.load(Ordering::SeqCst) > b {
+                break;
+            }
+            if t.elapsed() > LAUNCH_TIMEOUT {
+                return Err("the launch never asked for build.json".into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        other.eval(
+            "navigator.serviceWorker.getRegistration().then((r) => {
+              setTimeout(() => { r.update(); location.replace('about:blank'); }, 0);
+              return true;
+            })",
+        )?;
+        Ok(other)
+    });
     let t = launch(&mut cdp, "v3")?;
+    let mut other = updater.join().map_err(|_| "the updating tab panicked".to_string())??;
     let [name3, name4] = [2, 3].map(|i| kept.get(i).map(|(v, _)| cache_name(PREFIX, v)).unwrap_or_default());
     wait_for(&mut cdp, &state_js, "v4's worker keeps v4, v3's copy retired", |s| {
         s["kept"].as_object().is_some_and(|k| k.len() == 1 && k.contains_key(&name4))
             && s["retired"].as_array().is_some_and(|r| r.contains(&json!(name3)))
+            && s["settled"] == true
     })?;
     step("update in another tab: the kept v3 still starts; its copy is retired, not deleted", t);
+    // The page still open is v3's: a file it asks for now comes from v3's copy, not from v4 which the
+    // worker has taken over with (nor from the network, which serves v4).
+    let shared = cdp.eval("fetch('shared.js?later', { cache: 'no-store' }).then((r) => r.text())")?;
+    if !shared.as_str().is_some_and(|text| text.contains("\"v3\"")) {
+        let records = cdp
+            .eval(
+                "caches.keys().then(async (ks) => { const out = {}; for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) out[r.url] = await (await c.match(r)).text(); } return out; })",
+            )
+            .unwrap_or_default();
+        // Whether the request went through the worker at all (workerStart is 0 when it did not).
+        let how = cdp
+            .eval(
+                "(async () => { const e = performance.getEntriesByType('resource').filter((r) => r.name.includes('shared.js?later')).pop(); const reg = await navigator.serviceWorker.getRegistration(); return { workerStart: e ? e.workerStart : null, controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.state : null, active: reg && reg.active ? reg.active.state : null, installing: Boolean(reg && reg.installing), waiting: Boolean(reg && reg.waiting) }; })()",
+            )
+            .unwrap_or_default();
+        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}; request: {how}"));
+    }
+    // A page whose record is lost never gets the worker's build instead: its request fails visibly.
+    let lost = cdp.eval(
+        "caches.keys().then(async (ks) => {
+          for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) await c.delete(r); }
+          return (await fetch('shared.js?lost', { cache: 'no-store' })).status;
+        })",
+    )?;
+    if lost != json!(503) {
+        return Err(format!("a page with no remembered build was answered with status {lost}, not the visible failure (503)"));
+    }
     other.call("Page.close", json!({}))?;
 
     server.set(Mode::Serve(v4));
@@ -325,16 +569,17 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     let update = "navigator.serviceWorker.getRegistration().then((r) => { r.update(); return true; })";
     let name5 = kept.get(4).map(|(v, _)| cache_name(PREFIX, v)).unwrap_or_default();
     let asked = server.slow.load(Ordering::SeqCst);
-    server.set(Mode::SlowFiles(v5));
+    server.set(Mode::SlowFiles(v5.clone(), v6.clone()));
     cdp.eval(update)?;
     wait_for(&mut cdp, &state_js, "v5's worker starts downloading", |s| s["caches"].get(&name5).is_some())?;
     // Chrome sends a server at most six requests at once: a build with more files has the rest
     // wait for the first ones. v6 is deployed once all of v5's are asked for (any asked later
     // would get v6's file, which rightly ends v5's download, but that isn't this step).
-    let files5 = kept.get(4).map_or(0, |(_, n)| *n);
-    server.wait_asked_slowly(asked + files5)?;
+    server.wait_asked_slowly(asked + file_count(&v5)?)?;
     server.set(Mode::Serve(v6));
+    // v5's files are still held while v6 launches; they come once v6 has started.
     let t = launch(&mut cdp, "v6")?;
+    server.release();
     wait_for(&mut cdp, &state_js, "v5's download is finished, not dropped", |s| s["complete"].as_array().is_some_and(|c| c.contains(&json!(name5))))?;
     cdp.eval(update)?;
     wait_for(&mut cdp, &state_js, "the worker keeps build v6", keeps(5))?;
@@ -403,9 +648,23 @@ const STATE_JS: &str = "(async () => {
   }
   const filling = (await navigator.locks.query()).held.map((l) => l.name).filter((n) => n.startsWith(prefix));
   return { search: location.search, ready: document.readyState, build: document.documentElement.dataset.build ?? null,
+    scriptStartedBuild: document.documentElement.dataset.started ?? null,
+    scriptSharedBuild: document.documentElement.dataset.shared ?? null,
     started: STARTED, controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
-    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
+    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length,
+    // The newest worker is active and controls this page (not still taking over from an older one).
+    settled: await navigator.serviceWorker.getRegistration(scope).then((r) => Boolean(r && r.active && r.active.state === 'activated'
+      && !r.installing && !r.waiting && navigator.serviceWorker.controller && navigator.serviceWorker.controller.state === 'activated')) };
 })()";
+
+/// Every file this build downloads, including names shared with the next build.
+fn file_count(build: &Path) -> Result<usize, String> {
+    let path = build.join("build.json");
+    let json: Value =
+        std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).ok_or_else(|| format!("{}: not readable", path.display()))?;
+    let files = json["files"].as_array().into_iter().flatten().filter_map(|f| f["file"].as_str());
+    Ok(files.count())
+}
 
 /// The worker's cache for a build of the copy at `path` (sw.js's CACHE_PREFIX + version).
 fn cache_name(path: &str, version: &str) -> String {
@@ -471,6 +730,11 @@ fn stand_in(dir: &Path, build: &str, registration: &str) -> Result<(), String> {
     write("index.html", mark(&page, build)?)?;
     write(&format!("app-{build}.js"), format!("document.documentElement.dataset.started = \"{build}\";\n"))?;
     write("shared.js", format!("document.documentElement.dataset.shared = \"{build}\";\n"))?;
+    // More files than the browser asks for at once, as in a real build (icons, styles, wasm).
+    std::fs::create_dir_all(dir.join("icons")).map_err(|e| format!("icons: {e}"))?;
+    for i in 0..CONNECTIONS_PER_SERVER {
+        write(&format!("icons/{i}.txt"), format!("{build} {i}\n"))?;
+    }
     std::fs::create_dir_all(dir.join("fonts")).map_err(|e| format!("fonts: {e}"))?;
     write("fonts/on-demand.txt", format!("{build}\n"))
 }
@@ -521,11 +785,16 @@ enum Mode {
     Mixed(PathBuf, PathBuf),
     /// The network hangs: connections stay open, unanswered (until the mode changes).
     Hang,
-    /// Online, serving this build, but `build.json` hangs (until the mode changes).
+    /// Online, serving this build, but `build.json` hangs (until the mode changes), and `sw.js`
+    /// waits for the first `build.json` request: the browser's own check for a new worker, which
+    /// a navigation makes, must not install it before the launch is waiting for `build.json`.
     SlowCheck(PathBuf),
-    /// Online, serving this build, but its files (not `build.json`, `sw.js`) take SLOW_FILE.
-    SlowFiles(PathBuf),
-    /// Like SlowFiles, but `index.html` fails at once.
+    /// Online, serving this build, but its files (not `build.json`, `sw.js`) that the second build
+    /// lacks are held until `Server::release`. A file both builds have (`index.html`, a name that
+    /// no build changes) is served: the browser would make a request for the second build's copy
+    /// wait for the held one, and the launch of the second build must not depend on the first.
+    SlowFiles(PathBuf, PathBuf),
+    /// Like SlowFiles, but `index.html` fails at once (and isn't counted as asked for).
     FailFast(PathBuf),
     /// A sign-in in front of the app (an expired session): every request is redirected to
     /// SIGN_IN on another origin.
@@ -537,6 +806,37 @@ struct Server {
     mode: Arc<Mutex<Mode>>,
     /// How many files were asked for in Mode::SlowFiles.
     slow: Arc<AtomicUsize>,
+    /// How many `build.json` requests were held in Mode::SlowCheck.
+    checks: Arc<AtomicUsize>,
+    /// Closed by Mode::SlowFiles, Mode::FailFast and Mode::SlowCheck: their held files wait until it opens
+    /// (`Server::release`, or the first held `build.json`).
+    gate: Arc<Gate>,
+}
+
+/// Responses wait here while it is closed.
+struct Gate {
+    open: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl Gate {
+    fn set(&self, open: bool) {
+        if let Ok(mut o) = self.open.lock() {
+            *o = open;
+            self.changed.notify_all();
+        }
+    }
+
+    fn pass(&self) {
+        if let Ok(mut o) = self.open.lock() {
+            while !*o {
+                match self.changed.wait(o) {
+                    Ok(g) => o = g,
+                    Err(_) => return,
+                }
+            }
+        }
+    }
 }
 
 impl Server {
@@ -546,45 +846,62 @@ impl Server {
         let port = listener.local_addr().map_err(|e| format!("server: {e}"))?.port();
         let mode = Arc::new(Mutex::new(Mode::Refuse));
         let slow = Arc::new(AtomicUsize::new(0));
-        let (shared, asked) = (mode.clone(), slow.clone());
+        let checks = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(Gate { open: Mutex::new(true), changed: Condvar::new() });
+        let (shared, asked, held, door) = (mode.clone(), slow.clone(), checks.clone(), gate.clone());
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (shared, asked, elsewhere) = (shared.clone(), asked.clone(), elsewhere.clone());
-                std::thread::spawn(move || answer(stream, &shared, &asked, &elsewhere));
+                let (shared, asked, held, door, elsewhere) = (shared.clone(), asked.clone(), held.clone(), door.clone(), elsewhere.clone());
+                std::thread::spawn(move || answer(stream, &shared, &Counters { slow: &asked, checks: &held, gate: &door }, &elsewhere));
             }
         });
-        Ok(Server { port, mode, slow })
+        Ok(Server { port, mode, slow, checks, gate })
     }
 
-    /// Wait (at most 30 s) until `n` files in all were asked for in Mode::SlowFiles.
+    /// Wait until `n` files in all were asked for in Mode::SlowFiles.
     fn wait_asked_slowly(&self, n: usize) -> Result<(), String> {
-        for _ in 0..300 {
+        let t = Instant::now();
+        while t.elapsed() < LAUNCH_TIMEOUT {
             if self.slow.load(Ordering::SeqCst) >= n {
                 return Ok(());
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(50));
         }
         Err(format!("only {} of {n} slow files were asked for", self.slow.load(Ordering::SeqCst)))
     }
 
+    /// Let go of the files held back in Mode::SlowFiles and Mode::FailFast.
+    fn release(&self) {
+        self.gate.set(true);
+    }
+
     fn set(&self, mode: Mode) {
+        if matches!(mode, Mode::SlowFiles(..) | Mode::FailFast(_) | Mode::SlowCheck(_)) {
+            self.gate.set(false);
+        }
         if let Ok(mut m) = self.mode.lock() {
             *m = mode;
         }
     }
 }
 
-/// Hold a connection while the server's mode stays as it was (at most 20 s).
+/// Hold a connection while the server's mode stays as it was.
 fn hold(shared: &Mutex<Mode>, still: impl Fn(&Mode) -> bool) {
-    for _ in 0..200 {
-        std::thread::sleep(Duration::from_millis(100));
+    loop {
+        std::thread::sleep(Duration::from_millis(50));
         if !shared.lock().is_ok_and(|m| still(&m)) {
             return;
         }
     }
 }
 
-fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, slow: &AtomicUsize, elsewhere: &Path) {
+struct Counters<'a> {
+    slow: &'a AtomicUsize,
+    checks: &'a AtomicUsize,
+    gate: &'a Gate,
+}
+
+fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, seen: &Counters, elsewhere: &Path) {
     let Ok(read) = stream.try_clone() else { return };
     let mut reader = BufReader::new(read);
     let mut request = String::new();
@@ -629,10 +946,14 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, slow: &AtomicUsize, elsew
         Mode::Serve(dir) => (dir, false, false),
         Mode::Flaky(dir) => (dir, true, false),
         Mode::SlowCheck(dir) => (dir, false, true),
-        Mode::SlowFiles(dir) => {
-            if !small {
-                slow.fetch_add(1, Ordering::SeqCst);
-                std::thread::sleep(SLOW_FILE);
+        Mode::SlowFiles(dir, next) => {
+            if !small && file.is_some() {
+                // Count shared names too: switching builds before their requests arrive would
+                // serve the next build's bytes and correctly cancel this download's hash check.
+                seen.slow.fetch_add(1, Ordering::SeqCst);
+                if file.is_some_and(|f| !next.join(f).exists()) {
+                    seen.gate.pass();
+                }
             }
             (dir, false, false)
         }
@@ -641,7 +962,8 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, slow: &AtomicUsize, elsew
                 return;
             }
             if !small {
-                std::thread::sleep(SLOW_FILE);
+                seen.slow.fetch_add(1, Ordering::SeqCst);
+                seen.gate.pass();
             }
             (dir, false, false)
         }
@@ -654,10 +976,15 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, slow: &AtomicUsize, elsew
         Mode::Refuse => return,
         Mode::Hang => return hold(shared, |m| matches!(m, Mode::Hang)),
     };
+    if slow_check && file == Some("sw.js") {
+        seen.gate.pass();
+    }
     if flaky && !small {
         return;
     }
     if slow_check && file == Some("build.json") {
+        seen.checks.fetch_add(1, Ordering::SeqCst);
+        seen.gate.set(true);
         return hold(shared, |m| matches!(m, Mode::SlowCheck(_)));
     }
     let body = file.and_then(|f| std::fs::read(dir.join(f)).ok());

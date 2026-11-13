@@ -195,8 +195,15 @@ pub fn constraint_residual(sk: &Sketch, ci: usize) -> Option<f64> {
         Some(p) => Block::TangentAt(ci, &c.kind, p),
         None => Block::User(ci, &c.kind),
     };
+    let state = State { sk, lay: &fixed, x: &[] };
     let mut r = Vec::new();
-    block_residuals(&State { sk, lay: &fixed, x: &[] }, &b, &mut r);
+    block_residuals(&state, &b, &mut r);
+    // A tangency read at its touch point holds there when the curves only touch at a point that
+    // is not on both: the touch-free form (distance from the centre equals the radius) shows a
+    // violated tying constraint as well, so the larger of the two is the constraint's distance.
+    if matches!(b, Block::TangentAt(..)) {
+        super::residuals(&state, &c.kind, &mut r);
+    }
     Some(max_abs(&r))
 }
 

@@ -3,8 +3,9 @@
 use crate::geom::Aabb3;
 use crate::render::{FaceAppearance, ProductMesh, ProductScene};
 use crate::{EngineError, Result, Session};
+use solidcraft_geom::MeshGeom;
 
-pub const MAX_PRODUCT_BODIES: usize = 16_384;
+pub const MAX_PRODUCT_BODIES: usize = solidcraft_render::job::MAX_CPU_BODIES;
 
 /// Extract authoritative, visible geometry. Does not settle a live gesture implicitly.
 /// `render.scene` is the explicit model-reading command for that boundary.
@@ -12,11 +13,11 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
     if s.model.is_stale() {
         return Err(EngineError::Other("render scene is stale; finish the modelling gesture before previewing".into()));
     }
-    let world = s.world_state();
+    let world = s.world_state()?;
     let mut scene = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
     for body in world.bodies.iter().filter(|b| s.body_visible(&b.name)) {
         if scene.meshes.len() >= MAX_PRODUCT_BODIES {
-            return Err(EngineError::Other("render scene exceeds 16384 visible bodies".into()));
+            return Err(EngineError::Other("render scene exceeds 262144 visible bodies".into()));
         }
         let mesh = body.mesh();
         scene.bounds = scene.bounds.union(&mesh.bounds());
@@ -32,35 +33,98 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
                     color: look.color,
                     opacity: look.opacity.clamp(0.0, 1.0),
                     surface: look.opaque_surface().map_err(|e| EngineError::Other(e.to_string()))?,
+                    transmission: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
         let surface = s.doc.model_body_look(body).map(|l| l.opaque_surface()).transpose().map_err(|e| EngineError::Other(e.to_string()))?.flatten();
+        scene.meshes.try_reserve(1).map_err(|_| EngineError::Other("could not reserve captured render bodies".into()))?;
         scene.meshes.push(ProductMesh {
             name: body.name.clone(),
             mesh,
             color,
             opacity: s.doc.model_body_opacity(body).clamp(0.0, 1.0),
             surface,
+            transmission: None,
             faces,
         });
     }
     Ok(scene)
 }
 
+/// For each of `scene`'s meshes, the shared mesh it is drawn from and the placement that moves
+/// it there (column-major, as the document's placements): a part placed by several occurrences
+/// is the same definition mesh moved, and any other body is its own mesh, unmoved. A renderer
+/// that draws one copy of the triangles at many placements can use it; the scene's own
+/// world-space meshes stay authoritative. `None` for a mesh that is not, or no longer, the
+/// body's mesh.
+pub fn placements(s: &Session, scene: &ProductScene) -> Vec<Option<(std::sync::Arc<crate::geom::Mesh>, crate::doc::Mat)>> {
+    // A model that cannot be placed has no bodies whose meshes the scene could share.
+    let Ok(world) = s.world_state() else {
+        return scene.meshes.iter().map(|_| None).collect();
+    };
+    let bodies: std::collections::HashMap<&str, &crate::doc::ModelBody> = world.bodies.iter().map(|b| (b.name.as_str(), b)).collect();
+    scene
+        .meshes
+        .iter()
+        .map(|m| {
+            let body = bodies.get(m.name.as_str())?;
+            // Only the mesh this body has (made once and kept): a scene from another state
+            // names other meshes.
+            if !body.cached_mesh().is_some_and(|mesh| std::sync::Arc::ptr_eq(&mesh, &m.mesh)) {
+                return None;
+            }
+            Some(body.mesh_in_place())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Sel;
-    use crate::geom::Vec3;
     use crate::render::*;
     use serde_json::json;
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Vec3Geom;
+    use solidcraft_viewport::{Camera, UpAxis};
     use std::sync::Arc;
+
+    /// A part placed twice is two product meshes moved from one shared mesh; a body of the root
+    /// is its own mesh, unmoved, and a mesh from another state names nothing.
+    #[test]
+    fn placements_name_the_shared_mesh_of_placed_copies() {
+        let mut s = Session::default();
+        let part = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
+        s.execute("component.activate", &json!({"component":0})).unwrap();
+        s.execute("occurrence.copy", &json!({"component":part["component"],"translate":[30,0,0]})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence":part["occurrence"],"translate":[10,0,0]})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,40,0],"body_name":"Root"})).unwrap();
+        let scene = extract(&s).unwrap();
+        let placed = placements(&s, &scene);
+        assert_eq!(placed.len(), scene.meshes.len());
+        let copies: Vec<_> = scene.meshes.iter().zip(&placed).filter(|(m, _)| !m.name.starts_with("Root")).collect();
+        assert_eq!(copies.len(), 2);
+        let sources: Vec<_> = copies.iter().map(|(_, p)| p.as_ref().map(|(source, _)| source.clone()).expect("a placed copy")).collect();
+        assert!(Arc::ptr_eq(&sources[0], &sources[1]), "both placements share one mesh");
+        for (m, p) in &copies {
+            let (source, transform) = p.as_ref().unwrap();
+            let moved = crate::doc::apply_point(transform, source.positions[0]);
+            assert!(moved.dist(m.mesh.positions[0]) < 1e-9, "the shared mesh moved is the product mesh");
+        }
+        let root = scene.meshes.iter().position(|m| m.name.starts_with("Root")).unwrap();
+        let (own, unmoved) = placed[root].as_ref().unwrap();
+        assert!(Arc::ptr_eq(own, &scene.meshes[root].mesh) && crate::doc::is_identity(unmoved), "a root body is its own mesh, unmoved");
+        let mut other = scene.clone();
+        other.meshes[0].mesh = Arc::new((*other.meshes[0].mesh).clone());
+        assert!(placements(&s, &other)[0].is_none(), "another mesh under the same name");
+    }
 
     #[test]
     fn product_scene_keeps_placed_appearances_and_meshes_without_design_overlays() {
         let mut s = Session::default();
-        let component = s.execute("component.create", &json!({"name":"Part"})).unwrap();
+        let component = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
         s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
         s.execute("appearance.assign", &json!({"bodies":["Block"],"color":"#20a080","opacity":0.4})).unwrap();
         s.execute("appearance.assign", &json!({"faces":[[5,5,10]],"color":"#ff0000","opacity":0.7})).unwrap();
@@ -77,7 +141,7 @@ mod tests {
             assert_eq!(m.color, [32, 160, 128]);
             assert_eq!(m.opacity, 0.4);
             assert!(m.faces.iter().any(|f| f.color == [255, 0, 0] && f.opacity == 0.7));
-            assert!(Arc::ptr_eq(&m.mesh, &s.world_state().body(&m.name).unwrap().mesh()));
+            assert!(Arc::ptr_eq(&m.mesh, &s.world_state().unwrap().body(&m.name).unwrap().mesh()));
         }
         s.selection = vec![Sel::Body { name: first.meshes[0].name.clone() }];
         s.section = Some((Vec3::ZERO, Vec3::X));
@@ -107,7 +171,7 @@ mod tests {
             ("sketch.dimension", json!({"entities":["l2"],"value":15})),
             ("sketch.finish", json!({})),
             ("solid.extrude", json!({"distance":5})),
-            ("sketch.edit", json!({"sketch":"Sketch1"})),
+            ("sketch.edit", json!({"sketch":"Sketch1","restore_marker":false})),
             ("sketch.drag", json!({"entity":"l1.start","from":[5,5],"to":[4,5],"live":true})),
         ] {
             s.execute(id, &p).unwrap();
@@ -174,7 +238,7 @@ mod tests {
         let body = crate::kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))
             .unwrap()
             .with_color(Some([0.2, 0.6, 0.8]))
-            .with_paint(Some(crate::kernel::Paint { opacity: 0.4, faces: Vec::new() }));
+            .with_paint(Some(crate::kernel::Paint { opacity: 0.4, faces: Vec::new(), name: None }));
         let step = crate::kernel::step_export_bodies(
             &[crate::kernel::ExportBody { name: "Imported glass".into(), body: &body, color: body.color() }],
             &Default::default(),

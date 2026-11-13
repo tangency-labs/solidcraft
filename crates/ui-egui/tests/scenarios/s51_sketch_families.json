@@ -19,7 +19,7 @@
  {"call":"ui.documents","params":{"action":"new"}},
  {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
  {"click":{"handle":"button:sketch.rectangle.two_point"}},
- {"expect":{"tool":"sketch.rectangle.two_point"}},
+ {"expect":{"tool":"sketch.rectangle.center"}},
  {"key":"Escape"},
  {"call":"ui.documents","params":{"action":"switch","index":0}},
  {"click":{"handle":"button:sketch.rectangle.two_point"}},

@@ -15,7 +15,7 @@ use solidcraft_engine::doc::joints::JointKind;
 use crate::SolveApp;
 use crate::dialogs::{combo, form_row};
 use crate::selection::SelInput;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// Most samples the chart takes (each is a solve).
 const SAMPLES: u64 = 201;
@@ -142,7 +142,7 @@ fn chart(ui: &mut egui::Ui, xs: &[f64], ys: &[f64], unit: &str, total: u32, now:
     let (r, resp) = ui.allocate_exact_size(vec2(300.0, 120.0), Sense::click_and_drag());
     crate::scenario::publish_rect("motion:chart", r);
     let p = ui.painter_at(r);
-    p.rect(r, 3.0, t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    p.rect(r, t.radius_sm.saturating_sub(1), t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
     let plot = Rect::from_min_max(r.min + vec2(6.0, 16.0), r.max - vec2(6.0, 16.0));
     let total = f64::from(total.max(1));
     let x = |s: f64| plot.left() + plot.width() * (s / total).clamp(0.0, 1.0) as f32;
@@ -161,7 +161,7 @@ fn chart(ui: &mut egui::Ui, xs: &[f64], ys: &[f64], unit: &str, total: u32, now:
         }
         let pts: Vec<egui::Pos2> = xs.iter().zip(ys).filter(|(_, v)| v.is_finite()).map(|(s, v)| pos2(x(*s), y(*v))).collect();
         p.add(egui::Shape::line(pts, Stroke::new(1.5, t.accent)));
-        let font = FontId::proportional(crate::theme::Tokens::get().font_micro);
+        let font = FontId::proportional(solidcraft_theme::Tokens::get().font_micro);
         p.text(r.left_top() + vec2(4.0, 2.0), Align2::LEFT_TOP, format!("{} {unit}", short(hi)), font.clone(), t.text_dim);
         p.text(r.left_bottom() + vec2(4.0, -2.0), Align2::LEFT_BOTTOM, format!("{} {unit}", short(lo)), font.clone(), t.text_dim);
         if let Some(v) = value_at(xs, ys, now) {
@@ -285,7 +285,7 @@ fn collision_rows(
             ui.vertical(|ui| {
                 ui.vertical(|ui| {
                     if hits.is_empty() {
-                        ui.label(RichText::new(crate::i18n::tr("motion.no_collisions")).color(t.text_dim));
+                        ui.label(RichText::new(solidcraft_ui_text::tr("motion.no_collisions")).color(t.text_dim));
                     }
                     for (i, c) in hits.iter().enumerate() {
                         let steps: Vec<String> = c["steps"]
@@ -298,7 +298,8 @@ fn collision_rows(
                             })
                             .collect();
                         let name = |k: &str| c[k].as_str().unwrap_or_default().to_string();
-                        let text = crate::i18n::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))]);
+                        let text =
+                            solidcraft_ui_text::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))]);
                         // A click shows where they first collide.
                         let link = ui.link(RichText::new(text).color(t.error));
                         crate::scenario::publish_handle(&format!("motion:collision:{i}"), link.rect.center());
@@ -310,14 +311,14 @@ fn collision_rows(
                     }
                     if v["truncated"] == true {
                         let to = v["checked_to"].as_f64().map(|x| x.round().to_string()).unwrap_or_default();
-                        ui.label(RichText::new(crate::i18n::format("motion.checked_to", &[("step", &to)])).color(t.warning));
+                        ui.label(RichText::new(solidcraft_ui_text::format("motion.checked_to", &[("step", &to)])).color(t.warning));
                     }
                 });
             });
         }
         Some(Err(e)) => {
             ui.vertical(|ui| {
-                ui.add(egui::Label::new(RichText::new(e.as_str()).color(t.error)).wrap());
+                ui.add(egui::Label::new(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.error)).wrap());
             });
         }
         None => {}
@@ -356,9 +357,9 @@ fn plot_rows(
     let what = list.get(a.what).map_or(Plotted::Nothing, |(_, w)| *w);
     let bands = a.collisions.as_ref().and_then(|(_, r)| r.as_ref().ok()).map(collision_bands).unwrap_or_default();
     if what != Plotted::Nothing {
-        choice_row(ui, "Quantity", "ms_quantity", &mut a.quantity, &QUANTITIES);
+        choice_row(ui, "motion.plot_quantity", "ms_quantity", &mut a.quantity, &QUANTITIES);
         form_row(ui, "Duration", |ui| {
-            let r = crate::ui_kit::cell_editor(ui, ui.id().with("duration"), &mut a.duration, "motion.duration_hint", false);
+            let r = crate::ui_kit::cell_editor(ui, ui.scope_id().with("duration"), &mut a.duration, "motion.duration_hint", false);
             crate::scenario::publish_handle("dialog:Duration", r.rect.center());
         });
         let params = study.clone().and_then(|st| plot_params(s, what, &st, &a.duration, inputs).map(|p| (st, p)));
@@ -385,7 +386,7 @@ fn plot_rows(
                 });
             }
             Some(Err(e)) => {
-                ui.add(egui::Label::new(RichText::new(e.as_str()).color(t.text_dim)).wrap());
+                ui.add(egui::Label::new(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.text_dim)).wrap());
             }
             None => {}
         });

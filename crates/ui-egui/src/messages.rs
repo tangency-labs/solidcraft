@@ -8,8 +8,8 @@ use egui::{RichText, vec2};
 use serde_json::{Value, json};
 
 use crate::SolveApp;
-use crate::i18n::{format, tr};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::{format, tr};
 
 /// Messages kept (the oldest go first).
 pub const KEEP: usize = 200;
@@ -77,7 +77,7 @@ fn line(m: &Message) -> String {
 }
 
 /// How long ago `at` was, at `now` (both ms): seconds, minutes or hours.
-fn ago(now: f64, at: f64) -> String {
+pub(crate) fn ago(now: f64, at: f64) -> String {
     let s = ((now - at) / 1000.0).max(0.0).floor();
     let (id, n) = if s < 60.0 {
         ("messages.ago_s", s)
@@ -109,19 +109,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let t = Tokens::get();
     let now = crate::now_ms();
-    let mut open = true;
-    crate::frame::window(ctx, tr("messages.title"), crate::frame::Width::Normal)
-        .id(egui::Id::new("sc_messages"))
-        .open(&mut open)
-        .default_size(vec2(460.0, 360.0))
-        .show(ctx, |ui| {
+    let (closed, _) = crate::ui_kit::Window::new(egui::Id::unique("sc_messages"), "list", tr("messages.title")).fields().actions("", "", None).show(
+        ctx,
+        true,
+        |ui| {
             ui.horizontal(|ui| {
-                let copy = ui.add_enabled(app.messages.iter().len() > 0, egui::Button::new(tr("messages.copy_all")));
+                let copy = crate::ui_kit::button(ui, tr("messages.copy_all"), crate::ui_kit::Button::Enabled(app.messages.iter().len() > 0));
                 crate::scenario::publish_handle("messages:copy", copy.rect.center());
                 if copy.clicked() {
                     ctx.copy_text(app.messages.as_text(now));
                 }
-                let clear = ui.add_enabled(app.messages.iter().len() > 0, egui::Button::new(tr("messages.clear")));
+                let clear = crate::ui_kit::button(ui, tr("messages.clear"), crate::ui_kit::Button::Enabled(app.messages.iter().len() > 0));
                 crate::scenario::publish_handle("messages:clear", clear.rect.center());
                 if clear.clicked() {
                     app.messages.clear();
@@ -132,7 +130,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.label(RichText::new(tr("messages.none")).color(t.text_dim));
                 return;
             }
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(solidcraft_theme::Tokens::get().form_card_width).auto_shrink([false, true]).show(ui, |ui| {
                 for m in app.messages.iter().rev() {
                     ui.horizontal_top(|ui| {
                         ui.add_sized(vec2(70.0, 14.0), egui::Label::new(RichText::new(ago(now, m.at)).small().color(t.text_dim)));
@@ -141,8 +139,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
             });
-        });
-    if !open {
+        },
+    );
+    if closed {
         app.messages.open = false;
     }
     // The ages tick on while it is open.
@@ -155,6 +154,7 @@ mod tests {
 
     #[test]
     fn repeats_count_up_and_the_oldest_go_past_the_limit() {
+        crate::i18n::install();
         let mut m = Messages::default();
         m.push("Box done", false, 1000.0);
         m.push("Box done", false, 2000.0);

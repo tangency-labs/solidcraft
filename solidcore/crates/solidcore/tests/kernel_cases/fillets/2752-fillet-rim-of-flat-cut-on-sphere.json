@@ -1,0 +1,177 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  1.732050807568877,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -1.7320508075688776,
+                  1.0605752387249069e-16,
+                  1.0000000000000002
+                ]
+              ],
+              "index": 0
+            },
+            {
+              "at": [
+                [
+                  -1.7320508075688776,
+                  1.0605752387249069e-16,
+                  1.0000000000000002
+                ],
+                [
+                  1.732050807568877,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              2.7755575615628914e-16,
+              -1.7320508075688776,
+              1.0
+            ],
+            [
+              2.2515202296165945e-16,
+              1.7320508075688776,
+              1.0
+            ]
+          ],
+          "tolerance": 0.2964982970591842
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "2752-fillet-rim-of-flat-cut-on-sphere",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "sphere R2 with everything above z=1 cut away: V = 32 pi/3 - pi h^2 (3R - h)/3 with h=1 -> 32 pi/3 - 5 pi/3. The R1 rolling ball is tangent to the plane z=1 and (inside) to the sphere: its centre is on the circle of radius 1 at z=0 (distance R-r=1 from the origin), so the round is a torus piece. Removed = revolve of the region between z=0..1, sphere rho^2 = 4 - z^2 and the round rho = 1 + sqrt(1 - z^2): pi * integral over z in 0..1 of [4 - z^2 - (1 + sqrt(1-z^2))^2] dz = pi * integral of [2 - 2 sqrt(1-z^2)] = 2 pi (1 - pi/4) = 1.348. V = 28.274 - 1.348 = 26.9260.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2752",
+      "tangency-labs/solidcraft#2787"
+    ],
+    "volume_mm3": 26.92595077567323,
+    "what": "an R1 round round the rim of a radius-2 sphere cut flat at z=1"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 7,
+      "faces": 4,
+      "vertices": 5
+    }
+  },
+  "records": "2752-fillet-rim-of-flat-cut-on-sphere.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ball",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 44.427123590937484,
+      "body_count": 1,
+      "edges": 7,
+      "faces": 4,
+      "vertices": 5,
+      "volume_mm3": 26.925950776468493
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2752",
+    "tangency-labs/solidcraft#2787"
+  ],
+  "traced_ops": [
+    "make_sphere",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an R1 round round the rim of a radius-2 sphere cut flat at z=1",
+  "why_not": []
+}

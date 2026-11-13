@@ -1,0 +1,487 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/12435",
+ "test": "none: a regression between SolidCraft 0.30.1 (truck) and 0.40.0-rc.2 (solidcore); the report's script",
+ "summary": "SolidCraft 0.40 refuses a chamfer round the top rim of a cylinder whose rim has a rounded notch, at every distance, with 'not supported yet: the chamfer is larger than the faces beside its edges allow'; 0.30.1 builds it (#12435). The report's script: a cylinder R35 x 10 on the origin, a R7.25 cylinder from z = -1 to 11 at x = 36.5 cut out of it, the notch's two vertical edges rounded R5 (picked at (34.3108, +-6.9116, 5)), so the top rim is one tangent-continuous chain of four arcs (R35, R5, the concave R7.25 notch, R5), and a 1 mm chamfer picked at (-35, 0, 10) with tangent propagation on, which blends the whole chain. Replayed with solidcraft-cli built on GitHub's runners (fork SychPL/solidcraft branch fork-ci-12435, run 42665966667): main 5c99792a and v0.40.0-rc.2 refuse the chamfer at 1, 0.5, 0.2 and 0.05 mm with that message and build the controls, the plain cylinder's rim chamfer (38375.601462) and the rounded notch (37859.371278); v0.30.1 builds all six. SolidCraft's chamfer runs the fillet session's chamfer preparation (FilletSession::prepare_chamfers_along, through solidcraft-smlib's chamfer_edges). This fixture's chamfer step is SmApiFilletEdges with a linear section and rolling-ball radius d, as in SolidCraft #2672's case; on these right-angle edges it is the same chamfer, legs d on the top and on the wall, but it does not reach the refusal: on solidcore every case builds. The cases carry SolidCraft's two chamfer-cone fixes, fillet_chamfer_cone_on_arc and fillet_chamfer_cone_stored_as_cone (a fork probe: with both, the volumes of all of SolidCraft's fixes, to 4e-8). With them the plain rim's chamfer is an exact cone (2.3e-7 off), but on the chain the four chamfer faces are cones of face tolerance 1.6e-4, 16 times the body's 1e-5, and the volume is 0.0074 to 0.0079 mm^3 low at every distance, above each case's tolerance: those cases fail. Without the two fixes the chamfer is fitted with B-spline faces: 0.013 to 0.015 low with no fixes (the plain rim 0.016), within 0.001 with every other fix of SolidCraft's (the plain rim too). Expected volumes are closed form: the area inside the rim by Green's theorem over its four arcs (the R5 rounds' centres at (28.523116, +-9.296872), where |C| = 30 and |C - (36.5, 0)| = 12.25), times 10, less the chamfer, by Pappus arc by arc: 0.5 d^2 * angle * (r - d/3) on the three convex arcs and (r + d/3) on the concave notch. The arcs meet tangentially, so their normal sections tile the chamfered band. A randomised QMC of the top 1 mm slab (scrambled Sobol, 32 x 2^18 points, point membership by the distance to the rim) lies 0.20 standard errors from it, and the rc.2 and main CLI volumes of the controls agree within 3.9e-7. Tolerance per case: 1e-8 of the volume (the integrator's accuracy, 3.8e-4) plus 1e-5 times the area of the rounds and the chamfer (what faces anywhere within the body's 1e-5 tolerance of exact could change), rounded up: 0.002 to 0.005 mm^3. From 0.2 mm up it is below what legs 0.1% off would change (0.0089 mm^3 at 0.2 mm, 0.22 at 1 mm). The pick points are exact edge points: the notch's edges where the two circles cross, (2504.6875/73, +-sqrt(35^2 - x^2), 5), and the rim's arcs at (-35, 0, 10), (29.25, 0, 10) and the R5 rounds' midpoints.",
+ "cases": [
+  {
+   "name": "plain_cylinder_rim",
+   "note": "Control: the same 1 mm chamfer on the top rim of the cylinder without the notch, one circular edge. solidcraft-cli on SolidCraft main 5c99792a and v0.40.0-rc.2 builds it, 38375.601462; v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "blank",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 35.0,
+     "height": 10.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "blank",
+     "edges": [
+      [
+       -35.0,
+       0.0,
+       10.0
+      ]
+     ],
+     "distance": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 38375.601461151,
+     "tol": 0.004,
+     "formula": "pi*35^2*10 - 0.5*1^2*2*pi*(35 - 1/3) (Pappus: the chamfer's triangle, centroid 1/3 in from the wall); tol 0.004 mm^3"
+    }
+   },
+   "fixes": [
+    "fillet_chamfer_cone_on_arc",
+    "fillet_chamfer_cone_stored_as_cone"
+   ]
+  },
+  {
+   "name": "rounded_notch",
+   "note": "Control: the notched cylinder with the notch's two vertical edges rounded R5, before the chamfer. solidcraft-cli on SolidCraft main 5c99792a and v0.40.0-rc.2 builds it, 37859.371278; v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "blank",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 35.0,
+     "height": 10.0
+    },
+    {
+     "op": "cylinder",
+     "id": "scallop",
+     "origin": [
+      36.5,
+      0.0,
+      -1.0
+     ],
+     "radius": 7.25,
+     "height": 12.0
+    },
+    {
+     "op": "difference",
+     "id": "notched",
+     "a": "blank",
+     "b": "scallop"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "notched",
+     "edges": [
+      [
+       34.31078767123287,
+       6.911573582012581,
+       5.0
+      ],
+      [
+       34.31078767123287,
+       -6.911573582012581,
+       5.0
+      ]
+     ],
+     "radius": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 37859.371277705,
+     "tol": 0.002,
+     "formula": "10 * the area inside the rim (Green's theorem over its four arcs: R35 about the origin, R5 about (28.523116, +-9.296872), R7.25 about (36.5, 0)); tol 0.002 mm^3"
+    }
+   },
+   "fixes": [
+    "fillet_chamfer_cone_on_arc",
+    "fillet_chamfer_cone_stored_as_cone"
+   ]
+  },
+  {
+   "name": "rounded_notch_rim_chamfer_1",
+   "note": "The report's chamfer, 1 mm, on the whole tangent chain of the top rim: its four edges, as SolidCraft's tangent propagation picks them from one. On SolidCraft main 5c99792a and v0.40.0-rc.2, solidcraft-cli refuses it ('not supported yet: the chamfer is larger than the faces beside its edges allow'); v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "blank",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 35.0,
+     "height": 10.0
+    },
+    {
+     "op": "cylinder",
+     "id": "scallop",
+     "origin": [
+      36.5,
+      0.0,
+      -1.0
+     ],
+     "radius": 7.25,
+     "height": 12.0
+    },
+    {
+     "op": "difference",
+     "id": "notched",
+     "a": "blank",
+     "b": "scallop"
+    },
+    {
+     "op": "fillet",
+     "id": "lobe",
+     "body": "notched",
+     "edges": [
+      [
+       34.31078767123287,
+       6.911573582012581,
+       5.0
+      ],
+      [
+       34.31078767123287,
+       -6.911573582012581,
+       5.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "lobe",
+     "edges": [
+      [
+       -35.0,
+       0.0,
+       10.0
+      ],
+      [
+       33.337555489496104,
+       7.947362210383247,
+       10.0
+      ],
+      [
+       29.25,
+       0.0,
+       10.0
+      ],
+      [
+       33.337555489496104,
+       -7.947362210383247,
+       10.0
+      ]
+     ],
+     "distance": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 37749.359827568,
+     "tol": 0.005,
+     "formula": "the rounded notch's volume - 110.011450137: 0.5*d^2*sum(angle_i*(r_i -+ d/3)) over the rim's arcs (Pappus, minus on the three convex arcs, plus on the concave notch; they meet tangentially, so their normal sections tile the band), d = 1; tol 0.005 mm^3"
+    }
+   },
+   "fixes": [
+    "fillet_chamfer_cone_on_arc",
+    "fillet_chamfer_cone_stored_as_cone"
+   ]
+  },
+  {
+   "name": "rounded_notch_rim_chamfer_0_5",
+   "note": "The report's chamfer, 0.5 mm, on the whole tangent chain of the top rim: its four edges, as SolidCraft's tangent propagation picks them from one. On SolidCraft main 5c99792a and v0.40.0-rc.2, solidcraft-cli refuses it ('not supported yet: the chamfer is larger than the faces beside its edges allow'); v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "blank",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 35.0,
+     "height": 10.0
+    },
+    {
+     "op": "cylinder",
+     "id": "scallop",
+     "origin": [
+      36.5,
+      0.0,
+      -1.0
+     ],
+     "radius": 7.25,
+     "height": 12.0
+    },
+    {
+     "op": "difference",
+     "id": "notched",
+     "a": "blank",
+     "b": "scallop"
+    },
+    {
+     "op": "fillet",
+     "id": "lobe",
+     "body": "notched",
+     "edges": [
+      [
+       34.31078767123287,
+       6.911573582012581,
+       5.0
+      ],
+      [
+       34.31078767123287,
+       -6.911573582012581,
+       5.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "lobe",
+     "edges": [
+      [
+       -35.0,
+       0.0,
+       10.0
+      ],
+      [
+       33.337555489496104,
+       7.947362210383247,
+       10.0
+      ],
+      [
+       29.25,
+       0.0,
+       10.0
+      ],
+      [
+       33.337555489496104,
+       -7.947362210383247,
+       10.0
+      ]
+     ],
+     "distance": 0.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 37831.737515477,
+     "tol": 0.004,
+     "formula": "the rounded notch's volume - 27.633762228: 0.5*d^2*sum(angle_i*(r_i -+ d/3)) over the rim's arcs (Pappus, minus on the three convex arcs, plus on the concave notch; they meet tangentially, so their normal sections tile the band), d = 0.5; tol 0.004 mm^3"
+    }
+   },
+   "fixes": [
+    "fillet_chamfer_cone_on_arc",
+    "fillet_chamfer_cone_stored_as_cone"
+   ]
+  },
+  {
+   "name": "rounded_notch_rim_chamfer_0_2",
+   "note": "The report's chamfer, 0.2 mm, on the whole tangent chain of the top rim: its four edges, as SolidCraft's tangent propagation picks them from one. On SolidCraft main 5c99792a and v0.40.0-rc.2, solidcraft-cli refuses it ('not supported yet: the chamfer is larger than the faces beside its edges allow'); v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "blank",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 35.0,
+     "height": 10.0
+    },
+    {
+     "op": "cylinder",
+     "id": "scallop",
+     "origin": [
+      36.5,
+      0.0,
+      -1.0
+     ],
+     "radius": 7.25,
+     "height": 12.0
+    },
+    {
+     "op": "difference",
+     "id": "notched",
+     "a": "blank",
+     "b": "scallop"
+    },
+    {
+     "op": "fillet",
+     "id": "lobe",
+     "body": "notched",
+     "edges": [
+      [
+       34.31078767123287,
+       6.911573582012581,
+       5.0
+      ],
+      [
+       34.31078767123287,
+       -6.911573582012581,
+       5.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "lobe",
+     "edges": [
+      [
+       -35.0,
+       0.0,
+       10.0
+      ],
+      [
+       33.337555489496104,
+       7.947362210383247,
+       10.0
+      ],
+      [
+       29.25,
+       0.0,
+       10.0
+      ],
+      [
+       33.337555489496104,
+       -7.947362210383247,
+       10.0
+      ]
+     ],
+     "distance": 0.2
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 37854.937309378,
+     "tol": 0.003,
+     "formula": "the rounded notch's volume - 4.433968327: 0.5*d^2*sum(angle_i*(r_i -+ d/3)) over the rim's arcs (Pappus, minus on the three convex arcs, plus on the concave notch; they meet tangentially, so their normal sections tile the band), d = 0.2; tol 0.003 mm^3"
+    }
+   },
+   "fixes": [
+    "fillet_chamfer_cone_on_arc",
+    "fillet_chamfer_cone_stored_as_cone"
+   ]
+  },
+  {
+   "name": "rounded_notch_rim_chamfer_0_05",
+   "note": "The report's chamfer, 0.05 mm, on the whole tangent chain of the top rim: its four edges, as SolidCraft's tangent propagation picks them from one. On SolidCraft main 5c99792a and v0.40.0-rc.2, solidcraft-cli refuses it ('not supported yet: the chamfer is larger than the faces beside its edges allow'); v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "blank",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 35.0,
+     "height": 10.0
+    },
+    {
+     "op": "cylinder",
+     "id": "scallop",
+     "origin": [
+      36.5,
+      0.0,
+      -1.0
+     ],
+     "radius": 7.25,
+     "height": 12.0
+    },
+    {
+     "op": "difference",
+     "id": "notched",
+     "a": "blank",
+     "b": "scallop"
+    },
+    {
+     "op": "fillet",
+     "id": "lobe",
+     "body": "notched",
+     "edges": [
+      [
+       34.31078767123287,
+       6.911573582012581,
+       5.0
+      ],
+      [
+       34.31078767123287,
+       -6.911573582012581,
+       5.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "lobe",
+     "edges": [
+      [
+       -35.0,
+       0.0,
+       10.0
+      ],
+      [
+       33.337555489496104,
+       7.947362210383247,
+       10.0
+      ],
+      [
+       29.25,
+       0.0,
+       10.0
+      ],
+      [
+       33.337555489496104,
+       -7.947362210383247,
+       10.0
+      ]
+     ],
+     "distance": 0.05
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 37859.093761985,
+     "tol": 0.002,
+     "formula": "the rounded notch's volume - 0.277515720: 0.5*d^2*sum(angle_i*(r_i -+ d/3)) over the rim's arcs (Pappus, minus on the three convex arcs, plus on the concave notch; they meet tangentially, so their normal sections tile the band), d = 0.05; tol 0.002 mm^3"
+    }
+   },
+   "fixes": [
+    "fillet_chamfer_cone_on_arc",
+    "fillet_chamfer_cone_stored_as_cone"
+   ]
+  }
+ ]
+}

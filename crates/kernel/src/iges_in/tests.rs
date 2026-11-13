@@ -1,6 +1,7 @@
 use super::*;
 use crate::{Body, BoolOp, ExportBody, StepHeader, boolean, box_solid, cylinder, fillet, iges_export_bodies, measure, sphere, torus};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-9)
@@ -138,7 +139,7 @@ fn an_arc_revolved_about_its_centre_is_a_cap_not_a_ball() {
     ];
     let imp = iges_import(&iges_file_placed(&ents)).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
-    let mesh = imp.bodies[0].body.tessellate(0.01).unwrap();
+    let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
     for p in &mesh.positions {
         for (k, x) in [p.x, p.y, p.z].into_iter().enumerate() {
@@ -299,6 +300,49 @@ fn trimmed_surfaces_sew_into_a_solid() {
     assert!(rel(m.volume, 6000.0) < 1e-6 && rel(m.area, 2200.0) < 1e-6, "{} {}", m.volume, m.area);
 }
 
+/// One part whose surfaces make two separate boxes: two solids, not one shell of two lumps
+/// (closed edge by edge, but not connected, so it was read as an open body).
+#[test]
+fn separate_lumps_of_one_part_are_separate_solids() {
+    let mut ents = Vec::new();
+    let mut faces = trimmed_box(&mut ents, 0.0);
+    faces.extend(trimmed_box(&mut ents, 100.0));
+    let members = faces.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(",");
+    ents.push((308, 0, format!("0,5HFrame,{},{members}", faces.len())));
+    let imp = iges_import(&iges_file(&ents)).unwrap();
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies.len(), 2);
+    for (body, x) in imp.bodies.iter().zip([0.0, 100.0]) {
+        let m = measure(&body.body).unwrap();
+        assert!(body.closed && rel(m.volume, 6000.0) < 1e-6, "{} {}", body.name, m.volume);
+        assert!(m.bbox.min.dist(Vec3::new(x, 0.0, 0.0)) < 1e-6, "{} at {:?}", body.name, m.bbox.min);
+    }
+}
+
+/// Trim pieces whose ends miss each other by a hundredth of a millimetre, far past the file's
+/// stated resolution: the loop is closed and the box sews into a solid. A gap of half a
+/// millimetre is no corner written loosely, and stays open.
+#[test]
+fn trim_loops_with_small_gaps_still_close() {
+    let with_gap = |gap: f64| {
+        let mut ents = Vec::new();
+        trimmed_box(&mut ents, 0.0);
+        // The edge from (0, 0, 0) towards (0, 20, 0) stops `gap` short of that corner, in both
+        // faces that run along it (the first face's first line, the fifth face's last).
+        ents[1].2 = format!("0.,0.,0.,0.,{:?},0.", 20.0 - gap);
+        ents[36].2 = format!("0.,{:?},0.,0.,0.,0.", 20.0 - gap);
+        iges_import(&iges_file(&ents))
+    };
+    let imp = with_gap(0.01).unwrap();
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, 6000.0) < 1e-3 && rel(m.area, 2200.0) < 1e-3, "{} {}", m.volume, m.area);
+    if let Ok(imp) = with_gap(0.5) {
+        assert!(imp.bodies.iter().all(|b| !b.closed), "a 0.5 mm gap was closed");
+    }
+}
+
 #[test]
 fn surfaces_in_separate_groups_remain_separate_parts() {
     let mut ents = Vec::new();
@@ -318,11 +362,59 @@ fn surfaces_in_separate_groups_remain_separate_parts() {
     }
 }
 
+/// The box of [`trimmed_surfaces_sew_into_a_solid`] with its edge (0, 0, 0)–(0, 20, 0) stopping
+/// 0.01 mm short of its corner in both faces that use it, its next pieces starting at the
+/// corner. The pieces of a trim curve run on from one another, so the edge ends at the corner the
+/// other three edges there agree on, exactly: a closed box SMLib finds valid. The edge was left
+/// short with the gap on the vertex's tolerance, 2000 times the file's resolution (#3845).
+#[test]
+fn trim_pieces_that_miss_their_corner_are_closed_onto_it() {
+    let c =
+        |i: usize| -> [f64; 3] { [if i & 1 != 0 { 10.0 } else { 0.0 }, if i & 2 != 0 { 20.0 } else { 0.0 }, if i & 4 != 0 { 30.0 } else { 0.0 }] };
+    let short = [0.0, 19.99, 0.0];
+    let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+    let mut ents: Vec<(i64, i64, String)> = Vec::new();
+    let fmt = |p: [f64; 3]| format!("{:?},{:?},{:?}", p[0], p[1], p[2]);
+    for q in quads {
+        let (a, b, cc, d) = (c(q[0]), c(q[1]), c(q[2]), c(q[3]));
+        let surf = format!("1,1,1,1,0,0,1,0,0,0.,0.,1.,1.,0.,0.,1.,1.,1.,1.,1.,1.,{},{},{},{},0.,1.,0.,1.", fmt(a), fmt(b), fmt(d), fmt(cc));
+        ents.push((128, 0, surf));
+        let s_de = 2 * ents.len() - 1;
+        let mut lines = Vec::new();
+        for (p0, p1) in [(a, b), (b, cc), (cc, d), (d, a)] {
+            // The short edge: its end at (0, 20, 0) is 0.01 short.
+            let (p0, p1) = match (p0, p1) {
+                ([0.0, 0.0, 0.0], [0.0, 20.0, 0.0]) => (p0, short),
+                ([0.0, 20.0, 0.0], [0.0, 0.0, 0.0]) => (short, p1),
+                x => x,
+            };
+            ents.push((110, 0, format!("{},{}", fmt(p0), fmt(p1))));
+            lines.push(2 * ents.len() - 1);
+        }
+        ents.push((102, 0, format!("4,{}", lines.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))));
+        let comp = 2 * ents.len() - 1;
+        ents.push((142, 0, format!("0,{s_de},0,{comp},2")));
+        let cos = 2 * ents.len() - 1;
+        ents.push((144, 0, format!("{s_de},1,0,{cos}")));
+    }
+    let imp = iges_import(&iges_file(&ents)).unwrap();
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed);
+    let body = &imp.bodies[0].body;
+    let check = body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+    for v in &body.record().vertices {
+        assert!(v.tolerance <= body.record().tolerance, "a vertex {:?} kept a gap in its tolerance {}", v.point, v.tolerance);
+    }
+    let m = measure(body).unwrap();
+    assert!(rel(m.volume, 6000.0) < 1e-6 && rel(m.area, 2200.0) < 1e-6, "{} {}", m.volume, m.area);
+}
+
 #[test]
 fn a_drill_point_round_trips_through_iges() {
     // A blind hole with a cone tip: the tip's face closes at its apex (its seam runs out to the
     // apex and straight back).
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     let plate = box_solid(Vec3::new(-20.0, -15.0, 0.0), Vec3::new(20.0, 15.0, 10.0)).unwrap();
     let profile =
         Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 2.0), Vec2::new(4.0, 5.0), Vec2::new(4.0, 11.0), Vec2::new(0.0, 11.0)]), holes: vec![] };
@@ -508,4 +600,10 @@ fn a_curve_over_a_tiny_knot_span_still_bounds_its_faces() {
         let m = measure(&imp.bodies[0].body).unwrap();
         assert!(rel(m.volume, 6000.0) < 1e-6 && rel(m.area, 2200.0) < 1e-6, "span {span}: {} {}", m.volume, m.area);
     }
+}
+
+#[test]
+fn the_global_sections_native_system_becomes_the_originating_system() {
+    let imp = round_trip(&box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap());
+    assert_eq!(imp.system, "SolidCraft");
 }

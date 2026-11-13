@@ -1,8 +1,9 @@
 //! Analytic curve shapes for geometry operations (profiles, trim, extend, fillet…).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
 
 use crate::model::{CurveKind, Sketch};
 
@@ -136,6 +137,79 @@ pub fn intersections_within(x: &Shape, y: &Shape, tol: f64) -> Vec<Vec2> {
     }
 }
 
+/// How close a computed crossing must lie to both bounded curves to count as on them.
+const ON_CURVE: f64 = 1e-4;
+/// Curves considered for a snap, so a hostile sketch cannot stall the pointer.
+const MAX_INTERSECTION_CANDIDATES: usize = 256;
+
+/// Infinite construction lines use their full support; all other curves keep their bounds.
+fn snap_distance(shape: &Shape, infinite: bool, p: Vec2) -> f64 {
+    if infinite && matches!(shape, Shape::Line { .. }) { p.dist(shape.project(p)) } else { shape.dist(p) }
+}
+
+/// The crossing of `x` and `y` nearest `near` that lies on both bounded curves.
+pub fn nearest_crossing(x: &Shape, y: &Shape, near: Vec2) -> Option<Vec2> {
+    nearest_crossing_with_extents(x, y, near, [false; 2])
+}
+
+fn nearest_crossing_with_extents(x: &Shape, y: &Shape, near: Vec2, infinite: [bool; 2]) -> Option<Vec2> {
+    if !near.is_finite() {
+        return None;
+    }
+    let mut best: Option<(f64, Vec2)> = None;
+    let [infinite_x, infinite_y] = infinite;
+    for q in intersections_within(x, y, 1e-6) {
+        if !(q.is_finite() && snap_distance(x, infinite_x, q) <= ON_CURVE && snap_distance(y, infinite_y, q) <= ON_CURVE) {
+            continue;
+        }
+        let d = q.dist(near);
+        if best.is_none_or(|prev| d < prev.0) {
+            best = Some((d, q));
+        }
+    }
+    best.map(|(_, q)| q)
+}
+
+/// The nearest crossing of two lines, circles or arcs of `sk` to `p` within `tol`.
+///
+/// Skips a crossing that already has a sketch point. Curves farther than `tol` from `p`
+/// cannot meet near the cursor and are ignored. Infinite lines use their full support;
+/// ordinary segments and arcs keep their bounds.
+pub fn nearest_curve_intersection(sk: &Sketch, p: Vec2, tol: f64) -> Option<(Vec2, usize, usize)> {
+    if !p.is_finite() || !tol.is_finite() || tol <= 0.0 {
+        return None;
+    }
+    let mut candidates: Vec<(usize, Shape, bool)> = Vec::new();
+    for (i, curve) in sk.curves.iter().enumerate() {
+        if candidates.len() >= MAX_INTERSECTION_CANDIDATES {
+            break;
+        }
+        let Some(sh) = sk.shape(i) else { continue };
+        if snap_distance(&sh, curve.infinite, p) <= tol {
+            candidates.push((i, sh, curve.infinite));
+        }
+    }
+    let mut best: Option<(f64, Vec2, usize, usize)> = None;
+    for a in 0..candidates.len() {
+        for b in a + 1..candidates.len() {
+            let Some((ia, sa, infinite_a)) = candidates.get(a) else { continue };
+            let Some((ib, sb, infinite_b)) = candidates.get(b) else { continue };
+            let Some(q) = nearest_crossing_with_extents(sa, sb, p, [*infinite_a, *infinite_b]) else { continue };
+            let d = q.dist(p);
+            if d > tol {
+                continue;
+            }
+            if sk.points.iter().any(|pt| pt.pos.dist(q) <= ON_CURVE) {
+                continue;
+            }
+            if best.is_none_or(|prev| d < prev.0) {
+                best = Some((d, q, *ia, *ib));
+            }
+        }
+    }
+    best.map(|(_, q, i, j)| (q, i, j))
+}
+
 impl Shape {
     /// Unbounded curve parameter of `p` (line: t along a→b; round: angle offset from start in
     /// [0, 2π)).
@@ -191,6 +265,12 @@ impl Shape {
 }
 
 impl Sketch {
+    /// The nearest crossing of two analytic curves, respecting infinite construction lines.
+    pub fn nearest_crossing(&self, a: usize, b: usize, near: Vec2) -> Option<Vec2> {
+        let infinite = [self.curves.get(a)?.infinite, self.curves.get(b)?.infinite];
+        nearest_crossing_with_extents(&self.shape(a)?, &self.shape(b)?, near, infinite)
+    }
+
     /// The analytic shape of a curve (arcs counter-clockwise from their stored start).
     pub fn shape(&self, ci: usize) -> Option<Shape> {
         match self.curves.get(ci)?.kind {
@@ -202,5 +282,124 @@ impl Sketch {
             },
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod intersection_snap_tests {
+    use super::*;
+    use crate::model::Sketch;
+
+    fn v(x: f64, y: f64) -> Vec2 {
+        Vec2::new(x, y)
+    }
+
+    #[test]
+    fn nearest_curve_intersection_finds_crossing_lines() {
+        let mut sk = Sketch::new();
+        let a = sk.add_line(v(0.0, 0.0), v(20.0, 20.0), None, None, None).unwrap();
+        let b = sk.add_line(v(0.0, 20.0), v(20.0, 0.0), None, None, None).unwrap();
+        let (p, i, j) = nearest_curve_intersection(&sk, v(10.2, 9.8), 1.0).expect("crossing");
+        assert!(p.dist(v(10.0, 10.0)) < 1e-9, "{p:?}");
+        assert_eq!([i.min(j), i.max(j)], [a.min(b), a.max(b)]);
+    }
+
+    #[test]
+    fn infinite_line_crossing_snaps_beyond_both_defining_segments() {
+        for reverse in [false, true] {
+            let mut sk = Sketch::new();
+            let mut lines = [(v(20.0, 40.0), v(20.0, 50.0)), (v(40.0, 15.0), v(50.0, 15.0))];
+            if reverse {
+                lines.reverse();
+            }
+            for (a, b) in lines {
+                let i = sk.add_line(a, b, None, None, None).unwrap();
+                sk.curves[i].construction = true;
+            }
+            let near = v(20.4, 15.4);
+            assert!(nearest_curve_intersection(&sk, near, 1.0).is_none(), "finite construction segments do not cross");
+            for curve in &mut sk.curves {
+                curve.infinite = true;
+            }
+            let (at, a, b) = nearest_curve_intersection(&sk, near, 1.0).expect("infinite lines cross");
+            assert!(at.dist(v(20.0, 15.0)) < 1e-9, "{at:?}");
+            assert_ne!(a, b);
+        }
+    }
+
+    #[test]
+    fn infinite_line_crossing_keeps_the_other_curves_bounds() {
+        let mut sk = Sketch::new();
+        let line = sk.add_line(v(-6.0, 30.0), v(-6.0, 40.0), None, None, None).unwrap();
+        sk.curves[line].infinite = true;
+        sk.curves[line].construction = true;
+        sk.add_arc(v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0), [None; 3], None).unwrap();
+        assert!(nearest_curve_intersection(&sk, v(-6.0, 8.0), 1.0).is_none(), "the missing part of the arc is not a crossing");
+        let CurveKind::Line { a, b } = sk.curves[line].kind else { panic!("line") };
+        sk.points[a].pos.x = 6.0;
+        sk.points[b].pos.x = 6.0;
+        let (at, _, _) = nearest_curve_intersection(&sk, v(6.2, 8.2), 1.0).expect("the drawn arc crosses the infinite line");
+        assert!(at.dist(v(6.0, 8.0)) < 1e-9, "{at:?}");
+
+        let mut sk = Sketch::new();
+        let vertical = sk.add_line(v(20.0, 40.0), v(20.0, 50.0), None, None, None).unwrap();
+        sk.curves[vertical].infinite = true;
+        sk.curves[vertical].construction = true;
+        sk.add_line(v(40.0, 15.0), v(50.0, 15.0), None, None, None).unwrap();
+        assert!(nearest_curve_intersection(&sk, v(20.4, 15.4), 1.0).is_none(), "the finite line must not extend");
+    }
+
+    #[test]
+    fn nearest_curve_intersection_skips_a_crossing_that_already_has_a_point() {
+        let mut sk = Sketch::new();
+        sk.add_line(v(0.0, 0.0), v(20.0, 20.0), None, None, None).unwrap();
+        sk.add_line(v(0.0, 20.0), v(20.0, 0.0), None, None, None).unwrap();
+        sk.add_point(v(10.0, 10.0), None).unwrap();
+        assert!(nearest_curve_intersection(&sk, v(10.1, 10.0), 1.0).is_none());
+    }
+
+    #[test]
+    fn nearest_curve_intersection_ignores_parallel_lines_and_extensions() {
+        let mut sk = Sketch::new();
+        sk.add_line(v(0.0, 0.0), v(10.0, 0.0), None, None, None).unwrap();
+        sk.add_line(v(0.0, 5.0), v(10.0, 5.0), None, None, None).unwrap();
+        assert!(nearest_curve_intersection(&sk, v(5.0, 2.5), 3.0).is_none());
+        let mut far = Sketch::new();
+        far.add_line(v(0.0, 0.0), v(10.0, 0.0), None, None, None).unwrap();
+        far.add_line(v(0.0, 10.0), v(0.0, 20.0), None, None, None).unwrap();
+        assert!(nearest_curve_intersection(&far, v(0.0, 0.0), 1.0).is_none(), "the unbounded lines meet at an endpoint off the second segment");
+    }
+
+    #[test]
+    fn nearest_curve_intersection_picks_the_nearer_circle_crossing() {
+        let mut sk = Sketch::new();
+        sk.add_circle(v(0.0, 0.0), 10.0, None, None).unwrap();
+        sk.add_circle(v(10.0, 0.0), 10.0, None, None).unwrap();
+        let hi = v(5.0, 5.0 * 3.0f64.sqrt());
+        let (p, _, _) = nearest_curve_intersection(&sk, v(5.0, 8.0), 2.0).expect("upper crossing");
+        assert!(p.dist(hi) < 1e-6, "{p:?}");
+    }
+
+    #[test]
+    fn nearest_curve_intersection_uses_an_arc_s_bounded_sweep() {
+        let mut sk = Sketch::new();
+        sk.add_arc(v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0), [None; 3], None).unwrap();
+        sk.add_line(v(-15.0, 0.0), v(-5.0, 0.0), None, None, None).unwrap();
+        assert!(nearest_curve_intersection(&sk, v(-10.0, 0.0), 1.0).is_none(), "the missing half of the circle is not a snap");
+        let mut on = Sketch::new();
+        on.add_arc(v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0), [None; 3], None).unwrap();
+        on.add_line(v(0.0, 0.0), v(20.0, 20.0), None, None, None).unwrap();
+        let (p, _, _) = nearest_curve_intersection(&on, v(7.0, 7.0), 2.0).expect("on the quarter");
+        assert!((p.len() - 10.0).abs() < 1e-6 && p.x > 0.0 && p.y > 0.0, "{p:?}");
+    }
+
+    #[test]
+    fn nearest_curve_intersection_refuses_hostile_cursor_and_tolerance() {
+        let mut sk = Sketch::new();
+        sk.add_line(v(0.0, 0.0), v(10.0, 0.0), None, None, None).unwrap();
+        sk.add_line(v(0.0, 0.0), v(0.0, 10.0), None, None, None).unwrap();
+        assert!(nearest_curve_intersection(&sk, Vec2::new(f64::NAN, 0.0), 1.0).is_none());
+        assert!(nearest_curve_intersection(&sk, v(0.0, 0.0), 0.0).is_none());
+        assert!(nearest_curve_intersection(&sk, v(0.0, 0.0), f64::INFINITY).is_none());
     }
 }

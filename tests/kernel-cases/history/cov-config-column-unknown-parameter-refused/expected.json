@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "config.column of a parameter the design does not have",
+ "source": "invariants",
+ "method": "no parameter Depth: refused naming it",
+ "outcome": "refused",
+ "refusal": "no parameter `Depth`"
+}

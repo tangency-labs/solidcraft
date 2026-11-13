@@ -1,0 +1,46 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.column",
+   "params": {
+    "param": "H"
+   }
+  },
+  {
+   "command": "config.row",
+   "params": {
+    "name": "Long",
+    "values": {
+     "W": "60 mm"
+    }
+   }
+  },
+  {
+   "command": "config.rule",
+   "params": {
+    "rule": {
+     "id": "tall",
+     "name": "Tall when long",
+     "condition": {
+      "type": "parameter",
+      "parameter": "W",
+      "operator": "ge",
+      "expression": "60 mm"
+     },
+     "effect": {
+      "type": "drive_parameter",
+      "parameter": "H",
+      "expression": "20 mm"
+     }
+    }
+   }
+  },
+  {
+   "command": "config.activate",
+   "params": {
+    "row": "Long"
+   }
+  }
+ ]
+}

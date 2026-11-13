@@ -1,0 +1,13 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#1559",
+    "tangency-labs/solidcraft#3685"
+  ],
+  "what": "Delete Face on a fillet face next to a face whose edge a boolean/fillet rebuilt as an intersection curve: must never panic (truck: not implemented: intersection curve cannot connect by homotopy)",
+  "source": "analytic",
+  "method": "box 40x30x20, one top edge filleted R5 (a point on the round is (35+5/sqrt2, 15, 15+5/sqrt2)), then the round deleted and healed from the neighbouring planes: the original box comes back, V = 40*30*20 = 24000, area 5200, 6 faces. (If the kernel cannot rebuild the face the only other acceptable answer is a clean refusal, never a panic; the grader expects the healed box because healing is well defined here.)",
+  "body_count": 1,
+  "volume_mm3": 24000.0,
+  "area_mm2": 5200.0,
+  "faces": 6
+}

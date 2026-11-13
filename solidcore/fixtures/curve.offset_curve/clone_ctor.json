@@ -1,0 +1,609 @@
+{
+ "cases": [
+  {
+   "name": "clone_ctor_raw_gap1.5e-12_owns0",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63-84 (copy constructor: shares m_pCurve when m_bOwnsCurve is FALSE, else Copy()s it and sets ownership TRUE; an owned Hermite base's Copy fails, sharing a base both objects then delete)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.5,
+       0.5000000000015,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": false
+    },
+    "op": "clone_ctor",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.9e-12_owns0",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63-84 (copy constructor: shares m_pCurve when m_bOwnsCurve is FALSE, else Copy()s it and sets ownership TRUE; an owned Hermite base's Copy fails, sharing a base both objects then delete)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.5,
+       0.5000000000019,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": false
+    },
+    "op": "clone_ctor",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.5e-12_owns1",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63-84 (copy constructor: shares m_pCurve when m_bOwnsCurve is FALSE, else Copy()s it and sets ownership TRUE; an owned Hermite base's Copy fails, sharing a base both objects then delete) / source/SMLib/src/SmBSplineCurve.cpp:197-231 copy constructor / sm_FixupKnotVector (a copied base merges knots within SM_EFF_ZERO, a shared one keeps them)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.5,
+       0.5000000000015,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": true
+    },
+    "op": "clone_ctor",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "clone_ctor_normal_gap_owns0",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63-84 (copy constructor: shares m_pCurve when m_bOwnsCurve is FALSE, else Copy()s it and sets ownership TRUE; an owned Hermite base's Copy fails, sharing a base both objects then delete)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.5,
+       0.65,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 3.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": false
+    },
+    "op": "clone_ctor",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "clone_ctor_hermite_owns0",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63-84 (copy constructor: shares m_pCurve when m_bOwnsCurve is FALSE, else Copy()s it and sets ownership TRUE; an owned Hermite base's Copy fails, sharing a base both objects then delete)",
+   "inputs": {
+    "base": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       3,
+       1,
+       0
+      ],
+      "p2": [
+       4,
+       2,
+       0
+      ],
+      "d2": [
+       2,
+       -2,
+       0
+      ]
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 1.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": false
+    },
+    "op": "clone_ctor",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "clone_ctor_hermite_owns0_outer_owns1",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63-84 (copy constructor: shares m_pCurve when m_bOwnsCurve is FALSE, else Copy()s it and sets ownership TRUE; an owned Hermite base's Copy fails, sharing a base both objects then delete)",
+   "inputs": {
+    "base": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       3,
+       1,
+       0
+      ],
+      "p2": [
+       4,
+       2,
+       0
+      ],
+      "d2": [
+       2,
+       -2,
+       0
+      ]
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 1.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": false
+    },
+    "op": "clone_ctor",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ],
+    "outer": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 1.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": true
+    }
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.5e-12_owns1_outer_owns1",
+   "upstream_ref": "source/SMLib/src/SmOffsetCurve.cpp:63-84 (copy constructor: shares m_pCurve when m_bOwnsCurve is FALSE, else Copy()s it and sets ownership TRUE; an owned Hermite base's Copy fails, sharing a base both objects then delete) / source/SMLib/src/SmBSplineCurve.cpp:197-231 copy constructor / sm_FixupKnotVector (a copied base merges knots within SM_EFF_ZERO, a shared one keeps them)",
+   "inputs": {
+    "base": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        18,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        24,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        30,
+        -6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.5,
+       0.5000000000015,
+       0.7,
+       1,
+       1,
+       1,
+       1
+      ],
+      "raw_knots": true
+     }
+    },
+    "spec": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 1.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": true
+    },
+    "op": "clone_ctor",
+    "probes": [
+     0.1,
+     0.5,
+     0.9
+    ],
+    "outer": {
+     "a": 0,
+     "b": 1,
+     "dim": 3,
+     "dist": 1.0,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "nrev": 0,
+     "owns": true
+    }
+   }
+  }
+ ]
+}

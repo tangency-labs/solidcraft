@@ -1,117 +1,176 @@
 //! Transient shell geometry shared by automation, drawing and viewport occlusion.
-use egui::{Rect, pos2, vec2};
-use serde::{Deserialize, Serialize};
+use crate::ui_kit::{Container, Surface, within};
+use egui::{Rect, pos2};
 
-use crate::{SolveApp, theme::Tokens, toolbar};
-
-/// Shell frame selected by automation for this session.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LayoutMode {
-    #[default]
-    Floating,
-    Docked,
-}
-
-/// The gap from the viewport edge to the floating cards and between the cards.
-pub(crate) const SHELL_GAP: f32 = 7.0;
-
-/// The viewport's top corners are rounded concentrically with the cards: the card margin plus the
-/// card radius.
-pub(crate) fn corner_radius() -> f32 {
-    SHELL_GAP + f32::from(Tokens::get().radius_lg)
-}
-
-/// Fill the two concave corners where the application bar flows into the viewport's top edge, so
-/// the viewport reads as a rounded surface under the bar.
-pub(crate) fn paint_top_corners(painter: &egui::Painter, viewport: Rect, color: egui::Color32) {
-    let r = corner_radius().min(viewport.width() / 2.0).min(viewport.height() / 2.0);
-    if !(r.is_finite() && r > 0.5) {
-        return;
-    }
-    const STEPS: usize = 32;
-    for left in [true, false] {
-        let (corner, centre, dir) = if left {
-            (viewport.left_top(), pos2(viewport.left() + r, viewport.top() + r), -1.0)
-        } else {
-            (viewport.right_top(), pos2(viewport.right() - r, viewport.top() + r), 1.0)
-        };
-        let mut mesh = egui::Mesh::default();
-        mesh.colored_vertex(corner, color);
-        for i in 0..=STEPS {
-            // From the top tangent point round to the side tangent point.
-            let a = std::f32::consts::FRAC_PI_2 * i as f32 / STEPS as f32;
-            mesh.colored_vertex(pos2(centre.x + dir * r * a.sin(), centre.y - r * a.cos()), color);
-        }
-        for i in 0..STEPS as u32 {
-            mesh.add_triangle(0, i + 1, i + 2);
-        }
-        painter.add(egui::Shape::mesh(mesh));
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Cards {
-    pub workspace: Rect,
-    pub ribbon: Rect,
-    pub bottom: f32,
-}
-
-impl Cards {
-    pub fn new(available: Rect, mode: LayoutMode) -> Self {
-        let margin = if mode == LayoutMode::Floating { SHELL_GAP } else { 0.0 };
-        let gap = if mode == LayoutMode::Floating { SHELL_GAP } else { 1.0 };
-        let left = available.left() + margin;
-        let top = available.top() + margin;
-        let right = (available.right() - margin).max(left);
-        let workspace = Rect::from_min_size(
-            pos2(left, top),
-            vec2(toolbar::WORKSPACE_WIDTH.min((right - left).max(0.0)), toolbar::RIBBON_HEIGHT - if mode == LayoutMode::Docked { 1.0 } else { 0.0 }),
-        );
-        let ribbon = Rect::from_min_max(pos2((workspace.right() + gap).min(right), top), pos2(right, top + toolbar::RIBBON_HEIGHT));
-        Self { workspace, ribbon, bottom: ribbon.bottom() + margin }
-    }
-}
+use crate::SolveApp;
+use solidcraft_theme::Tokens;
 
 /// Shell panels measured after drawing the full-bleed viewport. No design or preferences data.
 #[derive(Default)]
 pub(crate) struct State {
+    /// Per-window Render view state; neither preferences nor document data.
+    pub render_focus: bool,
     pub cards: Vec<Rect>,
-    pub panels: Vec<Rect>,
+    /// Actual workspace overlays above the panel host.
+    pub workspace_panels: std::collections::BTreeMap<&'static str, Rect>,
     pub browser: Option<Rect>,
     pub history: Option<Rect>,
     pub content: Option<Rect>,
+    /// The status bar along the window's bottom edge, while it is shown (#7243).
+    pub status_bar: Option<Rect>,
 }
 
-/// One source of occlusion for navigation, picking, overlays and fit.
-pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
-    let mut rects = Vec::new();
-    if app.ui.layout == LayoutMode::Floating {
-        rects.extend(app.shell.cards.iter().copied());
-        rects.extend(app.shell.panels.iter().copied());
-        rects.extend(app.shell.history);
+/// Register the actual card, so fitting and pointer shielding use the same rectangle.
+pub(crate) fn register_panel(app: &mut SolveApp, id: &'static str, rect: Option<Rect>) {
+    let rect = rect.filter(|_| !crate::render_ui::focused(app) || !id.starts_with("render:") || id == "render:focus:exit");
+    if let Some(rect) = rect.filter(|r| r.is_finite() && r.is_positive()) {
+        app.shell.workspace_panels.insert(id, rect);
+    } else {
+        app.shell.workspace_panels.remove(id);
     }
-    rects.extend(app.shell.browser.filter(|_| app.ui.show_browser));
-    rects.extend(app.viewport.palette_rect.filter(|_| app.session.active_sketch.is_some()));
-    rects.extend(app.viewport.dialog_rect.filter(|_| app.dialog.is_some() || app.tree.redefine.is_some()));
+}
+
+/// Shared workspace-card bounds below the ribbon and above a floating bottom strip.
+pub(crate) fn panel_bounds(app: &SolveApp, mut available: Rect) -> Rect {
+    for card in &app.shell.cards {
+        available.min.y = within(card.bottom(), available.top(), available.bottom());
+    }
+    if crate::render_workspace::active(app) {
+        let bottom = app.shell.cards.iter().map(|r| r.bottom()).fold(available.top() - Tokens::get().space_8, f32::max);
+        available.min.y = (bottom + Tokens::get().space_8).min(available.bottom());
+    }
+    available
+}
+
+/// One source of occlusion for navigation, picking and overlays.
+pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
+    occluding_rects(app, false, false, true)
+}
+
+/// Actual persistent workspace footprints for the shared host. Transient menus
+/// remain input shields, without becoming targets for framing or control placement.
+pub(crate) fn host_usable(app: &SolveApp) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
+    use crate::panel_runtime::{MAX_USABLE_OBSTACLES, egui_rect, logical_rect, resolve_usable_region};
+    use solidcraft_engine::panels::{Rule, error};
+    let frame = app.universal_panel_frame().ok_or_else(|| error(Rule::Lifecycle, "universal host geometry is unavailable"))?;
+    let windows = app.viewport.host_windows.as_ref().ok_or_else(|| error(Rule::CollectionLimit, "persistent window footprint limit"))?;
+    let mut obstacles = frame.layout.usable.obstacles.clone();
+    for bounds in occluding_rects(app, true, false, false).into_iter().chain(windows.iter().copied()).chain(app.viewport.host_confirm) {
+        if !bounds.is_positive() || !bounds.is_finite() || !bounds.intersect(egui_rect(frame.layout.render_domain)).is_positive() {
+            continue;
+        }
+        let bounds = logical_rect(bounds);
+        bounds.validate()?;
+        if !obstacles.contains(&bounds) {
+            if obstacles.len() >= MAX_USABLE_OBSTACLES {
+                return Err(error(Rule::CollectionLimit, "effective usable-space obstacle limit"));
+            }
+            obstacles.push(bounds);
+        }
+    }
+    resolve_usable_region(frame.layout.render_domain, &obstacles)
+}
+
+fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: bool) -> Vec<Rect> {
+    let mut rects = Vec::new();
+    if let Some(frame) = app.universal_panel_frame() {
+        let regions = if input { &frame.layout.input } else { &frame.layout.occlusion };
+        rects.extend(regions.iter().copied().map(crate::panel_runtime::egui_rect));
+        if !fitting {
+            rects.extend(frame.menu_bounds.map(crate::panel_runtime::egui_rect));
+            rects.extend(frame.owned_overlays.iter().map(|region| crate::panel_runtime::egui_rect(region.bounds)));
+        }
+    }
+    rects.extend(app.shell.workspace_panels.iter().filter(|(id, _)| !fitting || **id != "render:selection").map(|(_, rect)| *rect));
+    rects.extend(app.shell.cards.iter().copied());
+    rects.extend(app.viewport.palette_rect);
+    // Persistent feature windows come from the host's window ledger. This cache also
+    // receives transient warnings, so include it only when checking input shields.
+    if !fitting {
+        rects.extend(app.viewport.dialog_rect);
+    }
+    if include_confirm {
+        rects.extend(crate::view_confirm::rect(app));
+    }
+    rects.extend(app.shell.status_bar.filter(|_| crate::status_bar::shown(app)));
     rects.retain(|r| r.is_finite() && r.is_positive());
     rects
 }
 
 pub(crate) fn covered(app: &SolveApp, p: egui::Pos2) -> bool {
-    covered_rects(app).iter().any(|r| r.contains(p))
+    occluding_rects(app, false, true, true).iter().any(|r| r.contains(p))
 }
 
-/// The former central panel remains the anchor for controls and docked panels.
+/// The full workspace remains the anchor for independent controls.
 pub(crate) fn content_rect(app: &SolveApp, viewport: Rect) -> Rect {
-    if app.ui.layout == LayoutMode::Floating { app.shell.content.unwrap_or(viewport).intersect(viewport) } else { viewport }
+    // The content kept from the last frame can lie outside a viewport that has shrunk or moved
+    // since (a resize, a new scale): the intersection is then turned inside out, its min past
+    // its max. The viewport stands in for it.
+    let content = app.shell.content.unwrap_or(viewport).intersect(viewport);
+    if content.is_positive() { content } else { viewport }
+}
+
+/// The shared host supplies the free workspace bounds when a layout is available.
+pub(crate) fn workspace_content(app: &SolveApp, content: Rect) -> Rect {
+    app.universal_panel_frame()
+        .and_then(|frame| frame.layout.viewport)
+        .map_or(content, |rect| crate::panel_runtime::egui_rect(rect).intersect(content))
+}
+
+/// Keep bottom readouts above the current shared-host bottom panels.
+pub(crate) fn bottom_readout_rect(app: &SolveApp, mut viewport: Rect) -> Rect {
+    use solidcraft_engine::panels::Zone;
+    let Some(frame) = app.universal_panel_frame() else { return viewport };
+    let gap = Tokens::get().space_8;
+    for section in &frame.layout.sections {
+        let bounds = crate::panel_runtime::egui_rect(section.outer);
+        let is_bottom_history = section.zone == Zone::Floating && section.instance.0 == "history" && bounds.center().y >= viewport.center().y;
+        if (section.zone == Zone::Bottom || is_bottom_history) && bounds.intersect(viewport).is_positive() {
+            viewport.max.y = within(bounds.top() - gap, viewport.top(), viewport.bottom());
+        }
+    }
+    viewport
+}
+
+/// Tool sheets may cover Browser and History, while shell chrome and Assistant stay clear.
+/// Assistant's outside-rail exception stays in its owner.
+pub(crate) fn tool_drag_rect(app: &SolveApp, placement: Rect) -> Rect {
+    let gap = Container::for_layout(app.ui.layout, Surface::Feature).gap();
+    let mut bounds = crate::agent_chat::tool_space(app, app.viewport.rect.unwrap_or(placement));
+    for card in app.shell.cards.iter().filter(|r| r.is_finite() && r.is_positive()) {
+        bounds.min.y = within(card.bottom() + gap, bounds.top(), bounds.bottom());
+    }
+    bounds
+}
+
+/// Keep a newly opened editor beside the visible Sketch Options panel.
+pub(crate) fn editor_space(app: &SolveApp, mut viewport: Rect) -> Rect {
+    if let Some(palette) = app.viewport.palette_rect
+        && palette.intersects(viewport)
+        && palette.center().x >= viewport.center().x
+    {
+        let gap = Container::for_layout(app.ui.layout, Surface::Feature).gap();
+        let right = palette.left() - gap;
+        if right > viewport.center().x {
+            viewport.max.x = viewport.right().min(right);
+        }
+    }
+    viewport
+}
+
+/// Initial placement for floating editor windows in the shared-panel workspace.
+pub(crate) fn floating_editor_anchor(app: &SolveApp, ctx: &egui::Context) -> (egui::Align2, egui::Pos2) {
+    let viewport = crate::agent_chat::tool_space(app, content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
+    let viewport = editor_space(app, viewport);
+    let side = crate::frame::Side::Right;
+    (egui::Align2::RIGHT_TOP, pos2(side.anchor_x(viewport), panel_top(app, viewport, viewport.bottom(), side)))
 }
 
 pub(crate) fn panel_top(app: &SolveApp, viewport: Rect, bottom: f32, side: crate::frame::Side) -> f32 {
     let content = content_rect(app, viewport);
-    if app.ui.layout == LayoutMode::Floating && side == crate::frame::Side::Right {
-        // Preserve measured compass clearance when there is room; reclaim it on short
-        // views with the same 360 px panel budget as Docked.
+    if side == crate::frame::Side::Right {
+        // Both layouts use the measured compass, rather than a legacy fixed-height gap.
+        // Reclaim that space on short views while keeping the panel usable.
         app.viewport
             .layout
             .as_ref()

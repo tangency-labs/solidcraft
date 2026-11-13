@@ -35,6 +35,16 @@ face appearances keep their existing priority. Physical material changes affect 
 `delete` to remove it. Names must be unique. To remove a style column, use
 `config.column` with `material` or `appearance` set to the target body and `delete: true`.
 
+Each row also has a fixed id, which `config.table` lists with the row. A rename keeps the id, and a
+deleted row's id is never given to another row. `config.activate` and `config.preview` take `row`
+as a name or an id. `config.row` takes `name` and `from` the same way. A row picked by its id
+must exist. A name it doesn't find adds a new row. A number is always an id and text is always a
+name, so a row named `"17"` is not row `17`. The table still saves the active row by its name.
+
+Suppression cells accept `true`/`false`, `yes`/`no`, and `1`/`0`, ignoring case and surrounding
+whitespace. Creating, copying, or editing a row checks its final suppression values before saving.
+An invalid value leaves the table and undo history unchanged; accepted text keeps its spelling.
+
 Body style columns target body names. Assignments remain stored when a row suppresses the
 feature that produces that body, and become visible when it returns.
 
@@ -119,8 +129,12 @@ multiplier. Bare saved feature length cells and rule thresholds gain the previou
 unit; explicit units and nonliteral source expressions retain their text. A matching active
 row rederives its driven values when units change. User parameters retain their own units.
 
-Rules recompute on configured edits, **Apply**, and **Preview Row**. Ordinary parameter
-edits can leave the configuration unmatched and do not continuously enforce restrictions.
+Rules recompute on configured edits, **Apply**, and **Preview Row**. An ordinary parameter edit
+runs only the rules that switch a feature's suppression and whose condition reads a parameter whose
+value changed (or a feature such a rule just switched), in their order, so a switch parameter alone
+turns its features on and off; `parameters.change` lists them as `switched`. It does not drive
+parameters or enforce restrictions: those, and a matching configuration, wait for an edit of the
+configuration or an activation.
 Cross-unit drives store effective numeric lengths; their saved source expressions reevaluate
 on the next Apply or Preview rather than following later ordinary parameter edits live.
 Saved source cells are preserved: disabling a drive restores the row's original choice.
@@ -136,12 +150,14 @@ Configure the `depth` column before adding this example drive. Conditions may re
 existing design parameter; effect targets must be configured columns. `config.rules` lists
 rules. `config.rule` replaces a rule with the same ID, deletes with `id` and `delete: true`,
 or moves it to a zero-based `index`. Editing a rule validates every saved row before committing;
-editing a row validates that row. Invalid geometry, dependency cycles, incompatible units,
+`rules: [...]` adds or replaces several rules in one step and validates the rows once, with all
+of them in place (rules that only hold together, such as suppressing a body and the cut on it).
+Editing a row validates that row. Invalid geometry, dependency cycles, incompatible units,
 or restrictions leave the previous document intact and explain the failure. Delete rules
 before removing the last row. Parameter renames update rule targets and expressions; rule
 references prevent parameter deletion until removed.
 
-Tables support at most 128 rules; conditions allow eight levels and 64 nodes, and allowed
+Tables support at most 2048 rules; conditions allow eight levels and 64 nodes, and allowed
 value lists support up to 128 expressions. These bounds are checked before saved rules are
 decoded. Driven appearance/material rules and repeated fixed-point evaluation are outside
 the current rule scope.
