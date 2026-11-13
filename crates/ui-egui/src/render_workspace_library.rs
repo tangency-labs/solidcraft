@@ -1967,8 +1967,9 @@ mod studio_browser_tests {
         assert!(Arc::ptr_eq(&model, &h.app.session.model.state()));
         assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), selected);
         assert!(h.app.render_workspace.view.job.is_none());
-        // Give the inspector room to expose the Save Maps button below its settings.
-        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        // The catalogue is below Scene in the same column. Give its footer room
+        // for the source preview and mapping controls before pressing Save.
+        h.call("ui.resize", json!({"width":1600,"height":1800}));
         h.frames(3);
         let footer = crate::scenario::rect_of("render:surface:catalog:footer").unwrap();
         h.frame_with(vec![
@@ -1984,7 +1985,7 @@ mod studio_browser_tests {
         h.frames(12);
         h.step(&json!({"move":{"handle":"render:surface:save-maps"}})).unwrap();
         h.step(&json!({"click":{"handle":"render:surface:save-maps"}})).unwrap();
-        assert!(h.app.render_workspace.view.library.review.is_some(), "the actual different-target button opens review");
+        assert!(h.app.render_workspace.view.library.review.is_some(), "the actual different-target button opens review: {:?}", h.app.status);
         assert!(Arc::ptr_eq(&before, &h.app.session.doc));
         h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
