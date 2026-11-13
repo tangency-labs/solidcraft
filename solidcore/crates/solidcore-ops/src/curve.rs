@@ -3,7 +3,9 @@
 //! blend from one curve's end to another's, circles and arcs, a curve extended at an end, two
 //! curves joined end to end, the point of a curve nearest a given point, and a planar curve
 //! offset in its plane ([`offset_planar`]: the kernel's trimmed offset, its distance measured by
-//! [`solidcore::query::deviation::distance_deviation`]).
+//! [`solidcore::query::deviation::distance_deviation`]), and a curve on a sheet offset along its
+//! surface ([`offset_on_surface`]: the kernel's
+//! [`solidcore::curve::geodesic_offset::geodesic_offset`]).
 //! The curve is the record's ([`Curve`]); the knots, the map's carrying of the control points,
 //! the views' meeting, the curvature, the blend, the circles, the extension and the nearest point
 //! are the kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
@@ -1788,5 +1790,103 @@ pub fn offset_planar(
             normal: plane.normal,
             deviation: worst,
         }))
+    })?
+}
+
+/// A curve offset along a surface ([`offset_on_surface`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceOffset {
+    /// The offset: a cubic spline on the curve's own parameters, through the ends of the
+    /// geodesics shot from the curve.
+    pub curve: Curve,
+    /// The largest distance found, at the middle of each span, between the offset and the end
+    /// of the geodesic shot from the curve there: measured, not proved.
+    pub deviation: f64,
+}
+
+/// `curve` (lying on the one-face `sheet`) offset `distance` along the sheet's surface to `side`
+/// (left or right of the curve's direction about the surface's own normal, `S_u x S_v`): each
+/// point the end of the geodesic of that length leaving the curve square to it, so the band
+/// between the curve and its offset has the same width along the surface everywhere (the
+/// kernel's [`solidcore::curve::geodesic_offset::geodesic_offset`], its stations doubled until
+/// its measured deviation is within `tolerance`). Refused when the measured deviation is still
+/// past `tolerance` at the kernel's most stations.
+///
+/// # Errors
+/// [`Error::Argument`] for a distance or a tolerance not finite and positive, a distance past the
+/// coordinate bound, a traced intersection curve, a curve the record or the kernel's
+/// constructors refuse, or a sheet that is not one face with a surface;
+/// [`Error::OffsetPastTolerance`] for an offset whose measured deviation strays past
+/// `tolerance`; [`Error::Record`] for an offset the record cannot hold; the kernel's refusals
+/// otherwise (a geodesic leaving the surface, a station off it, a singular surface); those of
+/// [`crate::Body::from_record`].
+pub fn offset_on_surface(
+    curve: &Curve,
+    sheet: &solidcore_record::brep::Brep,
+    distance: f64,
+    side: OffsetSide,
+    tolerance: f64,
+) -> Result<SurfaceOffset> {
+    use solidcore::curve::geodesic_offset::{geodesic_offset, Side};
+    let positive = |x: f64| x.is_finite() && x > 0.0;
+    if !positive(distance) || !coord_ok(&[distance]) || !positive(tolerance) {
+        return Err(Error::Argument);
+    }
+    if matches!(curve, Curve::SurfaceIntersection { .. })
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let side = match side {
+        OffsetSide::Left => Side::Left,
+        OffsetSide::Right => Side::Right,
+    };
+    let (body, _) = crate::Body::from_record(sheet, true)?;
+    crate::session::read_body("curve::offset_on_surface", &body, |k, b| {
+        let [f] = b.face_list() else {
+            return Ok(Err(Error::Argument));
+        };
+        let face = b.face(*f)?;
+        let Some(surface) = face.surface.as_ref() else {
+            return Ok(Err(Error::Argument));
+        };
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let offset = match geodesic_offset(
+            k,
+            surface,
+            &face.uv_domain,
+            &made.curve,
+            &made.interval,
+            distance,
+            side,
+            tolerance,
+        ) {
+            Ok(o) => o,
+            Err(e) => return Ok(Err(crate::error::status(e))),
+        };
+        if offset.worst > tolerance {
+            return Ok(Err(Error::OffsetPastTolerance {
+                tolerance,
+                worst: offset.worst,
+            }));
+        }
+        let held = solidcore::curve::from_parameters::record_of(
+            k,
+            &offset.curve,
+            &offset.curve.natural_interval(),
+        )?;
+        Ok(match solidcore_convert::record_curve(held.curve) {
+            Ok(c) => Ok(SurfaceOffset {
+                curve: c,
+                deviation: offset.worst,
+            }),
+            Err(Invalid(why)) => Err(Error::Record(why.to_owned())),
+        })
     })?
 }
