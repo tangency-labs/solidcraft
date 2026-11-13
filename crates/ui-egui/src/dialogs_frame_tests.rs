@@ -219,6 +219,52 @@ fn picked_lines_stay_in_the_sketch_they_were_picked_in() {
     assert!(apply_commands(&app, &d).unwrap_err().contains("one sketch"));
 }
 
+/// Lines clicked in two sketches on XY, one 300 mm above the other: the first sketch's line is
+/// the path's line, the other sketch's goes in as its two end points, a pair, so neither click
+/// is refused. A 3D sketch's line goes in the same way.
+#[test]
+fn a_line_clicked_in_another_sketch_goes_in_as_its_two_end_points() {
+    let mut app = app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Low"})),
+        ("sketch.line", json!({"points": [[0, 0], [500, 0]]})),
+        ("sketch.finish", json!({})),
+        ("sketch.create", json!({"plane": "XY", "offset": 300, "name": "High"})),
+        ("sketch.line", json!({"points": [[0, 0], [500, 0]]})),
+        ("sketch.finish", json!({})),
+        ("sketch.create", json!({"plane": "XY", "name": "Post"})),
+        ("sketch.options", json!({"sketch_3d": true})),
+        ("sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]})),
+        ("sketch.finish", json!({})),
+    ]);
+    let (low, high, post) = (sketch_id(&app, "Low"), sketch_id(&app, "High"), sketch_id(&app, "Post"));
+    let line = |sketch: u64| {
+        let sk = app.session.doc.sketch(sketch).unwrap();
+        let id = sk.curves.first().map(|c| c.id.clone()).or_else(|| sk.wires.first().map(|w| w.id.clone())).unwrap();
+        Sel::ExternalSketchCurve { sketch, id }
+    };
+    let (l_low, l_high, l_post) = (line(low), line(high), line(post));
+    let mut d = dialog_on(&mut app, &[]);
+    pick_all(&app, &mut d, &[l_low.clone(), l_high, l_post]);
+    assert_eq!(d.error, None);
+    let items = path(&d);
+    assert_eq!(items.len(), 5, "{items:?}");
+    assert_eq!(items[0], l_low);
+    assert!(items[1..].iter().all(|x| matches!(x, Sel::SketchPoint { .. })), "{items:?}");
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["sketch"], json!(low));
+    let pairs = c[0].1["pairs"].as_array().unwrap();
+    assert_eq!(pairs.len(), 2);
+    assert_eq!(pairs[0]["a"]["sketch"], json!(high));
+    assert_eq!(pairs[1]["b"]["sketch"], json!(post));
+    run_all(&mut app, c);
+    assert_eq!(members(&app).len(), 3);
+    // The high member lies 300 mm up, the post stands from 0 to 300.
+    let m = app.session.execute("inspect.measure", &json!({})).unwrap();
+    let zs: Vec<(f64, f64)> =
+        m["bodies"].as_array().unwrap().iter().map(|b| (b["bbox"]["min"][2].as_f64().unwrap(), b["bbox"]["max"][2].as_f64().unwrap())).collect();
+    assert!(zs.iter().any(|(lo, hi)| (lo + hi) / 2.0 > 290.0 && (hi - lo) < 100.0), "{zs:?}");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Members between pairs of points (#15705)
 

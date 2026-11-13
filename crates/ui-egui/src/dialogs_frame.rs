@@ -388,9 +388,18 @@ pub(crate) fn pick(app: &SolveApp, d: &mut Dialog, sel: Sel) {
 }
 
 /// [`pick_hit`], a new point taking `given` as its lasting reference when there is one.
-fn pick_as(app: &SolveApp, d: &mut Dialog, sel: Sel, mut given: Option<Value>) {
+fn pick_as(app: &SolveApp, d: &mut Dialog, sel: Sel, given: Option<Value>) {
     let before = (matches!(d.kind, Kind::Frame(_)) && d.active == 0).then(|| crate::selection::items(&d.inputs, 0).to_vec());
-    d.pick(&app.session, sel);
+    let picks = match before.as_deref().and_then(|b| other_sketch_ends(app, b, &sel)) {
+        Some(ends) => ends.map(|(end, r)| (end, Some(r))).to_vec(),
+        None => vec![(sel, given)],
+    };
+    let mut given = Vec::new();
+    for (sel, r) in picks {
+        d.pick(&app.session, sel);
+        given.push(r);
+    }
+    let mut given = given.into_iter().flatten();
     let Some(before) = before else { return };
     if let Some(why) = refusal(app, d, &before) {
         if let Some(path) = d.inputs.first_mut() {
@@ -406,7 +415,7 @@ fn pick_as(app: &SolveApp, d: &mut Dialog, sel: Sel, mut given: Option<Value>) {
     if let Kind::Frame(m) = &mut d.kind {
         for (i, item) in items.iter().enumerate().skip(before.len()).filter(|(_, item)| is_point(item)) {
             if let Some(r) = m.refs.get_mut(i).filter(|r| r.is_none()) {
-                *r = given.take().or_else(|| point_ref(app, item).ok());
+                *r = given.next().or_else(|| point_ref(app, item).ok());
             }
         }
     }
@@ -461,16 +470,40 @@ pub(crate) fn end_pick(s: &Session, hit: &Hit) -> Option<(Sel, Value)> {
         let g = if *end == 0 { &p.a } else { &p.b };
         return Some((crate::dialogs::point_pick(s, g), serde_json::to_value(g).ok()?));
     }
-    let sketch = path_sketch.as_ref()?.0;
+    let [a, b] = line_ends(s, path_sketch.as_ref()?.0, line, false)?;
+    Some(if *end == 0 { a } else { b })
+}
+
+/// Line `line` of sketch `sketch`'s two end points, as the path picks them and the references
+/// they keep: a sketch line's points, a 3D line's end nodes. With `straight`, only a straight
+/// line's (a 3D spline or arc between its ends is not the member its two ends would make).
+fn line_ends(s: &Session, sketch: u64, line: &str, straight: bool) -> Option<[(Sel, Value); 2]> {
     let sk = s.doc.sketch(sketch).ok()?;
-    let point = match sk.wire_index(line).and_then(|i| sk.wires.get(i)) {
-        Some(w) => format!("{}:{}", w.id, if *end == 0 { 0 } else { w.fit.len().checked_sub(1)? }),
+    let [a, b] = match sk.wire_index(line).and_then(|i| sk.wires.get(i)) {
+        Some(w) if straight && (w.fit.len() != 2 || w.arc.is_some()) => return None,
+        Some(w) => [format!("{}:0", w.id), format!("{}:{}", w.id, w.fit.len().checked_sub(1)?)],
         None => {
             let CurveKind::Line { a, b } = sk.curves.get(sk.curve_index(line)?)?.kind else { return None };
-            sk.points.get(if *end == 0 { a } else { b })?.id.clone()
+            [sk.points.get(a)?.id.clone(), sk.points.get(b)?.id.clone()]
         }
     };
-    Some((Sel::SketchPoint { id: format!("{sketch}:{point}") }, json!({"sketch": sketch, "point": point})))
+    let end = |point: String| (Sel::SketchPoint { id: format!("{sketch}:{point}") }, json!({"sketch": sketch, "point": point}));
+    Some([end(a), end(b)])
+}
+
+/// A line clicked in another sketch than the path's lines: one Frame Member's lines are one
+/// sketch's, so it goes in as its two end points, a pair, unless a point is waiting for its
+/// partner (which a line can't be).
+fn other_sketch_ends(app: &SolveApp, before: &[Sel], sel: &Sel) -> Option<[(Sel, Value); 2]> {
+    let (Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) }) = sel else { return None };
+    let path_sketch = before.iter().find_map(|x| match x {
+        Sel::ExternalSketchCurve { sketch, .. } | Sel::SketchCurve { sketch: Some(sketch), .. } => Some(*sketch),
+        _ => None,
+    })?;
+    if path_sketch == *sketch || !pairs_of(before).is_ok_and(|(_, _, waiting)| waiting.is_none()) {
+        return None;
+    }
+    line_ends(&app.session, *sketch, id, true)
 }
 
 /// Ctrl+click on a point of the path: its last occurrence goes. False when the click is not that.
