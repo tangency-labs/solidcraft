@@ -468,9 +468,10 @@ jobs:
     name: Windows ${{ matrix.arch }}
     needs: [version, icons]
     if: needs.version.outputs.build == 'true'
-    # Must stay a GitHub-hosted runner, like every job before it: SignPath's open-source policy
-    # only signs builds whose jobs all ran on GitHub-hosted runners.
-    runs-on: windows-latest
+    # GitHub-hosted while SignPath signs, like every job before it: SignPath's open-source policy
+    # only signs builds whose jobs all ran on GitHub-hosted runners. With the WINDOWS_SIGNING
+    # repository variable `off` nothing goes to SignPath, so it builds on Blacksmith, as CI does.
+    runs-on: ${{ vars.WINDOWS_SIGNING == 'off' && 'blacksmith-8vcpu-windows-2025' || 'windows-latest' }}
     # actions: read lets the SignPath action read this job's details and fetch the uploaded
     # artifact with GITHUB_TOKEN (the workflow default above grants contents: read only).
     permissions:
