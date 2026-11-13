@@ -78,13 +78,16 @@ impl Document {
             .assembly
             .joints
             .iter()
-            .filter(|j| occurrences.contains(&j.a.occurrence) || occurrences.contains(&j.b.occurrence))
+            .filter(|j| j.a.occurrences().chain(j.b.occurrences()).any(|o| occurrences.contains(&o)))
             .map(|j| j.id)
             .collect();
+        for group in &mut self.timeline_groups {
+            group.joints.retain(|id| !joints.contains(id));
+        }
         let assembly = &mut self.assembly;
         assembly.joints.retain(|j| !joints.contains(&j.id));
         assembly.links.retain(|l| !joints.contains(&l.a) && !joints.contains(&l.b));
-        assembly.origins.retain(|o| !occurrences.contains(&o.origin.occurrence));
+        assembly.origins.retain(|o| !o.origin.occurrences().any(|o| occurrences.contains(&o)));
         for set in &mut assembly.contact_sets {
             set.occurrences.retain(|o| !occurrences.contains(o));
         }

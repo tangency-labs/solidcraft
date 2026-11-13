@@ -1,0 +1,52 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0.0,
+     0
+    ],
+    "p1": [
+     15.0,
+     5.0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "angle": "360 deg",
+    "axis": "Z"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      15,
+      0,
+      0
+     ],
+     [
+      15,
+      0,
+      -5
+     ]
+    ],
+    "radius": 2.5
+   }
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+  "en": { "Flange slope": "Flange slope", "Inner radius": "Inner radius" },
+  "ar": { "Flange slope": "ميل الشفة", "Inner radius": "نصف القطر الداخلي" },
+  "de": { "Flange slope": "Flanschneigung", "Inner radius": "Innenradius" },
+  "he": { "Flange slope": "שיפוע אוגן", "Inner radius": "רדיוס פנימי" },
+  "ja": { "Flange slope": "フランジ勾配", "Inner radius": "内側コーナー半径" },
+  "ko": { "Flange slope": "플랜지 경사", "Inner radius": "안쪽 반지름" },
+  "vi": { "Flange slope": "Độ dốc cánh (flange)", "Inner radius": "Bán kính trong" },
+  "zh": { "Flange slope": "翼缘斜度", "Inner radius": "内圆角半径" }
+}

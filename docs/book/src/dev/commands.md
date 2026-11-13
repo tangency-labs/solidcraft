@@ -9,7 +9,7 @@ parameters and never open dialogs; a dialog is a front-end form that builds the 
 ```rust
 CommandSpec::new("solid.fillet", "Fillet", fillet)
     .at("SOLID", "MODIFY")      // toolbar tab and panel ("" = not on the toolbar)
-    .icon("fillet")             // drawn in code, assets/icons/ui/source/icons.rs
+    .icon("fillet")             // an SVG master in crates/look/icons/design/svg
     .key("F")                   // default shortcut
     .params("edges: [[x,y,z] | {body, index}]; radius: expr; …"),
 ```
@@ -55,5 +55,5 @@ ending in the same word (`file.open`: did you mean `doc.open`?).
    (English, every catalog in `COMPLETE` in `crates/ui-egui/src/i18n.rs`, which a test requires,
    and any other language you can write) and the id to `DOCUMENTED` in
    `crates/ui-egui/src/command_help.rs`. The test
-   `every_toolbar_command_has_help_or_is_on_the_backlog` fails for a ribbon command without help;
-   the older ones on its `BACKLOG` only shrink (#2758).
+   `every_toolbar_command_has_help` fails for a ribbon command without help
+   (#2758).

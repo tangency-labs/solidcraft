@@ -4,6 +4,8 @@ use solidcraft_ui_egui::scenario::Harness;
 
 fn setup() -> (Harness, u64) {
     let mut h = Harness::new();
+    // These cover the direct pick workflow; the options dialog is covered in dialogs_sketch_tests.
+    h.app.preferences.project_options_dialog = false;
     let source = h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap()["sketch"].as_u64().unwrap();
     h.app.run("sketch.line", json!({"points":[[10,10],[30,10]],"infer":false})).unwrap();
     h.app.run("sketch.point", json!({"point":[20,20],"id":"p"})).unwrap();
@@ -14,6 +16,47 @@ fn setup() -> (Harness, u64) {
     h.call("ui.set", json!({"shownSketches":[source]}));
     h.call("ui.view", json!({"view":"top"}));
     (h, source)
+}
+
+/// #10291: a line of another sketch, picked while the Project dialog is open, projects.
+/// The pick names the sketch it came from, so the dialog's geometry input holds it and the
+/// command gets a reference to it, even when the two sketches lie in parallel planes.
+#[test]
+fn a_line_of_another_sketch_picked_in_the_project_dialog_projects() {
+    let mut h = Harness::new();
+    // The options dialog is the workflow of the bug report: Project opens a dialog that
+    // takes the geometry to project.
+    h.app.preferences.project_options_dialog = true;
+    // Sketch 1 on plane 1.
+    let source = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,10],[30,10]],"infer":false})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    // Plane 2 parallel to plane 1, and sketch 2 on it.
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":10,"name":"Plane2"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"Plane2"})).unwrap();
+    h.call("ui.set", json!({"shownSketches":[source]}));
+    h.call("ui.view", json!({"view":"top"}));
+    // Project, then pick the line of sketch 1 in the viewport.
+    h.app.start("sketch.project");
+    h.frames(4);
+    assert!(h.app.dialog.is_some(), "Project opens its options dialog");
+    h.step(&json!({"click":{"world":[20,10,0]}})).unwrap();
+    let d = h.app.dialog.as_ref().expect("the dialog is still open");
+    assert_eq!(d.inputs[0].items.len(), 1, "the line of the other sketch is in the input: {:?}", d.inputs[0].items);
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "the dialog closes on a valid pick: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
+    let state = h.app.session.world_state().unwrap();
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    assert!(sk.curves.iter().any(|curve| curve.link.is_some()), "the line is projected into the sketch");
+    // The projection names the sketch it came from, so it follows it.
+    assert!(
+        sk.links.iter().any(|l| matches!(&l.source, solidcraft_engine::sketch::LinkSource::SketchCurve { sketch, .. } if *sketch == source)),
+        "{:?}",
+        sk.links
+    );
 }
 
 #[test]
@@ -32,7 +75,7 @@ fn clicked_external_curve_and_point_project_with_source_identity_and_one_undo() 
     assert!(h.app.session.selection.is_empty());
     assert!(h.app.tool.is_none());
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 2);
     assert!(sk.curves.iter().any(|curve| curve.link.is_some()));
@@ -84,7 +127,7 @@ fn axis_and_plane_preselection_projects_as_one_command() {
     h.step(&json!({"start":"sketch.project"})).unwrap();
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.iter().filter(|c| c.link.is_some()).count(), 2);
     assert!(h.app.session.selection.is_empty());
@@ -104,7 +147,7 @@ fn mixed_local_and_external_selection_keeps_ordinary_project_picking() {
     assert_eq!(h.app.session.undo.len(), undo);
     h.step(&json!({"click":{"world":[20,10,10]}})).unwrap();
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     assert!(state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.iter().any(|curve| curve.link.is_some()));
 }
 
@@ -143,7 +186,7 @@ fn a_rectangle_put_onto_a_projected_edge_is_still_a_profile_to_click() {
     h.call("ui.view", json!({"view":"bottom"}));
     h.step(&json!({"click":{"sketch":[15,12]}})).unwrap();
     assert_eq!(h.app.session.selection, vec![Sel::Profile { sketch, index: 0 }]);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sketch).unwrap();
     assert_eq!(ss.profiles.len(), 1);
     let mut bounded_by = ss.profiles[0].outer_curves.clone();

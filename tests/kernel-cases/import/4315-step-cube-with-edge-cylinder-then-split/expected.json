@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4315"
+ ],
+ "what": "a 10 mm cube joined with an r3 cylinder lying along its top edge, through a STEP export and re-import, then split by the plane x = 2: after the round trip truck's split (and intersect) gave no result",
+ "source": "analytic",
+ "method": "the cylinder's axis is the cube's edge (y = 10, z = 10), so a quarter of it is inside the cube: V = 1000 + (3/4)*pi*9*10 = 1212.0575. The split at x = 2 keeps the total in two bodies",
+ "body_count": 2,
+ "volume_mm3": 1212.0575
+}

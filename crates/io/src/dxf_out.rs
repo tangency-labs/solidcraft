@@ -4,16 +4,18 @@
 //! Curves stay exact: a circle is a CIRCLE, a circular arc an ARC, a whole ellipse one ELLIPSE
 //! and a conic arc of weight below 1 an elliptical ELLIPSE arc; Béziers (TrueType glyph
 //! outlines, spline pieces) and the other conics are SPLINEs of their own degree. The file holds
-//! what the entities refer to and what release 2000 needs to read them: the version, the
-//! handle seed, the units and the extents; the linetype, layer and block-record tables; the
-//! model and paper space blocks; handles, owners and the subclass markers of each entity; the
-//! root dictionary. Layers can be dashed and a drawing can carry TEXT (for annotations). Group
+//! what the entities refer to and what release 2000 needs to read them: the version, code page,
+//! handle seed, units and extents; the (empty) CLASSES section; all nine symbol tables, with the
+//! active viewport, the linetypes, layers, text style, the ACAD application id, the dimension
+//! style and the block records; the model and paper space blocks; handles, owners and the
+//! subclass markers of each entity; the root dictionary and its group dictionary. Layers can be dashed and a drawing can carry TEXT (for annotations). Group
 //! codes follow Autodesk's public DXF reference.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 use std::fmt::Write as _;
 
-use solidcraft_geom::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
+use solidcore_record::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
 
 use crate::{IoError, Result};
 
@@ -65,6 +67,12 @@ pub enum DxfShape {
     /// Connected straight segments, with continuous linetype generation through the vertices.
     Polyline {
         points: Vec<Vec2>,
+    },
+    /// A lightweight polyline (AutoCAD `LWPOLYLINE`) with bulges for arc segments.
+    /// Each entry in `verts` is `(position, bulge)`, where bulge is `tan(sweep / 4)`.
+    LwPolyline {
+        verts: Vec<(Vec2, f64)>,
+        closed: bool,
     },
     Circle {
         c: Vec2,
@@ -151,6 +159,54 @@ pub fn loop_shapes(lp: &Loop2) -> Vec<DxfShape> {
     lp.segs.iter().map(seg_shape).collect()
 }
 
+/// The closed loop as one AutoCAD `LWPOLYLINE` entity, with circular arc segments represented
+/// by their DXF bulge (tan of a quarter of the included angle). Free-form curves are sampled as lines.
+pub fn loop_lwpolyline_scaled(lp: &Loop2, scale: f64) -> DxfShape {
+    let mut verts: Vec<(Vec2, f64)> = Vec::new();
+    for s in &lp.segs {
+        match *s {
+            Seg2::Line { a, .. } => {
+                verts.push((a * scale, 0.0));
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                if (sweep.abs() - TAU).abs() < 1e-9 {
+                    // Full circle: split into two 180° semicircles.
+                    let b = if sweep >= 0.0 { 1.0 } else { -1.0 };
+                    let p0 = (center + Vec2::from_angle(start) * radius) * scale;
+                    let p1 = (center + Vec2::from_angle(start + std::f64::consts::PI) * radius) * scale;
+                    verts.push((p0, b));
+                    verts.push((p1, b));
+                } else if sweep.abs() > std::f64::consts::PI + 1e-9 {
+                    // Arc larger than 180°: split into two pieces.
+                    let half = sweep * 0.5;
+                    let b = (half / 4.0).tan();
+                    let p0 = (center + Vec2::from_angle(start) * radius) * scale;
+                    let p1 = (center + Vec2::from_angle(start + half) * radius) * scale;
+                    verts.push((p0, b));
+                    verts.push((p1, b));
+                } else {
+                    let b = (sweep / 4.0).tan();
+                    let p0 = (center + Vec2::from_angle(start) * radius) * scale;
+                    verts.push((p0, b));
+                }
+            }
+            _ => {
+                let poly = s.polyline(0.01);
+                let count = poly.len().saturating_sub(1);
+                for p in poly.iter().take(count) {
+                    verts.push((*p * scale, 0.0));
+                }
+            }
+        }
+    }
+    DxfShape::LwPolyline { verts, closed: true }
+}
+
+/// [`loop_lwpolyline_scaled`] at scale 1.0 (millimetres).
+pub fn loop_lwpolyline(lp: &Loop2) -> DxfShape {
+    loop_lwpolyline_scaled(lp, 1.0)
+}
+
 /// A parameter reduced to [0, 2π); one within 1e-12 of a full turn is 0.
 fn wrap(t: f64) -> f64 {
     let r = t.rem_euclid(TAU);
@@ -219,6 +275,30 @@ impl DxfShape {
         match self {
             DxfShape::Line(a, b) => out.extend([*a, *b]),
             DxfShape::Polyline { points } => out.extend(points.iter().copied()),
+            DxfShape::LwPolyline { verts, closed } => {
+                for (i, (p0, b)) in verts.iter().enumerate() {
+                    out.push(*p0);
+                    if b.abs() > 1e-12 {
+                        let next_idx = if i + 1 < verts.len() {
+                            Some(i + 1)
+                        } else if *closed {
+                            Some(0)
+                        } else {
+                            None
+                        };
+                        if let Some(next) = next_idx
+                            && let Some((p1, _)) = verts.get(next)
+                        {
+                            let chord = *p1 - *p0;
+                            let mid = (*p0 + *p1) * 0.5;
+                            let arc_mid = mid + chord.perp() * (*b * 0.5);
+                            if arc_mid.x.is_finite() && arc_mid.y.is_finite() {
+                                out.push(arc_mid);
+                            }
+                        }
+                    }
+                }
+            }
             DxfShape::Circle { c, r } => out.extend([*c - Vec2::new(*r, *r), *c + Vec2::new(*r, *r)]),
             DxfShape::Arc { c, r, a0, a1 } => {
                 let sweep = (a1 - a0).rem_euclid(360.0);
@@ -266,6 +346,11 @@ impl Out {
         self.num(c, p.x);
         self.num(c + 10, p.y);
         self.num(c + 20, 0.0);
+    }
+    /// A 2D point: codes `c` and `c + 10`.
+    fn point2(&mut self, c: i32, p: Vec2) {
+        self.num(c, p.x);
+        self.num(c + 10, p.y);
     }
     fn handle(&mut self) -> String {
         let h = format!("{:X}", self.next);
@@ -342,6 +427,11 @@ fn text_value(s: &str) -> Result<String> {
 /// (layer `0` is always there). A TEXT character beyond U+FFFF returns an error naming the
 /// character, its position, the entity and its layer; no drawing is returned on failure.
 pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<String> {
+    write_dxf_drawing_units(layers, entities, 4)
+}
+
+/// [`write_dxf_drawing`], with explicit DXF `$INSUNITS` (1 in, 2 ft, 4 mm, 5 cm, 6 m).
+pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insunits: i32) -> Result<String> {
     let mut pts = Vec::new();
     for e in entities {
         e.shape.sample(&mut pts);
@@ -366,10 +456,48 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     let (model, paper) = (o.handle(), o.handle());
     let root = o.handle();
 
+    // Release 2000 readers expect the CLASSES section, even empty, between HEADER and TABLES.
+    o.code(0, "SECTION");
+    o.code(2, "CLASSES");
+    o.code(0, "ENDSEC");
+
+    // All nine symbol tables, in the reference's order, even those with nothing to hold: a
+    // strict reader (AutoCAD among them, #9144) refuses a file that leaves one out.
     o.code(0, "SECTION");
     o.code(2, "TABLES");
-    // The three every drawing has, and DASHED, which the dashed layers name: dash and gap lengths
-    // (a gap is negative) after the pattern's total.
+    // The active viewport, looking down on the whole drawing so it opens zoomed to fit.
+    let t = o.table("VPORT", 1);
+    o.record("VPORT", "AcDbViewportTableRecord", &t);
+    o.code(2, "*Active");
+    o.code(70, 0);
+    o.point2(10, Vec2::ZERO);
+    o.point2(11, Vec2::new(1.0, 1.0));
+    o.point2(12, (lo + hi) * 0.5);
+    o.point2(13, Vec2::ZERO);
+    o.point2(14, Vec2::new(10.0, 10.0));
+    o.point2(15, Vec2::new(10.0, 10.0));
+    o.num(16, 0.0);
+    o.num(26, 0.0);
+    o.num(36, 1.0);
+    o.num(17, 0.0);
+    o.num(27, 0.0);
+    o.num(37, 0.0);
+    const ASPECT: f64 = 1.5;
+    let size = hi - lo;
+    let height = (size.y.max(size.x / ASPECT) * 1.1).max(1.0);
+    o.num(40, if height.is_finite() { height } else { 1.0 });
+    o.num(41, ASPECT);
+    o.num(42, 50.0);
+    o.num(43, 0.0);
+    o.num(44, 0.0);
+    o.num(50, 0.0);
+    o.num(51, 0.0);
+    for (code, value) in [(71, 0), (72, 1000), (73, 1), (74, 3), (75, 0), (76, 0), (77, 0), (78, 0)] {
+        o.code(code, value);
+    }
+    o.code(0, "ENDTAB");
+    // The three linetypes every drawing has, and DASHED, which the dashed layers name: dash and
+    // gap lengths (a gap is negative) after the pattern's total.
     let mut linetypes: Vec<(&str, &str, &[f64])> = vec![
         ("ByBlock", "", &[]),
         ("ByLayer", "", &[]),
@@ -416,6 +544,29 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     o.code(3, "txt");
     o.code(4, "");
     o.code(0, "ENDTAB");
+    for name in ["VIEW", "UCS"] {
+        o.table(name, 0);
+        o.code(0, "ENDTAB");
+    }
+    // The application id every drawing registers.
+    let t = o.table("APPID", 1);
+    o.record("APPID", "AcDbRegAppTableRecord", &t);
+    o.code(2, "ACAD");
+    o.code(70, 0);
+    o.code(0, "ENDTAB");
+    // The one dimension style, with the default settings. The table has a subclass of its own
+    // and its records keep their handle under 105, not 5.
+    let t = o.table("DIMSTYLE", 1);
+    o.code(100, "AcDbDimStyleTable");
+    let h = o.handle();
+    o.code(0, "DIMSTYLE");
+    o.code(105, h);
+    o.code(330, &t);
+    o.code(100, "AcDbSymbolTableRecord");
+    o.code(100, "AcDbDimStyleTableRecord");
+    o.code(2, "Standard");
+    o.code(70, 0);
+    o.code(0, "ENDTAB");
     let t = o.table("BLOCK_RECORD", 2);
     for (h, name) in [(&model, "*Model_Space"), (&paper, "*Paper_Space")] {
         o.code(0, "BLOCK_RECORD");
@@ -439,7 +590,7 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     for (index, e) in entities.iter().enumerate() {
         let kind = match &e.shape {
             DxfShape::Line(..) => "LINE",
-            DxfShape::Polyline { .. } => "LWPOLYLINE",
+            DxfShape::Polyline { .. } | DxfShape::LwPolyline { .. } => "LWPOLYLINE",
             DxfShape::Circle { .. } => "CIRCLE",
             DxfShape::Arc { .. } => "ARC",
             DxfShape::Ellipse { .. } => "ELLIPSE",
@@ -461,6 +612,19 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
                 for p in points {
                     o.num(10, p.x);
                     o.num(20, p.y);
+                }
+            }
+            DxfShape::LwPolyline { verts, closed } => {
+                o.code(100, "AcDbPolyline");
+                o.code(90, verts.len());
+                // Autodesk DXF reference: bit 1 closed, bit 128 (PLINEGEN) continues dash pattern.
+                o.code(70, 128 + if *closed { 1 } else { 0 });
+                for (p, b) in verts {
+                    o.num(10, p.x);
+                    o.num(20, p.y);
+                    if b.abs() > 1e-12 {
+                        o.num(42, *b);
+                    }
                 }
             }
             DxfShape::Line(a, b) => {
@@ -535,9 +699,18 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
 
     o.code(0, "SECTION");
     o.code(2, "OBJECTS");
+    // The root dictionary, which must name the group dictionary (empty: no groups).
+    let groups = o.handle();
     o.code(0, "DICTIONARY");
     o.code(5, root.as_str());
     o.code(330, 0);
+    o.code(100, "AcDbDictionary");
+    o.code(281, 1);
+    o.code(3, "ACAD_GROUP");
+    o.code(350, &groups);
+    o.code(0, "DICTIONARY");
+    o.code(5, &groups);
+    o.code(330, &root);
     o.code(100, "AcDbDictionary");
     o.code(281, 1);
     o.code(0, "ENDSEC");
@@ -548,12 +721,16 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     head.code(2, "HEADER");
     head.code(9, "$ACADVER");
     head.code(1, "AC1015");
+    // Every character in the file is ASCII (other letters are `\U+XXXX`), which this code page
+    // reads as itself.
+    head.code(9, "$DWGCODEPAGE");
+    head.code(3, "ANSI_1252");
     head.code(9, "$HANDSEED");
     head.code(5, format!("{:X}", o.next));
     head.code(9, "$INSUNITS");
-    head.code(70, 4);
+    head.code(70, insunits);
     head.code(9, "$MEASUREMENT");
-    head.code(70, 1);
+    head.code(70, if insunits == 1 || insunits == 2 { 0 } else { 1 });
     head.code(9, "$EXTMIN");
     head.point(10, lo);
     head.code(9, "$EXTMAX");
@@ -683,7 +860,7 @@ mod tests {
         assert!(degree_2(&conic(2.0), Some(vec![1.0, 2.0, 1.0])));
         assert!(degree_2(&conic(1.0 - 1e-9), Some(vec![1.0, 1.0 - 1e-9, 1.0])));
         // A quintic piece: six control points and twelve knots.
-        let mut q = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+        let mut q = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
         for (i, s) in q.iter_mut().enumerate() {
             *s = Vec2::new(i as f64, (i * i) as f64);
         }
@@ -694,13 +871,13 @@ mod tests {
 
     #[test]
     fn a_bezier_is_a_spline_of_its_own_degree_over_all_its_control_points() {
-        let mut q = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+        let mut q = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
         for (i, s) in q.iter_mut().enumerate() {
             *s = Vec2::new(i as f64, (i * i) as f64);
         }
         // Every degree a Bézier piece can have, up to a G4 blend's 9: n + 1 control points, all of
         // them, and 2(n + 1) clamped knots.
-        for n in 4..=solidcraft_geom::MAX_BEZIER_DEGREE as u8 {
+        for n in 4..=solidcore_record::MAX_BEZIER_DEGREE as u8 {
             let k = usize::from(n) + 1;
             let DxfShape::Spline { degree, knots, ctrl, weights } = seg_shape(&Seg2::Bezier { n, p: q }) else { panic!("degree {n}") };
             assert_eq!((degree, knots.len(), weights), (n, 2 * k, None), "degree {n}");
@@ -795,7 +972,7 @@ mod tests {
         let Geom2::Spline { pts, control: true, degree: 3 } = &back[5] else { panic!("{:?}", back[5]) };
         assert!(pts.iter().zip(&cubic).all(|(a, b)| a.dist(*b) < 1e-9) && pts.len() == 4);
         // A degree-9 Bézier (a G4 blend) comes back at its own degree over all ten points.
-        let mut q = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+        let mut q = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
         for (i, s) in q.iter_mut().enumerate() {
             *s = Vec2::new(i as f64, (i % 3) as f64);
         }
@@ -967,6 +1144,76 @@ mod tests {
     }
 
     #[test]
+    fn a_strict_reader_finds_every_section_table_and_the_group_dictionary() {
+        // #9144: AutoCAD refused the exported view. A release 2000 file has the CLASSES section,
+        // all nine symbol tables with their standard records, and a root dictionary naming
+        // ACAD_GROUP.
+        let ents = [
+            DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0)) },
+            DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Circle { c: Vec2::new(15.0, 5.0), r: 5.0 } },
+        ];
+        let dxf = write_dxf_drawing(&[DxfLayer::new("VISIBLE", 7)], &ents).unwrap();
+        let p = pairs(&dxf);
+        let sections: Vec<&str> = p.windows(2).filter(|w| w[0] == (0, "SECTION".into())).map(|w| w[1].1.as_str()).collect();
+        assert_eq!(sections, ["HEADER", "CLASSES", "TABLES", "BLOCKS", "ENTITIES", "OBJECTS"]);
+        let tables: Vec<&str> = p.windows(2).filter(|w| w[0] == (0, "TABLE".into())).map(|w| w[1].1.as_str()).collect();
+        assert_eq!(tables, ["VPORT", "LTYPE", "LAYER", "STYLE", "VIEW", "UCS", "APPID", "DIMSTYLE", "BLOCK_RECORD"]);
+        // Each table says how many records it holds, and holds them.
+        for table in tables {
+            let at = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, table)).unwrap();
+            let count: usize = p[at..].iter().find(|(c, _)| *c == 70).unwrap().1.parse().unwrap();
+            assert_eq!(table_records(&p, table).len(), count, "{table}");
+        }
+        assert_eq!(table_records(&p, "APPID").iter().map(|r| field(r, 2)).collect::<Vec<_>>(), ["ACAD"]);
+        let dimstyles = table_records(&p, "DIMSTYLE");
+        // (The DIMSTYLE table's own subclass comes before its record.)
+        let [standard] = dimstyles.as_slice() else { panic!("{dimstyles:?}") };
+        assert_eq!(field(standard, 2), "Standard");
+        assert!(!field(standard, 105).is_empty() && field(standard, 5).is_empty(), "{standard:?}");
+        // The active viewport looks down on the middle of the drawing (0, 0)..(30, 10), all of it in view.
+        let vports = table_records(&p, "VPORT");
+        let [active] = vports.as_slice() else { panic!("{vports:?}") };
+        assert_eq!(field(active, 2), "*Active");
+        assert_eq!((field(active, 12), field(active, 22), field(active, 36)), ("15.0", "5.0", "1.0"));
+        let (height, aspect): (f64, f64) = (field(active, 40).parse().unwrap(), field(active, 41).parse().unwrap());
+        assert!(height >= 10.0 && height * aspect >= 30.0, "{height} {aspect}");
+        // The root dictionary names the group dictionary, which it owns.
+        let objects = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, "OBJECTS")).unwrap();
+        let mut dictionaries: Vec<Vec<(i32, String)>> = Vec::new();
+        for (c, v) in p[objects + 1..].iter().take_while(|(c, v)| (*c, v.as_str()) != (0, "ENDSEC")) {
+            match c {
+                0 => dictionaries.push(Vec::new()),
+                _ => dictionaries.last_mut().unwrap().push((*c, v.clone())),
+            }
+        }
+        let [root, groups] = dictionaries.as_slice() else { panic!("{dictionaries:?}") };
+        assert_eq!((field(root, 330), field(root, 3)), ("0", "ACAD_GROUP"));
+        assert_eq!(field(root, 350), field(groups, 5));
+        assert_eq!(field(groups, 330), field(root, 5));
+        // Handles, under 5 and the DIMSTYLE's 105, are unique and below the seed.
+        let seed_at = p.iter().position(|(c, v)| (*c, v.as_str()) == (9, "$HANDSEED")).unwrap() + 1;
+        let seed = u64::from_str_radix(&p[seed_at].1, 16).unwrap();
+        let mut handles: Vec<u64> = p
+            .iter()
+            .enumerate()
+            .filter(|(i, (c, _))| *i != seed_at && (*c == 5 || *c == 105))
+            .map(|(_, (_, v))| u64::from_str_radix(v, 16).unwrap())
+            .collect();
+        let n = handles.len();
+        handles.sort_unstable();
+        handles.dedup();
+        assert_eq!(handles.len(), n);
+        assert!(handles.iter().all(|h| *h < seed));
+        // Every owner (330) is 0 or a handle in the file.
+        for (_, v) in p.iter().filter(|(c, _)| *c == 330) {
+            let h = u64::from_str_radix(v, 16).unwrap();
+            assert!(h == 0 || handles.binary_search(&h).is_ok(), "owner {v}");
+        }
+        // SolidCraft's own reader still reads it.
+        assert_eq!(read_dxf(&dxf).unwrap().len(), 2);
+    }
+
+    #[test]
     fn the_extents_hold_the_text() {
         // Five letters of 3 mm, turned to read upwards: 0.8 × 3 × 5 = 12 mm long around y = 12, and
         // 3 mm to the left of the baseline at x = 30.
@@ -976,5 +1223,63 @@ mod tests {
         let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
         assert_eq!(&after("$EXTMIN")[..2], &[(10, "27.0".to_string()), (20, "6.0".to_string())]);
         assert_eq!(&after("$EXTMAX")[..2], &[(10, "30.0".to_string()), (20, "18.0".to_string())]);
+    }
+
+    #[test]
+    fn lwpolyline_with_bulge_and_units_round_trip() {
+        // Closed loop with a line and a 90° arc segment (bulge tan(pi / 8)).
+        let sweep = FRAC_PI_2;
+        let bulge = (sweep / 4.0).tan();
+        let loop2 = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(0.0, 0.0) },
+                Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, 10.0) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: FRAC_PI_2, sweep: -FRAC_PI_2 },
+            ],
+        };
+        let shape = loop_lwpolyline(&loop2);
+        let DxfShape::LwPolyline { ref verts, closed } = shape else { panic!("expected LwPolyline") };
+        assert!(closed);
+        assert_eq!(verts.len(), 3);
+        // Third segment is clockwise (-90°), bulge is negative
+        assert!((verts[2].1 - (-bulge)).abs() < 1e-12, "bulge was {}", verts[2].1);
+
+        // Write with inch units (insunits = 1)
+        let dxf = write_dxf_drawing_units(
+            &[DxfLayer::new("CUT", 4)],
+            &[DxfEntity { layer: "CUT".into(), shape: loop_lwpolyline_scaled(&loop2, 1.0 / 25.4) }],
+            1,
+        )
+        .unwrap();
+        assert!(dxf.contains("LWPOLYLINE"));
+        assert!(dxf.contains("\n  8\nCUT\n") || dxf.contains("\n8\nCUT\n"));
+        assert!(dxf.contains("\n 70\n1\n") || dxf.contains("\n70\n1\n")); // $INSUNITS 1
+
+        // Read back via read_dxf: should scale from inches back to mm
+        let geom = read_dxf(&dxf).unwrap();
+        assert_eq!(geom.len(), 3);
+        // Arcs and lines should be recovered in millimetres
+        let Some((c, a, b)) = geom.iter().find_map(|g| match *g {
+            Geom2::Arc { c, a, b } => Some((c, a, b)),
+            _ => None,
+        }) else {
+            panic!("arc not recovered");
+        };
+        assert!(c.dist(Vec2::ZERO) < 1e-6);
+        assert!((c.dist(a) - 10.0).abs() < 1e-6);
+        assert!((c.dist(b) - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lwpolyline_open_sampling_does_not_wrap_around() {
+        // Unclosed polyline with 2 vertices: (0, 0) and (10, 0), with a bulge on the last vertex.
+        // For an unclosed polyline, the last vertex cannot form an arc segment to vertex 0.
+        let shape = DxfShape::LwPolyline { verts: vec![(Vec2::new(0.0, 0.0), 0.0), (Vec2::new(10.0, 0.0), 1.0)], closed: false };
+        let mut pts = Vec::new();
+        shape.sample(&mut pts);
+        // Only the two vertices should be sampled, not an arc chord back to (0, 0)
+        assert_eq!(pts.len(), 2);
+        assert_eq!(pts[0], Vec2::new(0.0, 0.0));
+        assert_eq!(pts[1], Vec2::new(10.0, 0.0));
     }
 }

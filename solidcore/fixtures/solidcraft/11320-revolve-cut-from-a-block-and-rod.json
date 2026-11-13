@@ -1,0 +1,285 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/11320",
+ "pr": "https://github.com/tangency-labs/solidcore/pull/2458",
+ "test": "none: the issue is open and has no fixing PR (SolidCraft's kernel work is paused, #3992), so `pr` points at the PR that adds this fixture, as the loader requires a /pull/ URL; the issue reports it on 0.30.1 with the reporter's design (combine-cut-failure.zip); reproduced with solidcraft-cli 0.26.0 from that design's sketches; the numbers here are by quadrature",
+ "summary": "A block (x -12..28, y -12..12, z 0..24) with a cylinder of radius 12 along X over it (its axis at z = 24.2, so its sides touch the block's sides along y = +-12), cut with a body made by turning a profile half a turn (180 deg, symmetric about the sketch plane) about a line parallel to X at z = 24: a quarter-round of radius 12 and a rectangle, as in the reporter's sketch. Combine > Cut of the body with the tool fails on SolidCraft's kernel with 'boolean Cut: the operation failed: no result' (reported on 0.30.1, filed twice as #11215; reproduced with solidcraft-cli 0.26.0). The union and the tool alone both build. Volumes are closed form for the union and by Pappus and polar quadrature for the tool and the cut, and checked by Monte Carlo. Here the half turn is built from the plane z = 24 turned 180 degrees about +X, which gives the same body as the symmetric turn. The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "body_alone",
+   "note": "#11320: the block with the rod over it, united (builds on SolidCraft).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -12.0,
+      -12.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      24.0,
+      24.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "rod",
+     "origin": [
+      -12.0,
+      0.0,
+      24.2
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 12.0,
+     "height": 40.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "block",
+     "b": "rod"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 32279.777953079,
+     "tol": 0.01,
+     "formula": "V = 40*24*24 + 40*A; the block x -12..28, y -12..12, z 0..24, and the rod (radius 12, axis X through (0, 0, 24.2)) over it; the rod's part inside the block adds nothing, so A is the disc segment above z = 24: pi r^2/2 + d sqrt(r^2 - d^2) + r^2 asin(d/r), r = 12, d = 0.2"
+    }
+   }
+  },
+  {
+   "name": "tool_alone",
+   "note": "#11320: the half turn of the profile on its own (builds on SolidCraft).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        16.0,
+        -24.0
+       ],
+       "to": [
+        16.0,
+        -30.365903
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        16.0,
+        -30.365903
+       ],
+       "to": [
+        34.676306,
+        -30.365903
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        34.676306,
+        -30.365903
+       ],
+       "to": [
+        34.676306,
+        -12.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        34.676306,
+        -12.0
+       ],
+       "to": [
+        28.0,
+        -12.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        28.0,
+        -24.0
+       ],
+       "radius": 12.0,
+       "start_deg": 90.0,
+       "end_deg": 180.0
+      }
+     ],
+     "plane": "xy",
+     "origin": [
+      0.0,
+      0.0,
+      24.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      24.0
+     ],
+     "axis_dir": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "angle_deg": 180.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 21401.287697557,
+     "tol": 0.01,
+     "formula": "V = pi * int over the profile of rho dA (Pappus for the half turn), rho = 24 - z the distance from the axis (y = 0, z = 24); the profile is x 16..34.676306, z from -6.365903 up to 12 (x >= 28) or up to the quarter arc about (28, 0) of radius 12 (x <= 28); adaptive Gauss-Kronrod, error below 1e-9"
+    }
+   }
+  },
+  {
+   "name": "cut_tool_from_body",
+   "note": "#11320: the body less the tool, as a Combine cut: 'no result' on SolidCraft.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -12.0,
+      -12.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      24.0,
+      24.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "rod",
+     "origin": [
+      -12.0,
+      0.0,
+      24.2
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 12.0,
+     "height": 40.0
+    },
+    {
+     "op": "union",
+     "id": "body",
+     "a": "block",
+     "b": "rod"
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        16.0,
+        -24.0
+       ],
+       "to": [
+        16.0,
+        -30.365903
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        16.0,
+        -30.365903
+       ],
+       "to": [
+        34.676306,
+        -30.365903
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        34.676306,
+        -30.365903
+       ],
+       "to": [
+        34.676306,
+        -12.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        34.676306,
+        -12.0
+       ],
+       "to": [
+        28.0,
+        -12.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        28.0,
+        -24.0
+       ],
+       "radius": 12.0,
+       "start_deg": 90.0,
+       "end_deg": 180.0
+      }
+     ],
+     "plane": "xy",
+     "origin": [
+      0.0,
+      0.0,
+      24.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      24.0
+     ],
+     "axis_dir": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "angle_deg": 180.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "body",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 28986.457612695,
+     "tol": 0.01,
+     "formula": "V = V(body) - V(body and tool); the tool's part inside the body is found in polar coordinates about the axis: at radius rho the block's cross-section (y -12..12, z 0..24) covers the angles |theta| from acos(24/rho) if rho > 24 to asin(12/rho) if rho > 12 (all of them below 12), and the rod adds nothing under z = 24; the tool at x covers rho from 24 - sqrt(144 - (x - 28)^2) to 30.365903 for x 16..28 (the body ends at x = 28), so V(body and tool) = int_16^28 [F(30.365903) - F(rho_lo(x))] dx, F(rho) = int_0^rho r m(r) dr, m the angular measure; V(body and tool) = 3293.320340384 (quad error 4e-12). Cross-checked by Monte Carlo of the cut (5e8 points) within 1.1 standard errors"
+    }
+   }
+  }
+ ]
+}

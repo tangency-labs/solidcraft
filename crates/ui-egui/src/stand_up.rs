@@ -3,7 +3,7 @@
 //! offers to stand it up: a quarter turn about X (Y → Z) of the component the file came in as
 //! (#1386), so an assembly's parts and instances turn together, in one step that can be undone.
 //! Preferences › Design › "Offer to stand up Y-up files" turns the offer off; with Y up as the
-//! default orientation it isn't needed. The file is never turned without asking.
+//! default orientation it isn't needed. A remembered answer can turn the same file silently.
 //!
 //! How it asks depends on the program the header names and on how the bodies rest (#7717):
 //! `estimate` weighs their flat area facing down Z against their flat area across Y. A file from
@@ -17,10 +17,81 @@
 //! context menu's "Turn Up Axis" fixes it any time.
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::prefs::StandUpUnknown;
 use crate::ui_kit;
+
+/// Maximum remembered files; the oldest answer is evicted first.
+pub const MAX_ANSWERS: usize = 500;
+
+/// The offered rotation is +90 degrees about X, taking Y up to Z up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Answer {
+    Leave,
+    YToZ,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Remembered {
+    digest: String,
+    answer: Answer,
+}
+
+/// A bounded map in insertion order, kept in user preferences, never in the design.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct Answers(std::collections::VecDeque<Remembered>);
+
+pub fn valid_digest(digest: &str) -> bool {
+    digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+impl Answers {
+    pub fn get(&self, digest: &str) -> Option<Answer> {
+        self.0.iter().find(|entry| entry.digest == digest).map(|entry| entry.answer)
+    }
+
+    pub fn remember(&mut self, digest: String, answer: Answer) {
+        if !valid_digest(&digest) {
+            return;
+        }
+        self.0.retain(|entry| entry.digest != digest);
+        while self.0.len() >= MAX_ANSWERS {
+            self.0.pop_front();
+        }
+        self.0.push_back(Remembered { digest, answer });
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Answers {
+    fn deserialize<D: serde::Deserializer<'de>>(saved: D) -> Result<Self, D::Error> {
+        let saved = <serde_json::Value as serde::Deserialize>::deserialize(saved)?;
+        let mut answers = Self::default();
+        if let Some(entries) = saved.as_array() {
+            for entry in entries {
+                if let Ok(entry) = serde_json::from_value::<Remembered>(entry.clone()) {
+                    answers.remember(entry.digest, entry.answer);
+                }
+            }
+        }
+        Ok(answers)
+    }
+}
+
+fn remember(app: &mut SolveApp, answer: Answer) {
+    if let Some(digest) = app.stand_up_digest.take()
+        && app.preferences.remember_stand_up
+    {
+        app.preferences.stand_up_answers.remember(digest, answer);
+    }
+}
 
 /// How long the note stays up when nobody is pointing at it, in seconds.
 pub const NOTE_SECONDS: f64 = 10.0;
@@ -56,7 +127,7 @@ pub enum Upright {
 /// The flat area of `mesh` facing down Z, facing down Y and facing up Y, looking at no more than
 /// `budget` triangles.
 pub fn flat_areas(mesh: &solidcraft_engine::geom::Mesh, budget: usize) -> [f64; 3] {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     struct Face {
         first: Vec3,
         area: f64,
@@ -128,7 +199,11 @@ pub fn upright(z_down: f64, y_either: f64, size: [f64; 3]) -> Upright {
 /// Which axis the bodies named `bodies` in the current design seem to have up. Looks at most
 /// `MAX_BODIES` bodies and `MAX_TRIANGLES` triangles; a body that can't be meshed adds nothing.
 pub fn estimate(app: &SolveApp, bodies: &[String]) -> Upright {
-    let world = app.session.world_state();
+    estimate_in(&crate::open_meshing::session_world(&app.session), bodies)
+}
+
+/// [`estimate`] in `world`.
+fn estimate_in(world: &solidcraft_engine::doc::ModelState, bodies: &[String]) -> Upright {
     let mut areas = [0.0_f64; 3];
     let mut bounds = solidcraft_engine::geom::Aabb3::EMPTY;
     let mut budget = MAX_TRIANGLES;
@@ -150,6 +225,7 @@ pub fn estimate(app: &SolveApp, bodies: &[String]) -> Upright {
 /// new design), and the import's component placement from the command's `result`: offer to
 /// stand them up.
 pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&serde_json::Value>) {
+    clear_offer(app);
     let io = &solidcraft_engine::io::is_step_path;
     if !(io(path) || solidcraft_engine::io::is_iges_path(path)) || app.preferences.up_axis != "z" {
         return;
@@ -159,7 +235,8 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
     if text("system") == Some("SolidCraft") || text("exporter_up") == Some("z") {
         return;
     }
-    let bodies: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
+    let bodies: Vec<String> =
+        crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
     if bodies.is_empty() {
         return;
     }
@@ -167,26 +244,142 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
     if !app.preferences.offer_stand_up {
         return;
     }
+    let digest = text("content_sha256").filter(|d| valid_digest(d)).map(str::to_owned);
+    if app.preferences.remember_stand_up
+        && let Some(answer) = digest.as_deref().and_then(|d| app.preferences.stand_up_answers.get(d))
+    {
+        match answer {
+            Answer::Leave => return,
+            Answer::YToZ => {
+                app.stand_up = Some(bodies.clone());
+                app.stand_up_occurrence = occurrence;
+                match stand_up(app) {
+                    Ok(()) => return,
+                    Err(error) => app.set_status(error, true),
+                }
+            }
+        }
+    }
     // A header naming a Y-up exporter asks in the dialog, with the reason, unless the bodies
     // clearly stand on Z already (it may have been saved Z up): then only the note. The file is
-    // never turned without asking. Any other program gets what Preferences › Design says: the
+    // never turned without asking the first time. Any other program gets what Preferences › Design says: the
     // note unless the bodies clearly stand on Z (an unclear shape still gets it, so a Y-up file
     // is never left without an offer), the dialog always, or nothing. Ask is the behaviour from
     // before #7717 for every file: the dialog, without looking.
     let known_y_up = text("exporter_up") == Some("y");
-    let note = match app.preferences.stand_up_unknown {
-        StandUpUnknown::Ask => false,
-        _ if known_y_up => estimate(app, &bodies) == Upright::Z,
-        StandUpUnknown::Note if estimate(app, &bodies) != Upright::Z => true,
-        StandUpUnknown::Note | StandUpUnknown::Off => return,
-    };
     let subcomponents = result.and_then(|r| r.get("subcomponents")).and_then(serde_json::Value::as_u64).unwrap_or(0);
-    app.stand_up_reason = known_y_up;
-    app.stand_up_assembly = bodies.len() > 1 || subcomponents > 0;
-    app.stand_up_note = note;
-    app.stand_up_note_since = None;
-    app.stand_up = Some(bodies);
-    app.stand_up_occurrence = occurrence;
+    let asked = Asked { bodies, occurrence, known_y_up, subcomponents, digest };
+    match app.preferences.stand_up_unknown {
+        StandUpUnknown::Ask => return asked.offer(app, None),
+        // No offer for another program's file: nothing to estimate.
+        StandUpUnknown::Off if !known_y_up => return,
+        _ => {}
+    }
+    // The estimate meshes the bodies. Just after an open they are being meshed beside the window
+    // (`open_meshing`), and meshing them here waited for that: the window stood still for a
+    // second or more on a large assembly. The offer comes when the estimate is made, beside it.
+    if cfg!(not(target_arch = "wasm32")) && crate::open_meshing::active(app) {
+        app.stand_up_later = Some(Later {
+            asked,
+            revision: app.session.revision,
+            #[cfg(not(target_arch = "wasm32"))]
+            worker: None,
+        });
+        return;
+    }
+    let upright = estimate(app, &asked.bodies);
+    asked.offer(app, Some(upright));
+}
+
+/// What an offer to stand bodies up asks about, before it knows how they rest.
+pub(crate) struct Asked {
+    bodies: Vec<String>,
+    occurrence: Option<u64>,
+    /// The file's header names an exporter known to save Y up.
+    known_y_up: bool,
+    subcomponents: u64,
+    /// The file's content digest, for remembering the answer (`remember_stand_up`).
+    digest: Option<String>,
+}
+
+impl Asked {
+    /// Make the offer, or none, from how the bodies rest (`None`: the dialog is asked for
+    /// whatever their shape, `StandUpUnknown::Ask`).
+    fn offer(self, app: &mut SolveApp, upright: Option<Upright>) {
+        // Asked again when made: the preferences may have changed while the estimate was made.
+        if !app.preferences.offer_stand_up || app.preferences.up_axis != "z" {
+            return;
+        }
+        let note = match (app.preferences.stand_up_unknown, upright) {
+            (StandUpUnknown::Ask, _) | (_, None) => false,
+            (_, Some(u)) if self.known_y_up => u == Upright::Z,
+            (StandUpUnknown::Note, Some(u)) if u != Upright::Z => true,
+            (StandUpUnknown::Note | StandUpUnknown::Off, _) => return,
+        };
+        app.stand_up_digest = self.digest;
+        app.stand_up_reason = self.known_y_up;
+        app.stand_up_assembly = self.bodies.len() > 1 || self.subcomponents > 0;
+        app.stand_up_note = note;
+        app.stand_up_note_since = None;
+        app.stand_up = Some(self.bodies);
+        app.stand_up_occurrence = self.occurrence;
+    }
+}
+
+/// An offer waiting for its estimate, made on a thread of its own (see [`offer`]).
+pub(crate) struct Later {
+    asked: Asked,
+    /// The design's revision when it was asked: a design changed meanwhile drops the offer.
+    revision: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    worker: Option<crate::starting::Worker<Upright>>,
+}
+
+/// Each frame: start the estimate of an offer that waits for one, and make the offer when it is
+/// done. A design changed before then (an edit, another file) gets no offer.
+pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(later) = app.stand_up_later.as_mut() else { return };
+    if later.revision != app.session.revision {
+        app.stand_up_later = None;
+        return;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::starting::{Poll, Worker};
+        let upright = match &later.worker {
+            None => {
+                let world = crate::open_meshing::session_world(&app.session);
+                let (job_world, bodies) = (world.clone(), later.asked.bodies.clone());
+                match Worker::spawn("stand-up-estimate", ctx.clone(), move || estimate_in(&job_world, &bodies)) {
+                    Ok(worker) => {
+                        later.worker = Some(worker);
+                        return;
+                    }
+                    // No thread: estimate here, as before.
+                    Err(_) => estimate_in(&world, &later.asked.bodies),
+                }
+            }
+            Some(worker) => match worker.poll() {
+                Poll::Running => return,
+                Poll::Done(upright) => upright,
+                Poll::Failed => {
+                    app.stand_up_later = None;
+                    return;
+                }
+            },
+        };
+        if let Some(later) = app.stand_up_later.take() {
+            later.asked.offer(app, Some(upright));
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = ctx;
+        if let Some(later) = app.stand_up_later.take() {
+            let upright = estimate(app, &later.asked.bodies);
+            later.asked.offer(app, Some(upright));
+        }
+    }
 }
 
 /// Turn the offered bodies a quarter turn about X (Y up becomes Z up).
@@ -196,6 +389,7 @@ pub fn stand_up(app: &mut SolveApp) -> Result<(), String> {
     app.stand_up_note = false;
     app.stand_up_note_since = None;
     let Some(bodies) = app.stand_up.take() else { return Err("no file is waiting to be stood up".into()) };
+    let digest = app.stand_up_digest.take();
     match app.stand_up_occurrence.take() {
         // The import's component turns about its parent's origin, contents and all, even when it
         // came in as the design's grounded first part (#2804): it is still being placed.
@@ -205,6 +399,8 @@ pub fn stand_up(app: &mut SolveApp) -> Result<(), String> {
         None => app.run("solid.move", json!({ "bodies": bodies, "axis": [1, 0, 0], "angle": "90 deg" })),
     }
     .map_err(|e| e.to_string())?;
+    app.stand_up_digest = digest;
+    remember(app, Answer::YToZ);
     app.animate_view("home");
     Ok(())
 }
@@ -212,6 +408,12 @@ pub fn stand_up(app: &mut SolveApp) -> Result<(), String> {
 /// Dismiss the offer and keep the file as it opened ("Leave it", or the note's Close); the
 /// preference stays on.
 pub fn leave(app: &mut SolveApp) {
+    remember(app, Answer::Leave);
+    clear_offer(app);
+}
+
+fn clear_offer(app: &mut SolveApp) {
+    app.stand_up_digest = None;
     app.stand_up = None;
     app.stand_up_reason = false;
     app.stand_up_occurrence = None;
@@ -240,17 +442,28 @@ pub(crate) fn note_due(app: &mut SolveApp, ctx: &egui::Context) -> Option<String
         return None;
     }
     let text = if app.stand_up_assembly { "Did this assembly open the wrong way up?" } else { "Did this part open the wrong way up?" };
-    Some(crate::i18n::tr_label(text).to_string())
+    Some(solidcraft_ui_text::tr_label(text).to_string())
 }
 
-/// The handles of the note's buttons, in order: the quarter turn, turning the offer off, then the
-/// dismissal. They are published for scripts; `stand_up:stand` and `stand_up:never` are the
-/// dialog's handles too.
-pub const NOTE_HANDLES: [&str; 3] = ["stand_up:stand", "stand_up:never", "stand_up:dismiss"];
+/// The handles of the note's buttons, in order: the quarter turn, then turning the offer off. They
+/// are published for scripts and are the dialog's handles too.
+pub const NOTE_HANDLES: [&str; 2] = ["stand_up:stand", "stand_up:never"];
+
+/// The handles of the note's close (×), which leaves the file as it opened (#7971):
+/// `toast:stand_up:close`, as every toast's, and `stand_up:dismiss`, the handle of the Close
+/// button it replaces, kept for scripts.
+pub const NOTE_CLOSE_HANDLES: [&str; 2] = ["toast:stand_up:close", "stand_up:dismiss"];
 
 /// The note's button labels, in the order of `NOTE_HANDLES`.
-pub(crate) fn note_labels() -> [String; 3] {
-    [crate::i18n::tr_label("Stand it up").to_string(), crate::i18n::tr_label("Don't ask again").to_string(), crate::i18n::tr("ui.close").to_string()]
+pub(crate) fn note_labels() -> [String; 2] {
+    [solidcraft_ui_text::tr_label("Stand it up").to_string(), solidcraft_ui_text::tr_label("Don't ask again").to_string()]
+}
+
+/// The share of the note's time left now, 1 to 0, for the countdown ring around its close (×).
+/// Pointing at it (`note_keep`) starts its time again, so the ring is full while it is pointed at.
+pub(crate) fn note_left(app: &SolveApp, ctx: &egui::Context) -> f32 {
+    let now = ctx.input(|i| i.time);
+    app.stand_up_note_since.map_or(1.0, |since| crate::viewport::countdown_left(since, now, NOTE_SECONDS))
 }
 
 /// The note was drawn at `rect`: a pointer on it keeps it from going.
@@ -283,24 +496,28 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let title = if app.stand_up_assembly { "Stand this assembly up?" } else { "Stand this part up?" };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_stand_up"), "move", crate::i18n::tr_label(title))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_stand_up"), "move", solidcraft_ui_text::tr_label(title))
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 140.0))
         .actions("Stand it up", "Leave it", Some("Don't ask again"))
         .show(ctx, true, |ui| {
             ui_kit::text(
                 ui,
-                crate::i18n::tr_label("Files from many CAD programs have Y up, so they open lying on their back here (Z up)."),
+                solidcraft_ui_text::tr_label("Files from many CAD programs have Y up, so they open lying on their back here (Z up)."),
                 ui_kit::Text::Report("why", false),
             );
             if app.stand_up_reason {
-                ui_kit::text(ui, crate::i18n::tr_label("Exported by SolidWorks, which usually saves Y up"), ui_kit::Text::Report("reason", false));
+                ui_kit::text(
+                    ui,
+                    solidcraft_ui_text::tr_label("Exported by SolidWorks, which usually saves Y up"),
+                    ui_kit::Text::Report("reason", false),
+                );
             }
             ui_kit::text(
                 ui,
-                crate::i18n::tr_label("Stand it up: a quarter turn about X, as one Move feature you can undo."),
+                solidcraft_ui_text::tr_label("Stand it up: a quarter turn about X, as one Move feature you can undo."),
                 ui_kit::Text::Report("how", false),
             );
-            ui_kit::text(ui, crate::i18n::tr_label("Preferences › Design turns the offer back on"), ui_kit::Text::Note("never"));
+            ui_kit::text(ui, solidcraft_ui_text::tr_label("Preferences › Design turns the offer back on"), ui_kit::Text::Note("never"));
         });
     for (handle, key) in [("stand_up:stand", "dialog:ok"), ("stand_up:never", "dialog:apply"), ("stand_up:leave", "dialog:cancel")] {
         if let Some(at) = crate::scenario::handle_at(key) {

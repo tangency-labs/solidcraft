@@ -1,0 +1,6 @@
+{
+  "unit": "surface.b_spline_volume_n_lib",
+  "cases": [
+    {"name": "fuzz00437_value_not_finite_or_too_large", "origin": "fuzz-out/n2000/surface.b_spline_volume_n_lib/fuzz00437.json (crash: rust: killed by signal 6 (memory allocation of 17179869240 bytes failed))", "cpp": "harness: invalid argument: value not finite or too large", "rust": "harness: control point count mismatch", "inputs": {"comp": false, "curve": {"cpts": [[-4.87, 6.75, -0.0687, 1.55]], "kind": "bspline", "knots": [1.0], "p": 2147483648}, "op": "curve_in", "vol": {"cpts": [[-1.0, -6.0, -4.0, 1.0]], "deg": [1, 0, 2], "hi": [5, 1, 5], "knots": [[-3.25, -3.2, -3.07, -3.07, -3.07, -3.04, -3.04, -3.01], [0.0, 0.0, 4.74], [-0.0664, -0.0664, -0.0664, 0.106, 0.106, 0.106, 0.888, 0.888, 0.888]]}, "which": 0}}
+  ]
+}

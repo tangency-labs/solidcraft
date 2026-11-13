@@ -108,3 +108,93 @@ fn hdr_admission_counts_retained_capacity_not_just_file_length() {
     assert_eq!(source.info().encoded_bytes, bytes.len() as u64);
     assert_eq!(source.admitted_bytes(), retained + 8 * 160 + 65536);
 }
+
+#[test]
+fn cooperative_alias_builder_preserves_original_gpu_table_bits() {
+    let colors = [0.0, 0.0, 1.0, 4.0, 9.0, 0.0, 2.0, 8.0];
+    let pixels: Vec<_> = colors.into_iter().map(|v| [v; 3]).collect();
+    // Pre-refactor table retained as a bitwise compatibility oracle.
+    let expected = [
+        (0x00000000, 0x00000000, 4),
+        (0x00000000, 0x00000000, 4),
+        (0x3cd94caf, 0x3eaaaaab, 7),
+        (0x3dd94caf, 0x3f800000, 3),
+        (0x3e747645, 0x3f2aaaab, 3),
+        (0x00000000, 0x00000000, 7),
+        (0x3d594caf, 0x3f2aaaab, 7),
+        (0x3e594caf, 0x3f2aaaab, 4),
+    ];
+    let mut builder = EnvironmentBuilder::new(4, 2).unwrap();
+    assert!(EnvironmentBuilder::new(4, 2).unwrap().finish().is_err());
+    let mut steps = 0;
+    while !builder.ready() {
+        builder.step(&pixels).unwrap();
+        steps += 1;
+    }
+    assert!((16..=25).contains(&steps), "bounded mass/entry/alias operations: {steps}");
+    let map = builder.finish().unwrap();
+    for ((entry, color), (pdf, threshold, alias)) in map.texels().iter().zip(colors).zip(expected) {
+        assert_eq!(entry.rgb, [color; 3]);
+        assert_eq!((entry.pdf.to_bits(), entry.threshold.to_bits(), entry.alias), (pdf, threshold, alias));
+    }
+}
+
+#[test]
+fn alias_pair_has_independent_spherical_cell_and_within_cell_distribution() {
+    let colors = [0.0, 0.0, 1.0, 4.0, 9.0, 0.0, 2.0, 8.0];
+    let map = PreparedEnvironment::new(4, 2, colors.into_iter().map(|v| [v; 3]).collect(), &CancelToken::default()).unwrap();
+    let mut counts = [[0usize; 16]; 8];
+    for i in 0..4096 {
+        for j in 0..16 {
+            let (d, rgb, pdf) = map.sample_pair([(f64::from(i) + 0.5) / 4096.0, (f64::from(j) + 0.5) / 16.0]).unwrap();
+            let index = colors.iter().position(|value| [*value; 3] == rgb).unwrap();
+            assert!(rgb[0] > 0.0);
+            assert_eq!(map.evaluate(d).unwrap(), (rgb, pdf));
+            let vertical = if index < 4 { 1.0 - d.z } else { -d.z };
+            let azimuth = d.y.atan2(d.x).rem_euclid(TAU) / (TAU / 4.0) - (index % 4) as f64;
+            counts[index][((vertical * 4.0) as usize).min(3) * 4 + ((azimuth * 4.0) as usize).min(3)] += 1;
+        }
+    }
+    for (index, bins) in counts.into_iter().enumerate().filter(|(i, _)| colors[*i] > 0.0) {
+        let expected = f64::from(colors[index]) / 24.0 / 16.0;
+        for count in bins {
+            assert!((count as f64 / 65536.0 - expected).abs() < 0.0003);
+        }
+    }
+}
+
+#[test]
+fn underflowing_positive_hdr_mass_uses_cpu_uniform_support_without_changing_gpu_entries() {
+    let mut pixels = vec![[1e-38; 3]; 8];
+    pixels[0] = [1e8; 3];
+    let map = PreparedEnvironment::new(4, 2, pixels, &CancelToken::default()).unwrap();
+    assert_eq!(map.texels()[7].pdf, 0.0);
+    assert!(!map.preserves_positive_support);
+    let (d, rgb, pdf) = map.sample_pair([0.75, 0.875]).unwrap();
+    assert_eq!(rgb, [1e-38; 3]);
+    assert_eq!(pdf, (1.0 / (4.0 * PI)) as f32);
+    let u = d.y.atan2(d.x).rem_euclid(TAU) / TAU;
+    let v = d.z.acos() / PI;
+    assert_eq!(map.pdf_at_uv([u, v]).unwrap(), pdf);
+}
+
+#[test]
+fn alias_builder_rejects_hostile_dimensions_before_admission_or_allocation() {
+    for (width, height) in [(0, 1), (2, 0), (1, 2_097_152), (2_097_152, 1), (2049, 1), (2, 1025), (4, 4), (u32::MAX, u32::MAX)] {
+        assert!(EnvironmentBuilder::admitted_bytes(width, height).is_err());
+        assert!(EnvironmentBuilder::new(width, height).is_err());
+    }
+}
+
+#[test]
+fn subnormal_positive_alias_probabilities_keep_gpu_bytes_and_use_cpu_uniform_support() {
+    let mut pixels = vec![[1e-39; 3]; 8];
+    pixels[0] = [1.0; 3];
+    let map = PreparedEnvironment::new(4, 2, pixels, &CancelToken::default()).unwrap();
+    assert!(map.texels()[7].pdf.is_subnormal());
+    assert!(map.texels()[7].threshold.is_subnormal());
+    assert!(!map.preserves_positive_support);
+    let (_, rgb, pdf) = map.sample_pair([0.75, 0.875]).unwrap();
+    assert_eq!(rgb, [1e-39; 3]);
+    assert_eq!(pdf, (1.0 / (4.0 * PI)) as f32);
+}

@@ -31,17 +31,23 @@ pub struct Refusal {
 
 impl Refusal {
     /// The batch reply for a batch refused before its first step: as a failed step's reply,
-    /// with nothing completed, nothing undone and every step not run.
-    pub fn reply(&self, steps: usize) -> Value {
-        json!({
+    /// with nothing completed, nothing undone and every step not run. `rolled_back` is the
+    /// batch's `rollback`: nothing ran, so the design is where the batch started, as a rollback
+    /// that went back leaves it (#10749).
+    pub fn reply(&self, steps: usize, rollback: bool) -> Value {
+        let mut reply = json!({
             "completed": 0,
             "results": [],
             "failed": {"index": self.index, "command": self.command, "error": self.error},
             "undone": 0,
-            "rolled_back": false,
+            "rolled_back": rollback,
             "not_run": (0..steps).collect::<Vec<_>>(),
             "note": "nothing was run: the batch was checked before its first step",
-        })
+        });
+        if let Some(reason) = crate::panels::commands::structured_error(&self.error) {
+            reply["failed"]["panel_error"] = reason;
+        }
+        reply
     }
 }
 
@@ -57,17 +63,42 @@ pub fn check(steps: &[Value], level: ParamCheck, host: &[&str]) -> Option<Refusa
         if host.contains(&id) {
             continue;
         }
-        let Some(spec) = find_command(id) else {
+        if find_command(id).is_none() {
             return Some(Refusal { index, command: Some(id.to_string()), error: EngineError::UnknownCommand(id.to_string()).to_string() });
-        };
+        }
         if level == ParamCheck::Strict
-            && let Some(contract) = spec.contract
-            && let Some(first) = contract.check(step.get("params").unwrap_or(&Value::Null)).into_iter().next()
+            && let Some(refusal) = contract_refusal(index, id, step)
         {
-            return Some(Refusal { index, command: Some(id.to_string()), error: crate::params::bad(id, first.message).to_string() });
+            return Some(refusal);
         }
     }
     None
+}
+
+/// The first of `steps` whose parameters break its command's typed contract, for a runner in
+/// another process that checks the rest itself (the MCP server bridged to an app at
+/// [`ParamCheck::Strict`]): a step naming no command, or one this registry lacks (the app may be
+/// another version), is left to it.
+pub fn contracts(steps: &[Value]) -> Option<Refusal> {
+    steps.iter().enumerate().find_map(|(index, step)| {
+        let id = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)?;
+        contract_refusal(index, id, step)
+    })
+}
+
+/// Step `index`'s refusal when its parameters break the typed contract of its command `id`.
+fn contract_refusal(index: usize, id: &str, step: &Value) -> Option<Refusal> {
+    if crate::panels::commands::is_command(id) {
+        let empty = json!({});
+        let params = step.get("params").filter(|p| !p.is_null()).unwrap_or(&empty);
+        return crate::panels::commands::parse_command(id, params).err().map(|reason| Refusal {
+            index,
+            command: Some(id.into()),
+            error: crate::panels::commands::error_text(reason),
+        });
+    }
+    let first = crate::schema::issues(id, step.get("params").unwrap_or(&Value::Null)).into_iter().next()?;
+    Some(Refusal { index, command: Some(id.to_string()), error: crate::params::bad(id, first.message).to_string() })
 }
 
 #[cfg(test)]
@@ -100,10 +131,13 @@ mod tests {
         let r = check(&steps, ParamCheck::Off, &[]).unwrap();
         assert_eq!((r.index, r.command.as_deref()), (160, Some("solid.extrud")));
         assert!(r.error.starts_with("unknown command `solid.extrud`") && r.error.contains("solid.extrude"), "{}", r.error);
-        let reply = r.reply(steps.len());
-        assert_eq!((reply["completed"].clone(), reply["undone"].clone(), reply["rolled_back"].clone()), (json!(0), json!(0), json!(false)));
+        let reply = r.reply(steps.len(), true);
+        // Nothing ran, so the design is where the batch started (#10749).
+        assert_eq!((reply["completed"].clone(), reply["undone"].clone(), reply["rolled_back"].clone()), (json!(0), json!(0), json!(true)));
         assert_eq!(reply["not_run"].as_array().map(Vec::len), Some(161), "nothing ran");
         assert_eq!(reply["failed"]["index"], 160);
+        // Without `rollback` a batch reports no rollback, as a failure at a step's turn does.
+        assert_eq!(r.reply(steps.len(), false)["rolled_back"], json!(false));
     }
 
     #[test]
@@ -130,5 +164,9 @@ mod tests {
         let mut s = crate::Session { param_check: ParamCheck::Strict, ..crate::Session::default() };
         let at_turn = s.execute("solid.box", &steps[1]["params"]).unwrap_err().to_string();
         assert_eq!(r.error, at_turn);
+        // Another process's runner gets the same refusal, and keeps what it checks itself.
+        assert_eq!(contracts(&steps), Some(r));
+        let theirs = vec![json!({"params": {}}), step("app.only", json!({"x": 1})), step("view.pick", json!({}))];
+        assert_eq!(contracts(&theirs), None);
     }
 }

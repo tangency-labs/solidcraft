@@ -4,7 +4,8 @@ use crate::config::ConfigFaceTarget;
 use crate::{DocError, Document, EmbossFace, FeatureKind, Model, ModelBody, ModelState, PlaneRef, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solidcraft_geom::Plane;
+use solidcore_record::Plane;
+use solidcraft_geom::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -13,12 +14,30 @@ pub struct FaceAnchor {
     pub component: u64,
     pub path: Vec<u64>,
     pub author_path: Vec<u64>,
+    /// Source component to author component at capture, for an independently placed part.
+    /// Body offsets and source geometry remain live; later assembly moves do not reshape it.
+    /// Older attachments without this field retain their live placement relationship.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<crate::Mat>,
     /// Origin and x direction in the exact canonical face plane's coordinates.
     pub coordinates: [f64; 2],
     pub x_axis: [f64; 2],
 }
 
 impl FaceAnchor {
+    /// Re-express a captured context when definitions (not their occurrences) change frames.
+    pub fn reframe_placement(&mut self, author: &crate::Mat, source: &crate::Mat) -> Result<()> {
+        if let Some(placement) = self.placement {
+            let inverse = crate::mat_inverse(source).ok_or_else(|| DocError::Invalid("attached source frame is invalid".into()))?;
+            let placement = crate::mat_mul(&crate::mat_mul(author, &placement), &inverse);
+            if !crate::valid_transfer_matrix(&placement) {
+                return Err(DocError::Invalid("invalid captured face placement".into()));
+            }
+            self.placement = Some(placement);
+        }
+        Ok(())
+    }
+
     pub fn remap_target(
         &mut self,
         features: &std::collections::BTreeMap<u64, u64>,
@@ -47,6 +66,7 @@ impl FaceAnchor {
             || self.path.iter().chain(&self.author_path).any(|id| *id == 0)
             || (self.component == 0 && !self.path.is_empty())
             || (self.component != 0 && self.path.is_empty())
+            || self.placement.as_ref().is_some_and(|m| !crate::valid_transfer_matrix(m))
             || self.coordinates.iter().any(|value| !value.is_finite() || value.abs() > 1e9)
             || self.x_axis.iter().any(|value| !value.is_finite())
             || (self.x_axis[0].hypot(self.x_axis[1]) - 1.).abs() > 1e-6
@@ -70,13 +90,11 @@ impl FaceAnchor {
         }
         let inverse = crate::mat_inverse(&self.author_frame(doc, author)?)
             .ok_or_else(|| DocError::Invalid("attached sketch author frame is invalid".into()))?;
-        let source = EmbossFace {
-            body: self.target.body.clone().into(),
-            at: crate::FacePick(self.target.point),
-            path: self.path.clone(),
-            author_path: self.author_path.clone(),
-        };
-        Ok(crate::mat_mul(&inverse, &source.body_frame(doc, body)?))
+        // Resolve both paths even with a captured placement: a missing or reparented source
+        // must still fail explicitly rather than silently reusing an unrelated definition.
+        let source = EmbossFace::component_frame(doc, self.component, &self.path)?;
+        let relative = self.placement.unwrap_or_else(|| crate::mat_mul(&inverse, &source));
+        Ok(doc.model_body_offset(body).map_or(relative, |offset| crate::mat_mul(&relative, offset)))
     }
 }
 
@@ -112,6 +130,57 @@ impl Document {
         self.resolve_attached_plane_noted(vals, plane, author, state, framed).map(|(plane, _)| plane)
     }
 
+    /// A sketch attached by 0.30.1 to the cap of an extrude (an `extrude_cap` certificate), whose
+    /// cap the SMLib kernel no longer marks as that extrude's after a join (#13323): the attachment
+    /// also stores the cap's history name, a point on it and the plane the sketch was in. The sketch
+    /// keeps that plane when exactly that face is still there: the name finds the face, made by
+    /// the extrude the certificate names, on a body whose certified cap is nowhere else, a saved
+    /// point lies on it, and it still lies in the saved plane. A moved or edited face stays lost.
+    fn old_cap_plane(
+        &self,
+        anchor: &FaceAnchor,
+        name: Option<&str>,
+        at: solidcore_record::Vec3,
+        saved: &Plane,
+        state: &ModelState,
+    ) -> Option<(Plane, Option<String>)> {
+        let target = &anchor.target;
+        let Some(crate::config::FaceCertificate::ExtrudeCap { sketch, high, outer, holes }) = &target.certificate else { return None };
+        if !anchor.path.is_empty() || !anchor.author_path.is_empty() || anchor.placement.is_some() {
+            return None;
+        }
+        let name = name.filter(|n| crate::persistent_name::made_by(crate::naming::strip_piece(n)) == Some(target.origin_feature))?;
+        let body = state.body(&target.body)?;
+        let solid = self.feature(target.origin_feature).is_some_and(|f| matches!(f.kind, FeatureKind::Extrude { thin: None, .. }));
+        if !solid || body.body.is_mesh() || body.definition_name() != target.body || !at.is_finite() {
+            return None;
+        }
+        // The checks below compare the body as built, before its offset: an offset body stays lost.
+        if self.model_body_offset(body).is_some_and(|offset| *offset != crate::IDENTITY) {
+            return None;
+        }
+        // The certified cap must be gone: while some body still has it, the attachment is exact.
+        let certified = |source: &Option<solidcraft_kernel::FaceSource>| {
+            matches!(source, Some(solidcraft_kernel::FaceSource::CertifiedExtrudeCap { producer, sketch: from, high: end, outer: around, holes: inside, .. })
+                if *producer == target.origin_feature && from == sketch && end == high && around == outer && inside == holes)
+        };
+        if state.bodies.iter().any(|other| other.body.face_sources().is_some_and(|sources| sources.iter().any(certified))) {
+            return None;
+        }
+        let indices = self.lineage_face_indices(body, name).ok()?;
+        let tolerance = (body.body.size() * 1e-6).max(1e-6);
+        let same_plane = |index: usize| {
+            body.body.planar_face(index).is_some_and(|face| {
+                face.normal().dot(saved.normal()) > 1. - 1e-8 && (face.origin - saved.origin).dot(saved.normal()).abs() <= tolerance
+            })
+        };
+        if indices.is_empty() || !indices.iter().all(|index| same_plane(*index)) || !crate::name_lookup::locate_on(body, name, at)?.on_point {
+            return None;
+        }
+        let note = format!("the face this sketch sits on was found again by its name `{name}`: its extrude-cap certificate no longer marks it");
+        Some((*saved, Some(note)))
+    }
+
     /// [`Document::resolve_attached_plane`] with the note of an attachment found by fallback
     /// ([`Document::anchored_face_indices`]).
     pub fn resolve_attached_plane_noted(
@@ -127,8 +196,12 @@ impl Document {
                 return Err(DocError::Invalid("attached plane nesting exceeds budget".into()));
             }
             match plane {
-                PlaneRef::Face { anchor: Some(anchor), .. } => {
-                    let (resolved, note) = doc.resolve_face_anchor_noted(anchor, author, state)?;
+                PlaneRef::Face { anchor: Some(anchor), name, at, plane: saved } => {
+                    let found = match doc.resolve_face_anchor_noted(anchor, author, state) {
+                        Ok(found) => found,
+                        Err(error) => doc.old_cap_plane(anchor, name.as_deref(), *at, saved, state).ok_or(error)?,
+                    };
+                    let (resolved, note) = found;
                     *plane = PlaneRef::Custom { plane: resolved };
                     Ok(note)
                 }
@@ -141,7 +214,7 @@ impl Document {
         }
         let mut resolved = plane.clone();
         let note = replace(self, &mut resolved, author, state, 0)?;
-        Ok((self.resolve_plane_in(vals, &resolved, 0, Some(framed))?, note))
+        Ok((self.resolve_plane_in(vals, &resolved, 0, author, Some(framed))?, note))
     }
 }
 
@@ -172,7 +245,43 @@ impl Document {
         author: u64,
         author_path: &[u64],
     ) -> Result<FaceAnchor> {
-        // A construction certificate that names this face alone, else its exact history name.
+        let target = self.flat_face_target(body, index)?;
+        let source = self
+            .anchor_face_plane(body, index, target.certificate.as_ref())
+            .ok_or_else(|| DocError::Invalid("this face has no exact planar source; choose a fixed plane instead".into()))?;
+        let mut anchor = FaceAnchor {
+            target,
+            component: self.model_body_component(body),
+            path: target_path.to_vec(),
+            author_path: author_path.to_vec(),
+            placement: None,
+            coordinates: [0., 0.],
+            x_axis: [1., 0.],
+        };
+        let canonical = map_plane(&anchor.source_to_author(self, author, body)?, &source)?;
+        if picked.normal().dot(canonical.normal()) < 1. - 1e-7 || (picked.origin - canonical.origin).dot(canonical.normal()).abs() > 1e-7 {
+            return Err(DocError::Invalid("picked plane does not match its exact source face".into()));
+        }
+        let delta = picked.origin - canonical.origin;
+        anchor.coordinates = [delta.dot(canonical.x), delta.dot(canonical.y)];
+        anchor.x_axis = [picked.x.dot(canonical.x), picked.x.dot(canonical.y)];
+        // A part built against another component uses that assembly context to define its
+        // own shape. Moving either occurrence later must not move the sketch inside the part.
+        // Root sketches and references inside the same component keep their live placements.
+        if author != 0 && author != anchor.component {
+            let inverse = crate::mat_inverse(&anchor.author_frame(self, author)?)
+                .ok_or_else(|| DocError::Invalid("attached sketch author frame is invalid".into()))?;
+            let source = EmbossFace::component_frame(self, anchor.component, &anchor.path)?;
+            anchor.placement = Some(crate::mat_mul(&inverse, &source));
+        }
+        anchor.validate()?;
+        Ok(anchor)
+    }
+
+    /// A target for flat face `index` of `body` that a rebuild finds again: a construction
+    /// certificate that names this face alone, else its exact history name. What a sketch on a
+    /// face and a print face hold.
+    pub(crate) fn flat_face_target(&self, body: &ModelBody, index: usize) -> Result<ConfigFaceTarget> {
         let certified = body
             .body
             .face_plane(index)
@@ -185,39 +294,24 @@ impl Document {
                 let indices = self.configuration_face_indices(body, &target)?;
                 // A copy a pattern or mirror made on the same body carries its seed's certificate,
                 // which finds the seed's face: the copy is attached by its own history name below.
+                // A face that is no copy, on the plane of the pieces the certificate finds, is
+                // another piece of that face (a piece a later join left bordering another body,
+                // and named after it): the certificate stands for it too (#9465).
                 if !indices.contains(&index) {
-                    return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
+                    let names = crate::naming::names(body);
+                    let copy = names.faces.get(index).is_none_or(|name| crate::persistent_name::is_copy(name));
+                    let all: Vec<usize> = indices.iter().copied().chain([index]).collect();
+                    if copy || self.coplanar_pieces(body, &all, |_| true).is_err() {
+                        return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
+                    }
                 }
                 self.coplanar_pieces(body, &indices, |_| true)?;
                 Ok(target)
             });
-        let target = match certified {
-            Ok(target) => target,
-            Err(error) => match body.body.planar_face(index).and_then(|plane| self.lineage_face_target(body, index, plane.origin)) {
-                Some(target) => target,
-                None => return Err(error),
-            },
-        };
-        let source = self
-            .anchor_face_plane(body, index, target.certificate.as_ref())
-            .ok_or_else(|| DocError::Invalid("this face has no exact planar source; choose a fixed plane instead".into()))?;
-        let mut anchor = FaceAnchor {
-            target,
-            component: self.model_body_component(body),
-            path: target_path.to_vec(),
-            author_path: author_path.to_vec(),
-            coordinates: [0., 0.],
-            x_axis: [1., 0.],
-        };
-        let canonical = map_plane(&anchor.source_to_author(self, author, body)?, &source)?;
-        if picked.normal().dot(canonical.normal()) < 1. - 1e-7 || (picked.origin - canonical.origin).dot(canonical.normal()).abs() > 1e-7 {
-            return Err(DocError::Invalid("picked plane does not match its exact source face".into()));
+        match certified {
+            Ok(target) => Ok(target),
+            Err(error) => body.body.planar_face(index).and_then(|plane| self.lineage_face_target(body, index, plane.origin)).ok_or(error),
         }
-        let delta = picked.origin - canonical.origin;
-        anchor.coordinates = [delta.dot(canonical.x), delta.dot(canonical.y)];
-        anchor.x_axis = [picked.x.dot(canonical.x), picked.x.dot(canonical.y)];
-        anchor.validate()?;
-        Ok(anchor)
     }
 
     /// The faces an attachment stands for, and a note when they were found by fallback.
@@ -230,12 +324,7 @@ impl Document {
     /// is not guessed). It never does while the exact cap is still on another body (profiles
     /// reordered: the bodies swapped names). The note names what changed. Every other identity
     /// stays exact.
-    pub(crate) fn anchored_face_indices(
-        &self,
-        state: &ModelState,
-        body: &ModelBody,
-        target: &ConfigFaceTarget,
-    ) -> Result<(Vec<usize>, Option<String>)> {
+    pub fn anchored_face_indices(&self, state: &ModelState, body: &ModelBody, target: &ConfigFaceTarget) -> Result<(Vec<usize>, Option<String>)> {
         let error = match self.configuration_face_indices(body, target) {
             Ok(indices) => return Ok((indices, None)),
             Err(error) => error,
@@ -378,7 +467,8 @@ impl Document {
 
 pub fn validate_face_anchor_json(value: &Value) -> Result<()> {
     let fields = value.as_object().ok_or_else(|| DocError::Invalid("face anchor must be an object".into()))?;
-    if fields.len() != 6 || fields.keys().any(|key| !["target", "component", "path", "author_path", "coordinates", "x_axis"].contains(&key.as_str()))
+    if !(6..=7).contains(&fields.len())
+        || fields.keys().any(|key| !["target", "component", "path", "author_path", "placement", "coordinates", "x_axis"].contains(&key.as_str()))
     {
         return Err(DocError::Invalid("unknown or missing face anchor fields".into()));
     }
@@ -410,6 +500,15 @@ pub fn validate_face_anchor_json(value: &Value) -> Result<()> {
         }
         if key == "x_axis" && (values[0].as_f64().unwrap_or(0.).hypot(values[1].as_f64().unwrap_or(0.)) - 1.).abs() > 1e-6 {
             return Err(DocError::Invalid("face anchor basis must be normalized".into()));
+        }
+    }
+    if let Some(placement) = fields.get("placement").filter(|v| !v.is_null()) {
+        if placement.as_array().is_none_or(|rows| rows.len() != 4 || rows.iter().any(|row| row.as_array().is_none_or(|row| row.len() != 4))) {
+            return Err(DocError::Invalid("face anchor placement requires a 4x4 matrix".into()));
+        }
+        let matrix: crate::Mat = serde_json::from_value(placement.clone()).map_err(|_| DocError::Invalid("invalid face anchor placement".into()))?;
+        if !crate::valid_transfer_matrix(&matrix) {
+            return Err(DocError::Invalid("face anchor placement must be a finite rigid transform".into()));
         }
     }
     Ok(())
@@ -456,7 +555,7 @@ pub fn validate_face_anchors_json(value: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     fn fixture() -> (Document, ModelBody, usize, Plane) {
         let mut doc = Document::default();
         let kind: FeatureKind =
@@ -521,6 +620,44 @@ mod tests {
         assert!(doc.resolve_face_anchor(&anchor, 0, &state).is_err(), "reused name cannot replace the producer");
     }
     #[test]
+    fn captured_component_placement_is_rigid_and_legacy_anchors_stay_live() {
+        let (mut doc, body, index, picked) = fixture();
+        let author = doc.add_component(Some("Part"), 0).unwrap();
+        let path = doc.first_path(author);
+        let anchor = doc.capture_face_anchor(&body, index, &picked, &[], author, &path).unwrap();
+        assert_eq!(anchor.placement, Some(crate::IDENTITY));
+        let raw = serde_json::to_value(&anchor).unwrap();
+        assert!(validate_face_anchor_json(&raw).is_ok());
+        let restored: FaceAnchor = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(restored, anchor);
+        for placement in [
+            serde_json::json!([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]),
+            serde_json::json!([[2, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]),
+            serde_json::json!([[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]),
+            serde_json::json!([[1, 0, 0, 1], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]),
+            serde_json::json!([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [1e10, 0, 0, 1]]),
+        ] {
+            let mut invalid = raw.clone();
+            invalid["placement"] = placement;
+            assert!(validate_face_anchor_json(&invalid).is_err(), "{invalid}");
+            if let Ok(invalid) = serde_json::from_value::<FaceAnchor>(invalid) {
+                assert!(invalid.validate().is_err());
+            }
+        }
+        let mut legacy = raw;
+        legacy.as_object_mut().unwrap().remove("placement");
+        assert!(validate_face_anchor_json(&legacy).is_ok());
+        let legacy: FaceAnchor = serde_json::from_value(legacy).unwrap();
+        doc.occurrences.iter_mut().find(|o| o.component == author).unwrap().transform[3][0] = 40.;
+        let mut state = ModelState::default();
+        state.bodies.push(body);
+        assert!(doc.resolve_face_anchor(&anchor, author, &state).unwrap().origin.dist(picked.origin) < 1e-9);
+        assert!(doc.resolve_face_anchor(&legacy, author, &state).unwrap().origin.dist(picked.origin - Vec3::X * 40.) < 1e-9);
+        doc.occurrences.clear();
+        assert!(doc.resolve_face_anchor(&anchor, author, &state).is_err(), "a captured context still validates its paths");
+    }
+
+    #[test]
     fn nested_anchor_offset_tracks_source_and_raw_budgets_precede_decode() {
         let (doc, body, index, picked) = fixture();
         let anchor = doc.capture_face_anchor(&body, index, &picked, &[], 0, &[]).unwrap();
@@ -545,7 +682,7 @@ mod tests {
     }
     #[test]
     fn extrude_cap_profile_reordering_never_retargets_an_ordinal_body() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         let mut sketch = solidcraft_sketch::Sketch::new();
         for offset in [0., 30.] {
             let points: Vec<_> = [(0., 0.), (10., 0.), (10., 10.), (0., 10.)]
@@ -638,7 +775,7 @@ mod tests {
     }
     #[test]
     fn warm_root_body_offset_edit_matches_cold_attached_sketch_and_downstream_bounds() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         let (mut doc, _, _, _) = fixture();
         let mut warm = Model::new();
         warm.evaluate(&doc);

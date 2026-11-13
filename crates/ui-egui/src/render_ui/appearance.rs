@@ -1,4 +1,5 @@
 //! Selection-following appearance editor. All mutations use the appearance registry.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, dialogs_appearance, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::{
@@ -22,6 +23,13 @@ pub(super) struct View {
     dirty: bool,
     replace_search: String,
     replacements: Vec<dialogs_appearance::Look>,
+}
+
+#[cfg(test)]
+impl View {
+    pub(super) fn draft(&self) -> Option<&Look> {
+        self.draft.as_ref()
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -69,7 +77,7 @@ fn step_index(step: LookStep) -> usize {
 }
 pub(super) fn targets(app: &SolveApp, step: LookStep) -> Targets {
     let mut targets = Targets::default();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     for selection in &app.session.selection {
         let body = match selection {
             Sel::Body { name } | Sel::Face { body: name, .. } => state.body(name),
@@ -214,7 +222,7 @@ fn ended(response: &egui::Response, ui: &egui::Ui) -> bool {
         || response.changed() && !response.has_focus() && !ui.input(|i| i.pointer.any_down()) && !ui.ctx().egui_wants_keyboard_input()
 }
 
-pub(super) fn scope_label(app: &SolveApp) -> &str {
+pub(in crate::render_workspace) fn scope_label(app: &SolveApp) -> &str {
     app.tr(match app.session.selection.last() {
         Some(Sel::Occurrence { .. }) => "render.pick_component",
         Some(Sel::Face { .. }) => "render.pick_face",
@@ -247,7 +255,7 @@ pub(super) fn reset(app: &mut SolveApp) {
     }
 }
 
-pub(super) fn remove(app: &mut SolveApp) {
+pub(in crate::render_workspace) fn remove(app: &mut SolveApp) {
     let view = &app.render_workspace.view.inspector.selection_appearance;
     let selected = targets(app, view.inspected.unwrap_or(mode_step(view.mode)));
     if let Some(look) = view.draft.clone() {
@@ -258,25 +266,54 @@ pub(super) fn remove(app: &mut SolveApp) {
     }
 }
 
-pub(super) fn footer(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        let enabled = !app.session.selection.is_empty();
-        if ui_kit::icon_label_action(ui, app.tr("render.inspector_save_library"), Some("plus"), enabled, false)
-            .on_hover_text(app.tr_label("Export design library..."))
-            .clicked()
-        {
+pub(in crate::render_workspace) fn remove_is_current(app: &SolveApp) -> bool {
+    let view = &app.render_workspace.view.inspector.selection_appearance;
+    view.draft.is_some()
+        && view.selection == app.session.selection
+        && view.revision == Some(app.session.revision)
+        && view.document.as_ref().is_some_and(|doc| Weak::ptr_eq(doc, &Arc::downgrade(&app.session.doc)))
+}
+
+pub(in crate::render_workspace) fn footer_stacked(app: &SolveApp, ui: &egui::Ui) -> bool {
+    ui_kit::icon_label_width(ui, app.tr("render.inspector_save_library"), Some("plus"), false)
+        + ui.spacing().item_spacing.x
+        + ui_kit::icon_label_width(ui, app.tr("render.inspector_reset"), None, false)
+        > ui.available_width()
+}
+
+pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui, stacked: bool) {
+    let enabled = !app.session.selection.is_empty();
+    let draw_save = |app: &mut SolveApp, ui: &mut egui::Ui| {
+        let label = app.tr("render.inspector_save_library");
+        let response = if ui_kit::icon_label_width(ui, label, Some("plus"), false) > ui.available_width() {
+            ui_kit::icon_action(ui, label, "plus", enabled, false)
+        } else {
+            ui_kit::icon_label_action(ui, label, Some("plus"), enabled, false)
+        };
+        if response.backing_on_hover_text(app.tr_label("Export design library...")).clicked() {
             app.start("library.export");
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui_kit::text_button(ui, app.tr("render.inspector_reset"), enabled).clicked() {
-                reset(app);
-            }
+    };
+    let draw_reset = |app: &mut SolveApp, ui: &mut egui::Ui| {
+        if ui_kit::text_button(ui, app.tr("render.inspector_reset"), enabled).clicked() {
+            reset(app);
+        }
+    };
+    if stacked {
+        ui.vertical(|ui| {
+            draw_save(app, ui);
+            draw_reset(app, ui);
         });
-    });
+    } else {
+        ui.horizontal(|ui| {
+            draw_save(app, ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| draw_reset(app, ui));
+        });
+    }
 }
 
 /// Returns false only when the explicit-target fallback should be shown.
-pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
+pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if app.session.selection.is_empty() {
         app.render_workspace.view.inspector.selection_appearance = View::default();
         return false;
@@ -339,7 +376,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         view.pick_mode = view.mode;
     }
     let selected_targets = targets(app, mode_step(view.mode));
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let result = ui_kit::settings_form(ui, t.form_label_width + t.space_8, |ui| draw(app, ui, &mut view, &selected_targets));
     if let Err(error) = result {
         ui_kit::text(ui, &error, ui_kit::Text::Error("render:appearance:error"));
@@ -372,7 +409,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         ui_kit::text(ui, app.tr("render.inspector_pick_target"), ui_kit::Text::Note("render.inspector_pick_target"));
         return Ok(());
     };
-    let default_color = crate::theme::Tokens::get().body;
+    let default_color = solidcraft_theme::Tokens::get().body;
     let default = Look::custom([default_color.r(), default_color.g(), default_color.b()], 1.0);
     let looks: Vec<_> = chains
         .iter()
@@ -384,7 +421,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
                     selected.items.get(index).filter(|_| !matches!(view.inspected, Some(LookStep::Component | LookStep::Material))).and_then(|item| {
                         match item {
                             Sel::Body { name } | Sel::Face { body: name, .. } => {
-                                app.session.world_state().body(name).and_then(|body| app.session.doc.model_display_look(body))
+                                crate::open_meshing::session_world(&app.session).body(name).and_then(|body| app.session.doc.model_display_look(body))
                             }
                             _ => None,
                         }
@@ -418,7 +455,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
     let mut draft = view.draft.clone().unwrap_or_else(|| from.clone());
     let name = if is_mixed { app.tr("render.tree_mixed").to_owned() } else { from.name.clone() };
     let source = app.tr(if source_step == LookStep::Material { "render.inspector_material" } else { "render.library_in_design" }).to_owned();
-    let used = crate::i18n::format("render.inspector_used_by", &[("count", &count.to_string())]);
+    let used = solidcraft_ui_text::format("render.inspector_used_by", &[("count", &count.to_string())]);
     let replacements = &view.replacements;
     let ids: Vec<_> = (0..replacements.len()).map(|index| index.to_string()).collect();
     let handles: Vec<_> = ids.iter().map(|id| format!("render:appearance:replace:{id}")).collect();
@@ -439,7 +476,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         &used,
         |ui| {
             let response = ui_kit::compact_dropdown_menu(ui, "render_appearance_chain", &source, |ui| {
-                ui.set_min_width(crate::theme::Tokens::get().form_label_width * 3.0);
+                ui.set_min_width(solidcraft_theme::Tokens::get().form_label_width * 3.0);
                 if let Some(step) =
                     ui_kit::look_chain(ui, "render:appearance:chain", chain_labels, chain.each_ref().map(|l| l.as_ref().map(sphere)), selected_step)
                 {
@@ -469,7 +506,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
     }
     let step = view.inspected.unwrap_or(mode_step(view.mode));
     let mut scope = usize::from(view.all_users);
-    let all_label = crate::i18n::format("render.inspector_all_users", &[("count", &count.to_string())]);
+    let all_label = solidcraft_ui_text::format("render.inspector_all_users", &[("count", &count.to_string())]);
     let this_label = app
         .tr(match step {
             LookStep::Face => "render.inspector_this_face",
@@ -498,7 +535,9 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         let editable = step != LookStep::Material && (!edit_targets.items.is_empty() || !edit_targets.components.is_empty());
         ui.add_enabled_ui(editable, |ui| {
             ui_kit::row(ui, app.tr("render.inspector_colour"), |ui| {
-                let response = ui_kit::color_hex_field(ui, &mut draft.color, mixed(&looks, |l| l.color).then(|| app.tr("render.tree_mixed")));
+                let opacity = draft.pbr.is_none().then_some(&mut draft.opacity);
+                let response =
+                    ui_kit::mixed_color_field(ui, &mut draft.color, opacity, mixed(&looks, |l| l.color).then(|| app.tr("render.tree_mixed")));
                 view.dirty |= response.changed();
                 commit |= ended(&response, ui);
             });

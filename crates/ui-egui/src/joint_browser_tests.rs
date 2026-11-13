@@ -10,11 +10,197 @@ use crate::context_menu::{self, Target};
 use crate::scenario::Harness;
 use crate::test_support::click;
 
+/// What `joint_glyphs` paints for the design as it stands.
+fn joint_shapes(h: &Harness) -> Vec<egui::Shape> {
+    let ctx = crate::fonts::test_context();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let cam = h.app.cam;
+    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
+    let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+        let painter = ui.painter().clone();
+        crate::dialogs_assembly::joint_glyphs(&h.app, &painter, &proj);
+    });
+    out.textures_delta.clear();
+    out.shapes.into_iter().map(|clipped| clipped.shape).collect()
+}
+
+/// How many circles of this radius and rim width are painted.
+fn circles(shapes: &[egui::Shape], radius: f32, width: f32) -> usize {
+    shapes.iter().filter(|s| matches!(s, egui::Shape::Circle(c) if c.radius == radius && c.stroke.width == width)).count()
+}
+
+/// The default style is the ring and axis from before badges: a ring with a dot on the moving
+/// joint and a square on the rigid one, whatever Highlight moving joints says. In a badge style a
+/// moving joint's badge has the wide rim and a rigid one the thin rim, until Highlight moving
+/// joints is off.
+#[test]
+fn joint_styles_draw_badges_or_the_old_ring_and_axis() {
+    let mut h = harness();
+    assert_eq!(h.app.preferences.joint_symbols, crate::dialogs_assembly::RING_AND_AXIS);
+    for highlight in [true, false] {
+        h.app.preferences.highlight_moving_joints = highlight;
+        let shapes = joint_shapes(&h);
+        assert_eq!(circles(&shapes, 3.5, 1.5), 1, "a dot on the hinge's ring");
+        assert_eq!(shapes.iter().filter(|s| matches!(s, egui::Shape::Rect(_))).count(), 1, "a square for the rigid joint");
+        assert!(shapes.iter().all(|s| !matches!(s, egui::Shape::Circle(c) if c.radius >= 9.0)), "and no badge");
+    }
+
+    h.app.preferences.joint_symbols = 1;
+    h.app.preferences.highlight_moving_joints = true;
+    let shapes = joint_shapes(&h);
+    assert_eq!((circles(&shapes, 13.0, 2.0), circles(&shapes, 13.0, 1.0)), (1, 1), "the hinge glows and the rigid joint is quiet");
+
+    h.app.preferences.highlight_moving_joints = false;
+    assert_eq!(circles(&joint_shapes(&h), 13.0, 2.0), 2, "off, both draw alike");
+
+    h.app.preferences.joint_symbols = 6;
+    assert_eq!(circles(&joint_shapes(&h), 5.0, 1.5), 2, "dots in place of badges");
+}
+
+/// Every joint type draws something, and no two types share a pictogram.
+#[test]
+fn every_joint_type_has_its_own_symbol() {
+    use solidcraft_engine::doc::joints::JointKind;
+    let types = crate::dialogs_assembly::TYPES;
+    let symbols: Vec<_> = types.iter().map(|t| crate::joint_symbols::symbol(JointKind::parse(t).unwrap())).collect();
+    for (i, (name, symbol)) in types.iter().zip(&symbols).enumerate() {
+        assert!(symbol.lines.iter().all(|line| line.len() > 1) && !symbol.lines.is_empty(), "{name} draws nothing");
+        assert!(symbols.iter().skip(i + 1).all(|other| other != symbol), "{name} shares its symbol");
+    }
+}
+
+/// Which joints draw bright: those that let their parts move, and once limits stop all a pair's
+/// freedom, only the joints with the limits.
+#[test]
+fn bright_joints_are_the_ones_that_let_their_parts_move() {
+    use solidcraft_engine::doc::joints::{Joint, JointKind};
+    use std::collections::BTreeMap;
+    let h = harness();
+    let template = h.app.session.doc.assembly.joints[0].clone();
+    let (ground, part, other) = (template.a.occurrence, template.b.occurrence, u64::MAX);
+    let joint = |id: u64, kind: JointKind, limits: usize| {
+        let mut j: Joint = template.clone();
+        (j.id, j.kind, j.suppressed) = (id, kind, false);
+        j.limits = vec![Some((-1.0, 1.0)); limits];
+        j
+    };
+    let dof = |n: usize| BTreeMap::from([(ground, 0), (part, n), (other, n + 1)]);
+    let bright = |joints: &[Joint], n: usize| crate::joint_symbols::bright_joints(joints, &dof(n), &BTreeMap::new()).into_iter().collect::<Vec<_>>();
+    let (one, two) = (joint(1, JointKind::Parallel, 0), joint(2, JointKind::PointOnPlane, 0));
+
+    assert_eq!(bright(&[one.clone(), two.clone()], 1), [1, 2], "a free axis is left: both still glow");
+    assert_eq!(bright(&[one.clone(), two.clone(), joint(3, JointKind::PointOnLine, 0)], 0), Vec::<u64>::new(), "fully held: all go quiet");
+    assert_eq!(bright(&[one.clone(), two.clone(), joint(3, JointKind::PointOnLine, 1)], 1), [3], "the limit takes the free axis");
+    assert_eq!(bright(&[one.clone(), two.clone(), joint(3, JointKind::PointOnLine, 1)], 2), [1, 2, 3], "an axis is left unstopped");
+    assert_eq!(bright(&[one.clone(), joint(3, JointKind::PointOnLine, 1)], 0), Vec::<u64>::new(), "a limit doesn't glow on a held part");
+    assert_eq!(bright(&[joint(1, JointKind::Rigid, 0)], 1), Vec::<u64>::new(), "a rigid joint moves with its parts, it doesn't move them");
+
+    // A limit on the joint to a third part says nothing about this pair.
+    let mut beyond = joint(3, JointKind::Revolute, 1);
+    (beyond.a.occurrence, beyond.b.occurrence) = (part, other);
+    assert_eq!(bright(&[joint(1, JointKind::Slider, 0), beyond], 1), [1, 3]);
+
+    let mut off = joint(1, JointKind::Slider, 0);
+    off.suppressed = true;
+    assert_eq!(bright(&[off], 1), Vec::<u64>::new());
+
+    // Parts locked together are quiet however much they move as one in the world.
+    let pair = (ground.min(part), ground.max(part));
+    let locked = crate::joint_symbols::bright_joints(&[joint(1, JointKind::Slider, 0)], &dof(2), &BTreeMap::from([(pair, 0)]));
+    assert!(locked.is_empty(), "the pair's own freedom decides, not the world's");
+}
+
+/// A slider that another joint locks goes quiet though both of its parts still ride on a moving
+/// axis, as a spindle plate locked to a carriage does: they have freedom in the world, but none
+/// against each other.
+#[test]
+fn parts_locked_together_on_a_moving_axis_go_quiet() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| h.app.run(id, p).unwrap());
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Axis", "a": "A:1", "b": "B:1", "at": {"point": [30, 10, 5]}})).unwrap();
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Second", "a": "B:1", "b": "C:1", "at": {"point": [60, 10, 5]}})).unwrap();
+    h.frames(2);
+    let [axis, second] = ["Axis", "Second"].map(|name| id(&h, name));
+    let bright = |h: &Harness| crate::joint_symbols::bright(&h.app.session).iter().copied().collect::<Vec<_>>();
+    assert_eq!(bright(&h), [axis, second], "each slider moves its part against the other");
+
+    h.app.run("joint.as_built", json!({"type": "rigid", "name": "Lock", "a": "B:1", "b": "C:1", "at": {"point": [60, 10, 2]}})).unwrap();
+    h.frames(2);
+    let solved = solidcraft_engine::doc::joints::solve(&h.app.session.doc, &h.app.session.model.state());
+    let c = occurrence(&h, "C:1");
+    assert_eq!(solved.dof.get(&c), Some(&1), "C still rides on the first axis");
+    assert_eq!(bright(&h), [axis], "and it is locked to B, so their slider has nothing left to do");
+}
+
+/// The answer comes from the solver, and stays until the construction changes.
+#[test]
+fn the_bright_joints_follow_the_design() {
+    let mut h = harness();
+    let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
+    let bright = |h: &Harness| crate::joint_symbols::bright(&h.app.session).iter().copied().collect::<Vec<_>>();
+    assert_eq!(bright(&h), [hinge], "the hinge turns B, and the rigid Glue draws quiet");
+    h.app.run("joint.drive", json!({"joint": "Hinge", "value": 30})).unwrap();
+    assert_eq!(bright(&h), [hinge], "driving it changes no construction");
+    h.app.run("joint.edit", json!({"joint": "Hinge", "suppressed": true})).unwrap();
+    assert!(bright(&h).is_empty());
+    assert!(crate::joint_symbols::bright(&h.app.session).get(&glue).is_none());
+}
+
+/// A limit picks which of a pair's joints draw bright, so setting one changes the bright joints
+/// though the construction, and so the solve, stays. Moving the parts keeps the model geometry
+/// the solve was made on.
+#[test]
+fn a_new_limit_changes_the_bright_joints_without_a_new_construction() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30)], |id, p| h.app.run(id, p).unwrap());
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Rail", "a": "A:1", "b": "B:1", "at": {"point": [30, 10, 5]}})).unwrap();
+    h.app.run("joint.as_built", json!({"type": "cylindrical", "name": "Rod", "a": "A:1", "b": "B:1", "at": {"point": [30, 10, 5]}})).unwrap();
+    h.frames(2);
+    let [rail, rod] = ["Rail", "Rod"].map(|name| id(&h, name));
+    let bright = |h: &Harness| crate::joint_symbols::bright(&h.app.session).iter().copied().collect::<Vec<_>>();
+    assert_eq!(bright(&h), [rail, rod], "B slides on both, and nothing stops it");
+
+    let geometry = h.app.session.model.state();
+    h.app.run("joint.drive", json!({"joint": "Rail", "value": 5})).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&geometry, &h.app.session.model.state()), "moving a part keeps the model geometry");
+
+    h.app.run("joint.limits", json!({"joint": "Rail", "min": -10, "max": 10})).unwrap();
+    assert_eq!(bright(&h), [rail], "the rail's limit now shapes the slide, and the rod goes quiet");
+    h.app.run("joint.limits", json!({"joint": "Rail"})).unwrap();
+    assert_eq!(bright(&h), [rail, rod], "cleared, both are bright again");
+}
+
+/// A motion link holds its driven value inside that joint's limits. Pushed against one, the
+/// driven joint can't move its parts, so it goes quiet; clearing the limit frees it again. That
+/// limit changes how free the parts are, so a new solve finds it.
+#[test]
+fn a_limit_that_holds_a_linked_joint_changes_how_free_its_parts_are() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| h.app.run(id, p).unwrap());
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Drive", "a": "A:1", "b": "B:1", "at": {"point": [30, 10, 5]}})).unwrap();
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Follow", "a": "B:1", "b": "C:1", "at": {"point": [60, 10, 5]}})).unwrap();
+    h.app.run("joint.motion_link", json!({"a": "Drive", "b": "Follow", "ratio": 1, "offset": 50})).unwrap();
+    h.frames(2);
+    let [drive, follow] = ["Drive", "Follow"].map(|name| id(&h, name));
+    let bright = |h: &Harness| crate::joint_symbols::bright(&h.app.session).iter().copied().collect::<Vec<_>>();
+    assert_eq!(bright(&h), [drive, follow], "the drive moves B, and through the link C against B");
+
+    h.app.run("joint.limits", json!({"joint": "Follow", "min": -10, "max": 10})).unwrap();
+    assert_eq!(bright(&h), [drive], "the link pushes Follow to its stop, so C no longer moves against B");
+    h.app.run("joint.limits", json!({"joint": "Follow"})).unwrap();
+    assert_eq!(bright(&h), [drive, follow], "cleared, the link moves C again");
+}
+
 /// Components A (grounded) and B joined by a revolute "Hinge", and C held by a rigid "Glue".
 fn harness() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
     h.app.ui.show_browser = true;
+    // The tests read the Joints folders inside placements, which start closed (#9274).
+    h.app.preferences.browser_components_open = true;
     crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| h.app.run(id, p).unwrap());
     h.app
         .run("joint.create", json!({"type": "revolute", "name": "Hinge", "a": {"occurrence": "A:1", "face": [10, 10, 10]}, "b": {"occurrence": "B:1", "face": [40, 10, 0]}}))
@@ -28,6 +214,11 @@ fn harness() -> Harness {
 
 fn id(h: &Harness, name: &str) -> u64 {
     h.app.session.doc.assembly.joints.iter().find(|j| j.name == name).unwrap().id
+}
+
+/// The id of the occurrence named `name`, such as "C:1".
+fn occurrence(h: &Harness, name: &str) -> u64 {
+    h.app.session.doc.occurrences.iter().find(|o| o.name == name).unwrap().id
 }
 
 fn drawn(h: &Harness) -> Vec<(u64, bool)> {
@@ -87,6 +278,28 @@ fn a_hidden_joint_still_drives_and_shows_while_picked() {
 }
 
 #[test]
+fn hovering_a_joint_row_lights_its_glyph_until_the_pointer_leaves() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let row = crate::scenario::handle_at("row:Hinge").unwrap();
+    h.step(&json!({"move": [row.x, row.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, Some(hinge));
+    assert!(h.app.tree.picked_joints.is_empty(), "hovering doesn't pick");
+    // Lit as a hovered body's edges are: the dark core over the light halo.
+    let t = solidcraft_theme::Tokens::get();
+    let strokes = |h: &Harness, picked| crate::dialogs_assembly::glyph_strokes(&h.app, hinge, picked, false);
+    let (core, rim) = strokes(&h, false);
+    assert_eq!((core.color, rim.map(|r| r.color)), (t.hover_edge, Some(t.hover_edge_halo)));
+    assert!(rim.unwrap().width > core.width);
+    // Picked, it takes the selection's core and rim, hovered or not.
+    let (core, rim) = strokes(&h, true);
+    assert_eq!((core.color, rim.map(|r| r.color)), (t.sel_edge, Some(t.sel_edge_rim)));
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, None);
+    assert_eq!(strokes(&h, false), (egui::Stroke::new(1.5, t.accent), None), "an unlit glyph has no rim");
+}
+
+#[test]
 fn the_menu_and_the_v_key_hide_and_show_picked_joints() {
     let mut h = harness();
     let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
@@ -107,6 +320,76 @@ fn the_menu_and_the_v_key_hide_and_show_picked_joints() {
     assert!(!h.app.session.joint_visible(hinge) && !h.app.session.joint_visible(glue));
     context_menu::toggle_visibility(&mut h.app);
     assert!(h.app.session.joint_visible(hinge) && h.app.session.joint_visible(glue));
+}
+
+/// Each placement has a Joints folder listing the joints that attach it, beside the placement
+/// each joins it to (#9130). Its rows are the root folder's joints: a click picks, the eye
+/// hides, a double-click edits and the menu acts on the same joint.
+#[test]
+fn each_placement_lists_the_joints_that_attach_it() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let occ = |h: &Harness, name: &str| h.app.session.doc.occurrences.iter().find(|o| o.name == name).unwrap().id;
+    let (a, b, c) = (occ(&h, "A:1"), occ(&h, "B:1"), occ(&h, "C:1"));
+    let listed = |h: &Harness, o: u64| -> Vec<(String, String)> {
+        crate::dialogs_assembly::placement_joints(&h.app.session.doc, &[o]).iter().map(|j| (j.name.clone(), j.other.clone())).collect()
+    };
+    let pair = |n: &str, o: &str| (n.to_string(), o.to_string());
+    assert_eq!(listed(&h, a), [pair("Hinge", "B:1"), pair("Glue", "C:1")]);
+    assert_eq!(listed(&h, b), [pair("Hinge", "A:1")]);
+    assert_eq!(listed(&h, c), [pair("Glue", "A:1")]);
+    // Remembered for the design as it is: a joint renamed is listed by its new name.
+    h.app.run("joint.edit", json!({"joint": "Glue", "name": "Weld"})).unwrap();
+    assert_eq!(listed(&h, c), [pair("Weld", "A:1")], "the listing follows the edited design");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(listed(&h, c), [pair("Glue", "A:1")]);
+
+    // The folders start closed: only the root's lists rows.
+    let rows = |label: &str| crate::browser::drawn_rows().into_iter().filter(|r| r.0 == label).map(|r| r.1.center().y).collect::<Vec<_>>();
+    assert_eq!(rows("Joints").len(), 4, "the root's Joints folder and one per placement");
+    assert_eq!(rows("Hinge").len(), 1);
+
+    // Opened, B's folder lists Hinge a second time, below the root's.
+    h.app.tree.expanded.insert(format!("o:{b}/joints"));
+    h.frames(3);
+    let hinges = rows("Hinge");
+    assert_eq!(hinges.len(), 2);
+    assert_eq!(rows("Glue").len(), 1, "Glue doesn't attach B");
+    let at = crate::scenario::handle_at("row:Hinge").unwrap();
+    assert_eq!(at.y, hinges[1], "the row clicked below is B's");
+    // Hovering B's row lights the glyph as the root's row does.
+    h.step(&json!({"move": [at.x, at.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, Some(hinge));
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, None);
+
+    h.step(&json!({"click": {"handle": "row:Hinge"}, "double": true})).unwrap();
+    h.frames(3);
+    let editing = match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Joint(f))) => f.editing,
+        _ => None,
+    };
+    assert_eq!(editing, Some(hinge), "a double click edits the joint");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(3);
+    assert!(h.app.dialog.is_none());
+
+    h.app.tree.picked_joints.clear();
+    click(&mut h, "row:Hinge");
+    assert_eq!(h.app.tree.picked_joints, [hinge]);
+    click(&mut h, "eye:Hinge");
+    assert!(!h.app.session.joint_visible(hinge), "B's eye hides the joint itself");
+    click(&mut h, "eye:Hinge");
+    assert!(h.app.session.joint_visible(hinge));
+
+    // Its menu is the joint's: Delete removes Hinge, and B, which nothing joins now, has no folder.
+    h.step(&json!({"click": {"handle": "row:Hinge"}, "button": "right"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"widget": "Delete"})).unwrap();
+    h.frames(3);
+    assert!(h.app.session.doc.assembly.joints.iter().all(|j| j.id != hinge));
+    assert!(listed(&h, b).is_empty());
+    assert_eq!(rows("Joints").len(), 3, "the root's, A's and C's");
 }
 
 mod delete {
@@ -339,5 +622,27 @@ mod delete {
         assert_eq!(features(&h), before);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
+    }
+}
+
+/// Edit Joint Limits has its own id, so `ui.menuPick` tells it from Edit Joint, and it opens the
+/// joint's dialog on its Limits (#10745).
+#[test]
+fn edit_joint_limits_opens_the_limits_and_has_its_own_id() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let items = context_menu::items(&h.app, &Target::Joint { id: hinge });
+    let ids = |label: &str| items.iter().filter(|i| i.label == label).map(|i| i.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids("Edit Joint"), ["ui.editJoint"]);
+    assert_eq!(ids("Edit Joint Limits"), ["ui.editJointLimits"]);
+
+    for (item, limits) in [("ui.editJoint", false), ("ui.editJointLimits", true)] {
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(2);
+        h.call("ui.menu", json!({"x": 150, "y": 400, "target": {"type": "joint", "id": hinge}}));
+        assert_eq!(h.call("ui.menuPick", json!({"item": item}))["ok"], true, "{item}");
+        h.frames(3);
+        assert!(h.app.dialog.is_some(), "{item} opens the joint's dialog");
+        assert_eq!(h.widget("Angle limits").is_some(), limits, "{item}: the Limits section open");
     }
 }

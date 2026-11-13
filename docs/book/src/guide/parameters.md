@@ -6,12 +6,22 @@ are ones you add yourself, with a unit, an expression and an optional comment. C
 uses them.
 
 When creating or editing a sketch dimension, its value editor shows its model parameter
-name (`d1`, `d2`, …). Click another driving dimension to use its name: when the value is
-just a number (such as `10` or `10 mm`) the name replaces it; otherwise it goes in at the
-cursor, replacing selected text and keeping what you typed, so typing `10 + ` and clicking
-`d1` gives `10 + d1`. Add arithmetic such as `/ 2` to build a dependent dimension. Press **Enter** to apply
-the expression or **Escape** to cancel the edit.
+name (`d1`, `d2`, …). Double-click another dimension to edit it: the current value is applied,
+as **Enter** does (if it is not valid, the box stays open with its error), and the clicked
+dimension opens with its value selected. Single-click another driving dimension to insert its
+name: when the value is just a number (such as `10` or `10 mm`) the name replaces it; otherwise
+it goes in at the cursor, replacing selected text and keeping what you typed, so typing `10 + `
+and clicking `d1` gives `10 + d1`. The name goes in a moment after the click, once it is clear
+the click was not the first of a double-click. Add arithmetic such as `/ 2` to build a dependent
+dimension. Press **Enter** to apply the expression or **Escape** to cancel the edit.
 Add and edit user parameters through the existing **Change Parameters** command.
+
+<img class="dark-ui" src="../media/parameters/dialog.png" alt="The Parameters dialog, numbered 1 to 5">
+<img class="light-ui" src="../media/parameters/dialog.light.png" alt="The Parameters dialog, numbered 1 to 5">
+
+**1** Apply each change as you leave its field · **2** User parameters, and **Add parameter** ·
+**3** Model parameters, grouped by the sketch or feature they belong to · **4** An expression ·
+**5** The value it works out to
 
 ## Naming a value as you type it
 
@@ -40,6 +50,11 @@ In the MANAGE tab's PARAMETERS section, click **Parameters** to open the user an
 parameter editor. The **Configurations** button in CONFIGURATIONS opens the configuration table;
 **Configure** remains in the dropdown for configuring columns.
 
+The **Filter** box lists the parameters whose name, expression, comment or group contains what
+you type, in any case. It also finds a name by the starts of its words, in order: `toodia`,
+`toofla` and `outdia` all find `tooth_outward_flange_diameter`. Underscores, hyphens and
+camelCase (`boltHoleDepth`) separate the words. Autocomplete offers parameters the same way.
+
 Press **Enter** in the new parameter's name, expression or comment field to add it.
 Valid entries return focus to the name field for the next parameter; invalid entries remain
 editable. In expression fields, type a parameter or dimension name for autocomplete,
@@ -60,13 +75,14 @@ or **Alt/Option** for 0.1. The mouse wheel over the focused field does the same,
 and the preview follows each step. An expression such as `width / 2` is left as typed.
 
 Expressions are unit-aware: `2 * width + 5 mm`, `angle / 2`, `sqrt(area)`, `1 in + 3 mm`, using
-`+ - * / ^`, parentheses, `sin cos tan asin acos atan atan2 sqrt abs min max floor ceil round mod
-trunc` and unit conversion. A number and the unit after it are one value: `10 mm / 2 mm` is 5
+`+ - * / ^ %`, parentheses, `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh sqrt
+abs sign min max floor ceil round trunc mod exp ln log log10 pow hypot` (`log` is base 10) and unit
+conversion. A number and the unit after it are one value: `10 mm / 2 mm` is 5
 and `90 deg / 1 rad` is π/2, and a fraction of numbers before a unit is one value too (`1/2 in`
 is half an inch; after a `/` only written without spaces: `1 in / 1/2 in` is 2, while
-`width / 10 / 2 mm` divides by 10 and then by 2 mm). A decimal comma works too, outside parentheses: `2,5 mm` is
-`2.5 mm` (inside a function's parentheses the comma separates its arguments, so write
-`max(2.5, 3)` there). A mixed number is one value, as imperial sizes are written: `2 1/8"` and
+`width / 10 / 2 mm` divides by 10 and then by 2 mm). A decimal comma works too: `2,5 mm` is
+`2.5 mm`, and `-(width-0,5)/2` is `-(width-0.5)/2` (directly in a function's parentheses the
+comma separates its arguments, so write `max(2.5, 3)` there). A mixed number is one value, as imperial sizes are written: `2 1/8"` and
 `3 7/16 in` are 2.125 in and 3.4375 in (a whole number, a space, then a proper fraction of whole
 numbers). A length where an angle is expected (or the other way round) is an
 error, not a silent conversion. Cycles are reported with their path (`a → b → a`), renaming a
@@ -75,9 +91,13 @@ in use can't be deleted (the error lists its users).
 
 The design's units (Document Settings in the browser: mm, cm, m, in or ft) set how a bare number
 or unitless arithmetic expression typed into a length field is read. In an inch design `0.25`
-and `1 / 4` mean 0.25 in. Operation dialogs start with lengths in the design's units, including
-secondary distances, wall thicknesses, gaps, offsets and radii. Canvas handles and live sketch
-values use the same units as the operation. Angles, counts and scale factors keep their own
+and `1 / 4` mean 0.25 in. A new user parameter given no unit (`parameters.add` or
+`parameters.import` without `unit`) is a length in the design's units, as the Parameters dialog
+makes it: `40/2` is 20 in. Operation dialogs start with lengths in the design's units, including
+secondary distances, wall thicknesses, gaps, offsets and radii. One is the exception: a new Solid
+Fillet's radius opens at the 2 mm the tool ships with, shown in the design's units ("0.07874 in" in
+an inch design), because a radius is bound by the faces beside its edges. Canvas handles and live
+sketch values use the same units as the operation. Angles, counts and scale factors keep their own
 units. Preferences selects the default units for new designs; existing designs use their own
 Document Settings.
 
@@ -88,6 +108,13 @@ an unchanged field cannot reinterpret it. Computed sizes and tolerances keep the
 precision when written back into editable fields, independently of display precision.
 
 Parameters export to and import from CSV or JSON (`parameters.export`, `parameters.import`).
+In a CSV, a value that a spreadsheet would run as a formula is written with a `'` before it, so the
+spreadsheet shows it as text. That is a value that starts with `=`, `+`, `-` or `@`, their full-width
+forms, a tab or a line break, after any spaces and `'`; a plain number such as `-5` is left as it is.
+The import takes the `'` off again. A spreadsheet that saves the file again as CSV can drop the `'`
+(Excel does), so export again from SolidCraft instead of passing that file on. Earlier versions of
+SolidCraft wrote every value unchanged, so in a CSV from one of them, a value whose first character
+really was a `'` typed before a formula character (`'=x`) now imports without it (`=x`).
 **Configurations** (`config.*`) keep a table of rows, each with its own parameter values and
 suppressed features, physical materials and body appearances, switched with `config.activate`.
 The table's Library picker selects material or appearance values. Choose **Follow material**
@@ -112,3 +139,21 @@ time and what changed from the design as it is now: features that fail (`failed`
 (`joints_flipped`, more than 90°), sketch planes that turned over (`sketches_flipped`) and sketch
 solves that fail or only hold by flipping a triangle's turn or an offset's side (`sketches_failed`).
 `summary` counts the values that show each.
+
+Use **Compare Parameter Variants** when several parameters must change together. Each
+named variant starts from the same open design, so values from one variant never carry
+over to the next. For example, compare a pair of bracket sizes:
+
+```json
+{"command": "inspect.parameter_variants", "params": {"variants": [
+  {"name": "Compact", "set": {"Width": "40 mm", "Thickness": "4 mm"}},
+  {"name": "Wide", "set": {"Width": "60 mm", "Thickness": "6 mm"}}
+]}}
+```
+
+The command accepts up to 12 variants with up to 16 existing parameters each. It returns
+the baseline's volume, mass and body counts, then one result per variant in input order.
+The result reports new feature, joint or sketch regressions using the same checks as
+Parameter Sweep. A refused expression is an error for that variant; later variants still
+run. A variant with a rebuild regression has no metrics. Open bodies do not count toward
+volume or mass. The design and its undo history are unchanged.

@@ -1,0 +1,44 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#759"
+ ],
+ "what": "a window 240 deg round the saddle-shaped inner wall of a torus (R20, r8) between z = -3 and 3, its cut faces taken off, patched g1 and stitched",
+ "source": "invariants",
+ "method": "the box x -6..13, y -13..13, z -3..3 opens the inner wall where 12 cos a >= -6 (|a| <= 120 deg): its rim is two arcs on z = +-3 each way and two curves on x = -6, and it bounds no height field. G1: the fill's tangent plane is the torus's all round the rim. The fill's shape is its own: one closed valid solid is the right answer.",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1",
+  "edges": [
+   [
+    6.417783810682518,
+    -10.789476030783234,
+    -3
+   ],
+   [
+    6.417783810682518,
+    10.789476030783234,
+    -3
+   ],
+   [
+    6.417783810682518,
+    10.789476030783234,
+    3
+   ],
+   [
+    6.417783810682518,
+    -10.789476030783234,
+    3
+   ],
+   [
+    -6,
+    10.39230584418982,
+    0
+   ],
+   [
+    -6,
+    -10.39230584418982,
+    0
+   ]
+  ]
+ }
+}

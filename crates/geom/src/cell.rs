@@ -29,7 +29,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::paper::MAX_COORDINATE_MM;
-use crate::{Aabb2, EPS, Vec2};
+use crate::{Aabb2, EPS};
+use solidcore_record::Vec2;
 
 /// The most parts a cell's content may have.
 pub const MAX_PARTS: usize = 64;
@@ -188,7 +189,7 @@ impl Fit {
 
 /// The Unicode blocks of the scripts written in wide characters (Chinese, Japanese, Korean and Yi),
 /// with their full-width and vertical forms.
-const WIDE: [(u32, u32); 15] = [
+const WIDE: &[(u32, u32)] = &[
     (0x1100, 0x115F),
     (0x2E80, 0x303E),
     (0x3041, 0x33FF),

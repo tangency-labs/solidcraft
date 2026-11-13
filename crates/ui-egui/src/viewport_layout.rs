@@ -1,17 +1,26 @@
 //! Floating controls reserve drawing space without changing rendering or picking projection.
-use egui::{Rect, pos2, vec2};
-use solidcraft_engine::geom::{Aabb3, Vec3};
-use solidcraft_engine::render::Camera;
+use egui::{Pos2, Rect, pos2, vec2};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_viewport::Camera;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Layout {
     pub viewport: Rect,
     pub drawable: Rect,
+    /// The view without the panels (Browser, Assistant, workspace panels), but still counting
+    /// the floating controls as drawn over it: where a fit puts the middle of the model. The
+    /// compass and the navigation bar take room out of `drawable` without moving this.
+    pub middle: Rect,
     pub content: Rect,
     pub axis_view: Rect,
     pub navigation: Rect,
     /// OK and Cancel in the view's corner (#6709), or nothing while they are not shown.
     pub confirm: Rect,
+    /// Full bounded contour for the opt-in host. Legacy layouts keep their
+    /// existing rectangle policy; rendering always uses `viewport`.
+    pub usable: Option<crate::panel_runtime::HostUsableRegion>,
 }
 
 /// How far the OK and Cancel pair sits in from the content's top right corner, and the space
@@ -20,13 +29,49 @@ const CORNER_INSET: f32 = 8.0;
 const CORNER_GAP: f32 = 4.0;
 
 /// Enumerate rectangles whose edges meet the viewport or a bounded number of overlays.
+///
+/// The answer for the same view and overlays is remembered: the search is quartic in their
+/// edges, and it ran several times at every frame (each pointer move) with the same inputs.
 pub(crate) fn free_rect(view: Rect, obstacles: &[Rect]) -> Rect {
+    let key = |r: &Rect| [r.min.x, r.min.y, r.max.x, r.max.y].map(f32::to_bits);
+    let wanted: Vec<[u32; 4]> = std::iter::once(&view).chain(obstacles).map(key).collect();
+    if let Some(found) = FREE_RECTS.with(|c| c.borrow().iter().find(|(k, _)| *k == wanted).map(|(_, r)| *r)) {
+        return found;
+    }
+    let found = free_rect_search(view, obstacles);
+    FREE_RECTS.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= FREE_RECTS_KEPT {
+            c.remove(0);
+        }
+        c.push((wanted, found));
+    });
+    found
+}
+
+/// How many [`free_rect`] answers are remembered (a frame asks for a few).
+const FREE_RECTS_KEPT: usize = 8;
+
+thread_local! {
+    /// [`free_rect`]'s recent answers, by the bits of its view and overlays.
+    static FREE_RECTS: std::cell::RefCell<Vec<(Vec<[u32; 4]>, Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn free_rect_search(view: Rect, obstacles: &[Rect]) -> Rect {
     if !view.is_finite() || !view.is_positive() {
         return Rect::NOTHING;
     }
     let mut xs = vec![view.left(), view.right()];
     let mut ys = vec![view.top(), view.bottom()];
-    let obstacles: Vec<_> = obstacles.iter().take(16).map(|r| r.intersect(view)).filter(|r| r.is_positive() && r.is_finite()).collect();
+    let obstacles: Vec<_> = obstacles.iter().map(|r| r.intersect(view)).filter(|r| r.is_positive() && r.is_finite()).collect();
+    if obstacles.len() > 16 {
+        let obstacles: Vec<_> = obstacles.iter().copied().map(crate::panel_runtime::logical_rect).collect();
+        return crate::panel_runtime::resolve_usable_region(crate::panel_runtime::logical_rect(view), &obstacles)
+            .ok()
+            .and_then(|region| region.free.into_iter().max_by(|a, b| (a.size.width * a.size.height).total_cmp(&(b.size.width * b.size.height))))
+            .map(crate::panel_runtime::egui_rect)
+            .unwrap_or(Rect::NOTHING);
+    }
     for r in &obstacles {
         xs.extend([r.left(), r.right()]);
         ys.extend([r.top(), r.bottom()]);
@@ -50,6 +95,112 @@ pub(crate) fn free_rect(view: Rect, obstacles: &[Rect]) -> Rect {
 }
 
 impl Layout {
+    /// Place independent controls within the whole contour. No placement step
+    /// changes camera state or reduces the rendering/picking domain.
+    pub fn host(
+        viewport: Rect,
+        usable: &crate::panel_runtime::HostUsableRegion,
+        style: crate::prefs::NavigatorStyle,
+        corner: egui::Vec2,
+        navigation: Rect,
+    ) -> Self {
+        Self::host_with_axis(viewport, usable, style, corner, navigation, true)
+    }
+
+    pub(crate) fn host_with_axis(
+        viewport: Rect,
+        usable: &crate::panel_runtime::HostUsableRegion,
+        style: crate::prefs::NavigatorStyle,
+        corner: egui::Vec2,
+        navigation: Rect,
+        show_axis: bool,
+    ) -> Self {
+        Self::host_impl(viewport, usable, style, corner, navigation, show_axis, None)
+    }
+
+    pub(crate) fn host_with_retained_confirm(
+        viewport: Rect,
+        usable: &crate::panel_runtime::HostUsableRegion,
+        style: crate::prefs::NavigatorStyle,
+        confirm: Rect,
+        navigation: Rect,
+        show_axis: bool,
+    ) -> Self {
+        Self::host_impl(viewport, usable, style, egui::Vec2::ZERO, navigation, show_axis, Some(confirm))
+    }
+
+    fn host_impl(
+        viewport: Rect,
+        usable: &crate::panel_runtime::HostUsableRegion,
+        style: crate::prefs::NavigatorStyle,
+        corner: egui::Vec2,
+        navigation: Rect,
+        show_axis: bool,
+        retained_confirm: Option<Rect>,
+    ) -> Self {
+        use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+        use solidcraft_engine::panels::{Point, Size};
+        let clearance = solidcraft_theme::Tokens::get().space_4;
+        let mut obstacles = usable.obstacles.clone();
+        let navigation = if navigation.is_positive() && navigation.is_finite() && usable.contains_rect(logical_rect(navigation)) {
+            navigation
+        } else {
+            Rect::NOTHING
+        };
+        if navigation.is_positive() {
+            obstacles.push(logical_rect(navigation));
+        }
+        let with_navigation = resolve_usable_region(usable.domain, &obstacles).ok();
+        let confirm = retained_confirm.unwrap_or_else(|| {
+            with_navigation
+                .as_ref()
+                .and_then(|region| {
+                    region.place_footprint(
+                        Size { width: corner.x, height: corner.y },
+                        Point { x: viewport.right() - CORNER_INSET - corner.x / 2.0, y: viewport.top() + CORNER_INSET + corner.y / 2.0 },
+                        clearance,
+                    )
+                })
+                .map(egui_rect)
+                .unwrap_or(Rect::NOTHING)
+        });
+        if confirm.is_positive() && !obstacles.contains(&logical_rect(confirm)) {
+            obstacles.push(logical_rect(confirm));
+        }
+        let before_axis = resolve_usable_region(usable.domain, &obstacles).ok();
+        let extent = super::viewport::axis_view_size(style);
+        let axis_view = before_axis
+            .as_ref()
+            .filter(|_| show_axis)
+            .and_then(|region| {
+                region.place_footprint(
+                    Size { width: extent, height: extent },
+                    Point { x: viewport.right() - extent / 2.0 - clearance, y: viewport.top() + extent / 2.0 + clearance },
+                    clearance,
+                )
+            })
+            .map(egui_rect)
+            .unwrap_or(Rect::NOTHING);
+        if axis_view.is_positive() {
+            obstacles.push(logical_rect(axis_view));
+        }
+        let region = resolve_usable_region(usable.domain, &obstacles).ok();
+        // Compatibility summaries use an existing safe sweep piece. Searching
+        // all spanning rectangles belongs only to an explicit Fit request.
+        let largest_piece = |region: &crate::panel_runtime::HostUsableRegion| {
+            region
+                .free
+                .iter()
+                .max_by(|a, b| (a.size.width * a.size.height).total_cmp(&(b.size.width * b.size.height)))
+                .copied()
+                .map(egui_rect)
+                .unwrap_or(Rect::NOTHING)
+        };
+        let middle = largest_piece(usable);
+        let drawable = region.as_ref().map(largest_piece).unwrap_or(Rect::NOTHING);
+        Self { viewport, drawable, middle, content: viewport, axis_view, navigation, confirm, usable: region }
+    }
+
     /// `corner` is the size of the OK and Cancel pair (#6709; zero while it is not shown): it is
     /// held in the top right corner of the content, and the axis view moves down below it.
     /// `navigation` is the measured rectangle of the navigation bar (nothing while it is hidden).
@@ -62,49 +213,8 @@ impl Layout {
         corner: egui::Vec2,
         navigation: Rect,
     ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, None)
-    }
-
-    /// Render fits stay between the docked panels, including beneath a short Browser card.
-    pub fn product(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-    ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Right))
-    }
-
-    /// Render compass at the free canvas edge beside a left-hand Inspector.
-    pub fn product_left(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-    ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Left))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn build(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-        inspector_side: Option<crate::frame::Side>,
-    ) -> Self {
-        let fit_in_content = inspector_side.is_some();
         let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-        let mut obstacles: Vec<_> = docks.iter().take(14).copied().filter(|r| r.is_finite()).map(|r| r.expand(4.0)).collect();
+        let mut obstacles: Vec<_> = docks.iter().copied().filter(|r| r.is_finite()).map(|r| r.expand(4.0)).collect();
         // Navigation is anchored to the viewport, never to transient dialog space.
         let available = content;
         let confirm = if corner.is_finite()
@@ -117,63 +227,290 @@ impl Layout {
         } else {
             Rect::NOTHING
         };
+        // A navigation bar on the view's top edge (#8183) keeps the pair and the axis view below it.
+        let bar_on_top = navigation.is_positive() && navigation.center().y < available.center().y;
+        let below_bar = |rect: Rect| {
+            if bar_on_top && rect.intersect(navigation).is_positive() {
+                rect.translate(vec2(0.0, navigation.bottom() + CORNER_GAP - rect.top()))
+            } else {
+                rect
+            }
+        };
+        let confirm = below_bar(confirm);
         // The axis view starts below the pair while it is shown.
         let top = if confirm.is_positive() { confirm.bottom() + CORNER_GAP } else { available.top() };
-        let cube_size = if fit_in_content { 110.0 } else { super::viewport::axis_view_size(style) };
-        let axis_left = |size| {
-            if inspector_side == Some(crate::frame::Side::Left) { available.left() } else { available.right() - size }
-        };
+        let cube_size = super::viewport::axis_view_size(style);
+        let axis_left = |size| available.right() - size;
+        let top = below_bar(Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))).top();
         let mut axis_view = if available.width() >= cube_size && available.bottom() - top >= cube_size {
             Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))
         } else {
             Rect::NOTHING
         };
-        if fit_in_content {
-            // A focus-exit or folded-dock chip may occupy the compass's corner.
-            for _ in 0..obstacles.len() {
-                let bottom = obstacles.iter().filter(|dock| axis_view.intersect(**dock).is_positive()).map(Rect::bottom).max_by(f32::total_cmp);
-                let Some(bottom) = bottom else { break };
-                axis_view = if available.bottom() - bottom >= cube_size {
-                    Rect::from_min_size(pos2(axis_view.left(), bottom), vec2(cube_size, cube_size))
-                } else {
-                    Rect::NOTHING
-                };
-            }
-        }
         // On tiny viewports keep the bottom controls usable rather than overlapping them.
         // This decision depends only on viewport size, never on an overlay.
         if axis_view.intersect(navigation).is_positive() {
             let compact = (navigation.top() - top - 4.0).min(cube_size);
-            axis_view = if style == crate::prefs::NavigatorStyle::Cube && compact >= 96.0 {
+            axis_view = if style != crate::prefs::NavigatorStyle::Axes && compact >= 96.0 {
                 Rect::from_min_size(pos2(axis_left(compact), top), vec2(compact, compact))
             } else {
                 Rect::NOTHING
             };
         }
+        let within = viewport;
+        // Only the panels decide where the middle of the view is; the controls below are drawn
+        // over the view and would otherwise push the model into a corner of it.
+        let middle = free_rect(within, &obstacles);
+        let middle = if middle.is_positive() && middle.is_finite() { middle } else { within };
         for control in [axis_view, navigation, confirm] {
             if control.is_positive() {
                 obstacles.push(control);
             }
         }
-        let drawable = free_rect(if fit_in_content { content } else { viewport }, &obstacles).shrink(16.0 / scale);
-        Self { viewport, drawable, content, axis_view, navigation, confirm }
+        let drawable = free_rect(within, &obstacles).shrink(16.0 / scale);
+        Self { viewport, drawable, middle, content, axis_view, navigation, confirm, usable: None }
     }
 }
 
-pub(crate) fn fit_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout, perspective: bool) -> Option<Camera> {
-    fit_with_fov(cam, bounds, layout, if perspective { 0.6 } else { 0.0 })
+/// Add independently drawn controls once, retaining the complete persistent
+/// contour. Exact deduplication avoids counting the early confirmation twice.
+fn framing_region(layout: &Layout, usable: &crate::panel_runtime::HostUsableRegion) -> Option<crate::panel_runtime::HostUsableRegion> {
+    use crate::panel_runtime::{MAX_USABLE_OBSTACLES, logical_rect, resolve_usable_region};
+    let mut obstacles = usable.obstacles.clone();
+    for rect in [layout.navigation, layout.confirm, layout.axis_view] {
+        if !rect.is_positive() || !rect.is_finite() {
+            continue;
+        }
+        let rect = logical_rect(rect);
+        if !obstacles.contains(&rect) {
+            if obstacles.len() >= MAX_USABLE_OBSTACLES {
+                return None;
+            }
+            obstacles.push(rect);
+        }
+    }
+    match &layout.usable {
+        Some(region) if region.domain == usable.domain && region.obstacles == obstacles => Some(region.clone()),
+        _ => resolve_usable_region(usable.domain, &obstacles).ok(),
+    }
+}
+
+/// Reuse the actual host contour in a product-owned projection (for example a
+/// Render picture). Controls stay where they painted; only their intersections
+/// with the picture can obstruct its camera. This never allocates UI or fits.
+pub(crate) fn host_projection_layout(layout: &Layout, usable: &crate::panel_runtime::HostUsableRegion, projection: Rect) -> Option<Layout> {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+    if !projection.is_finite() || !projection.is_positive() || !layout.viewport.contains_rect(projection) {
+        return None;
+    }
+    let region = framing_region(layout, usable)?;
+    let obstacles: Vec<_> = region
+        .obstacles
+        .iter()
+        .map(|rect| egui_rect(*rect).intersect(projection))
+        .filter(|rect| rect.is_positive() && rect.is_finite())
+        .map(logical_rect)
+        .collect();
+    let region = resolve_usable_region(logical_rect(projection), &obstacles).ok()?;
+    Some(Layout {
+        viewport: projection,
+        content: projection,
+        drawable: layout.drawable.intersect(projection),
+        middle: layout.middle.intersect(projection),
+        // These footprints are already included, clipped, in the new contour.
+        navigation: Rect::NOTHING,
+        axis_view: Rect::NOTHING,
+        confirm: Rect::NOTHING,
+        usable: Some(region),
+    })
+}
+
+/// Explicit Fit/centring chooses a safe rectangle for the model's projected
+/// aspect within the contour, then uses the existing camera-fitting path and
+/// its full-domain projection/corner checks. Panel changes never call this.
+pub(crate) fn fit_host_bounds(
+    cam: Camera,
+    bounds: &Aabb3,
+    layout: &Layout,
+    usable: &crate::panel_runtime::HostUsableRegion,
+    fov: f64,
+    share: f64,
+) -> Option<Camera> {
+    let room = host_framing_room(cam, bounds, layout, usable)?;
+    let mut target = layout.clone();
+
+    target.drawable = room;
+    target.middle = room;
+    fit_bounds_sized(cam, bounds, &target, fov, share)
+}
+
+fn host_framing_room(cam: Camera, bounds: &Aabb3, layout: &Layout, usable: &crate::panel_runtime::HostUsableRegion) -> Option<Rect> {
+    use crate::panel_runtime::egui_rect;
+    use solidcraft_engine::panels::Point;
+    if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() || !cam.is_valid() {
+        return None;
+    }
+    let (right, up, _) = cam.basis();
+    let extent = bounds.max - bounds.min;
+    let half = |axis: Vec3| (extent.x * axis.x.abs() + extent.y * axis.y.abs() + extent.z * axis.z.abs()) * 0.5;
+    let (width, height) = (half(right).max(0.5), half(up).max(0.5));
+    if !width.is_finite() || !height.is_finite() {
+        return None;
+    }
+    let aspect = (width / height).clamp(0.0001, 10000.0) as f32;
+    let region = framing_region(layout, usable)?;
+    let room = region.fit_rect_with_clearance(
+        aspect,
+        Point { x: layout.viewport.center().x, y: layout.viewport.center().y },
+        solidcraft_theme::Tokens::get().space_8,
+    )?;
+    let room = egui_rect(room);
+    room.is_positive().then_some(room)
+}
+
+/// Reposition an explicitly selected focus at the current zoom. Perspective
+/// corners are checked after translation; an oversized selection falls back to
+/// centring only its requested focus, never silently changing distance.
+pub(crate) fn centre_host_camera(
+    mut cam: Camera,
+    bounds: Option<&Aabb3>,
+    layout: &Layout,
+    usable: &crate::panel_runtime::HostUsableRegion,
+    fov: f64,
+) -> Option<Camera> {
+    use crate::panel_runtime::{egui_rect, logical_rect};
+    use solidcraft_engine::panels::{Point, Size};
+    if !cam.is_valid() || !layout.viewport.is_positive() || !fov.is_finite() || !(0.0..std::f64::consts::PI).contains(&fov) {
+        return None;
+    }
+    let region = framing_region(layout, usable)?;
+    let room = egui_rect(region.largest_rect()?);
+    let original_fov = cam.fov;
+    cam.fov = fov;
+    let focus = cam.target;
+    let (right, up, _) = cam.basis();
+    let h = f64::from(layout.viewport.height());
+    let w = f64::from(layout.viewport.width());
+    let k = 2.0 * cam.half_height() / h;
+    let translate = |at: egui::Pos2| {
+        let offset = at - layout.viewport.center();
+        let mut result = cam;
+        result.target = focus - right * (f64::from(offset.x) * k) + up * (f64::from(offset.y) * k);
+        result
+    };
+    let corners: Vec<_> = bounds
+        .filter(|bounds| !bounds.is_empty() && bounds.min.is_finite() && bounds.max.is_finite())
+        .map(|bounds| {
+            [bounds.min.x, bounds.max.x]
+                .into_iter()
+                .flat_map(|x| {
+                    [bounds.min.y, bounds.max.y]
+                        .into_iter()
+                        .flat_map(move |y| [bounds.min.z, bounds.max.z].into_iter().map(move |z| Vec3::new(x, y, z)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let radius = corners.iter().map(|p| p.dist(focus)).fold(cam.half_height().max(10.0), f64::max) * 2.0;
+    let project = |camera: Camera, point: Vec3| {
+        camera.to_screen(point, w, h, radius).and_then(|(x, y, z)| {
+            (x.is_finite() && y.is_finite() && (0.0..=1.0).contains(&z))
+                .then(|| pos2(layout.viewport.left() + x as f32, layout.viewport.top() + y as f32))
+        })
+    };
+    let mut result = translate(room.center());
+    if !corners.is_empty() {
+        let projected: Option<Vec<_>> = corners.iter().map(|p| project(cam, *p)).collect();
+        if let Some(points) = projected {
+            let footprint = points.iter().fold(Rect::NOTHING, |rect, p| rect.union(Rect::from_min_max(*p, *p)));
+            let size = footprint.size().max(vec2(1.0, 1.0));
+            if let Some(landing) = region.place_footprint(
+                Size { width: size.x, height: size.y },
+                Point { x: layout.viewport.center().x, y: layout.viewport.center().y },
+                solidcraft_theme::Tokens::get().space_8,
+            ) {
+                let at = layout.viewport.center() + (egui_rect(landing).center() - footprint.center());
+                let candidate = translate(at);
+                let final_points: Option<Vec<_>> = corners.iter().map(|p| project(candidate, *p)).collect();
+                if let Some(points) = final_points {
+                    let footprint = points.iter().fold(Rect::NOTHING, |rect, p| rect.union(Rect::from_min_max(*p, *p)));
+                    if region.contains_rect(logical_rect(footprint.expand(solidcraft_theme::Tokens::get().space_4))) {
+                        result = candidate;
+                    }
+                }
+            }
+        }
+    }
+    result.fov = original_fov;
+    result.is_valid().then_some(result)
 }
 
 /// Product cameras keep the authored lens while framing the free canvas.
 pub(crate) fn fit_product_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout) -> Option<Camera> {
-    fit_with_fov(cam, bounds, layout, cam.fov)
+    fit_bounds(cam, bounds, layout, cam.fov)
 }
 
-fn fit_with_fov(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> Option<Camera> {
+pub(crate) fn fit_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> Option<Camera> {
+    fit_bounds_sized(cam, bounds, layout, fov, 1.0)
+}
+
+/// The screen point Home and Fit centre the model on: the middle of the view, kept `drawable`-clear for a model
+/// whose half extents on screen are `hx` by `hy` and which `hh` (its fitted half height) sizes. The one place
+/// that decides it: the orbit pivot reads it too (#14651).
+fn framing_point(layout: &Layout, hx: f64, hy: f64, hh: f64) -> Pos2 {
+    let h = f64::from(layout.viewport.height());
+    let drawable = layout.drawable;
+    let size = vec2((hx * h / hh) as f32, (hy * h / hh) as f32).min(drawable.size());
+    let toward = |want: f32, lo: f32, hi: f32| if lo <= hi { want.clamp(lo, hi) } else { (lo + hi) * 0.5 };
+    pos2(
+        toward(layout.middle.center().x, drawable.left() + size.x * 0.5, drawable.right() - size.x * 0.5),
+        toward(layout.middle.center().y, drawable.top() + size.y * 0.5, drawable.bottom() - size.y * 0.5),
+    )
+}
+
+/// Where Home and Fit put the middle of `bounds` on screen for `cam`'s direction in this layout, or `None` when
+/// they could not frame it.
+pub(crate) fn framing_centre(cam: Camera, bounds: &Aabb3, layout: &Layout) -> Option<Pos2> {
+    if let Some(usable) = &layout.usable {
+        return host_framing_room(cam, bounds, layout, usable).map(|room| room.center());
+    }
+    if bounds.is_empty()
+        || !bounds.min.is_finite()
+        || !bounds.max.is_finite()
+        || !cam.is_valid()
+        || !layout.viewport.is_positive()
+        || !layout.drawable.is_positive()
+        || !layout.drawable.is_finite()
+    {
+        return None;
+    }
+    let (r, u, _) = cam.basis();
+    let centre = bounds.center();
+    let (mut hx, mut hy): (f64, f64) = (0.0, 0.0);
+    for x in [bounds.min.x, bounds.max.x] {
+        for y in [bounds.min.y, bounds.max.y] {
+            for z in [bounds.min.z, bounds.max.z] {
+                let d = Vec3::new(x, y, z) - centre;
+                hx = hx.max(d.dot(r).abs());
+                hy = hy.max(d.dot(u).abs());
+            }
+        }
+    }
+    let h = f64::from(layout.viewport.height());
+    let hh = (hx * h / f64::from(layout.drawable.width())).max(hy * h / f64::from(layout.drawable.height())).max(0.5);
+    let at = framing_point(layout, hx, hy, hh);
+    at.is_finite().then_some(at)
+}
+
+/// [`fit_bounds`] with the model filling `share` (0.1 to 1) of the room between the panels, the
+/// compass and the navigation bar instead of all of it: the Navigation preference "Home and Fit
+/// size" (#10091). The model stays clear of what covers the view at every size.
+pub(crate) fn fit_bounds_sized(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64, share: f64) -> Option<Camera> {
     let perspective = fov > 0.0;
     if !fov.is_finite() || !(0.0..std::f64::consts::PI).contains(&fov) {
         return None;
     }
+    let share = if share.is_finite() { share.clamp(0.1, 1.0) } else { 1.0 };
     if bounds.is_empty()
         || !bounds.min.is_finite()
         || !bounds.max.is_finite()
@@ -204,8 +541,20 @@ fn fit_with_fov(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> O
         depth = depth.max(d.dot(b).abs());
     }
     let h = f64::from(layout.viewport.height());
-    let hh = (hx * h / f64::from(layout.drawable.width())).max(hy * h / f64::from(layout.drawable.height())).max(0.5);
-    let offset = layout.drawable.center() - layout.viewport.center();
+    let drawable = layout.drawable;
+    let hh = (hx * h / f64::from(drawable.width())).max(hy * h / f64::from(drawable.height())).max(0.5);
+    // Home and Fit put the model in the middle of the view. `drawable` decides its size and keeps
+    // it clear of every control; the room it leaves over in either direction moves the model
+    // towards `middle`, the middle of the view, instead of the middle of the gap between the
+    // compass and the navigation bar, which left it low and to one side of an otherwise empty view.
+    let at = framing_point(layout, hx, hy, hh);
+    let half = vec2((at.x - drawable.left()).min(drawable.right() - at.x), (at.y - drawable.top()).min(drawable.bottom() - at.y));
+    let room = Rect::from_center_size(at, half * 2.0);
+    if !room.is_positive() || !room.is_finite() {
+        return None;
+    }
+    let hh = (hx * h / f64::from(room.width())).max(hy * h / f64::from(room.height())).max(0.5) / share;
+    let offset = room.center() - layout.viewport.center();
     let tangent = if perspective { (fov * 0.5).tan() } else { 0.4 };
     cam.distance = hh / tangent + if perspective { depth } else { 0.0 };
     // Offset the target so the model projects into the free rectangle in the original viewport.
@@ -219,7 +568,7 @@ fn fit_with_fov(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> O
                 x.is_finite()
                     && y.is_finite()
                     && (0.0..=1.0).contains(&z)
-                    && layout.drawable.contains(pos2(layout.viewport.left() + x as f32, layout.viewport.top() + y as f32))
+                    && room.contains(pos2(layout.viewport.left() + x as f32, layout.viewport.top() + y as f32))
             })
         });
         if fits {

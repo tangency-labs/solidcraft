@@ -1,22 +1,24 @@
 //! 3D sketching in the viewport (the Sketch Palette's 3D Sketch option): the Line, Arc, Spline
 //! and Point tools take points off the sketch plane by snapping to model vertices, edges and
 //! faces and to points already drawn in 3D; segments that stay on the plane are ordinary sketch
-//! lines and arcs. The 3D Arc command has its own tool: every point it takes is a world point.
+//! lines and arcs. The 3D Line, Arc, Spline and Point commands have their own tools: every point
+//! they take is a world point, with no on-plane downgrade.
 //! A drawn 3D point (or curve end) clicked without a tool gets a move triad:
 //! drag an arrow to move along X, Y or Z, or the square to move parallel to the sketch plane.
 //! Everything runs `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`, `sketch.point3d`,
 //! `sketch.move3d`, `sketch.line` and `sketch.arc.three_point`.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 
 use egui::{Pos2, Rect, Shape, Stroke, vec2};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tools::Tool;
 use crate::viewport::{Hit, Proj, pick_3d};
+use solidcraft_theme::Tokens;
 
 thread_local! {
     /// Points of the curve being drawn in 3D (with the tool they belong to).
@@ -34,12 +36,22 @@ const ARROW: f32 = 60.0;
 
 /// Is the sketch being edited a 3D sketch?
 pub fn active(app: &SolveApp) -> bool {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     app.session.active_sketch.and_then(|s| st.sketch(s)).is_some_and(|ss| ss.sketch.view.three_d)
 }
 
 fn takes(cmd: &str) -> bool {
-    matches!(cmd, "sketch.line" | "sketch.arc.three_point" | "sketch.arc3d" | "sketch.spline.fit_point" | "sketch.point")
+    matches!(
+        cmd,
+        "sketch.line"
+            | "sketch.arc.three_point"
+            | "sketch.arc3d"
+            | "sketch.spline.fit_point"
+            | "sketch.point"
+            | "sketch.line3d"
+            | "sketch.spline3d"
+            | "sketch.point3d"
+    )
 }
 
 /// Only 3D point-placing tools broaden sketch-point picking; ordinary selection stays local.
@@ -49,7 +61,7 @@ pub fn drawing(app: &SolveApp) -> bool {
 
 /// Points drawn in 3D: (wire id, fit index, point).
 fn drawn_points(app: &SolveApp) -> Vec<(String, usize, Vec3)> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return Vec::new() };
     ss.sketch.wires.iter().flat_map(|w| w.fit.iter().enumerate().map(|(i, p)| (w.id.clone(), i, *p))).collect()
 }
@@ -73,11 +85,12 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
             return Some((p, "Pt"));
         }
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let ss = app.session.active_sketch.and_then(|s| st.sketch(s))?;
     let (o, d) = proj.ray(pos);
     for h in pick_3d(app, proj, pos) {
         match h {
+            Hit::SketchPoint3d { at, .. } => return Some((at, "Pt")),
             Hit::SketchPoint { sketch, at, .. } => {
                 if let Some(source) = st.sketch(sketch) {
                     return Some((source.plane.to_world(at), "Pt"));
@@ -85,7 +98,7 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
             }
             Hit::Vertex { point, .. } => return Some((point, "Vertex")),
             Hit::Edge { body, index, .. } => {
-                let ws = app.session.world_state();
+                let ws = crate::open_meshing::session_world(&app.session);
                 let m = ws.body(&body)?.mesh();
                 let e = m.edges.get(index)?;
                 let best = e
@@ -103,7 +116,7 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
 
 /// The sketch-plane coordinates of `p` when it lies on the plane.
 fn on_plane(app: &SolveApp, p: Vec3) -> Option<Vec2> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let ss = app.session.active_sketch.and_then(|s| st.sketch(s))?;
     let q = ss.plane.to_local(p);
     (ss.plane.to_world(q).dist(p) < 1e-6).then_some(q)
@@ -138,6 +151,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
                 Some(q) => app.run("sketch.point", json!({"point": [q.x, q.y]})),
                 None => app.run("sketch.point3d", json!({"point": [p.x, p.y, p.z]})),
             };
+            report(app, r);
+        }
+        "sketch.point3d" => {
+            // The dedicated 3D Point tool: every click is a world point, and the tool stays.
+            let r = app.run("sketch.point3d", json!({"point": [p.x, p.y, p.z]}));
             report(app, r);
         }
         "sketch.line" => {
@@ -206,6 +224,12 @@ pub fn finish(app: &mut SolveApp) -> bool {
         };
         report(app, r);
     }
+    // The dedicated 3D tools keep every point as a world point: no on-plane downgrade.
+    if matches!(cmd, "sketch.line3d" | "sketch.spline3d") && pts.len() >= 2 {
+        let q: Vec<Value> = pts.iter().map(|p| json!([p.x, p.y, p.z])).collect();
+        let r = app.run(cmd, json!({ "points": q }));
+        report(app, r);
+    }
     set_chain(Some(cmd), Vec::new());
     true
 }
@@ -233,15 +257,15 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
                 s + vec2(10.0, -14.0),
                 egui::Align2::LEFT_BOTTOM,
                 label,
-                egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+                egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro),
                 tk.text,
             );
         }
         painter.text(
-            s + vec2(10.0, 10.0),
+            crate::tool_cursor::readout_at(painter, proj.rect, s),
             egui::Align2::LEFT_TOP,
             format!("{}, {}, {}", crate::prefs::show_mm(app, h.x, 1), crate::prefs::show_mm(app, h.y, 1), crate::prefs::show_mm(app, h.z, 1)),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
             tk.text_dim,
         );
     }
@@ -256,7 +280,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
         };
         let screen: Vec<Pos2> = poly.into_iter().filter_map(|p| proj.to_screen(p)).collect();
         painter.add(Shape::line(screen, stroke));
-    } else if t.cmd == "sketch.spline.fit_point" && all.len() >= 2 {
+    } else if matches!(t.cmd, "sketch.spline.fit_point" | "sketch.spline3d") && all.len() >= 2 {
         let mut w: Vec<Vec3> = pts.clone();
         if let Some((h, _)) = hover {
             w.push(h);
@@ -356,7 +380,7 @@ fn target(app: &SolveApp, proj: &Proj, pos: Pos2, axis: Option<Vec3>, p: Vec3) -
             Some(p + u * ((b * d.dot(w0) - c * u.dot(w0)) / den))
         }
         None => {
-            let st = app.session.world_state();
+            let st = crate::open_meshing::session_world(&app.session);
             let n = app.session.active_sketch.and_then(|s| st.sketch(s))?.plane.normal();
             let den = d.dot(n);
             (den.abs() > 1e-12).then(|| o + d * ((p - o).dot(n) / den))

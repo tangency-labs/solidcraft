@@ -3,8 +3,53 @@
 
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
+
+#[test]
+fn same_body_select_other_refresh_survives_disappearing_semantic_owners() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"})).unwrap();
+    h.frames(4);
+    let body_row = crate::browser::drawn_rows().into_iter().find(|(label, ..)| label == "Body1").unwrap().1.center();
+    h.step(&json!({"move":[body_row.x,body_row.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_bodies, ["Body1"], "establish actual Browser row hover first");
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.app.viewport.select_other.popup = Some(super::Popup {
+        at: egui::pos2(500.0, 300.0),
+        rows: vec![super::Row {
+            hit: crate::viewport::Hit::Face { body: "Body1".into(), index: 0, point: solidcore_record::Vec3::ZERO },
+            sel: Sel::Body { name: "Body1".into() },
+            label: "Body1".into(),
+            icon: "body",
+        }],
+        total: 1,
+        hovered: Some(0),
+        revision: h.app.session.revision,
+        dialog: false,
+        include_hidden: h.app.preferences.select_other_hidden,
+        lit_body: false,
+        held: Default::default(),
+    });
+    let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
+    h.ctx
+        .run_ui(raw, |ui| {
+            crate::semantic_content::begin(&mut h.app, ui.ctx());
+            // Floating show_workspace calls this real producer before semantic finalization.
+            // Its new body name is deliberately identical to the previous Browser contribution.
+            super::hover_override(&mut h.app);
+            assert_eq!(h.app.viewport.hover_bodies, ["Body1"]);
+            crate::semantic_content::finalize(&mut h.app, ui.ctx());
+        })
+        .textures_delta
+        .clear();
+    assert_eq!(h.app.viewport.hover_bodies, ["Body1"], "fresh external ownership survives missing semantic owners");
+    assert!(crate::browser::drawn_rows().is_empty());
+    super::close(&mut h.app);
+    assert!(h.app.viewport.hover_bodies.is_empty(), "Select Other retains responsibility for clearing its own contribution");
+}
 
 /// A sketch with two lines drawn on top of each other (l1, then l2), off the origin axes.
 fn two_lines() -> (Harness, Value) {
@@ -290,7 +335,7 @@ fn long_names_stay_inside_the_popup_and_remain_available_on_hover() {
             _ => None,
         })
         .expect("the body label is painted");
-    let popup = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_select_other"))).unwrap();
+    let popup = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_select_other"))).unwrap();
     let text_rect = egui::Rect::from_min_size(text.pos, text.galley.size());
     assert!(popup.contains_rect(text_rect), "{text_rect:?} spills outside {popup:?}");
     assert!(h.ctx.content_rect().contains_rect(popup));
@@ -472,7 +517,7 @@ fn an_edge_is_as_deep_as_its_point_under_the_pointer_not_its_middle() {
     h.call("ui.view", json!({"view":"fit"}));
     h.settle();
     // On the bottom plate's near top edge along Y (x = 15, y from -15 to 15), well off its middle.
-    let under = solidcraft_engine::geom::Vec3::new(15.0, 9.0, 2.0);
+    let under = solidcore_record::Vec3::new(15.0, 9.0, 2.0);
     let at = h.call("ui.at", json!({"world": [under.x, under.y, under.z]}))["result"].clone();
     let pos = egui::pos2(at[0].as_f64().unwrap() as f32, at[1].as_f64().unwrap() as f32);
     let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
@@ -483,7 +528,7 @@ fn an_edge_is_as_deep_as_its_point_under_the_pointer_not_its_middle() {
     let index = st.bodies.iter().enumerate().map(|(i, b)| (b.name.as_str(), i)).collect();
     let t = super::hit_depth(&st, &index, o, d, edge).expect("a depth");
     let want = (under - o).dot(d);
-    let mid = solidcraft_engine::geom::Vec3::new(15.0, 0.0, 2.0);
+    let mid = solidcore_record::Vec3::new(15.0, 0.0, 2.0);
     assert!((t - want).abs() < 0.5, "depth {t}, the point under the pointer {want}, its middle {}", (mid - o).dot(d));
 }
 
@@ -517,6 +562,31 @@ fn holding_still_opens_the_list_while_a_navigation_mode_is_lit() {
         h.step(&json!({"click": at})).unwrap();
         assert_eq!(curves(&h).len(), 1, "{slot}: a click still selects");
         assert_eq!(h.app.viewport.nav, Some(mode), "{slot} stays lit");
+    }
+}
+
+/// A press held still on a line keeps the line lit until the list opens, with Orbit, Pan or
+/// Zoom lit as with none: the press is not navigating yet (#8864).
+#[test]
+fn a_press_held_still_keeps_the_highlight_while_a_navigation_mode_is_lit() {
+    for slot in [None, Some("orbit"), Some("pan"), Some("zoom")] {
+        let (mut h, at) = two_lines();
+        if let Some(slot) = slot {
+            h.step(&json!({"click": {"handle": format!("nav:slot:{slot}")}})).unwrap();
+        }
+        h.step(&json!({"move": at})).unwrap();
+        h.frames(2);
+        assert!(hovered_curve(&h).is_some(), "{slot:?}: the line under the pointer is lit");
+        let pos = egui::pos2(at[0].as_f64().unwrap_or_default() as f32, at[1].as_f64().unwrap_or_default() as f32);
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        h.app.synthetic.push(button(true));
+        h.frames(10);
+        assert!(!crate::select_other::is_open(&h.app), "{slot:?}: not open yet");
+        assert!(hovered_curve(&h).is_some(), "{slot:?}: still lit while the press is held");
+        h.frames(40);
+        assert!(crate::select_other::is_open(&h.app), "{slot:?}: the hold opened the list");
+        h.app.synthetic.push(button(false));
+        h.frames(2);
     }
 }
 
@@ -561,4 +631,513 @@ fn a_press_that_opened_the_list_does_not_move_the_view_when_it_moves_on() {
         assert!(crate::select_other::is_open(&h.app), "{slot}: the list stays open");
         assert_eq!(h.app.cam, cam, "{slot}: the view did not move under the open list");
     }
+}
+
+/// Zooming out does not make a click reach through the body. The pixel of the box's hidden far
+/// corner is on the near +X face, so every distance picks something standing on that face —
+/// the face, or one of its edges or corners once the box is small on screen — never the far
+/// side behind it. The occlusion slack used to be cut from the camera's distance, so far
+/// enough out the whole body fitted inside it.
+#[test]
+fn a_zoomed_out_click_picks_the_near_face_not_an_edge_through_the_body() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[-5,-5,-5]})).unwrap();
+    for distance in [40.0, 300.0, 1000.0, 3000.0] {
+        h.app.cam.distance = distance;
+        h.settle();
+        let at = h.at(&json!({"world": [0, 5, -5]})).unwrap();
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let hits = crate::viewport::pick(&h.app, &proj, egui::pos2(at[0] as f32, at[1] as f32));
+        let first = hits.first().expect("the box is under the cursor");
+        let point = match first {
+            crate::viewport::Hit::Face { point, .. } | crate::viewport::Hit::Vertex { point, .. } => *point,
+            crate::viewport::Hit::Edge { mid, .. } => *mid,
+            other => panic!("at {distance} mm away the box is not picked: {other:?}"),
+        };
+        assert!(point.x > 4.9, "at {distance} mm away the pick is behind the near face: {first:?}");
+    }
+}
+
+/// A small part on a large one is picked by its own size, not the assembly's: the 2 mm box's
+/// far corner is 2 mm behind its near face, and a slack cut from the 200 mm plate (or from the
+/// camera) reached straight through it — the kraken board's 2.54 mm connectors picked their far
+/// side from 5 mm behind.
+#[test]
+fn a_small_body_on_a_large_one_is_not_picked_through() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":200,"width":200,"height":10,"corner":[-100,-100,-10]})).unwrap();
+    h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[-1,-1,0]})).unwrap();
+    for distance in [20.0, 100.0, 600.0] {
+        h.app.cam.distance = distance;
+        h.settle();
+        // The small box's far bottom corner, whose pixel is on its near +X face.
+        let at = h.at(&json!({"world": [0, 1, 0]})).unwrap();
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let hits = crate::viewport::pick(&h.app, &proj, egui::pos2(at[0] as f32, at[1] as f32));
+        let first = hits.first().expect("the small box is under the cursor");
+        let point = match first {
+            crate::viewport::Hit::Face { point, .. } | crate::viewport::Hit::Vertex { point, .. } => *point,
+            crate::viewport::Hit::Edge { mid, .. } => *mid,
+            other => panic!("at {distance} mm away the small box is not picked: {other:?}"),
+        };
+        assert!(point.x > 0.9, "at {distance} mm away the pick is behind the near face: {first:?}");
+    }
+}
+
+#[test]
+fn a_curve_from_intersect_is_labelled_intersected_and_one_from_project_projected() {
+    use solidcraft_engine::sketch::LinkKind;
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":10,"height":10,"body_name":"Block"})).unwrap();
+    let label = |h: &Harness, kind: LinkKind| {
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let c = sk.curves.iter().find(|c| c.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.kind == kind)).unwrap();
+        crate::select_other::curve_label(sk, &c.id)
+    };
+    h.app.run("sketch.create", json!({"plane":"XY","offset":5,"project_edges":false})).unwrap();
+    h.app.run("sketch.intersect", json!({"refs":[{"body":"Block"}]})).unwrap();
+    assert!(label(&h, LinkKind::Intersect).ends_with("(intersected)"));
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":20,"project_edges":false})).unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"body":"Block"}]})).unwrap();
+    assert!(label(&h, LinkKind::Project).ends_with("(projected)"));
+}
+#[test]
+fn long_press_picks_hidden_profiles_behind_a_body_without_revealing_them() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Buried profile"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Buried profile").unwrap().id;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[-5,-5,1],"body_name":"Cover"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.app.session.visibility.hidden_sketches.push(sketch);
+    h.app.start("solid.extrude");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.settle();
+    assert_eq!(h.call("ui.prefs", json!({}))["result"]["select_other_hidden"], true);
+    assert_eq!(h.call("ui.prefs", json!({"select_other_hidden":false}))["ok"], true);
+    h.step(&json!({"hold":{"world":[5,5,0]}})).unwrap();
+    assert!(!h.app.viewport.select_other.popup.as_ref().unwrap().rows.iter().any(|r| matches!(r.sel, Sel::Profile { .. })));
+    h.call("ui.selectOther", json!({"close":true}));
+    assert_eq!(h.call("ui.prefs", json!({"select_other_hidden":true}))["ok"], true);
+    let before = h.app.session.visibility.hidden_sketches.clone();
+    h.step(&json!({"hold":{"world":[5,5,0]}})).unwrap();
+    let popup = h.app.viewport.select_other.popup.as_ref().unwrap();
+    let row = popup.rows.iter().position(|r| r.sel == Sel::Profile { sketch, index: 0 }).unwrap();
+    h.call("ui.selectOther", json!({"pick":row}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, [Sel::Profile { sketch, index: 0 }]);
+    assert_eq!(h.app.session.visibility.hidden_sketches, before);
+    assert!(!crate::viewport::visible_sketches(&h.app).contains(&sketch));
+    assert!(h.app.session.selection.is_empty());
+}
+
+#[test]
+fn see_through_includes_hidden_bodies_and_occluded_edges_but_normal_picks_do_not() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Hidden"})).unwrap();
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":10,"corner":[-10,-10,20],"body_name":"Cover"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    let point = h.at(&json!({"world":[5,0,10]})).unwrap();
+    let pos = egui::pos2(point[0] as f32, point[1] as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let edge = |hit: &crate::viewport::Hit| matches!(hit, crate::viewport::Hit::Edge { body, .. } if body == "Hidden");
+    assert!(crate::viewport::pick_through(&h.app, &proj, pos).iter().any(edge));
+    assert!(!crate::viewport::pick_all(&h.app, &proj, pos).iter().any(edge));
+    h.app.session.visibility.hidden_bodies.push("Hidden".into());
+    let hidden = h.app.session.visibility.hidden_bodies.clone();
+    h.call("ui.prefs", json!({"select_other_hidden":false}));
+    h.call("ui.selectOther", json!({"x":pos.x,"y":pos.y}));
+    assert!(!h.app.viewport.select_other.popup.as_ref().unwrap().rows.iter().any(|r| r.sel == Sel::Body { name: "Hidden".into() }));
+    h.call("ui.selectOther", json!({"close":true}));
+    h.call("ui.prefs", json!({"select_other_hidden":true}));
+    h.call("ui.selectOther", json!({"x":pos.x,"y":pos.y}));
+    let i = h.app.viewport.select_other.popup.as_ref().unwrap().rows.iter().position(|r| r.sel == Sel::Body { name: "Hidden".into() }).unwrap();
+    h.call("ui.selectOther", json!({"pick":i}));
+    assert_eq!(h.app.session.selection, [Sel::Body { name: "Hidden".into() }]);
+    assert_eq!(h.app.session.visibility.hidden_bodies, hidden);
+    assert!(
+        !crate::viewport::pick_all(&h.app, &proj, pos).iter().any(|hit| matches!(hit, crate::viewport::Hit::Face { body, .. } if body == "Hidden"))
+    );
+}
+
+#[test]
+fn approximate_long_click_reaches_profiles_and_shows_all_eight_rows() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    let mut sketches = Vec::new();
+    for i in 0..8 {
+        h.app.run("sketch.create", json!({"plane":"XY","name":format!("Layer{i}")})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        sketches.push(h.app.session.doc.find_feature(&format!("Layer{i}")).unwrap().id);
+    }
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.app.session.visibility.hidden_sketches = sketches.clone();
+    h.app.start("solid.extrude");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.settle();
+    let at = h.at(&json!({"world":[10,5,0]})).unwrap();
+    let pos = egui::pos2(at[0] as f32 + 3.0, at[1] as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    assert!(crate::viewport::pick_all(&h.app, &proj, pos).iter().all(|x| !matches!(x, crate::viewport::Hit::Profile { .. })));
+    h.step(&json!({"hold":[pos.x,pos.y]})).unwrap();
+    assert_eq!(h.app.viewport.select_other.popup.as_ref().unwrap().rows.len(), 8);
+    h.frames(3);
+    if let Ok(dir) = std::env::var("SOLIDCRAFT_SELECT_OTHER_EVIDENCE") {
+        let ctx = crate::fonts::test_context();
+        let mut textures = std::collections::HashMap::new();
+        let mut last = None;
+        for _ in 0..4 {
+            let output = ctx.run_ui(
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() },
+                |ui| super::show(&mut h.app, ui.ctx()),
+            );
+            crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+            last = Some(output);
+        }
+        let output = last.unwrap();
+        let rect = crate::scenario::rect_of("select_other").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, rect.expand(4.0), &textures)
+            .save(std::path::Path::new(&dir).join("select-other.png"))
+            .unwrap();
+        h.frames(4);
+    }
+    let rect = crate::scenario::rect_of("select_other").unwrap();
+    assert!(rect.height() > 8.0 * super::ROW_HEIGHT, "all eight rows plus header: {rect:?}");
+    for i in 0..8 {
+        assert!(rect.contains(crate::scenario::handle_at(&format!("select_other:{i}")).unwrap()), "row {i}: {rect:?}");
+    }
+    h.step(&json!({"click":{"handle":"select_other:7"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, [Sel::Profile { sketch: sketches[7], index: 0 }]);
+    h.app.session.visibility.hidden_sketches.clear();
+    h.call("ui.prefs", json!({"select_other_hidden":false}));
+    assert!(!super::rows(&h.app, &proj, pos).iter().any(|r| matches!(r.sel, Sel::Profile { .. })), "old list uses the exact pointer");
+    h.call("ui.prefs", json!({"select_other_hidden":true}));
+    assert_eq!(super::rows(&h.app, &proj, pos).iter().filter(|r| matches!(r.sel, Sel::Profile { .. })).count(), 8);
+    h.app.session.visibility.hidden_sketches = sketches.clone();
+}
+
+#[test]
+fn see_through_control_rejects_out_of_range_coordinates() {
+    let mut h = Harness::new();
+    h.settle();
+    for x in [1e300, -1e300, 1e7] {
+        let reply = h.call("ui.selectOther", json!({"x":x,"y":10}));
+        assert_eq!(reply["ok"], false, "{reply}");
+    }
+}
+
+#[test]
+fn popup_uses_window_height_and_flips_above_the_pointer() {
+    for (count, y, height) in [(20, 100.0, 1000), (20, 900.0, 1000), (20, 500.0, 1000), (60, 500.0, 1000), (20, 240.0, 480)] {
+        let (mut h, at) = two_lines();
+        h.step(&json!({"hold":at})).unwrap();
+        let popup = h.app.viewport.select_other.popup.as_mut().unwrap();
+        popup.rows = vec![popup.rows[0].clone(); count];
+        popup.total = count;
+        popup.at.y = y;
+        h.call("ui.resize", json!({"width":1600,"height":height}));
+        h.frames(4);
+        let rect = crate::scenario::rect_of("select_other").unwrap();
+        assert!(h.ctx.content_rect().contains_rect(rect), "{count} rows: {rect:?}");
+        if count == 20 && height == 1000 {
+            assert!(rect.height() > 360.0, "large window shows more than the old fixed cap: {rect:?}");
+            assert!(rect.contains(crate::scenario::handle_at("select_other:19").unwrap()), "last row fits: {rect:?}");
+            if y > 500.0 {
+                assert!(rect.bottom() <= y, "opens above the pointer: {rect:?}");
+            } else if y < 500.0 {
+                assert!(rect.top() > y, "opens below the pointer: {rect:?}");
+            }
+        } else {
+            assert!(!rect.contains(crate::scenario::handle_at(&format!("select_other:{}", count - 1)).unwrap()), "overflow needs scrolling");
+            h.app.synthetic.push(egui::Event::PointerMoved(rect.center()));
+            h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -2000.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.frames(40);
+            assert!(rect.contains(crate::scenario::handle_at(&format!("select_other:{}", count - 1)).unwrap()), "can scroll to the last row");
+        }
+    }
+}
+
+#[test]
+fn hidden_selection_preference_is_saved_and_older_settings_get_the_new_default() {
+    let prefs: crate::prefs::Prefs = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(serde_json::to_value(&prefs).unwrap()["select_other_hidden"], true);
+    let prefs: crate::prefs::Prefs = serde_json::from_value(json!({"select_other_hidden":false})).unwrap();
+    assert_eq!(serde_json::to_value(&prefs).unwrap()["select_other_hidden"], false);
+}
+
+#[test]
+fn hidden_selection_preference_can_be_changed_and_cancelled_in_preferences() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"open":"Sketch & selection"}));
+    crate::prefs::reveal_preference(&mut h, "prefs:select_other_hidden");
+    h.step(&json!({"click":{"handle":"prefs:select_other_hidden"}})).unwrap();
+    assert_eq!(h.call("ui.prefs", json!({}))["result"]["select_other_hidden"], false);
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    assert_eq!(h.call("ui.prefs", json!({}))["result"]["select_other_hidden"], true);
+}
+
+#[test]
+fn changing_hidden_selection_or_opening_an_empty_point_clears_the_old_list() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Hidden"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    let at = h.at(&json!({"world":[5,5,10]})).unwrap();
+    let point = json!({"x":at[0],"y":at[1]});
+    h.app.session.selection.clear();
+    h.app.session.visibility.hidden_bodies.push("Hidden".into());
+    h.call("ui.selectOther", point.clone());
+    assert!(super::is_open(&h.app));
+    h.call("ui.prefs", json!({"select_other_hidden":false}));
+    assert!(!super::is_open(&h.app), "old hidden rows close when the preference changes");
+    assert_eq!(h.call("ui.selectOther", point.clone())["result"]["open"], false);
+    assert_eq!(h.call("ui.selectOther", json!({"pick":0}))["ok"], false);
+    assert!(h.app.session.selection.is_empty());
+    h.call("ui.prefs", json!({"select_other_hidden":true}));
+    h.call("ui.selectOther", point.clone());
+    h.app.preferences.select_other_hidden = false;
+    h.frames(2);
+    assert!(!super::is_open(&h.app), "direct preference changes also close stale rows");
+    h.app.session.visibility.hidden_bodies.clear();
+    h.call("ui.selectOther", point);
+    assert!(super::is_open(&h.app));
+    let rect = h.app.viewport.rect.unwrap();
+    assert_eq!(h.call("ui.selectOther", json!({"x":rect.left()+20.0,"y":rect.top()+20.0}))["result"]["open"], false);
+    assert!(!super::is_open(&h.app), "an empty point cannot keep the preceding list");
+}
+
+/// A separate cover blocks the target edge at every point along it.
+fn covered_edge() -> (Harness, egui::Pos2) {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Target"})).unwrap();
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":10,"corner":[-10,-10,20],"body_name":"Cover"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    let at = h.at(&json!({"world":[5,0,10]})).unwrap();
+    (h, egui::pos2(at[0] as f32, at[1] as f32))
+}
+
+#[test]
+fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
+    use crate::viewport::{Hit, pick_all, pick_cached, projection};
+    let (mut h, pos) = covered_edge();
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
+    h.app.ui.visual_style = 3;
+    assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
+    assert_eq!(h.call("ui.prefs", json!({"select_hidden_edges":true}))["ok"], true);
+    assert!(pick_cached(&mut h.app, &proj, pos).iter().any(target));
+    assert!(pick_all(&h.app, &proj, pos).iter().any(target));
+    for style in [0, 1, 2, 3] {
+        h.app.ui.visual_style = style;
+        assert_eq!(pick_cached(&mut h.app, &proj, pos).iter().any(target), style >= 2, "style {style}");
+    }
+    h.app.session.visibility.hidden_bodies.push("Target".into());
+    assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
+    h.app.session.visibility.hidden_bodies.clear();
+    // The section removes the target entirely: even hidden-edge mode must exclude it.
+    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, -5.0), solidcore_record::Vec3::Z));
+    assert!(!pick_all(&h.app, &proj, pos).iter().any(target));
+    h.app.session.section = None;
+    h.call("ui.prefs", json!({"select_hidden_edges":false}));
+    assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
+}
+
+#[test]
+fn hidden_edge_mode_keeps_section_caps_as_occluders() {
+    use crate::viewport::{Hit, pick, pick_all, projection};
+    let (mut h, pos) = covered_edge();
+    h.app.ui.visual_style = 3;
+    h.app.preferences.select_hidden_edges = true;
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
+    assert!(pick_all(&h.app, &proj, pos).iter().any(target), "an ordinary face permits hidden edges");
+    // The target remains below the cut, but the section cap through the cover hides it.
+    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 25.0), solidcore_record::Vec3::Z));
+    assert!(!pick(&h.app, &proj, pos).iter().any(target), "ordinary picking must respect the cap");
+    assert!(!pick_all(&h.app, &proj, pos).iter().any(target), "Select Other must respect the cap");
+    // A plane between the bodies removes the cover without making a cap over the target.
+    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 15.0), solidcore_record::Vec3::Z));
+    assert!(pick_all(&h.app, &proj, pos).iter().any(target));
+}
+
+#[test]
+fn hidden_edge_mode_keeps_caps_behind_a_nearer_kept_face() {
+    use crate::viewport::{Hit, pick, pick_all, projection};
+    let (mut h, _) = covered_edge();
+    // This face counts as kept just before the cut. The Cover still crosses the plane.
+    let top = 25.0 + crate::view_pick::SECTION_EPS * 0.5;
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":1,"corner":[-10,-10,top-1.0],"body_name":"NearFace"})).unwrap();
+    h.app.cam.pitch = std::f64::consts::FRAC_PI_2;
+    h.app.ui.perspective = false;
+    h.app.ui.visual_style = 3;
+    h.app.preferences.select_hidden_edges = true;
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    // The ray lies inside the faces, close enough to reach the Target's edge.
+    let pos = proj.to_screen(solidcore_record::Vec3::new(5.0, 0.02, 10.0)).unwrap();
+    let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
+    assert!(pick_all(&h.app, &proj, pos).iter().any(target), "ordinary faces permit hidden edges");
+    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 25.0), solidcore_record::Vec3::Z));
+    for enabled in [false, true] {
+        h.app.preferences.select_hidden_edges = enabled;
+        for hits in [pick(&h.app, &proj, pos), pick_all(&h.app, &proj, pos)] {
+            assert!(hits.iter().any(|hit| matches!(hit, Hit::Face { body, .. } if body == "NearFace")), "the nearer kept face remains selectable");
+            assert!(!hits.iter().any(target), "the cap still hides the Target with hidden edges {enabled}");
+        }
+    }
+}
+
+#[test]
+fn hidden_edge_ties_prefer_visible_edges_without_overriding_distance() {
+    use crate::viewport::{Hit, pick, pick_all, projection};
+    for front_first in [false, true] {
+        for offset in [0.0, -0.1] {
+            let mut h = Harness::new();
+            h.app.set_origin_shown(false);
+            for front in [front_first, !front_first] {
+                h.app
+                    .run("solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,if front { offset } else { 0.0 },if front { 20 } else { 0 }],"body_name":if front { "Front" } else { "Rear" }}))
+                    .unwrap();
+            }
+            h.call("ui.view", json!({"view":"top"}));
+            h.call("ui.view", json!({"view":"fit"}));
+            h.app.ui.visual_style = 3;
+            // Standard views stop just short of vertical; use an exact pole for a true screen tie.
+            h.app.cam.pitch = std::f64::consts::FRAC_PI_2;
+            h.app.ui.perspective = false;
+            let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+            assert_eq!(h.app.session.world_state().unwrap().bodies[0].name, if front_first { "Front" } else { "Rear" });
+            if offset == 0.0 {
+                for x in [0.0, 40.0] {
+                    assert_eq!(proj.to_screen(solidcore_record::Vec3::new(x, 0.0, 10.0)), proj.to_screen(solidcore_record::Vec3::new(x, 0.0, 30.0)));
+                }
+            }
+            // Keep the ray inside both faces so boundary rounding cannot hide the nearer face.
+            let pos = proj.to_screen(solidcore_record::Vec3::new(20.0, 0.02, 10.0)).unwrap();
+            for enabled in [false, true] {
+                h.app.preferences.select_hidden_edges = enabled;
+                let expected = if enabled && offset != 0.0 { "Rear" } else { "Front" };
+                for (all, hits) in [(false, pick(&h.app, &proj, pos)), (true, pick_all(&h.app, &proj, pos))] {
+                    let edges: Vec<&str> =
+                        hits.iter().filter_map(|hit| if let Hit::Edge { body, .. } = hit { Some(body.as_str()) } else { None }).collect();
+                    assert_eq!(edges.first().copied(), Some(expected), "front_first={front_first}, offset={offset}, enabled={enabled}: {edges:?}");
+                    if enabled && all {
+                        assert!(edges.contains(&"Rear"), "Select Other still offers the hidden edge: {edges:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn hidden_edge_mode_reaches_the_far_side_of_the_same_body() {
+    use crate::viewport::{Hit, pick_all, projection};
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.cam.yaw = 0.6;
+    h.app.cam.pitch = 0.5;
+    h.app.fit_view();
+    h.settle();
+    h.app.ui.visual_style = 3;
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let mesh = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh();
+    let mut hidden = 0;
+    for (index, points) in mesh.edges.iter().enumerate() {
+        let mid = (points[0] + points[points.len() - 1]) * 0.5;
+        let Some(pos) = proj.to_screen(mid) else { continue };
+        let wanted = |hit: &Hit| matches!(hit, Hit::Edge { index: i, .. } if *i == index);
+        h.app.preferences.select_hidden_edges = false;
+        if pick_all(&h.app, &proj, pos).iter().any(wanted) {
+            continue;
+        }
+        h.app.preferences.select_hidden_edges = true;
+        assert!(pick_all(&h.app, &proj, pos).iter().any(wanted), "far-side edge {index}");
+        hidden += 1;
+    }
+    assert!(hidden >= 3, "the three edges meeting at the far corner: {hidden}");
+}
+
+#[test]
+fn hidden_edge_clicks_feed_fillet_before_and_after_opening_the_dialog() {
+    for preselect in [true, false] {
+        let (mut h, pos) = covered_edge();
+        h.call("ui.prefs", json!({"select_hidden_edges":true}));
+        h.app.ui.visual_style = 3;
+        if !preselect {
+            h.app.start("solid.fillet");
+        }
+        h.step(&json!({"click":[pos.x,pos.y]})).unwrap();
+        if preselect {
+            #[cfg(not(target_arch = "wasm32"))]
+            save_hidden_edge_evidence(&h, "hidden-edge-selected");
+            assert!(matches!(h.app.session.selection.first(), Some(Sel::Edge {body,..}) if body == "Target"));
+            h.app.start("solid.fillet");
+        }
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(matches!(d.inputs[0].items.first(), Some(Sel::Edge {body,..}) if body == "Target"));
+        if let crate::dialogs::Kind::Fillet { radius, .. } = &mut d.kind {
+            *radius = "1".into();
+        }
+        let cmds = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let before = h.app.session.doc.features.len();
+        h.app.dialog = None;
+        for (command, params) in cmds {
+            h.app.run(&command, params).unwrap();
+        }
+        assert_eq!(h.app.session.doc.features.len(), before + 1);
+        assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
+        let state = h.app.session.world_state().unwrap();
+        let volume = |name| solidcraft_engine::kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+        let expected = 1000.0 - 10.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+        assert!((volume("Target") - expected).abs() < 0.02, "radius-1 fillet on a length-10 edge: {}", volume("Target"));
+        assert!((volume("Cover") - 9000.0).abs() < 1e-6, "the cover must stay intact");
+        #[cfg(not(target_arch = "wasm32"))]
+        if preselect {
+            h.app.session.selection.clear();
+            save_hidden_edge_evidence(&h, "hidden-edge-fillet");
+        }
+    }
+}
+
+/// Optional real viewport captures for local review, using the same GPU pipeline as the app.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_hidden_edge_evidence(h: &Harness, name: &str) {
+    let Ok(dir) = std::env::var("SOLIDCRAFT_HIDDEN_EDGE_EVIDENCE") else { return };
+    let size = 768;
+    let proj = crate::viewport::projection(&h.app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size as f32, size as f32)));
+    let eye = proj.cam.eye().to_f32();
+    let rgba = crate::gpu::render_offscreen(
+        crate::viewport::build_scene(&h.app),
+        Some(crate::viewport::build_highlight(&h.app)),
+        proj.vp.to_f32(),
+        proj.cam.back().to_f32(),
+        [eye[0], eye[1], eye[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
+        size,
+        None,
+        [0.0; 8],
+        crate::gpu::analysis_colors(&solidcraft_theme::Tokens::get().analysis),
+    )
+    .expect("a GPU is required when evidence capture is requested");
+    std::fs::create_dir_all(&dir).unwrap();
+    image::save_buffer(std::path::Path::new(&dir).join(format!("{name}.png")), &rgba, size, size, image::ColorType::Rgba8).unwrap();
 }

@@ -1,0 +1,15 @@
+#### UB-31. NLib curve helpers read values their callees did not write
+- **Severity:** Crash / undefined behaviour
+- **Area:** NLib: curves, fitting, surfaces
+- **Location:**
+  - `NL_CrvBasic.cpp:3256` `N_CrvGetNumAndDenom`: allocates the numerator, then fails before writing it.
+  - `NL_CrvBasic.cpp:5364` `N_CrvIsPlanar`: reads `ang` after a failed `N_VectorsAngle`.
+  - `NL_CrvAdv.cpp:12688` `N_LinearMultiplyCrv`: ignores the `N_CrvGetGrevilleAbscissa` error, then uses the parameter.
+  - `NL_CrvCommon.cpp:75` `N_CreateQuadraticArcTol`: reads `N_IsectLineLine`'s unset `ints` flag.
+  - `NL_Geom.cpp:2868` `N_DistPtLineSeg` and `:6068` `N_CPtsAreColinear`: no distance written for NaN input, which is then compared.
+- **What happens:** Results depend on uninitialised memory.
+- **Trigger:** A degree-0 curve for `N_LinearMultiplyCrv`; zero end tangents for `N_CreateQuadraticArcTol`; a zero weight for `N_CPtsAreColinear`.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Propagates the callee error (or returns NaN / `false` where documented).

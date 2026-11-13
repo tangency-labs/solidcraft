@@ -1,20 +1,49 @@
 //! Recorded ownership changes are evaluated at their timeline position.
 use crate::{DocError, Document, Mat, ModelBody, ModelState, Result};
-use solidcraft_geom::Vec3;
 use std::collections::BTreeSet;
 
+/// A profile moved into the component receiving its own body is read through the recorded
+/// transfer frame. Reading its live placement would move the source geometry when that
+/// component moves, then move the transferred body a second time. All outputs of a constructor
+/// must reach the sketch's component through the same frame; independent cross-component
+/// references retain their ordinary live placement.
+pub(crate) fn profile_frame(doc: &Document, feature: &crate::Feature, sketch: u64) -> Option<Mat> {
+    if !matches!(
+        feature.kind,
+        crate::FeatureKind::Extrude { operation: crate::Operation::NewBody, .. }
+            | crate::FeatureKind::Revolve { operation: crate::Operation::NewBody, .. }
+    ) || feature.body_names.is_empty()
+    {
+        return None;
+    }
+    let owner = doc.feature(sketch)?.component;
+    if owner == feature.component {
+        return None;
+    }
+    let mut frames: std::collections::BTreeMap<&str, (u64, Mat)> =
+        feature.body_names.iter().map(|name| (name.as_str(), (feature.component, crate::IDENTITY))).collect();
+    let start = doc.feature_index(feature.id)?.saturating_add(1);
+    for step in doc.features.iter().take(doc.marker.unwrap_or(usize::MAX)).skip(start).filter(|step| !step.suppressed) {
+        let crate::FeatureKind::BodyTransfer { bodies, from, to, transform } = &step.kind else { continue };
+        for name in bodies {
+            if let Some((component, frame)) = frames.get_mut(name.as_ref()) {
+                if *component != *from || !valid_transfer_matrix(transform) {
+                    return None;
+                }
+                *component = *to;
+                *frame = crate::mat_mul(transform, frame);
+            }
+        }
+        if frames.values().all(|(component, _)| *component == owner) {
+            let (_, first) = frames.values().next()?;
+            return frames.values().all(|(_, frame)| frame == first).then(|| crate::mat_inverse(first)).flatten();
+        }
+    }
+    None
+}
+
 pub fn valid_transfer_matrix(m: &Mat) -> bool {
-    let axis = |i: usize| Vec3::new(m[i][0], m[i][1], m[i][2]);
-    let (x, y, z) = (axis(0), axis(1), axis(2));
-    m.iter().flatten().all(|v| v.is_finite())
-        && m[3][..3].iter().all(|v| v.abs() <= 1e9)
-        && [x, y, z].iter().all(|v| (v.dot(*v) - 1.0).abs() < 1e-6)
-        && x.dot(y).abs() < 1e-6
-        && x.dot(z).abs() < 1e-6
-        && y.dot(z).abs() < 1e-6
-        && x.cross(y).dot(z) > 0.0
-        && [m[0][3], m[1][3], m[2][3]].iter().all(|v| v.abs() < 1e-9)
-        && (m[3][3] - 1.0).abs() < 1e-9
+    crate::is_placement(m)
 }
 
 /// Validate the stored boundary before allocation, loading, or evaluation.

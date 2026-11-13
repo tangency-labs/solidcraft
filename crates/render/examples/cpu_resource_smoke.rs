@@ -1,9 +1,12 @@
 //! Bounded native acceptance probe for explicit CPU profiles. This is not a speed
 //! benchmark or an application/UI test. Writes only to a new caller-selected folder.
 use serde_json::json;
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::job::{CpuBudget, CpuHost, DirectionalLightOptions, ImageRequest, Integrator, JobId, JobOptions, Phase, RaytraceOptions};
-use solidcraft_render::{Camera, ProductMesh, ProductScene, StandardView, surface::OpaqueSurface};
+use solidcraft_render::{ProductMesh, ProductScene};
+use solidcraft_viewport::{Camera, StandardView, surface::OpaqueSurface};
 use std::{error::Error, fs, path::PathBuf, sync::Arc, time::Duration};
 
 fn scene() -> Result<ProductScene, Box<dyn Error>> {
@@ -31,6 +34,7 @@ fn request(width: u32, height: u32, budget: CpuBudget) -> ImageRequest {
     let mut camera = Camera { distance: 65.0, ..Default::default() };
     camera.set_view(StandardView::Top);
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator: Integrator::Raytrace,
@@ -126,7 +130,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let mut studio = request(width, height, budget);
     if case == "bodies" {
-        studio.camera.fit(&source.bounds);
+        studio.camera.fit(&solidcraft_render::view_bounds(&source.bounds));
     }
     let admission = host.admit(&source, &studio, JobOptions::default())?;
     let id = JobId { session: 20261022, serial: 1, generation: 1 };

@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
 use crate::SolveApp;
-use solidcraft_engine::render::{Camera, job::CancelToken};
+use solidcraft_engine::render::job::CancelToken;
+use solidcraft_viewport::Camera;
 
 pub(super) const LIMIT: usize = 16;
 #[cfg(not(target_arch = "wasm32"))]
@@ -105,7 +106,7 @@ pub(super) fn refresh(app: &mut SolveApp, ctx: &egui::Context) {
     let mut scene = std::collections::hash_map::DefaultHasher::new();
     app.session.visibility.hidden_bodies.hash(&mut scene);
     app.session.visibility.hidden_occurrences.hash(&mut scene);
-    (std::sync::Arc::as_ptr(&app.session.world_state()) as usize).hash(&mut scene);
+    (std::sync::Arc::as_ptr(&crate::open_meshing::session_world(&app.session)) as usize).hash(&mut scene);
     let scene = scene.finish();
     let mut keys = Vec::new();
     for name in std::iter::once(&app.render_workspace.view.name)
@@ -138,6 +139,7 @@ pub(super) fn refresh(app: &mut SolveApp, ctx: &egui::Context) {
         let permit = WorkerPermit;
         let Some(setup) = app.session.doc.render.setups.get(&key.name) else { return };
         let request = solidcraft_engine::render::job::ImageRequest {
+            studio_weights: None,
             camera: setup.camera,
             width: SIZE[0],
             height: SIZE[1],

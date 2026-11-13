@@ -1,0 +1,32 @@
+#### WR-685. A blend-curve fillet's cross-section is a Hermite blend curve per section, not a section of order-n contact with its faces
+- **Severity:** Wrong result (the blend meets its faces only as far as each section's blend curve does, and the surface is a fit through sections rather than one defined surface)
+- **Area:** Blend (fillet solver)
+- **Location:** `source/SMLib/src/SmFilletStandardSolver.cpp`, `SmBlendCurveCrossSectionFSG::CreateSurface` and `CreateSurfaceFromCurves`. These are what `SmFilletExecutive::SetFilletParameters` builds for `SM_FSG_BLEND_CURVE`, as do the corners' `MakeConstantRadiusFillet` and `MakeVariableRadiusFillet`.
+- **What happens:** each section is a blend curve between the rails, scaled by the thumbweight, and the surface is skinned through those sections. Its contact with the faces across the rails is only what each section's end derivatives give. Its distance from any defined blend is not bounded.
+- **Trigger:** any blend-curve round. The box 40 x 30 x 20 with its top back edge rounded r 3 at order 2: the fork's G^n section cuts off 0.154192655384275 r^2 at w = 0 (113/756 r^2 at w* = 0.034293402266607321), and the blend curve cuts off a different area.
+- **How found:** the SolidCraft fork's tangency-labs/smlib@11ea2d9 (= 0bd3f4d in the history of d01d7b0, the revision SolidCraft pins; same SMLib and SM_API trees) (smlib#78). It adds `SmGnSectionFSG` in `SmFilletSection.cpp` and replaces the blend curve with it. Tracking: tangency-labs/solidcore#2250.
+- **Confirmed:** in the Rust port (`crates/solidcore/tests/wr685_gn_section.rs`; expected values from closed forms or quoted from the fork's commits, as #2252 quotes them), and checked against fork d01d7b0 built locally (SMLib and SM_API with the harness's flags, `-ffp-contract=off`), through scratch drivers that are not committed:
+  - The generator between two planes (orders 2 to 4; w = 0, 0.3 and w*): its surface's 1377 points and its certificate bounds and span counts are identical to the fork's (max rel err 0).
+  - Round volumes through `SmApiFilletEdges` and `SmApiBrepComputeVolume` against `fillet_edges` and `brep_volume`:
+    - box edge, order 2, 3 and 4 at w = 0: rel err 3.3e-10, 6.9e-11 and 2.2e-12;
+    - box edge, order 2 at w*: rel err 3.5e-10;
+    - pipe root: rel err 5.8e-9;
+    - boss root: rel err 4.7e-10.
+
+    These run the whole fillet, whose other fork changes are not all in the port, and the volume integrator at 1e-7. The fork at 0bd3f4d gives the same box and pipe volumes to 2e-14.
+- **Rust port:** behaves as upstream by default. With `Kernel::fixes.fillet_gn_section_generator`, `SM_FSG_BLEND_CURVE` builds `blend::fillet_section::section::GnSectionFsg` (`FilletSurfaceGenerator::GnSection`).
+  - The section is `S(t) = f T1(1 - p1) + (1 - f) T2(p2)` of order n = 2 to 4 with thumbweight w in [0, 1). The jets come from the station system's truncated power series (`fillet_section::station`). The section's form is the rational Bezier of degree 3n + 1 (`fillet_section::form`), multiplied by the jets' cubic Hermite curves along the rails.
+  - Each span is certified by rounded interval arithmetic and a Krawczyk test (`fillet_section::certificate`) and halved until its bound is under a tenth of the tolerance.
+  - The rest of the wiring follows the fork. `SetFilletParameters` refuses another order or thumbweight. The corners carry and compare the order and thumbweight. `CreateSurface` rebuilds the rails' uv curves. The tangent end's rib takes the order of contact `ContactOrderAt` finds at its rail (n + 2 between planes). `EaseSetBackSections` blends into the order-2 section at w = 0, in place of the at-thirds blend curve, so `blend_curve_at_thirds` is not used under this flag.
+  - WR-581's revolved blend curve is not applied to the G^n section. The fork's order > 3 guard in `AdjustCrossSection` has no port, because that function is not ported.
+  - Deviation, a fork out-of-bounds write: `ContactOrderAt` at order 4 truncates at eps^5, one power past `sm_Ser`'s storage, so the fork writes `c[0][5]` over `c[1][0]`. That slot is unused at sigma order 0. The port stores one more eps column for that truncation, which gives the same values without the overrun.
+  - The box's order 3 and 4 rounds need `fillet_surface_plane_curve_on_plane_equation` (WR-682, the fork's 5bdcddf = d01d7b0's 34b7a22, which comes before this one in the fork): the end ribs of a section of degree 10 or 13 across are traced on the end plane, and upstream's intersector fails them with 1001. The tests turn it on with this flag, as the fork has it.
+  - Tests in `wr685_gn_section.rs`:
+    - The generator's surface between two planes is the closed-form section to 1e-12, for n = 2 to 4 and w = 0 and 0.3.
+    - Its cut areas are the fork's 113/756 r^2 and 0.154192655384275 r^2, to 1e-8.
+    - The box edge's order-2 round removes 360 times 0.154192655384275 (relative 1e-7).
+    - The fork's pipe root takes 40258.5435962825 (relative 1e-7).
+    - The fork's boss root adds up to 26043.0880831714 (relative 1e-6). This test is ignored by default: it takes about 15 minutes in a debug build and 3 minutes in release, as long as the fork's own build takes.
+    - An invalid order or thumbweight is refused.
+    - The unit tests in `blend::fillet_section` cover the primitives, the station's closed form at a square corner, and the contact order n + 2 between planes.
+  - Follow-ups not in this record: 58e073d (the chord and circle as the generator's orders 0 and 1, moved code), 6148773 + 22d258a (the equal-area default thumbweight), and 6b346f6 onward.

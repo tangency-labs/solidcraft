@@ -42,13 +42,13 @@ Editable drawing code, native projects and shipped exports are collected under `
 | examples/render-path-studio.json | SolidCraft contributors | original procedural opaque enclosure, teal insert and metal fasteners for progressive rendering; no imported models | MIT OR Apache-2.0 |
 | crates/gpu/src/path/path.wgsl | SolidCraft contributors | original software BVH traversal and path integration using the existing SolidCraft surface/studio equations; no external shader source | MIT OR Apache-2.0 |
 | crates/gpu/src/pbr.rs | SolidCraft contributors | original WGSL translation of SolidCraft's opaque surface and fixed studio reference, embedded as Rust source; no external shader code | MIT OR Apache-2.0 |
-| assets/icons/app/macos/source/SolidCraft.icon/icon.json | SolidCraft contributors | approved Icon Composer composition and appearance settings for the original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/app/macos/source/SolidCraft.icon/Assets/02-grid.svg | SolidCraft contributors | original perspective grid with elliptical radial alpha, exported from VectorCraft | MIT OR Apache-2.0 |
-| assets/icons/app/macos/source/SolidCraft.icon/Assets/02-grid-dark.svg | SolidCraft contributors | original blue perspective grid with elliptical radial alpha, exported from VectorCraft for the Dark appearance | MIT OR Apache-2.0 |
-| assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg | SolidCraft contributors | original saturated blue CAD solid with transparent topology cutouts, edited and exported with VectorCraft | MIT OR Apache-2.0 |
-| assets/icons/app/macos/exports/Assets.car | SolidCraft contributors | Apple actool compilation of assets/icons/app/macos/source/SolidCraft.icon for macOS; contains original artwork only | MIT OR Apache-2.0 |
+| assets/icons/app/macos/source/SolidCraft.icon/icon.json | SolidCraft contributors | approved Icon Composer composition and appearance settings for the original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/macos/source/SolidCraft.icon/Assets/02-grid.svg | SolidCraft contributors | original perspective grid with elliptical radial alpha, exported from VectorCraft | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/macos/source/SolidCraft.icon/Assets/02-grid-dark.svg | SolidCraft contributors | original blue perspective grid with elliptical radial alpha, exported from VectorCraft for the Dark appearance | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg | SolidCraft contributors | original saturated blue CAD solid with transparent topology cutouts, edited and exported with VectorCraft | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/macos/exports/Assets.car | SolidCraft contributors | Apple actool compilation of assets/icons/app/macos/source/SolidCraft.icon for macOS; contains original artwork only | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/archive/icons/macos-v1/source/icon.vectorcraft | SolidCraft contributors | retained editable historical VectorCraft source, with named face and background layers; redundant exports retired | MIT OR Apache-2.0 |
-| assets/icons/app/macos/exports/icon.icns | SolidCraft contributors | macOS fallback compiled by Apple's actool from the approved assets/icons/app/macos/source/SolidCraft.icon composition | MIT OR Apache-2.0 |
+| assets/icons/app/macos/exports/icon.icns | SolidCraft contributors | macOS fallback compiled by Apple's actool from the approved assets/icons/app/macos/source/SolidCraft.icon composition | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/models/test_boat.bin | 3DBenchy.com | 3DBenchy.com | Public Domain |
 | assets/models/make_test_boat.py | SolidCraft contributors | original script that packs a model into the compact file above | MIT OR Apache-2.0 |
 | docs/screenshots/class-a-blend.png | SolidCraft contributors | screenshot of SolidCraft itself: a 24 mm and a 10 mm box bridged by a `surface.blend` sheet (G1 at both edges), rendered by the app's `ui.render` in the dark theme with examples/demo/class_a_shots.py | MIT OR Apache-2.0 |
@@ -73,17 +73,18 @@ Editable drawing code, native projects and shipped exports are collected under `
 | docs/design/ux-redesign/start-page.png | SolidCraft contributors | original UX mockup (start page (File view)) rendered from an HTML mockup that uses the original Technical Accent icon set; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
 | docs/design/ux-redesign/workspaces.png | SolidCraft contributors | original UX mockup (workspace switcher) rendered from an HTML mockup that uses the original Technical Accent icon set; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
 | docs/design/ux-redesign/command-map.png | SolidCraft contributors | original UX mockup (ribbon command map) rendered from an HTML mockup that uses the original Technical Accent icon set; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
-| assets/branding/web/source/og.png | SolidCraft contributors | original 1280 × 640 social preview card (the SolidCraft mark, name and tagline), served by the docs site for link previews | MIT OR Apache-2.0 |
+| assets/branding/web/source/og.png | SolidCraft contributors | original 1280 × 640 social preview card (the SolidCraft mark, name and tagline), served by the docs site for link previews | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | docs/book/src/generated/sample-plate.png | SolidCraft contributors | copy of docs/screenshots/sample-plate.png made by `cargo xtask book` (gitignored) | MIT OR Apache-2.0 |
 | docs/book/src/generated/bracket.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot examples/bracket.json`; gitignored) | MIT OR Apache-2.0 |
 | docs/book/src/generated/enclosure.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/enclosure.json`; gitignored) | MIT OR Apache-2.0 |
 | docs/book/src/generated/revolve.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/revolve.json`; gitignored) | MIT OR Apache-2.0 |
 | docs/book/src/generated/sheet-metal.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/sheet-metal.json`; gitignored) | MIT OR Apache-2.0 |
-| assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf | IBM Corp. (IBM Plex Mono) | https://github.com/IBM/plex (via google/fonts), unmodified; licence text in assets/fonts/ibm-plex-mono/OFL.txt; the interface monospace font | SIL OFL 1.1 |
-| assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf | IBM Corp. (IBM Plex Sans, variable wdth and wght) | https://github.com/IBM/plex (via google/fonts), unmodified; licence text in assets/fonts/ibm-plex-sans/OFL.txt; the default interface font | SIL OFL 1.1 |
+| crates/look/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf | IBM Corp. (IBM Plex Mono) | https://github.com/IBM/plex (via google/fonts), unmodified; licence text in crates/look/fonts/ibm-plex-mono/OFL.txt; the interface monospace font | SIL OFL 1.1 |
+| crates/look/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf | IBM Corp. (IBM Plex Sans, variable wdth and wght) | https://github.com/IBM/plex (via google/fonts), unmodified; licence text in crates/look/fonts/ibm-plex-sans/OFL.txt; the default interface font | SIL OFL 1.1 |
 | docs/book/src/generated/tool-preview.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/tool-preview.json`; gitignored) | MIT OR Apache-2.0 |
-| assets/fonts/liberation-sans/LiberationSans-Regular.ttf | Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google) | https://github.com/liberationfonts (Debian fonts-liberation), unmodified; licence text in assets/fonts/liberation-sans/OFL.txt; used for sketch Text outlines | SIL OFL 1.1 |
 | assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf | The BIZ UDGothic Project Authors | https://github.com/googlefonts/morisawa-biz-ud-gothic (Google Fonts), unmodified; licence text in assets/fonts/biz-udp-gothic/OFL.txt; used for web UI Japanese font | SIL OFL 1.1 |
+| assets/fonts/craft-ui-sc/CraftUI-SC.otf | Adobe / Google Inc. (Noto Sans SC); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/SC Regular, glyph-subset for assets/locales/zh.json and renamed Craft UI SC (OFL reserved-name); licence text in assets/fonts/craft-ui-sc/OFL.txt; web UI Simplified Chinese | SIL OFL 1.1 |
+| assets/fonts/craft-ui-tc/CraftUI-TC.otf | Adobe / Google Inc. (Noto Sans TC); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/TC Regular, glyph-subset for assets/locales/zh-TW.json and renamed Craft UI TC (OFL reserved-name); licence text in assets/fonts/craft-ui-tc/OFL.txt; web UI Traditional Chinese | SIL OFL 1.1 |
 | tests/step-conformance/cone_point.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/cone_point_vertex.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/cylinder.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
@@ -101,6 +102,22 @@ Editable drawing code, native projects and shipped exports are collected under `
 | tests/step-conformance/tiny_pin.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/torus_ring_nurbs.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/washer.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
+| tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step | step-conformance contributors | copy of tests/step-conformance/cylinder_nurbs.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#1721 | CC0-1.0 |
+| tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#2043 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/258-cone-point-vertex/input.step | step-conformance contributors | copy of tests/step-conformance/cone_point_vertex.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#258 | CC0-1.0 |
+| tests/kernel-cases/import/258-cone-to-point/input.step | step-conformance contributors | copy of tests/step-conformance/cone_point.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#258 | CC0-1.0 |
+| tests/kernel-cases/import/258-tiny-pin/input.step | step-conformance contributors | copy of tests/step-conformance/tiny_pin.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#258 | CC0-1.0 |
+| tests/kernel-cases/import/3098-bspline-edges-over-tiny-knot-span/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3098 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/3208-extruded-ellipse-face-over-parameter-seam/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3208 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/3352-vertex-off-its-edge-curve/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3352 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/3730-void-oriented-shell-false/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3730 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/3880-cylinder-seam-edge/input.step | step-conformance contributors | copy of tests/step-conformance/cylinder_seam.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#3880 | CC0-1.0 |
+| tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step | step-conformance contributors | copy of tests/step-conformance/dome_nurbs.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#3880 | CC0-1.0 |
+| tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3963 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#4005 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/4006-plane-written-as-cone-of-nearly-right-angle/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#4006 | MIT OR Apache-2.0 |
+| tests/ssi-corpus/cases/*.json.gz, tests/ssi-corpus/LICENSE-MIT, tests/ssi-corpus/LICENSE-APACHE | ssi-corpus contributors (jyviko) | 119 surface/surface intersection cases with exact ground truth from https://github.com/jyviko/ssi-corpus (cases/data, b04c8a6), gzip-compressed, unchanged; SSI scorer fixtures (tests/ssi-corpus/README.md) | MIT OR Apache-2.0 |
+| tests/ssi-corpus/cases/y23_*.json.gz | Yang, Jia and Yan (paper authors: published surfaces, figures and topology); ssi-corpus contributors (reconstructions and truth) | 25 cases built from Yang, Jia & Yan 2023, "Topology Guaranteed B-Spline Surface/Surface Intersection", ACM Transactions on Graphics 42(6), Article 211; each cites the paper in its `source` field | CC-BY 4.0 (paper); MIT OR Apache-2.0 (case files) |
 | tests/step-regressions/rod_doubled_edge.step | SolidCraft contributors | written by SolidCraft from the commands of #4598 (a bored rod moved 100 mm and exported); import regression fixture | MIT OR Apache-2.0 |
 | tests/oracle/17-loft/reference.stl | SolidCraft contributors | triangulation of our own recipe (tests/oracle/17-loft/recipe.json) built with FreeCAD as an external tool by tools/freecad-oracle | MIT OR Apache-2.0 |
 | tests/oracle/23-bracket-multifeature/reference.stl | SolidCraft contributors | triangulation of our own recipe (tests/oracle/23-bracket-multifeature/recipe.json) built with FreeCAD as an external tool by tools/freecad-oracle | MIT OR Apache-2.0 |
@@ -125,25 +142,27 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/appearances/library.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/appearances/opaque_finishes.rs | SolidCraft contributors | original illustrative opaque finish values; no external dataset, textures or measured engineering data | MIT OR Apache-2.0 |
 | assets/fonts/biz-udp-gothic/OFL.txt | The BIZ UDGothic Project Authors | Unmodified accompanying font licence | SIL OFL 1.1 |
-| assets/fonts/ibm-plex-mono/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
-| assets/fonts/ibm-plex-sans/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
-| assets/fonts/liberation-sans/OFL.txt | Red Hat, Inc.; Liberation Fonts contributors | Unmodified accompanying font licence | SIL OFL 1.1 |
-| assets/icons/app/linux/exports/hicolor/128x128/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/16x16/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/24x24/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/256x256/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/32x32/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/48x48/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/512x512/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/64x64/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/shared/source/app_icon.rs | SolidCraft contributors | Original SolidCraft drawing code: the borderless mark, drawn from the faces and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg | MIT OR Apache-2.0 |
-| assets/icons/app/shared/source/windows_ico.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
-| assets/icons/app/windows/exports/solidcraft-executable.ico | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/windows/exports/solidcraft.ico | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/ui/source/glyphs.rs | SolidCraft / VectorCraft contributors | Original glyphs; caption geometry adapted from VectorCraft titlebar.rs (https://github.com/storytold/vectorcraft) | MIT OR Apache-2.0 |
-| assets/icons/ui/source/markers.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
-| assets/icons/ui/source/navigation.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
-| assets/icons/ui/source/pointer.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
+| assets/fonts/craft-ui-sc/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-SC.otf | SIL OFL 1.1 |
+| assets/fonts/craft-ui-tc/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-TC.otf | SIL OFL 1.1 |
+| crates/look/fonts/ibm-plex-mono/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
+| crates/look/fonts/ibm-plex-sans/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/icons/app/linux/exports/hicolor/128x128/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/linux/exports/hicolor/16x16/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/linux/exports/hicolor/24x24/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/linux/exports/hicolor/256x256/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/linux/exports/hicolor/32x32/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/linux/exports/hicolor/48x48/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/linux/exports/hicolor/512x512/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/linux/exports/hicolor/64x64/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/shared/source/app_icon.rs | SolidCraft contributors | Original SolidCraft drawing code: the borderless mark, drawn from the faces and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/shared/source/windows_ico.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/windows/exports/solidcraft-executable.ico | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/icons/app/windows/exports/solidcraft.ico | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/src/glyphs.rs | SolidCraft / VectorCraft contributors | Original glyphs; caption geometry adapted from VectorCraft titlebar.rs (https://github.com/storytold/vectorcraft) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/ui-egui/src/icons/markers.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
+| crates/ui-egui/src/icons/navigation.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
+| crates/look/src/compass.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/src/pointer.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/locales/cs.json | potuzai | Czech translation of the English catalog, contributed upstream | MIT OR Apache-2.0 |
 | assets/locales/da.json | SolidCraft contributors | Original Danish translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/de.json | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
@@ -182,116 +201,123 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/platforms/macos/README.txt | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/platforms/windows/solidcraft.en-us.wxl | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/platforms/windows/solidcraft.wxs | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
-| assets/shaders/viewport.wgsl | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
-| assets/styles/ui/palettes.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/gruvbox-dark.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/gruvbox-dark-hard.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/gruvbox-dark-soft.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/gruvbox-light.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/gruvbox-light-hard.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/gruvbox-light-soft.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/solidcraft-95.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/platinum-9.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/cupertino.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/green-phosphor.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/amber-phosphor.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/blueprint.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/one-dark.json | SolidCraft contributors | original SolidCraft theme file with colours adapted from the One Dark palette (Atom One Dark by GitHub Atom, https://github.com/atom/atom, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/tokyo-night.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Tokyo Night by enkia, https://github.com/enkia/tokyo-night-vscode-theme, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/solarized-light.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Solarized by Ethan Schoonover, https://github.com/altercation/solarized, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/nord.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Nord by Sven Greb and the Nord contributors, https://github.com/nordtheme/nord, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/high-contrast.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/graphite.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/nosferatu.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Dracula by Zeno Rocha and the Dracula Theme contributors, https://github.com/dracula/dracula-theme, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/catppuccin-mocha.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Catppuccin by the Catppuccin organisation, https://github.com/catppuccin/catppuccin, MIT) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/okibi.json | SolidCraft contributors (Kai Evans) | original SolidCraft theme file mapping SolidCraft's UI colours to the Okibi palette (dark) of the Okibi design system by Kai Evans (https://kaievns.github.io/okibi-akiri-design-system-spec/) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/akari.json | SolidCraft contributors (Kai Evans) | original SolidCraft theme file mapping SolidCraft's UI colours to the Akari palette (light) of the Okibi design system by Kai Evans (https://kaievns.github.io/okibi-akiri-design-system-spec/) | MIT OR Apache-2.0 |
+| crates/viewport-gpu/shaders/viewport.wgsl | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
+| crates/look/themes/gruvbox-dark.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/gruvbox-light.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/solidcraft-95.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/platinum-9.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/cupertino.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/green-phosphor.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/amber-phosphor.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/blueprint.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/one-dark.json | SolidCraft contributors | original SolidCraft theme file with colours adapted from the One Dark palette (Atom One Dark by GitHub Atom, https://github.com/atom/atom, MIT) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/tokyo-night.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Tokyo Night by enkia, https://github.com/enkia/tokyo-night-vscode-theme, MIT) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/solarized-light.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Solarized by Ethan Schoonover, https://github.com/altercation/solarized, MIT) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/solarized-dark.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Solarized by Ethan Schoonover, https://github.com/altercation/solarized, MIT) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/nord.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Nord by Sven Greb and the Nord contributors, https://github.com/nordtheme/nord, MIT) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/high-contrast.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/graphite.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/nosferatu.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Dracula by Zeno Rocha and the Dracula Theme contributors, https://github.com/dracula/dracula-theme, MIT) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/catppuccin-mocha.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Catppuccin by the Catppuccin organisation, https://github.com/catppuccin/catppuccin, MIT) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/okibi.json | SolidCraft contributors (Kai Evans) | original SolidCraft theme file mapping SolidCraft's UI colours to the Okibi palette (dark) of the Okibi design system by Kai Evans (https://kaievns.github.io/okibi-akiri-design-system-spec/) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/akari.json | SolidCraft contributors (Kai Evans) | original SolidCraft theme file mapping SolidCraft's UI colours to the Akari palette (light) of the Okibi design system by Kai Evans (https://kaievns.github.io/okibi-akiri-design-system-spec/) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/styles/web/loading-logo.svg | SolidCraft contributors | Animation of the SolidCraft mark, built from the paths and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg; original animation | MIT OR Apache-2.0 |
 | assets/styles/web/loading.css | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | crates/io/src/native_cad/fixtures/block.FCStd | SolidCraft contributors | original 10 × 20 × 30 mm test box saved by FreeCAD 1.1.4 run as an external program (`make_block_fcstd.py` beside it); no third-party geometry | MIT OR Apache-2.0 |
 | crates/io/src/native_cad/fixtures/block.3dm | SolidCraft contributors | original 10 × 20 × 30 mm test box written with McNeel's MIT-licensed rhino3dm Python package (`make_block_3dm.py` beside it); no third-party geometry | MIT OR Apache-2.0 |
-| assets/icons/ui/design/aliases.toml | SolidCraft contributors | icon ids that share a master, original SolidCraft data | MIT OR Apache-2.0 |
-| assets/icons/ui/design/palette.toml | SolidCraft contributors | icon colour roles (light and dark) and accents, original SolidCraft data | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/bug_report.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/chevron.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/chevron_right.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/close.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/disclosure_closed.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/disclosure_open.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/fit.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/folder.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/help.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/home.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/lookat.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/moon.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/nav_settings.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/orbit.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/plus.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/pan.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/perspective.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/redo.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/save.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/settings.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/settings_keyboard.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/settings_monitor.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/settings_mouse.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/settings_palette.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/settings_plug.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/spin.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/style.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/undo.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/zoom.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/accessibility.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/activate.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/align.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/appearance.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/arc3.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/arc_center.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/arc_slot.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/arc_tangent.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/as_built.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/auto_constrain.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/axis.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/bendtable.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/blend.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/blend_surface.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/body.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/boss.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/boundary.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/boundary_fill.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/box.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/break.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_coincident.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_collinear.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_concentric.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_equal.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_fix.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_hv.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_midpoint.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_parallel.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_perpendicular.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_polygon.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_smooth.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_symmetry.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/c_tangent.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/camera.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/canvas.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/capture.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/center_of_mass.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/centerline.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/chain.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/chamfer.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/checkpoint.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/circle.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/circle2.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/circle3.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/circle_tt.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/circle_ttt.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/coil.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/colored_components.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/colored_components_off.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/combine.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/component.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| crates/look/icons/design/aliases.toml | SolidCraft contributors | icon ids that share a master, original SolidCraft data | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/palette.toml | SolidCraft contributors | icon colour roles (light and dark) and accents, original SolidCraft data | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/bug_report.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/chevron.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/chevron_right.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/close.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/disclosure_closed.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/disclosure_open.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/fit.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/folder.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/help.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/home.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/lookat.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/moon.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/nav_settings.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/orbit.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/plus.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/pan.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/perspective.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_appearance.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_assistant.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_design.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_general.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_graphics.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_layout.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_mouse3d.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_navigation.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_plugins.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_shortcuts.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_sketch.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/prefs_tools.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/redo.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/save.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/settings.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/settings_keyboard.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/settings_monitor.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/settings_mouse.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/settings_palette.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/settings_plug.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/spin.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/style.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/undo.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/zoom.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/accessibility.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/activate.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/align.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/appearance.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/arc3.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/arc_center.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/arc_slot.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/arc_tangent.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/as_built.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/auto_constrain.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/axis.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/bendtable.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/blend.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/blend_surface.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/body.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/boss.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/boundary.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/boundary_fill.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/box.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/break.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_coincident.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_collinear.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_concentric.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_equal.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_fix.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_hv.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_midpoint.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_parallel.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_perpendicular.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_polygon.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_smooth.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_symmetry.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/c_tangent.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/camera.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/canvas.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/capture.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/center_of_mass.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/centerline.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/chain.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/chamfer.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/checkpoint.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/circle.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/circle2.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/circle3.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/circle_tt.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/circle_ttt.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/coil.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/colored_components.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/combine.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/component.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 
 ### Render workspace icon drafts
 
@@ -299,310 +325,542 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 
 | File | Author | Source | Licence |
 |---|---|---|---|
-| assets/icons/ui/design/svg/model/render_all_shots.svg | SolidCraft contributors | original Camera icon master (64 grid): stacked camera bodies with a lower-right play badge | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_appearance.svg | SolidCraft contributors | original Looks icon master (64 grid): shaded look sphere on the top corner of an accent-shaded cube | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_aspect_frame.svg | SolidCraft contributors | original Camera icon master (64 grid): wide rounded frame with two opposite corner brackets | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_backdrop.svg | SolidCraft contributors | original Studio icon master (64 grid): grey cube in front of a tall upright accent panel | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_cancel.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a lower-right round stop badge | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_check.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a lower-right round check badge | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_compare.svg | SolidCraft contributors | original Output icon master (64 grid): two grey pictures split by a vertical slider with opposed arrows | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_copy_look.svg | SolidCraft contributors | original Looks icon master (64 grid): look sphere in a square frame offset from a second frame outline | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_execute.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a lower-right round play badge | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_export_image.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a large outward diagonal arrow at the upper right | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_exposure.svg | SolidCraft contributors | original Camera icon master (64 grid): split light and accent disc with plus and minus marks | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_fit_product.svg | SolidCraft contributors | original Camera icon master (64 grid): grey cube inside four corner brackets | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_frame_guides.svg | SolidCraft contributors | original Camera icon master (64 grid): rounded frame with a rule-of-thirds grid and four accent nodes | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_from_material.svg | SolidCraft contributors | original Looks icon master (64 grid): look sphere struck through above a plain grey slab | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_ground.svg | SolidCraft contributors | original Studio icon master (64 grid): grey cube on a slab with an accent contact patch | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_lens.svg | SolidCraft contributors | original Camera icon master (64 grid): concentric lens rings around an accent centre | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_library.svg | SolidCraft contributors | original Studio icon master (64 grid): row of three look spheres, middle one accent, on a shelf bar | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_light_area.svg | SolidCraft contributors | original Lights icon master (64 grid): slanted flat panel above a dotted accent stem | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_light_by_highlight.svg | SolidCraft contributors | original Lights icon master (64 grid): shaded sphere with a ringed highlight target and dotted stem arriving from above | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_light_point.svg | SolidCraft contributors | original Lights icon master (64 grid): round source disc with centre dot above a dotted accent stem | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_light_spot.svg | SolidCraft contributors | original Lights icon master (64 grid): cone source with curved rim above a dotted accent stem | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_lighting_presets.svg | SolidCraft contributors | original Studio icon master (64 grid): two stacked cards, the front one holding a light bulb | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_output_size.svg | SolidCraft contributors | original Output icon master (64 grid): picture frame with a diagonal double-headed dimension arrow | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_paint.svg | SolidCraft contributors | original Looks icon master (64 grid): flat brush with an accent tip, light ferrule and slate handle | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_pick_up.svg | SolidCraft contributors | original Looks icon master (64 grid): eyedropper with a grey bulb, slate crossbar and accent sampling tip | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_quality.svg | SolidCraft contributors | original Output icon master (64 grid): three rising bars, the tallest in accent | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_replace_all.svg | SolidCraft contributors | original Looks icon master (64 grid): grey sample sphere with an arrow to an accent sphere beside a second one | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_results.svg | SolidCraft contributors | original Output icon master (64 grid): stack of two pictures, the front one showing a landscape | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_same_look.svg | SolidCraft contributors | original Looks icon master (64 grid): look sphere and three cubes, the two matching cubes ringed | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_shot.svg | SolidCraft contributors | original Camera icon master (64 grid): camera body with a lower-right plus badge | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_shots_strip.svg | SolidCraft contributors | original Camera icon master (64 grid): strip of three small frames, the middle one in accent | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_solo_light.svg | SolidCraft contributors | original Lights icon master (64 grid): point source and dotted stem inside four corner focus brackets | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_sun.svg | SolidCraft contributors | original Lights icon master (64 grid): source disc with eight short radial rays | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_transparent_background.svg | SolidCraft contributors | original Output icon master (64 grid): grey cube on a checker tile | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_update_shot.svg | SolidCraft contributors | original Camera icon master (64 grid): camera body with a lower-right refresh badge | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/render_all_shots.svg | SolidCraft contributors | original Camera icon master (64 grid): stacked camera bodies with a lower-right play badge | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_appearance.svg | SolidCraft contributors | original Looks icon master (64 grid): shaded look sphere on the top corner of an accent-shaded cube | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_aspect_frame.svg | SolidCraft contributors | original Camera icon master (64 grid): wide rounded frame with two opposite corner brackets | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_backdrop.svg | SolidCraft contributors | original Studio icon master (64 grid): grey cube in front of a tall upright accent panel | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_cancel.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a lower-right round stop badge | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_check.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a lower-right round check badge | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_compare.svg | SolidCraft contributors | original Output icon master (64 grid): two grey pictures split by a vertical slider with opposed arrows | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_copy_look.svg | SolidCraft contributors | original Looks icon master (64 grid): look sphere in a square frame offset from a second frame outline | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_execute.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a lower-right round play badge | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_export_image.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a large outward diagonal arrow at the upper right | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_exposure.svg | SolidCraft contributors | original Camera icon master (64 grid): split light and accent disc with plus and minus marks | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_fit_product.svg | SolidCraft contributors | original Camera icon master (64 grid): grey cube inside four corner brackets | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_frame_guides.svg | SolidCraft contributors | original Camera icon master (64 grid): rounded frame with a rule-of-thirds grid and four accent nodes | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_from_material.svg | SolidCraft contributors | original Looks icon master (64 grid): look sphere struck through above a plain grey slab | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_ground.svg | SolidCraft contributors | original Studio icon master (64 grid): grey cube on a slab with an accent contact patch | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_lens.svg | SolidCraft contributors | original Camera icon master (64 grid): concentric lens rings around an accent centre | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_library.svg | SolidCraft contributors | original Studio icon master (64 grid): row of three look spheres, middle one accent, on a shelf bar | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_light_area.svg | SolidCraft contributors | original Lights icon master (64 grid): slanted flat panel above a dotted accent stem | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_light_by_highlight.svg | SolidCraft contributors | original Lights icon master (64 grid): shaded sphere with a ringed highlight target and dotted stem arriving from above | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_light_point.svg | SolidCraft contributors | original Lights icon master (64 grid): round source disc with centre dot above a dotted accent stem | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_light_spot.svg | SolidCraft contributors | original Lights icon master (64 grid): cone source with curved rim above a dotted accent stem | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_lighting_presets.svg | SolidCraft contributors | original Studio icon master (64 grid): two stacked cards, the front one holding a light bulb | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_output_size.svg | SolidCraft contributors | original Output icon master (64 grid): picture frame with a diagonal double-headed dimension arrow | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_paint.svg | SolidCraft contributors | original Looks icon master (64 grid): flat brush with an accent tip, light ferrule and slate handle | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_pick_up.svg | SolidCraft contributors | original Looks icon master (64 grid): eyedropper with a grey bulb, slate crossbar and accent sampling tip | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_quality.svg | SolidCraft contributors | original Output icon master (64 grid): three rising bars, the tallest in accent | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_replace_all.svg | SolidCraft contributors | original Looks icon master (64 grid): grey sample sphere with an arrow to an accent sphere beside a second one | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_results.svg | SolidCraft contributors | original Output icon master (64 grid): stack of two pictures, the front one showing a landscape | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_same_look.svg | SolidCraft contributors | original Looks icon master (64 grid): look sphere and three cubes, the two matching cubes ringed | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_shot.svg | SolidCraft contributors | original Camera icon master (64 grid): camera body with a lower-right plus badge | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_shots_strip.svg | SolidCraft contributors | original Camera icon master (64 grid): strip of three small frames, the middle one in accent | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_solo_light.svg | SolidCraft contributors | original Lights icon master (64 grid): point source and dotted stem inside four corner focus brackets | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_sun.svg | SolidCraft contributors | original Lights icon master (64 grid): source disc with eight short radial rays | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_transparent_background.svg | SolidCraft contributors | original Output icon master (64 grid): grey cube on a checker tile | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_update_shot.svg | SolidCraft contributors | original Camera icon master (64 grid): camera body with a lower-right refresh badge | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 
 ### UI icon masters (continued)
 
 | File | Author | Source | Licence |
 |---|---|---|---|
-| assets/icons/ui/design/svg/model/compute.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/configuration_table.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/conic.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/constrainer.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/construction.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/convert_sheet.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/copy.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/curvature_comb.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/curvature_map.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/cylinder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/decal.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/delete.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/dimension.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/dots.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/draft.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/draft_analysis.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/drive.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/dxf.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/edge_continuity.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/edit.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/ellipse.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/emboss.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/environment_map.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/explode.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/export.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/extend.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/extrude.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/eye.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/fastener.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/fillet.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/filter.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/finish.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/fit_section.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/flange.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/flat.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/fold.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/folder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/graph.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/hem.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/hole.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/import.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/include.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/inspect.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/interference.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/intersect.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/intersection_curve.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/iso_analysis.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/iso_curve.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/joint.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/joint_origin.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/library.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/line.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/line_mid.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/lip.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/list.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/loft.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/material.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/measure.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/min_radius.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/mirror.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/motion_link.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/move.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/new.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/offset.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/offset_face.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/offset_surface.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/open.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/origin.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/params.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/paste.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/patch.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/pattern.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/pattern_circ.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/pattern_path.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/pattern_rect.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/perforate.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/pipe.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/silhouette.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/assistant.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/agent_link.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/offset_two_sides.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/offset_symmetric.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/import_tray.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/export_tray.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/send.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/stop.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/shield.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/status_recovery.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/frame_member.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_environment.svg | SolidCraft contributors | original Studio icon master (64 grid): dome with a grey cube inside | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/style_shaded.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/style_wireframe.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/style_hidden_edges.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/style_translucent.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/select_faces_edges.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/select_bodies.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/select_features.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/select_parts.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/select_components.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/select_sketch.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/display.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/grid.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/ground_shadow.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/ambient_occlusion.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/placeholder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plane.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plane_angle.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plastic_assign.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plastic_rule.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/play.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/point.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/polygon.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/presspull.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/project.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/project_surface.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rect.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rect3.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rect_center.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rect_rounded.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/refold.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rename.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_image.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/render_scene.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/reorder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rest.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/restore.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/reverse_normal.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/revert.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/revolve.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rib.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rigid_group.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rollback.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/ruled.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/scale.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/section.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/select.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sheet.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sheet_rules.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/shell.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sketch.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sketch_chamfer.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sketch_fillet.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sketch_mirror.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/slot.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/snap.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sphere.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/spline.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/spline_cv.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/split_body.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/split_face.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/spun.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/star.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/status_error.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/status_warning.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/stitch.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/flat/suppress.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/surface.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/svg.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sweep.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/text.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/thicken.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/thread.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/torus.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/trim.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/unfold.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/unstitch.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/untrim.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/update.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/zebra.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/small/as_built.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/small/component.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/small/curvature_comb.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/small/interference.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/small/iso_analysis.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/small/joint.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/small/pattern.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/small/section.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/workspace/ws_animate.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/polygon_circumscribed.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/polygon_edge.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/slot_overall.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/slot_center.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/arc_slot_center.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sketch_chamfer_angle.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sketch_chamfer_two_distances.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/gear.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/rack_pinion.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/screw.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/cam.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/trace.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/agent_chat.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/normal.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/infinite.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/pattern_flip.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/pattern_center.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/reach.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/cut.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/compare.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/web.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/replace_face.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/bounding_solid.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/delete_face.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/snap_fit.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/contact_sets.svg | SolidCraft contributors | original contact icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/contact_all.svg | SolidCraft contributors | original contact icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/contact_off.svg | SolidCraft contributors | original contact icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/contact_new.svg | SolidCraft contributors | original contact icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/axis_through_cylinder.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/axis_normal_to_face.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/axis_two_planes.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/axis_two_points.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/axis_edge.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/point_vertex.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/point_two_edges.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/point_three_planes.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/point_center.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/point_edge_plane.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/point_along_path.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plane_midplane.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plane_two_edges.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plane_three_points.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plane_tangent.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plane_along_path.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/plane_perpendicular.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/workspace/ws_design.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/workspace/ws_drawing.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/workspace/ws_render.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
-| assets/icons/ui/design/references.toml | SolidCraft contributors | original icon authoring or review tool resource | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/author/bases.py | SolidCraft contributors | original icon authoring or review tool resource | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/author/new_icon.py | SolidCraft contributors | original icon authoring or review tool resource | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/review/index.html | SolidCraft contributors | original icon authoring or review tool resource | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/review/guide.html | SolidCraft contributors | original icon authoring or review tool resource | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/review/review.css | SolidCraft contributors | original icon authoring or review tool resource | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/review/review.js | SolidCraft contributors | original icon authoring or review tool resource | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/icon_palette.py | SolidCraft contributors | Original shared semantic icon palette resolver for repository tools | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/icon_status.py | SolidCraft contributors | icon lint, status page or preview tool (standard-library Python), original SolidCraft code | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/lint_icons.py | SolidCraft contributors | icon lint, status page or preview tool (standard-library Python), original SolidCraft code | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/preview.py | SolidCraft contributors | icon lint, status page or preview tool (standard-library Python), original SolidCraft code | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/review_state.py | SolidCraft contributors | icon review state helper (standard-library Python), original SolidCraft code | MIT OR Apache-2.0 |
-| assets/icons/ui/design/requested_icons.txt | SolidCraft contributors | Runtime icon requests collected by the headless menu audit, original SolidCraft data | MIT OR Apache-2.0 |
-| assets/icons/ui/design/review.json | SolidCraft contributors | icon review state (accepted icons and notes), original SolidCraft data | MIT OR Apache-2.0 |
-| assets/icons/ui/design/tools/author/lib.py | SolidCraft contributors | icon authoring script (standard-library Python), original SolidCraft code | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/compute.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/configuration_table.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/conic.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/constrainer.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/convert_sheet.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/copy.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/curvature_comb.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/curvature_map.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/cylinder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/decal.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/delete.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/dimension.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/dots.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/draft.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/draft_analysis.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/drive.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/dxf.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/edge_continuity.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/edit.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/ellipse.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/emboss.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/environment_map.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/explode.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/export.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/extend.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/extrude.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/eye.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/fastener.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/fillet.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/filter.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/finish.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/fit_section.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/flange.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/flat.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/fold.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/folder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/graph.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/hem.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/hole.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/import.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/include.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/inspect.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/interference.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/intersect.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/intersection_curve.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/iso_analysis.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/iso_curve.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/joint.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/joint_origin.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/library.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/line.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/line_mid.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/lip.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/list.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/loft.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/material.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/measure.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/min_radius.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/mirror.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/motion_link.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/move.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/new.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/offset.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/offset_face.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/offset_surface.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/open.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/origin.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/params.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/paste.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/patch.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/pattern.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/pattern_circ.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/pattern_path.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/pattern_rect.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/perforate.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/pipe.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/silhouette.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/assistant.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/agent_link.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/offset_two_sides.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/offset_symmetric.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/import_tray.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/export_tray.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/send.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/stop.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/shield.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/status_recovery.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/frame_member.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_environment.svg | SolidCraft contributors | original Studio icon master (64 grid): dome with a grey cube inside | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/style_shaded.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/style_wireframe.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/style_hidden_edges.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/style_translucent.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/select_faces_edges.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/select_bodies.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/select_features.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/select_parts.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/select_components.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/select_sketch.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/display.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/grid.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/ground_shadow.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/ambient_occlusion.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/placeholder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plane.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plane_angle.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plastic_assign.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plastic_rule.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/play.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/point.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/polygon.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/presspull.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/project.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/project_surface.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rect.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rect3.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rect_center.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rect_rounded.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/refold.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rename.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_image.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/render_scene.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/reorder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rest.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/restore.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/reverse_normal.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/revert.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/revolve.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rib.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rigid_group.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rollback.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/ruled.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/scale.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/section.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/select.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sheet.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sheet_rules.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/shell.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sketch.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sketch_chamfer.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sketch_fillet.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sketch_mirror.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/slot.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/snap.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sphere.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/spline.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/spline_cv.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/split_body.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/split_face.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/spun.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/star.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/status_error.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/status_warning.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/stitch.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/suppress.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/surface.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/svg.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sweep.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/text.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/thicken.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/thread.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/torus.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/trim.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/unfold.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/unstitch.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/untrim.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/update.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/zebra.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/as_built.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/component.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/curvature_comb.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/interference.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/iso_analysis.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/joint.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/pattern.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/section.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/workspace/ws_animate.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/polygon_circumscribed.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/polygon_edge.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/slot_overall.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/slot_center.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/arc_slot_center.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sketch_chamfer_angle.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/sketch_chamfer_two_distances.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/gear.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rack_pinion.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/screw.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/cam.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/trace.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/agent_chat.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/normal.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/infinite.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/pattern_flip.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/pattern_center.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/reach.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/cut.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/compare.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/web.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/replace_face.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/bounding_solid.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/delete_face.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/snap_fit.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/contact_sets.svg | SolidCraft contributors | original contact icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/contact_all.svg | SolidCraft contributors | original contact icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/contact_off.svg | SolidCraft contributors | original contact icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/contact_new.svg | SolidCraft contributors | original contact icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/axis_through_cylinder.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/axis_normal_to_face.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/axis_two_planes.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/axis_two_points.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/axis_edge.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/point_vertex.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/point_two_edges.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/point_three_planes.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/point_center.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/point_edge_plane.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/point_along_path.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plane_midplane.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plane_two_edges.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plane_three_points.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plane_tangent.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plane_along_path.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/plane_perpendicular.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/workspace/ws_design.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/workspace/ws_drawing.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/workspace/ws_render.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/references.toml | SolidCraft contributors | original icon authoring or review tool resource | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/author/bases.py | SolidCraft contributors | original icon authoring or review tool resource | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/author/new_icon.py | SolidCraft contributors | original icon authoring or review tool resource | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/review/index.html | SolidCraft contributors | original icon authoring or review tool resource | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/review/guide.html | SolidCraft contributors | original icon authoring or review tool resource | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/review/review.css | SolidCraft contributors | original icon authoring or review tool resource | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/review/review.js | SolidCraft contributors | original icon authoring or review tool resource | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/icon_palette.py | SolidCraft contributors | Original shared semantic icon palette resolver for repository tools | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/icon_status.py | SolidCraft contributors | icon lint, status page or preview tool (standard-library Python), original SolidCraft code | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/lint_icons.py | SolidCraft contributors | icon lint, status page or preview tool (standard-library Python), original SolidCraft code | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/preview.py | SolidCraft contributors | icon lint, status page or preview tool (standard-library Python), original SolidCraft code | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/review_state.py | SolidCraft contributors | icon review state helper (standard-library Python), original SolidCraft code | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/requested_icons.txt | SolidCraft contributors | Runtime icon requests collected by the headless menu audit, original SolidCraft data | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/review.json | SolidCraft contributors | icon review state (accepted icons and notes), original SolidCraft data | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/tools/author/lib.py | SolidCraft contributors | icon authoring script (standard-library Python), original SolidCraft code | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 
 | docs/book/src/og.png | SolidCraft contributors | copy of assets/branding/web/source/og.png staged by cargo xtask book (gitignored) | MIT OR Apache-2.0 |
 | docs/sponsors/blacksmith-ci-powered.png | Blacksmith (blacksmith.sh) | "CI powered by Blacksmith" sponsor banner supplied by Blacksmith for the sponsorship credit; used only to credit the sponsor, not part of the application | © Blacksmith, used with permission |
-| assets/icons/ui/design/svg/model/path_flange.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/path_flange.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | docs/book/src/generated/hem.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/hem.json`; gitignored), original sheet metal demonstration | MIT OR Apache-2.0 |
 | docs/book/scripts/hem.json | SolidCraft contributors | original parametric recipe for an 80 × 50 mm sheet with an 8 mm returned edge, authored for the command guide | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/clay.json | SolidCraft contributors | original SolidCraft theme file (Clay, light): warm paper palette chosen for SolidCraft | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/clay-dark.json | SolidCraft contributors | original SolidCraft theme file (Clay Dark): warm charcoal palette chosen for SolidCraft | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/cone.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/themes/clay.json | SolidCraft contributors | original SolidCraft theme file (Clay, light): warm paper palette chosen for SolidCraft | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/clay-dark.json | SolidCraft contributors | original SolidCraft theme file (Clay Dark): warm charcoal palette chosen for SolidCraft | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/cone.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/locales/ar.json | Abdullah (A-AL-ANAZI) | Original Arabic translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/he.json | SolidCraft contributors | Original Hebrew translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/cga.json | SolidCraft contributors | original SolidCraft theme file using the 16 colours of the IBM Color Graphics Adapter (black, cyan, magenta, and white of its high-intensity palette 1 for the interface) | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/1-bit.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
-| assets/styles/ui/themes/1-bit-dark.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
+| crates/look/themes/cga.json | SolidCraft contributors | original SolidCraft theme file using the 16 colours of the IBM Color Graphics Adapter (black, cyan, magenta, and white of its high-intensity palette 1 for the interface) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/1-bit.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/1-bit-dark.json | SolidCraft contributors | original SolidCraft theme file | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | `assets/locales/pending/navbar-customisation.json` | SolidCraft contributors | Original navigation bar editor translations | MIT OR Apache-2.0 |
 | `assets/locales/pending/navbar-slots.json` | SolidCraft contributors | Original navigation slot translations | MIT OR Apache-2.0 |
 | assets/locales/bs.json | Tarik Sijercic (tsijercic1) | Original Bosnian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/hr.json | Tarik Sijercic (tsijercic1) | Original Croatian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/sr.json | Tarik Sijercic (tsijercic1) | Original Serbian (ekavian, Cyrillic) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/finish_edit.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/finish_edit.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | `assets/locales/pending/sketch-tracking-guides.json` | SolidCraft contributors | Original alignment-guide preference labels and help text | MIT OR Apache-2.0 |
 | assets/locales/pending/point-clouds.json | SolidCraft contributors | Original point-cloud UI strings and translations | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/feature_group.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/mesh_body.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/timeline_play.svg | SolidCraft contributors | Original history playback icon; canonical grey_cube base and original action cue | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/timeline_stop.svg | SolidCraft contributors | Original history playback icon; canonical grey_cube base and original action cue | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/status_pin.svg | SolidCraft contributors | Original analytic pin icon for persistent viewport results | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/pending/render-wear.json | SolidCraft contributors | Original UI labels and translations | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/equation_curve.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/pending/sketch-recent-snap.json | SolidCraft contributors | Original preference messages for the recent centre and midpoint snap | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/construction_line.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction_line_horizontal.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction_line_vertical.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction_line_angle.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction_line_parallel.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction_line_perpendicular.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction_line_tangent_external.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction_line_tangent_at.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction_line_tangent_two.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/construction_line_bisector.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| docs/book/src/generated/equation-circle.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-circle.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-flower.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-flower.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-involute.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-involute.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-line.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-line.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-parabola.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-parabola.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-spiral.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-spiral.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/equation-wave.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-wave.json`; gitignored) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/print_face.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/fi.json | SolidCraft contributors | Original Finnish translation of SolidCraft's English catalog, AI-assisted (Claude Code) clean-room from the English and not yet reviewed line by line by a native speaker; no commercial CAD text used | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/plane_axis_point.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| docs/design/preferences/figures/aa-2x.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/aa-2x.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/aa-4x.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/aa-4x.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/aa-8x.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/aa-8x.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/aa-off.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/aa-off.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/agent-pointer-speed.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/agent-pointer-speed.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/ao-on.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/ao-on.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/assembly-move.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/assembly-move.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/browser-card.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/browser-card.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/browser-column.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/browser-column.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-axes.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-axes.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-bends.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-bends.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-draft.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-draft.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-failed.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-failed.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-fixed.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-fixed.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-projected.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/colour-vision-projected.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/direct-interaction.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/direct-interaction.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/frame-rate.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/frame-rate.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/history-bottom.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/history-bottom.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/history-in-browser.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/history-in-browser.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/history-left.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/history-left.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/history-under-browser.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/history-under-browser.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/layout-schematic.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/layout-schematic.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/measure-axis-distances.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/measure-axis-distances.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/mouse-mapping.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/mouse-mapping.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/navigator-axes.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/navigator-axes.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/navigator-cube.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/navigator-cube.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orbit-centre.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orbit-centre.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orbit-cursor.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orbit-cursor.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orbit-origin.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orbit-origin.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orientation-y-up.dark.svg | SolidCraft contributors | original SolidCraft artwork: the Orientation figure copied from the app and extracted from the Preferences redesign board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orientation-y-up.light.svg | SolidCraft contributors | original SolidCraft artwork: the Orientation figure copied from the app and extracted from the Preferences redesign board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orientation-z-up.dark.svg | SolidCraft contributors | original SolidCraft artwork: the Orientation figure copied from the app and extracted from the Preferences redesign board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/orientation-z-up.light.svg | SolidCraft contributors | original SolidCraft artwork: the Orientation figure copied from the app and extracted from the Preferences redesign board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/quick-measure.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/quick-measure.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/select-bodies.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/select-bodies.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/select-faces-edges.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/select-faces-edges.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-conflict.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-conflict.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-exit-keep.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-exit-keep.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-exit-previous.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-exit-previous.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-exit-unless-turned.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-exit-unless-turned.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-guides.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-guides.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-hide-glyphs.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-hide-glyphs.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-state-icons.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/sketch-state-icons.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/style-shaded-edges.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/style-shaded-edges.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tess-coarse.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tess-coarse.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tess-fine.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tess-fine.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tess-normal.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tess-normal.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tess-ultra.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tess-ultra.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-dark.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-dark.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-gruvbox.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-gruvbox.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-imported.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-imported.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-light.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-light.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-system-dark-half.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-system-dark-half.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-system-light-half.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/theme-system-light-half.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tool-cursor.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tool-cursor.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tool-extrude.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tool-extrude.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tool-hole.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tool-hole.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tool-placement.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/tool-placement.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/vertex-markers.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/vertex-markers.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/view-angles.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/view-angles.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/view-grid.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/view-grid.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/view-perspective.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/view-perspective.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/view-shadow.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| docs/design/preferences/figures/view-shadow.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
+| `assets/locales/pending/sketch-offset-instances.json` | SolidCraft contributors | Original offset instance-count label and translations | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/settings_profile.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original analytic head and shoulder geometry for settings profiles | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| tests/kernel-cases/import/4561-convert-box-mesh-with-a-zero-area-triangle/box-degenerate.stl | SolidCraft contributors | synthetic ASCII STL written by hand: a box with one zero-area triangle, for the kernel regression case of tangency-labs/solidcraft#4561 | MIT OR Apache-2.0 |
+| assets/locales/pending/theme-blur-ui.json | SolidCraft contributors | Original blur controls, notices and translations | MIT OR Apache-2.0 |
+| crates/ui-egui/tests/fixtures/theme-blur.json | SolidCraft contributors | Original theme for blur option scenarios and manager review | MIT OR Apache-2.0 |
+| assets/locales/ka.json | David Machakhelidze (devius) | Original Georgian translation of SolidCraft's English catalog, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/branding/logo/solidcraft-mark.svg | SolidCraft contributors | static SolidCraft mark: the five faces and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg (the final frame of assets/styles/web/loading-logo.svg), cropped to the mark's bounds; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/branding/logo/solidcraft-mark-mono-black.svg | SolidCraft contributors | one-colour (black) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/branding/logo/solidcraft-mark-mono-white.svg | SolidCraft contributors | one-colour (white) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/branding/logo/solidcraft-mark-512.png | SolidCraft contributors | transparent 512 px render of assets/branding/logo/solidcraft-mark.svg (cairosvg); original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/branding/logo/solidcraft-mark-1024.png | SolidCraft contributors | transparent 1024 px render of assets/branding/logo/solidcraft-mark.svg (cairosvg); original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/branding/logo/solidcraft-mark-2048.png | SolidCraft contributors | transparent 2048 px render of assets/branding/logo/solidcraft-mark.svg (cairosvg); original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/branding/logo/solidcraft-wordmark.svg | SolidCraft contributors | the name SolidCraft set like the loading logo's wordmark (bold, +0.02 em tracking, #15499e) in IBM Plex Sans Bold from crates/look/fonts/ibm-plex-sans (SIL OFL 1.1, IBM Corp.), outlined to paths; no font file is embedded | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/branding/logo/solidcraft-lockup-horizontal.svg | SolidCraft contributors | assets/branding/logo/solidcraft-mark.svg beside assets/branding/logo/solidcraft-wordmark.svg, in the proportions of assets/branding/web/source/og.png; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/themes/onyx.json | SolidCraft contributors | original Onyx stone-grey palette, option overlays and semantic icon-role mapping; existing SolidCraft artwork is unchanged | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| docs/book/src/media/ui-tour/window.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`solidcraft --sample`, default dark theme, software renderer, 1280x800) with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/ui-tour/navigate.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (`--sample`, default dark theme, software renderer) orbiting, panning and zooming, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| assets/locales/pending/sketch-tool-hints.json | carlymx | Original sketch tool hints and engine error translations | MIT OR Apache-2.0 |
+| assets/locales/pending/primitive-pick-field-tips.json | SolidCraft contributors | Original primitive pick-field tooltip translations | MIT OR Apache-2.0 |
+| assets/locales/pending/ribbon-panel-hover.json | SolidCraft contributors | Original ribbon panel menu preference labels and translations | MIT OR Apache-2.0 |
+| docs/screenshots/box-insert-designer.gif | Shawn Marx | original recording made with BoxInsertDesigner's own Motion export (its three.js viewer) of its example game `examples/ccg-example` (https://github.com/ShawnMarx/BoxInsertDesigner): a card game box insert whose trays were built by SolidCraft through `solidcraft-cli`; the published card, board and box art in it is pixelated beyond recognition, and no logos or game names are shown (2.5× playback, 800 px wide) | MIT OR Apache-2.0 |
+| docs/screenshots/box-insert-designer.mp4 | Shawn Marx | original recording made with BoxInsertDesigner's own Motion export (its three.js viewer) of its example game `examples/ccg-example` (https://github.com/ShawnMarx/BoxInsertDesigner): a card game box insert whose trays were built by SolidCraft through `solidcraft-cli`; the published card, board and box art in it is pixelated beyond recognition, and no logos or game names are shown (1280×720) | MIT OR Apache-2.0 |
+| assets/locales/pending/agent-http-consent.json | SolidCraft contributors | Original endpoint-specific HTTP consent messages and translations | MIT OR Apache-2.0 |
+| assets/locales/pending/ground-shadow-placement.json | SolidCraft contributors | Original ground-shadow placement preference messages and translations | MIT OR Apache-2.0 |
+| docs/book/src/media/assemblies/components.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) making components from two original hinge-leaf bodies, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/assemblies/joint.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) creating a revolute joint between two hinge leaves, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/assemblies/drag.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) dragging a jointed hinge leaf, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/assemblies/drive.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) driving a revolute joint between two hinge leaves, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/extrude.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) extruding a sketch's profile, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/shell.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) shelling a block, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/fillet.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) filleting four edges, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/edit.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) editing a feature from the timeline, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/hole.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) placing a hole, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/pattern.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) patterning a hole around an axis, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/parameters/dialog.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (default dark theme, software renderer) showing the Parameters dialog, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/files/menu.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`--sample`, default dark theme, software renderer) showing the File menu, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/getting-started/start.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (default dark theme, software renderer, 1280x800) showing the start page with its built-in sample thumbnails, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/getting-started/sample.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) opening the built-in Sample Plate from the start page, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sheet-metal/base.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) making a sheet metal base flange, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sheet-metal/flange.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) adding sheet metal edge flanges, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sheet-metal/flat.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) showing a sheet metal flat pattern, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/create.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) starting a sketch on the Top plane, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/draw.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) drawing a rectangle and a circle with typed values, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/dimension.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) dimensioning a sketch until it is fully constrained, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/parts.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (default dark theme, software renderer, 1280x800) showing a fully constrained sketch, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/offset.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) offsetting a sketch outline, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/trim.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) trimming a notch in a sketch, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| assets/locales/ca.json | carlymx | Catalan translation of the English catalog, contributed upstream | MIT OR Apache-2.0 |
+| assets/locales/pending/sketch-mirror-auto-line.json | SolidCraft contributors | Original Mirror preference label and translations | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-01-extrude5-edge-frame.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-04-preview-outer-l11.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-05-preview-inner-l8.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-06-result-outer-120.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-07-preview-360.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-08-cancelled.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-13-colliding-id.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-14-surface-l1.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-15-surface-result.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/revolve-selected-edge.mp4 | SamD98 | screen recording of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| assets/locales/bg.json | Yasen-55 | Original translation | MIT OR Apache-2.0 |
+| crates/sketch/assets/fonts/liberation-sans/LiberationSans-Regular.ttf | Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google) | https://github.com/liberationfonts (Debian fonts-liberation), unmodified; licence text in crates/sketch/assets/fonts/liberation-sans/OFL.txt; used for sketch Text outlines | SIL OFL 1.1 |
+| crates/sketch/assets/fonts/liberation-sans/OFL.txt | Red Hat, Inc.; Liberation Fonts contributors | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/locales/pending/drag-to-zoom.json | SolidCraft contributors | Original drag-to-zoom labels and translations | MIT OR Apache-2.0 |
+| `assets/locales/pending/hole-group-folder.json` | SolidCraft contributors | Original Hole grouping preference labels and translations | MIT OR Apache-2.0 |
+| assets/locales/pending/press-pull-dialog-title.json | SolidCraft contributors | Original Press Pull dialog title translations for SolidCraft's English catalog; no external text used | MIT OR Apache-2.0 |
+| docs/layers/layers.svg | SolidCraft contributors | original diagram of SolidCraft's crate layers for docs/layers.md, written as SVG in solidcore's docs/layers diagram style | MIT OR Apache-2.0 |
+| assets/locales/pending/agent-chat-select-all.json | SolidCraft contributors | Original assistant chat select-all strings and translations | MIT OR Apache-2.0 |
+| docs/book/src/media/ui-tour/window.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`solidcraft --sample`, light theme, software renderer, 1280x800) with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/parts.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (light theme, software renderer, 1280x800) showing a fully constrained sketch, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/parameters/dialog.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (light theme, software renderer) showing the Parameters dialog, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/getting-started/start.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (light theme, software renderer, 1280x800) showing the start page with its built-in sample thumbnails, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/files/menu.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`--sample`, light theme, software renderer) showing the File menu, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| assets/locales/pending/constraint-glyph-size.json | SolidCraft contributors | Original constraint glyph size preference label and help text | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/plane_auto.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/end_cap.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/end_cap_inward.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/end_cap_outward.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/lv.json | SolidCraft contributors | Original Latvian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/fonts/craft-ui-kr/CraftUI-KR.otf | Adobe / Google Inc. (Noto Sans KR); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/KR Regular, glyph-subset for the Hangul syllable block and renamed Craft UI KR (OFL reserved-name); licence text in assets/fonts/craft-ui-kr/OFL.txt; web UI Korean | SIL OFL 1.1 |
+| assets/fonts/craft-ui-kr/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-KR.otf | SIL OFL 1.1 |
+| `assets/locales/pending/names-from-file.json` | SolidCraft contributors | Original label for the names-from-file preference | MIT OR Apache-2.0 |
+| `assets/locales/pending/snap-points.json` | SolidCraft contributors | Original snap point labels and messages | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -620,6 +878,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | apps/solidcraft/src/open_documents.rs (macOS: files opened from Finder and the Dock, its test) | VectorCraft `apps/vectorcraft/src/open_documents.rs` (https://github.com/storytold/vectorcraft) | MIT OR Apache-2.0 |
 | LICENSE-MIT, LICENSE-APACHE (licence text) | CADCraft | — |
 | .github/workflows/release.yml, .github/workflows/packaging-lint.yml and packaging/ (release pipeline: Linux AppImage/deb/rpm/Flatpak/tar.gz, FreeBSD, macOS dmg, Windows MSI/portable zip, web zip; AppRun, nfpm, Flatpak, WiX and Info.plist templates) | PhotoCraft (https://github.com/storytold/photocraft) `.github/workflows/{release,packaging-lint}.yml`, `packaging/` | Apache-2.0 |
+| crates/viewport-gpu/src/environment.rs (the neutral room scene, the GGX prefilter and environment-BRDF table), crates/viewport-gpu/shaders/viewport.wgsl (`finished`, `ibl_ggx_fresnel`, `pbr_neutral`) | google/model-viewer `EnvironmentScene.ts` and its exposure for it (https://github.com/google/model-viewer); KhronosGroup glTF-Sample-Renderer `ibl.glsl`, `pbr.frag` (https://github.com/KhronosGroup/glTF-Sample-Renderer); KhronosGroup ToneMapping `pbrNeutral.glsl`; google/filament `light_indirect.fs`, `ambient_occlusion.fs` (https://github.com/google/filament) | Apache-2.0 |
 
 ## Incremental HDR codec adapter
 
@@ -642,10 +901,19 @@ in THIRD-PARTY-LICENSES.txt; no images or artwork from that project are copied.
 The glTF test files are built by the tests themselves (crates/io/src/gltf_in_tests.rs,
 crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 
+## Geometry kernel crates
+
+| Crate | Used for | Licence |
+|---|---|---|
+| solidcore (https://github.com/tangency-labs/solidcore, vendored at solidcore/) | the Rust port of NVIDIA's SMLib: the B-rep kernel behind crates/smlib | Apache-2.0 (its NOTICE credits NVIDIA's USD BRep) |
+
+Linked as a crate; no code from it is copied into SolidCraft. Its licence text and NOTICE go
+into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
+
 ## FreeCAD and Rhino import library
 
 FreeCAD `.FCStd` and Rhino `.3dm` files are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg)
-0.6.3 (Apache-2.0), linked as the crates `cadmpeg-core`, `cadmpeg-ir`, `cadmpeg-registry`,
+0.6.7 (Apache-2.0), linked as the crates `cadmpeg-core`, `cadmpeg-ir`, `cadmpeg-registry`,
 `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino` and `cadmpeg-codec-step`
 in native and browser builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
 default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
@@ -657,20 +925,16 @@ copied into SolidCraft.
 | SolidCraft file | Original contribution | Licence |
 |---|---|---|
 | crates/ui-egui/src/viewport.rs (`nearest_quarter_turn`, `axis_view_orbit`) | N3MI-DG's [PR #101](https://github.com/bherbruck/solidcraft/pull/101): [minimal TOP/BOTTOM turns](https://github.com/bherbruck/solidcraft/commit/c28e780f52490784ef5886f094b9d3f6d10c3e3f) and [drag-to-orbit](https://github.com/bherbruck/solidcraft/commit/f30b30be6ecc4e2e6544a851243137c01a354934), adapted to the axis gizmo | MIT OR Apache-2.0 |
+| crates/smlib/src/core/offset.rs (`draft`: the tilted planes and `SmBrep::LocalOperation`, the tail of the capi's `draft_faces`) | ablasik's `draft` in `crates/smlib/src/ffi/rs_ops2.rs` on [ablasik/solidcraft `app/solidcore-backend-on-develop`](https://github.com/ablasik/solidcraft/blob/9c7e8e31565e1823f0591b58e2967351c32af13f/crates/smlib/src/ffi/rs_ops2.rs), adapted to `core::offset`'s errors and checks | MIT OR Apache-2.0 |
 
 ## Vendored third-party code
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
-| vendor/truck-meshalgo | truck-meshalgo 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | meshing: bounded parameter searches, collapsed-boundary projection, subdivision and provisional fixed-grid previews (vendor/README.md) |
-| vendor/truck-stepio | truck-stepio 0.3.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | STEP writer: intersection-curve surfaces written at unique ids (vendor/README.md) |
-| vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |
-| vendor/truck-geometry | truck-geometry 0.5.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | intersection curves divided from their neighbours' surface parameters; surface second derivatives (vendor/README.md) |
-| vendor/matext4cgmath | matext4cgmath 0.1.0, https://github.com/ricosjp/matext4cgmath (RICOS Co. Ltd.) | Apache-2.0 | root refinement stops after 100 Newton steps (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 
-`vendor/egui-wgpu` is egui-wgpu 0.36.2 from https://github.com/emilk/egui
+`vendor/egui-wgpu` is egui-wgpu 0.37.0 from https://github.com/emilk/egui
 (MIT OR Apache-2.0; both original licence texts are included). Rust sources and
 its original `egui.wgsl` shader are retained; no images or other artwork are copied.
 SolidCraft's narrow patch selects a safe 1x MSAA path on the chosen OpenGL adapter

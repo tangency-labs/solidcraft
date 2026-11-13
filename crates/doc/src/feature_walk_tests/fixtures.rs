@@ -29,6 +29,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
     let hole =
         |h: Value| json!({"type": "hole", "position": o, "direction": [0, 0, 1], "diameter": "hole.diameter", "depth": "hole.depth", "hole": h});
     vec![
+        ("newer_file_feature", json!({"type": "newer_file_feature", "raw": {"type": "gyroid_lattice", "cell": 2}})),
+        (
+            "frame_end_cap",
+            json!({"type":"frame_end_cap","ends":[{"plane":plane("cap1"),"member":{"feature":7,"line":"l1"}}],"thickness":"cap.thickness","ratio":"cap.ratio","chamfer":"cap.chamfer","direction":"inward"}),
+        ),
         (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
@@ -139,6 +144,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "coil_profile",
             json!({"type": "coil", "base": ["coil_profile.x", "coil_profile.y", "coil_profile.z"], "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "pitch": "coil_profile.pitch", "turns": "coil_profile.turns"}),
         ),
+        (
+            "cell_grid",
+            json!({"type": "cell_grid", "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "sides": "cell_grid.sides", "size": "cell_grid.size", "web": "cell_grid.web", "angle": "cell_grid.angle", "anchor": ["cell_grid.x", "cell_grid.y", "cell_grid.z"], "depth": "cell_grid.depth"}),
+        ),
         ("sheet_base", json!({"type": "sheet_base", "sketch": 1, "profiles": {"type": "all"}})),
         ("sheet_contour", json!({"type": "sheet_contour", "sketch": 1, "curves": ["l1"], "distance": "contour.distance"})),
         (
@@ -148,7 +157,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("sheet_hem", json!({"type": "sheet_hem", "edges": [o], "length": "hem.length", "gap": "hem.gap"})),
         (
             "sheet_perforate",
-            json!({"type": "sheet_perforate", "diameter": "perforate.diameter", "pitch": "perforate.pitch", "margin": "perforate.margin"}),
+            json!({
+                "type": "sheet_perforate", "diameter": "perforate.diameter", "pitch": "perforate.pitch", "margin": "perforate.margin",
+                "sketch": 1, "profiles": {"type": "all"}
+            }),
         ),
         (
             "sheet_fold",
@@ -236,6 +248,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("import", json!({"type": "import", "file": "a.step", "step": ""})),
         ("mesh_convert", json!({"type": "mesh_convert", "body": "B", "tolerance": "mesh_convert.tolerance"})),
         ("mesh_import", json!({"type": "mesh_import", "file": "a.stl", "meshes": []})),
+        ("repair", json!({"type": "repair", "body": "B", "gap": "repair.gap", "patch_holes": true})),
     ]
 }
 
@@ -246,7 +259,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
     let o = [0, 0, 0];
     let tool = json!({"body": "B", "point": o});
     let extra = match name {
-        "extrude" | "extrude_thin" | "revolve" | "sweep" | "sweep_options" | "pipe" | "coil" | "thicken" => json!({"targets": ["B"]}),
+        "extrude" | "extrude_thin" | "revolve" | "sweep" | "sweep_options" | "pipe" | "coil" | "cell_grid" | "thicken" => json!({"targets": ["B"]}),
         "fillet_constant" | "fillet_chord" | "fillet_curvature" | "fillet_variable" | "fillet_spline" | "chamfer" | "shell" | "draft"
         | "offset_face" | "delete_face" | "replace_face" | "sheet_flange" | "sheet_hem" | "sheet_perforate" | "sheet_path" | "sheet_unfold"
         | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {

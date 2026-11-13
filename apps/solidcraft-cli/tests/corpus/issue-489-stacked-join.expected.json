@@ -90,10 +90,6 @@
   ],
   "timeline": [
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 1,
       "ms": 0.131943,
@@ -104,10 +100,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 2,
       "ms": 1.0812709999999999,
@@ -118,10 +110,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 3,
       "ms": 0.450002,
@@ -132,10 +120,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 4,
       "ms": 5.191514000000001,

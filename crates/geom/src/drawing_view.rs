@@ -11,8 +11,9 @@
 //!   scales at which a view fits a space.
 //! - A **[`ViewFrame`]** places a view on paper: the point of the view's plane at `centre` lands at
 //!   `position_mm`, everything scaled by the scale. Its [`ViewFrame::paper_map`] moves the view's
-//!   curves ([`Seg2::similar`]) and their accuracy ([`CurveAccuracy::scaled`]) onto paper.
+//!   curves ([`Seg2Geom::similar`]) and their accuracy ([`CurveAccuracy::scaled`]) onto paper.
 
+use crate::prelude::*;
 use std::fmt;
 use std::str::FromStr;
 
@@ -20,7 +21,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::paper::MAX_SIDE_MM;
 use crate::section::{CurveAccuracy, MAX_NUMBER, validate_plane};
-use crate::{Aabb2, Plane, Seg2, Similarity2, Vec2, Vec3};
+use crate::{Aabb2, Similarity2};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 
 /// The smallest scale: one paper millimetre for 100 m of model.
 pub const MIN_SCALE: f64 = 1e-5;
@@ -136,7 +138,7 @@ pub struct Scale {
 }
 
 /// ISO 5455's recommended scales, largest first: enlargements, full size, then reductions.
-pub const PRESETS: [Scale; 18] = [
+pub const PRESETS: &[Scale] = &[
     Scale { paper: 50.0, model: 1.0 },
     Scale { paper: 20.0, model: 1.0 },
     Scale { paper: 10.0, model: 1.0 },
@@ -181,7 +183,7 @@ impl Scale {
         if ![size_mm, room_mm].into_iter().all(|v| v.is_finite() && v.x >= 0.0 && v.y >= 0.0) {
             return None;
         }
-        PRESETS.into_iter().find(|s| size_mm.x * s.paper <= room_mm.x * s.model && size_mm.y * s.paper <= room_mm.y * s.model)
+        PRESETS.iter().copied().find(|s| size_mm.x * s.paper <= room_mm.x * s.model && size_mm.y * s.paper <= room_mm.y * s.model)
     }
 }
 

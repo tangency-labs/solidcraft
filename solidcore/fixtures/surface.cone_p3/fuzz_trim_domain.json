@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "fuzz": {
+        "base": "global_same_swap1_inside1",
+        "mutations": [
+          "/same = false",
+          "/cone/7 = 0"
+        ],
+        "seed": 849728965383016823
+      },
+      "inputs": {
+        "cone": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          3,
+          0,
+          360,
+          1,
+          1,
+          0
+        ],
+        "domains": [
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          1,
+          1
+        ],
+        "op": 3,
+        "other": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1,
+          3,
+          0,
+          360,
+          1,
+          1,
+          0
+        ],
+        "same": false,
+        "tolerance": null
+      },
+      "name": "fuzz_trim_domain_02497",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5325 (sm_GetEllipseTrimIntervals ignores ConvertDomainFromNURBSToSTEP status; zero Y axis leaves no polar curve)"
+    }
+  ]
+}

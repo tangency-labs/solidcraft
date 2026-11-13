@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "011's Tr20x4 thread with a chamfered tip and no depth: refused, ISO 4753 is for metric threads",
+ "source": "invariants",
+ "method": "ISO 4753's chamfered end (d_f at most the external minor diameter, ISO 724's d3) is defined for ISO metric threads only: a trapezoidal thread has no standard chamfer depth, so without `chamfer_depth` there is no right answer and the thread must be refused, naming the depth to give",
+ "outcome": "refused",
+ "refusal": "ISO 4753's chamfered end is for ISO metric threads"
+}

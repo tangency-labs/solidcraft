@@ -1,0 +1,50 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 40,
+    "height": 2.8,
+    "corner": [
+     -20,
+     -20,
+     0
+    ],
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 6,
+    "height": 1.6,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3.04,
+    "height": 1.2,
+    "base": [
+     0,
+     0,
+     1.6
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  }
+ ]
+}

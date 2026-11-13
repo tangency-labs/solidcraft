@@ -1,0 +1,210 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 100,
+    "taper": "-5.710593137 deg",
+    "operation": "new",
+    "body_name": "Taper"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.5,
+    "height": 102,
+    "base": [
+     0,
+     0,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.5,
+    "height": 102,
+    "base": [
+     10.0,
+     0.0,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.5,
+    "height": 102,
+    "base": [
+     7.071068,
+     7.071068,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.5,
+    "height": 102,
+    "base": [
+     0.0,
+     10.0,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.5,
+    "height": 102,
+    "base": [
+     -7.071068,
+     7.071068,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.5,
+    "height": 102,
+    "base": [
+     -10.0,
+     0.0,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.5,
+    "height": 102,
+    "base": [
+     -7.071068,
+     -7.071068,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.5,
+    "height": 102,
+    "base": [
+     -0.0,
+     -10.0,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1.5,
+    "height": 102,
+    "base": [
+     7.071068,
+     -7.071068,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -50,
+     -50,
+     2
+    ],
+    "length": 100,
+    "width": 100,
+    "height": 98,
+    "operation": "cut",
+    "targets": [
+     "Taper"
+    ]
+   }
+  }
+ ]
+}

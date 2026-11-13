@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2754"
+  ],
+  "what": "a tapered extrude of a profile in which an arc meets a line at a corner (a half disc)",
+  "source": "analytic",
+  "method": "positive taper grows the profile outward (as tests/oracle/05): at height z, d = z*tan3deg, the half disc R20 becomes the arc R'=20+d and the line moves to y=-d; area(z) = Int from y=-d to R' of 2*sqrt(R'^2-y^2) dy = R'^2*(pi/2+asin(d/R')) + d*sqrt(R'^2-d^2). V = Int area dz over z in 0..10 (Simpson) = 6555.91. Faces: top, bottom, flat wall, conical wall",
+  "body_count": 1,
+  "volume_mm3": 6555.908038909024,
+  "faces": 4
+}
