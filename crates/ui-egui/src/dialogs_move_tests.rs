@@ -1884,6 +1884,8 @@ fn a_placed_pivot_is_what_the_body_turns_about() {
     assert!((apply_point(&m, corner) - corner).len() < 1e-4);
     let spun = corner + gizmo::apply(&gizmo::rotation(Vec3::X, std::f64::consts::FRAC_PI_2), centre - corner);
     assert!((apply_point(&m, centre) - spun).len() < 1e-4);
+    let d = h.app.dialog.clone().unwrap();
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     // Fixed holds the same axes; only the triad stops turning.
     let mut d = h.app.dialog.take().unwrap();
     set_fixed(&h.app, &mut d, true);
@@ -1924,6 +1926,7 @@ fn a_placed_pivot_replaces_a_reopened_moves_origin() {
     let Ok(Step::Made(p)) = step(&h.app, &d) else { panic!("a move") };
     let m = transform(&h.app, &p).unwrap();
     assert!((apply_point(&m, piv) - piv).len() < 1e-6, "it turns about the placed pivot: {p}");
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
 }
 
 /// A round pick places the pivot on the middle of its circle, along its axis; a planar face on
