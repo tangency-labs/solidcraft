@@ -5,6 +5,7 @@
 //! kernel's. Ops checks the record and converts.
 
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::crv_basic::Boundary;
 use solidcore::nurbs::crv_fit::p1::approx_knots;
 use solidcore::nurbs::geom::Rectangle;
 use solidcore::nurbs::knots::{clamped_uniform, KnotVector, Side};
@@ -13,12 +14,21 @@ use solidcore::nurbs::srf_basic::{
     falloff_weight as kernel_falloff, Direction, FalloffShape, Surface as NurbSurface,
 };
 use solidcore::nurbs::srf_deviation::certified_distance;
+use solidcore::nurbs::srf_match::match_boundary;
+pub use solidcore::nurbs::srf_match::{MatchOrder, MatchRows, SeamBounds};
+use solidcore::SolidError;
 use solidcore::Vec3;
 use solidcore_record::brep::{
     knot_domain, Brep, Curve2, Loop, Natural, Surface, MAX_SPLINE_DEGREE,
 };
 
-use crate::session::run;
+use std::borrow::Cow;
+
+use solidcore::topology::brep::sheet::face_spline_sheet;
+
+use crate::body::Body;
+use crate::error::status;
+use crate::session::{read_body, run};
 use crate::surface::{record, sheet as sheet_of};
 use crate::sweep::coord_ok;
 use crate::{Error, Result};
@@ -38,13 +48,43 @@ pub struct Net {
     pub points: Vec<[f64; 3]>,
 }
 
-/// The control net of `sheet`'s surface.
+/// `sheet` ready for a control-net edit: a one-face sheet on a plane (a flat skin, which has no
+/// net) rebuilt as the Coons spline of its edges, its whole box the face (the kernel's
+/// `face_spline_sheet`); any other sheet as it is, borrowed (so a spline sheet's edits are
+/// exactly what they were).
+///
+/// # Errors
+/// [`Error::Record`] for a record the kernel refuses; the kernel's refusal of the rebuild
+/// ([`Error::Unsupported`]: holes, other than three or four edges, a folding outline) by its
+/// status.
+pub(crate) fn editable(sheet: &Brep) -> Result<Cow<'_, Brep>> {
+    let [face] = sheet.faces.as_slice() else {
+        return Ok(Cow::Borrowed(sheet));
+    };
+    if !matches!(face.surface, Surface::Plane { .. }) {
+        return Ok(Cow::Borrowed(sheet));
+    }
+    let (body, _) = Body::from_record(sheet, true)?;
+    let rebuilt = read_body("surface_cvs::editable", &body, |k, b| {
+        let Some(&f) = b.face_list().first() else {
+            return Ok(Err(Error::Argument));
+        };
+        Ok(face_spline_sheet(k, b, f).map_err(status))
+    })??;
+    match rebuilt {
+        Some(b) => Ok(Cow::Owned(Body::new(b).to_record()?.0)),
+        None => Ok(Cow::Borrowed(sheet)),
+    }
+}
+
+/// The control net of `sheet`'s surface (a planar sheet's after [`editable`]).
 ///
 /// # Errors
 /// [`Error::Argument`] for a record that is not one face on a non-rational B-spline surface, or
 /// whose net is not rectangular; [`Error::Unsupported`] for a trimmed face (see [`untrimmed`]).
 pub fn control_net(sheet: &Brep) -> Result<Net> {
-    let (_, points) = untrimmed(sheet)?;
+    let sheet = editable(sheet)?;
+    let (_, points) = untrimmed(&sheet)?;
     let rows = points.len();
     let cols = points.first().map_or(0, Vec::len);
     if cols == 0 || points.iter().any(|r| r.len() != cols) {
@@ -65,7 +105,8 @@ pub fn control_net(sheet: &Brep) -> Result<Net> {
 /// As [`control_net`]; [`Error::Argument`] for an index past the net or a point not finite or
 /// past the coordinate bound; the kernel's status otherwise.
 pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Brep> {
-    let ((u, v), points) = untrimmed(sheet)?;
+    let sheet = editable(sheet)?;
+    let ((u, v), points) = untrimmed(&sheet)?;
     let mut net = points.to_vec();
     for &((i, j), to) in moves {
         if !coord_ok(&to) {
@@ -196,8 +237,9 @@ pub fn move_net(
     if !coord_ok(&delta) {
         return Err(Error::Argument);
     }
-    let ((u, v), points) = untrimmed(sheet)?;
-    let net = control_net(sheet)?;
+    let sheet = editable(sheet)?;
+    let ((u, v), points) = untrimmed(&sheet)?;
+    let net = control_net(&sheet)?;
     let weights = net_weights(net.rows, net.cols, picks, falloff)?;
     let moves: Vec<((usize, usize), f64)> = (0..net.rows)
         .flat_map(|i| (0..net.cols).map(move |j| (i, j)))
@@ -241,7 +283,8 @@ pub fn rebuild(
     spans_v: usize,
     tol: f64,
 ) -> Result<(Brep, f64)> {
-    let ((u, v), points) = untrimmed(sheet)?;
+    let sheet = editable(sheet)?;
+    let ((u, v), points) = untrimmed(&sheet)?;
     let degrees_ok = |d: usize| (1..=MAX_SPLINE_DEGREE).contains(&d);
     if !(degrees_ok(deg_u) && degrees_ok(deg_v) && tol.is_finite() && tol >= 0.0) {
         return Err(Error::Argument);
@@ -326,6 +369,107 @@ pub fn rebuild(
     Ok((made, bound))
 }
 
+/// `sheet` with the control rows next to its record edge `edge` moved so the edge meets record
+/// edge `target` of `other` at `order` (the kernel's
+/// [`solidcore::nurbs::srf_match::match_boundary`]: at most `rows.rows` rows from the edge move,
+/// the rows the order does not fix following by `rows.blend`, G2's row along the normal only, the
+/// sheet refined first where its knots cannot carry the target), and the seam after, measured at
+/// the edge's stations. Both sheets are one untrimmed face (as [`control_net`] reads them), each
+/// edge a side of its face's box. Refused when the seam would be worse than before in a measure
+/// the order holds: past both what it was and `held`, the caller's floor for that measure (the
+/// gap, the angle, the curvature jump), so rounding at a seam already held is not "worse".
+///
+/// # Errors
+/// As [`control_net`] for either sheet; [`Error::Argument`] for an edge past its record's list
+/// or not a side of its face's box, a floor in `held` negative or not finite, and the kernel's
+/// refusals of the input (rows outside 1..=3 or below the order plus one, a blend outside 0..=1,
+/// knots not clamped, a target degenerate at a station); [`Error::Unsupported`] for a match that
+/// would leave the seam worse; the kernel's status otherwise.
+pub fn match_edge(
+    sheet: &Brep,
+    edge: usize,
+    other: &Brep,
+    target: usize,
+    order: MatchOrder,
+    rows: MatchRows,
+    held: SeamBounds,
+) -> Result<(Brep, SeamBounds)> {
+    if ![held.gap, held.angle, held.curvature]
+        .iter()
+        .all(|t| t.is_finite() && *t >= 0.0)
+    {
+        return Err(Error::Argument);
+    }
+    let side = side_of(sheet, edge)?;
+    let target_side = side_of(other, target)?;
+    let ((u, v), points) = untrimmed(sheet)?;
+    let surface = kernel_surface(u, v, points)?;
+    let ((tu, tv), tpoints) = untrimmed(other)?;
+    let target_surface = kernel_surface(tu, tv, tpoints)?;
+    let matched = run("surface_cvs::match_edge", |_| {
+        Ok(
+            match match_boundary(&surface, side, &target_surface, target_side, order, rows) {
+                Ok(m) => Ok(m),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })??;
+    let (before, after) = (matched.before, matched.after);
+    let worse = |now: f64, was: f64, floor: f64| now > was.max(floor);
+    let k = order.order();
+    if worse(after.gap, before.gap, held.gap)
+        || (k >= 1 && worse(after.angle, before.angle, held.angle))
+        || (k >= 2 && worse(after.curvature, before.curvature, held.curvature))
+    {
+        return Err(Error::Unsupported(
+            "the match would leave the seam worse than it was",
+        ));
+    }
+    let made = record(run("surface_cvs::match_edge", |k| {
+        sheet_of(k, BSplineSurface::from_gw_nurb(&matched.surface))
+    }))?;
+    Ok((made, after))
+}
+
+/// The side of its face's box record edge `edge` of the one-face untrimmed `sheet` runs along:
+/// its use's pcurve all on `u = umin` (left), `u = umax` (right), `v = vmin` (bottom) or
+/// `v = vmax` (top).
+///
+/// # Errors
+/// As [`untrimmed`]; [`Error::Argument`] for an edge the face does not use, or one not on a side.
+fn side_of(sheet: &Brep, edge: usize) -> Result<Boundary> {
+    untrimmed(sheet)?;
+    let [face] = sheet.faces.as_slice() else {
+        return Err(Error::Argument);
+    };
+    let [[u0, u1], [v0, v1]] = face.domain;
+    let [Loop::Edges { edges }] = face.loops.as_slice() else {
+        return Err(Error::Argument);
+    };
+    let Some(used) = edges
+        .iter()
+        .find(|e| usize::try_from(e.edge).is_ok_and(|i| i == edge))
+    else {
+        return Err(Error::Argument);
+    };
+    let Curve2::Spline { points: uv, .. } = &used.pcurve else {
+        return Err(Error::Argument);
+    };
+    let on = |k: usize, at: f64| uv.iter().all(|p| p.get(k) == Some(&at));
+    if on(0, u0) {
+        Ok(Boundary::Left)
+    } else if on(0, u1) {
+        Ok(Boundary::Right)
+    } else if on(1, v0) {
+        Ok(Boundary::Bottom)
+    } else if on(1, v1) {
+        Ok(Boundary::Top)
+    } else {
+        Err(Error::Argument)
+    }
+}
+
 /// Whether the first and last `degree + 1` of `knots` are each one value.
 fn clamped(knots: &[f64], degree: usize) -> bool {
     let flat =
@@ -363,6 +507,10 @@ fn kernel_surface(u: &[f64], v: &[f64], net: &[Vec<[f64; 3]>]) -> Result<NurbSur
 /// [`Error::Argument`] for a record of more or fewer faces, another surface or a rational one;
 /// [`Error::Unsupported`] for a face that is trimmed (or not proved untrimmed: a rational
 /// pcurve, a pcurve off the box's sides, holes).
+///
+/// A planar sheet is taken through [`editable`] first by the net edits (`control_net`,
+/// `move_cvs`, `move_net`, `rebuild`); `match_edge`, which names its edges by record index,
+/// takes spline sheets only (a planar one's rebuilt edges would need the edge map).
 #[allow(clippy::type_complexity)]
 pub(crate) fn untrimmed(sheet: &Brep) -> Result<((&[f64], &[f64]), &[Vec<[f64; 3]>])> {
     let [face] = sheet.faces.as_slice() else {
@@ -432,6 +580,18 @@ mod tests {
             ],
         };
         ruled(&a, &b, false).unwrap()
+    }
+
+    /// A spline sheet is not rebuilt: `editable` hands the record back borrowed (not converted),
+    /// so every net edit of a spline sheet reads and makes exactly what it did before planar
+    /// sheets were taken.
+    #[test]
+    fn a_spline_sheet_is_edited_as_it_is() {
+        let s = sheet();
+        match editable(&s).unwrap() {
+            Cow::Borrowed(b) => assert_eq!(b, &s),
+            Cow::Owned(_) => panic!("a spline sheet was rebuilt"),
+        }
     }
 
     #[test]

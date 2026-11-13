@@ -457,7 +457,8 @@ will apply when it finishes.
 step: the design, the active sketch and the undo history are restored exactly as they were,
 however long the history is. Batches that call `file.new` or `doc.open` get the design back,
 not its file path. (An older app without checkpoints falls back to undoing as many steps as
-the batch added to the undo history.)
+the batch added to the undo history.) A checkpoint that a step of the batch takes stays after a
+batch that went through; a rollback that goes back uses it up.
 
 A long batch, such as a polyline of hundreds of points, can be written to a JSON file and run with
 `path` instead of `commands`, so the steps don't have to go through the chat. The file holds an array

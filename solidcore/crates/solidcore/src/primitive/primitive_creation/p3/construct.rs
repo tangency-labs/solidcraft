@@ -44,7 +44,7 @@ use super::{
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
-use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::curve::Curve;
 use crate::error::{ignore_status, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
@@ -418,40 +418,8 @@ fn swung_curve_scale(
 // CreateSwungSurface queries GetOrCreateGwNurbPointer on each original
 // derived curve. Copying a lazy SmLine's empty base would lose its MakeNurb.
 fn swung_nurb(kernel: &crate::kernel::Kernel, curve: &Curve) -> Result<BSplineCurve> {
-    let base = super::geometry::bspline(curve)
-        .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline swung input"))?;
-    if base.gw_nurb().is_some() {
-        return Ok(base);
-    }
-    // GetOrCreateGwNurbPointer ignores MakeNurb's ordinary status. Keep the
-    // caller's owner/context for analytic generation and propagate Unported.
-    match curve.kind() {
-        CurveKind::Line(line) => {
-            let mut line = line.clone();
-            ignore_status(line.make_nurb_owned(curve.owner()))?;
-            Ok(line.base().clone())
-        }
-        CurveKind::Ellipse(ellipse) => {
-            let mut ellipse = ellipse.clone();
-            ignore_status(ellipse.make_nurb_owned_with_edge_tol(
-                kernel,
-                curve.owner(),
-                curve.owner_zone_tol_3d(),
-            ))?;
-            Ok(ellipse.base().clone())
-        }
-        CurveKind::Parabola(parabola) => {
-            let mut parabola = parabola.clone();
-            ignore_status(parabola.make_nurb(curve.owner()))?;
-            Ok(parabola.base().clone())
-        }
-        CurveKind::Hyperbola(hyperbola) => {
-            let mut hyperbola = hyperbola.clone();
-            ignore_status(hyperbola.make_nurb(curve.owner()))?;
-            Ok(hyperbola.base().clone())
-        }
-        _ => Ok(base),
-    }
+    super::geometry::bspline_with_nurb(kernel, curve)?
+        .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline swung input"))
 }
 
 fn swung_surface(
