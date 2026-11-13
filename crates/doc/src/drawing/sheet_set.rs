@@ -22,7 +22,9 @@
 //!   printing every sheet: asking for it by name is the exception. A scope of no sheets is refused.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
+use super::by_id::{ById, Record, named_index};
 use super::{Drawing, check_name, require};
 use crate::ids::{self, IdSource};
 use crate::{DocError, Result};
@@ -39,6 +41,12 @@ pub struct SheetSet {
     sheets: Vec<u64>,
 }
 
+impl Record for SheetSet {
+    fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 impl SheetSet {
     /// The sheets it selects, by id, in id order (not the order they come out in: see
     /// [`SheetSets::resolve`]).
@@ -50,7 +58,7 @@ impl SheetSet {
 /// A drawing's sheet sets, by id.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SheetSets {
-    sets: Vec<SheetSet>,
+    sets: ById<SheetSet>,
 }
 
 /// What an output covers.
@@ -77,7 +85,7 @@ pub struct SheetsRemoved {
 
 impl SheetSets {
     /// The sets, by id.
-    pub fn sets(&self) -> &[SheetSet] {
+    pub fn sets(&self) -> &[Arc<SheetSet>] {
         &self.sets
     }
 
@@ -91,21 +99,13 @@ impl SheetSets {
 
     /// The position of the set `named` names: by id, else by a name only one set has.
     pub fn index(&self, named: &str) -> Result<usize> {
-        if let Some(i) = ids::decode(named).and_then(|id| self.sets.iter().position(|s| s.id == id)) {
-            return Ok(i);
-        }
-        let mut called = self.sets.iter().enumerate().filter(|(_, s)| s.name == named).map(|(i, _)| i);
-        match (called.next(), called.next()) {
-            (Some(i), None) => Ok(i),
-            (Some(_), Some(_)) => Err(DocError::Invalid(format!("more than one sheet set is called `{named}`: give its id"))),
-            (None, _) => Err(DocError::Invalid(format!("no sheet set `{named}`"))),
-        }
+        named_index(self.sets.as_slice(), named, "sheet set", |set| set.id, |set| &set.name)
     }
 
     /// The set `named` names ([`SheetSets::index`]).
     pub fn get(&self, named: &str) -> Result<&SheetSet> {
         let i = self.index(named)?;
-        self.sets.get(i).ok_or_else(|| DocError::Invalid(format!("no sheet set `{named}`")))
+        self.sets.get(i).map(Arc::as_ref).ok_or_else(|| DocError::Invalid(format!("no sheet set `{named}`")))
     }
 
     /// Adds a set named `name` of the sheets `sheets` names (each by id or by a name only one sheet
@@ -117,19 +117,17 @@ impl SheetSets {
         let sheets = sheet_ids(drawing, sheets)?;
         let taken: BTreeSet<u64> = drawing.ids().chain(self.sets.iter().map(|s| s.id)).collect();
         let id = id_source.next(&taken)?;
-        let at = self.sets.partition_point(|s| s.id < id);
-        self.sets.insert(at, SheetSet { id, name: name.into(), sheets });
+        self.sets.add([Arc::new(SheetSet { id, name: name.into(), sheets })]);
         Ok(id)
     }
 
     /// Renames the set `named` names to `name`. False when it already had that name.
     pub fn rename(&mut self, named: &str, name: &str) -> Result<bool> {
         check_name(name, "a sheet set's")?;
-        let set = self.get_mut(named)?;
-        if set.name == name {
+        if self.get(named)?.name == name {
             return Ok(false);
         }
-        set.name = name.into();
+        self.get_mut(named)?.name = name.into();
         Ok(true)
     }
 
@@ -137,11 +135,10 @@ impl SheetSets {
     /// them. False when it already selected those.
     pub fn set_sheets(&mut self, drawing: &Drawing, named: &str, sheets: &[&str]) -> Result<bool> {
         let sheets = sheet_ids(drawing, sheets)?;
-        let set = self.get_mut(named)?;
-        if set.sheets == sheets {
+        if self.get(named)?.sheets == sheets {
             return Ok(false);
         }
-        set.sheets = sheets;
+        self.get_mut(named)?.sheets = sheets;
         Ok(true)
     }
 
@@ -149,7 +146,7 @@ impl SheetSets {
     pub fn remove(&mut self, named: &str) -> Result<SheetSet> {
         let i = self.index(named)?;
         require(i < self.sets.len(), || format!("no sheet set `{named}`"))?;
-        Ok(self.sets.remove(i))
+        Ok(Arc::unwrap_or_clone(self.sets.remove(i)))
     }
 
     /// The sets that hold sheet `sheet`, by id: what deleting the sheet changes, to report before it
@@ -166,6 +163,7 @@ impl SheetSets {
             let Ok(at) = set.sheets.binary_search(&sheet) else {
                 return true;
             };
+            let set = Arc::make_mut(set);
             set.sheets.remove(at);
             if set.sheets.is_empty() {
                 removed.emptied.push(set.id);
@@ -208,12 +206,10 @@ impl SheetSets {
     /// The rules (the module's notes), against the drawing the sets are of: what reading them will
     /// check, and what every edit keeps.
     pub fn validate(&self, drawing: &Drawing) -> Result<()> {
-        require(self.sets.len() <= MAX_SHEET_SETS, || format!("a drawing has at most {MAX_SHEET_SETS} sheet sets"))?;
-        require(self.sets.is_sorted_by_key(|s| s.id), || "the sheet sets are not listed by id".into())?;
         let drawing_ids: BTreeSet<u64> = drawing.ids().collect();
         let sheets: BTreeSet<u64> = drawing.sheets.iter().map(|s| s.id).collect();
         let mut seen = BTreeSet::new();
-        for set in &self.sets {
+        self.sets.check(MAX_SHEET_SETS, "sheet set", |set| {
             let id = ids::encode(set.id);
             require(set.id != 0, || "a sheet set has the id 0, which is never one".into())?;
             require(seen.insert(set.id), || format!("two sheet sets have the id {id}"))?;
@@ -224,13 +220,13 @@ impl SheetSets {
             if let Some(gone) = set.sheets.iter().find(|s| !sheets.contains(s)) {
                 return Err(DocError::Invalid(format!("sheet set {id} holds sheet {}, which the drawing doesn't have", ids::encode(*gone))));
             }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     fn get_mut(&mut self, named: &str) -> Result<&mut SheetSet> {
         let i = self.index(named)?;
-        self.sets.get_mut(i).ok_or_else(|| DocError::Invalid(format!("no sheet set `{named}`")))
+        self.sets.get_mut(i).map(Arc::make_mut).ok_or_else(|| DocError::Invalid(format!("no sheet set `{named}`")))
     }
 }
 

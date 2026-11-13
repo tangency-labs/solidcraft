@@ -347,21 +347,21 @@ fn validation_refuses_every_planted_fault() {
 
     type Plant = Box<dyn Fn(&mut SheetSets)>;
     let faults: Vec<(Plant, String)> = vec![
-        (Box::new(|s| s.sets[0].id = 0), "has the id 0".into()),
-        (Box::new(move |s| s.sets[1].id = first), format!("two sheet sets have the id {}", ids::encode(first))),
-        (Box::new(move |s| s.sets[0].id = assembly), "has the id of an object of the drawing".into()),
-        (Box::new(|s| s.sets.reverse()), "not listed by id".into()),
-        (Box::new(|s| s.sets[0].name = " ".into()), "name is 1 to 256 bytes".into()),
-        (Box::new(|s| s.sets[0].sheets.clear()), "holds 1 to 1000 sheets".into()),
-        (Box::new(move |s| s.sets[0].sheets = vec![high, low]), "not listed by id, once each".into()),
-        (Box::new(move |s| s.sets[0].sheets = vec![low, low]), "not listed by id, once each".into()),
-        (Box::new(move |s| s.sets[0].sheets = vec![low, high, u64::MAX]), "which the drawing doesn't have".into()),
-        (Box::new(move |s| s.sets[1].sheets = vec![second]), "which the drawing doesn't have".into()),
+        (Box::new(|s| Arc::make_mut(&mut s.sets[0]).id = 0), "has the id 0".into()),
+        (Box::new(move |s| Arc::make_mut(&mut s.sets[1]).id = first), format!("two sheet sets have the id {}", ids::encode(first))),
+        (Box::new(move |s| Arc::make_mut(&mut s.sets[0]).id = assembly), "has the id of an object of the drawing".into()),
+        (Box::new(|s| s.sets.reverse()), "lists its sheet sets by id".into()),
+        (Box::new(|s| Arc::make_mut(&mut s.sets[0]).name = " ".into()), "name is 1 to 256 bytes".into()),
+        (Box::new(|s| Arc::make_mut(&mut s.sets[0]).sheets.clear()), "holds 1 to 1000 sheets".into()),
+        (Box::new(move |s| Arc::make_mut(&mut s.sets[0]).sheets = vec![high, low]), "not listed by id, once each".into()),
+        (Box::new(move |s| Arc::make_mut(&mut s.sets[0]).sheets = vec![low, low]), "not listed by id, once each".into()),
+        (Box::new(move |s| Arc::make_mut(&mut s.sets[0]).sheets = vec![low, high, u64::MAX]), "which the drawing doesn't have".into()),
+        (Box::new(move |s| Arc::make_mut(&mut s.sets[1]).sheets = vec![second]), "which the drawing doesn't have".into()),
         (
             Box::new(|s| {
-                let one = s.sets[1].clone();
-                s.sets = (0..=MAX_SHEET_SETS as u64).map(|i| SheetSet { id: u64::MAX - i, ..one.clone() }).collect();
-                s.sets.sort_by_key(|set| set.id);
+                let one = s.sets[1].as_ref().clone();
+                s.sets = ById::default();
+                s.sets.add((0..=MAX_SHEET_SETS as u64).map(|i| Arc::new(SheetSet { id: u64::MAX - i, ..one.clone() })));
             }),
             "at most 256 sheet sets".into(),
         ),
@@ -391,4 +391,35 @@ fn hostile_names_never_panic() {
         let _ = sets.remove(named);
     }
     sets.validate(&d).unwrap();
+}
+
+#[test]
+fn set_edits_share_unchanged_records_and_preserve_earlier_snapshots() {
+    let d = gearbox();
+    let mut sets = SheetSets::default();
+    let mut source = IdSource::seeded(1);
+    sets.add(&d, "A", &["Shaft"], &mut source).unwrap();
+    sets.add(&d, "B", &["Notes"], &mut source).unwrap();
+    let a = sets.index("A").unwrap();
+    let b = sets.index("B").unwrap();
+    let original_a = sets.sets[a].clone();
+    let original_b = sets.sets[b].clone();
+    let before = sets.clone();
+
+    assert!(!sets.rename("A", "A").unwrap());
+    assert!(!sets.set_sheets(&d, "A", &["Shaft"]).unwrap());
+    assert!(Arc::ptr_eq(&sets.sets[a], &original_a));
+    sets.rename("A", "Renamed").unwrap();
+    assert_eq!(before.get("A").unwrap().name, "A");
+    assert!(!Arc::ptr_eq(&sets.sets[a], &original_a));
+    assert!(Arc::ptr_eq(&sets.sets[b], &original_b));
+
+    let renamed = sets.clone();
+    sets.without_sheet(id_of(&d, "Shaft"));
+    assert!(sets.get("Renamed").is_err());
+    assert_eq!(renamed.get("Renamed").unwrap().sheets(), [id_of(&d, "Shaft")]);
+    let removed = sets.remove("B").unwrap();
+    assert_eq!(removed.name, "B");
+    assert!(sets.is_empty());
+    assert_eq!(before.get("B").unwrap().sheets(), [id_of(&d, "Notes")]);
 }

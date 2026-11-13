@@ -568,15 +568,7 @@ impl Drawing {
 
     /// The position of the sheet `named` names: by id, else by a name only one sheet has.
     pub fn sheet_index(&self, named: &str) -> Result<usize> {
-        if let Some(i) = ids::decode(named).and_then(|id| self.sheets.iter().position(|s| s.id == id)) {
-            return Ok(i);
-        }
-        let mut called = self.sheets.iter().enumerate().filter(|(_, s)| s.name == named).map(|(i, _)| i);
-        match (called.next(), called.next()) {
-            (Some(i), None) => Ok(i),
-            (Some(_), Some(_)) => Err(DocError::Invalid(format!("more than one sheet is called `{named}`: give its id"))),
-            (None, _) => Err(DocError::Invalid(format!("no sheet `{named}`"))),
-        }
+        by_id::named_index(&self.sheets, named, "sheet", |sheet| sheet.id, |sheet| &sheet.name)
     }
 
     /// Whether `id` names an object a sheet shows: a view, a dimension or a balloon.
