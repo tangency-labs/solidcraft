@@ -558,10 +558,10 @@ mod tests {
             "{up:?} {down:?}"
         );
         assert_eq!(at(&b, 0.0), FaceSide::On);
-        turn_over(&mut b, f).unwrap();
+        turn_over(&k, &mut b, f).unwrap();
         assert_eq!((at(&b, 3.0), at(&b, -3.0)), (down, up), "point_side swaps");
         assert_eq!(at(&b, 0.0), FaceSide::On);
-        turn_over(&mut b, f).unwrap();
+        turn_over(&k, &mut b, f).unwrap();
         assert_eq!((at(&b, 3.0), at(&b, -3.0)), (up, down));
         assert!(point_side(&k, &b, f, Point3::new(f64::NAN, 0.0, 0.0), 1e-9).is_err());
     }
