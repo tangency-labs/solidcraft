@@ -190,6 +190,64 @@ fn omitted_print_faces_are_reported_without_changing_the_design() {
     assert_eq!(run(&mut s, "timeline.export_script", json!({}))["omitted"], json!([]));
 }
 
+/// A design with a configuration table: a parameter, a suppression and a material column,
+/// two rows, a rule, and the second row active (#15441).
+fn configured(s: &mut Session) {
+    plate(s);
+    run(s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [60, 0, 0], "body_name": "Tab"}));
+    run(s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [80, 0, 0], "body_name": "Boss"}));
+    let boss = s.doc.features.last().unwrap().name.clone();
+    run(s, "material.create", json!({"name": "Test resin", "density_g_cm3": 1.3}));
+    run(s, "config.configure", json!({"params": ["w"], "features": [boss.clone()], "materials": ["Tab"]}));
+    let mut values = serde_json::Map::new();
+    values.insert("param:w".into(), json!("60 mm"));
+    values.insert(format!("suppress:{boss}"), json!("true"));
+    values.insert("material:Tab".into(), json!("Test resin"));
+    run(s, "config.row", json!({"name": "Wide", "values": values}));
+    let rule = json!({"id": "span", "name": "Width range", "condition": {"type": "always"},
+        "effect": {"type": "parameter_range", "parameter": "w", "minimum": "10 mm", "maximum": "100 mm"}});
+    run(s, "config.rule", json!({"rules": [rule]}));
+    run(s, "config.activate", json!({"row": "Wide"}));
+}
+
+/// A table by what a replay keeps: row ids are new, everything else is the same.
+fn table(s: &Session) -> (Vec<solidcraft_doc::config::Column>, Vec<(String, Vec<String>)>, Vec<solidcraft_doc::config::ConfigRule>, Option<String>) {
+    let t = &s.doc.configs;
+    (t.columns.clone(), t.rows.iter().map(|r| (r.name.clone(), r.cells.clone())).collect(), t.rules.clone(), t.active.clone())
+}
+
+#[test]
+fn a_configuration_table_comes_back() {
+    let mut s = Session::default();
+    configured(&mut s);
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    assert_eq!(r["omitted"], json!([]), "{r}");
+    let mut t = replay(&r["script"]);
+    assert_eq!(table(&t), table(&s));
+    assert!(t.doc.configuration_matches(), "the active row still describes the design");
+    same(&mut s, &mut t);
+    // The replayed rows switch the design as the originals do.
+    run(&mut s, "config.activate", json!({"row": "Default"}));
+    run(&mut t, "config.activate", json!({"row": "Default"}));
+    same(&mut s, &mut t);
+}
+
+#[test]
+fn a_design_that_moved_off_its_active_row_keeps_the_table_and_reports_the_row() {
+    let mut s = Session::default();
+    configured(&mut s);
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "45 mm"}));
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    assert_eq!(r["omitted"], json!(["the active configuration (the design no longer matches its row)"]), "{r}");
+    let mut t = replay(&r["script"]);
+    let (theirs, mut ours) = (table(&t), table(&s));
+    // The replay has no active row; everything else in the table is the same.
+    assert_eq!(theirs.3, None);
+    ours.3 = None;
+    assert_eq!(theirs, ours);
+    same(&mut s, &mut t);
+}
+
 #[test]
 fn a_recorded_feature_that_does_not_fit_is_refused_and_changes_nothing() {
     let mut s = Session::default();
