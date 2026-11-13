@@ -21,7 +21,8 @@
 # sccache is on a Blacksmith sticky disk that only main commits.
 # A push to main runs only the repository checks when a passing merge-queue run tested that very
 # commit, or when nothing a build reads changed since the last push to main whose run passed.
-# Otherwise it runs everything.
+# Otherwise it runs everything; it also does when it changes a cache key (the toolchain, Cargo.lock,
+# the cache settings here), so that main saves the caches the next runs restore.
 # Heavy checks wait for review: a pull request without the `approved-for-ci` label runs only
 # Select checks, the format and repository checks and a quick compile. Adding the label (after
 # review) runs everything above, and every later push to the PR does too, except a push that only
@@ -43,7 +44,7 @@
 # Every Linux job runs on Blacksmith's Ubuntu 24.04 runners (blacksmith-<N>vcpu-ubuntu-2404), sized
 # per job: 32 vCPU for the tests, 16 for Clippy, the GPU path tests, the archive build (nightly) and the merge queue's, 8 for compiles, doc and reference tests, 4 for the light checks, 2 for Select checks and ci.
 # The Windows shader job runs on Blacksmith's Windows Server 2025 runners (blacksmith-8vcpu-windows-2025);
-# the Windows app startup smoke stays on windows-latest, which has a desktop session that presents frames.
+# the Windows app is built there too, and only its startup smoke runs on windows-latest, which has a desktop session that presents frames.
 # Pull requests, forks included, the merge queue, pushes to main and the nightly run all use them:
 # the runners are ephemeral, fork runs get no secrets, and main saves the build caches that every
 # other run restores read-only. Nightly and by hand, Build tests also makes an archive the matrix
@@ -240,6 +241,24 @@ jobs:
           solidcore_paths() {
             if grep -qz '^solidcore/' "$1"; then solidcore=true; fi
           }
+          # Whether the NUL-separated paths in $1 (the diff $2..$3) change what the build jobs' caches
+          # are keyed on, and which (cache_key): rust-cache hashes the toolchain file and the lockfile,
+          # and this workflow installs the toolchain and names the caches. Of ci.yml only the lines
+          # that set those count: the toolchain, rust-cache and sccache actions, the sticky disks,
+          # cache keys and the CARGO_, RUST and SCCACHE_ environment. solidcore/ has its own toolchain
+          # file and lockfile, which only the SolidCore checks read; solidcore_paths runs those.
+          cache_key_paths() {
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                rust-toolchain|rust-toolchain.toml|Cargo.lock) cache_key="${cache_key:+$cache_key, }$path" ;;
+              esac
+            done < "$1"
+            if grep -qxzF '.github/workflows/ci.yml' "$1" \
+              && git diff -U0 "$2" "$3" -- .github/workflows/ci.yml \
+                | grep -E '^[+-] .*(dtolnay/rust-toolchain@|Swatinem/rust-cache@|useblacksmith/stickydisk@|mozilla-actions/sccache-action@|[[:space:]](key|save-if|workspaces|prefix-key|shared-key|cache-[a-z-]+|toolchain|components|targets|CARGO_[A-Z_]+|RUST[A-Z_]*|SCCACHE_[A-Z_]+):)' > /dev/null; then
+              cache_key="${cache_key:+$cache_key, }the cache settings in ci.yml"
+            fi
+          }
           # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
           # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
           # the paths say.
@@ -255,11 +274,17 @@ jobs:
             # SolidCore checks for a push to main that changes solidcore/**, whatever the queue
             # tested: main saves their caches, which every pull request restores. A push that
             # can't be compared (new branch, force push) runs them.
+            # Likewise the build jobs for a push to main that changes a cache key (cache_key_paths),
+            # or can't be compared: only main saves their caches, so skipping them left every run cold
+            # until the nightly saved one.
+            cache_key=
             if [ "$GITHUB_REF_NAME" = main ]; then
               if git diff --no-renames --name-only -z "$BEFORE_SHA" "$PUSH_SHA" > "$RUNNER_TEMP/ci-solidcore-paths" 2>/dev/null; then
                 solidcore_paths "$RUNNER_TEMP/ci-solidcore-paths"
+                cache_key_paths "$RUNNER_TEMP/ci-solidcore-paths" "$BEFORE_SHA" "$PUSH_SHA"
               else
                 solidcore=true
+                cache_key="a push that can't be compared"
               fi
               echo "solidcore=$solidcore for $BEFORE_SHA..$PUSH_SHA"
             fi
@@ -267,10 +292,17 @@ jobs:
             # testing the push again proves nothing new; otherwise (a merge that skipped the
             # queue, or the API cannot answer) test everything.
             # The API through curl and grep, which every runner image has.
-            tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$PUSH_SHA&status=success&per_page=1" \
-              | grep -o '"total_count": *[0-9]*' | grep -o '[0-9]*$' || echo 0)
-            if [ "${tested:-0}" -gt 0 ]; then
+            if [ -z "$cache_key" ]; then
+              tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$PUSH_SHA&status=success&per_page=1" \
+                | grep -o '"total_count": *[0-9]*' | grep -o '[0-9]*$' || echo 0)
+            fi
+            if [ -n "$cache_key" ]; then
+              echo "$BEFORE_SHA..$PUSH_SHA changes a cache key ($cache_key): running the build jobs to save their caches."
+              full=true
+              packages=
+              native=true
+            elif [ "${tested:-0}" -gt 0 ]; then
               echo "The merge queue already tested $PUSH_SHA: repository checks only."
             elif tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=$GITHUB_REF_NAME&status=success&per_page=1" \
@@ -370,7 +402,8 @@ jobs:
           # - in the merge queue, when the group's diff touches render code or one of its pull
           #   requests carries render-tests;
           # - in the nightly and by hand, always, so anything the above skipped is caught within a day;
-          # - not on a push to main: the queue tested that commit, or the nightly will.
+          # - not on a push to main: the queue tested that commit, or the nightly will; except a push
+          #   to main that changes a cache key (cache_key), so that main saves the GPU job's caches too.
           gpu=false
           if [ "$native" = true ]; then
             case "$EVENT_NAME" in
@@ -379,7 +412,7 @@ jobs:
                 gpu=$gpu_paths
                 if [ "$RENDER_LABEL" = true ]; then gpu=true; fi ;;
               merge_group) gpu=$gpu_paths ;;
-              push) gpu=false ;;
+              push) if [ -n "$cache_key" ]; then gpu=true; fi ;;
               *) gpu=true ;;
             esac
           fi
@@ -665,8 +698,14 @@ jobs:
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       # Every command label needs an English catalog entry (#8542). The label table is the CLI's
-      # command registry, so this builds the CLI in the profile the tests just used (the shared
-      # crates are cached) and reads it. Skipped when no selected package can change the table.
+      # command registry, so this reads it from a CLI built in the profile the tests just used.
+      # Skipped when no selected package can change the table.
+      # When solidcraft-cli was in the test run, its integration tests (CARGO_BIN_EXE) already made
+      # the binary in this run's feature set. `cargo build -p solidcraft-cli` would resolve features
+      # for the CLI alone (no dev-dependencies, no other members), so every workspace crate got new
+      # metadata and was compiled again: about 4 minutes. No feature that differs between the two
+      # touches the command table. The binary is only missing when the CLI was not tested (a
+      # change to solidcraft-ui-egui or xtask alone); then it is built as before.
       - name: Command labels in the translation catalogs
         env:
           FULL: ${{ needs.changes.outputs.full }}
@@ -676,8 +715,12 @@ jobs:
             true*|*" solidcraft-cli "*|*" solidcraft-ui-egui "*|*" xtask "*) ;;
             *) echo "No package that feeds the command table changed."; exit 0 ;;
           esac
-          cargo build -p solidcraft-cli --profile ci --locked
-          cargo xtask i18n --check --cli "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          case "$FULL $PACKAGES " in
+            true*|*" solidcraft-cli "*) echo "Reusing the CLI the test build made: $cli" ;;
+            *) cargo build -p solidcraft-cli --profile ci --locked ;;
+          esac
+          cargo xtask i18n --check --cli "$cli"
       - name: Compiler cache statistics
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
@@ -1038,25 +1081,47 @@ jobs:
   # The Windows app starts D3D12 first and only the backend it uses (a Vulkan driver crashed the
   # app at startup on Intel). Start the real app on the runner (its D3D12 adapter is WARP) with
   # several saved settings and safe mode, and check each draws a frame and quits cleanly.
-  windows-startup:
-    name: Windows app startup
+  # Split in two (2026-11-12): compiling the app and its startup tests took ~30 of this job's 33
+  # minutes on a 4-vCPU GitHub-hosted runner and held the merge queue's front batch. The build and
+  # the startup unit tests (no window) run on a Blacksmith Windows runner; only the smoke itself,
+  # which needs a desktop that presents frames, stays GitHub-hosted, on the built app.
+  windows-build:
+    name: Windows app build
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    # GitHub-hosted: the startup smoke needs an interactive desktop that presents frames; on
-    # Blacksmith's Windows runners the window never presents ("no frame was presented").
-    runs-on: windows-latest
-    timeout-minutes: 60
+    runs-on: blacksmith-8vcpu-windows-2025
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: windows-startup
+          key: windows-build
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
       - name: Build the app
         run: cargo build -p solidcraft --profile ci --locked
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-app
+          path: target/ci/solidcraft.exe
+          retention-days: 1
+
+  windows-startup:
+    name: Windows app startup
+    needs: [changes, windows-build]
+    if: needs.changes.outputs.windows == 'true'
+    # GitHub-hosted: the startup smoke needs an interactive desktop that presents frames; on
+    # Blacksmith's Windows runners the window never presents ("no frame was presented").
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-app
+          path: target/ci
       - name: Start the app under different settings
         shell: pwsh
         run: tools/windows-startup-smoke.ps1 -Exe target/ci/solidcraft.exe
@@ -1070,7 +1135,7 @@ jobs:
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
@@ -1137,6 +1202,7 @@ jobs:
           DOCS: ${{ needs.doc-tests.result }}
           ORACLE: ${{ needs.oracle.result }}
           WINDOWS_FXC: ${{ needs.windows-fxc.result }}
+          WINDOWS_BUILD: ${{ needs.windows-build.result }}
           WINDOWS_STARTUP: ${{ needs.windows-startup.result }}
           DEPS_RUN: ${{ needs.changes.outputs.deps }}
           ADVISORIES: ${{ needs.dependency-advisories.result }}
@@ -1172,6 +1238,7 @@ jobs:
           fi
           if [ "$WINDOWS" = true ]; then
             test "$WINDOWS_FXC" = success
+            test "$WINDOWS_BUILD" = success
             test "$WINDOWS_STARTUP" = success
           fi
           # Cargo.lock or a Cargo.toml changed on a pull request or in a merge group.

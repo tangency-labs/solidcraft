@@ -1874,6 +1874,29 @@ fn occurrence_bodies_cache_retires_one_answer_when_full() {
     assert_eq!(s.occurrence_bodies(&root, true).unwrap().len(), 131);
 }
 
+/// Listing a subtree makes the design's name index once, not once for each placement in it: an
+/// assembly's active placement is listed at every model scene build, and making the index for
+/// each of its placements cost the subtree times the design (about 70 ms a build on a 561-body
+/// assembly, each appearance edit a frame of over 100 ms).
+#[test]
+fn listing_a_subtree_makes_the_name_index_once() {
+    let mut s = Session::default();
+    let (_assembly, assembly) = created(&mut s, "Assembly");
+    let (part, _) = created(&mut s, "Part");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Part"}));
+    for i in 0..130 {
+        run(&mut s, "occurrence.copy", json!({"component": part, "translate": [i as f64 * 10.0, 0.0, 0.0]}));
+    }
+    crate::occurrences::NAME_INDEXES.with(|n| n.set(0));
+    let listed = s.occurrence_bodies(&[assembly], true).unwrap();
+    assert_eq!(listed.len(), 131);
+    assert_eq!(crate::occurrences::NAME_INDEXES.with(std::cell::Cell::get), 1, "one name index for the 131 placements");
+    let mut unique = listed.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), 131, "each placement's body has its own world name");
+}
+
 /// A connector's boss extruded To Object up to the shell of another component joins the
 /// connector only: the shell it runs to stays its own body in its own component, and the PCB
 /// sketched on the shell afterwards is still made (a Join extrude to an object joined the body

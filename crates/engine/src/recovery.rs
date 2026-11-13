@@ -65,6 +65,21 @@ pub fn data_dir() -> Option<PathBuf> {
     }
 }
 
+/// SolidCraft's per-user cache folder, for files it can make again (Home's pictures, files sent to
+/// a slicer): `%LOCALAPPDATA%\SolidCraft`, `~/Library/Caches/SolidCraft`, or
+/// `$XDG_CACHE_HOME/solidcraft` (`~/.cache/solidcraft`). Unlike the system's temporary folder, it
+/// is still there after a restart.
+pub fn cache_dir() -> Option<PathBuf> {
+    let env = |k: &str| std::env::var_os(k).filter(|d| !d.is_empty()).map(PathBuf::from);
+    if cfg!(windows) {
+        Some(env("LOCALAPPDATA")?.join("SolidCraft"))
+    } else if cfg!(target_os = "macos") {
+        Some(env("HOME")?.join("Library/Caches/SolidCraft"))
+    } else {
+        Some(env("XDG_CACHE_HOME").or_else(|| env("HOME").map(|h| h.join(".cache")))?.join("solidcraft"))
+    }
+}
+
 /// The recovery folder under the per-user data `root`, and the folder earlier releases used.
 /// Windows and macOS name the app's folder in title case, other systems in lower case.
 fn dirs_under(root: &Path, title_case: bool) -> (PathBuf, PathBuf) {

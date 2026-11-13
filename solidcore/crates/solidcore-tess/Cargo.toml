@@ -28,6 +28,8 @@ rayon = "1.12"
 serde_json = { version = "1", features = ["float_roundtrip"] }
 # The frozen records under tests/data are gzipped JSON.
 flate2 = "1.1"
+# The mesh path's tests model their bodies (a box joined with a sphere) through the modelling API.
+solidcore-ops = { path = "../solidcore-ops" }
 
 [lints]
 workspace = true

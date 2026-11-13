@@ -476,3 +476,11 @@ fn a_reach_stops_where_a_contact_set_touches() {
     let x = place(&s, "B", near_face).x;
     assert!(x.abs() < 1e-6, "B's face at x = {x}, not at the limit, 0");
 }
+
+#[test]
+fn body_centre_uses_exact_body_bounds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    let c = super::body_centre(&s, 0);
+    assert!((c.x - 5.0).abs() < 1e-6 && (c.y - 10.0).abs() < 1e-6 && (c.z - 15.0).abs() < 1e-6, "got {c:?}");
+}

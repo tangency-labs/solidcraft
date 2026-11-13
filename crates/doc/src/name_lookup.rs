@@ -7,9 +7,11 @@
 //! face, when only a face of the same stem is left, when the name is on several bodies, or when
 //! the name was saved before format 14 ([`LEGACY_MARK`]), the name finds nothing and the feature
 //! that uses it fails, asking for the reference to be picked again
-//! ([`crate::DocError::Reselect`]). An edge name has one more way: when no edge's faces answer
+//! ([`crate::DocError::Reselect`]). An edge name has two more ways: when no edge's faces answer
 //! to it, and one of its faces is gone from a feature still on the body, the reference's point
-//! decides (see [`renamed_edge`]). A face whose name was worked out from geometry, found where
+//! decides (see [`renamed_edge`]); so it does when a face of it is named after neighbours it no
+//! longer has, or answers to several faces, and the point lies on one edge between them (see
+//! [`resuffixed_edge`]). A face whose name was worked out from geometry, found where
 //! the reference's point no longer lies, is reported: only geometry decided.
 //! Saved numbered Project links also have a compatibility check for a whole face that
 //! contains the saved pick and comes directly from its original construction feature.
@@ -57,6 +59,9 @@ pub struct EdgeHit {
 /// between them is it only where the reference's point still lies on it. A name whose faces no
 /// edge's faces answer to at all, one of them gone from a feature that is still there, is the edge
 /// of the other face the reference's point lies on, clear of its ends (see [`renamed_edge`]).
+/// A name with a face named after neighbours it no longer has, or answering to several faces, is
+/// the one edge between faces answering to it that the reference's point lies on (see
+/// [`resuffixed_edge`]).
 /// `Err` explains when there is none: no such edge, the named edge split into several, one of
 /// several edges whose faces now bound one edge elsewhere, or a name saved before format 14.
 pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
@@ -91,11 +96,10 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
             loose = true;
         }
     }
+    let at_pick = |i: usize| EdgeHit { edge: i, point: near, verified: false, on_point: true };
     let Some((_, cands)) = best else {
-        let picked = if loose { None } else { renamed_edge(b, &m, &faces, wanted, near) };
-        return picked
-            .map(|i| EdgeHit { edge: i, point: near, verified: false, on_point: true })
-            .ok_or_else(|| format!("edge `{name}` no longer exists"));
+        let picked = if loose { resuffixed_edge(b, &m, &faces, wanted, near) } else { renamed_edge(b, &m, &faces, wanted, near) };
+        return picked.map(at_pick).ok_or_else(|| format!("edge `{name}` no longer exists"));
     };
     // When the faces of several numbered edges bound one edge now, every one of their names
     // finds the faces of that edge: taking it for each would put them all on one edge (#13332).
@@ -105,7 +109,7 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
             Err(format!("edge `{name}` was one of several between its faces, and the one left is elsewhere"))
         }
         [i] => exact(*i),
-        _ => Err(format!("edge `{name}` is no longer one edge")),
+        _ => resuffixed_edge(b, &m, &faces, wanted, near).map(at_pick).ok_or_else(|| format!("edge `{name}` is no longer one edge")),
     }
 }
 
@@ -147,6 +151,323 @@ fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Opt
     // Each face it separates is whole: no other piece of it is left to be the one picked. The
     // edge is verified by that name, so the faces it separates are the `whole` stems.
     whole.iter().all(|face| faces_with_stem(b, face).len() == 1).then_some(hit)
+}
+
+/// Where a stored vertex name was found.
+#[derive(Clone, Copy, Debug)]
+pub struct VertexHit {
+    /// The vertex (its index in the body's B-rep record).
+    pub vertex: usize,
+    /// The vertex's point in world coordinates.
+    pub point: Vec3,
+    /// Whether the names of the faces meeting at it follow exact history (and the vertex is not
+    /// one of several with the same incident faces, numbered by where they lie).
+    pub verified: bool,
+    /// Whether the reference's point still lies on the vertex.
+    pub on_point: bool,
+}
+
+impl VertexHit {
+    /// What a feature says about how it found a vertex by its stored name `name` (`None`: exactly).
+    pub fn note(&self, name: &str) -> Option<String> {
+        if !self.verified && !self.on_point {
+            Some(format!("vertex `{}` was found by geometry, not exact history; check it", quoted(name)))
+        } else {
+            None
+        }
+    }
+}
+
+/// The vertex of a body a stored vertex name finds: the vertex with that name; else the one
+/// vertex whose incident faces answer to it cleanly via exact history. A numbered name (`~k`)
+/// was one of several vertices with the same incident faces, told apart only by where they lay,
+/// so the one vertex left is it only where the reference's point still lies on it.
+pub fn locate_vertex(b: &ModelBody, name: &str, near: Vec3) -> Result<VertexHit, String> {
+    if legacy_name(name).is_some() {
+        return Err(format!("vertex `{name}` was named by a build before format 14"));
+    }
+    if b.body.is_mesh() {
+        return Err(format!("vertex `{name}` cannot be found on a mesh body"));
+    }
+    let record = b.body.record();
+    let incident = naming::vertex_incident_faces(record);
+    let faces = naming::names(b);
+    let names = naming::vertex_names_from_record(record, &incident, &faces.faces);
+    let reach = pick_reach(b);
+    let pos = |v: usize| record.vertices.get(v).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).filter(|p| p.is_finite());
+    let verified = |v: usize| {
+        incident.get(v).is_some_and(|fs| !fs.is_empty() && fs.iter().all(|f| faces.verified(*f as usize)))
+            && names.get(v).is_some_and(|n| strip_edge_number(n).len() == n.len())
+    };
+    let hit = |v: usize| -> Result<VertexHit, String> {
+        let point = pos(v).ok_or_else(|| "vertex".to_string())?;
+        let on_point = near.is_finite() && point.dist(near) <= reach;
+        Ok(VertexHit { vertex: v, point, verified: verified(v), on_point })
+    };
+    if let Some(v) = names
+        .iter()
+        .enumerate()
+        .find(|(v, n)| !n.is_empty() && incident.get(*v).is_some_and(|fs| !fs.is_empty()) && crate::persistent_name::same_edge(n, name))
+        .map(|(v, _)| v)
+    {
+        return hit(v);
+    }
+    let (wanted, numbered) = parse_vertex_wanted(name);
+    let wanted_parsed: Vec<(String, Option<crate::persistent_name::FaceName>)> =
+        wanted.iter().map(|w| (w.clone(), crate::persistent_name::FaceName::parse(w).ok())).collect();
+    let (mut best, mut loose): (Option<(Match, Vec<usize>)>, bool) = (None, false);
+    for (v, fs) in incident.iter().enumerate() {
+        if fs.is_empty() {
+            continue;
+        }
+        let Some(level) = vertex_match(&faces, fs, &wanted_parsed) else { continue };
+        if exactly(level) {
+            keep_best(&mut best, level, v);
+        } else {
+            loose = true;
+        }
+    }
+    let at_pick = |v: usize| -> Option<VertexHit> {
+        let point = pos(v)?;
+        Some(VertexHit { vertex: v, point, verified: false, on_point: true })
+    };
+    let Some((_, cands)) = best else {
+        let picked = if loose {
+            resuffixed_vertex(record, &incident, &faces, &wanted_parsed, reach, near)
+        } else {
+            renamed_vertex(record, &incident, &faces, &wanted, reach, near)
+        };
+        return picked.and_then(at_pick).ok_or_else(|| format!("vertex `{name}` no longer exists"));
+    };
+    let vertex_near = |v: usize| pos(v).is_some_and(|p| near.is_finite() && p.dist(near) <= reach);
+    match cands.as_slice() {
+        [v] if numbered && !vertex_near(*v) => Err(format!("vertex `{name}` was one of several between its faces, and the one left is elsewhere")),
+        [v] => hit(*v),
+        _ => resuffixed_vertex(record, &incident, &faces, &wanted_parsed, reach, near)
+            .and_then(at_pick)
+            .ok_or_else(|| format!("vertex `{name}` is no longer one vertex")),
+    }
+}
+
+/// Find a saved Sketch Project vertex in its body, recovering numbered face pieces when the
+/// faces around it now evaluate whole at the saved point.
+pub(crate) fn locate_projected_vertex(b: &ModelBody, name: &str, near: Vec3) -> Result<VertexHit, String> {
+    locate_vertex(b, name, near).or_else(|miss| recover_numbered_projected_vertex(b, name, near).ok_or(miss))
+}
+
+fn recover_numbered_projected_vertex(b: &ModelBody, name: &str, near: Vec3) -> Option<VertexHit> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let (wanted, _) = parse_vertex_wanted(name);
+    let mut numbered = false;
+    let whole: Vec<&str> = wanted
+        .iter()
+        .map(|part| match part.rsplit_once('#') {
+            Some((stem, number))
+                if !stem.is_empty()
+                    && strip_piece(stem) == stem
+                    && !number.is_empty()
+                    && !number.starts_with('0')
+                    && number.bytes().all(|digit| digit.is_ascii_digit()) =>
+            {
+                numbered = true;
+                stem
+            }
+            _ => part.as_str(),
+        })
+        .collect();
+    if !numbered {
+        return None;
+    }
+    let hit = locate_vertex(b, &whole.join("|"), near).ok().filter(|hit| hit.verified && hit.on_point)?;
+    whole.iter().all(|face| faces_with_stem(b, face).len() == 1).then_some(hit)
+}
+
+fn parse_vertex_wanted(name: &str) -> (Vec<String>, bool) {
+    if let Ok(parsed) = crate::persistent_name::EdgeName::parse(name) {
+        return (parsed.faces.iter().map(ToString::to_string).collect(), parsed.tie.is_some());
+    }
+    let base = strip_edge_number(name);
+    (split_top_level_bars(base).into_iter().map(str::to_string).collect(), base.len() != name.len())
+}
+
+fn split_top_level_bars(s: &str) -> Vec<&str> {
+    let (mut parts, mut start, mut depth) = (Vec::new(), 0usize, 0usize);
+    for (i, b) in s.bytes().enumerate() {
+        match b {
+            b'(' | b'[' => depth = depth.saturating_add(1),
+            b')' | b']' => depth = depth.saturating_sub(1),
+            b'|' if depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+/// Best 1-to-1 bottleneck match between a vertex's incident faces `fs` and the wanted face list
+/// `wanted`, maximizing the weakest individual face match.
+fn vertex_match(faces: &Names, fs: &[u32], wanted: &[(String, Option<crate::persistent_name::FaceName>)]) -> Option<Match> {
+    const MAX_INCIDENT: usize = 64;
+    let k = wanted.len();
+    if k == 0 || fs.len() != k || k > MAX_INCIDENT {
+        return None;
+    }
+    let mut rows: Vec<Vec<(usize, Match)>> = Vec::with_capacity(k);
+    let mut col_hit = vec![false; k];
+    for (w_str, w_parsed) in wanted {
+        let mut opts = Vec::new();
+        for (ci, f) in fs.iter().enumerate() {
+            if let Some(m) = crate::history_names::matches_read(faces, *f as usize, w_str, w_parsed.clone()) {
+                col_hit[ci] = true;
+                opts.push((ci, m));
+            }
+        }
+        if opts.is_empty() {
+            return None;
+        }
+        opts.sort_by_key(|a| std::cmp::Reverse(a.1));
+        rows.push(opts);
+    }
+    if col_hit.iter().any(|hit| !*hit) {
+        return None;
+    }
+    // Search fewest-option rows first so high-degree polygon corners resolve in linear time.
+    let mut order: Vec<usize> = (0..k).collect();
+    order.sort_by_key(|&r| rows[r].len());
+    let mut used = vec![false; k];
+    let mut best: Option<Match> = None;
+    match_assign(&rows, &order, 0, &mut used, None, &mut best);
+    best
+}
+
+fn match_assign(rows: &[Vec<(usize, Match)>], order: &[usize], depth: usize, used: &mut [bool], cur_min: Option<Match>, best: &mut Option<Match>) {
+    if depth == order.len() {
+        *best = (*best).max(cur_min);
+        return;
+    }
+    let row = &rows[order[depth]];
+    for &(col, level) in row {
+        if used[col] {
+            continue;
+        }
+        let next_min = Some(cur_min.map_or(level, |m| m.min(level)));
+        if best.is_some_and(|b| next_min.is_some_and(|n| n <= b)) {
+            continue;
+        }
+        used[col] = true;
+        match_assign(rows, order, depth + 1, used, next_min, best);
+        used[col] = false;
+    }
+}
+
+fn resuffixed_vertex(
+    record: &solidcore_record::brep::Brep,
+    incident: &[Vec<u32>],
+    faces: &Names,
+    wanted: &[(String, Option<crate::persistent_name::FaceName>)],
+    reach: f64,
+    near: Vec3,
+) -> Option<usize> {
+    if !near.is_finite() || wanted.is_empty() {
+        return None;
+    }
+    let side = |f: usize, (x, x_parsed): &(String, Option<crate::persistent_name::FaceName>)| -> Option<bool> {
+        let level = crate::history_names::matches_read(faces, f, x, x_parsed.clone())?;
+        if exactly(level) {
+            let resuffixed = level == Match::Piece && qualified(x) && faces.faces.get(f).is_some_and(|n| !crate::history_names::descends(n, x));
+            return Some(resuffixed);
+        }
+        (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n))).then_some(true)
+    };
+    let mut on = incident.iter().enumerate().filter_map(|(v, fs)| {
+        let pt = record.vertices.get(v).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+        if !pt.is_finite() || pt.dist(near) > reach || fs.len() != wanted.len() || fs.len() > 64 {
+            return None;
+        }
+        let mut rows: Vec<Vec<(usize, bool)>> = Vec::with_capacity(wanted.len());
+        for w in wanted {
+            let opts: Vec<(usize, bool)> = fs.iter().enumerate().filter_map(|(ci, f)| side(*f as usize, w).map(|r| (ci, r))).collect();
+            if opts.is_empty() {
+                return None;
+            }
+            rows.push(opts);
+        }
+        let mut used = vec![false; fs.len()];
+        fn can_assign(rows: &[Vec<(usize, bool)>], depth: usize, used: &mut [bool], saw_resuffixed: bool) -> bool {
+            if depth == rows.len() {
+                return saw_resuffixed;
+            }
+            for &(col, r) in &rows[depth] {
+                if !used[col] {
+                    used[col] = true;
+                    let ok = can_assign(rows, depth + 1, used, saw_resuffixed || r);
+                    used[col] = false;
+                    if ok {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        can_assign(&rows, 0, &mut used, false).then_some(v)
+    });
+    on.next().filter(|_| on.next().is_none())
+}
+
+fn renamed_vertex(
+    record: &solidcore_record::brep::Brep,
+    incident: &[Vec<u32>],
+    faces: &Names,
+    wanted: &[String],
+    reach: f64,
+    near: Vec3,
+) -> Option<usize> {
+    if !near.is_finite() || wanted.len() < 2 {
+        return None;
+    }
+    let count = faces.faces.len();
+    let found = |x: &str| {
+        let mut hits = (0..count).filter(|f| crate::history_names::matches(faces, *f, x).is_some_and(exactly));
+        hits.next().filter(|_| hits.next().is_none())
+    };
+    let lost = |y: &str| {
+        crate::persistent_name::made_by(y)
+            .filter(|id| faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(*id)))
+            .filter(|_| (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none()))
+    };
+    // Exactly one face is lost while its feature still exists on the body, and all remaining faces are found.
+    let mut kept_faces: Vec<usize> = Vec::with_capacity(wanted.len() - 1);
+    let mut lost_by: Option<u64> = None;
+    for w in wanted {
+        if let Some(f) = found(w)
+            && !kept_faces.contains(&f)
+        {
+            kept_faces.push(f);
+        } else if lost_by.is_none()
+            && let Some(id) = lost(w)
+        {
+            lost_by = Some(id);
+        } else {
+            return None;
+        }
+    }
+    let lost_by = lost_by?;
+    let made_by = |f: usize| faces.faces.get(f).and_then(|name| crate::persistent_name::made_by(name));
+    let mut on = incident.iter().enumerate().filter_map(|(v, fs)| {
+        let pt = record.vertices.get(v).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+        if !pt.is_finite() || pt.dist(near) > reach || fs.len() != wanted.len() {
+            return None;
+        }
+        let bounds_kept = kept_faces.iter().all(|k| fs.iter().any(|f| *f as usize == *k));
+        let replaced = fs.iter().any(|f| !kept_faces.contains(&(*f as usize)) && made_by(*f as usize) == Some(lost_by));
+        (bounds_kept && !replaced).then_some(v)
+    });
+    on.next().filter(|_| on.next().is_none())
 }
 
 /// Whether a face found at `level` is exactly the face a name named: the very name (or another
@@ -233,6 +554,68 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
     let bounds_face = uses.iter().any(|u| u.face as usize == face);
     let replaced = uses.iter().any(|u| u.face as usize != face && made_by(u.face as usize) == Some(lost_by));
     (bounds_face && !replaced).then_some(edge)
+}
+
+/// The edge a stored edge name `wanted` (without its number) meant when one of its faces is named
+/// with the faces around it (`F44:top#[F43:side:l7]`) and those are now others: the face is still
+/// there under its stem, but its qualifier changed, or several faces answer to it (a join over
+/// another extrude's footprint names the walls it joins differently, and can leave two faces of
+/// that stem). The candidates are the edges between faces answering to the name's two faces: each
+/// exactly (see [`exactly`]) or, for a face named with its qualifier, by its stem where that face
+/// too is named with a qualifier (another one: a face whole again is not it), at least one
+/// side of them by a qualifier that is not that face's own (a piece of the named face split since
+/// is not a renamed face: the edge split with it and the name asks again). Of those, the one edge
+/// whose exact curve the reference's point `near` lies on (within the pick reach, as
+/// [`solidcraft_kernel::edge_distance`] measures it) is taken; none or several, and the name finds
+/// nothing. The point must be the reference's own pick, as for [`renamed_edge`].
+fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    // How face `f` answers to face name `x`: `Some(true)` by a qualifier that is not its own.
+    let side = |f: usize, x: &str| -> Option<bool> {
+        let level = crate::history_names::matches(faces, f, x)?;
+        if exactly(level) {
+            let resuffixed = level == Match::Piece && qualified(x) && faces.faces.get(f).is_some_and(|n| !crate::history_names::descends(n, x));
+            return Some(resuffixed);
+        }
+        // By its stem only where the face is still named after its neighbours, others than the name's:
+        // a face whole again is not one the name told apart by a face it never touches (#11731).
+        (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n))).then_some(true)
+    };
+    let mut cands: Vec<usize> = Vec::new();
+    for (i, fs) in m.edge_faces.iter().enumerate() {
+        let [fa, fb] = fs.as_slice() else { continue };
+        let answers = wanted.match_indices('|').any(|(k, _)| {
+            let (Some(x), Some(y)) = (wanted.get(..k), wanted.get(k + 1..)) else { return false };
+            [(*fa, *fb), (*fb, *fa)].into_iter().any(|(p, q)| side(p as usize, x).zip(side(q as usize, y)).is_some_and(|(sx, sy)| sx || sy))
+        });
+        if answers {
+            cands.push(i);
+        }
+    }
+    let reach = pick_reach(b);
+    let record = b.body.record();
+    let sorted = |mut fs: Vec<u32>| {
+        fs.sort_unstable();
+        fs.dedup();
+        fs
+    };
+    let mut on = cands.into_iter().filter(|i| {
+        // The mesh's edges are the B-rep's, in its order: the edge's faces say it is the same edge.
+        let same = record
+            .edges
+            .get(*i)
+            .zip(m.edge_faces.get(*i))
+            .is_some_and(|(e, fs)| sorted(e.uses.iter().map(|u| u.face).collect()) == sorted(fs.clone()));
+        same && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    on.next().filter(|_| on.next().is_none())
+}
+
+/// Whether face name `x` names its face with the faces around it (`F2:top#[F4:side:l1]`).
+fn qualified(x: &str) -> bool {
+    crate::piece_names::piece_parts(x).is_some_and(|(_, around)| !around.is_empty())
 }
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.

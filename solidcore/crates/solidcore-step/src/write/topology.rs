@@ -1,4 +1,4 @@
-//! A schema 4 record ([`solidcraft_geom::brep`]) as ISO 10303-42 topology, the inverse of
+//! A schema 4 record ([`solidcore_record::brep`]) as ISO 10303-42 topology, the inverse of
 //! [`crate::topology`]. Each bounded material region becomes a MANIFOLD_SOLID_BREP, or a
 //! BREP_WITH_VOIDS when voids lie inside it (each void's CLOSED_SHELL through an
 //! ORIENTED_CLOSED_SHELL); the open shells become one SHELL_BASED_SURFACE_MODEL. Faces are ADVANCED_FACEs on their

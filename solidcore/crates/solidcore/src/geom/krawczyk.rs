@@ -17,13 +17,21 @@
 //! |------|----------|
 //! | [`krawczyk`], [`newton`], [`KRAWCZYK_STEPS`], [`NEWTON_STEPS`] | (not upstream: #15009's, moved) |
 //! | [`inverse3`], [`inverse_of_columns2`], [`inverse_of_columns3`], [`inverse_of_columns4`] | (not upstream: #15009's, moved) |
+//! | [`contraction`], [`k_operator`] | `sm_GnEncloseOver`'s `C`, `q` and `K` (the fork's order), extracted (#15140) |
 //!
-//! Deviations: none; the bodies are #15009's as they were in `reach/net.rs`, bit for bit.
+//! Deviations: [`krawczyk`]'s centre, first box, widening and step count are #15009's as they
+//! were in `reach/net.rs`; its operator is the crate's one ([`contraction`], [`k_operator`],
+//! the fork's `sm_GnEncloseOver` order, #15140), so its boxes differ from #15009's by
+//! roundings only (each operation rounds outward; the order of the terms changed, not the
+//! maths).
 
 use crate::blend::fillet_section::certificate::inverse4;
-use crate::blend::fillet_section::interval::{round_up, Ivl};
+use crate::blend::fillet_section::interval::{cmax, round_up, Ivl};
 use crate::error::Result;
 use crate::geom::vector3d::Vec3;
+
+/// The point interval 0 (a missing entry's value, as `IZ` in the certificate).
+const ZERO: Ivl = Ivl::new(0.0, 0.0);
 
 /// The most Krawczyk steps one root gets ([`krawczyk`]).
 pub(crate) const KRAWCZYK_STEPS: usize = 8;
@@ -81,18 +89,12 @@ pub(crate) fn krawczyk<const N: usize>(
         let Some(j) = jacobian(y)? else {
             return Ok(None);
         };
-        let mut k = y;
-        for (i, ((ki, row), (&m, &cfi))) in
-            k.iter_mut().zip(&c).zip(mid.iter().zip(&cf)).enumerate()
-        {
-            let mut v = Ivl::from(m) - cfi;
-            for (jj, (col, (&yj, &mj))) in j.iter().zip(y.iter().zip(&mid)).enumerate() {
-                // (I − C F′(Y))_ij, formed before it multiplies Y − ỹ
-                let identity = Ivl::from(if i == jj { 1.0 } else { 0.0 });
-                v = v + (identity - times(row, col)) * (yj - Ivl::from(mj));
-            }
-            *ki = v;
-        }
+        // the crate's one operator (#15140), in its order: `F′` by rows from the columns given
+        let rows: [[Ivl; N]; N] = core::array::from_fn(|r| {
+            core::array::from_fn(|col| j.get(col).and_then(|cl| cl.get(r)).copied().unwrap_or(ZERO))
+        });
+        let (cm, _) = contraction(&c, &rows);
+        let k = k_operator(&mid, &c, &f, &cm, &y);
         let inside = k.iter().zip(&y).all(|(a, b)| a.lo > b.lo && a.hi < b.hi);
         if inside {
             let mut out = k;
@@ -107,6 +109,60 @@ pub(crate) fn krawczyk<const N: usize>(
         }
     }
     Ok(None)
+}
+
+/// The contraction of Krawczyk's operator for the preconditioner `y` (rows) and `F′` over a
+/// box `jac` (rows: `jac[k][j]` the `k`th equation's partial in the `j`th unknown):
+/// `C = I − Y F′`, each `C_ij` formed from `δ_ij` by subtracting `y_ik F′_kj` in `k`'s
+/// order, and `q = max_i Σ_j |C_ij|`, each row's sum rounded up as it grows. The fork's
+/// order (`sm_GnEncloseOver`), shared with [`k_operator`] (tangency-labs/solidcraft#15140).
+pub(crate) fn contraction<const N: usize>(
+    y: &[[f64; N]; N],
+    jac: &[[Ivl; N]; N],
+) -> ([[Ivl; N]; N], f64) {
+    let mut cm = [[Ivl::from(0.0); N]; N];
+    let mut q = 0.0_f64;
+    for (i, (yi, ci)) in y.iter().zip(cm.iter_mut()).enumerate() {
+        let mut row = 0.0_f64;
+        for (j, cij) in ci.iter_mut().enumerate() {
+            let mut c = Ivl::from(if i == j { 1.0 } else { 0.0 });
+            for (&yik, jk) in yi.iter().zip(jac) {
+                c = c - Ivl::from(yik) * jk.get(j).copied().unwrap_or(ZERO);
+            }
+            *cij = c;
+            row = round_up(row + c.mag());
+        }
+        q = cmax(q, row);
+    }
+    (cm, q)
+}
+
+/// Krawczyk's operator over the box `x` about `mid`: `K_i = mid_i − Σ_j y_ij g_j + Σ_j
+/// c_ij (x_j − mid_j)`, from `mid_i`, each term subtracted then added in `j`'s order (the
+/// fork's `sm_GnEncloseOver`), `g` the system at the point `mid`, `c` the [`contraction`] for
+/// `y`. A box `x` with `K` strictly inside it holds a root of the system (module docs); each
+/// caller keeps its own centre, first box, preconditioner and widening, and a caller whose
+/// proof needs `q < 1` tests it itself (tangency-labs/solidcraft#15140).
+pub(crate) fn k_operator<const N: usize>(
+    mid: &[f64; N],
+    y: &[[f64; N]; N],
+    g: &[Ivl; N],
+    c: &[[Ivl; N]; N],
+    x: &[Ivl; N],
+) -> [Ivl; N] {
+    let mut kk = [Ivl::from(0.0); N];
+    for (i, ((yi, ci), ki)) in y.iter().zip(c).zip(kk.iter_mut()).enumerate() {
+        let mut k = Ivl::from(mid.get(i).copied().unwrap_or(f64::NAN));
+        for (&yij, gj) in yi.iter().zip(g) {
+            k = k - Ivl::from(yij) * *gj;
+        }
+        for (j, &cij) in ci.iter().enumerate() {
+            let xj = x.get(j).copied().unwrap_or(ZERO);
+            k = k + cij * (xj - Ivl::from(mid.get(j).copied().unwrap_or(f64::NAN)));
+        }
+        *ki = k;
+    }
+    kk
 }
 
 /// `F` at a point and its columns there, as numbers ([`newton`]).

@@ -115,7 +115,7 @@ pub use blend::hermite_bezier;
 pub use bvh::{Bvh, MeshIndex};
 pub use chain::{Chain, Closed, Ends, Open, Path, Planar, Ring};
 pub use grid::Grid;
-pub use mesh::{Aabb3, BoxedTriangle, InsideIndex, MassProperties, Mesh, MeshGeom, MeshMeasure, find_close_pair};
+pub use mesh::{Aabb3, BoxedTriangle, InsideIndex, MassProperties, Mesh, MeshGeom, MeshMeasure, TANGENT_CHAIN, find_close_pair};
 pub use plane::PlaneGeom;
 pub use profile::{Loop2Geom, MAX_DERIVATIVE_ORDER, Region2Geom, Seg2Geom, Similarity2, bezier, regions_apart};
 pub use unit_vec3::UnitVec3;

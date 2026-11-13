@@ -771,7 +771,7 @@ sends it a line whenever the active design changes (#6985):
 ### Slow commands and the window (#1989)
 
 With the preference **Preferences > AI > Keep the window responsive while agents run commands**
-on (`ui.prefs {"agent_off_thread": true}`; off by default), a design change in the desktop app
+on (the default; `ui.prefs {"agent_off_thread": false}` turns it off), a design change in the desktop app
 that takes longer than about 150 ms (an `engine.execute` of a
 modelling command, an `engine.batch` of them) computes off the window thread, so the window keeps
 drawing and answering while it runs:
@@ -967,14 +967,17 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
+- `dimension_colour` (`null` (default) or `[r, g, b]` numbers 0…255: the colour a sketch dimension draws its lines, arrows and value in; null uses the theme's dimension colours. Selection, hover and conflicts keep their own colours, #14121)
 - `dimension_input` (`view` (default): a sketch dimension's value is typed in a box on the dimension; `window`: placing a dimension with the Dimension tool, or double-clicking one, opens a small window at it with the value field (handle `dimwin:value`), arrows that step the value (`dimwin:up`, `dimwin:down`), a check (`dimwin:ok`, also Enter) and a cross (`dimwin:cancel`, also Esc), #7246)
 - `dimension_step_deg` (default 1, 0.001…180: what the dimension window's arrows, Up/Down and the wheel over its field add to an angle, in degrees)
 - `dimension_step_mm` (default 1, 0.001…1000: what the window's arrows, Up/Down and the wheel over its field add to a length, in millimetres, written in the unit the value is written in)
+- `dimension_text_scale` (default 1, 0.5…2.5: how far a sketch dimension's text is scaled; it applies in the open sketch and to Show Dimensions, #14121)
 - `escape_twice_finishes_sketch` (default true: in a sketch, two quick presses of Esc (0.4 s apart or less) with no tool or dialog left to cancel finish it, as before; false: Esc only cancels the tool, dialog or selection and the sketch stays open until Finish Sketch, #12069)
 - `export_name` (string, default empty: each export offers the design's name, or a mesh its body's; otherwise the name File › Export and Save As Mesh offer, with `{design}`, `{body}` (the exported body's name) and the design properties (`{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}`) replaced; [export file names](book/src/guide/files.md#export-file-names))
 - `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `fillet_legacy_radius` (default false: a new Solid Fillet opens at the radius the tool ships with, 2 mm, shown in the design's units ("0.07874 in" in an inch design); true: it opens at the number 2 read in the design's units ("2 in"), as before, #12418)
+- `forget_stand_up: true` (action: forget all remembered stand-up answers; also available beside the memory checkbox in Preferences › Design)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
 - `graphics_adapter` (exact card name, or empty for Automatic; applies after restart; `WGPU_ADAPTER_NAME` takes precedence)
 - `graphics_backend` (native Graphics API: `auto` by default; Windows: `dx12`, `vulkan`, `gl`; macOS: `metal`; Linux: `vulkan`, `gl`. Saved before graphics initialization and applied on restart. Existing manual comma lists are preserved until an explicit API change. `{"button":"restart_graphics"}` asks about unsaved designs, then restarts with the saved API; unavailable in the browser or under an explicit launch override.)
@@ -1025,7 +1028,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `placement_handles` (default false: handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil that move it across the model and turn it where it can turn)
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
+- `remember_stand_up` (default true: reuse the stand-up or Leave it answer per SHA-256 of the original file bytes, at most 500 answers with oldest-first eviction; false restores asking on every open)
 - `render_legacy_memory_admission` (Graphics, default false): Use previous render memory checks. True skips native available-RAM/cgroup fit refusals for future CPU/GPU admissions; shared/host software limits, device limits, checked allocation and all held reservations remain enforced. It is a machine preference, not saved image quality. The CLI equivalent is `solidcraft-cli render --legacy-memory-admission`.
+- `reuse_imports` (default true: reopen unchanged STEP and IGES files using the local saved-model cache; false imports each time). `doc.open {reuse_import: false}` bypasses reading and writing this cache for one open; its reply includes `import_reused` and `content_sha256`. `file.import_cache_clear {}` removes cached imports and returns `{removed}`, keeping stand-up answers. `SOLIDCRAFT_IMPORT_CACHE_DIR` overrides the default `imports` folder under SolidCraft's per-user data folder; `SOLIDCRAFT_NO_MODEL_CACHE` also bypasses import reuse.
 - `ribbon_menus_follow_hover` (default false). Click a ribbon panel label to open its menu. Hover another panel label to switch, or move outside the ribbon and open menu to close it.
 - `ribbon_reveal` (default false: hovering a result in Search commands switches the ribbon to the command's tab and marks its button, or opens the panel drop-down that holds it on its row, handle `ribbon:reveal`; leaving the results goes back to the tab before; a command started from the search blinks there, and a running command from a drop-down marks its panel label, `ribbon:running_section:<TAB>:<SECTION>`, #7287)
 - `right_drag_orbits` (default true; false: a right drag the mouse preset would orbit leaves the camera alone, #6492)
@@ -1061,7 +1066,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)
 - `trackpad_zoom_modifier` (`off` default, `cmd`, `alt`, or `ctrl`: hold this key alone for vertical scroll to zoom)
-- `ui_font` (an installed font family or a font file for the interface; empty for the built-in font)
+- `ui_font` (an installed font family or a font file for the interface; empty for the built-in font; a `Family-Weight.ttf` file also takes its heavier sibling files for bold text, see [interface fonts](fonts.md))
 - `ui_scale`
 - `up_axis` (`z`, `y`)
 - `view_confirm_corner` (default false: while a dialog or a sketch is open, a check and a cross at the view's top right, handles `view:confirm:ok` and `view:confirm:cancel`, do what the dialog's OK and Cancel do, or Finish Sketch and Cancel Sketch; the axis view or cube moves down below them, #6709)

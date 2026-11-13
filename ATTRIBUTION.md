@@ -857,6 +857,10 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/look/icons/design/svg/model/end_cap_inward.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/end_cap_outward.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/locales/lv.json | SolidCraft contributors | Original Latvian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/fonts/craft-ui-kr/CraftUI-KR.otf | Adobe / Google Inc. (Noto Sans KR); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/KR Regular, glyph-subset for the Hangul syllable block and renamed Craft UI KR (OFL reserved-name); licence text in assets/fonts/craft-ui-kr/OFL.txt; web UI Korean | SIL OFL 1.1 |
+| assets/fonts/craft-ui-kr/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-KR.otf | SIL OFL 1.1 |
+| `assets/locales/pending/names-from-file.json` | SolidCraft contributors | Original label for the names-from-file preference | MIT OR Apache-2.0 |
+| `assets/locales/pending/snap-points.json` | SolidCraft contributors | Original snap point labels and messages | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

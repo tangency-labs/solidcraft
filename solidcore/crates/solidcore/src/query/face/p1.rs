@@ -117,6 +117,66 @@ fn tight_face_box(k: &Kernel, lb: &mut LazyBrep<'_>, f: FaceId) -> Result<Extent
     Ok(face_bbox)
 }
 
+/// Not upstream (WR-755): the tolerance and the box within which the surfaces of two faces
+/// are compared by their definitions: the larger face tolerance, and the two faces
+/// together (where the surfaces must agree).
+///
+/// # Errors
+///
+/// Those of the face tolerances and bounding boxes.
+pub fn surface_comparison_extent(
+    k: &Kernel,
+    brep: &Brep,
+    face: FaceId,
+    other: &Brep,
+    other_face: FaceId,
+) -> Result<(f64, Extent3d)> {
+    let tol = fp2::tolerance(brep, face)?.max(fp2::tolerance(other, other_face)?);
+    let region = calculate_bounding_box(k, brep, face, false)?
+        .union(&calculate_bounding_box(k, other, other_face, false)?);
+    Ok((tol, region))
+}
+
+/// Not upstream: whether the definitions show the surfaces of two faces to be different
+/// surfaces: two different analytic kinds ([`Surface::is_other_analytic_kind`]), or two
+/// quadrics of one kind that [`Surface::same_analytic_surface`] tells apart within
+/// [`surface_comparison_extent`]. Faces on such surfaces meet in curves and points, however
+/// parallel they leave a common edge. `false` where the definitions cannot tell (two planes,
+/// a B-spline, an offset, an extrusion, a revolution): the faces may be on one surface.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face without surface; those of
+/// [`surface_comparison_extent`].
+pub fn faces_on_other_surfaces(
+    k: &Kernel,
+    brep: &Brep,
+    face: FaceId,
+    other: &Brep,
+    other_face: FaceId,
+) -> Result<bool> {
+    fn surface(b: &Brep, f: FaceId) -> Result<&Surface> {
+        fp2::surface(b, f)?
+            .ok_or_else(|| SolidError::invalid_input(OP_FACE_BOX, "face without surface"))
+    }
+    let (a, b) = (surface(brep, face)?, surface(other, other_face)?);
+    if a.is_other_analytic_kind(b) {
+        return Ok(true);
+    }
+    // of one kind, only quadrics have definitions that tell two surfaces apart
+    let quadric = |s: &Surface| {
+        matches!(
+            s.kind(),
+            SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_)
+        )
+    };
+    if !(quadric(a) && quadric(b)) {
+        return Ok(false);
+    }
+    let (tol, region) = surface_comparison_extent(k, brep, face, other, other_face)?;
+    Ok(a.same_analytic_surface(b, tol, &region) == Some(false))
+}
+
 const NORMAL_BOX: BoundingBoxRequest = BoundingBoxRequest {
     normal: true,
     pseudo: false,

@@ -353,3 +353,104 @@ fn open_profiles_are_traced_through_the_builder_s_segments() {
     // the builder chains the second section from (1, 1): its first segment is curve 2
     assert_eq!(pairs, [(0, 2), (1, 3)]);
 }
+
+/// #15263: the end sections share z = 0, and the middle square spans z = 5..15.
+/// Both caps of a valid arch must face down. Check shell orientation separately
+/// from the volume sign so a local reversal cannot masquerade as an inside-out solid.
+#[test]
+fn a_skin_returning_to_its_start_plane_has_two_outward_downward_caps() {
+    use solidcore::mass::integrator::properties::brep_volume_default;
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use solidcore::nurbs::knots::Side;
+    use solidcore::topology::{brep::p2 as brep2, edgeuse::p1 as eu1};
+
+    let sections = [
+        [[0., 0., 0.], [10., 0., 0.], [10., 10., 0.], [0., 10., 0.]],
+        [
+            [15., 0., 5.],
+            [15., 10., 5.],
+            [15., 10., 15.],
+            [15., 0., 15.],
+        ],
+        [[20., 0., 0.], [30., 0., 0.], [30., 10., 0.], [20., 10., 0.]],
+    ];
+    for joined_profiles in [false, true] {
+        let mut k = Kernel::default();
+        let curves: Vec<Curve> = sections
+            .iter()
+            .flat_map(|p| {
+                let mut sides: Vec<_> = (0..4)
+                    .map(|i| {
+                        BSplineCurve::create_line_segment(
+                            3,
+                            Point3::new(p[i][0], p[i][1], p[i][2]),
+                            Point3::new(p[(i + 1) % 4][0], p[(i + 1) % 4][1], p[(i + 1) % 4][2]),
+                        )
+                        .unwrap()
+                    })
+                    .collect();
+                if joined_profiles {
+                    vec![Curve::from(
+                        BSplineCurve::create_by_joining(&mut sides, None).unwrap(),
+                    )]
+                } else {
+                    sides.into_iter().map(Curve::from).collect()
+                }
+            })
+            .collect();
+        let refs: Vec<_> = curves.iter().map(Some).collect();
+        let count = if joined_profiles { 1 } else { 4 };
+        let (mut made, sources) =
+            create_skin_primitive_with_sources(&mut k, &[count; 3], &refs, 2, true).unwrap();
+        assert_eq!(made.brep.face_list().len(), 6);
+        assert_eq!(made.side_faces.len(), 4);
+        assert_eq!(made.start_faces.len(), 1);
+        assert_eq!(made.end_faces.len(), 1);
+        let walls = traced(sources);
+        assert_eq!(walls.len(), 4);
+        for (_, sources) in walls {
+            assert_eq!(sources.len(), 3, "{sources:?}");
+        }
+        assert!(brep2::is_manifold_solid(&made.brep).unwrap());
+        // A reversed cap would disagree with its neighbouring edge uses. Check the
+        // stitched exterior shell directly, independently of its signed volume.
+        for &f in made.brep.face_list() {
+            let outer = face2::outer_faceuse(&made.brep, f).unwrap().unwrap();
+            for eu in eu1::faceuse_edgeuses(&made.brep, outer, false, None).unwrap() {
+                let radial = eu1::radial(&made.brep, eu).unwrap().unwrap();
+                assert_ne!(
+                    eu1::orientation(&made.brep, eu).unwrap(),
+                    eu1::orientation(&made.brep, radial).unwrap(),
+                    "inconsistent exterior edge uses on {f:?}"
+                );
+            }
+        }
+        let mut cap_normals = Vec::new();
+        for &f in made.start_faces.iter().chain(&made.end_faces) {
+            let surface = face2::surface(&made.brep, f).unwrap().unwrap();
+            let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+            let uv = d.evaluate(0.5, 0.5);
+            let p = surface.evaluate_point(&k, uv).unwrap();
+            let mut n = surface
+                .evaluate_normal(&k, uv, Side::Left, Side::Left)
+                .unwrap();
+            let outer = face2::outer_faceuse(&made.brep, f).unwrap().unwrap();
+            if eu1::faceuse_orientation(&made.brep, outer).unwrap() == OrientType::Opposite {
+                n = -n;
+            }
+            eprintln!("cap {f:?}: point {p:?}, outward normal {n:?}");
+            assert!(p.z.abs() < 1e-9, "cap point {p:?}");
+            cap_normals.push(n);
+        }
+        assert!(
+            cap_normals.iter().all(|n| n.z < -0.999999),
+            "cap outward normals {cap_normals:?}"
+        );
+        let v = brep_volume_default(&k, &mut made.brep, 1e-9).unwrap();
+        eprintln!("joined profiles {joined_profiles}: volume {v} mm3");
+        // Untwisted quadratic boundaries enclose 800/3 mm2, across a 10 mm width.
+        // The historical ~1338 mm3 is not the volume of this untwisted quadratic.
+        assert!((v - 8000.0 / 3.0).abs() < 1e-5, "signed volume {v}");
+        assert!(solidcore::topology::brep::is_outward_solid(&mut k, &mut made.brep).unwrap());
+    }
+}

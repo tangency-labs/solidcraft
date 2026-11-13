@@ -49,8 +49,11 @@ fn edge_index(b: &ModelBody, name: Option<&str>, pick: Vec3) -> Option<usize> {
 /// The planar face beside edge `i` the origin sits on: the named one, else the larger planar face
 /// the edge bounds. Its index, outward normal and centroid.
 fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -> Result<(usize, Vec3, Vec3)> {
-    let m = b.mesh();
-    let beside: Vec<usize> = m.edge_faces.get(i).map(|fs| fs.iter().map(|f| *f as usize).collect()).unwrap_or_default();
+    let beside: Vec<usize> = if b.body.is_mesh() {
+        Vec::new()
+    } else {
+        b.body.record().edges.get(i).map(|e| e.uses.iter().map(|u| u.face as usize).collect()).unwrap_or_default()
+    };
     let infos = b.joint_faces()?;
     let planar = |f: usize| infos.iter().find(|x| x.index == f).and_then(|x| x.plane_normal.map(|n| (x.index, n, x.centroid, x.area)));
     let chosen = match name {

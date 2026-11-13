@@ -999,6 +999,29 @@ fn a_point_clicked_on_a_line_midpoint_is_held_there() {
     assert!(held, "no MidPoint constraint: {:?}", sk.constraints.iter().map(|c| &c.kind).collect::<Vec<_>>());
 }
 
+/// #15387: the Point tool clicked on the crossing of two lines makes a point held on both lines
+/// (`PointOnCurve` on each), not a free point that happens to sit at their intersection.
+#[test]
+fn a_point_clicked_on_a_line_crossing_is_held_on_both() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,20]],"ids":["a"],"infer":false})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,20],[20,0]],"ids":["b"],"infer":false})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.point"})).unwrap();
+    h.step(&json!({"click":{"world":[10, 10, 0]}})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    let p = sk.points.len() - 1;
+    for line in ["a", "b"] {
+        let c = sk.curve_index(line).unwrap();
+        let held = sk.constraints.iter().any(|k| k.kind == ConstraintKind::PointOnCurve { p, c });
+        assert!(held, "not held on {line}: {:?}", sk.constraints.iter().map(|k| &k.kind).collect::<Vec<_>>());
+    }
+}
+
 /// #7299: the centre circle tool, its centre snapped to a rectangle's corner, ties the circle
 /// to the corner with a Coincident (which the sketch shows as a glyph that can be picked and
 /// deleted), not by quietly sharing the corner as its centre.
