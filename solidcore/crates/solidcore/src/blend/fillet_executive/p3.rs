@@ -2197,6 +2197,22 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         radius: Option<f64>,
     ) -> Result<Option<crate::blend::fillet_exact::CollapsedOffset>>;
 
+    /// Not the fork's (#14846): for a constant ball (of `radius`, `None`: the solver's own),
+    /// the end of its edge that every ball on the edge's faces lies past, so that the round
+    /// has no section between the edge's ends, and the largest radius that has one
+    /// ([`ball_past_an_end`](crate::blend::fillet_exact::ball_past_an_end)); `None` otherwise,
+    /// for a solver that rolls no constant ball, and from the adapter over
+    /// [`ExecutiveAccess`], which holds no solvers.
+    ///
+    /// # Errors
+    /// The judging's own errors.
+    fn creation_ball_past_an_end(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        radius: Option<f64>,
+    ) -> Result<Option<crate::blend::fillet_exact::PastAnEnd>>;
+
     /// Not the fork's (#2546): for a constant ball, its rail whose ends lie within the
     /// part's resolution of each other without closing to a point
     /// (`blend::fillet_exact::rail_below_resolution`); `None` otherwise, for a solver
@@ -2335,6 +2351,15 @@ where
         _solver: O,
         _radius: Option<f64>,
     ) -> Result<Option<crate::blend::fillet_exact::CollapsedOffset>> {
+        Ok(None)
+    }
+
+    fn creation_ball_past_an_end(
+        &mut self,
+        _k: &mut Kernel,
+        _solver: O,
+        _radius: Option<f64>,
+    ) -> Result<Option<crate::blend::fillet_exact::PastAnEnd>> {
         Ok(None)
     }
 
@@ -3891,17 +3916,64 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
         }
         if let Some((open, solver)) = least {
-            let radius = open.radius;
             let g = |x: f64| c_general(x, 0, 7);
+            // (#14846) just below the face's radius the ball rolls, but its round may still have
+            // no section between the edge's ends: then the size that builds is the one at which
+            // it first has one
+            let past = if open.partial {
+                None
+            } else {
+                access
+                    .creation_ball_past_an_end(k, solver, Some(open.radius))?
+                    .filter(|p| p.radius < open.radius)
+            };
+            let radius = past.map_or(open.radius, |p| p.radius);
             self.error.code = FilletErrorType::NoRoom as i32;
             self.error.comment = if open.partial {
                 format!("Fillet Error: the rolling ball is as wide as a face it rolls on along part of the edge only (the face's radius across the edge reaches {}): a radius below {} rolls", g(radius), g(radius))
+            } else if past.is_some() {
+                format!("Fillet Error: the rolling ball is as wide as a face it rolls on (radius {}): its centre does not move along the edge, and at an end of the edge it has no section, so no round ends there; below that radius every ball on the edge's faces still lies past an end of the edge down to radius {}: a radius below {} has a section between the edge's ends", g(open.radius), g(radius), g(radius))
             } else {
                 format!("Fillet Error: the rolling ball is as wide as a face it rolls on (radius {}): its centre does not move along the edge, and at an end of the edge it has no section, so no round ends there: a radius below {} rolls", g(radius), g(radius))
             };
             self.error.no_room = Some(NoRoomReason::OffsetCollapses);
             self.error.no_room_without_site = true;
             self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
+            return Err(failure());
+        }
+        Ok(())
+    }
+
+    /// Not the fork's (#14846): after the collapsed offsets, a constant ball every one of whose
+    /// positions on the edge's two faces lies past the plane through an end of the edge square
+    /// to it ([`ball_past_an_end`](crate::blend::fillet_exact::ball_past_an_end)): the round
+    /// has no section between the edge's ends, its rail leaving the face it rolls on before
+    /// either end. Refused with [`FilletErrorType::NoRoom`] ([`NoRoomReason::EndRollsIntoSmoothEnd`]),
+    /// naming the radius at which the round first has a section there less the fit margin
+    /// (open: at it the section is the end's), the least of the solvers'.
+    fn refuse_balls_past_an_end(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+    ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::refuse_balls_past_an_end");
+        let mut least: Option<(crate::blend::fillet_exact::PastAnEnd, O)> = None;
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            index += 1;
+            if let Some(past) = access.creation_ball_past_an_end(k, solver, None)? {
+                if least.is_none_or(|(l, _)| past.radius < l.radius) {
+                    least = Some((past, solver));
+                }
+            }
+        }
+        if let Some((past, solver)) = least {
+            let g = |x: f64| c_general(x, 0, 7);
+            self.error.code = FilletErrorType::NoRoom as i32;
+            self.error.comment = format!("Fillet Error: every position of the rolling ball on the edge's faces lies past an end of the edge (its rail leaves the face it rolls on before either end, at ({}, {}, {})): a radius below {} has a section between the edge's ends", g(past.at.x), g(past.at.y), g(past.at.z), g(past.radius));
+            self.error.no_room = Some(NoRoomReason::EndRollsIntoSmoothEnd);
+            self.error.no_room_without_site = true;
+            self.note_open_fit(access, true, past.radius, FitKind::Radius, solver)?;
             return Err(failure());
         }
         Ok(())
@@ -3992,6 +4064,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // not the fork's (#2401): a ball as wide as a face, whose zone has no section at an
         // end of its edge
         self.refuse_collapsed_offsets(k, access)?;
+        // not the fork's (#14846): a ball whose every position on the edge's faces lies past
+        // an end of its edge
+        self.refuse_balls_past_an_end(k, access)?;
         // the fork's 862971f, e568e45 and aac4288: a convex blend that would cut the part
         // into pieces, refused naming the largest size that keeps it whole
         self.refuse_blends_cutting_the_part(k, access)?;
