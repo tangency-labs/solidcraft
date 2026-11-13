@@ -181,7 +181,8 @@ mod tests {
     #[test]
     fn dense_cylinder_caps_stay_inside_the_radius_and_perimeter_angles_are_uniform() {
         for sides in [1, 2, 4, 8] {
-            let c = cylinder(3.0, 5.0, sides, 3).unwrap();
+            let c =
+                Parameters { kind: "cylinder".into(), dimensions: [6.0, 6.0, 5.0], segments: [sides, 3, 1], ..Default::default() }.build().unwrap();
             assert!(c.points.iter().all(|p| p.x.hypot(p.y) <= 3.0 + 1e-10));
             let mut angles: Vec<_> = c
                 .points

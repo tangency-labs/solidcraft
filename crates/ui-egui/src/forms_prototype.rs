@@ -2837,7 +2837,7 @@ mod tests {
         let b = projection.to_screen(curve.at(0.31).unwrap()).unwrap();
         let tangent = (b - a).normalized();
         let outside = position + egui::vec2(-tangent.y, tangent.x) * 12.0;
-        assert!(curves::project(curve, &projection, outside).is_none(), "the exact hit threshold remains9px");
+        assert!(curves::project(curve, &projection, outside).is_none(), "the exact hit threshold remains 9 px");
         let vertex = projection.to_screen(app.session.forms_prototype.as_ref().unwrap().surface.vertices[0]).unwrap();
         assert_eq!(surface::nearest_with(&app, &projection, vertex, Pick::All), Some(Element::Vertex(0)));
         assert!(matches!(surface::nearest_with(&app, &projection, vertex, Pick::Edge), Some(Element::Edge(_))));

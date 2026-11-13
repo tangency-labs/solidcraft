@@ -194,6 +194,10 @@ fn projection(proj: &Proj) -> Projection {
 fn projections(curve: &Curve, projection: Projection, position: Pos2) -> impl Iterator<Item = (f32, f64, Vec3)> {
     forms_view_queries::curve_hits(projection, [position.x, position.y], HIT_PIXELS, |fraction| curve.at(fraction).ok())
 }
+#[cfg(test)]
+pub(super) fn project(curve: &Curve, proj: &Proj, position: Pos2) -> Option<(f64, Vec3)> {
+    projections(curve, projection(proj), position).next().map(|(_, fraction, point)| (fraction, point))
+}
 pub(super) fn nearest(app: &SolveApp, proj: &Proj, position: Pos2) -> Option<([usize; 2], f64, Vec3)> {
     let prepared = prepared(app)?.ok()?;
     let projected_view = projection(proj);

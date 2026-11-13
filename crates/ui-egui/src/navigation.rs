@@ -2850,8 +2850,8 @@ mod tests {
         let raw = egui::RawInput {
             screen_rect: Some(rect),
             focused: true,
-            modifiers,
             events: vec![
+                egui::Event::ModifiersChanged(modifiers),
                 egui::Event::PointerMoved(rect.center()),
                 egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed: true, repeat: false, modifiers },
             ],
