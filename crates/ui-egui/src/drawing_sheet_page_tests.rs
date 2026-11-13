@@ -402,3 +402,24 @@ fn no_drawing_open_shows_the_note() {
     h.frames(2);
     assert_eq!(page(&mut h), Value::Null);
 }
+
+#[test]
+fn offscreen_arrow_tracks_the_edge_and_hides_when_paper_is_visible() {
+    let area = Rect::from_min_max(pos2(50.0, 20.0), pos2(250.0, 220.0));
+    let sheet_at = |x, y| Rect::from_center_size(pos2(x, y), vec2(30.0, 40.0));
+    let (centre, direction) = offscreen_arrow(area, sheet_at(350.0, 120.0), 20.0).unwrap();
+    assert_eq!(centre, pos2(230.0, 120.0));
+    assert_eq!(direction, vec2(1.0, 0.0));
+
+    let (lower, lower_direction) = offscreen_arrow(area, sheet_at(350.0, 200.0), 20.0).unwrap();
+    assert_eq!(lower.x, centre.x);
+    assert!(lower.y > centre.y);
+    assert!(lower_direction.x > 0.0 && lower_direction.y > 0.0);
+
+    let (above, up) = offscreen_arrow(area, sheet_at(150.0, -60.0), 20.0).unwrap();
+    assert_eq!(above, pos2(150.0, 40.0));
+    assert_eq!(up, vec2(0.0, -1.0));
+
+    assert!(offscreen_arrow(area, sheet_at(260.0, 120.0), 20.0).is_none());
+    assert!(offscreen_arrow(area, sheet_at(350.0, 120.0), 110.0).is_none());
+}
