@@ -185,6 +185,8 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
     }
     let Some(plane) = Plane::from_normal(axis * lo, axis) else { return Ok(None) };
     let mut caps = [BTreeMap::<(u32, u32), usize>::new(), BTreeMap::new()];
+    // The side triangles, checked against the fitted section once it is known.
+    let mut walls: Vec<[Vec3; 3]> = Vec::new();
     for triangle in &mesh.triangles {
         let [a, b, c] = *triangle;
         let (Some(pa), Some(pb), Some(pc)) = (mesh.positions.get(a as usize), mesh.positions.get(b as usize), mesh.positions.get(c as usize)) else {
@@ -196,14 +198,7 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
         } else if hs.iter().all(|h| (h - hi).abs() <= epsilon) {
             1
         } else {
-            // STL stores coordinates as f32. Test the projected triangle's
-            // distance from a line rather than amplifying that rounding into
-            // an angular error on narrow side triangles.
-            let [a, b, c] = [plane.to_local(*pa), plane.to_local(*pb), plane.to_local(*pc)];
-            let length = a.dist(b).max(b.dist(c)).max(c.dist(a));
-            if (b - a).cross(c - a).abs() > epsilon * 3. * length {
-                return Ok(None);
-            }
+            walls.push([*pa, *pb, *pc]);
             continue;
         };
         let Some(edges) = caps.get_mut(cap) else { return Ok(None) };
@@ -251,52 +246,40 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
         }
         Some(adjacency)
     };
-    let (Some(mut adjacency), Some(other)) = (boundary(0), boundary(1)) else { return Ok(None) };
-    if adjacency != other || adjacency.is_empty() || adjacency.len() > MAX_BOUNDARY || adjacency.values().any(|n| n.len() != 2) {
+    let (Some(adjacency), Some(other)) = (boundary(0), boundary(1)) else { return Ok(None) };
+    let well_formed = |a: &BTreeMap<(i64, i64), Vec<(i64, i64)>>| !a.is_empty() && a.len() <= MAX_BOUNDARY && a.values().all(|n| n.len() == 2);
+    if !well_formed(&adjacency) || !well_formed(&other) {
         return Ok(None);
     }
-    // Every side vertex must lie on an unchanged straight extrusion of the cap.
-    // This excludes twisted, tapered and stepped meshes before fitting any circles.
     let point = |k: (i64, i64)| Vec2::new(k.0 as f64 * epsilon, k.1 as f64 * epsilon);
-    let boundary_segments: Vec<_> =
-        adjacency.iter().flat_map(|(&a, bs)| bs.iter().filter(move |&&b| a < b).map(move |&b| (point(a), point(b)))).collect();
-    if mesh.positions.len().saturating_mul(boundary_segments.len()) > 32_000_000 {
+    let Some((raw_loops, loops)) = cap_loops(adjacency, &positions, point, tolerance, epsilon) else { return Ok(None) };
+    // The two caps are one section: the same number of loops, and each cap's boundary nodes on
+    // the other's fitted loops. A mesh need not sample them alike (a mesher that refines a side
+    // splits only that side's edge), so they are compared as curves, within the tolerance.
+    let Some((other_raw, other_loops)) = cap_loops(other, &positions, point, tolerance, epsilon) else { return Ok(None) };
+    let on = |loops: &[Loop2], p: Vec2| loops.iter().flat_map(|l| &l.segs).any(|s| s.point_at(s.closest_param(p)).dist(p) <= tolerance);
+    let nodes = |raw: &[Loop2]| raw.iter().flat_map(|l| l.segs.iter().map(|s| s.start())).collect::<Vec<_>>();
+    let segments = |l: &[Loop2]| l.iter().map(|l| l.segs.len()).sum::<usize>();
+    let work = (nodes(&raw_loops).len().saturating_add(nodes(&other_raw).len()).saturating_add(walls.len().saturating_mul(4)))
+        .saturating_mul(segments(&loops).max(segments(&other_loops)));
+    if work > 32_000_000 {
         return Err(invalid("boundary certification exceeds its work budget"));
     }
-    for p in &mesh.positions {
-        let h = p.dot(axis);
-        if (h - lo).abs() <= epsilon || (h - hi).abs() <= epsilon {
-            continue;
-        }
-        let p = plane.to_local(*p);
-        if !boundary_segments.iter().any(|&(a, b)| {
-            solidcore_record::Seg2::Line { a, b }.point_at(solidcore_record::Seg2::Line { a, b }.closest_param(p)).dist(p) <= epsilon * 3.
-        }) {
-            return Ok(None);
-        }
+    if other_loops.len() != loops.len()
+        || !nodes(&other_raw).iter().all(|p| on(&loops, *p))
+        || !nodes(&raw_loops).iter().all(|p| on(&other_loops, *p))
+    {
+        return Ok(None);
     }
-    let mut loops = Vec::new();
-    let mut raw_loops = Vec::new();
-    while let Some((&start, _)) = adjacency.first_key_value() {
-        let mut current = start;
-        let mut previous = None;
-        let mut chain = Vec::new();
-        for _ in 0..=MAX_BOUNDARY {
-            let Some(neighbours) = adjacency.remove(&current) else { return Ok(None) };
-            chain.push(*positions.get(&current).unwrap_or(&point(current)));
-            let next = neighbours.into_iter().find(|n| Some(*n) != previous);
-            let Some(next) = next else { return Ok(None) };
-            if next == start {
-                break;
-            }
-            previous = Some(current);
-            current = next;
-        }
-        if chain.len() < 3 || current == start {
+    // Every side triangle lies on the straight extrusion of the section: its corners and its
+    // centroid, projected along the axis, on the fitted loops within the tolerance. A mesh with
+    // nodes inside its walls (a mesher's lattice, as on a quality mesh) passes; a twisted,
+    // tapered or stepped one does not.
+    for [a, b, c] in &walls {
+        let centroid = (*a + *b + *c) / 3.;
+        if ![*a, *b, *c, centroid].iter().all(|p| on(&loops, plane.to_local(*p))) {
             return Ok(None);
         }
-        raw_loops.push(Loop2::polygon(&chain));
-        loops.push(fit_loop(&chain, tolerance, epsilon));
     }
     certify_nesting(&raw_loops, &loops, epsilon, bounds.size().len())?;
     // Nest by the original polygon, so smoothing cannot change which loop is a hole.
@@ -334,6 +317,42 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
         return Err(invalid("reconstructed volume is inconsistent with the source mesh"));
     }
     Ok(Some(body))
+}
+
+/// A cap's boundary (`adjacency`: each boundary node's two neighbours, by its key in the section
+/// plane) walked into loops: each loop's polygon through the nodes (`positions`, else the key's
+/// point) and its fitted form ([`fit_loop`]). `None` for a boundary that does not walk into
+/// closed loops of three nodes or more.
+fn cap_loops(
+    mut adjacency: BTreeMap<(i64, i64), Vec<(i64, i64)>>,
+    positions: &BTreeMap<(i64, i64), Vec2>,
+    point: impl Fn((i64, i64)) -> Vec2,
+    tolerance: f64,
+    epsilon: f64,
+) -> Option<(Vec<Loop2>, Vec<Loop2>)> {
+    let mut loops = Vec::new();
+    let mut raw_loops = Vec::new();
+    while let Some((&start, _)) = adjacency.first_key_value() {
+        let mut current = start;
+        let mut previous = None;
+        let mut chain = Vec::new();
+        for _ in 0..=MAX_BOUNDARY {
+            let neighbours = adjacency.remove(&current)?;
+            chain.push(*positions.get(&current).unwrap_or(&point(current)));
+            let next = neighbours.into_iter().find(|n| Some(*n) != previous)?;
+            if next == start {
+                break;
+            }
+            previous = Some(current);
+            current = next;
+        }
+        if chain.len() < 3 || current == start {
+            return None;
+        }
+        raw_loops.push(Loop2::polygon(&chain));
+        loops.push(fit_loop(&chain, tolerance, epsilon));
+    }
+    Some((raw_loops, loops))
 }
 
 /// The mesh as one sewn faceted solid (#358): each run of coplanar neighbour triangles fused
@@ -611,22 +630,51 @@ fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
             }
         }
     }
-    let mut points = points.to_vec();
-    let linear_tolerance = epsilon / points.len().max(1) as f64;
-    loop {
-        let n = points.len();
-        if n <= 3 {
-            break;
+    // Drop the nodes that lie on a straight run: a node goes where every node between its kept
+    // neighbours, those dropped before it included, lies within the rounding allowance (three
+    // times `epsilon`, as STL's f32 coordinates are allowed for elsewhere) of the line between
+    // them. Measured against the original nodes, so dropping one after another never drifts: a
+    // mesher that samples a straight edge with nodes along it (a quality mesh does) gives the
+    // edge's one segment.
+    let allowance = epsilon * 3.;
+    let n = points.len();
+    let mut kept: Vec<usize> = (0..n).collect();
+    // The nodes from `from` to `to` going forward round the loop, both excluded.
+    let between = |from: usize, to: usize| (1..n).map(move |k| (from + k) % n).take_while(move |&i| i != to);
+    // At most a budget of node tests: the boundary is bounded (`MAX_BOUNDARY`), and so is this.
+    let mut budget = 16_000_000usize;
+    // Passes until one drops nothing: dropping a node can make its kept neighbour's run straight.
+    let mut dropped = true;
+    while dropped {
+        dropped = false;
+        let mut k = 0usize;
+        while kept.len() > 3 && k < kept.len() {
+            let m = kept.len();
+            let (Some(&p), Some(&q)) = (kept.get((k + m - 1) % m), kept.get((k + 1) % m)) else { break };
+            let (Some(&a), Some(&c)) = (points.get(p), points.get(q)) else { break };
+            let edge = solidcore_record::Seg2::Line { a, b: c };
+            let mut straight = true;
+            for i in between(p, q) {
+                if budget == 0 {
+                    straight = false;
+                    break;
+                }
+                budget -= 1;
+                let Some(&x) = points.get(i) else { continue };
+                if edge.point_at(edge.closest_param(x)).dist(x) > allowance {
+                    straight = false;
+                    break;
+                }
+            }
+            if straight {
+                kept.remove(k);
+                dropped = true;
+            } else {
+                k += 1;
+            }
         }
-        let remove = (0..n).find(|&i| {
-            let (Some(a), Some(b), Some(c)) = (points.get((i + n - 1) % n), points.get(i), points.get((i + 1) % n)) else { return false };
-            let edge = solidcore_record::Seg2::Line { a: *a, b: *c };
-            edge.point_at(edge.closest_param(*b)).dist(*b) <= linear_tolerance
-        });
-        let Some(index) = remove else { break };
-        points.remove(index);
     }
-    Loop2::polygon(&points)
+    Loop2::polygon(&kept.iter().filter_map(|&i| points.get(i).copied()).collect::<Vec<_>>())
 }
 
 #[cfg(test)]
@@ -665,6 +713,38 @@ mod tests {
         let step = crate::step_export(&[&converted], "SolidCraft regression").unwrap();
         let reopened = crate::step_import(&step).unwrap();
         assert!((fine_volume(&reopened.bodies[0].body) - expected).abs() < 0.02);
+    }
+
+    /// A quality mesh (the mesh path's, `Body::export_mesh`: lattice nodes inside every wall and
+    /// cap, its caps' edges sampled each on their own) of the L with a bore converts as the
+    /// display mesh does: its planes, its one cylinder and its volume. Before, the converter took
+    /// only side facets running the part's full height and caps sampled alike, so it found no
+    /// prism and fell back to the faceted solid.
+    #[test]
+    fn a_quality_mesh_with_nodes_inside_its_walls_reconstructs_planes_and_the_bore() {
+        let region = Region2 {
+            outer: Loop2::polygon(&[
+                Vec2::new(0., 0.),
+                Vec2::new(40., 0.),
+                Vec2::new(40., 20.),
+                Vec2::new(20., 20.),
+                Vec2::new(20., 30.),
+                Vec2::new(0., 30.),
+            ]),
+            holes: vec![Loop2::circle(Vec2::new(10., 10.), 4.).reversed()],
+        };
+        let source = crate::extrude_planar_regions(&Plane::XY, &[region], 0., 15.).unwrap();
+        let spec = crate::MeshSpec::chord(source.size() * 2e-4);
+        let quality = source.export_mesh(&spec).unwrap().mesh;
+        let walls_inside = quality.positions.iter().filter(|p| p.z > 1e-6 && p.z < 15. - 1e-6).count();
+        assert!(walls_inside > 0, "the quality mesh has nodes inside its walls");
+        let welded = crate::mesh_body(&quality.positions, &quality.triangles).unwrap();
+        let converted = convert_prismatic_mesh(&welded, 0.05).unwrap();
+        assert!(converted.validity().is_empty());
+        assert_eq!(crate::measure(&converted).unwrap().merged.face_types.get("cylinder"), Some(&1));
+        // The L's six sides, the two caps and the bore.
+        assert_eq!(converted.faces(0.01).unwrap().len(), 9);
+        assert!((crate::measure(&converted).unwrap().volume - crate::measure(&source).unwrap().volume).abs() < 1e-7);
     }
 
     #[test]
