@@ -313,6 +313,19 @@ impl Member {
         }
     }
 
+    /// Take entry `at` out of the path `items` with what is kept for it, so each other entry
+    /// keeps its own reference and pair id (matching by value would give a shared point's
+    /// remaining occurrence the wrong pair's).
+    pub fn remove_at(&mut self, items: &mut Vec<Sel>, at: usize) {
+        self.sync(items);
+        let gone = std::collections::BTreeSet::from([at]);
+        drop_at(items, &gone);
+        drop_at(&mut self.path, &gone);
+        drop_at(&mut self.refs, &gone);
+        drop_at(&mut self.pair_ids, &gone);
+        self.picked_tubes.clear();
+    }
+
     /// `refs` and `pair_ids` for `items`, matched against `path` in order.
     fn aligned(&self, items: &[Sel]) -> (Vec<Option<Value>>, Vec<Option<String>>) {
         let mut from = 0;
@@ -478,7 +491,7 @@ pub(crate) fn refused_pick(error: &str) -> bool {
 }
 
 /// After the path changed: a last point waiting for its partner asks for it.
-fn prompt(d: &mut Dialog) {
+pub(crate) fn prompt(d: &mut Dialog) {
     let waiting = pairs_of(crate::selection::items(&d.inputs, 0)).is_ok_and(|(_, _, w)| w.is_some());
     if waiting {
         d.error = Some(PICK_ANOTHER.into());
