@@ -370,6 +370,128 @@ fn double_clicking_a_dimension_opens_the_window_with_a_live_preview() {
     crate::dim_view::cancel();
 }
 
+/// The window open on `d1` of two lines whose dimensions use the user parameters `corner_r` (6 mm)
+/// and `foot` (2 mm): `d1` is `d1_expr`, `d2` is `corner_r + 4`.
+fn parameter_window(d1_expr: &str) -> Harness {
+    let mut h = windowed([20., 0.]);
+    h.app.run("sketch.line", json!({"points":[[0,10],[15,10]]})).unwrap();
+    h.app.run("parameters.add", json!({"name":"corner_r","expression":"6 mm"})).unwrap();
+    h.app.run("parameters.add", json!({"name":"foot","expression":"2 mm"})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":d1_expr,"text_at":[10,-6]})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l2"],"value":"corner_r + 4","text_at":[8,16]})).unwrap();
+    h.settle();
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+    h.frames(3);
+    assert!(crate::dim_view::editing() && crate::scenario::rect_of("dimwin").is_some(), "the window opens on d1");
+    h
+}
+
+/// The parameter rows the open window shows, in order.
+fn parameter_rows() -> Vec<String> {
+    crate::scenario::handles("dimwin:param:").into_iter().map(|(name, _)| name.trim_start_matches("dimwin:param:").to_string()).collect()
+}
+
+fn type_in_row(h: &mut Harness, name: &str, text: &str) {
+    h.step(&json!({"click":{"handle":format!("dimwin:param:{name}")}})).unwrap();
+    h.frames(2);
+    type_value(h, text);
+    h.frames(2);
+}
+
+fn length(h: &Harness, name: &str) -> f64 {
+    h.app.session.doc.eval(name, solidcraft_engine::doc::expr::Kind::Length).unwrap_or(f64::NAN)
+}
+
+/// A dimension driven by a user parameter (`corner_r`) offers that parameter's value in its
+/// window (#16319): changing it there changes the parameter itself, so every dimension using it
+/// follows and the dimension keeps its expression, with OK in one undo step.
+#[test]
+fn a_parameter_changed_in_the_dimension_window_changes_everywhere_it_is_used() {
+    let mut h = parameter_window("corner_r");
+    assert_eq!(parameter_rows(), ["corner_r"]);
+    let undo = h.app.session.undo.len();
+    type_in_row(&mut h, "corner_r", "8");
+    assert!(crate::dim_view::editing(), "a click into the row keeps the window open");
+    assert!((length(&h, "corner_r") - 6.).abs() < 1e-9, "nothing reaches the design before OK");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing(), "Enter in the row applies the window");
+    assert_eq!(h.app.session.doc.param("corner_r").unwrap().expr, "8 mm", "a bare number takes the parameter's own unit");
+    assert!((length(&h, "corner_r") - 8.).abs() < 1e-9);
+    assert_eq!(h.app.session.doc.param("d1").unwrap().expr, "corner_r", "the dimension keeps its link");
+    assert!((length(&h, "d1") - 8.).abs() < 1e-9);
+    assert!((length(&h, "d2") - 12.).abs() < 1e-9, "the other dimension using it follows");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.param("corner_r").unwrap().expr, "6 mm");
+    assert!((length(&h, "d2") - 10.).abs() < 1e-9);
+    crate::dim_view::cancel();
+}
+
+/// A row's bare number is written in its parameter's own unit (a length's, an angle's), a
+/// unitless parameter's stays a number, and an explicit unit or an expression is kept as typed.
+#[test]
+fn a_parameter_row_writes_a_bare_number_in_the_parameter_s_unit() {
+    let mut h = parameter_window("corner_r");
+    h.app.run("parameters.add", json!({"name":"tilt","expression":"10 deg"})).unwrap();
+    h.app.run("parameters.add", json!({"name":"count","expression":"3","unit":""})).unwrap();
+    let doc = h.app.session.doc.clone();
+    let typed: std::collections::BTreeMap<String, String> =
+        [("corner_r", "8"), ("tilt", "30"), ("count", "4"), ("foot", "0.1 in")].into_iter().map(|(n, t)| (n.into(), t.into())).collect();
+    let changes = crate::dim_view::window::parameter_changes(&doc, "d1", "corner_r + tilt + count + foot", &typed).unwrap();
+    let written = |name: &str| changes.get(name).and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+    assert_eq!(written("corner_r"), "8 mm");
+    assert_eq!(written("tilt"), "30 deg");
+    assert_eq!(written("count"), "4");
+    assert_eq!(written("foot"), "0.1 in", "an explicit unit stays");
+    let typed: std::collections::BTreeMap<String, String> = [("corner_r".to_string(), "foot * 2".to_string())].into_iter().collect();
+    let changes = crate::dim_view::window::parameter_changes(&doc, "d1", "corner_r", &typed).unwrap();
+    assert_eq!(changes.get("corner_r").and_then(serde_json::Value::as_str), Some("foot * 2"), "an expression stays as typed");
+    crate::dim_view::cancel();
+}
+
+/// Each user parameter the expression names gets one row, in the order they first appear; a
+/// dimension's own parameter (`d2`) and a plain number get none. Cancel drops a row's change.
+#[test]
+fn the_dimension_window_lists_the_user_parameters_its_expression_names() {
+    let mut h = parameter_window("corner_r * 2 - foot");
+    assert_eq!(parameter_rows(), ["corner_r", "foot"]);
+    h.step(&json!({"click":{"handle":"dimwin:value"}})).unwrap();
+    type_value(&mut h, "foot + corner_r + foot + d2");
+    h.frames(2);
+    assert_eq!(parameter_rows(), ["foot", "corner_r"], "the rows follow what is typed, each once, without d2");
+    type_value(&mut h, "20");
+    h.frames(2);
+    assert!(parameter_rows().is_empty(), "a plain number has no parameter rows");
+    type_value(&mut h, "foot * 3");
+    h.frames(2);
+    let before = h.app.session.doc.to_json();
+    type_in_row(&mut h, "foot", "5");
+    h.step(&json!({"click":{"handle":"dimwin:cancel"}})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.to_json(), before, "Cancel drops the parameter's change too");
+    crate::dim_view::cancel();
+}
+
+/// A row value the parameter cannot take says why under the rows, and OK applies nothing: neither
+/// the parameter nor the dimension's value.
+#[test]
+fn an_invalid_parameter_value_in_the_dimension_window_applies_nothing() {
+    let mut h = parameter_window("corner_r");
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    type_in_row(&mut h, "corner_r", "no_such_name");
+    assert!(crate::scenario::rect_of("dialog:report:dimension_parameter_error").is_some(), "the refusal shows under the rows");
+    h.step(&json!({"click":{"handle":"dimwin:ok"}})).unwrap();
+    h.frames(2);
+    assert!(crate::dim_view::editing(), "a refused value keeps the window open");
+    assert_eq!(h.app.session.doc.to_json(), before, "nothing was applied");
+    assert_eq!(h.app.session.undo.len(), undo);
+    crate::dim_view::cancel();
+}
+
 /// The arrows keep the unit and decimal mark a value is written in: a length steps by the length
 /// step converted to that unit (a bare number is in the design's unit), an angle by the angle
 /// step, and anything but a plain number is left alone.
