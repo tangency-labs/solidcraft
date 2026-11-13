@@ -165,6 +165,7 @@ impl StraightPreview {
             replaced: Vec::new(),
             error: crate::preview::extrusion_target_error(&app.session, commands, &app.session.model.state()),
             bounds,
+            layer: None,
         }))
     }
 }

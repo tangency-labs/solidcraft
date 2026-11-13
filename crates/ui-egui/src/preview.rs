@@ -104,9 +104,28 @@ pub struct Built {
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
+    /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
+    /// (a Move). `scene` is not read then.
+    pub layer: Option<Layer>,
+}
+
+/// What a preview only moves, as a layer of its own ([`crate::gpu::MovingLayer`]): scenes built
+/// once where the bodies stand and one rigid motion, so a change of the motion builds and
+/// uploads nothing.
+pub struct Layer {
+    /// Names the scenes: everything they are built from.
+    pub key: u64,
+    /// What stays where it is (the ghost of where the bodies were), then what moves; `None`
+    /// when the preview already shows the scenes of `key` ([`PreviewState::layer_shown`]).
+    pub scenes: Option<(GpuScene, GpuScene)>,
+    /// From where the moving scene was built to where it is drawn.
+    pub motion: solidcraft_engine::doc::Mat,
 }
 
 type Job = Result<Built, String>;
+
+/// Set in the keys of the scenes a [`Layer`] moves (see [`PreviewState::moving_layer`]).
+const LAYER_KEYS: u64 = 1 << 63;
 
 /// How many obsolete preview jobs may still run, left behind for newer inputs (#7167). Beyond
 /// them, a new job waits for the running one as before, so a quick series of picks keeps at
@@ -164,6 +183,11 @@ pub struct PreviewState {
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
     pub rolled_back: bool,
+    /// The scene a [`Layer`] moves, for the GPU, and its key (changes whenever the scene does).
+    layer_slot: SceneSlot,
+    layer_serial: u64,
+    /// The [`Layer::key`] of the scenes shown and their motion; `None`: no layer is drawn.
+    layer: Option<(u64, solidcraft_engine::doc::Mat)>,
 }
 
 impl PreviewState {
@@ -172,8 +196,38 @@ impl PreviewState {
         if self.rolled_back { &[] } else { &self.replaced }
     }
 
+    /// The key of the [`Layer`] scenes shown: a result for the same key leaves them out.
+    pub(crate) fn layer_shown(&self) -> Option<u64> {
+        self.layer.map(|(key, _)| key)
+    }
+
+    /// The bodies the preview draws moved on the GPU, for this frame; none while the preview is
+    /// hidden for a pick (`rolled_back`), as its scene is.
+    pub(crate) fn moving_layer(&self) -> Option<crate::gpu::MovingLayer> {
+        let (_, motion) = self.layer.filter(|_| self.active && !self.rolled_back)?;
+        let transform = std::array::from_fn(|c| std::array::from_fn(|r| motion[c][r] as f32));
+        Some(crate::gpu::MovingLayer { key: self.layer_serial, slot: self.layer_slot.clone(), transform })
+    }
+
+    /// As if a layer of scenes `key` had been applied and were shown.
+    #[cfg(test)]
+    pub(crate) fn show_layer_for_tests(&mut self, key: u64) {
+        self.active = true;
+        self.layer = Some((key, solidcraft_engine::doc::IDENTITY));
+    }
+
+    /// Stop drawing a [`Layer`]: its scene goes with it.
+    fn drop_layer(&mut self) {
+        if self.layer.take().is_some()
+            && let Ok(mut slot) = self.layer_slot.lock()
+        {
+            *slot = None;
+        }
+    }
+
     /// Stop drawing the preview scene and give the bodies it stood in for back to the model.
     fn hide_scene(&mut self) {
+        self.drop_layer();
         if self.active || !self.replaced.is_empty() {
             self.active = false;
             self.bounds = Aabb3::EMPTY;
@@ -231,7 +285,29 @@ impl PreviewState {
                 self.stopped = b.stopped;
                 self.placed = b.placed;
                 self.tapered = b.tapered;
-                self.set_scene(b.scene);
+                match b.layer {
+                    // The scenes of this key are up: only the motion changes, nothing is uploaded.
+                    Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
+                    Some(Layer { key, scenes: Some((still, moving)), motion }) => {
+                        self.set_scene(still);
+                        if let Ok(mut slot) = self.layer_slot.lock() {
+                            *slot = Some(moving);
+                        }
+                        // Apart from a drag's layer keys, which are hashes: the renderer has one layer.
+                        self.layer_serial = self.layer_serial.wrapping_add(1) | LAYER_KEYS;
+                        self.layer = Some((key, motion));
+                    }
+                    // Its scenes left out, but they are not the ones shown: there is nothing to
+                    // move, so nothing is drawn rather than another preview's scene moved.
+                    Some(Layer { scenes: None, .. }) => {
+                        self.drop_layer();
+                        self.set_scene(GpuScene::default());
+                    }
+                    None => {
+                        self.drop_layer();
+                        self.set_scene(b.scene);
+                    }
+                }
             }
             // The current inputs make no feature: the last good geometry would contradict
             // them (a 1 mm extrusion still drawn at 0 mm), so nothing is drawn.
@@ -420,7 +496,14 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
-    let key = job_key(&cmds, app.session.revision, colors);
+    let mut key = job_key(&cmds, app.session.revision, colors);
+    // A Move is drawn as a layer where the view allows it (`move_preview::layered`), and built
+    // where it lands where not: when the view changes between the two, it is computed again.
+    if crate::move_preview::is_move(&cmds) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (key, crate::move_preview::layered(app)).hash(&mut h);
+        key = h.finish();
+    }
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
     let pv = &mut app.preview;
@@ -661,6 +744,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         tapered: Vec::new(),
         stopped: None,
         placed: None,
+        layer: None,
     }
 }
 
@@ -809,7 +893,18 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
     }
     let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None, placed: None }
+    Built {
+        scene: sc,
+        sketches,
+        replaced,
+        error: None,
+        bounds: Aabb3::EMPTY,
+        applied: None,
+        tapered: Vec::new(),
+        stopped: None,
+        placed: None,
+        layer: None,
+    }
 }
 
 /// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
@@ -1126,6 +1221,64 @@ mod tests {
             tapered: Vec::new(),
             stopped: None,
             placed: None,
+            layer: None,
+        }
+    }
+
+    /// A result drawn as a layer of scenes `key`, handed over when `scenes`, moved `x` along X.
+    fn layered(key: u64, scenes: bool, x: f64) -> Built {
+        let mut motion = solidcraft_engine::doc::IDENTITY;
+        motion[3][0] = x;
+        Built { layer: Some(Layer { key, scenes: scenes.then(|| (GpuScene::default(), GpuScene::default())), motion }), ..pose() }
+    }
+
+    /// No layer is drawn and none waits for the renderer.
+    fn no_layer(pv: &PreviewState) -> bool {
+        pv.moving_layer().is_none() && pv.layer_shown().is_none() && pv.layer_slot.lock().unwrap().is_none()
+    }
+
+    /// A layer's scenes go to the renderer once: a change of its motion keeps both scene keys,
+    /// so nothing is uploaded. The layer goes when its preview does (another preview, a failure,
+    /// the dialog closed, the design gone), is not drawn while the preview is hidden for a pick,
+    /// and a result that left its scenes out for scenes that are not shown draws nothing.
+    #[test]
+    fn a_layer_hands_its_scenes_over_once_and_goes_with_its_preview() {
+        let mut pv = PreviewState::default();
+        assert!(no_layer(&pv));
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let first = pv.moving_layer().expect("drawn as a layer");
+        let still = pv.key;
+        assert_eq!(pv.layer_shown(), Some(7));
+        assert!(pv.layer_slot.lock().unwrap().is_some(), "the moving scene waits for the renderer");
+        assert_eq!(first.transform[3][0], 10.0);
+        // A step of the drag: the motion alone.
+        pv.apply(2, Ok(layered(7, false, 25.0)));
+        let next = pv.moving_layer().expect("still a layer");
+        assert_eq!((pv.key, next.key), (still, first.key), "a step uploads nothing");
+        assert_eq!(next.transform[3][0], 25.0);
+        // Hidden for a pick, as the preview's scene is.
+        pv.rolled_back = true;
+        assert!(pv.moving_layer().is_none());
+        pv.rolled_back = false;
+        // Other scenes (other bodies or colours): handed over under other keys.
+        pv.apply(3, Ok(layered(8, true, 25.0)));
+        let other = pv.moving_layer().expect("a layer of the new scenes");
+        assert!(other.key != first.key && pv.key != still && pv.layer_shown() == Some(8));
+        // Scenes left out that are not the ones shown: nothing to move, so nothing is drawn.
+        let before = pv.key;
+        pv.apply(4, Ok(layered(9, false, 1.0)));
+        assert!(no_layer(&pv) && pv.key != before, "neither the layer nor the old still scene stays");
+        // The layer goes with its preview.
+        for end in 0..4 {
+            pv.apply(5, Ok(layered(7, true, 3.0)));
+            assert!(pv.moving_layer().is_some());
+            match end {
+                0 => pv.apply(6, Ok(pose())),
+                1 => pv.apply(6, Err("the inputs make no feature".into())),
+                2 => pv.clear(),
+                _ => pv.reset(),
+            }
+            assert!(no_layer(&pv), "end {end}");
         }
     }
 
