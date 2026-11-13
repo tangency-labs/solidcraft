@@ -766,4 +766,3 @@ mod tests {
         assert!(matches!(n_sided(&arcs), Err(Error::Unsupported(_))));
     }
 }
-

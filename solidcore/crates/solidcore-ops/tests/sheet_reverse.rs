@@ -43,7 +43,10 @@ fn shell_normal(r: &Brep, face: u32, uv: [f64; 2]) -> [f64; 3] {
         .find(|(f, _)| *f == face)
         .map(|(_, fw)| *fw)
         .unwrap();
-    let n = FaceSurface::of(r, face as usize).unwrap().normal(uv).unwrap();
+    let n = FaceSurface::of(r, face as usize)
+        .unwrap()
+        .normal(uv)
+        .unwrap();
     if forward {
         n
     } else {
@@ -55,7 +58,10 @@ fn shell_normal(r: &Brep, face: u32, uv: [f64; 2]) -> [f64; 3] {
 fn turned_over_each_face_s_normal_is_the_other_way_at_the_same_point() {
     let before = sheet();
     let after = reverse_sheet(&before).unwrap();
-    assert_eq!(after.faces, before.faces, "the surfaces, domains and loops are kept");
+    assert_eq!(
+        after.faces, before.faces,
+        "the surfaces, domains and loops are kept"
+    );
     assert_eq!(after.edges.len(), before.edges.len(), "the edges are kept");
     let (b, a) = (sides(&before), sides(&after));
     assert_eq!(b.len(), a.len());
