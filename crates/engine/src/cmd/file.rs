@@ -878,7 +878,8 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
     let feature_name = name.filter(|n| !n.trim().is_empty()).unwrap_or(&feature.name).to_string();
     let component_name = import::component_name(path, name);
     let tree = if imported.plan.places.is_empty() { import::Tree::Flat } else { import::Tree::Mesh(&imported.plan) };
-    let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &component_name, tree)?;
+    // A board hides none of its own bodies; its layers are all wanted.
+    let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &component_name, tree)?;
     // The board stands at the origin: its lower-left outline corner goes to X = Y = 0, not to the
     // coordinates KiCad stores, which put a board anywhere on the project sheet.
     if let Some(corner) = imported.corner {
@@ -910,12 +911,8 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
 /// contents and all: the occurrence takes the shift, so the design's Z = 0 stays the board's top.
 fn at_origin(s: &mut Session, placed: &import::Placed, corner: [f64; 2]) {
     let Some(occurrence) = placed.occurrence else { return };
-    let shift = solidcraft_doc::rigid(
-        solidcore_record::Vec3::new(-corner[0], -corner[1], 0.0),
-        solidcore_record::Vec3::ZERO,
-        solidcore_record::Vec3::Z,
-        0.0,
-    );
+    let shift =
+        solidcraft_doc::rigid(solidcore_record::Vec3::new(-corner[0], -corner[1], 0.0), solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0);
     if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occurrence) {
         o.transform = shift;
     }
