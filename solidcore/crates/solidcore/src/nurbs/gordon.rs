@@ -587,18 +587,9 @@ fn monotone(xs: &[f64], ys: &[f64], t: f64) -> Result<f64> {
         + (s3 - s2) * h * m1)
 }
 
-/// One family refitted so its crossings sit at the common parameters `at`: each curve `c` of
-/// `curves` (its own crossing parameters `own[c]`, the ends its domain's) sampled at its
-/// monotone map from `at` to its own ([`monotone`]), `per_span` points to each span between two
-/// common parameters, and interpolated at the common side's parameters at its own degree with
-/// averaged knots: the crossings are interpolation sites, so they land on the common
-/// parameters exactly, and every curve of the family gets the same knots.
-fn refit_family(
-    curves: &[Curve],
-    own: &[Vec<f64>],
-    at: &[f64],
-    per_span: usize,
-) -> Result<Vec<BSplineCurve>> {
+/// The refit's sites on the common parameters `at`: `per_span` even steps to each span between
+/// two of them, each common parameter itself a site (exactly), the last included.
+fn samples(at: &[f64], per_span: usize) -> Result<Vec<f64>> {
     let mut params = Vec::new();
     for w in at.windows(2) {
         if let [a, b] = w {
@@ -615,6 +606,22 @@ fn refit_family(
             .copied()
             .ok_or_else(|| bad("no common parameters"))?,
     );
+    Ok(params)
+}
+
+/// One family refitted so its crossings sit at the common parameters `at`: each curve `c` of
+/// `curves` (its own crossing parameters `own[c]`, the ends its domain's) sampled at its
+/// monotone map from `at` to its own ([`monotone`]) at the sites [`samples`] places, and
+/// interpolated at the sites at its own degree with averaged knots: the crossings are
+/// interpolation sites, so they land on the common parameters exactly, and every curve of the
+/// family gets the same knots.
+fn refit_family(
+    curves: &[Curve],
+    own: &[Vec<f64>],
+    at: &[f64],
+    per_span: usize,
+) -> Result<Vec<BSplineCurve>> {
+    let params = samples(at, per_span)?;
     let mut out = Vec::new();
     for (c, ys) in curves.iter().zip(own) {
         let p = c.degree();
@@ -635,8 +642,8 @@ fn refit_family(
 /// pair crossing once, in order, the outer curves crossing at their ends): each family whose
 /// crossings are off its common parameters refitted to them ([`refit_family`]), the surface
 /// built from the refits ([`build`]), and each INPUT curve proved within the bound of the
-/// surface between its crossings, geometrically ([`span_bound`]: no parametric correspondence
-/// trusted). A span past `tol` doubles the refit's points, up to [`REFIT_MOST`] a span.
+/// surface ([`inputs_on`]). A span past `tol` doubles the refit's points, up to [`REFIT_MOST`]
+/// a span.
 /// `gap` is the refusal the network had at its common parameters, returned where it cannot be
 /// refitted (an outer curve crossing short of a curve's end).
 ///
@@ -752,6 +759,7 @@ fn refitted(
             &v_own,
             &u_at,
             &v_at,
+            per_span,
             tol,
         )?;
         if within(bound, tol) {
@@ -766,10 +774,15 @@ fn refitted(
     Ok(Err(NetworkRefusal::PastTolerance { bound: reached }))
 }
 
-/// The largest proved distance between the surface and each input curve, span by span between
-/// its crossings ([`span_bound`]): u-curve `kk` from `(u_at[l], v_at[kk])` to
-/// `(u_at[l + 1], v_at[kk])` at its own parameters `u_own[kk][l]`, `u_own[kk][l + 1]`, and each
-/// v-curve likewise.
+/// The largest proved distance between the surface and each input curve ([`span_bound`]), piece
+/// by piece between the refit's sites ([`samples`]): u-curve `kk` at site `x` is the surface's
+/// `(x, v_at[kk])` and its own parameter `monotone(u_at, u_own[kk], x)`, the point the refit
+/// went through there (a family kept as it is maps each site to itself), and each v-curve
+/// likewise. Nodes only at the crossings would not do: [`span_bound`] cuts a piece at each knot
+/// line of the surface with the curve's parameter interpolated linearly between the nodes, and
+/// the monotone map is not linear there, so each cut would slide along the curve by its
+/// departure from the line, a floor no halving lowers (the refit's own knots between two
+/// crossings are all such cuts).
 #[allow(clippy::too_many_arguments)]
 fn inputs_on(
     k: &Kernel,
@@ -780,46 +793,44 @@ fn inputs_on(
     v_own: &[Vec<f64>],
     u_at: &[f64],
     v_at: &[f64],
+    per_span: usize,
     tol: f64,
 ) -> Result<f64> {
     let surf = crate::surface::surface::Surface::from(surface.clone());
     let mut worst = 0.0_f64;
-    // one family: each curve, its own parameters, and per crossing the surface's (u, v)
+    // one family: each curve, its own crossing parameters, the common ones, and per curve and
+    // site the surface's (u, v)
     let mut family = |curves: &[Curve],
                       own: &[Vec<f64>],
-                      uv: &dyn Fn(usize, usize) -> Option<Point2>|
+                      at: &[f64],
+                      uv: &dyn Fn(usize, f64) -> Option<Point2>|
      -> Result<()> {
+        let sites = samples(at, per_span)?;
         for (i, (c, ts)) in curves.iter().zip(own).enumerate() {
             let rail = kernel_curve(c);
             let start = c.eval(ts.first().copied().unwrap_or(0.0), Side::Left)?;
             let spans = RailSpans::about(c, start)?;
-            for j in 0..ts.len().saturating_sub(1) {
-                let (Some(&ta), Some(&tb), Some(a), Some(b)) =
-                    (ts.get(j), ts.get(j + 1), uv(i, j), uv(i, j + 1))
-                else {
-                    return Err(bad("a crossing without its parameters"));
-                };
-                let bound = span_bound(
-                    k,
-                    &surf,
-                    &rail,
-                    &spans,
-                    start,
-                    Node { t: ta, uv: a },
-                    Node { t: tb, uv: b },
-                    tol,
-                )?;
-                worst = worst.max(bound);
+            let node = |x: f64| -> Result<Node> {
+                let uv = uv(i, x).ok_or_else(|| bad("a site without its parameters"))?;
+                Ok(Node {
+                    t: monotone(at, ts, x)?,
+                    uv,
+                })
+            };
+            for w in sites.windows(2) {
+                if let [a, b] = w {
+                    let bound =
+                        span_bound(k, &surf, &rail, &spans, start, node(*a)?, node(*b)?, tol)?;
+                    worst = worst.max(bound);
+                }
             }
         }
         Ok(())
     };
-    family(cu, u_own, &|kk, l| {
-        Some(Point2::new(*u_at.get(l)?, *v_at.get(kk)?))
+    family(cu, u_own, u_at, &|kk, x| {
+        Some(Point2::new(x, *v_at.get(kk)?))
     })?;
-    family(dv, v_own, &|l, kk| {
-        Some(Point2::new(*u_at.get(l)?, *v_at.get(kk)?))
-    })?;
+    family(dv, v_own, v_at, &|l, x| Some(Point2::new(*u_at.get(l)?, x)))?;
     Ok(worst)
 }
 
@@ -1152,6 +1163,43 @@ mod tests {
         assert!(g.bound <= tol, "{}", g.bound);
         for c in us.iter().chain(&vs) {
             on_surface(&k, &g.surface, c, g.bound, 20);
+        }
+    }
+
+    /// The deck's refit, compared with the original rails directly: at every site the refit is
+    /// the rail at its monotone map's parameter, so at each common parameter it is the rail's
+    /// own crossing.
+    #[test]
+    fn the_decks_refit_goes_through_the_rails_at_their_crossings() {
+        let k = Kernel::default();
+        let (us, vs) = deck();
+        let net = network(&k, &us, &vs).unwrap().unwrap();
+        let (ua, ub) = net.cu[0].param_bounds();
+        let own: Vec<Vec<f64>> = net
+            .u_cross
+            .iter()
+            .map(|row| {
+                let mut row = row.clone();
+                *row.first_mut().unwrap() = ua;
+                *row.last_mut().unwrap() = ub;
+                row
+            })
+            .collect();
+        let refits = refit_family(&net.cu, &own, &net.u_at, REFIT_FIRST).unwrap();
+        let sites = samples(&net.u_at, REFIT_FIRST).unwrap();
+        for ((c, ts), r) in net.cu.iter().zip(&own).zip(&refits) {
+            let r = r.nurb.as_ref().unwrap();
+            for &x in &sites {
+                let d = (r.eval(x, Side::Left).unwrap()
+                    - c.eval(monotone(&net.u_at, ts, x).unwrap(), Side::Left)
+                        .unwrap())
+                .length();
+                assert!(d < 1e-9, "the refit at {x} is {d} off the rail");
+            }
+            for (&x, &t) in net.u_at.iter().zip(ts) {
+                assert!(sites.contains(&x), "the common parameter {x} is not a site");
+                assert_eq!(monotone(&net.u_at, ts, x).unwrap().to_bits(), t.to_bits());
+            }
         }
     }
 
