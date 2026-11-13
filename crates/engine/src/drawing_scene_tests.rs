@@ -3889,6 +3889,59 @@ fn a_pictures_setup_is_a_job_beside_the_window() {
     assert!(*only_picture(&settled(&mut alone, sheet)).rows.clone().unwrap() == *rows, "the pixels step alone draws");
 }
 
+/// The kind of work the provider does next on the sheet last extracted ([`Next`]), or none.
+fn next_kind(s: &mut Session) -> Option<&'static str> {
+    let (d, on, state) = drawable(s)?;
+    next(s, &d, &on, &state).map(|next| match next {
+        Next::View(..) => "view",
+        Next::Dimensions(_) => "dimensions",
+        Next::PictureSetup(_) => "picture setup",
+        Next::Bands => "bands",
+    })
+}
+
+/// The kinds of work taken as the window's tick takes them, until none waits, each listed once in a
+/// row: [`begin`]'s job when it hands one out, which must be of the next kind, or else a [`step`].
+fn taken(s: &mut Session) -> Vec<&'static str> {
+    let mut kinds: Vec<&'static str> = Vec::new();
+    for _ in 0..10_000 {
+        let Some(kind) = next_kind(s) else { return kinds };
+        match begin(s) {
+            Some(job) => {
+                let handed = if matches!(job.0, Work::View(_)) { "view" } else { "picture setup" };
+                assert_eq!(handed, kind, "begin hands out the next work");
+                assert!(finish(s, job.run()));
+            }
+            None => {
+                assert!(matches!(kind, "dimensions" | "bands"), "begin hands out no {kind} work");
+                step(s);
+            }
+        }
+        if kinds.last() != Some(&kind) {
+            kinds.push(kind);
+        }
+    }
+    panic!("the work never ended: {kinds:?}");
+}
+
+/// `begin` and `step` take the provider's work in its one order ([`Next`], #5624): views out of date,
+/// then dimensions, then a picture's setup, then its bands, and `begin` hands out only the long kinds.
+/// A dimension edited and a new dpi leave the dimension and the picture waiting together: the
+/// dimension is read first, and `begin` hands out nothing until it is.
+#[test]
+fn begin_and_step_take_the_work_in_one_order() {
+    let (mut s, sheet, id) = shaded_front([200.0, 150.0]);
+    let dimension = top_edge(&mut s, id);
+    extract(&mut s, sheet).unwrap();
+    // A view's job reads its dimensions with its lines.
+    assert_eq!(taken(&mut s), ["view", "picture setup", "bands"]);
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(dimension), "set": {"offset_mm": 20.0}}));
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "dpi": DEFAULT_DPI / 2.0}));
+    let answer = extract(&mut s, sheet).unwrap();
+    assert!(answer.stale.is_empty() && !answer.stale_dimensions.is_empty() && answer.drawing_pictures, "a dimension and the picture wait");
+    assert_eq!(taken(&mut s), ["dimensions", "picture setup", "bands"]);
+}
+
 /// A view of lines hands no picture, nothing waits for one, and no bodies are read for pictures.
 #[test]
 fn a_view_of_lines_hands_no_picture() {
