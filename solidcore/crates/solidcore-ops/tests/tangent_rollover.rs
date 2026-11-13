@@ -778,3 +778,123 @@ fn a_round_partly_between_the_ends_is_not_refused_past_an_end() {
         assert_b27_rails_on_faces(&input, &made, r);
     }
 }
+
+/// The arm and boss of [`arm_and_boss`] with the boss standing 20 tall over the 5 thick arm
+/// (SolidCraft #15641's test9: its boss rises from the arm's base plane past the arm's top face):
+/// the cylinder of radius 18 about B from z = 0 to 20, joined to the arm. `seam_deg`: the angle
+/// about B its seam runs up at, built as a swept circle; `None`: the cylinder `make_cylinder`
+/// makes, whose seam runs up at 0 degrees, through the tangent edge's line (-36, -90), as
+/// test9's does.
+fn arm_and_tall_boss(seam_deg: Option<f64>) -> Body {
+    use solidcore::curve::curve::Curve as KCurve;
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_curves::create_arc;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    let boss = match seam_deg {
+        None => solidcore_ops::make_cylinder([-54.0, -90.0, 0.0], 18.0, 20.0).unwrap(),
+        Some(seam) => common::built(|k| {
+            let circle = KCurve::from(create_arc(
+                Point3::new(-54.0, -90.0, 0.0),
+                18.0,
+                seam - 360.0,
+                seam,
+            )?);
+            create_linear_sweep(
+                k,
+                &[Some(&circle)],
+                solidcore::Vec3::new(0.0, 0.0, 1.0),
+                20.0,
+                true,
+            )
+        }),
+    };
+    boolean(arm_and_boss(), boss, BooleanOp::Union)
+        .unwrap()
+        .unwrap()
+}
+
+/// A round past a side running into a boss that stands taller than the arm (#15767 case 1):
+/// the rolled contact line on the boss meets the arm's top plane z = 5 inside the boss's face,
+/// at angle theta2 < 0 about B, where the boss's foot edge on the arm's top face starts at
+/// angle 0 and runs away from it (theta 0 -> 180 deg). The round ends there: the end rib runs
+/// on z = 5 to that point, and a new edge on the boss face runs along the foot circle from it
+/// back to (-36, -90, 5); the boss loses the strip between theta2 and 0 below z = 5 and keeps
+/// everything above. Closed forms: the volume 5 (section + the round's area) + pi 18^2 15 (the
+/// boss above the arm), and the boss face's area 2 pi 18 15 + pi 18 5 - 18 |theta2| 5. With the
+/// boss seam at the tangent edge's line (test9's, and `make_cylinder`'s) the foot circle's
+/// parameter starts at the new edge's end, and the rolled ball's section at the corner is
+/// guessed on that seam; with the seam inside the removed strip the new edge runs through the
+/// circle's closure.
+#[test]
+fn a_round_rolled_onto_a_taller_boss_ends_inside_the_boss_face() {
+    use solidcore::query::api_queries::edge_closest_point;
+    use solidcore_record::brep::Surface as RecordSurface;
+    fixes();
+    let height = 5.0;
+    let profile = 72.0 * 25.0 + 36.0 * 25.0 + PI * 18.0 * 18.0 / 2.0;
+    // the seam at the tangent edge's line (make_cylinder's, test9's), a quarter turn on, at the
+    // foot edge's far end (-72, -90), and inside the strip the round removes (theta2 < seam < 0:
+    // 359 deg for r >= 26, 357 deg for r >= 28)
+    for seam in [None, Some(90.0), Some(180.0), Some(359.0), Some(357.0)] {
+        for r in [25.5_f64, 26.0, 27.0, 28.0, 30.0] {
+            let b = arm_and_tall_boss(seam);
+            let e = edge_at(&b, [-36.0, -65.0, height / 2.0]);
+            blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+                .unwrap_or_else(|err| panic!("seam {seam:?} r {r}: {err:?}"));
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "seam {seam:?} r {r}: {report}");
+            // the ball's centre (cx, -65 - r) and its contact on the boss at theta2
+            let cy = -65.0 - r;
+            let cx = -54.0 + ((18.0 + r).powi(2) - (cy + 90.0).powi(2)).sqrt();
+            let theta2 = (cy + 90.0).atan2(cx + 54.0);
+            assert!(theta2 < 0.0, "seam {seam:?} r {r}: theta2 {theta2}");
+            let t2 = (-54.0 + 18.0 * theta2.cos(), -90.0 + 18.0 * theta2.sin());
+            let (k, brep) = common::kernel_copy(&b);
+            for (x, y) in [(cx, -65.0), t2] {
+                for z in [0.5, 2.5, 4.5] {
+                    let q = solidcore::Vec3::new(x, y, z);
+                    let on_edge = brep.edge_list().iter().any(|&e| {
+                        edge_closest_point(&k, &brep, e, q)
+                            .unwrap()
+                            .closest
+                            .distance
+                            < 1e-7
+                    });
+                    assert!(
+                        on_edge,
+                        "seam {seam:?} r {r}: no rail through ({x}, {y}, {z})"
+                    );
+                }
+            }
+            let v = b.volume(1e-9).unwrap();
+            let expected = height * (profile + boss_round_area(r)) + PI * 18.0 * 18.0 * 15.0;
+            assert!(
+                (v - expected).abs() < 1e-6,
+                "seam {seam:?} r {r}: volume {v}, expected {expected}"
+            );
+            // the boss's faces: those on the cylinder of radius 18 about B
+            let (record, order) = b.to_record().unwrap();
+            let mut boss_area = 0.0;
+            let mut boss_faces = 0;
+            for (i, face) in record.faces.iter().enumerate() {
+                let RecordSurface::Cylinder { frame, radius } = &face.surface else {
+                    continue;
+                };
+                if (radius - 18.0).abs() < 1e-9
+                    && (frame.origin[0] + 54.0).abs() < 1e-9
+                    && (frame.origin[1] + 90.0).abs() < 1e-9
+                {
+                    boss_area += b.face_area(&order, i, 1e-12).unwrap();
+                    boss_faces += 1;
+                }
+            }
+            assert!(boss_faces > 0, "seam {seam:?} r {r}: no face on the boss");
+            let expected_area =
+                2.0 * PI * 18.0 * 15.0 + PI * 18.0 * height - 18.0 * theta2.abs() * height;
+            assert!(
+                (boss_area - expected_area).abs() < 1e-6,
+                "seam {seam:?} r {r}: boss area {boss_area}, expected {expected_area}"
+            );
+        }
+    }
+}

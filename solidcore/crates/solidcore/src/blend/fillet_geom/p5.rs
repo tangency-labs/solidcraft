@@ -34,6 +34,10 @@
 //!   `CalcEdgeOnExtendedEdge` takes the cap edge on a tangent seam as the seam's own curve
 //!   (`calc_edge_on_tangent_seam`). Its tangency check (`EvaluateBinormal` may make a
 //!   missing UV trim) runs on a copy of the target, which the routine only reads.
+//! - **A turned-back cap edge (not upstream).** `CalcEdgeOnExtendedEdge` intersects a
+//!   turned-back rail's cap edge (`FilletCorner::turned_back_arcs`) with
+//!   `SrfSrfOptions::closed_by_start_direction`, so a closed foot curve is taken from the
+//!   rail's end towards the vertex, also across the face's seam.
 //! - **Near-knot rail trims (opt-in, not upstream).** With
 //!   `fixes.fillet_rail_trim_at_near_knot` (WR-664, the fork's tangency-labs/smlib@7d79866),
 //!   `TrimRailCurves` trims a rail at its knot next to a vertex's drop when the rail between
@@ -1816,22 +1820,52 @@ impl FilletBrep {
         let surface2 = surfaces.get(1).cloned().flatten().ok_or_else(|| {
             SolidError::blend_missing(OP_EXT_EDGE, "the second extended B-spline surface")
         })?;
-        let curves = srf_srf_intersection(
-            k,
-            self,
-            Some(start_fv),
-            Some(end_fv),
-            Some(&mut dir),
-            None,
-            &surface1,
-            &surface2,
-            tol,
-            angle_tol,
-            false,
-            None,
-        )?;
-        let curve = curves
+        // Not upstream (solidcore-native): the cap edge of a rail ending inside the face it
+        // rolled onto (`FilletCorner::turned_back_arcs`) runs along the end face's foot edge on
+        // that face, continued back past the rolled-over edge's vertex. Their surfaces meet in
+        // a closed curve where that face is closed (a boss's foot circle), whose parameter
+        // starts at the face's seam, and that vertex may lie on the seam or the edge run
+        // through it: the curve from the rail's end is the one that heads for the vertex
+        // (`SrfSrfOptions::closed_by_start_direction`). The chord is that heading: the edge
+        // spans the strip between the rolled-over edge and the rail, short of a half turn.
+        let turned_back = the_corner.turned_back_arcs.contains(&Some(e));
+        let curve_3d = if turned_back {
+            let (start, end) = (self.vertex_point(start_fv)?, self.vertex_point(end_fv)?);
+            super::p2::srf_srf_intersection(
+                k,
+                Some(start),
+                Some(end),
+                Some(&mut dir),
+                None,
+                &surface1,
+                &surface2,
+                tol,
+                angle_tol,
+                super::p2::SrfSrfOptions {
+                    skip_two_pnts_intersection: false,
+                    ref_point: None,
+                    closed_by_start_direction: true,
+                },
+            )?
             .curve_3d
+        } else {
+            srf_srf_intersection(
+                k,
+                self,
+                Some(start_fv),
+                Some(end_fv),
+                Some(&mut dir),
+                None,
+                &surface1,
+                &surface2,
+                tol,
+                angle_tol,
+                false,
+                None,
+            )?
+            .curve_3d
+        };
+        let curve = curve_3d
             .ok_or_else(|| SolidError::blend_missing(OP_EXT_EDGE, "the intersection curve"))?;
         // both UV curves are deleted
         set_edge_curve(self.brep_mut(), e, Some(curve))?;

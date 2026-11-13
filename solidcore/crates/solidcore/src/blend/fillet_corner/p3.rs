@@ -340,6 +340,12 @@ pub struct FilletCorner {
     /// The fork's `m_pEndCap` (smlib 41a39ec, WR-697): an End at a smooth vertex's plane
     /// square to its edge there (`GetEndCapSurface`), set by its topology.
     pub end_cap: Option<Surface>,
+    /// Not upstream (solidcore-native): for each rail of an Nx1 end that ends inside the face
+    /// it rolled onto ([`crate::blend::fillet_corner::topology::nx1_end::TurnedBack`]), the cap
+    /// edge along the foot edge's continuation there (an `SM_FE_ON_EXTEND_EDGE` fillet edge).
+    /// Such a cap has an edge for each piece, four or five in all
+    /// ([`FilletCorner::turned_back_cap`]).
+    pub(crate) turned_back_arcs: [Option<EdgeId>; 2],
 }
 
 /// What the corner methods operate on besides the corner itself.
@@ -572,6 +578,13 @@ fn round_size(solver: &FilletSolver) -> Result<f64> {
 }
 
 impl FilletCorner {
+    /// Not upstream (solidcore-native): whether this Nx1 end's cap runs along a foot edge's
+    /// continuation inside the face a rail rolled onto ([`FilletCorner::turned_back_arcs`]).
+    #[must_use]
+    pub(crate) fn turned_back_cap(&self) -> bool {
+        self.turned_back_arcs.iter().any(Option::is_some)
+    }
+
     /// `SmFilletCorner(crContext, cpVertex, pSolverEUs, pAllEUs, pExec, dApproxTol3d,
     /// dTangencyTolRadians)` and the derived constructors (CO-PORTED, module docs):
     /// no fillet vertices, edges or surfaces, every flag off except
@@ -621,6 +634,7 @@ impl FilletCorner {
             setback: None,
             mixed: None,
             end_cap: None,
+            turned_back_arcs: [None, None],
         }
     }
 
@@ -1744,13 +1758,15 @@ impl FilletCorner {
 
     /// `SmFilletNx1Corner::CreateCornerPatch`: with three fillet edges an end patch
     /// from the extended side face (`CreateEndPatch`) or the default patch; otherwise
-    /// nothing.
+    /// nothing. Not upstream: a turned-back cap ([`FilletCorner::turned_back_cap`], four or
+    /// five edges) takes the end patch when its end face is extended, and nothing otherwise
+    /// (the default patch is three-sided).
     ///
     /// # Errors
     ///
     /// Those of the patch builders; [`SolidError::Unported`] (`CreateEndPatch`).
     pub fn create_corner_patch_nx1(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
-        if self.edges.len() == 3 {
+        if self.edges.len() == 3 || (self.turned_back_cap() && self.extended_surface_patch) {
             if self.extended_surface_patch {
                 self.create_end_patch(env)?;
             } else {
@@ -1773,7 +1789,7 @@ impl FilletCorner {
         extended_surface: impl Fn(FaceId) -> Option<Surface>,
         note_end_face_error: &mut dyn FnMut(&FilletCorner),
     ) -> Result<()> {
-        if self.edges.len() == 3 {
+        if self.edges.len() == 3 || (self.turned_back_cap() && self.extended_surface_patch) {
             if self.extended_surface_patch {
                 let mut end_env = CornerPatchEnv {
                     k: &mut *env.k,
