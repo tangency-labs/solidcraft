@@ -2,6 +2,159 @@
 use super::*;
 use crate::scenario::{self, Harness};
 
+fn repeated_profile_fixture() -> (Harness, u64, u64) {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    for x in [0, 4] {
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[x,0],"p1":[x+2,2]})).unwrap();
+    }
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let path = h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[0,10]]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    (h, sketch, path)
+}
+
+#[test]
+fn profile_refill_resolves_each_region_once_for_extrude_and_sweep() {
+    for command in ["solid.extrude", "solid.sweep"] {
+        let (mut h, sketch, path) = repeated_profile_fixture();
+        let state = h.app.session.world_state().unwrap();
+        let ss = state.sketch(sketch).unwrap();
+        assert_eq!(ss.profiles.len(), 2);
+        let order = [1, 0, 1, 0];
+        // Distinct saved places can name the same region after a divider disappears.
+        let points = order
+            .iter()
+            .enumerate()
+            .map(|(n, &i)| ss.profiles[i].region.interior_point() + solidcore_record::Vec2::new(n as f64 * 0.01, 0.0))
+            .collect();
+        let loops = order.iter().map(|&i| ss.profiles[i].outer_curves.clone()).collect();
+        let curve = &state.sketch(path).unwrap().sketch.curves[0].id;
+        let made = h.app.run(command, json!({"sketch":sketch,"profiles":[1,0],"distance":10,"path_sketch":path,"path":[curve]})).unwrap();
+        let feature = made["feature"].as_u64().unwrap();
+        for selection in [ProfileSel::Points { points }, ProfileSel::Curves { loops }, ProfileSel::Indices { indices: order.to_vec() }] {
+            let kind = &mut h.app.session.doc_mut().feature_mut(feature).unwrap().kind;
+            match kind {
+                FeatureKind::Extrude { profiles, .. } | FeatureKind::Sweep { profiles, .. } => *profiles = selection,
+                _ => panic!("a profile feature"),
+            }
+            let d = for_feature(&h.app, feature, None).unwrap();
+            assert_eq!(d.inputs[0].items, vec![Sel::Profile { sketch, index: 1 }, Sel::Profile { sketch, index: 0 }], "{command}");
+            let commands = apply_commands(&h.app, &d).unwrap();
+            assert_eq!(commands[0].1["params"]["profiles"], json!([1, 0]), "{command}");
+        }
+    }
+}
+
+#[test]
+fn profile_commands_send_each_region_once_for_extrude_and_sweep() {
+    for command in ["solid.extrude", "solid.sweep"] {
+        // Repeated picks can also arrive from older saved selections or external callers.
+        for (order, expected) in [(vec![1, 0, 1, 0], vec![1, 0]), (vec![0; 6], vec![0])] {
+            let (mut h, sketch, path) = repeated_profile_fixture();
+            let state = h.app.session.world_state().unwrap();
+            let curve = &state.sketch(path).unwrap().sketch.curves[0].id;
+            let mut d = Dialog::for_command(&h.app, command).unwrap();
+            d.inputs[0].items = order.into_iter().map(|index| Sel::Profile { sketch, index }).collect();
+            if command == "solid.sweep" {
+                d.inputs[1].items = vec![Sel::SketchCurve { sketch: Some(path), id: curve.clone() }];
+            }
+            let commands = apply_commands(&h.app, &d).unwrap();
+            assert_eq!(commands[0].1["profiles"], json!(expected), "{command}");
+            assert_eq!(commands[0].1["exact_regions"], json!(true), "{command}");
+            h.app.run(&commands[0].0, commands[0].1.clone()).unwrap();
+            // Each 2 x 2 mm square travels 10 mm: 40 mm³ per selected region.
+            let volume = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+            assert!((volume - 40.0 * expected.len() as f64).abs() < 1e-6, "{command}: {volume}");
+        }
+    }
+}
+
+#[test]
+fn profile_commands_keep_loft_section_order_when_removing_repeats() {
+    let (mut h, sketch, _) = repeated_profile_fixture();
+    let other = h.app.run("sketch.create", json!({"plane":"XY","offset":20})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[2,2]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.loft").unwrap();
+    d.inputs[0].items = [(sketch, 1), (sketch, 1), (sketch, 0), (other, 0), (sketch, 1), (sketch, 1)]
+        .into_iter()
+        .map(|(sketch, index)| Sel::Profile { sketch, index })
+        .collect();
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        commands[0].1["sections"],
+        json!([
+            {"sketch":sketch,"profiles":[1,0]},
+            {"sketch":other,"profiles":[0]},
+            {"sketch":sketch,"profiles":[1]}
+        ])
+    );
+}
+
+#[test]
+fn profile_batch_picks_keep_one_sketch_for_extrude_and_sweep() {
+    let (mut h, first, path) = repeated_profile_fixture();
+    let mut sketches = vec![first];
+    for z in 1..6 {
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","offset":z*20})).unwrap()["sketch"].as_u64().unwrap();
+        for x in [0, 4] {
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[x,0],"p1":[x+2,2]})).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        sketches.push(sketch);
+    }
+    let last = *sketches.last().unwrap();
+    let state = h.app.session.world_state().unwrap();
+    let curve = &state.sketch(path).unwrap().sketch.curves[0].id;
+    for command in ["solid.extrude", "solid.sweep"] {
+        for indices in [vec![1, 0], vec![0]] {
+            let picks: Vec<_> = sketches.iter().flat_map(|&sketch| indices.iter().map(move |&index| Sel::Profile { sketch, index })).collect();
+            let expected: Vec<_> = indices.iter().map(|&index| Sel::Profile { sketch: last, index }).collect();
+            for source in ["preselection", "box", "add_box", "click"] {
+                h.app.session.selection = if source == "preselection" { picks.clone() } else { vec![] };
+                let mut d = Dialog::for_command(&h.app, command).unwrap();
+                match source {
+                    "box" => d.take_box(&h.app.session, picks.clone(), false),
+                    "add_box" => {
+                        d.pick(&h.app.session, picks[0].clone());
+                        d.take_box(&h.app.session, picks.clone(), true);
+                    }
+                    "click" => {
+                        for pick in &picks {
+                            d.pick(&h.app.session, pick.clone());
+                        }
+                    }
+                    _ => {}
+                }
+                assert_eq!(d.inputs[0].items, expected, "{command}: {source}");
+                if command == "solid.sweep" {
+                    d.inputs[1].items = vec![Sel::SketchCurve { sketch: Some(path), id: curve.clone() }];
+                }
+                let commands = apply_commands(&h.app, &d).unwrap();
+                assert_eq!(commands[0].1["sketch"], json!(last), "{command}: {source}");
+                assert_eq!(commands[0].1["profiles"], json!(indices), "{command}: {source}");
+                assert_eq!(commands[0].1["exact_regions"], json!(true));
+            }
+        }
+    }
+}
+
+#[test]
+fn profile_batch_picks_keep_measurement_sketches() {
+    let (mut h, first, _) = repeated_profile_fixture();
+    let second = h.app.run("sketch.create", json!({"plane":"XY","offset":20})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":2})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let picks = vec![Sel::Profile { sketch: first, index: 0 }, Sel::Profile { sketch: second, index: 0 }];
+    h.app.session.selection = picks.clone();
+    let mut d = Dialog::for_command(&h.app, "inspect.measure").unwrap();
+    assert_eq!(d.inputs[0].items, picks);
+    d.take_box(&h.app.session, picks.clone(), false);
+    assert_eq!(d.inputs[0].items, picks);
+}
+
 #[test]
 fn measure_input_fits_external_sketch_geometry() {
     let mut h = Harness::new();

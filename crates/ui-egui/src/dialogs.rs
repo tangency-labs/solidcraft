@@ -1293,6 +1293,7 @@ impl Dialog {
                     && !i.rejects(sel)
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
+                retain_profile_list_sketch(&d.kind, inp, sel);
                 if matches!(d.kind, Kind::Fillet { .. }) {
                     for x in crate::viewport::grouped_selection(s, sel) {
                         if !d.picked_edges.iter().any(|y| selection::same_item(y, &x)) {
@@ -1912,11 +1913,8 @@ impl Dialog {
         let picked = if chain { fillet_edges(s, &sel, true) } else { single.clone() };
         // Extrude and revolve take profiles of one sketch; both lofts take sections
         // from several sketches and must keep their pick order.
-        if let Sel::Profile { sketch, .. } = &sel
-            && !matches!(self.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
-            && let Some(inp) = self.inputs.get_mut(self.active)
-        {
-            inp.items.retain(|x| !matches!(x, Sel::Profile { sketch: s2, .. } if s2 != sketch));
+        if let Some(inp) = self.inputs.get_mut(self.active) {
+            retain_profile_sketch(&self.kind, inp, &sel);
         }
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
@@ -2008,6 +2006,7 @@ impl Dialog {
             if !fits(inp.accept, &x) {
                 continue;
             }
+            retain_profile_list_sketch(&self.kind, inp, &x);
             accepted = true;
             if !inp.multi {
                 inp.items.clear();
@@ -2246,6 +2245,26 @@ pub(crate) fn fillet_least_setback(ctx: &egui::Context, s: &Session, items: &[Se
         .reduce(f64::max);
     ctx.data_mut(|d| d.insert_temp(id, (key, least)));
     least
+}
+
+/// Profiles are indices within one sketch. Only lofts consume sections from several sketches.
+/// Keep batch and preselection inputs consistent with successive clicks: the latest sketch wins.
+fn retain_profile_list_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
+    if matches!(
+        kind,
+        Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Sweep { .. } | Kind::Surface(_) | Kind::Frame(_) | Kind::Sheet(_)
+    ) {
+        retain_profile_sketch(kind, input, sel);
+    }
+}
+
+/// Keep the profile picks of the sketch just picked; lofts retain their separate sections.
+fn retain_profile_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
+    if let Sel::Profile { sketch, .. } = sel
+        && !matches!(kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
+    {
+        input.items.retain(|x| !matches!(x, Sel::Profile { sketch: other, .. } if other != sketch));
+    }
 }
 
 /// The profiles of a sketch that aren't the island inside another profile's hole: a circle in a
@@ -5600,7 +5619,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     let need = |i: usize, what: &str| -> Result<(), String> { if sels(d, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) } };
     let profiles = || -> (Value, Value) {
         let ps: Vec<(u64, usize)> = sels(d, 0).profiles();
-        (ps.first().map(|x| json!(x.0)).unwrap_or(Value::Null), json!(ps.iter().map(|x| x.1).collect::<Vec<_>>()))
+        let sketch = ps.first().map(|x| x.0);
+        (sketch.map(|id| json!(id)).unwrap_or(Value::Null), json!(ps.iter().filter(|x| Some(x.0) == sketch).map(|x| x.1).collect::<Vec<_>>()))
     };
     let face_points = |i: usize| -> Vec<Value> { sels(d, i).face_points().into_iter().map(pt).collect() };
     // An empty Thickness is no value to shell with: OK waits for one instead of the command
@@ -5924,7 +5944,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     Sel::Profile { sketch, index } => {
                         let last = sections.last_mut().filter(|sec| sec.get("sketch").and_then(Value::as_u64) == Some(*sketch));
                         match last.and_then(|sec| sec.get_mut("profiles")).and_then(Value::as_array_mut) {
-                            Some(profiles) => profiles.push(json!(index)),
+                            Some(profiles) => {
+                                let index = json!(index);
+                                if !profiles.contains(&index) {
+                                    profiles.push(index);
+                                }
+                            }
                             None => sections.push(json!({"sketch": sketch, "profiles": [index]})),
                         }
                         profile_sketches.push(*sketch);
@@ -6898,7 +6923,7 @@ const AXIS_PICK: &str =
 /// Which profiles of a sketch a profile selection means.
 pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &ProfileSel) -> Vec<usize> {
     let ps = &ss.profiles;
-    match sel {
+    let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
         ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
@@ -6911,7 +6936,12 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
             })
             .collect(),
         ProfileSel::Points { points } => points.iter().filter_map(|q| solidcraft_engine::doc::sketch::profile_at_point(ps, *q)).collect(),
-    }
+    };
+    // Saved places or curve references can converge on one region after a sketch changes.
+    // Refill bypasses SelInput::toggle, so keep each resolved region only once here.
+    let mut seen = std::collections::BTreeSet::new();
+    indices.retain(|index| seen.insert(*index));
+    indices
 }
 
 thread_local! {
