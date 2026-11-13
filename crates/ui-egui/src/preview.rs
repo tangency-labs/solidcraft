@@ -120,6 +120,8 @@ pub struct Built {
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
+    /// The members of a previewed Frame Member (`dialogs_frame::centrelines`).
+    pub centrelines: Vec<crate::dialogs_frame::Centreline>,
 }
 
 type Job = Result<Built, String>;
@@ -181,6 +183,8 @@ pub struct PreviewState {
     /// The bodies and plane ([`mirror_key`]) the Mirror dialog last set its operation for: an
     /// operation picked by hand afterwards stays until they change.
     pub mirror_decided: Option<u64>,
+    /// The members of the previewed Frame Member, for Remove Tube in its dialog.
+    pub centrelines: Vec<crate::dialogs_frame::Centreline>,
     straight: crate::extrude_preview::StraightPreview,
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
@@ -217,6 +221,7 @@ impl PreviewState {
         self.tapered.clear();
         self.mirror_meets = None;
         self.mirror_decided = None;
+        self.centrelines.clear();
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
@@ -255,6 +260,7 @@ impl PreviewState {
                 self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
+                self.centrelines = b.centrelines;
                 self.set_scene(b.scene);
             }
             // The current inputs make no feature: the last good geometry would contradict
@@ -269,6 +275,7 @@ impl PreviewState {
                 self.tapered.clear();
                 self.mirror_meets = None;
                 self.mirror_decided = None;
+                self.centrelines.clear();
             }
         }
     }
@@ -595,6 +602,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
+            b.centrelines = features().flat_map(|id| crate::dialogs_frame::centrelines(&p, id)).collect();
             Ok(b)
         }
     }
@@ -798,6 +806,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         stopped: None,
         mirror_meets: None,
         placed: None,
+        centrelines: Vec::new(),
     }
 }
 
@@ -962,6 +971,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         stopped: None,
         mirror_meets: None,
         placed: None,
+        centrelines: Vec::new(),
     }
 }
 
@@ -1282,6 +1292,7 @@ mod tests {
             stopped: None,
             mirror_meets: None,
             placed: None,
+            centrelines: Vec::new(),
         }
     }
 

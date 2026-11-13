@@ -1301,7 +1301,7 @@ impl Lit {
             Some(Hit::Plane { name, .. }) => Some(Thing::Plane(name.clone())),
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
-            Some(Hit::MemberEnd { .. }) | None => None,
+            Some(Hit::MemberEnd { .. } | Hit::Centreline { .. }) | None => None,
         };
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in

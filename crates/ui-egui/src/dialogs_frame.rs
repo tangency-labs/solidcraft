@@ -63,6 +63,197 @@ pub struct Member {
     /// dialog is open, its faces and edges left out of picks, so the points behind and its own
     /// vertices and centreline ends can be picked. Ticked whenever the dialog opens.
     pub ghost: bool,
+    /// The tubes clicked in the view (their centrelines' ids, [`Centreline::id`]), for Remove Tube.
+    pub picked_tubes: Vec<String>,
+}
+
+/// A member of the Frame Member the dialog previews, as its live preview made it: its id (a
+/// sketch line's, or a pair's as the preview numbered it), which of the path's pairs it is (none
+/// for a line), the frame sketch of a line, and its centreline's ends.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Centreline {
+    pub id: String,
+    pub pair: Option<usize>,
+    pub sketch: Option<u64>,
+    pub a: solidcore_record::Vec3,
+    pub b: solidcore_record::Vec3,
+}
+
+/// How near the pointer a centreline lights up and takes a click, in points.
+const TUBE_PX: f32 = 8.0;
+
+/// The centrelines of Frame Member feature `id` among a preview's features, in member order:
+/// its lines', then its pairs', as the document's own segments place them.
+pub(crate) fn centrelines(p: &solidcraft_engine::Preview, id: u64) -> Vec<Centreline> {
+    let Some(f) = p.doc.feature(id) else { return Vec::new() };
+    let FeatureKind::FrameMember { path_sketch, pairs, .. } = &f.kind else { return Vec::new() };
+    let Ok(segments) = frame::member_segments(&p.doc, &p.model.state_before(id), f) else { return Vec::new() };
+    // The pairs' members come last, in the pairs' order, which is the order of the path's pairs.
+    let first_pair = segments.len().saturating_sub(pairs.len());
+    segments
+        .into_iter()
+        .enumerate()
+        .map(|(k, (id, a, b))| {
+            let pair = k.checked_sub(first_pair);
+            Centreline { id, pair, sketch: path_sketch.filter(|_| pair.is_none()).map(|s| s.0), a, b }
+        })
+        .collect()
+}
+
+/// The centrelines shown and picked: the open Frame Member dialog's, while its preview is up to
+/// date with the path (a preview still computing may be of another path).
+fn tubes(app: &SolveApp) -> &[Centreline] {
+    let open = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Frame(_)));
+    if open && !app.preview.busy { &app.preview.centrelines } else { &[] }
+}
+
+/// The nearest centreline within [`TUBE_PX`] of `pos`.
+pub(crate) fn tube_near(app: &SolveApp, proj: &crate::viewport::Proj, pos: egui::Pos2) -> Option<Hit> {
+    tubes(app)
+        .iter()
+        .filter_map(|c| Some((crate::viewport::seg_dist(pos, proj.to_screen(c.a)?, proj.to_screen(c.b)?), c)))
+        .filter(|(d, _)| *d < TUBE_PX)
+        .min_by(|x, y| x.0.total_cmp(&y.0))
+        .map(|(_, c)| Hit::Centreline { line: c.id.clone() })
+}
+
+/// The centreline under the cursor, unless a point the click would pick is there too: a point
+/// wins (a pair's end is the point it was picked on).
+pub(crate) fn tube_hover(app: &SolveApp, hits: &[Hit]) -> Option<Hit> {
+    let tube = hits.iter().find(|h| matches!(h, Hit::Centreline { .. }))?;
+    let point = crate::viewport::candidate(app, hits).is_some_and(|(h, _)| {
+        matches!(
+            h,
+            Hit::SketchPoint { .. }
+                | Hit::SketchPoint3d { .. }
+                | Hit::SketchMidpoint { .. }
+                | Hit::Vertex { .. }
+                | Hit::ConstructionPoint { .. }
+                | Hit::MemberEnd { .. }
+        )
+    });
+    (!point).then(|| tube.clone())
+}
+
+fn frame_member(app: &mut SolveApp) -> Option<&mut Member> {
+    match app.dialog.as_mut().map(|d| &mut d.kind) {
+        Some(Kind::Frame(m)) => Some(m),
+        _ => None,
+    }
+}
+
+/// A click on a centreline: its tube goes into the picked tubes, or out again.
+pub(crate) fn click_tube(app: &mut SolveApp, hit: &Hit) -> bool {
+    let Hit::Centreline { line } = hit else { return false };
+    let Some(m) = frame_member(app) else { return false };
+    match m.picked_tubes.iter().position(|t| t == line) {
+        Some(i) => drop(m.picked_tubes.remove(i)),
+        None => m.picked_tubes.push(line.clone()),
+    }
+    true
+}
+
+/// A right-click on a centreline: its tube is picked, unless it already is, and the Remove Tube
+/// menu opens. False when the click is not on one.
+pub(crate) fn open_menu(app: &mut SolveApp, at: egui::Pos2) -> bool {
+    let Some(Hit::Centreline { line }) = app.viewport.hover.clone() else { return false };
+    let Some(m) = frame_member(app) else { return false };
+    if !m.picked_tubes.contains(&line) {
+        m.picked_tubes = vec![line];
+    }
+    crate::context_menu::open_for(app, at, crate::context_menu::Target::FrameTubes);
+    true
+}
+
+/// The Remove Tube menu: one item for the picked tubes.
+pub(crate) fn menu_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
+    let n = match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Frame(m)) => m.picked_tubes.len(),
+        _ => return Vec::new(),
+    };
+    let key = if n == 1 { "frame.remove_tubes_one" } else { "frame.remove_tubes_other" };
+    let label = solidcraft_ui_text::format(key, &[("count", &n.to_string())]);
+    vec![crate::context_menu::act("ui.removeTubes", &label, "delete").key("Del").on(n > 0)]
+}
+
+/// Remove Tube on the picked tubes (the menu's item, the Delete key). False with none picked.
+pub(crate) fn remove_picked(app: &mut SolveApp) -> bool {
+    let Some(picked) = frame_member(app).map(|m| std::mem::take(&mut m.picked_tubes)).filter(|p| !p.is_empty()) else { return false };
+    remove_tubes(app, &picked);
+    true
+}
+
+/// Take tubes `ids` out of the path: a pair's two entries (only this pair's, so a point another
+/// pair shares stays), a line's pick. Each other entry keeps its reference and pair id. With All
+/// Lines, the lines kept are listed from then on, so the one taken out stays out.
+pub(crate) fn remove_tubes(app: &mut SolveApp, ids: &[String]) {
+    let all = tubes(app).to_vec();
+    let Some(d) = app.dialog.as_mut() else { return };
+    let (Some(path), Kind::Frame(m)) = (d.inputs.first_mut(), &mut d.kind) else { return };
+    m.sync(&path.items);
+    let Ok((lines, pairs, _)) = pair_indices(&path.items) else { return };
+    let mut gone = std::collections::BTreeSet::new();
+    for t in all.iter().filter(|t| ids.contains(&t.id)) {
+        match t.pair {
+            Some(k) => gone.extend(pairs.get(k).into_iter().flat_map(|(a, b)| [*a, *b])),
+            None => gone.extend(lines.iter().filter(|i| line_id(path.items.get(**i)) == Some(t.id.as_str()))),
+        }
+    }
+    // The entries and what is kept for each go together, so each keeps its own.
+    drop_at(&mut path.items, &gone);
+    drop_at(&mut m.path, &gone);
+    drop_at(&mut m.refs, &gone);
+    drop_at(&mut m.pair_ids, &gone);
+    if m.all && all.iter().any(|t| t.pair.is_none() && ids.contains(&t.id)) {
+        m.all = false;
+        let missing: Vec<Sel> = all
+            .iter()
+            .filter(|t| t.pair.is_none() && !ids.contains(&t.id))
+            .filter(|t| !path.items.iter().any(|s| line_id(Some(s)) == Some(t.id.as_str())))
+            .filter_map(|t| Some(Sel::ExternalSketchCurve { sketch: t.sketch?, id: t.id.clone() }))
+            .collect();
+        path.items.splice(0..0, missing);
+    }
+    m.picked_tubes.clear();
+    prompt(d);
+}
+
+/// A sketch line's id, when `item` is one.
+fn line_id(item: Option<&Sel>) -> Option<&str> {
+    match item? {
+        Sel::SketchCurve { id, .. } | Sel::ExternalSketchCurve { id, .. } => Some(id),
+        _ => None,
+    }
+}
+
+/// `v` without the entries at `gone`.
+fn drop_at<T>(v: &mut Vec<T>, gone: &std::collections::BTreeSet<usize>) {
+    let mut i = 0;
+    v.retain(|_| {
+        i += 1;
+        !gone.contains(&(i - 1))
+    });
+}
+
+/// The previewed members' centrelines, lit when hovered and when picked for Remove Tube.
+pub(crate) fn draw_tubes(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj) {
+    let t = solidcraft_theme::Tokens::get();
+    let picked = match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Frame(m)) => &m.picked_tubes[..],
+        _ => &[],
+    };
+    for c in tubes(app) {
+        let (Some(a), Some(b)) = (proj.to_screen(c.a), proj.to_screen(c.b)) else { continue };
+        let hovered = matches!(&app.viewport.hover, Some(Hit::Centreline { line }) if *line == c.id);
+        let stroke = if hovered {
+            egui::Stroke::new(3.0, t.hover_edge)
+        } else if picked.contains(&c.id) {
+            egui::Stroke::new(2.5, t.sel_edge)
+        } else {
+            egui::Stroke::new(1.5, t.construction_geom)
+        };
+        painter.line_segment([a, b], stroke);
+    }
 }
 
 impl Member {
@@ -90,6 +281,7 @@ impl Member {
             refs: Vec::new(),
             pair_ids: Vec::new(),
             ghost: true,
+            picked_tubes: Vec::new(),
         }
     }
 
@@ -99,6 +291,8 @@ impl Member {
         if self.path != items {
             (self.refs, self.pair_ids) = self.aligned(items);
             self.path = items.to_vec();
+            // Tubes picked for another path may now be other members.
+            self.picked_tubes.clear();
         }
     }
 

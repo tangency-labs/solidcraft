@@ -121,6 +121,8 @@ pub enum Target {
     },
     /// The Section Analysis in the browser's Analysis folder.
     Section,
+    /// The tubes picked in the Frame Member dialog: Remove Tube (#15705).
+    FrameTubes,
     /// A component's Bodies, Sketches or Construction folder, under the design (`scope` `c0`)
     /// or a placement (`o:<path>`).
     Folder {
@@ -373,6 +375,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::ViewGizmo => crate::view_gizmo::menu_items(app),
         Target::Section => crate::browser::section_items(app),
+        Target::FrameTubes => crate::dialogs_frame::menu_items(app),
         Target::Joint { id } => joint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
@@ -1568,6 +1571,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.delete" if item.params.is_some() => crate::delete::request(app, p),
         "ui.delete" => delete(app),
+        "ui.removeTubes" => {
+            crate::dialogs_frame::remove_picked(app);
+        }
         "ui.horizontalConstraint" | "ui.verticalConstraint" => {
             let selection = app.session.selection.clone();
             let keep_midpoints = selection.iter().any(|s| matches!(s, Sel::SketchMidpoint { .. }));
@@ -2484,6 +2490,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         Target::PointCloud { id } => doc.point_clouds.iter().any(|c| c.id == *id),
         // Shown or hidden, the browser lists it.
         Target::Section => app.session.section.is_some() || app.tree.hidden_section.is_some(),
+        Target::FrameTubes => matches!(app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Frame(m)) if !m.picked_tubes.is_empty()),
     };
     if found {
         return Ok(());

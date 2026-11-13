@@ -1688,6 +1688,11 @@ impl Dialog {
     /// ([`Dialog::face_snap`] of the same hits). A face place picked on or near a sketch point that
     /// lies on that face (a circle's centre) is taken at the point, as a points input picks it.
     pub(crate) fn candidate_on(&self, s: &Session, h: &Hit, snap: Option<&FaceSnap>) -> Option<Sel> {
+        // A centreline of the Frame Member being made is picked for Remove Tube, never into an
+        // input (`dialogs_frame::click_tube`).
+        if matches!(h, Hit::Centreline { .. }) {
+            return None;
+        }
         // A ghosted member's centreline end is a point for Frame Member's path alone (#15705).
         if matches!(h, Hit::MemberEnd { .. }) {
             let path = matches!(self.kind, Kind::Frame(_)) && self.active == 0;

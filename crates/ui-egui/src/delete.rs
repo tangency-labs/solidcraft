@@ -63,6 +63,10 @@ fn shared_occurrences(app: &SolveApp, params: &Value) -> bool {
 /// Delete what is selected (the Delete key). A selected sketch dimension or constraint glyph
 /// goes first, as before.
 pub fn delete_selection(app: &mut SolveApp) {
+    // In Frame Member, the tubes picked in the view are taken out of its path (#15705).
+    if crate::dialogs_frame::remove_picked(app) {
+        return;
+    }
     if crate::sketch3d::delete_selected(app) || crate::sketch_tools::delete_glyph(app) {
         return;
     }

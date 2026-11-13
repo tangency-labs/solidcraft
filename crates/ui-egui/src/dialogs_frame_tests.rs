@@ -701,3 +701,187 @@ fn end_caps_are_ghosted_with_members() {
     assert!(crate::viewport::frame_ghosted(&app, &model_body(&st, &cap)));
     assert!(drawn(&app, &cap)[3] < 255 && drawn(&app, "Post")[3] < 255);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Remove Tube in the dialog (#15705)
+
+/// The box seen from straight above, as `railed_box` sees it.
+fn from_above(app: &mut SolveApp) {
+    app.cam = solidcraft_viewport::Camera {
+        target: Vec3::new(300.0, 200.0, 450.0),
+        yaw: 0.0,
+        pitch: std::f64::consts::FRAC_PI_2,
+        roll: 0.0,
+        distance: 1000.0,
+        fov: 0.0,
+        up: Default::default(),
+    };
+}
+
+/// The open dialog's live preview, computed to the end.
+fn settle_preview(app: &mut SolveApp) {
+    let ctx = egui::Context::default();
+    for _ in 0..4000 {
+        crate::preview::update(app, &ctx);
+        if !app.preview.busy {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("the preview did not finish");
+}
+
+/// The Frame Member dialog open with `picks` in its path, its preview computed.
+fn dialog_with(app: &mut SolveApp, picks: &[Sel]) {
+    let mut d = frame_dialog(app);
+    pick_all(app, &mut d, picks);
+    app.dialog = Some(d);
+    settle_preview(app);
+}
+
+fn open(app: &mut SolveApp) -> &mut Dialog {
+    app.dialog.as_mut().unwrap()
+}
+
+fn picked_tubes(app: &mut SolveApp) -> Vec<String> {
+    member(open(app)).picked_tubes.clone()
+}
+
+fn centreline(line: &str) -> crate::viewport::Hit {
+    crate::viewport::Hit::Centreline { line: line.into() }
+}
+
+/// A diagonal over the box's top, seen from above: its ends on screen.
+fn diagonal(app: &mut SolveApp) -> (egui::Pos2, egui::Pos2) {
+    from_above(app);
+    dialog_with(app, &[corner(0., 0., 400.), corner(600., 400., 400.)]);
+    let proj = model_proj(app);
+    (proj.to_screen(Vec3::new(0., 0., 400.)).unwrap(), proj.to_screen(Vec3::new(600., 400., 400.)).unwrap())
+}
+
+fn menu_labels(app: &SolveApp) -> Vec<(String, String)> {
+    crate::context_menu::items(app, &crate::context_menu::Target::FrameTubes).into_iter().map(|i| (i.label, i.icon.to_string())).collect()
+}
+
+#[test]
+fn a_centreline_is_hovered_within_8_px_and_clicked_to_select() {
+    let mut app = box_app();
+    let (a, b) = diagonal(&mut app);
+    let lines = &app.preview.centrelines;
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!((lines[0].id.as_str(), lines[0].pair), ("pair1", Some(0)));
+    let proj = model_proj(&app);
+    let across = (b - a).normalized().rot90();
+    let middle = a + (b - a) * 0.5;
+    let hover = |app: &SolveApp, px: f32| super::tube_hover(app, &crate::viewport::pick(app, &proj, middle + across * px));
+    assert_eq!(hover(&app, 6.0), Some(centreline("pair1")));
+    assert_eq!(hover(&app, -6.0), Some(centreline("pair1")));
+    assert_eq!(hover(&app, 10.0), None, "too far off");
+    assert!(super::click_tube(&mut app, &centreline("pair1")));
+    assert_eq!(picked_tubes(&mut app), ["pair1"]);
+    assert!(super::click_tube(&mut app, &centreline("pair1")));
+    assert!(picked_tubes(&mut app).is_empty(), "a second click takes it out of the selection");
+    assert!(!super::click_tube(&mut app, &crate::viewport::Hit::Axis { name: "X".into() }), "only a centreline");
+    // A right-click on a centreline selects it and opens its menu: one item, Remove Tube.
+    app.viewport.hover = Some(centreline("pair1"));
+    assert!(super::open_menu(&mut app, middle));
+    assert_eq!(app.menu.target, crate::context_menu::Target::FrameTubes);
+    assert_eq!(picked_tubes(&mut app), ["pair1"]);
+    assert_eq!(menu_labels(&app), [("Remove Tube".to_string(), "delete".to_string())]);
+}
+
+#[test]
+fn a_point_under_the_cursor_wins_over_a_centreline() {
+    let mut app = box_app();
+    let (a, _) = diagonal(&mut app);
+    let hits = crate::viewport::pick(&app, &model_proj(&app), a);
+    assert!(hits.contains(&centreline("pair1")), "{hits:?}");
+    assert!(hits.iter().any(|h| matches!(h, crate::viewport::Hit::Vertex { body, .. } if body == "Box")), "{hits:?}");
+    assert_eq!(super::tube_hover(&app, &hits), None, "the corner is picked, not the tube");
+}
+
+#[test]
+fn remove_tube_on_a_pair_takes_out_its_two_points_and_keeps_a_shared_one() {
+    let mut app = box_app();
+    let (p0, p1, p2) = (corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 400.));
+    dialog_with(&mut app, &[p0, p1.clone(), p1.clone(), p2.clone()]);
+    assert_eq!(app.preview.centrelines.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["pair1", "pair2"]);
+    let refs = member(open(&mut app)).refs.clone();
+    super::remove_tubes(&mut app, &["pair1".to_string()]);
+    let d = app.dialog.clone().unwrap();
+    assert_eq!(path(&d), [p1, p2], "only this pair's occurrence of the shared point goes");
+    assert_eq!(member(open(&mut app)).refs, refs[2..], "the others keep their references");
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["pairs"], json!([{"a": vertex(0., 0., 400.), "b": vertex(600., 0., 400.)}]));
+}
+
+#[test]
+fn remove_tube_on_a_line_member_unpicks_its_line() {
+    let mut app = box_app();
+    let base = sketch_id(&app, "Base");
+    let ids: Vec<String> = app.session.doc.sketch(base).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let line = |id: &String| Sel::ExternalSketchCurve { sketch: base, id: id.clone() };
+    dialog_with(&mut app, &[line(&ids[0]), line(&ids[1]), corner(0., 0., 0.), corner(0., 0., 400.)]);
+    assert_eq!(app.preview.centrelines.iter().map(|c| c.id.clone()).collect::<Vec<_>>(), [ids[0].clone(), ids[1].clone(), "pair1".into()]);
+    super::remove_tubes(&mut app, std::slice::from_ref(&ids[0]));
+    let d = app.dialog.clone().unwrap();
+    assert_eq!(path(&d), [line(&ids[1]), corner(0., 0., 0.), corner(0., 0., 400.)]);
+    let p = &apply_commands(&app, &d).unwrap()[0].1;
+    assert_eq!((&p["lines"], p["pairs"].as_array().map(Vec::len)), (&json!([ids[1]]), Some(1)));
+    // On every line of the sketch (All Lines): the others are listed from then on.
+    crate::dialogs::cancel(&mut app);
+    app.run("frame.member", json!({"sketch": "Base", "profile": tube()})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    app.edit_feature(f);
+    settle_preview(&mut app);
+    assert!(member(open(&mut app)).all);
+    super::remove_tubes(&mut app, std::slice::from_ref(&ids[2]));
+    assert!(!member(open(&mut app)).all);
+    let d = app.dialog.clone().unwrap();
+    let rest: Vec<&String> = ids.iter().filter(|id| **id != ids[2]).collect();
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["params"]["lines"], json!(rest));
+}
+
+#[test]
+fn delete_removes_the_selected_tubes() {
+    let mut app = box_app();
+    let selection = app.session.selection.clone();
+    let features = app.session.doc.features.len();
+    dialog_with(&mut app, &[corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 0.), corner(600., 0., 400.)]);
+    for id in ["pair1", "pair2"] {
+        assert!(super::click_tube(&mut app, &centreline(id)));
+    }
+    assert_eq!(menu_labels(&app), [("Remove 2 Tubes".to_string(), "delete".to_string())]);
+    crate::delete::delete_selection(&mut app);
+    assert!(path(app.dialog.as_ref().unwrap()).is_empty(), "both pairs go");
+    assert!(picked_tubes(&mut app).is_empty());
+    assert_eq!((&app.session.selection, app.session.doc.features.len()), (&selection, features), "nothing else is deleted");
+    // The menu's item does the same.
+    let mut d = app.dialog.clone().unwrap();
+    pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 400.)]);
+    app.dialog = Some(d);
+    settle_preview(&mut app);
+    assert!(super::click_tube(&mut app, &centreline("pair1")));
+    let item = crate::context_menu::items(&app, &crate::context_menu::Target::FrameTubes).remove(0);
+    crate::context_menu::run_item(&mut app, &item, egui::Pos2::ZERO);
+    assert!(path(app.dialog.as_ref().unwrap()).is_empty());
+}
+
+#[test]
+fn cancel_after_remove_tube_leaves_the_feature_unchanged() {
+    let mut app = box_app();
+    let pairs = json!([{"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)}, {"a": vertex(0., 0., 400.), "b": vertex(600., 0., 400.)}]);
+    app.run("frame.member", json!({"pairs": pairs, "profile": tube()})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let stored = |app: &SolveApp| serde_json::to_value(&app.session.doc.feature(f).unwrap().kind).unwrap();
+    let (before, bodies) = (stored(&app), members(&app));
+    app.edit_feature(f);
+    settle_preview(&mut app);
+    super::remove_tubes(&mut app, &["pair1".to_string()]);
+    let d = app.dialog.clone().unwrap();
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["params"]["pairs"][0]["id"], "pair2", "the pair kept keeps its id: {}", c[0].1);
+    assert_eq!(c[0].1["params"]["pairs"].as_array().map(Vec::len), Some(1));
+    crate::dialogs::cancel(&mut app);
+    assert!(app.dialog.is_none());
+    assert_eq!((stored(&app), members(&app)), (before, bodies));
+}

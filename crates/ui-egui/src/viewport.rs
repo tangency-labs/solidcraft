@@ -384,6 +384,11 @@ pub enum Hit {
         end: usize,
         point: Vec3,
     },
+    /// The centreline of member `line` ([`crate::dialogs_frame::Centreline::id`]) of the Frame
+    /// Member the open dialog previews: clicked to pick it for Remove Tube.
+    Centreline {
+        line: String,
+    },
 }
 
 impl ViewportState {
@@ -3432,6 +3437,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             }
         }
     }
+    // A centreline of the Frame Member being made, before the curves (a line member's sketch line
+    // lies under it); a point the click would pick still wins (`dialogs_frame::tube_hover`).
+    hits.extend(crate::dialogs_frame::tube_near(app, proj, pos));
     let before_curves = hits.len();
     hits.extend(bestc.hits());
     if let Some((_, far)) = woken_far
@@ -4134,7 +4142,7 @@ pub fn hit_sel(h: &Hit) -> Option<Sel> {
         Hit::Axis { name } => Sel::Axis { name: name.clone() },
         Hit::ConstructionPoint { name } => Sel::ConstructionPoint { name: name.clone() },
         // Only the Frame Member dialog's path takes one (`dialogs_frame::end_pick`).
-        Hit::MemberEnd { .. } => return None,
+        Hit::MemberEnd { .. } | Hit::Centreline { .. } => return None,
     })
 }
 
@@ -4254,7 +4262,7 @@ fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
         Hit::Edge { .. } => !off("edges") && !app.ui.pick_bodies && !app.ui.pick_components,
         Hit::Face { .. } => !off("faces") || app.ui.pick_bodies || app.ui.pick_components,
         Hit::Plane { .. } | Hit::Axis { .. } | Hit::ConstructionPoint { .. } => true,
-        Hit::MemberEnd { .. } => false,
+        Hit::MemberEnd { .. } | Hit::Centreline { .. } => false,
     }
 }
 
@@ -5778,7 +5786,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else if let Some((hit, sel)) = corner {
         Some((hit, Some(sel)))
     } else {
-        candidate(app, &hits).map(|(h, s)| (h, Some(s)))
+        // A centreline of the Frame Member being made lights up for Remove Tube (#15705).
+        crate::dialogs_frame::tube_hover(app, &hits).map(|h| (h, None)).or_else(|| candidate(app, &hits).map(|(h, s)| (h, Some(s))))
     };
     // The view moved under a still pointer: the highlight under it stays on the face it
     // was on instead of going off (#2130). It is picked again when the gesture ends.
@@ -6096,6 +6105,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
                 if add && crate::dialogs_move::add_body_click(app, &hits, allow_toggle) {
                     // Ctrl/Shift+click: one more body for Move, which stays on From, Point or Axis.
+                } else if let Some((hit, None)) = &cand
+                    && crate::dialogs_frame::click_tube(app, hit)
+                {
+                    // A centreline of the Frame Member being made: picked for Remove Tube, or not.
                 } else if let Some((hit, Some(sel))) = cand {
                     // Ctrl+click on a point of Frame Member's path takes out its last occurrence.
                     if !(held_mods.primary && crate::dialogs_frame::take_out(app, &sel)) {
@@ -6226,6 +6239,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
                 crate::context_menu::open(app, p, held_mods);
+            } else if crate::dialogs_frame::open_menu(app, p) {
+                // A centreline of the Frame Member being made: its Remove Tube menu (#15705).
             } else if app.preferences.right_click_confirms {
                 crate::dialogs::right_click(app);
             }
@@ -7480,6 +7495,8 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.circle(sp, 4.5, fill, stroke);
         }
     }
+    // The Frame Member being made: its centrelines, for Remove Tube (#15705).
+    crate::dialogs_frame::draw_tubes(app, painter, proj);
     // The centreline ends of the members Frame Member ghosts, to pick as points (#15705).
     for h in crate::dialogs_frame::member_ends(app) {
         if let Hit::MemberEnd { point, .. } = &h
