@@ -231,12 +231,10 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.curve_tight_box_interval_knots = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.edge_check_orders_tangent_faces = true;
-    k.fixes.ellipse_adjust_step_interval_keeps_turns = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.face_tight_box_searches_trim = true;
