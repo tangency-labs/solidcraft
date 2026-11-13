@@ -590,7 +590,7 @@ fn half(cut: &Body, other: &Body, side: SheetSide, tol: f64) -> Result<Body> {
         };
         let mut out = Vec::with_capacity(inside.len());
         for p in &inside {
-            let p = solidcore::Vec3::new(p[0], p[1], p[2]);
+            let p = Vec3::new(p[0], p[1], p[2]);
             match point_side(k, b, f, p, tol) {
                 Ok(s) => out.push(s),
                 Err(e) => return Ok(Err(status(e))),
