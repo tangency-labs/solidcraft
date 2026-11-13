@@ -1,4 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Plane from picks</title>
-  <path d="M32 18L56 32L32 46L8 32Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="0.1 5"/>
+  <path d="M30.00 9.00L58.00 24.00L30.00 39.00L2.00 24.00Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="30" cy="24" r="5" fill="#ffffff"/>
+  <circle cx="30" cy="24" r="3.4" fill="#236ead"/>
+  <path d="M31.00 26.00L31.00 50.08L36.88 44.76L40.80 53.44L45.00 51.48L41.08 43.08L48.92 43.08Z" fill="none" stroke="#ffffff" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31.00 26.00L31.00 50.08L36.88 44.76L40.80 53.44L45.00 51.48L41.08 43.08L48.92 43.08Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>
