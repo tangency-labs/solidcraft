@@ -1540,19 +1540,19 @@ impl TouchNavigation {
         if self.contacts.len() >= 2 {
             self.multiple = true;
             self.mode = Some(NavMode::Pan);
-        } else if !self.multiple {
-            if let Some(origin) = self.origin {
-                let distance =
-                    point_distance([f64::from(origin.x), f64::from(origin.y), 0.0], [current_summary.centroid[0], current_summary.centroid[1], 0.0]);
-                match distance {
-                    Ok(distance) if distance.value > 6.0 => {
-                        self.mode = Some(if orbit { NavMode::Orbit } else { NavMode::Pan });
-                    }
-                    Ok(_) => {}
-                    Err(_) => {
-                        *self = Self::default();
-                        return TouchMotion::default();
-                    }
+        } else if !self.multiple
+            && let Some(origin) = self.origin
+        {
+            let distance =
+                point_distance([f64::from(origin.x), f64::from(origin.y), 0.0], [current_summary.centroid[0], current_summary.centroid[1], 0.0]);
+            match distance {
+                Ok(distance) if distance.value > 6.0 => {
+                    self.mode = Some(if orbit { NavMode::Orbit } else { NavMode::Pan });
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    *self = Self::default();
+                    return TouchMotion::default();
                 }
             }
         }
@@ -1584,7 +1584,7 @@ impl TouchNavigation {
                 *self = Self::default();
                 return TouchMotion::default();
             };
-            match point_displacement(prior.centroid, current_summary.centroid).ok().and_then(|delta| finite_screen_vector(delta)) {
+            match point_displacement(prior.centroid, current_summary.centroid).ok().and_then(finite_screen_vector) {
                 Some(delta) => out.delta = delta,
                 None => {
                     *self = Self::default();
