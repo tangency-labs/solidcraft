@@ -9,6 +9,7 @@
 //! | [`calculate_bounding_box`]            | `SmEdge::CalculateBoundingBox`             |
 //! | [`calculate_tight_bounding_box`]      | `SmEdge::CalculateTightBoundingBox`        |
 //! | [`closest_point`], [`ClosestPoint`]   | `SmEdge::ClosestPoint`                     |
+//! | [`closest_point_to_ray`], [`RayClosestPoint`] | (none: the edge point nearest a ray)  |
 //! | [`radial_sector_classify`], [`radial_sector_classify_between`], [`RadialSectorClass`] | `SmEdge::RadialSectorClassify` |
 //! | [`radial_sector_of_curve_classify`], [`CurveSectorClass`] | `SmEdge::RadialSectorOfCurveClassify` |
 //! | [`edge_vertices`]                     | `SmEdge::GetVertices(SmTArray&, ULONG*)` (CO-PORTED, `topology.edge`) |
@@ -60,7 +61,9 @@
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::euclidian_step_off;
+use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::Curve;
+use crate::curve::line::Line;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -80,6 +83,7 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 const OP_BBOX: &str = "query::edge::calculate_bounding_box";
 const OP_TIGHT: &str = "query::edge::calculate_tight_bounding_box";
 const OP_CLOSEST: &str = "query::edge::closest_point";
+const OP_CLOSEST_RAY: &str = "query::edge::closest_point_to_ray";
 const OP_RADIAL: &str = "query::edge::radial_sector_classify";
 const OP_RADIAL_CURVE: &str = "query::edge::radial_sector_of_curve_classify";
 const OP_VERTICES: &str = "query::edge::edge_vertices";
@@ -370,6 +374,104 @@ pub fn closest_point(
     // found a closest point
     Ok(Some(ClosestPoint {
         parameter: sol.start.param(0)?,
+        distance: sol.start.solution_value,
+    }))
+}
+
+/// (Not upstream) The result of [`closest_point_to_ray`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RayClosestPoint {
+    /// The edge curve's parameter of the edge point nearest the ray.
+    pub parameter: f64,
+    /// That edge point.
+    pub point: Point3,
+    /// The ray's point nearest it.
+    pub on_ray: Point3,
+    /// The distance between the two.
+    pub distance: f64,
+}
+
+/// (Not upstream) The point of the edge nearest the ray from `origin` along `direction` (a
+/// pick through the view, which [`closest_point`] to a point on the ray answers only where the
+/// point happens to be the nearest one): the first solution of the global minimising
+/// curve/curve solve ([`Curve::global_curve_solve`]) of the edge's curve over the edge's
+/// interval against the ray as a line segment from `origin`, the edge tolerance as the
+/// distance tolerance; `None` when there is none. The segment runs past the edge: as long as
+/// the farthest point of the edge's box from `origin` is away, plus a millimetre, and an edge
+/// point's foot on the ray is never farther from `origin` than the point itself, so the
+/// segment's nearest point is the ray's. A ray pointing away from the edge is nearest it at
+/// `origin`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge without curve, a `direction` of no length or a
+/// coordinate that is not finite; those of the edge's box, the line and the solve.
+pub fn closest_point_to_ray(
+    k: &Kernel,
+    brep: &Brep,
+    edge: EdgeId,
+    origin: Point3,
+    direction: Vec3,
+) -> Result<Option<RayClosestPoint>> {
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    if !(finite(origin) && finite(direction)) {
+        return Err(SolidError::invalid_input(
+            OP_CLOSEST_RAY,
+            "a coordinate that is not finite",
+        ));
+    }
+    let direction = direction
+        .unitize()
+        .map_err(|_| SolidError::invalid_input(OP_CLOSEST_RAY, "a direction of no length"))?;
+    let curve = curve_of(brep, edge, OP_CLOSEST_RAY)?;
+    let e = brep.edge(edge)?;
+    let req = BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let edge_box = calculate_bounding_box(k, brep, edge, req, false)?
+        .normal
+        .ok_or_else(|| SolidError::query_failed(OP_CLOSEST_RAY, "the edge has no box"))?;
+    let reach = edge_box.max_distance(&Extent3d::from_points(origin, origin)) + 1.0;
+    let ray = Curve::from(Line::create_line_segment(
+        3,
+        origin,
+        origin + direction * reach,
+        None,
+    )?);
+    let ray_interval = ray.natural_interval();
+    let opts = CurveSolveOptions {
+        handles: [
+            Some(CurveHandle {
+                id: 0,
+                ivl: curve.natural_interval(),
+            }),
+            Some(CurveHandle {
+                id: 1,
+                ivl: ray_interval,
+            }),
+        ],
+        ..CurveSolveOptions::default()
+    };
+    let solutions = curve.global_curve_solve(
+        k,
+        &e.interval,
+        &ray,
+        &ray_interval,
+        SolverOperation::Minimize,
+        e.tolerance,
+        &opts,
+        SolutionRequested::Single,
+    )?;
+    let Some(sol) = solutions.get(0) else {
+        return Ok(None);
+    };
+    let parameter = sol.start.param(0)?;
+    Ok(Some(RayClosestPoint {
+        parameter,
+        point: curve.evaluate_point(k, parameter)?,
+        on_ray: ray.evaluate_point(k, sol.start.param(1)?)?,
         distance: sol.start.solution_value,
     }))
 }
@@ -1318,6 +1420,93 @@ mod tests {
             .unwrap();
         }
         (br, e)
+    }
+
+    /// A line edge from the origin to (1, 0, 0) (the helper's line runs one unit from its first
+    /// point over `[0, 1]`) and a ray past it: nearest where the ray passes over the edge, at the
+    /// ray's origin where it points away, and on the edge's end where the ray passes beyond it.
+    #[test]
+    fn a_line_edge_is_nearest_a_ray_where_the_ray_passes_it() {
+        let k = Kernel::default();
+        let (b, e) = wire(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), true);
+        let near = |o: Point3, d: Vec3| closest_point_to_ray(&k, &b, e, o, d).unwrap().unwrap();
+
+        // down past the edge, 3 to its side: the edge's middle, under the ray
+        let c = near(Point3::new(0.5, 3.0, 4.0), Vec3::new(0.0, 0.0, -1.0));
+        assert!((c.parameter - 0.5).abs() < 1e-6, "{c:?}");
+        assert!(c.point.distance(Point3::new(0.5, 0.0, 0.0)) < 1e-6, "{c:?}");
+        assert!(
+            c.on_ray.distance(Point3::new(0.5, 3.0, 0.0)) < 1e-6,
+            "{c:?}"
+        );
+        assert!((c.distance - 3.0).abs() < 1e-6, "{c:?}");
+
+        // the same line pointing up, away from the edge: nearest at the ray's origin
+        let c = near(Point3::new(0.5, 3.0, 4.0), Vec3::new(0.0, 0.0, 1.0));
+        assert!(
+            c.on_ray.distance(Point3::new(0.5, 3.0, 4.0)) < 1e-6,
+            "{c:?}"
+        );
+        assert!((c.distance - 5.0).abs() < 1e-6, "{c:?}");
+
+        // a slanted ray crossing the edge's line past its end: nearest at the end
+        let c = near(Point3::new(1.4, 0.0, 8.0), Vec3::new(0.0, 1.0, -2.0));
+        assert!((c.parameter - 1.0).abs() < 1e-6, "{c:?}");
+
+        // a direction of no length or not finite is refused
+        for d in [Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 1.0)] {
+            assert!(matches!(
+                closest_point_to_ray(&k, &b, e, Point3::ZERO, d),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+    }
+
+    /// A cylinder's bottom circle (radius 5, at z = 0) and a ray down the line x = 20, y = 0:
+    /// nearest at (5, 0, 0), 15 from the ray. A ray seen at a slant is nearest where its
+    /// line passes, not at its hit on any one plane.
+    #[test]
+    fn a_circle_edge_is_nearest_a_ray_at_its_closest_approach() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0)
+            .unwrap();
+        let bottom = b
+            .edge_list()
+            .iter()
+            .copied()
+            .find(|&e| {
+                let edge = b.edge(e).unwrap();
+                let c = edge.curve.as_ref().unwrap();
+                let (lo, hi) = (edge.interval.min(), edge.interval.max());
+                let mid = c.evaluate_point(&k, 0.5 * (lo + hi)).unwrap();
+                mid.z.abs() < 1e-9
+            })
+            .expect("the bottom circle");
+        let c = closest_point_to_ray(
+            &k,
+            &b,
+            bottom,
+            Point3::new(20.0, 0.0, 30.0),
+            Vec3::new(0.0, 0.0, -1.0),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(c.point.distance(Point3::new(5.0, 0.0, 0.0)) < 1e-6, "{c:?}");
+        assert!((c.distance - 15.0).abs() < 1e-6, "{c:?}");
+
+        // a ray through (0, 5, 3) along (1, 0, -1): its line meets z = 0 at (3, 5, 0), but the
+        // circle point nearest it is the one its whole line passes closest to
+        let (o, d) = (Point3::new(-3.0, 5.0, 6.0), Vec3::new(1.0, 0.0, -1.0));
+        let c = closest_point_to_ray(&k, &b, bottom, o, d).unwrap().unwrap();
+        let dir = d.unitize().unwrap();
+        let foot = |p: Point3| o + dir * (p - o).dot(dir);
+        let gap = |p: Point3| p.distance(foot(p));
+        assert!((gap(c.point) - c.distance).abs() < 1e-6, "{c:?}");
+        for i in 0..360 {
+            let a = f64::from(i).to_radians();
+            let p = Point3::new(5.0 * a.cos(), 5.0 * a.sin(), 0.0);
+            assert!(c.distance <= gap(p) + 1e-6, "{p:?} is nearer than {c:?}");
+        }
     }
 
     #[test]

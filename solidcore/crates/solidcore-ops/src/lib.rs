@@ -82,8 +82,8 @@ pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
 pub use error::{Error, FitKind, OffsetRefusal, Result, RoomReason, SolidTest, Unblendable};
 pub use measure::{
-    point_distance, Distance, EdgePoint, FaceCentroid, GapSample, MassPropertiesEstimate, Normal,
-    PointClass,
+    point_distance, Distance, EdgePoint, EdgeRayPoint, FaceCentroid, GapSample,
+    MassPropertiesEstimate, Normal, PointClass,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
