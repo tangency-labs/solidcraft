@@ -522,9 +522,51 @@ pub fn export_mesh_noted(b: &solidcraft_kernel::Body, quality: MeshQuality) -> R
 /// mesh (a rotated copy's box, and so its own size, is not the part's).
 fn export_mesh_sized(b: &solidcraft_kernel::Body, size: f64, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
     let spec = quality.spec(size);
-    let made = b.export_mesh(&spec)?;
-    let notes = made.notes(&spec);
-    Ok((made.mesh, notes))
+    let (mesh, stats) = b.export_mesh(&spec)?;
+    Ok((mesh, mesh_notes(&stats, &spec)))
+}
+
+/// A line for each face the mesh path left short of its shape or its tolerance, and each edge
+/// whose sampling stopped off its chord tolerance: what an export reports as warnings, so a
+/// mesh that falls short of its spec is never written silently. `spec` is the spec it was
+/// meshed to.
+fn mesh_notes(stats: &solidcraft_kernel::PlanStats, spec: &solidcraft_kernel::MeshSpec) -> Vec<String> {
+    let mut notes = Vec::new();
+    for u in &stats.unshaped {
+        let limits = if u.limits.is_empty() {
+            String::from("nothing stopped it")
+        } else {
+            u.limits.iter().map(|l| format!("{l:?}")).collect::<Vec<_>>().join(", ")
+        };
+        // A bound can stop the shaping (too many points, a side kept whole) after every
+        // triangle already keeps the angle: that face is not short of it.
+        notes.push(if u.smallest_angle < spec.min_angle {
+            format!("face {}: smallest angle {:.2}°, short of the {}° asked (stopped by: {limits})", u.face, u.smallest_angle, spec.min_angle)
+        } else {
+            format!(
+                "face {}: its shaping stopped at a bound ({limits}) with the {}° asked reached (smallest angle {:.2}°)",
+                u.face, spec.min_angle, u.smallest_angle
+            )
+        });
+    }
+    for o in &stats.over_tolerance {
+        let caps = o.caps.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ");
+        let how = if o.within { "still within it" } else { "past it" };
+        notes.push(format!(
+            "face {}: its refinement stopped at a bound ({caps}); its triangles lie up to {:.3e} mm off the surface, {how} (chord tolerance {:.3e} mm{})",
+            o.face,
+            o.sag,
+            o.tol,
+            if o.unmeasured > 0 { format!(", {} middles unmeasured", o.unmeasured) } else { String::new() }
+        ));
+    }
+    for e in stats.edges_capped.iter().filter(|e| !e.within) {
+        notes.push(format!(
+            "edge {}: its sampling stopped at a bound ({:?}); its chords lie up to {:.3e} mm off the curve, past the {:.3e} mm chord tolerance",
+            e.edge, e.cap, e.sag, e.tol
+        ));
+    }
+    notes
 }
 
 /// The display mesh of a body at `quality`'s chord ([`solidcraft_kernel::Body::mesh`]): for the
@@ -800,18 +842,70 @@ fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQ
     Ok(ObjFiles { warnings, ..obj_files(&bodies, mtl_name) })
 }
 
-/// A body's export mesh of `body` (`b`'s body, or the same showing its part's mesh, as
-/// [`shared_placements`] gives it), its chord from `size` ([`export_mesh_sized`]), with its
-/// notes, each led by the body's name.
-fn body_mesh(b: &solidcraft_doc::ModelBody, (body, size): &(solidcraft_kernel::Body, f64), quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
-    let (mesh, notes) = export_mesh_sized(body, *size, quality)?;
+/// A body's export mesh as [`shared_placements`] gives it: its part's mesh placed
+/// ([`PartMesh::placed`]) for a placement of a part, else its own ([`export_mesh_sized`]), its
+/// chord from `size`, with its notes, each led by the body's name.
+fn body_mesh(b: &solidcraft_doc::ModelBody, (body, size, part): &Placed, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    let placed = match part {
+        Some((part, rel)) => part.placed(&quality.spec(*size), rel)?,
+        None => None,
+    };
+    let (mesh, notes) = match placed {
+        Some(placed) => placed,
+        None => export_mesh_sized(body, *size, quality)?,
+    };
     Ok((mesh, notes.into_iter().map(|n| format!("{}: {n}", b.name)).collect()))
+}
+
+/// A body of an export as it is meshed ([`shared_placements`]): the body, the size its chord is
+/// taken from, and for a placement of a part, the part's meshes and the placement relative to
+/// the part's first.
+type Placed = (solidcraft_kernel::Body, f64, Option<(std::sync::Arc<PartMesh>, solidcraft_doc::Mat)>);
+
+/// A part's export meshes (its first placement's body), made once for all its placements, by
+/// spec: asked again, the same mesh without meshing again. The lock is held while meshing, so
+/// placements asking for the mesh wait for that one mesh rather than make it too.
+struct PartMesh {
+    original: solidcraft_kernel::Body,
+    made: std::sync::Mutex<Vec<((u64, Option<u64>, u64), std::sync::Arc<(Mesh, solidcraft_kernel::PlanStats)>)>>,
+}
+
+/// Meshes a [`PartMesh`] keeps at most (the oldest goes first).
+const PART_MESHES: usize = 4;
+
+impl PartMesh {
+    fn new(original: solidcraft_kernel::Body) -> Self {
+        PartMesh { original, made: std::sync::Mutex::new(Vec::new()) }
+    }
+
+    /// The part's mesh to `spec` ([`solidcraft_kernel::Body::export_mesh`]), made now or kept.
+    fn mesh(&self, spec: &solidcraft_kernel::MeshSpec) -> Result<std::sync::Arc<(Mesh, solidcraft_kernel::PlanStats)>> {
+        let make = || self.original.export_mesh(spec).map(std::sync::Arc::new);
+        let Ok(mut made) = self.made.lock() else { return Ok(make()?) };
+        let key = (spec.chord.to_bits(), spec.size.map(f64::to_bits), spec.min_angle.to_bits());
+        if let Some((_, m)) = made.iter().find(|(k, _)| *k == key) {
+            return Ok(m.clone());
+        }
+        let m = make()?;
+        if made.len() >= PART_MESHES {
+            made.remove(0);
+        }
+        made.push((key, m.clone()));
+        Ok(m)
+    }
+
+    /// The part's mesh to `spec`, moved by `rel` ([`solidcraft_kernel::placed_mesh`]), with its
+    /// notes; `None` when `rel` is no rotation and translation (the placement is meshed on its own).
+    fn placed(&self, spec: &solidcraft_kernel::MeshSpec, rel: &solidcraft_doc::Mat) -> Result<Option<(Mesh, Vec<String>)>> {
+        let made = self.mesh(spec)?;
+        Ok(solidcraft_kernel::placed_mesh(&made.0, rel).map(|m| (m, mesh_notes(&made.1, spec))))
+    }
 }
 
 /// The bodies of an export as they are meshed, each with the size its chord is taken from. Each
 /// placement of a component's body (a world state's computed placement) shows the mesh of the
-/// first placement of that body in `sel`, placed ([`solidcraft_kernel::Body::with_display_share`],
-/// the first placement through it too), and takes that placement's size: every placement of one
+/// first placement of that body in `sel`, placed ([`PartMesh`], the first placement through it
+/// too), and takes that placement's size: every placement of one
 /// part asks for one spec, so the part is meshed once and its copies are those triangles, moved.
 /// The mesh path is not the same under a move to the bit: a copy's record is the part's moved,
 /// rounded (a rational form's weighted points round as they move), and its shaping can take
@@ -820,32 +914,31 @@ fn body_mesh(b: &solidcraft_doc::ModelBody, (body, size): &(solidcraft_kernel::B
 /// one mesh rather than make it again; other parts are meshed on other threads meanwhile. Any
 /// other body is meshed as it is at its own size, and so is a placement that is not its first
 /// placement moved ([`placed_vertices_match`]).
-fn shared_placements(sel: &[&solidcraft_doc::ModelBody]) -> Vec<(solidcraft_kernel::Body, f64)> {
-    type Leader = (solidcraft_kernel::DisplayShare, solidcraft_doc::Mat, f64);
+fn shared_placements(sel: &[&solidcraft_doc::ModelBody]) -> Vec<Placed> {
+    type Leader = (std::sync::Arc<PartMesh>, solidcraft_doc::Mat, f64);
     let mut leaders: std::collections::BTreeMap<(String, u64), Leader> = std::collections::BTreeMap::new();
     sel.iter()
         .map(|b| {
-            let own = (b.body.clone(), b.body.size());
+            let own = (b.body.clone(), b.body.size(), None);
             let (Some(name), key) = (b.source_name.as_ref(), b.source_key()) else { return own };
             if key == 0 || b.body.is_mesh() || b.body.record().vertices.is_empty() {
                 return own;
             }
             match leaders.get(&(name.clone(), key)) {
                 None => {
-                    let share = solidcraft_kernel::DisplayShare::new(b.body.clone());
+                    let share = std::sync::Arc::new(PartMesh::new(b.body.clone()));
                     let size = b.body.size();
-                    let first = b.body.clone().with_display_share(&share, solidcraft_doc::IDENTITY);
-                    leaders.insert((name.clone(), key), (share, b.source_transform, size));
-                    (first, size)
+                    leaders.insert((name.clone(), key), (share.clone(), b.source_transform, size));
+                    (b.body.clone(), size, Some((share, solidcraft_doc::IDENTITY)))
                 }
                 Some((share, first, size)) => {
                     let Some(rel) = solidcraft_doc::mat_inverse(first).map(|inv| solidcraft_doc::mat_mul(&b.source_transform, &inv)) else {
                         return own;
                     };
-                    if !placed_vertices_match(share.original(), &b.body, &rel) {
+                    if !placed_vertices_match(&share.original, &b.body, &rel) {
                         return own;
                     }
-                    (b.body.clone().with_display_share(share, rel), *size)
+                    (b.body.clone(), *size, Some((share.clone(), rel)))
                 }
             }
         })
@@ -883,10 +976,10 @@ fn placed_vertices_match(original: &solidcraft_kernel::Body, copy: &solidcraft_k
 /// then. An assembly of many bodies meshed on one core took most of the export's time.
 fn per_placed_body<R: Send>(
     sel: &[&solidcraft_doc::ModelBody],
-    f: impl Fn(&solidcraft_doc::ModelBody, &(solidcraft_kernel::Body, f64)) -> Result<R> + Sync,
+    f: impl Fn(&solidcraft_doc::ModelBody, &Placed) -> Result<R> + Sync,
 ) -> Result<Vec<R>> {
     let meshed = shared_placements(sel);
-    let pairs: Vec<(&solidcraft_doc::ModelBody, &(solidcraft_kernel::Body, f64))> = sel.iter().copied().zip(&meshed).collect();
+    let pairs: Vec<(&solidcraft_doc::ModelBody, &Placed)> = sel.iter().copied().zip(&meshed).collect();
     solidcraft_kernel::map_on_threads(&pairs, EXPORT_THREADS, |(b, body)| f(b, body))
         .into_iter()
         .zip(sel)
@@ -1051,12 +1144,7 @@ const EXPORT_THREADS: usize = 16;
 
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`
 /// each triangle keeps the B-rep face it came from.
-fn mesh_object(
-    b: &solidcraft_doc::ModelBody,
-    body: &(solidcraft_kernel::Body, f64),
-    tagged: bool,
-    quality: MeshQuality,
-) -> Result<(MeshObject, Vec<String>)> {
+fn mesh_object(b: &solidcraft_doc::ModelBody, body: &Placed, tagged: bool, quality: MeshQuality) -> Result<(MeshObject, Vec<String>)> {
     let (m, notes) = body_mesh(b, body, quality)?;
     let eps = weld_eps(&b.body);
     // Faces with colours of their own tag their triangles.
@@ -1702,6 +1790,61 @@ mod tests {
     /// rounded to `f32` (a relative 6e-8 of each coordinate, on parts of 10 to 30 mm with sides
     /// of a tenth of a millimetre or more: under 1e-4 degrees).
     const F32_ANGLE_SLACK: f64 = 1e-3;
+
+    /// A part's export mesh placed ([`PartMesh::placed`]) is its first placement's, moved: the
+    /// same triangles, its points moved by the placement, the same notes, and the part meshed
+    /// once for every placement.
+    #[test]
+    fn a_placed_copys_export_mesh_is_its_originals_moved() {
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(30.0, 20.0, 10.0)).unwrap();
+        let share = PartMesh::new(part.clone());
+        let (angle, shift) = (0.7f64, Vec3::new(50.0, -20.0, 5.0));
+        let (c, s) = (angle.cos(), angle.sin());
+        let t = [[c, s, 0., 0.], [-s, c, 0., 0.], [0., 0., 1., 0.], [shift.x, shift.y, shift.z, 1.]];
+        let spec = solidcraft_kernel::MeshSpec::chord(part.size() * 2e-4);
+        let (original, stats) = part.export_mesh(&spec).unwrap();
+        for _ in 0..2 {
+            let (m, notes) = share.placed(&spec, &t).unwrap().unwrap();
+            assert_eq!(m.triangles, original.triangles);
+            assert_eq!(m.tri_face, original.tri_face);
+            assert_eq!(notes, mesh_notes(&stats, &spec));
+            let placed = solidcraft_kernel::placed_mesh(&original, &t).unwrap();
+            let far = m.positions.iter().zip(&placed.positions).map(|(p, q)| p.dist(*q)).fold(0.0, f64::max);
+            assert!(far < 1e-9, "{far}");
+        }
+        assert_eq!(share.made.lock().unwrap().len(), 1, "meshed once for both copies");
+    }
+
+    /// A part keeps its export meshes by spec: asked again, the same mesh without meshing again;
+    /// another spec meshes anew.
+    #[test]
+    fn a_part_keeps_its_export_meshes_by_spec() {
+        let kept = PartMesh::new(solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(30.0, 20.0, 10.0)).unwrap());
+        let (a, b) =
+            (solidcraft_kernel::MeshSpec::chord(0.01), solidcraft_kernel::MeshSpec { min_angle: 20.0, ..solidcraft_kernel::MeshSpec::chord(0.01) });
+        let first = kept.mesh(&a).unwrap();
+        let again = kept.mesh(&a).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first, &again));
+        assert_eq!(kept.made.lock().unwrap().len(), 1, "one spec, one meshing");
+        let _ = kept.mesh(&b).unwrap();
+        assert_eq!(kept.made.lock().unwrap().len(), 2);
+    }
+
+    /// A face left short of the angle is said to be short of it; one whose shaping a bound stopped
+    /// after it reached the angle is said to have reached it. A mesh with nothing to report has no notes.
+    #[test]
+    fn notes_say_short_only_for_a_face_under_the_angle() {
+        let spec = solidcraft_kernel::MeshSpec::chord(0.01);
+        assert!(mesh_notes(&solidcraft_kernel::PlanStats::default(), &spec).is_empty());
+        let unshaped =
+            |face: usize, smallest_angle: f64| solidcore_tess::Unshaped { face, smallest_angle, limits: vec![solidcore_tess::ShapeLimit::Rounds] };
+        let stats = solidcraft_kernel::PlanStats { unshaped: vec![unshaped(3, 18.5), unshaped(7, 27.25)], ..Default::default() };
+        let notes = mesh_notes(&stats, &spec);
+        assert_eq!(notes.len(), 2);
+        assert!(notes[0].starts_with("face 3: smallest angle 18.50°, short of the 25° asked"), "{}", notes[0]);
+        assert!(!notes[1].contains("short"), "{}", notes[1]);
+        assert!(notes[1].contains("face 7") && notes[1].contains("reached") && notes[1].contains("27.25°"), "{}", notes[1]);
+    }
 
     /// A 10 × 20 × 30 box exported as STL has no triangle sharper than the mesh export's smallest
     /// angle: every face goes through the mesh path (`solidcore_tess::mesh`), planar ones too.
