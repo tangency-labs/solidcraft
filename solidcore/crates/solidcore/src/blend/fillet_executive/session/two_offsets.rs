@@ -35,6 +35,14 @@ fn invalid(what: &'static str) -> SolidError {
     )
 }
 
+/// The support a chamfer's first size is along: one of its edge's two faces, as the
+/// caller named it, or support 1 or 2 of the edge's blend edge use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Along {
+    Support { second: bool },
+    Face(crate::topology::FaceId),
+}
+
 /// The tangency of a solver these prepare, radians: 10 degrees.
 const TANGENCY: f64 = 10.0 * (crate::math::PI / 180.0);
 
@@ -280,52 +288,44 @@ impl FilletSession<'_> {
             .map(|_| ())
     }
 
-    /// `edges`, `sizes` and `along` with the edges the chamfers run on into across seams'
-    /// vertices ([`FilletParametersAccess::parameters_runs_on_across_seams`]): each takes
-    /// its picked edge's size along the same face (support 1 of the picked edge when `along`
-    /// is empty), so a chamfer never ends at a seam (#2864). The lists unchanged where none
-    /// runs on.
+    /// `edges`, `sizes` and the support each edge's first size is along, with the edges the
+    /// chamfers run on into across seams' vertices (`super::runs_on_across_seams`): each
+    /// takes its picked edge's size along the same face, so a chamfer never ends at a seam
+    /// (#2864). Where `along` is empty a picked edge's size is along its support 1, and a
+    /// run-on edge's along its support 1 or, where its blend edge use lies on the picked
+    /// edge's other face, its support 2.
     fn chamfers_run_on(
         &mut self,
         k: &Kernel,
         edges: &[EdgeId],
         sizes: &[ChamferSize],
         along: &[crate::topology::FaceId],
-    ) -> Result<(Vec<EdgeId>, Vec<ChamferSize>, Vec<crate::topology::FaceId>)> {
-        let objects: Vec<_> = edges
-            .iter()
-            .map(|&id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)))
-            .collect();
-        let run_ons = self.objects.parameters_runs_on_across_seams(
+    ) -> Result<(Vec<EdgeId>, Vec<ChamferSize>, Vec<Along>)> {
+        let run_ons = super::runs_on_across_seams(
             k,
-            &objects,
+            self.objects.target,
+            edges,
             crate::math::rad_to_deg(TANGENCY),
         )?;
-        let (mut edges, mut sizes, mut along) = (edges.to_vec(), sizes.to_vec(), along.to_vec());
-        if run_ons.is_empty() {
-            return Ok((edges, sizes, along));
-        }
-        if along.is_empty() {
-            for &id in &edges {
-                let u0 = self.blendable_edgeuse(k, id)?;
-                along.push(
-                    eu1::face(self.target(), u0)?
-                        .ok_or_else(|| invalid("the edge use has no face"))?,
-                );
-            }
-        }
+        let (mut edges, mut sizes) = (edges.to_vec(), sizes.to_vec());
+        let mut supports: Vec<Along> = if along.is_empty() {
+            vec![Along::Support { second: false }; edges.len()]
+        } else {
+            along.iter().map(|&face| Along::Face(face)).collect()
+        };
         for run_on in run_ons {
-            let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)) = run_on.edge
-            else {
-                return Err(invalid("a run-on edge is not in the target"));
-            };
-            edges.push(id);
+            edges.push(run_on.edge);
             if sizes.len() != 1 {
                 sizes.push(value(&sizes, run_on.source)?);
             }
-            along.push(value(&along, run_on.source)?);
+            supports.push(match value(&supports, run_on.source)? {
+                Along::Face(face) => Along::Face(face),
+                Along::Support { second } => Along::Support {
+                    second: second != run_on.flipped,
+                },
+            });
         }
-        Ok((edges, sizes, along))
+        Ok((edges, sizes, supports))
     }
 
     /// [`Self::prepare_chamfers`], with each edge's first size along the face `along` names
@@ -450,10 +450,10 @@ impl FilletSession<'_> {
             let target: &crate::Brep = &*self.objects.target;
             let u1 =
                 eu1::radial(target, u0)?.ok_or_else(|| invalid("the edge's radial edge use"))?;
-            // the support the first size is along: 1 unless `along` names support 2's face
-            let on_second = match along.get(index) {
-                None => false,
-                Some(&face) => {
+            // the support the first size is along: 1 unless `along` names support 2
+            let on_second = match value(along, index)? {
+                Along::Support { second } => second,
+                Along::Face(face) => {
                     let face_of = |u| -> Result<Option<crate::topology::FaceId>> {
                         Ok(match eu1::faceuse(target, u)? {
                             Some(fu) => target.faceuse(fu)?.face,
