@@ -64,19 +64,23 @@ pub fn face_on(k: &mut Kernel, b: &mut Brep, surface: Surface, bx: &Extent2d) ->
 
 const OP_TURN: &str = "topology::brep::sheet::turn_over_shell";
 
-/// Turns the open shell `s` over: each of its faces ([`turn_over`]), so each face's side
-/// against its surface is the other one, its surface, loops and edges as they were. Turning a
-/// shell over twice gives it back exactly.
+/// Turns the open shell `s` over: each of its faces ([`turn_over`], `SmFace::SwapUV`), so each
+/// face's side is the other one, its edges as they were; the body stays valid. Turning a shell
+/// over twice gives it back.
+///
+/// A loop of [`turn_over`], not `SmBrep::SwapUV` or `OrientSheetSurfaces(same = false)`: those
+/// ignore a face's failed swap (upstream's `sm_SwapFaceUV` is void), and a turn-over that stops
+/// part way must say so and leave the shell as it was to the caller's rollback.
 ///
 /// # Errors
 ///
 /// [`SolidError::Unsupported`] for a closed shell (one whose faces' other uses lie in another
 /// shell: turned over, the body would be inside out), before anything changes;
 /// [`SolidError::InvalidInput`] for a shell of no faces; those of [`turn_over`].
-pub fn turn_over_shell(b: &mut Brep, s: ShellId) -> Result<()> {
+pub fn turn_over_shell(k: &Kernel, b: &mut Brep, s: ShellId) -> Result<()> {
     let faces = open_shell_faces(b, s)?;
     for f in faces {
-        turn_over(b, f)?;
+        turn_over(k, b, f)?;
     }
     b.refresh_cached_topology();
     Ok(())
@@ -88,7 +92,7 @@ pub fn turn_over_shell(b: &mut Brep, s: ShellId) -> Result<()> {
 ///
 /// [`SolidError::Unsupported`] for a body with a closed shell (a solid), before anything
 /// changes; those of [`turn_over`].
-pub fn turn_over_sheet(b: &mut Brep) -> Result<()> {
+pub fn turn_over_sheet(k: &Kernel, b: &mut Brep) -> Result<()> {
     let mut faces = Vec::new();
     let shells: Vec<ShellId> = b.shells().ids().collect();
     for s in shells {
@@ -97,7 +101,7 @@ pub fn turn_over_sheet(b: &mut Brep) -> Result<()> {
         }
     }
     for f in faces {
-        turn_over(b, f)?;
+        turn_over(k, b, f)?;
     }
     b.refresh_cached_topology();
     Ok(())

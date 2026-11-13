@@ -15,7 +15,7 @@
 //! | [`create_oriented_trim_boundary`], [`OrientedTrimBoundary`] | `SmFace::CreateOrientedTrimBoundary` |
 //! | [`find_if_rectangular_trim`], [`RectangularTrim`] | `SmFace::FindIfRectangularTrim`          |
 //! | [`flip_face_orientation`]                    | `SmFace::FlipFaceOrientation`                |
-//! | [`turn_over`]                                | (none: a face of a sheet turned over)        |
+//! | [`turn_over`]                                | (none: [`swap_uv`] on a face of one shell)   |
 //! | [`set_surface`], [`set_surface_notified`]    | `SmFace::SetSurface`                         |
 //! | [`insert_loop`]                              | `SmFace::InsertLoop`                         |
 //! | [`remove_loop`]                              | `SmFace::RemoveLoop`                         |
@@ -1148,57 +1148,12 @@ pub fn find_if_rectangular_trim(
 /// [`fp2::loops`]; [`SolidError::Unported`] (`SmFace::Notify`).
 pub fn flip_face_orientation(b: &mut Brep, f: FaceId) -> Result<()> {
     face_notify(b, f, NotifyOperation::PreEdit)?;
-    let (top, bot) = upward_and_mate(b, f)?;
-    make_mate_upward(b, f, bot)?;
-    // and the two uses' orientations
-    b.faceuse_mut(top)?.orientation = OrientType::Opposite;
-    b.faceuse_mut(bot)?.orientation = OrientType::Same;
-    face_notify(b, f, NotifyOperation::PostEdit)?;
-    Ok(())
-}
-
-/// (Not upstream) Turns face `f` over: the mate of its upward face use becomes the upward
-/// one, and each loop's other loop use (the new upward use's) its primary. Each use keeps
-/// its orientation, loop uses and edge uses, so the face's side against its surface (the
-/// upward use's orientation) is the other one and each use is as consistent as it was: a
-/// valid face is valid after. Turning a face over twice gives it back exactly.
-/// [`flip_face_orientation`] is this with the two orientations rewritten, which keeps the
-/// side and leaves the uses inconsistent (a repair).
-///
-/// Only a face both of whose uses lie in one shell (a face of a sheet) is turned: a face
-/// between two shells has the side its material gives it.
-///
-/// # Errors
-///
-/// [`SolidError::InvalidInput`] for a face whose uses lie in two shells; those of
-/// [`flip_face_orientation`].
-pub fn turn_over(b: &mut Brep, f: FaceId) -> Result<()> {
-    let (top, bot) = upward_and_mate(b, f)?;
-    if b.faceuse(top)?.shell != b.faceuse(bot)?.shell {
-        return Err(SolidError::invalid_input(
-            OP,
-            "turning over a face between two shells, whose side its material gives",
-        ));
-    }
-    face_notify(b, f, NotifyOperation::PreEdit)?;
-    make_mate_upward(b, f, bot)?;
-    face_notify(b, f, NotifyOperation::PostEdit)?;
-    Ok(())
-}
-
-/// The face's upward use and its mate.
-fn upward_and_mate(b: &Brep, f: FaceId) -> Result<(FaceuseId, FaceuseId)> {
     let top = fp2::upward_faceuse(b, f)?
         .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
     let bot = eu1::faceuse_mate(b, top)?.ok_or_else(|| {
         SolidError::topology_missing(OP, "the mate of the face's upward face use")
     })?;
-    Ok((top, bot))
-}
 
-/// The edit [`flip_face_orientation`] and [`turn_over`] share: each loop's other loop use
-/// made its primary, and `bot`, the mate of the face's upward use, made the upward one.
-fn make_mate_upward(b: &mut Brep, f: FaceId, bot: FaceuseId) -> Result<()> {
     // Flip ordering of loopuses within the loops
     for l in fp2::loops(b, f, false, None)? {
         let lu1_ = b
@@ -1212,9 +1167,43 @@ fn make_mate_upward(b: &mut Brep, f: FaceId, bot: FaceuseId) -> Result<()> {
         b.loop_mut(l)?.loopuse = Some(lu2_);
     }
 
-    // Flip ordering of faceuses within the face
+    // Flip ordering of faceuses within the face and their orientation.
     b.face_mut(f)?.faceuse = Some(bot);
+    b.faceuse_mut(top)?.orientation = OrientType::Opposite;
+    b.faceuse_mut(bot)?.orientation = OrientType::Same;
+
+    face_notify(b, f, NotifyOperation::PostEdit)?;
     Ok(())
+}
+
+/// (Not upstream) Turns face `f` over: [`swap_uv`] (`SmFace::SwapUV`), which swaps the
+/// surface's `u` and `v` (its natural normal the other way), mirrors the UV trims and makes
+/// the other face use and loop uses primary with the orientations to match, so the face's
+/// side is the other one and a valid face stays valid (its upward use the Same one, its loops
+/// counter-clockwise about the new normal). The surface is swapped exactly, for every kind
+/// [`swap_uv`] takes; the trims are mirrored about `u = v`. Turning a face over twice gives its
+/// uses, loops and surface back.
+///
+/// Only a face both of whose uses lie in one shell (a face of a sheet) is turned: a face
+/// between two shells has the side its material gives it.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face whose uses lie in two shells, or without face use
+/// or mate; those of [`swap_uv`].
+pub fn turn_over(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
+    let top = fp2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
+    let bot = eu1::faceuse_mate(b, top)?.ok_or_else(|| {
+        SolidError::topology_missing(OP, "the mate of the face's upward face use")
+    })?;
+    if b.faceuse(top)?.shell != b.faceuse(bot)?.shell {
+        return Err(SolidError::invalid_input(
+            OP,
+            "turning over a face between two shells, whose side its material gives",
+        ));
+    }
+    swap_uv(k, b, f)
 }
 
 /// `SetSurface`: gives the face `surface` (owned by the face, `this`) and its natural
