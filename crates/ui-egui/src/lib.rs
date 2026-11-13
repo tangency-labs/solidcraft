@@ -3766,6 +3766,9 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // The unit of an imported mesh is asked on the screen the import starts: the
+                // start page asks it too, or the file would wait for an answer nobody sees (#15598).
+                mesh_units::show(self, ui.ctx());
                 return;
             }
         }

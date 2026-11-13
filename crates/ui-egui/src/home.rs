@@ -716,6 +716,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !app.help.menu
         && !egui::Popup::is_any_open(ui.ctx())
         && app.issue_report.draft.is_none()
+        // A file waiting for its unit is asked on this page too (#15598): its Escape gives the
+        // question up, and does not close the page behind it.
+        && app.mesh_units.is_none()
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.home.open = false;
