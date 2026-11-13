@@ -2048,6 +2048,67 @@ fn measure_items() {
     assert!(s.execute("inspect.measure", &json!({"items": [{"type": "nonsense"}]})).is_err());
 }
 
+/// The closest distance between a face and an edge, line or face that ends (#16270, #16271): a
+/// line is not counted as running on to the face's plane, and two faces meet where they cross
+/// or come nearest along an edge, not only at a corner. Values worked out by hand on a
+/// 60 × 40 × 10 block whose top face is z = 10, x from -30 to 30, y from -20 to 20.
+#[test]
+fn measure_closest_between_items_that_end() {
+    let block = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "corner": [-30, -20, 0], "name": "Block", "body_name": "Block"}));
+    };
+    let top = json!({"type": "face", "body": "Block", "point": [20, 15, 10]});
+    let min = |r: &Value| r["min"].as_f64().unwrap_or(f64::NAN);
+    let at = |r: &Value, k: &str| -> Vec3 { serde_json::from_value(r[k].clone()).unwrap_or_else(|e| panic!("{k}: {e} in {r}")) };
+    // A sketch line on the YZ plane (sketch y is world z): above the face, beside it, past its edge.
+    for (points, want) in [
+        (json!([[10, 25], [10, 50]]), 15.0),
+        (json!([[10, 25], [30, 45]]), 15.0),
+        (json!([[30, 25], [30, 50]]), (10.0f64 * 10.0 + 15.0 * 15.0).sqrt()),
+        (json!([[30, 0], [30, 50]]), 10.0),
+        (json!([[10, 0], [10, 50]]), 0.0),
+        (json!([[-10, 30], [10, 30]]), 20.0),
+    ] {
+        let mut s = Session::default();
+        block(&mut s);
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Line"}));
+        run(&mut s, "sketch.line", json!({"points": points}));
+        let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "sketch_curve", "sketch": 2, "id": "l1"}, top]}));
+        assert!((min(&r) - want).abs() < 1e-9, "{points}: want {want}, {r}");
+        assert!((at(&r, "from").dist(at(&r, "to")) - want).abs() < 1e-9, "{points}: {r}");
+    }
+    // A body's straight edge 15 above the face: from its lower end straight down.
+    let mut s = Session::default();
+    block(&mut s);
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 1, "width": 1, "height": 25, "corner": [0, 10, 25], "operation": "new", "name": "Probe", "body_name": "Probe"}),
+    );
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "edge", "body": "Probe", "point": [0, 10, 40]}, top]}));
+    assert!((min(&r) - 15.0).abs() < 1e-9 && at(&r, "from").dist(Vec3::new(0.0, 10.0, 25.0)) < 1e-9, "{r}");
+    // The side face (x = 1) of a 2 wide fin, against the block's top face.
+    for (width, corner, pick, want) in [
+        (20, [-1, -10, -15], [1, 0, 5], 0.0),
+        (60, [-1, -30, -15], [1, 0, 5], 0.0),
+        (60, [-1, -30, 10], [1, 0, 30], 0.0),
+        (60, [-1, -30, 13], [1, 0, 33], 3.0),
+        (20, [-1, -10, 13], [1, 0, 33], 3.0),
+    ] {
+        let mut s = Session::default();
+        block(&mut s);
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 2, "width": width, "height": 40, "corner": corner, "operation": "new", "name": "Fin", "body_name": "Fin"}),
+        );
+        let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "face", "body": "Fin", "point": pick}, top]}));
+        assert!((min(&r) - want).abs() < 1e-9, "fin {width} at {corner:?}: want {want}, {r}");
+        let (from, to) = (at(&r, "from"), at(&r, "to"));
+        assert!((from.x - 1.0).abs() < 1e-9 && (to.z - 10.0).abs() < 1e-9 && to.y.abs() <= 20.0 + 1e-9, "fin {width} at {corner:?}: {r}");
+    }
+}
+
 /// Section Analysis sets and clears the view cut without touching the design or history.
 #[test]
 fn section_analysis() {

@@ -284,6 +284,15 @@ impl ModelBody {
         out
     }
 
+    /// The display edges that are one edge to the user with display edge `edge`, sorted, `edge`
+    /// among them: the pieces a seam of a curved surface splits it into, as a sphere's seam
+    /// ending on a slot's rim splits that rim's arc in two ([`kernel::whole_edge`], decided from
+    /// the exact record). The kernel names them by the record's edge indices, which are the
+    /// display edges'. Just `edge` for a mesh body, a seam or an edge the body does not have.
+    pub fn whole_edge(&self, edge: usize) -> Vec<usize> {
+        kernel::whole_edge(&self.body, edge)
+    }
+
     /// The display plan of this body at the viewport's display quality
     /// ([`crate::display_quality::current`]; at Normal, the same tolerance and angle as
     /// [`ModelBody::mesh`]), made once per level; `None` when the body has no plan (a mesh body,

@@ -14,7 +14,9 @@ use solidcraft_engine::schema::edit::PlaybackAction;
 use crate::SolveApp;
 use crate::history_bar;
 use crate::ui_kit::Item;
+use solidcraft_engine::doc::Document;
 use solidcraft_theme::Tokens;
+use std::sync::Arc;
 
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
@@ -199,7 +201,7 @@ pub(crate) fn follow_view_pick(app: &mut SolveApp) {
 
 // Snapshot only the data used by timeline interactions. Cloning FeatureKind here would
 // also copy imported mesh vertices and triangles on every frame.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimelineKind {
     Sketch,
     Profile(SketchId),
@@ -653,6 +655,12 @@ pub(crate) fn warning_text(result: &FeatureResult) -> Option<String> {
     }
 }
 
+/// Whether a feature has a warning mark, as [`warning_text`] would say, without writing it:
+/// the bar asks this of every chip every frame.
+pub(crate) fn has_warning(result: &FeatureResult) -> bool {
+    result.import_report.as_deref().is_some_and(|r| !r.issues.is_empty()) || result.warning.is_some()
+}
+
 /// The status line after an open or an import with warnings: their summary. The import made
 /// the reply's `feature`; a STEP file opened as a design is the design's one import. `None`
 /// without an import's warnings.
@@ -745,8 +753,9 @@ pub(crate) fn sketch_plane_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64
 }
 
 /// Shift+click on a feature: select the features from the anchor (the last feature clicked, or
-/// the last selected one) to this one. `order` is the timeline as drawn this frame, taken before
-/// drawing so the range never mixes two orders. Ctrl as well adds the range to the selection.
+/// the last selected one) to this one. `order` is the timeline as drawn this frame, taken from
+/// the list it was drawn from so the range never mixes two orders. Ctrl as well adds the range to
+/// the selection.
 fn select_range(app: &mut SolveApp, order: &[u64], id: u64, add: bool) {
     let anchor = app.tree.timeline_anchor.clone().or_else(|| selected_feature_ids(app).last().map(|f| anchor_key(*f)));
     let from = anchor.and_then(|key| order.iter().position(|f| anchor_key(*f) == key));
@@ -941,6 +950,147 @@ const BAR_HANDLES: history_bar::Handles<'static> = history_bar::Handles { marker
 /// A feature as the bar draws it: id, name, icon, suppressed, type name, kind.
 type BarFeature = (u64, String, &'static str, bool, &'static str, TimelineKind);
 
+/// What the bar reads from one feature: id, name, icon, suppressed, type name and kind. The rows
+/// are built from it and checked against it, so the check compares exactly what the build reads.
+fn bar_feature(f: &solidcraft_engine::doc::Feature) -> (u64, &str, &'static str, bool, &'static str, TimelineKind) {
+    (f.id, f.name.as_str(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), TimelineKind::of(&f.kind))
+}
+
+/// What tells the bar that the document may have changed since its rows were last checked: the
+/// same kind of key as the vertical History's row plan (`PlanKey`), without the marker and the
+/// group count, which these rows do not depend on. The design changes through commands, which
+/// count the session's revision up; the document's address and the feature count guard edits made
+/// in place without one. The address is a plain number, never a pointer that is held: a weak
+/// pointer here would make `Session::doc_mut` (`Arc::make_mut`) move the document to a new address
+/// instead of editing it in place, which is why the engine drops its own weak caches before an
+/// edit (#7502).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct BarSeen {
+    /// Another design in the same window.
+    session: u64,
+    revision: u64,
+    document: usize,
+    features: usize,
+}
+
+impl BarSeen {
+    fn of(app: &SolveApp) -> Self {
+        let session = &app.session;
+        Self { session: session.uid, revision: session.revision, document: Arc::as_ptr(&session.doc) as usize, features: session.doc.features.len() }
+    }
+}
+
+/// The bar's features as the design alone gives them, kept in the egui context with the key they
+/// were last checked under ([`BarSeen`]): a long history copied every feature's name, and wrote
+/// every step's handle, on every frame. A frame with the same key takes them as they are. When the
+/// key changes they are checked against the document's features ([`BarRows::describes`]) and built
+/// again only if a feature changed: a counted-up revision (a selection) or a moved document (every
+/// frame of a sketch drag) does not mean one did. Nothing here depends on the theme, the results,
+/// the selection, the marker or the folds.
+struct BarRows {
+    features: Vec<BarFeature>,
+    /// Each feature's handle: `BAR_HANDLES.step` followed by its name.
+    handles: Vec<Arc<str>>,
+    /// Each feature's icon accent, which its type name and icon give
+    /// (`workspace::feature_icon_accent`).
+    accents: Vec<Option<&'static str>>,
+    /// No feature id repeats, so results that line up with the features need no table
+    /// ([`BarResults`]).
+    unique_ids: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times the bar's rows were built.
+    static BAR_ROWS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many times the kept rows were checked against the document, the key having changed.
+    static BAR_ROWS_CHECKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl BarRows {
+    /// The rows for the design as it is: the kept ones under the same key; under another, the
+    /// kept ones again (now under the new key) while they still describe its features.
+    fn cached(app: &SolveApp, ui: &egui::Ui) -> Arc<Self> {
+        let id = egui::Id::unique("sc_history_bar_rows");
+        let seen = BarSeen::of(app);
+        let kept = ui.data(|data| data.get_temp::<(BarSeen, Arc<Self>)>(id));
+        if let Some((was, rows)) = &kept
+            && *was == seen
+        {
+            return rows.clone();
+        }
+        // The key changed: the kept rows still serve if no feature did.
+        let held = kept.map(|(_, rows)| rows).filter(|rows| {
+            #[cfg(test)]
+            BAR_ROWS_CHECKED.with(|checked| checked.set(checked.get() + 1));
+            rows.describes(&app.session.doc)
+        });
+        let rows = held.unwrap_or_else(|| Arc::new(Self::of(app)));
+        ui.data_mut(|data| data.insert_temp(id, (seen, rows.clone())));
+        rows
+    }
+
+    /// Build the rows from the design.
+    fn of(app: &SolveApp) -> Self {
+        #[cfg(test)]
+        BAR_ROWS_BUILT.with(|built| built.set(built.get() + 1));
+        let features: Vec<BarFeature> = app
+            .session
+            .doc
+            .features
+            .iter()
+            .map(|f| {
+                let (id, name, icon, suppressed, ty, kind) = bar_feature(f);
+                (id, name.to_string(), icon, suppressed, ty, kind)
+            })
+            .collect();
+        let handles = features.iter().map(|f| Arc::from(format!("{}{}", BAR_HANDLES.step, f.1))).collect();
+        let accents = features.iter().map(|f| crate::workspace::feature_icon_accent(f.4, f.2)).collect();
+        let mut seen = std::collections::HashSet::with_capacity(features.len());
+        let unique_ids = features.iter().all(|f| seen.insert(f.0));
+        Self { features, handles, accents, unique_ids }
+    }
+
+    /// Whether these rows are the ones [`BarRows::of`] would build from `doc` now, for a frame whose
+    /// key changed. Nothing is allocated. The handles, accents and `unique_ids` follow from the six values compared
+    /// (`feature_icon_accent` reads only its two arguments), so they need no check of their own.
+    fn describes(&self, doc: &Document) -> bool {
+        self.features.len() == doc.features.len()
+            && self.features.iter().zip(&doc.features).all(|(row, f)| (row.0, row.1.as_str(), row.2, row.3, row.4, row.5) == bar_feature(f))
+    }
+}
+
+/// How the bar finds each feature's result this frame: the first result with its id, as
+/// [`result_index`] and `Model::result` find it.
+enum BarResults {
+    /// One result per feature, with its id, at its place, and no id twice: a feature's result is
+    /// the one at its own place, with no table to build.
+    InPlace,
+    /// Otherwise a table built once for the strip: a search per chip made a long timeline cost
+    /// the square of its length every frame.
+    Indexed(std::collections::HashMap<u64, usize>),
+}
+
+impl BarResults {
+    fn of(features: &[BarFeature], unique_ids: bool, results: &[FeatureResult]) -> Self {
+        if unique_ids && results.len() == features.len() && features.iter().zip(results).all(|(f, r)| f.0 == r.id) {
+            Self::InPlace
+        } else {
+            Self::Indexed(result_index(results))
+        }
+    }
+
+    /// The result of the feature `id` at `at` in the design. A feature without a result has
+    /// none; a place that no longer holds this id (a click earlier in the frame ran a command) is
+    /// searched for.
+    fn get<'m>(&self, model: &'m solidcraft_engine::doc::Model, at: usize, id: u64) -> Option<&'m FeatureResult> {
+        match self {
+            Self::InPlace => model.results.get(at).filter(|r| r.id == id).or_else(|| model.result(id)),
+            Self::Indexed(index) => index.get(&id).and_then(|k| model.results.get(*k).filter(|r| r.id == id).or_else(|| model.result(id))),
+        }
+    }
+}
+
 /// The History Play control's names: SolidCraft's commands that play and stop History.
 pub(crate) fn play_labels() -> crate::ui_kit::PlayLabels<'static> {
     crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr("cmd.timeline_play"), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
@@ -997,18 +1147,9 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     bar.steps = shown;
     // The features scroll horizontally in the space right of the playback controls.
     let strip_rect = Rect::from_min_max(pos2(x, r.top()), r.right_bottom());
-    let feats: Vec<BarFeature> = app
-        .session
-        .doc
-        .features
-        .iter()
-        .map(|f| (f.id, f.name.clone(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), TimelineKind::of(&f.kind)))
-        .collect();
-    // The bar's features in the order it draws them, folded ones included: a Shift+click
-    // range runs over these.
-    let order: Vec<u64> = history.view.indices(0, shown).iter().filter_map(|i| feats.get(*i).map(|f| f.0)).collect();
+    let rows = BarRows::cached(app, ui);
     let out = {
-        let mut steps = BarSteps { app: &mut *app, history: &history, strip: &strip, feats: &feats, reveal, marker, marker_view };
+        let mut steps = BarSteps { app: &mut *app, history: &history, strip: &strip, rows: &rows, reveal, marker, marker_view };
         history_bar::strip(ui, &bar, r, strip_rect, ("history_strip", history.within), &mut steps)
     };
     crate::semantic_content::set_timeline_feature_hover(app, out.hovered);
@@ -1022,9 +1163,17 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
             (false, _) => at,
         }
     };
+    // The bar's features in the order it draws them, folded ones included: a Shift+click range
+    // runs over these. Taken once, when a click needs it, from the list this frame drew (never
+    // from the design as the click's command leaves it), so a range never mixes two orders.
+    let mut order: Option<Vec<u64>> = None;
     for action in out.actions {
         match action {
-            history_bar::Action::Select { step, modifiers } => click_feature(app, &order, step, modifiers),
+            history_bar::Action::Select { step, modifiers } => {
+                let order =
+                    order.get_or_insert_with(|| history.view.indices(0, shown).iter().filter_map(|i| rows.features.get(*i).map(|f| f.0)).collect());
+                click_feature(app, order, step, modifiers);
+            }
             history_bar::Action::Edit(id) => app.edit_feature(id),
             // The same menu as the browser's, so the control channel reports it (#10745).
             history_bar::Action::Menu { step, at } => crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: step }),
@@ -1062,7 +1211,7 @@ struct BarSteps<'a> {
     app: &'a mut SolveApp,
     history: &'a crate::timeline_fold::History,
     strip: &'a crate::timeline_fold::Strip,
-    feats: &'a [BarFeature],
+    rows: &'a BarRows,
     /// The slot to scroll into view, until it is.
     reveal: Option<usize>,
     /// The marker's design position, and its slot among the features shown.
@@ -1077,9 +1226,8 @@ impl history_bar::Contents for BarSteps<'_> {
         let (history, strip) = (self.history, self.strip);
         // Each sketch's solve state, read once for the strip (#7245).
         let sketch_states = crate::sketch_state::SketchStates::of(app);
-        // Each feature's result, found once for the strip: a search per chip made a long
-        // timeline cost the square of its length every frame.
-        let results = result_index(&app.session.model.results);
+        // Each feature's result, found once for the strip.
+        let results = BarResults::of(&self.rows.features, self.rows.unique_ids, &app.session.model.results);
         // The features picked in the design or in the open dialog, collected once for the
         // strip: the dialog built its item list again for every chip.
         let feature_of = |selection: &solidcraft_engine::Sel| match selection {
@@ -1130,14 +1278,11 @@ impl history_bar::Contents for BarSteps<'_> {
             };
             // The feature's index in the design.
             let at = history.view.index(i);
-            let Some((id, name, icon, suppressed, ty, kind)) = self.feats.get(at) else {
+            let Some((id, name, icon, suppressed, ty, kind)) = self.rows.features.get(at) else {
                 continue;
             };
             let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
-            // A feature without a result has none; an index that no longer holds this id is
-            // searched for.
-            let res =
-                results.get(id).and_then(|k| app.session.model.results.get(*k).filter(|r| r.id == *id).or_else(|| app.session.model.result(*id)));
+            let res = results.get(&app.session.model, at, *id);
             let rolled = i >= self.marker_view;
             let tip = || {
                 let mut tip = feature_status_text(name, ty, res);
@@ -1162,7 +1307,7 @@ impl history_bar::Contents for BarSteps<'_> {
                 slot: i,
                 label: name,
                 icon,
-                icon_accent: crate::workspace::feature_icon_accent(ty, icon),
+                icon_accent: self.rows.accents.get(at).copied().flatten(),
                 state: history_bar::StepState {
                     selected: picked.contains(id),
                     highlighted: strip.from_view.contains(&Some(*id)),
@@ -1171,12 +1316,15 @@ impl history_bar::Contents for BarSteps<'_> {
                     last_done: at + 1 == self.marker,
                 },
                 error: res.is_some_and(|r| r.error.is_some()),
-                warning: res.and_then(warning_text).is_some(),
+                warning: res.is_some_and(has_warning),
                 ink: sketch_state.and_then(|state| state.ink(&t)),
                 tip: &tip,
+                handle: self.rows.handles.get(at),
             });
+            // Only the step to reveal takes the strip's ui: taking it makes the steps out of view
+            // after it read egui's memory again.
             let holds = self.reveal == Some(i);
-            if reveal_once(s.ui(), &mut self.reveal, holds, rect, egui::Align::Center) {
+            if holds && reveal_once(s.ui(), &mut self.reveal, holds, rect, egui::Align::Center) {
                 app.tree.timeline_reveal = None;
             }
         }
@@ -3255,5 +3403,448 @@ mod tests {
         assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": false}))["ok"], true);
         h.frames(4);
         assert!(handle_at("timeline-group:Rig").is_none() && handle_at("timeline:S49").is_some(), "off again, each feature shows");
+    }
+
+    /// The bar's rows as the History bar kept them, from the egui context.
+    fn kept_rows(h: &Harness) -> std::sync::Arc<super::BarRows> {
+        h.ctx
+            .data(|data| data.get_temp::<(super::BarSeen, std::sync::Arc<super::BarRows>)>(egui::Id::unique("sc_history_bar_rows")))
+            .expect("the History bar kept its rows")
+            .1
+    }
+
+    /// Everything the bar's rows hold, to compare kept ones with ones built afresh.
+    fn rows_summary(rows: &super::BarRows) -> String {
+        use super::TimelineKind;
+        let kind = |kind: &TimelineKind| match kind {
+            TimelineKind::Sketch => "sketch".to_string(),
+            TimelineKind::Profile(sketch) => format!("profile of {sketch:?}"),
+            TimelineKind::Other => "other".to_string(),
+        };
+        let features: Vec<_> = rows.features.iter().map(|f| (f.0, &f.1, f.2, f.3, f.4, kind(&f.5))).collect();
+        format!("{features:?}\n{:?}\n{:?}\n{}", rows.handles, rows.accents, rows.unique_ids)
+    }
+
+    fn rows_built() -> usize {
+        super::BAR_ROWS_BUILT.with(std::cell::Cell::get)
+    }
+
+    fn rows_checked() -> usize {
+        super::BAR_ROWS_CHECKED.with(std::cell::Cell::get)
+    }
+
+    /// A frame where nothing changed takes the kept rows without checking them. A selection
+    /// counts the revision up: one check, nothing built, and the frames after it check nothing
+    /// again. A rename builds the rows once.
+    #[test]
+    fn a_frame_where_nothing_changed_checks_nothing() {
+        let mut h = two_boxes(false);
+        h.settle();
+        h.frames(2);
+        let (checked, built) = (rows_checked(), rows_built());
+        h.frames(5);
+        assert_eq!((rows_checked(), rows_built()), (checked, built), "nothing changed: no check, nothing built");
+        let id = h.app.session.doc.find_feature("First").unwrap().id;
+        h.app.run("select.set", json!({"items": [{"type": "feature", "id": id}]})).unwrap();
+        h.frames(2);
+        assert!(rows_checked() > checked, "a selection counts the revision up: the rows are checked");
+        assert_eq!(rows_built(), built, "and not built");
+        let checked = rows_checked();
+        h.frames(5);
+        assert_eq!(rows_checked(), checked, "the key the check held under is kept: no check after it");
+        let second = h.app.session.doc.find_feature("Second").unwrap().id;
+        h.app.run("timeline.rename", json!({"feature": second, "name": "Lid"})).unwrap();
+        h.frames(3);
+        assert_eq!(rows_built(), built + 1, "a rename builds the rows once");
+    }
+
+    #[test]
+    fn the_kept_bar_rows_are_the_ones_built_afresh_after_every_change() {
+        let mut h = two_boxes(false);
+        let check = |h: &mut Harness, what: &str| {
+            h.frames(2);
+            let kept = kept_rows(h);
+            assert!(kept.describes(&h.app.session.doc), "{what}: kept for the design as it is");
+            assert_eq!(rows_summary(&kept), rows_summary(&super::BarRows::of(&h.app)), "{what}");
+        };
+        check(&mut h, "opened");
+        let id = |h: &Harness, name: &str| h.app.session.doc.find_feature(name).unwrap().id;
+        let (first, second) = (id(&h, "First"), id(&h, "Second"));
+        let third = json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new_body", "name": "Third"});
+        let steps: [(&str, serde_json::Value); 7] = [
+            ("timeline.rename", json!({"feature": second, "name": "Lid"})),
+            ("timeline.suppress", json!({"feature": first})),
+            ("solid.box", third),
+            ("timeline.move_many", json!({"features": [first], "position": 3, "group": null, "active": true})),
+            ("timeline.roll_to", json!({"position": 1})),
+            ("timeline.roll_to", json!({})),
+            ("timeline.delete", json!({"feature": second})),
+        ];
+        for (command, params) in steps {
+            h.app.run(command, params.clone()).unwrap_or_else(|e| panic!("{command} {params}: {e}"));
+            check(&mut h, command);
+        }
+        h.app.run("edit.undo", json!({})).unwrap();
+        check(&mut h, "undo");
+        assert!(has_chip("Lid"), "the undone delete brings Lid's chip back");
+    }
+
+    /// Whether the bar drew a chip for the feature `name` last frame.
+    fn has_chip(name: &str) -> bool {
+        crate::scenario::handle_at(&format!("timeline:{name}")).is_some()
+    }
+
+    /// The bar's rows follow the document alone: the pointer moving, a hover over a chip and a
+    /// new selection (which counts the session's revision up, `Session::refresh_display`) leave
+    /// them as they are, and a rename builds them once.
+    #[test]
+    fn the_bar_rows_are_built_again_only_when_the_document_changes() {
+        let mut h = two_boxes(false);
+        h.frames(2);
+        let built = rows_built();
+        for k in 0..5 {
+            h.frame_with(vec![egui::Event::PointerMoved(egui::pos2(300.0 + 40.0 * k as f32, 300.0))]);
+        }
+        let chip = crate::scenario::handle_at("timeline:Second").unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(chip)]);
+        h.frames(2);
+        assert_eq!(rows_built(), built, "a moving pointer and a hover build nothing");
+        let id = h.app.session.doc.find_feature("First").unwrap().id;
+        h.app.run("select.set", json!({"items": [{"type": "feature", "id": id}]})).unwrap();
+        h.frames(2);
+        assert_eq!(rows_built(), built, "a selection by command builds nothing");
+        h.step(&json!({"click": {"handle": "timeline:Second"}})).unwrap();
+        h.frames(2);
+        assert_eq!(rows_built(), built, "a selection by a click on a chip builds nothing");
+        let second = h.app.session.doc.find_feature("Second").unwrap().id;
+        h.app.run("timeline.rename", json!({"feature": second, "name": "Lid"})).unwrap();
+        h.frames(3);
+        assert_eq!(rows_built(), built + 1, "a rename builds them once");
+        assert!(has_chip("Lid") && !has_chip("Second"));
+    }
+
+    /// A document replaced by an equal copy at another address (as a sketch drag gives the session
+    /// on every frame) keeps the rows: nothing is built and the kept rows are the same ones.
+    #[test]
+    fn an_equal_document_at_a_new_address_keeps_the_bar_rows() {
+        let mut h = two_boxes(false);
+        h.frames(2);
+        let (kept, built, checked) = (kept_rows(&h), rows_built(), rows_checked());
+        let before = std::sync::Arc::as_ptr(&h.app.session.doc);
+        h.app.session.doc = std::sync::Arc::new((*h.app.session.doc).clone());
+        assert!(!std::ptr::eq(before, std::sync::Arc::as_ptr(&h.app.session.doc)), "the copy is at another address");
+        h.frames(2);
+        assert!(rows_checked() > checked, "the address changed the key: the rows are checked");
+        assert_eq!(rows_built(), built, "nothing is built");
+        assert!(std::sync::Arc::ptr_eq(&kept, &kept_rows(&h)), "the kept rows are the same ones");
+    }
+
+    /// An edit made in place on the document, at its own address, shows on the next frame,
+    /// whichever of the values the bar reads it changes, once the revision is counted up as a
+    /// command counts it. A feature added or removed shows even without that: the feature count
+    /// is part of the key, as for the vertical History.
+    #[test]
+    fn an_edit_in_place_reaches_the_bar_on_the_next_frame() {
+        let mut h = boxes(&["Alpha", "Beta", "Gamma"]);
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Plan"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [110, 10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch": "Plan", "distance": 5, "operation": "new", "name": "Pad"})).unwrap();
+        h.frames(2);
+        type Edit = fn(&mut Vec<solidcraft_engine::doc::Feature>);
+        // Each edit, and whether the revision is counted up after it as a command does.
+        let edits: [(&str, Edit, bool); 10] = [
+            ("a rename", |f| f[1].name = "Renamed".to_string(), true),
+            ("a suppress", |f| f[0].suppressed = !f[0].suppressed, true),
+            ("a changed id", |f| f[2].id += 1000, true),
+            // The same icon and type name: only the profile's sketch changes.
+            (
+                "a profile's sketch changed",
+                |f| {
+                    let sketch = f.iter_mut().find_map(|feature| match &mut feature.kind {
+                        FeatureKind::Extrude { sketch, .. } => Some(sketch),
+                        _ => None,
+                    });
+                    let Some(sketch) = sketch else { panic!("the design has an extrude") };
+                    sketch.0 += 1000;
+                },
+                true,
+            ),
+            (
+                "a changed kind",
+                |f| {
+                    let kind = f[3].kind.clone();
+                    f[3].kind = std::mem::replace(&mut f[0].kind, kind);
+                },
+                true,
+            ),
+            (
+                "a feature added",
+                |f| {
+                    let mut added = f[1].clone();
+                    added.id += 5000;
+                    added.name = "Added".to_string();
+                    f.push(added);
+                },
+                true,
+            ),
+            (
+                "a feature removed",
+                |f| {
+                    f.pop();
+                },
+                true,
+            ),
+            ("two features swapped", |f| f.swap(0, 1), true),
+            (
+                "a feature added, the revision as it was",
+                |f| {
+                    let mut added = f[0].clone();
+                    added.id += 7000;
+                    added.name = "Quiet".to_string();
+                    f.push(added);
+                },
+                false,
+            ),
+            (
+                "a feature removed, the revision as it was",
+                |f| {
+                    f.pop();
+                },
+                false,
+            ),
+        ];
+        for (what, edit, command) in edits {
+            // A copy no one else holds can be changed where it is: an edit through
+            // `Session::doc_mut` would move a document that others share.
+            h.app.session.doc = std::sync::Arc::new((*h.app.session.doc).clone());
+            let kept = kept_rows(&h);
+            assert!(kept.describes(&h.app.session.doc), "{what}: the kept rows describe the copy");
+            // As though a frame had checked them against the copy, so that only the edit can
+            // change the key: a frame here could hold the copy elsewhere (the Browser keeps a weak
+            // pointer to the document), and it could no longer be changed where it is.
+            let rows_id = egui::Id::unique("sc_history_bar_rows");
+            let seen = super::BarSeen::of(&h.app);
+            h.ctx.data_mut(|data| data.insert_temp(rows_id, (seen, kept.clone())));
+            let at = std::sync::Arc::as_ptr(&h.app.session.doc);
+            let before = h.app.session.doc.features.clone();
+            let Some(doc) = std::sync::Arc::get_mut(&mut h.app.session.doc) else { panic!("{what}: the copy is held elsewhere") };
+            edit(&mut doc.features);
+            if command {
+                h.app.session.revision += 1;
+            }
+            assert!(std::ptr::eq(at, std::sync::Arc::as_ptr(&h.app.session.doc)), "{what}: made in place");
+            assert_ne!(h.app.session.doc.features, before, "{what}: the edit changed the features");
+            assert!(!kept.describes(&h.app.session.doc), "{what}: the kept rows no longer describe the document");
+            let built = rows_built();
+            h.frame();
+            assert_eq!(rows_built(), built + 1, "{what}: the next frame builds the rows once");
+            assert_eq!(rows_summary(&kept_rows(&h)), rows_summary(&super::BarRows::of(&h.app)), "{what}");
+        }
+    }
+
+    /// Every feature's chip is published under the name the kept rows hold for it: after a
+    /// rename, under the new name only.
+    #[test]
+    fn the_bar_publishes_each_features_name_from_the_kept_rows() {
+        let mut h = boxes(&["Alpha", "Beta", "Gamma"]);
+        h.frames(2);
+        let names = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+        for name in names(&h) {
+            assert!(has_chip(&name), "{name} has its chip");
+        }
+        let beta = h.app.session.doc.find_feature("Beta").unwrap().id;
+        h.app.run("timeline.rename", json!({"feature": beta, "name": "Lid"})).unwrap();
+        h.frames(2);
+        assert_eq!(names(&h), ["Alpha", "Lid", "Gamma"]);
+        for name in names(&h) {
+            assert!(has_chip(&name), "{name} has its chip after the rename");
+        }
+        assert!(!has_chip("Beta"), "the old name is gone");
+        let kept: Vec<String> = kept_rows(&h).handles.iter().map(|handle| handle.to_string()).collect();
+        let published: Vec<String> = crate::scenario::handles("timeline:").into_iter().map(|(name, _)| name).collect();
+        assert_eq!(published, kept, "the kept names, in order");
+    }
+
+    /// A frame drawn with the rows kept publishes the same chip handles and paints the same bar as
+    /// the first frame of the same design, which builds them. `every_chip`: each feature has its
+    /// own chip (no run folds), in the design's order.
+    fn assert_a_warm_frame_matches_the_first(h: &mut Harness, every_chip: bool, what: &str) {
+        h.frames(2);
+        let bar = |h: &Harness| {
+            let card = h.app.shell.history.expect("the History bar is shown");
+            let shapes: Vec<egui::epaint::ClippedShape> =
+                h.shapes.iter().filter(|s| card.intersects(s.shape.visual_bounding_rect())).cloned().collect();
+            (crate::scenario::handles("timeline"), shapes)
+        };
+        h.ctx.data_mut(|data| data.remove::<(super::BarSeen, std::sync::Arc<super::BarRows>)>(egui::Id::unique("sc_history_bar_rows")));
+        let built = rows_built();
+        h.frame();
+        assert_eq!(rows_built(), built + 1, "{what}: the first frame builds the rows");
+        let first = bar(h);
+        h.frame();
+        assert_eq!(rows_built(), built + 1, "{what}: the next one keeps them");
+        let warm = bar(h);
+        assert!(!first.1.is_empty(), "{what}: the bar paints");
+        assert_eq!(warm, first, "{what}: the same handles, at the same points, and the same shapes");
+        if every_chip {
+            let names: Vec<String> = h.app.session.doc.features.iter().map(|f| format!("timeline:{}", f.name)).collect();
+            assert_eq!(warm.0.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>(), names, "{what}: each feature's chip, in order");
+        }
+    }
+
+    #[test]
+    fn a_warm_frame_publishes_and_paints_the_bar_as_the_first_one_does() {
+        assert_a_warm_frame_matches_the_first(&mut boxes(&["Alpha", "Beta", "Gamma", "Delta"]), true, "four boxes");
+
+        // Most steps out of view.
+        let mut h = Harness::new();
+        for i in 0..120 {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.frames(4);
+        let width = h.app.shell.history.unwrap().right();
+        assert!(crate::scenario::handle_at("timeline:S119").unwrap().x > width, "the last steps are out of view");
+        assert_a_warm_frame_matches_the_first(&mut h, true, "a long history");
+
+        // The bar's groups on: a component's long run folds into one chip (as in
+        // `a_long_history_folds_a_components_features_into_one_chip`).
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Root sketch"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("component.create", json!({"name": "Rig"})).unwrap();
+        for i in 0..crate::timeline_fold::FOLD_FROM {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.frames(4);
+        assert!(crate::scenario::handle_at("timeline-group:Rig").is_some(), "the run folds");
+        assert_a_warm_frame_matches_the_first(&mut h, false, "the bar's groups on");
+    }
+
+    /// The bar finds each feature's result where `result_index` and `Model::result` do: in place
+    /// when the results line up with the features, else through the table.
+    #[test]
+    fn the_bar_finds_each_result_as_the_table_does() {
+        use super::{BarResults, result_index};
+        let mut h = two_boxes(false);
+        let edges = json!([[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]]);
+        h.app.run("solid.fillet", json!({"edges": edges, "radius": 6, "fit": "reduce", "body": "One"})).unwrap();
+        h.frames(2);
+        let features = super::BarRows::of(&h.app).features;
+        assert!(features.len() >= 3);
+        let unique = |features: &[super::BarFeature]| {
+            let mut seen = std::collections::HashSet::new();
+            features.iter().all(|f| seen.insert(f.0))
+        };
+        // Each feature's result as the strip found it before: the first of its id in a table.
+        let table = |model: &solidcraft_engine::doc::Model, id: u64| {
+            let index = result_index(&model.results);
+            index.get(&id).and_then(|k| model.results.get(*k).filter(|r| r.id == id).or_else(|| model.result(id))).map(|r| r as *const _)
+        };
+        let compare = |model: &solidcraft_engine::doc::Model, features: &[super::BarFeature], in_place: bool, what: &str| {
+            let found = BarResults::of(features, unique(features), &model.results);
+            assert_eq!(matches!(found, BarResults::InPlace), in_place, "{what}");
+            for (at, feature) in features.iter().enumerate() {
+                let got = found.get(model, at, feature.0).map(|r| r as *const _);
+                assert_eq!(got, table(model, feature.0), "{what}: feature {at}");
+            }
+        };
+        let model = h.app.session.model.clone();
+        compare(&model, &features, true, "lined up");
+        let mut fewer = model.clone();
+        fewer.results.truncate(features.len() - 1);
+        compare(&fewer, &features, false, "fewer results than features");
+        let mut reversed = model.clone();
+        reversed.results.reverse();
+        compare(&reversed, &features, false, "results in another order");
+        // The first feature listed again at the end, its result too: lined up, but the second
+        // listing's result is the first one's.
+        let mut twice = features.clone();
+        twice.push(features[0].clone());
+        let mut again = model.clone();
+        again.results.push(model.results[0].clone());
+        compare(&again, &twice, false, "a feature id twice");
+        let mut repeated = model.clone();
+        repeated.results[1] = model.results[0].clone();
+        compare(&repeated, &features, false, "a result id twice");
+        // Results that change after the strip found them lined up (a click on a chip earlier in
+        // the frame ran a command): each feature still gets what the table would give it now.
+        let lined_up = BarResults::of(&features, true, &model.results);
+        assert!(matches!(lined_up, BarResults::InPlace));
+        for (changed, what) in [(&fewer, "a result gone"), (&reversed, "results moved"), (&repeated, "a result replaced")] {
+            for (at, feature) in features.iter().enumerate() {
+                let got = lined_up.get(changed, at, feature.0).map(|r| r as *const _);
+                assert_eq!(got, table(changed, feature.0), "{what} after lining up: feature {at}");
+            }
+        }
+    }
+
+    /// A feature id listed twice: the rows say their ids are not unique, so results that line up
+    /// with the features by position are still looked up as the table does, and the second
+    /// listing gets the first result with its id, not the one at its own place. The bar still
+    /// draws such a design.
+    #[test]
+    fn a_repeated_feature_id_makes_the_bar_look_results_up_by_id() {
+        use super::{BarResults, BarRows, result_index};
+        let mut h = two_boxes(false);
+        h.frames(2);
+        assert!(BarRows::of(&h.app).unique_ids, "the plain design's ids are unique");
+        // A copy no one else holds, changed where it is: the first feature listed again at the
+        // end under another name.
+        h.app.session.doc = std::sync::Arc::new((*h.app.session.doc).clone());
+        let Some(doc) = std::sync::Arc::get_mut(&mut h.app.session.doc) else { panic!("the copy is held elsewhere") };
+        let mut twice = doc.features[0].clone();
+        twice.name = "Twice".to_string();
+        doc.features.push(twice);
+        let rows = BarRows::of(&h.app);
+        assert!(!rows.unique_ids, "an id listed twice");
+        // One result per listing, lined up by position, the last one a copy of the first.
+        let mut model = h.app.session.model.clone();
+        model.results.truncate(rows.features.len() - 1);
+        let Some(first) = model.results.first().cloned() else { panic!("the design has results") };
+        model.results.push(first);
+        assert!(rows.features.iter().zip(&model.results).all(|(f, r)| f.0 == r.id), "the results line up by position");
+        let found = BarResults::of(&rows.features, rows.unique_ids, &model.results);
+        assert!(matches!(found, BarResults::Indexed(_)), "looked up by id");
+        let last = rows.features.len() - 1;
+        let id = rows.features[last].0;
+        let got = found.get(&model, last, id).map(|r| r as *const _);
+        let index = result_index(&model.results);
+        let table = index.get(&id).and_then(|k| model.results.get(*k)).map(|r| r as *const _);
+        assert_eq!(got, table, "what the table gives");
+        assert_eq!(got, model.results.first().map(|r| r as *const _), "the first result with the id");
+        assert_ne!(got, model.results.get(last).map(|r| r as *const _), "not the one at its own place");
+        h.frames(2);
+        assert!(has_chip("Twice") && has_chip("First"), "the bar draws both listings");
+    }
+
+    #[test]
+    fn has_warning_says_what_warning_text_would() {
+        use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
+        let h = two_boxes(false);
+        let plain = h.app.session.model.results[0].clone();
+        let issue = ImportIssue { kind: IssueKind::Repaired, item: Some(3), part: String::new(), faces: 0, times: 1, detail: "solid #3: …".into() };
+        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues }));
+        let with = |warning: Option<&str>, import_report| {
+            let mut result = plain.clone();
+            result.warning = warning.map(str::to_string);
+            result.import_report = import_report;
+            result
+        };
+        let cases = [
+            (with(None, None), false, "neither"),
+            (with(Some("reduced"), None), true, "a warning only"),
+            (with(None, report(vec![issue.clone()])), true, "a report with issues"),
+            (with(None, report(Vec::new())), false, "a report without issues"),
+            (with(Some("reduced"), report(vec![issue])), true, "both"),
+        ];
+        for (result, warned, what) in cases {
+            assert_eq!(super::has_warning(&result), warned, "{what}");
+            assert_eq!(super::has_warning(&result), super::warning_text(&result).is_some(), "{what}");
+        }
     }
 }

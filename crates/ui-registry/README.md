@@ -13,6 +13,7 @@ so when a name is published more than once in a frame the latest publish wins.
 | Function | What it does |
 |---|---|
 | `publish_handle(name, at)` | A handle (a point to click or drag) drawn this frame |
+| `publish_shared_handle(name, at)` | The same, for a caller that keeps the name (an `Arc<str>`) between frames: no text is copied |
 | `publish_rect(name, rect)` | A painted part's rectangle this frame |
 | `publish_target(name, rect)` | Both: the rectangle and a handle at its centre, under one name |
 | `publish_target_as(handle, rect_name, rect)` | Both, with separate names for the handle and the rectangle |

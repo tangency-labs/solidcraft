@@ -7,17 +7,18 @@
 //! only join two pieces of one edge are counted once.
 
 use solidcraft_geom::prelude::*;
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 use solidcore_record::Vec3;
-use solidcore_record::brep::{Brep, Loop};
+use solidcore_record::brep::{Brep, Edge, Loop};
 use solidcraft_geom::{Mesh, UnitVec3};
 
 use crate::Result;
 use crate::body::Body;
 use crate::heal::{edge_points, find, on_split_line};
-use crate::history::edge_faces;
+use crate::history::{edge_faces, faces_of};
 use crate::offset::{Surf, surf_of};
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
@@ -39,20 +40,21 @@ fn name(s: Option<&Surf>) -> &'static str {
     }
 }
 
-/// The faces of a record with their surfaces, for telling which lie on one surface.
+/// The faces of a record with their surfaces, for telling which lie on one surface. Each face's
+/// surface is read the first time it is asked for.
 struct Faces<'a> {
     record: &'a Brep,
-    surfs: Vec<Option<Surf>>,
+    surfs: Vec<OnceCell<Option<Surf>>>,
     tol: f64,
 }
 
 impl<'a> Faces<'a> {
     fn new(record: &'a Brep, tol: f64) -> Faces<'a> {
-        Faces { record, surfs: (0..record.faces.len()).map(|f| surf_of(record, f)).collect(), tol }
+        Faces { record, surfs: (0..record.faces.len()).map(|_| OnceCell::new()).collect(), tol }
     }
 
     fn surf(&self, f: usize) -> Option<&Surf> {
-        self.surfs.get(f).and_then(Option::as_ref)
+        self.surfs.get(f)?.get_or_init(|| surf_of(self.record, f)).as_ref()
     }
 
     fn planar(&self, f: usize) -> bool {
@@ -86,22 +88,121 @@ impl<'a> Faces<'a> {
     }
 }
 
+/// How far apart two faces' surfaces may be and still be one surface, for [`seam_flags`] and
+/// [`whole_edge`].
+fn surface_tol(b: &Body) -> f64 {
+    (b.size() * 1e-4).max(1e-6) * 10.0
+}
+
+/// Is edge `e` (separating `fs`, [`faces_of`]) a seam of a curved surface: between two pieces of
+/// it, or where one face of it meets itself (a whole turn of a cylinder, its seam used twice)?
+fn is_seam(faces: &Faces, e: &Edge, fs: &[usize]) -> bool {
+    match *fs {
+        [x, y] => !faces.planar(x) && faces.same(x, y),
+        [x] => e.uses.len() == 2 && !faces.planar(x),
+        _ => false,
+    }
+}
+
 /// Per edge (in `Body::edges` order): is it a seam of a curved surface, between two pieces of it
 /// or where one face of it meets itself (a whole turn of a cylinder, its seam used twice)?
 /// `mesh` is the body's tessellation, whose edges are the record's.
 pub fn seam_flags(b: &Body, _mesh: &Mesh) -> Vec<bool> {
     let record = b.record();
-    let faces = Faces::new(record, (b.size() * 1e-4).max(1e-6) * 10.0);
-    record
-        .edges
-        .iter()
-        .zip(edge_faces(record))
-        .map(|(e, fs)| match fs[..] {
-            [x, y] => !faces.planar(x) && faces.same(x, y),
-            [x] => e.uses.len() == 2 && !faces.planar(x),
-            _ => false,
-        })
-        .collect()
+    let faces = Faces::new(record, surface_tol(b));
+    record.edges.iter().zip(edge_faces(record)).map(|(e, fs)| is_seam(&faces, e, &fs)).collect()
+}
+
+/// Most record edges [`whole_edge`] gathers into one edge.
+const MAX_PIECES: usize = 4096;
+
+/// The record edges (in `Body::edges` order, sorted, `edge` among them) that are one edge to the
+/// user with `edge`: the pieces a seam of a curved surface cuts it into. A sphere cut by a slot
+/// ends its seam on the slot's rim, so that rim's arc is two record edges where its mirror image
+/// is one (#16122). Two edges are one through a vertex they share when both lie between the same
+/// two faces (or pieces of one curved surface, split only by seams), neither is a seam
+/// ([`seam_flags`]), every other edge at the vertex is a seam (or there is none), and one runs
+/// on into the other there, their exact curves' tangents within [`crate::smooth_edges::ANGLE`]
+/// of one line. A real corner, two tangent arcs of different radii and an authored split (a
+/// line Split Face made, even across a curved face) leave a non-seam edge or a turn at the
+/// vertex, so they stay apart. Just `edge` for a seam, an index out of range or a mesh body.
+/// Reads the record only, never a mesh; each step scans the record's edges once.
+pub fn whole_edge(b: &Body, edge: usize) -> Vec<usize> {
+    let record = b.record();
+    let Some(e) = record.edges.get(edge) else { return vec![edge] };
+    let faces = Faces::new(record, surface_tol(b));
+    let keep = b.split_keep();
+    if !is_piece(&faces, e, &faces_of(e)) || (!keep.is_empty() && on_split_line(&edge_points(record, edge as u32), keep)) {
+        return vec![edge];
+    }
+    let mut out = vec![edge];
+    let mut k = 0;
+    while let Some(&a) = out.get(k) {
+        k += 1;
+        let Some(ea) = record.edges.get(a) else { continue };
+        for v in ea.vertices {
+            if out.len() >= MAX_PIECES {
+                break;
+            }
+            if let Some(next) = runs_on(&faces, keep, a, v)
+                && !out.contains(&next)
+            {
+                out.push(next);
+            }
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
+/// Can edge `e` (separating `fs`) be a piece of a longer edge: between two faces, not a seam?
+fn is_piece(faces: &Faces, e: &Edge, fs: &[usize]) -> bool {
+    fs.len() == 2 && e.vertices[0] != e.vertices[1] && !is_seam(faces, e, fs)
+}
+
+/// The edge that edge `a` runs on into through its end vertex `v`, as [`whole_edge`] joins them.
+/// `keep` holds the lines faces were split along on purpose ([`Body::split_keep`]): an edge on
+/// one is authored, never a seam.
+fn runs_on(faces: &Faces, keep: &[Vec<Vec3>], a: usize, v: u32) -> Option<usize> {
+    let record = faces.record;
+    let fa = faces_of(record.edges.get(a)?);
+    let mut next: Option<(usize, Vec<usize>)> = None;
+    for (i, other) in record.edges.iter().enumerate() {
+        if i == a || !other.vertices.contains(&v) {
+            continue;
+        }
+        let fo = faces_of(other);
+        if is_seam(faces, other, &fo) && (keep.is_empty() || !on_split_line(&edge_points(record, i as u32), keep)) {
+            continue;
+        }
+        // A second edge that is not a seam: a corner, a branch or an authored split.
+        if next.is_some() || !is_piece(faces, other, &fo) {
+            return None;
+        }
+        next = Some((i, fo));
+    }
+    let (b, fb) = next?;
+    // Defensive: in a manifold record the faces round `v` already put both edges between the same
+    // two faces when every other edge there is a seam, so no body the kernel builds reaches this;
+    // a damaged or imported record might.
+    if !same_pair(faces, &fa, &fb) {
+        return None;
+    }
+    // Defensive too: two smooth surfaces crossing each other meet along a smooth curve, so a turn
+    // between two pieces of one face pair needs the surfaces to touch there (or a record whose
+    // curves leave their surfaces); no body the kernel builds reaches it.
+    let (da, db) = (crate::blend::leaving(record, a, v)?, crate::blend::leaving(record, b, v)?);
+    (da.dot(db) <= -crate::smooth_edges::ANGLE.cos()).then_some(b)
+}
+
+/// Do two edges' faces (two each) lie on the same two faces: each the same face, or a piece of
+/// the same curved surface (a surface the record holds in several faces, split only by seams)?
+fn same_pair(faces: &Faces, a: &[usize], b: &[usize]) -> bool {
+    let one = |x: usize, y: usize| x == y || (!faces.planar(x) && faces.same(x, y));
+    match (a, b) {
+        ([a0, a1], [b0, b1]) => (one(*a0, *b0) && one(*a1, *b1)) || (one(*a0, *b1) && one(*a1, *b0)),
+        _ => false,
+    }
 }
 
 /// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.mesh(..)`: faces of no

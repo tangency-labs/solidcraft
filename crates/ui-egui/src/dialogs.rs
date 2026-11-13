@@ -1303,6 +1303,13 @@ impl Dialog {
                 // Fillets and chamfers take an edge with its tangent chain, as a pick does.
                 let picked = match (&d.kind, sel) {
                     (Kind::Fillet { chain, .. }, _) => fillet_edges(s, sel, *chain),
+                    // One item per edge: a click selects all the pieces of an edge a seam splits,
+                    // the clicked one first, and Measure takes that one.
+                    (Kind::Measure { .. }, _)
+                        if crate::viewport::grouped_selection(s, sel).iter().any(|x| inp.items.iter().any(|y| selection::same_item(x, y))) =>
+                    {
+                        Vec::new()
+                    }
                     (Kind::Measure { .. }, _) => vec![crate::viewport::measurement_selection(s, sel)],
                     _ if inp.multi => crate::viewport::grouped_selection(s, sel),
                     _ => vec![sel.clone()],
@@ -8430,6 +8437,7 @@ mod refused_ok_tests {
                 removed: [4; 4],
                 lost: [6; 4],
                 selected: [7; 4],
+                mirrored: [6; 4],
                 edge: [5; 4],
                 ghost: false,
                 tint_new: true,

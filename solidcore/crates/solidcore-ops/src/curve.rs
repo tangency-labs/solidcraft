@@ -1,7 +1,9 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
 //! blend from one curve's end to another's, circles and arcs, a curve extended at an end, two
-//! curves joined end to end, and the point of a curve nearest a given point.
+//! curves joined end to end, the point of a curve nearest a given point, and a planar curve
+//! offset in its plane ([`offset_planar`]: the kernel's trimmed offset, its distance measured by
+//! [`solidcore::query::deviation::distance_deviation`]).
 //! The curve is the record's ([`Curve`]); the knots, the map's carrying of the control points,
 //! the views' meeting, the curvature, the blend, the circles, the extension and the nearest point
 //! are the kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
@@ -1659,4 +1661,132 @@ mod tests {
             Err(Error::Argument)
         );
     }
+}
+
+/// Which side of a planar curve an offset lies on, looking down the plane's normal
+/// ([`PlanarOffset::normal`]): left of the curve's direction of travel, or right of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OffsetSide {
+    /// To the left: the side `normal x tangent` points to.
+    Left,
+    /// To the right.
+    Right,
+}
+
+/// The stations along each piece of an offset at which its distance from the curve is measured
+/// ([`offset_planar`]).
+pub const OFFSET_STATIONS: usize = 129;
+
+/// A planar curve's offset ([`offset_planar`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanarOffset {
+    /// The offset's pieces, in order along the curve.
+    pub curves: Vec<Curve>,
+    /// The normal of the curve's plane the side is read about (the kernel's
+    /// [`crate::curve_plane::plane_of`]).
+    pub normal: [f64; 3],
+    /// The largest difference found, at [`OFFSET_STATIONS`] stations along each piece, between a
+    /// station's distance from the curve and the distance asked: measured, not proved between
+    /// the stations.
+    pub deviation: f64,
+}
+
+/// `curve` offset `distance` in its own plane to `side` (the kernel's trimmed offset of a planar
+/// curve, `CompositeCurve::create_trimmed_offsets`): each point moved `distance` square to the
+/// curve in the plane, where the offset would cross itself (past a bend tighter than the
+/// distance) the loops trimmed off, the pieces approximated by splines within `tolerance`. Each
+/// piece is then measured ([`solidcore::query::deviation::distance_deviation`] at
+/// [`OFFSET_STATIONS`] stations) and the offset refused when a station lies farther than
+/// `tolerance` from `distance`. The plane is the one the kernel proves the curve lies in
+/// ([`crate::curve_plane::plane_of`]); a line is in no one plane and is refused.
+///
+/// # Errors
+/// [`Error::Argument`] for a distance or a tolerance not finite and positive, a distance past the
+/// coordinate bound, a traced intersection curve or a curve the record or the kernel's
+/// constructors refuse; [`Error::Unsupported`] for a curve in no one plane;
+/// [`Error::Empty`] when no offset is left; [`Error::OffsetPastTolerance`] for an offset whose
+/// measured distance strays past `tolerance`; [`Error::Record`] for a piece the record cannot
+/// hold; the kernel's refusals otherwise.
+pub fn offset_planar(
+    curve: &Curve,
+    distance: f64,
+    side: OffsetSide,
+    tolerance: f64,
+) -> Result<PlanarOffset> {
+    use solidcore::curve::composite_curve::{
+        CompositeCurve, OffsetCornerType, OffsetDirection, OffsetParams,
+    };
+    use solidcore::query::deviation::distance_deviation;
+    let positive = |x: f64| x.is_finite() && x > 0.0;
+    if !positive(distance) || !coord_ok(&[distance]) || !positive(tolerance) {
+        return Err(Error::Argument);
+    }
+    if matches!(curve, Curve::SurfaceIntersection { .. })
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let Some(plane) = crate::curve_plane::plane_of(std::slice::from_ref(curve))? else {
+        return Err(Error::Unsupported(
+            "the curve lies in no one plane: a planar offset needs a curve that spans a plane",
+        ));
+    };
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let [nx, ny, nz] = plane.normal;
+    let direction = match side {
+        OffsetSide::Left => OffsetDirection::LeftHandSide,
+        OffsetSide::Right => OffsetDirection::RightHandSide,
+    };
+    let params = OffsetParams {
+        xsect_tol_3d: tolerance,
+        approx_tol_3d: tolerance,
+        plane_normal: Vec3::new(nx, ny, nz),
+        corner: OffsetCornerType::FilletCorner,
+        trim_results: true,
+        offset_distance: distance,
+        match_parameterization: false,
+    };
+    run("curve::offset_planar", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let natural = made.curve.natural_interval();
+        if natural.min() != made.interval.min() || natural.max() != made.interval.max() {
+            return Ok(Err(Error::Unsupported(
+                "a curve whose kernel form runs past its record's interval",
+            )));
+        }
+        let source = made.curve;
+        let composite = CompositeCurve::with_curves(3, vec![source.clone()], false, None, None)?;
+        let pieces = composite.create_trimmed_offsets(k, direction, &params)?;
+        if pieces.is_empty() {
+            return Ok(Err(Error::Empty));
+        }
+        let mut worst = 0.0_f64;
+        let mut curves = Vec::with_capacity(pieces.len());
+        for piece in &pieces {
+            let measured = distance_deviation(k, &piece.curve, &source, distance, OFFSET_STATIONS)?;
+            worst = worst.max(measured.worst);
+            let held = solidcore::curve::from_parameters::record_of(
+                k,
+                &piece.curve,
+                &piece.curve.natural_interval(),
+            )?;
+            match solidcore_convert::record_curve(held.curve) {
+                Ok(c) => curves.push(c),
+                Err(Invalid(why)) => return Ok(Err(Error::Record(why.to_owned()))),
+            }
+        }
+        if worst > tolerance {
+            return Ok(Err(Error::OffsetPastTolerance { tolerance, worst }));
+        }
+        Ok(Ok(PlanarOffset {
+            curves,
+            normal: plane.normal,
+            deviation: worst,
+        }))
+    })?
 }

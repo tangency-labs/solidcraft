@@ -6,6 +6,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::mesh_distance::TriangleSet;
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Mesh, UnitVec3};
 
@@ -18,27 +19,6 @@ use crate::{Result, Sel, Session};
 enum Geo {
     Points(Vec<Vec3>),
     Tris(Vec<[Vec3; 3]>),
-}
-
-/// Caps that keep a measurement interactive on big meshes.
-const MAX_POINTS: usize = 4000;
-const MAX_TRIS: usize = 20000;
-
-fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
-    let n = (b - a).cross(c - a);
-    if let Some(nn) = n.normalized() {
-        let q = p - nn * (p - a).dot(nn);
-        if [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-12) {
-            return q;
-        }
-    }
-    let on_seg = |u: Vec3, v: Vec3| {
-        let d = v - u;
-        let l2 = d.dot(d);
-        let t = if l2 > 0.0 { ((p - u).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
-        u + d * t
-    };
-    [on_seg(a, b), on_seg(b, c), on_seg(c, a)].into_iter().min_by(|x, y| x.dist(p).total_cmp(&y.dist(p))).unwrap_or(a)
 }
 
 fn polyline_len(pts: &[Vec3]) -> f64 {
@@ -511,7 +491,6 @@ fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
     v.iter().step_by(step).copied().collect()
 }
 
-/// Closest pair of points between two pieces of geometry.
 /// An origin plane (XY, XZ, YZ) or a construction plane's point and normal.
 fn plane_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
     match name {
@@ -532,133 +511,58 @@ fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
     }
 }
 
-/// The closest points of two exact shapes, where the sampled points would be wrong: a plane or
-/// an axis runs on, so a point set of it is not the object. `anchor` is a point of `a` to
-/// measure from where any point would do (two parallel planes); `unbounded` says whether `a`
-/// and `b` run on for ever (datum planes and axes) rather than ending (faces and edges).
+/// The closest points of a datum plane and another item, which its sampled point can't give:
+/// the plane runs on for ever. `anchor` is a point of `a` to measure from where any point would
+/// do (two parallel planes); `unbounded` says whether `a` and `b` run on for ever (datum planes
+/// and axes) rather than ending (faces and edges). A face's plane gives nothing here: the face
+/// ends, and [`closest`] measures it.
 fn exact_min(a: &Shape, b: &Shape, anchor: Option<Vec3>, unbounded: (bool, bool)) -> Option<(f64, Vec3, Vec3)> {
     use Shape::*;
-    let to_plane = |p: Vec3, point: Vec3, normal: UnitVec3| {
+    // From an item to a plane that runs on for ever: a segment that crosses it meets it, one
+    // that doesn't comes nearest at its nearer end.
+    let to_plane = |x: &Shape, point: Vec3, normal: UnitVec3| {
         let n = normal.vec();
-        let h = (p - point).dot(n);
-        (h.abs(), p, p - n * h)
-    };
-    let to_line = |p: Vec3, a: Vec3, b: Vec3| {
-        let d = b - a;
-        let t = if d.len() > 1e-12 { ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0) } else { 0.0 };
-        let q = a + d * t;
-        (p.dist(q), p, q)
+        let (p, q) = match *x {
+            Point(p) => (p, p),
+            Line { a, b } => (a, b),
+            _ => return None,
+        };
+        let (hp, hq) = ((p - point).dot(n), (q - point).dot(n));
+        if hp * hq <= 0.0 && hp != hq {
+            let x = p.lerp(q, hp / (hp - hq));
+            return Some((0.0, x, x));
+        }
+        let (p, h) = if hq.abs() < hp.abs() { (q, hq) } else { (p, hp) };
+        Some((h.abs(), p, p - n * h))
     };
     match (a, b) {
-        (Point(p), Plane { point, normal }) => Some(to_plane(*p, *point, *normal)),
-        (Plane { point, normal }, Point(p)) => {
-            let (d, f, t) = to_plane(*p, *point, *normal);
-            Some((d, t, f))
-        }
-        (Point(p), Line { a: la, b: lb }) => Some(to_line(*p, *la, *lb)),
-        (Line { a: la, b: lb }, Point(p)) => {
-            let (d, f, t) = to_line(*p, *la, *lb);
-            Some((d, t, f))
-        }
-        (Point(p), Point(q)) => Some((p.dist(*q), *p, *q)),
-        (Plane { point: p1, normal: n1 }, Plane { point: p2, normal: n2 }) => {
+        (Plane { point: p1, normal: n1 }, Plane { point: p2, normal: n2 }) if unbounded.0 || unbounded.1 => {
             super::measure_shape::plane_plane(*p1, *n1, *p2, *n2, anchor.unwrap_or(*p1), unbounded.0 && unbounded.1)
         }
-        (Plane { point, normal }, Line { a: la, b: lb }) => {
-            let d = *lb - *la;
-            let den = d.dot(normal.vec());
-            if den.abs() < 1e-9 {
-                let (dist, _, q) = {
-                    let h = (*la - *point).dot(normal.vec());
-                    (h.abs(), *la, *la - normal.vec() * h)
-                };
-                Some((dist, q, *la))
-            } else {
-                let t = (*point - *la).dot(normal.vec()) / den;
-                let p = *la + d * t;
-                Some((0.0, p, p))
-            }
-        }
-        (Line { a: la, b: lb }, Plane { point, normal }) => {
-            let d = *lb - *la;
-            let den = d.dot(normal.vec());
-            if den.abs() < 1e-9 {
-                let h = (*la - *point).dot(normal.vec());
-                Some((h.abs(), *la, *la - normal.vec() * h))
-            } else {
-                let t = (*point - *la).dot(normal.vec()) / den;
-                let p = *la + d * t;
-                Some((0.0, p, p))
-            }
-        }
-        (Line { a: a1, b: b1 }, Line { a: a2, b: b2 }) => {
-            let (d1, d2) = (*b1 - *a1, *b2 - *a2);
-            let n = d1.cross(d2);
-            if n.len() < 1e-9 {
-                let (dist, _, q) = {
-                    let dd = d1;
-                    let t = if dd.len() > 1e-12 { ((*a2 - *a1).dot(dd) / dd.dot(dd)).clamp(0.0, 1.0) } else { 0.0 };
-                    let q = *a1 + dd * t;
-                    ((*a2).dist(q), *a2, q)
-                };
-                Some((dist, q, *a2))
-            } else {
-                let w = *a1 - *a2;
-                let a = d1.dot(d1);
-                let b = d1.dot(d2);
-                let c = d2.dot(d2);
-                let d = d1.dot(w);
-                let e = d2.dot(w);
-                let den = a * c - b * b;
-                let (t, s) = if den.abs() < 1e-12 { (0.0, e / c) } else { ((b * e - c * d) / den, (a * e - b * d) / den) };
-                let p = *a1 + d1 * t;
-                let q = *a2 + d2 * s;
-                Some((p.dist(q), p, q))
-            }
-        }
+        (Plane { point, normal }, x) if unbounded.0 => to_plane(x, *point, *normal).map(|(d, p, q)| (d, q, p)),
+        (x, Plane { point, normal }) if unbounded.1 => to_plane(x, *point, *normal),
         _ => None,
     }
 }
 
-fn closest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
-    let pts_to_tris = |pts: &[Vec3], tris: &[[Vec3; 3]]| -> Option<(Vec3, Vec3)> {
-        let pts = sample(pts, MAX_POINTS);
-        let tris = sample(tris, MAX_TRIS);
-        let mut best: Option<(f64, Vec3, Vec3)> = None;
-        for p in &pts {
-            for [x, y, z] in &tris {
-                let q = closest_on_triangle(*p, *x, *y, *z);
-                let d = p.dist(q);
-                if best.is_none_or(|(bd, _, _)| d < bd) {
-                    best = Some((d, *p, q));
-                }
-            }
-        }
-        best.map(|(_, p, q)| (p, q))
+/// An item's geometry as triangles for [`TriangleSet::closest`]: a straight edge or axis is one
+/// flat triangle along it, so it is measured as the whole segment, and a point is a triangle with
+/// all three corners at it.
+fn triangle_set(item: &Item) -> TriangleSet {
+    let tris: Vec<[Vec3; 3]> = match (&item.geo, item.shape) {
+        (Geo::Tris(t), _) => t.clone(),
+        (Geo::Points(_), Shape::Line { a, b }) => vec![[a, b, b]],
+        (Geo::Points(p), _) => p.iter().map(|&p| [p, p, p]).collect(),
     };
-    let verts = |tris: &[[Vec3; 3]]| -> Vec<Vec3> { tris.iter().flat_map(|t| t.iter().copied()).collect() };
-    match (a, b) {
-        (Geo::Points(p), Geo::Points(q)) => {
-            let (p, q) = (sample(p, MAX_POINTS), sample(q, MAX_POINTS));
-            let mut best: Option<(f64, Vec3, Vec3)> = None;
-            for x in &p {
-                for y in &q {
-                    let d = x.dist(*y);
-                    if best.is_none_or(|(bd, _, _)| d < bd) {
-                        best = Some((d, *x, *y));
-                    }
-                }
-            }
-            best.map(|(_, x, y)| (x, y))
-        }
-        (Geo::Points(p), Geo::Tris(t)) => pts_to_tris(p, t),
-        (Geo::Tris(t), Geo::Points(p)) => pts_to_tris(p, t).map(|(x, y)| (y, x)),
-        (Geo::Tris(t1), Geo::Tris(t2)) => {
-            let ab = pts_to_tris(&verts(t1), t2);
-            let ba = pts_to_tris(&verts(t2), t1).map(|(x, y)| (y, x));
-            [ab, ba].into_iter().flatten().min_by(|x, y| x.0.dist(x.1).total_cmp(&y.0.dist(y.1)))
-        }
-    }
+    let positions: Vec<Vec3> = tris.iter().flatten().copied().collect();
+    let triangles = (0..tris.len() as u32).map(|i| [3 * i, 3 * i + 1, 3 * i + 2]).collect();
+    TriangleSet::new(&Mesh { positions, triangles, ..Mesh::default() })
+}
+
+/// Closest pair of points between two items: triangles against triangles, so faces that cross
+/// meet and an edge of one face can come nearest an edge of the other.
+fn closest(a: &Item, b: &Item) -> Option<(Vec3, Vec3)> {
+    triangle_set(a).closest(&triangle_set(b), f64::INFINITY).map(|m| (m.a, m.b))
 }
 
 /// Two straight edges sharing exactly one end define rays away from that corner. Their
@@ -766,7 +670,7 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
         }
     }
     if let [a, b] = described.as_slice() {
-        let near = closest(&a.geo, &b.geo);
+        let near = closest(a, b);
         let far = farthest(&a.geo, &b.geo);
         let c = centre(&a.shape, &b.shape);
         // An exact closest or farthest distance stands only where the mesh agrees with it to
