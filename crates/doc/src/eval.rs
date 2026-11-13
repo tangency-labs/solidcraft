@@ -4620,9 +4620,9 @@ fn apply_traced_with(
         if named {
             for &i in &target_idx {
                 if let Some(b) = state.bodies.get(i).filter(|b| b.body.is_surface()) {
-                    let verb = if op == Operation::Cut { "cut" } else { "intersect" };
+                    let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
                     return Err(DocError::Invalid(format!(
-                        "{} is a surface body, and a {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
+                        "{} is a surface body, and {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
                         b.name
                     )));
                 }

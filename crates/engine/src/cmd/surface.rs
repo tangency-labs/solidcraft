@@ -1742,10 +1742,11 @@ mod tests {
         run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 10], "p1": [15, 20]}));
         run(&mut s, "sketch.finish", json!({}));
         let before = area(&s, "Tube");
-        for op in ["cut", "intersect"] {
+        for (op, article) in [("cut", "a cut"), ("intersect", "an intersect")] {
             let params = json!({"sketch": "R", "distance": 30, "direction": "symmetric", "operation": op, "targets": ["Tube"]});
             let err = s.execute("solid.extrude", &params).unwrap_err().to_string();
-            assert!(err.contains("Tube is a surface body") && err.contains("Trim"), "{op}: {err}");
+            let says = format!("Tube is a surface body, and {article} needs a solid: cut it with Surface › Trim, or Thicken it first");
+            assert!(err.contains(&says), "{op}: {err}");
         }
         let st = s.world_state().unwrap();
         assert!(st.body("Tube").unwrap().body.is_surface());
