@@ -2530,6 +2530,79 @@
     }
    ]
   ],
+  "mesh_plate": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Outline"
+    }
+   ],
+   [
+    "sketch.rectangle.two_point",
+    {
+     "p0": [
+      0,
+      0
+     ],
+     "p1": [
+      60,
+      40
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "solid.extrude",
+    {
+     "sketch": "Outline",
+     "distance": 10,
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "solid.hole",
+    {
+     "position": [
+      30,
+      20,
+      10
+     ],
+     "diameter": 12,
+     "name": "Bore"
+    }
+   ],
+   [
+    "file.save_mesh",
+    {
+     "path": "{TMP}/Scan.stl",
+     "bodies": [
+      "Plate"
+     ]
+    }
+   ],
+   [
+    "timeline.delete",
+    {
+     "features": [
+      "Bore",
+      "Plate",
+      "Outline"
+     ]
+    }
+   ],
+   [
+    "file.insert_mesh",
+    {
+     "path": "{TMP}/Scan.stl",
+     "name": "Scan"
+    }
+   ]
+  ],
   "mesh_sketch": [
    [
     "sketch.create",
@@ -7104,6 +7177,44 @@
      "component.activate",
      {
       "component": "root"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "mesh.rebuild",
+   "setup": "mesh_plate",
+   "about": "Builds a prismatic mesh again as a sketch, an extrusion and its holes, with a parameter for each size.",
+   "demo": [
+    [
+     "component.activate",
+     {
+      "component": "Scan"
+     }
+    ],
+    [
+     "mesh.rebuild",
+     {
+      "body": "Scan"
+     }
+    ],
+    [
+     "component.activate",
+     {
+      "component": "root"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "mesh.recognize",
+   "setup": "mesh",
+   "about": "Reads a mesh as the surfaces it stands for: planes, cylinders, cones, spheres and tori, each certified against the mesh itself. Nothing is changed.",
+   "demo": [
+    [
+     "mesh.recognize",
+     {
+      "body": "Scan"
      }
     ]
    ]
