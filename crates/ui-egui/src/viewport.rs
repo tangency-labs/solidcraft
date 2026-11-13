@@ -11540,7 +11540,7 @@ mod tests {
         for y in 2..18 {
             for x in 2..18 {
                 let at = rect.min + egui::vec2(rect.width() * x as f32 / 20.0, rect.height() * y as f32 / 20.0);
-                if crate::viewport::pick(&h.app, &proj, at).iter().any(|hit| matches!(hit, crate::viewport::Hit::Face { .. })) {
+                if matches!(candidate(&h.app, &pick(&h.app, &proj, at)), Some((Hit::Face { .. }, _))) {
                     return at;
                 }
             }

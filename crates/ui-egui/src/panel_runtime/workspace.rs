@@ -2519,7 +2519,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 icon: if matches!(target, HostPointerTarget::Menu { .. }) {
                                     Some("dots")
                                 } else if matches!(target, HostPointerTarget::TabOverflow { .. }) {
-                                    Some("chevron")
+                                    Some("dots")
                                 } else if matches!(target, HostPointerTarget::Close { .. }) {
                                     Some("close")
                                 } else if let HostPointerTarget::HeaderAction { instance, action } = target {

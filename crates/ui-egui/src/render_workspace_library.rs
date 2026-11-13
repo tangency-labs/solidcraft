@@ -1967,6 +1967,9 @@ mod studio_browser_tests {
         assert!(Arc::ptr_eq(&model, &h.app.session.model.state()));
         assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), selected);
         assert!(h.app.render_workspace.view.job.is_none());
+        // Give the inspector room to expose the Save Maps button below its settings.
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.frames(3);
         h.step(&json!({"click":{"handle":"render:surface:save-maps"}})).unwrap();
         assert!(h.app.render_workspace.view.library.review.is_some(), "the actual different-target button opens review");
         assert!(Arc::ptr_eq(&before, &h.app.session.doc));

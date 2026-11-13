@@ -4554,7 +4554,13 @@ fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_foo
                     if text.galley.job.text == title {
                         let original = source.contains(text.pos);
                         let opacity = if original && faded { 0.5 } else { 1.0 };
-                        let ink = if !original { t.form_ink } else if tab { t.app_bar_text } else { t.form_primary };
+                        let ink = if !original {
+                            t.form_ink
+                        } else if tab {
+                            t.app_bar_text
+                        } else {
+                            t.form_primary
+                        };
                         assert!(text.galley.job.sections.iter().all(|section| {
                             section.format.color == ink.gamma_multiply(opacity)
                                 || (tab && original && section.format.color == ink.gamma_multiply(opacity * 0.7))
