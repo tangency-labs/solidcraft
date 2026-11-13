@@ -13,7 +13,7 @@
   <key>CFBundleExecutable</key>
   <string>SolidCraft</string>
   <key>CFBundleIdentifier</key>
-  <string>ai.storyteller.solidcraft</string>
+  <string>io.tangencylabs.solidcraft</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundlePackageType</key>
@@ -45,8 +45,11 @@
       <key>CFBundleTypeName</key>
       <string>SolidCraft design</string>
       <key>CFBundleTypeExtensions</key>
-      <!-- solvecraft: designs saved before the rename (compatibility shim, docs/compatibility.md). -->
-      <array><string>solidcraft</string><string>solvecraft</string></array>
+      <!-- solidcraft: designs saved before .sc; solvecraft: before the rename (compatibility
+           shims, docs/compatibility.md). -->
+      <array><string>sc</string><string>solidcraft</string><string>solvecraft</string></array>
+      <key>LSItemContentTypes</key>
+      <array><string>io.tangencylabs.solidcraft.design</string></array>
       <key>CFBundleTypeRole</key>
       <string>Editor</string>
       <key>LSHandlerRank</key>
@@ -61,6 +64,25 @@
       <string>Viewer</string>
       <key>LSHandlerRank</key>
       <string>Alternate</string>
+    </dict>
+  </array>
+  <!-- The design type: .sc, and the older .solidcraft and .solvecraft (docs/compatibility.md). -->
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>io.tangencylabs.solidcraft.design</string>
+      <key>UTTypeDescription</key>
+      <string>SolidCraft design</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>public.data</string><string>public.content</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>sc</string><string>solidcraft</string><string>solvecraft</string></array>
+        <key>public.mime-type</key>
+        <array><string>application/x-solidcraft</string></array>
+      </dict>
     </dict>
   </array>
 </dict>

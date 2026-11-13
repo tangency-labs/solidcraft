@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Appearance library — looks on a shelf</title>
+  <circle cx="13" cy="28.35" r="9.5" fill="#b8c3cf"/>
+  <path d="M21.93 25.1A9.5 9.5 0 0 1 9.75 37.28A12.42 12.42 0 0 0 21.93 25.1Z" fill="#8e9faf"/>
+  <circle cx="9.77" cy="25.12" r="2.57" fill="#e2e8ef"/>
+  <circle cx="13" cy="28.35" r="9.5" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="51" cy="28.35" r="9.5" fill="#b8c3cf"/>
+  <path d="M59.93 25.1A9.5 9.5 0 0 1 47.75 37.28A12.42 12.42 0 0 0 59.93 25.1Z" fill="#8e9faf"/>
+  <circle cx="47.77" cy="25.12" r="2.57" fill="#e2e8ef"/>
+  <circle cx="51" cy="28.35" r="9.5" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="28.35" r="13.97" fill="#ffffff"/>
+  <circle cx="32" cy="28.35" r="11.5" fill="#328bd3"/>
+  <path d="M42.81 24.42A11.5 11.5 0 0 1 28.07 39.16A15.04 15.04 0 0 0 42.81 24.42Z" fill="#236ead"/>
+  <circle cx="28.09" cy="24.44" r="3.11" fill="#b9ddf8"/>
+  <circle cx="32" cy="28.35" r="11.5" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M7 42.35L57 42.35A2 2 0 0 1 59 44.35L59 46.35A2 2 0 0 1 57 48.35L7 48.35A2 2 0 0 1 5 46.35L5 44.35A2 2 0 0 1 7 42.35Z" fill="#8e9faf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

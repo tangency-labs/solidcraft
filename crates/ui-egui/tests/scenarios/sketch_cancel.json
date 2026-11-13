@@ -1,0 +1,16 @@
+[
+ {"note": "#3838: Cancel Sketch leaves a sketch without keeping its changes. A new sketch is removed with what was drawn in it, and Undo goes back into it."},
+ {"start": "sketch.create"},
+ {"click": {"plane": "XY"}},
+ {"expect": {"sketching": true}},
+ {"start": "sketch.line"},
+ {"click": {"sketch": [0, 0]}},
+ {"click": {"sketch": [30, 10]}},
+ {"key": "Escape"},
+ {"expect": {"sketch_curves": {"own": 1}}},
+ {"start": "sketch.cancel"},
+ {"expect": {"sketching": false, "errors": 0}},
+ {"expect": {"query": {"command": "document.inspect", "path": ["timeline"], "value": []}}},
+ {"call": "engine.execute", "params": {"command": "edit.undo", "params": {}}},
+ {"expect": {"sketching": true, "sketch_curves": {"own": 1}}}
+]

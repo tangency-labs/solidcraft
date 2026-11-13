@@ -8,7 +8,7 @@
 //! no fixture.
 //!
 //! ```text
-//! solidcraft-cli bench-agent [--scale F] [--script-out script.json] [--save design.solidcraft]
+//! solidcraft-cli bench-agent [--scale F] [--script-out script.json] [--save design.sc]
 //! ```
 //! prints one JSON line per hundred commands (mean and max milliseconds, bodies so far), then the
 //! build total, then the phases `bench-open` prints for the saved design.
@@ -36,8 +36,9 @@ impl Script {
         );
     }
 
+    /// A part placed after it is built: free, even as the design's first part (#2804).
     fn component(&mut self, name: &str) {
-        self.c("component.create", json!({"name": name}));
+        self.c("component.create", json!({"name": name, "grounded": false}));
     }
 
     fn root(&mut self) {
@@ -183,7 +184,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         s.execute(id, &c["params"]).map_err(|e| format!("command {i} ({id}): {e}"))?;
         run.push(t.elapsed().as_secs_f64() * 1000.0);
         let t = std::time::Instant::now();
-        s.world_state().warm_meshes(|| true);
+        s.world_state().map_err(|e| e.to_string())?.warm_meshes(|| true);
         shown.push(t.elapsed().as_secs_f64() * 1000.0);
         if run.len() == 100 || i + 1 == commands.len() {
             let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
@@ -197,14 +198,17 @@ pub fn run(args: &[String]) -> Result<(), String> {
             shown.clear();
         }
     }
-    let world = s.world_state();
+    let world = s.world_state().map_err(|e| e.to_string())?;
     println!(
         "{}",
         json!({"step": "built", "ms": began.elapsed().as_secs_f64() * 1000.0, "commands": commands.len(), "features": s.doc.features.len(), "bodies": world.bodies.len()})
     );
     let path = match flag("--save") {
         Some(p) => p.clone(),
-        None => std::env::temp_dir().join(format!("bench-agent-{}.solidcraft", std::process::id())).to_string_lossy().into_owned(),
+        None => std::env::temp_dir()
+            .join(format!("bench-agent-{}.{}", std::process::id(), solidcraft_engine::io::DESIGN_EXT))
+            .to_string_lossy()
+            .into_owned(),
     };
     s.execute("file.save", &json!({"path": path})).map_err(|e| e.to_string())?;
     let r = crate::cmd_bench_open(std::slice::from_ref(&path));
@@ -232,7 +236,7 @@ mod tests {
             }
         }
         assert!(s.model.results.iter().all(|r| r.error.is_none()));
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         assert!(world.bodies.len() > 40, "{} bodies", world.bodies.len());
         assert!(world.bodies.iter().any(|b| b.name.contains("spoke")));
     }

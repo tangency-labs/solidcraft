@@ -1,0 +1,250 @@
+//! Explicit CPU resource envelopes. Larger profiles are opt-in saved intent, not
+//! automatic quality changes or promises about available RAM, speed or convergence.
+use serde::{Deserialize, Serialize};
+
+use super::{CpuProgressiveOptions, ErrorCode, JobError, Result};
+use crate::RenderLimits;
+
+const MIB: u64 = 1024 * 1024;
+const GIB: u64 = 1024 * MIB;
+/// Native CPU reservations, including retained frames, share this finite ceiling.
+pub const NATIVE_CPU_POOL_BYTES: u64 = 256 * GIB;
+/// Hard implementation ceilings; individual requests retain their selected envelope.
+pub const MAX_CPU_WORK: u64 = 1 << 60;
+pub const MAX_CPU_TRIANGLES: usize = 8_000_000;
+pub const MAX_CPU_BODIES: usize = 262_144;
+/// Maximum admitted primary-film samples, shared with the display resolver.
+pub const MAX_CPU_SAMPLES_PER_PIXEL: u32 = super::MAX_SAMPLES_PER_PIXEL;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CpuBudget {
+    #[default]
+    Compact,
+    Studio,
+    Workstation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct CpuBudgetLimits {
+    pub max_dimension: u64,
+    pub max_pixels: u64,
+    pub max_progressive_pixels: u64,
+    pub max_samples_per_pixel: u32,
+    pub max_camera_samples: u64,
+    pub max_triangles: u64,
+    pub max_bodies: usize,
+    pub max_geometry_bytes: u64,
+    pub max_job_bytes: u64,
+    pub max_work_units: u64,
+}
+
+impl CpuBudget {
+    pub const ALL: [Self; 3] = [Self::Compact, Self::Studio, Self::Workstation];
+
+    pub fn is_compact(&self) -> bool {
+        *self == Self::Compact
+    }
+
+    pub const fn limits(self) -> CpuBudgetLimits {
+        match self {
+            Self::Compact => CpuBudgetLimits {
+                max_dimension: 4096,
+                max_pixels: 4_194_304,
+                max_progressive_pixels: 1_048_576,
+                max_samples_per_pixel: 64,
+                max_camera_samples: 16_777_216,
+                max_triangles: super::image::MAX_TRIANGLES,
+                max_bodies: 16_384,
+                max_geometry_bytes: super::image::MAX_GEOMETRY_BYTES,
+                max_job_bytes: super::image::MAX_JOB_BYTES,
+                max_work_units: 1_000_000_000,
+            },
+            Self::Studio => CpuBudgetLimits {
+                max_dimension: 8192,
+                max_pixels: 16_777_216,
+                max_progressive_pixels: 16_777_216,
+                max_samples_per_pixel: 1024,
+                max_camera_samples: 4_294_967_296,
+                max_triangles: 2_000_000,
+                max_bodies: 65_536,
+                max_geometry_bytes: GIB,
+                max_job_bytes: 3 * GIB,
+                max_work_units: 1_000_000_000_000,
+            },
+            Self::Workstation => CpuBudgetLimits {
+                max_dimension: 16_384,
+                max_pixels: 134_217_728,
+                max_progressive_pixels: 134_217_728,
+                max_samples_per_pixel: MAX_CPU_SAMPLES_PER_PIXEL,
+                max_camera_samples: super::MAX_TRACE_PIXELS * MAX_CPU_SAMPLES_PER_PIXEL as u64,
+                max_triangles: MAX_CPU_TRIANGLES as u64,
+                max_bodies: MAX_CPU_BODIES,
+                max_geometry_bytes: 4 * GIB,
+                max_job_bytes: 128 * GIB,
+                max_work_units: MAX_CPU_WORK,
+            },
+        }
+    }
+
+    pub fn image_limits(self, progressive: bool) -> RenderLimits {
+        let limits = self.limits();
+        RenderLimits {
+            max_dimension: limits.max_dimension,
+            max_pixels: if progressive { limits.max_progressive_pixels } else { limits.max_pixels },
+            max_scratch_bytes: limits.max_job_bytes,
+        }
+    }
+
+    pub fn validate_samples(self, samples: u32) -> Result<()> {
+        let maximum = self.limits().max_samples_per_pixel;
+        if samples == 0 || samples > maximum {
+            return Err(JobError::new(ErrorCode::InvalidRequest, format!("CPU {self:?} samples_per_pixel must be 1..{maximum}")));
+        }
+        Ok(())
+    }
+
+    /// The smallest profile that admits this image, to name in a refusal. It is never
+    /// selected automatically: the person chooses it. `None` when no profile admits it.
+    pub fn smallest_admitting(width: u32, height: u32, progressive: Option<CpuProgressiveOptions>) -> Option<Self> {
+        Self::ALL.into_iter().find(|budget| budget.admits_image(width, height, progressive))
+    }
+
+    /// What `validate_image` accepts, without building its message (which names a profile).
+    fn admits_image(self, width: u32, height: u32, progressive: Option<CpuProgressiveOptions>) -> bool {
+        let (w, h) = (u64::from(width), u64::from(height));
+        let limits = self.image_limits(progressive.is_some());
+        let Some(pixels) = w.checked_mul(h) else { return false };
+        w > 0
+            && h > 0
+            && w <= limits.max_dimension
+            && h <= limits.max_dimension
+            && pixels <= limits.max_pixels
+            && progressive.is_none_or(|options| {
+                let samples = options.samples_per_pixel;
+                (1..=self.limits().max_samples_per_pixel).contains(&samples)
+                    && pixels.checked_mul(u64::from(samples)).is_some_and(|n| n <= self.limits().max_camera_samples)
+            })
+    }
+
+    /// The way out of a size refusal, for English messages: the profile that can render
+    /// the image, or only a smaller size when none can.
+    pub fn size_advice(width: u32, height: u32, progressive: Option<CpuProgressiveOptions>) -> String {
+        match Self::smallest_admitting(width, height, progressive) {
+            Some(budget) => format!("choose the {budget:?} CPU resource profile, or a smaller size"),
+            None => "no CPU resource profile accepts this size; choose a smaller size".into(),
+        }
+    }
+
+    /// No geometry reads or allocations. This also validates offline saved intent.
+    pub fn validate_image(self, width: u32, height: u32, progressive: Option<CpuProgressiveOptions>) -> Result<()> {
+        let (w, h) = (u64::from(width), u64::from(height));
+        let limits = self.image_limits(progressive.is_some());
+        let pixels = w.checked_mul(h).ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "CPU pixel count overflow"))?;
+        if w == 0 || h == 0 {
+            return Err(JobError::new(ErrorCode::LimitExceeded, format!("CPU {self:?} accepts dimensions 1..{}", limits.max_dimension)));
+        }
+        if w > limits.max_dimension || h > limits.max_dimension || pixels > limits.max_pixels {
+            return Err(JobError::new(
+                ErrorCode::LimitExceeded,
+                format!(
+                    "CPU {self:?} accepts dimensions 1..{} and at most {} pixels; {}",
+                    limits.max_dimension,
+                    limits.max_pixels,
+                    Self::size_advice(width, height, progressive)
+                ),
+            ));
+        }
+        if let Some(options) = progressive {
+            self.validate_samples(options.samples_per_pixel)?;
+            if pixels.checked_mul(u64::from(options.samples_per_pixel)).is_none_or(|n| n > self.limits().max_camera_samples) {
+                return Err(JobError::new(
+                    ErrorCode::LimitExceeded,
+                    format!("CPU {self:?} exceeds its {} camera-sample admission", self.limits().max_camera_samples),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// A file may preserve large intent on every platform; only execution needs
+    /// the native 64-bit address space. No implicit downgrade to Compact occurs.
+    pub fn validate_execution(self) -> Result<()> {
+        if self != Self::Compact && (cfg!(target_arch = "wasm32") || usize::BITS < 64) {
+            return Err(JobError::new(ErrorCode::HostUnavailable, "large CPU profiles require a native 64-bit host"));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn large_intent_is_explicit_and_old_intent_remains_compact() {
+        assert_eq!(CpuBudget::default(), CpuBudget::Compact);
+        let p = Some(CpuProgressiveOptions { samples_per_pixel: 128, seed: 9 });
+        assert!(CpuBudget::Compact.validate_image(3840, 2160, p).is_err());
+        assert!(CpuBudget::Studio.validate_image(3840, 2160, p).is_ok());
+        assert!(CpuBudget::Studio.validate_image(7680, 4320, p).is_err());
+        assert!(CpuBudget::Workstation.validate_image(7680, 4320, p).is_ok());
+        assert_eq!(serde_json::from_str::<CpuBudget>("\"workstation\"").unwrap(), CpuBudget::Workstation);
+        assert!(serde_json::from_str::<CpuBudget>("\"unlimited\"").is_err());
+    }
+
+    #[test]
+    fn all_envelopes_have_checked_finite_bounds_and_no_automatic_resize() {
+        for budget in CpuBudget::ALL {
+            let limits = budget.limits();
+            assert!(limits.max_geometry_bytes < limits.max_job_bytes);
+            assert!(limits.max_job_bytes < NATIVE_CPU_POOL_BYTES);
+            assert!(limits.max_work_units <= MAX_CPU_WORK);
+            assert!(budget.validate_image(0, 1, None).is_err());
+            assert!(budget.validate_image(u32::MAX, u32::MAX, None).is_err());
+            assert!(budget.validate_samples(0).is_err());
+            assert!(budget.validate_samples(limits.max_samples_per_pixel + 1).is_err());
+            assert!(budget.validate_samples(limits.max_samples_per_pixel).is_ok());
+        }
+        let p = Some(CpuProgressiveOptions { samples_per_pixel: MAX_CPU_SAMPLES_PER_PIXEL, seed: 0 });
+        assert!(CpuBudget::Workstation.validate_image(8192, 8192, p).is_ok());
+        assert!(CpuBudget::Workstation.validate_image(16_384, 8192, p).is_ok());
+        assert_eq!(CpuBudget::Workstation.limits().max_camera_samples, 1 << 43);
+        assert!(CpuBudget::Workstation.validate_image(3840, 2160, p).is_ok());
+    }
+
+    /// #8941: a size refusal names the smallest profile that admits the image, and none when
+    /// even Workstation refuses it. The profile is only named, never selected.
+    #[test]
+    fn a_size_refusal_names_the_smallest_profile_that_admits_it() {
+        assert_eq!(CpuBudget::smallest_admitting(1920, 1080, None), Some(CpuBudget::Compact));
+        assert_eq!(CpuBudget::smallest_admitting(3840, 2160, None), Some(CpuBudget::Studio));
+        assert_eq!(CpuBudget::smallest_admitting(15360, 4320, None), Some(CpuBudget::Workstation));
+        assert_eq!(CpuBudget::smallest_admitting(16385, 1, None), None);
+        assert_eq!(CpuBudget::smallest_admitting(0, 1, None), None);
+        let message = CpuBudget::Compact.validate_image(3840, 2160, None).unwrap_err().to_string();
+        assert!(message.contains("choose the Studio CPU resource profile, or a smaller size"), "{message}");
+        let message = CpuBudget::Studio.validate_image(15360, 4320, None).unwrap_err().to_string();
+        assert!(message.contains("choose the Workstation CPU resource profile"), "{message}");
+        let message = CpuBudget::Workstation.validate_image(16384, 16384, None).unwrap_err().to_string();
+        assert!(message.contains("no CPU resource profile accepts this size"), "{message}");
+        assert!(!message.contains("Studio") && !message.contains("choose the"), "{message}");
+        // The message-free check agrees with validate_image everywhere, progressive included.
+        let sizes = [(0, 1), (1, 1), (2048, 2048), (3840, 2160), (4096, 4096), (7680, 4320), (8192, 8192), (16384, 4096), (u32::MAX, 2)];
+        for budget in CpuBudget::ALL {
+            for progressive in [
+                None,
+                Some(CpuProgressiveOptions { samples_per_pixel: 64, seed: 0 }),
+                Some(CpuProgressiveOptions { samples_per_pixel: 4096, seed: 0 }),
+            ] {
+                for (w, h) in sizes {
+                    assert_eq!(
+                        budget.admits_image(w, h, progressive),
+                        budget.validate_image(w, h, progressive).is_ok(),
+                        "{budget:?} {w}x{h} {progressive:?}"
+                    );
+                }
+            }
+        }
+    }
+}

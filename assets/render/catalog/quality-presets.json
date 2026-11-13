@@ -1,0 +1,759 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "specified_unbound",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG"
+  },
+  "items": [
+    {
+      "id": "Q-001",
+      "name": "Interactive Draft",
+      "status": "specified_unbound",
+      "goal": "preview",
+      "resolution": {
+        "width": 960,
+        "height": 540
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 8,
+        "maximum_samples": 64,
+        "relative_error_target": 0.12,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 4,
+        "maximum_transmission_depth": 2,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": false,
+        "preserve_raw": true,
+        "temporal_validation_required": false
+      },
+      "motion": {
+        "enabled": false,
+        "shutter_fraction": 0.0,
+        "temporal_samples": 0,
+        "requires_approved_bake": false,
+        "sample_budget_policy": "No time integration.",
+        "shutter_alignment": "instantaneous",
+        "frame_rate_binding": "not_applicable"
+      },
+      "output": {
+        "master": "linear_buffer",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-073",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    },
+    {
+      "id": "Q-002",
+      "name": "Balanced Product",
+      "status": "specified_unbound",
+      "goal": "presentation",
+      "resolution": {
+        "width": 1600,
+        "height": 900
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 32,
+        "maximum_samples": 512,
+        "relative_error_target": 0.035,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 8,
+        "maximum_transmission_depth": 6,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": true,
+        "preserve_raw": true,
+        "temporal_validation_required": false
+      },
+      "motion": {
+        "enabled": false,
+        "shutter_fraction": 0.0,
+        "temporal_samples": 0,
+        "requires_approved_bake": false,
+        "sample_budget_policy": "No time integration.",
+        "shutter_alignment": "instantaneous",
+        "frame_rate_binding": "not_applicable"
+      },
+      "output": {
+        "master": "linear_buffer",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-065",
+        "CAP-073",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    },
+    {
+      "id": "Q-003",
+      "name": "Product Portfolio",
+      "status": "specified_unbound",
+      "goal": "presentation",
+      "resolution": {
+        "width": 2560,
+        "height": 1440
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 64,
+        "maximum_samples": 2048,
+        "relative_error_target": 0.015,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 12,
+        "maximum_transmission_depth": 10,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": true,
+        "preserve_raw": true,
+        "temporal_validation_required": false
+      },
+      "motion": {
+        "enabled": false,
+        "shutter_fraction": 0.0,
+        "temporal_samples": 0,
+        "requires_approved_bake": false,
+        "sample_budget_policy": "No time integration.",
+        "shutter_alignment": "instantaneous",
+        "frame_rate_binding": "not_applicable"
+      },
+      "output": {
+        "master": "linear_buffer",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-065",
+        "CAP-073",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    },
+    {
+      "id": "Q-004",
+      "name": "Glass and Layers",
+      "status": "specified_unbound",
+      "goal": "optics",
+      "resolution": {
+        "width": 2560,
+        "height": 1440
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 128,
+        "maximum_samples": 4096,
+        "relative_error_target": 0.01,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 20,
+        "maximum_transmission_depth": 16,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": true,
+        "preserve_raw": true,
+        "temporal_validation_required": false
+      },
+      "motion": {
+        "enabled": false,
+        "shutter_fraction": 0.0,
+        "temporal_samples": 0,
+        "requires_approved_bake": false,
+        "sample_budget_policy": "No time integration.",
+        "shutter_alignment": "instantaneous",
+        "frame_rate_binding": "not_applicable"
+      },
+      "output": {
+        "master": "linear_exr",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-025",
+        "CAP-026",
+        "CAP-027",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-065",
+        "CAP-073",
+        "CAP-074",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    },
+    {
+      "id": "Q-005",
+      "name": "LED Optical Study",
+      "status": "specified_unbound",
+      "goal": "optics",
+      "resolution": {
+        "width": 2560,
+        "height": 1440
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 128,
+        "maximum_samples": 4096,
+        "relative_error_target": 0.01,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 20,
+        "maximum_transmission_depth": 16,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": false,
+        "preserve_raw": true,
+        "temporal_validation_required": false
+      },
+      "motion": {
+        "enabled": false,
+        "shutter_fraction": 0.0,
+        "temporal_samples": 0,
+        "requires_approved_bake": false,
+        "sample_budget_policy": "No time integration.",
+        "shutter_alignment": "instantaneous",
+        "frame_rate_binding": "not_applicable"
+      },
+      "output": {
+        "master": "linear_exr",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-025",
+        "CAP-026",
+        "CAP-027",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-073",
+        "CAP-074",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    },
+    {
+      "id": "Q-006",
+      "name": "Lunar Hero Master",
+      "status": "specified_unbound",
+      "goal": "lunar",
+      "resolution": {
+        "width": 3840,
+        "height": 2160
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 256,
+        "maximum_samples": 8192,
+        "relative_error_target": 0.005,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 24,
+        "maximum_transmission_depth": 20,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": false,
+        "preserve_raw": true,
+        "temporal_validation_required": false
+      },
+      "motion": {
+        "enabled": false,
+        "shutter_fraction": 0.0,
+        "temporal_samples": 0,
+        "requires_approved_bake": false,
+        "sample_budget_policy": "No time integration.",
+        "shutter_alignment": "instantaneous",
+        "frame_rate_binding": "not_applicable"
+      },
+      "output": {
+        "master": "linear_exr",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-025",
+        "CAP-026",
+        "CAP-027",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-073",
+        "CAP-074",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085",
+        "CAP-105"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    },
+    {
+      "id": "Q-007",
+      "name": "Lunar Sample Macro",
+      "status": "specified_unbound",
+      "goal": "lunar",
+      "resolution": {
+        "width": 3072,
+        "height": 3072
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 256,
+        "maximum_samples": 8192,
+        "relative_error_target": 0.005,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 24,
+        "maximum_transmission_depth": 20,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": false,
+        "preserve_raw": true,
+        "temporal_validation_required": false
+      },
+      "motion": {
+        "enabled": false,
+        "shutter_fraction": 0.0,
+        "temporal_samples": 0,
+        "requires_approved_bake": false,
+        "sample_budget_policy": "No time integration.",
+        "shutter_alignment": "instantaneous",
+        "frame_rate_binding": "not_applicable"
+      },
+      "output": {
+        "master": "linear_exr",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-025",
+        "CAP-026",
+        "CAP-027",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-073",
+        "CAP-074",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085",
+        "CAP-105"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    },
+    {
+      "id": "Q-008",
+      "name": "Animation Preview",
+      "status": "specified_unbound",
+      "goal": "animation",
+      "resolution": {
+        "width": 1280,
+        "height": 720
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 16,
+        "maximum_samples": 256,
+        "relative_error_target": 0.06,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 8,
+        "maximum_transmission_depth": 6,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": false,
+        "preserve_raw": true,
+        "temporal_validation_required": true
+      },
+      "motion": {
+        "enabled": true,
+        "shutter_fraction": 0.5,
+        "temporal_samples": 8,
+        "requires_approved_bake": true,
+        "sample_budget_policy": "One shutter-time sample per camera path, stratified over temporal_samples intervals; temporal_samples does not multiply the spatial sample budget.",
+        "shutter_alignment": "centered_on_frame_time",
+        "frame_rate_binding": "positive_finite_shot_frame_rate_hz_required"
+      },
+      "output": {
+        "master": "linear_exr",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-053",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-073",
+        "CAP-074",
+        "CAP-078",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085",
+        "CAP-111",
+        "CAP-112",
+        "CAP-119"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    },
+    {
+      "id": "Q-009",
+      "name": "Animation Final",
+      "status": "specified_unbound",
+      "goal": "animation",
+      "resolution": {
+        "width": 3840,
+        "height": 2160
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 128,
+        "maximum_samples": 4096,
+        "relative_error_target": 0.012,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 16,
+        "maximum_transmission_depth": 12,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": false,
+        "preserve_raw": true,
+        "temporal_validation_required": true
+      },
+      "motion": {
+        "enabled": true,
+        "shutter_fraction": 0.5,
+        "temporal_samples": 32,
+        "requires_approved_bake": true,
+        "sample_budget_policy": "One shutter-time sample per camera path, stratified over temporal_samples intervals; temporal_samples does not multiply the spatial sample budget.",
+        "shutter_alignment": "centered_on_frame_time",
+        "frame_rate_binding": "positive_finite_shot_frame_rate_hz_required"
+      },
+      "output": {
+        "master": "linear_exr",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-053",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-073",
+        "CAP-074",
+        "CAP-078",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085",
+        "CAP-105",
+        "CAP-111",
+        "CAP-112",
+        "CAP-119"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    },
+    {
+      "id": "Q-010",
+      "name": "Reference Convergence",
+      "status": "specified_unbound",
+      "goal": "reference",
+      "resolution": {
+        "width": 2048,
+        "height": 2048
+      },
+      "integrator_intent": "path_tracing",
+      "sampling": {
+        "minimum_samples": 1024,
+        "maximum_samples": 16384,
+        "relative_error_target": 0.002,
+        "error_estimator": "Versioned relative standard error of scene-linear luminance with a documented dark-signal floor; adapter must bind an estimator before use.",
+        "maximum_samples_action": "Finish with an unconverged flag when the target is not met.",
+        "scope": "Estimated Monte Carlo uncertainty for the bound estimator, not total optical error, finite-depth bias, rare-path coverage or temporal error.",
+        "stopping_rule_binding": "Require a versioned pixel/tile aggregation rule and dark-signal floor before execution."
+      },
+      "transport": {
+        "maximum_depth": 32,
+        "maximum_transmission_depth": 24,
+        "russian_roulette_after_depth": 3,
+        "roulette_policy": "Compensated stochastic termination; finite depth is a declared truncation."
+      },
+      "denoising": {
+        "enabled": false,
+        "preserve_raw": true,
+        "temporal_validation_required": false
+      },
+      "motion": {
+        "enabled": false,
+        "shutter_fraction": 0.0,
+        "temporal_samples": 0,
+        "requires_approved_bake": false,
+        "sample_budget_policy": "No time integration.",
+        "shutter_alignment": "instantaneous",
+        "frame_rate_binding": "not_applicable"
+      },
+      "output": {
+        "master": "linear_exr",
+        "presentation": "png",
+        "color_transform": "project_declared",
+        "exposure_policy": "manual_locked"
+      },
+      "seed": 21026,
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-002",
+        "CAP-003",
+        "CAP-004",
+        "CAP-005",
+        "CAP-006",
+        "CAP-025",
+        "CAP-026",
+        "CAP-027",
+        "CAP-057",
+        "CAP-058",
+        "CAP-059",
+        "CAP-073",
+        "CAP-074",
+        "CAP-081",
+        "CAP-083",
+        "CAP-085"
+      ],
+      "budget_policy": "Resolve memory and time against the selected executor; never switch devices or downgrade silently.",
+      "baseline_compatibility": "Future authoring target; resolve every field against the current executor before use.",
+      "validation": [
+        "Measure convergence in dark regolith and bright metal or glass regions.",
+        "Compare raw and finished results; preserve labels, fibers and thin wires.",
+        "Report elapsed time, peak memory and incomplete quality targets.",
+        "Compare multiple seeds and increased sample/depth budgets; an estimated noise threshold alone does not establish reference accuracy."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "seed_policy": "Base seed; bind a versioned frame/pixel/sample/time-stratum stream policy and record it in the render manifest."
+    }
+  ]
+}

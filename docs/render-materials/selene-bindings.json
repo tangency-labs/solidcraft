@@ -1,0 +1,834 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "historical_reference_only",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "active_demo_source": false,
+    "superseded_by": "../../assets/render/selene/source-lock.json",
+    "usage": "Historical v7 comparison only. Never use these IDs as targets for the improved SELENE-showcase source."
+  },
+  "source": {
+    "repository": "0xlillith/solidcraft-rover",
+    "commit": "b32437915372d32b71419dc8f5143fe22ff1e869",
+    "path": "models/Rover-v7.solidcraft",
+    "sha256": "fcb08540b1db08325f366fd0ff235f84f66d96406961482736bc097d7248c6d6",
+    "size_bytes": 216036,
+    "format": "solidcraft/15",
+    "units": "mm",
+    "up_axis": "+Z",
+    "source_id": "SRC-SELENE-V7"
+  },
+  "observed_counts": {
+    "bodies_from_source_statistics": 1395,
+    "sketches": 576,
+    "history_features": 3324,
+    "component_definitions_excluding_root": 36,
+    "occurrences": 36,
+    "revolute_joints": 17
+  },
+  "components": [
+    {
+      "component_id": 1929,
+      "name": "Structure",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        1930
+      ]
+    },
+    {
+      "component_id": 2108,
+      "name": "Drive module -1:-90",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2109
+      ]
+    },
+    {
+      "component_id": 2161,
+      "name": "Wheel -1:-90",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2162
+      ]
+    },
+    {
+      "component_id": 2191,
+      "name": "Drive module -1:0",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2192
+      ]
+    },
+    {
+      "component_id": 2244,
+      "name": "Wheel -1:0",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2245
+      ]
+    },
+    {
+      "component_id": 2274,
+      "name": "Drive module -1:90",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2275
+      ]
+    },
+    {
+      "component_id": 2327,
+      "name": "Wheel -1:90",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2328
+      ]
+    },
+    {
+      "component_id": 2357,
+      "name": "Drive module 1:-90",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2358
+      ]
+    },
+    {
+      "component_id": 2410,
+      "name": "Wheel 1:-90",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2411
+      ]
+    },
+    {
+      "component_id": 2440,
+      "name": "Drive module 1:0",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2441
+      ]
+    },
+    {
+      "component_id": 2493,
+      "name": "Wheel 1:0",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2494
+      ]
+    },
+    {
+      "component_id": 2523,
+      "name": "Drive module 1:90",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2524
+      ]
+    },
+    {
+      "component_id": 2576,
+      "name": "Wheel 1:90",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2577
+      ]
+    },
+    {
+      "component_id": 2606,
+      "name": "Avionics",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2607
+      ]
+    },
+    {
+      "component_id": 2629,
+      "name": "Power bay",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2630
+      ]
+    },
+    {
+      "component_id": 2671,
+      "name": "Service lid",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2672
+      ]
+    },
+    {
+      "component_id": 2697,
+      "name": "Payload mounts",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2698
+      ]
+    },
+    {
+      "component_id": 2709,
+      "name": "Communication antennas",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2710
+      ]
+    },
+    {
+      "component_id": 2735,
+      "name": "Arm turret",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2736
+      ]
+    },
+    {
+      "component_id": 2750,
+      "name": "Upper arm",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2751
+      ]
+    },
+    {
+      "component_id": 2781,
+      "name": "Forearm",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2782
+      ]
+    },
+    {
+      "component_id": 2812,
+      "name": "Distal arm",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2813
+      ]
+    },
+    {
+      "component_id": 2843,
+      "name": "Gripper tool",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2844
+      ]
+    },
+    {
+      "component_id": 2853,
+      "name": "Service armour",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2854
+      ]
+    },
+    {
+      "component_id": 2881,
+      "name": "Solar wing -1",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2882
+      ]
+    },
+    {
+      "component_id": 2950,
+      "name": "Solar wing 1",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        2951
+      ]
+    },
+    {
+      "component_id": 3019,
+      "name": "Sample laboratory",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3020
+      ]
+    },
+    {
+      "component_id": 3141,
+      "name": "Dish pedestal",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3142
+      ]
+    },
+    {
+      "component_id": 3153,
+      "name": "Dish yaw mount",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3154
+      ]
+    },
+    {
+      "component_id": 3161,
+      "name": "Parabolic antenna",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3162
+      ]
+    },
+    {
+      "component_id": 3172,
+      "name": "Navigation lights",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3173
+      ]
+    },
+    {
+      "component_id": 3228,
+      "name": "Turret pedestal",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3229
+      ]
+    },
+    {
+      "component_id": 3240,
+      "name": "Turret yaw",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3241
+      ]
+    },
+    {
+      "component_id": 3256,
+      "name": "Turret sensor head",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3257
+      ]
+    },
+    {
+      "component_id": 3286,
+      "name": "Underbody LEDs",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3287
+      ]
+    },
+    {
+      "component_id": 3352,
+      "name": "Project wordmark",
+      "parent_component_id": 0,
+      "occurrence_ids": [
+        3353
+      ]
+    }
+  ],
+  "joints": [
+    {
+      "id": 1,
+      "name": "Wheel axis -1:-90",
+      "kind": "revolute",
+      "a_occurrence_id": 1930,
+      "b_occurrence_id": 2162,
+      "limits_rad": null,
+      "limit_status": "not_declared"
+    },
+    {
+      "id": 2,
+      "name": "Wheel axis -1:0",
+      "kind": "revolute",
+      "a_occurrence_id": 1930,
+      "b_occurrence_id": 2245,
+      "limits_rad": null,
+      "limit_status": "not_declared"
+    },
+    {
+      "id": 3,
+      "name": "Wheel axis -1:90",
+      "kind": "revolute",
+      "a_occurrence_id": 1930,
+      "b_occurrence_id": 2328,
+      "limits_rad": null,
+      "limit_status": "not_declared"
+    },
+    {
+      "id": 4,
+      "name": "Wheel axis 1:-90",
+      "kind": "revolute",
+      "a_occurrence_id": 1930,
+      "b_occurrence_id": 2411,
+      "limits_rad": null,
+      "limit_status": "not_declared"
+    },
+    {
+      "id": 5,
+      "name": "Wheel axis 1:0",
+      "kind": "revolute",
+      "a_occurrence_id": 1930,
+      "b_occurrence_id": 2494,
+      "limits_rad": null,
+      "limit_status": "not_declared"
+    },
+    {
+      "id": 6,
+      "name": "Wheel axis 1:90",
+      "kind": "revolute",
+      "a_occurrence_id": 1930,
+      "b_occurrence_id": 2577,
+      "limits_rad": null,
+      "limit_status": "not_declared"
+    },
+    {
+      "id": 7,
+      "name": "Turret azimuth articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 3229,
+      "b_occurrence_id": 3241,
+      "limits_rad": [
+        -2.792526803190927,
+        2.792526803190927
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 8,
+      "name": "Turret elevation articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 3241,
+      "b_occurrence_id": 3257,
+      "limits_rad": [
+        -0.6108652381980153,
+        1.0471975511965976
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 9,
+      "name": "Port solar tilt articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 1930,
+      "b_occurrence_id": 2882,
+      "limits_rad": [
+        -0.2617993877991494,
+        0.7853981633974483
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 10,
+      "name": "Starboard solar tilt articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 1930,
+      "b_occurrence_id": 2951,
+      "limits_rad": [
+        -0.7853981633974483,
+        0.2617993877991494
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 11,
+      "name": "Arm azimuth articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 1930,
+      "b_occurrence_id": 2736,
+      "limits_rad": [
+        -2.792526803190927,
+        2.792526803190927
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 12,
+      "name": "Shoulder articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 2736,
+      "b_occurrence_id": 2751,
+      "limits_rad": [
+        -1.6580627893946132,
+        1.1344640137963142
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 13,
+      "name": "Elbow articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 2751,
+      "b_occurrence_id": 2782,
+      "limits_rad": [
+        -3.141592653589793,
+        3.141592653589793
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 14,
+      "name": "Wrist articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 2782,
+      "b_occurrence_id": 2813,
+      "limits_rad": [
+        -2.792526803190927,
+        2.792526803190927
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 15,
+      "name": "Tool tilt articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 2813,
+      "b_occurrence_id": 2844,
+      "limits_rad": [
+        -2.792526803190927,
+        2.792526803190927
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 16,
+      "name": "Dish azimuth articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 3142,
+      "b_occurrence_id": 3154,
+      "limits_rad": [
+        -2.6179938779914944,
+        2.6179938779914944
+      ],
+      "limit_status": "inspected_source_limits"
+    },
+    {
+      "id": 17,
+      "name": "Dish elevation articulation",
+      "kind": "revolute",
+      "a_occurrence_id": 3154,
+      "b_occurrence_id": 3162,
+      "limits_rad": [
+        -0.7853981633974483,
+        0.7853981633974483
+      ],
+      "limit_status": "inspected_source_limits"
+    }
+  ],
+  "arm_chain_occurrence_ids": [
+    2736,
+    2751,
+    2782,
+    2813,
+    2844
+  ],
+  "arm_joint_ids": [
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "candidate_vial": {
+    "parent_component_id": 3019,
+    "parent_occurrence_id": 3020,
+    "source_label_coordinates_mm": [
+      -136,
+      -22
+    ],
+    "independent_occurrence_exists": false,
+    "body_references": [
+      {
+        "source_feature_id": 1419,
+        "exact_body_name": "Vial retention grommet (-136, -22)",
+        "transfer_feature_ids": [
+          3062
+        ],
+        "moves_with_vial": false,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1421,
+        "exact_body_name": "Glass sample vial (-136, -22)",
+        "transfer_feature_ids": [
+          3063
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1422,
+        "exact_body_name": "Glass vial bottom (-136, -22)",
+        "transfer_feature_ids": [
+          3064
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1423,
+        "exact_body_name": "Sample material (-136, -22)",
+        "transfer_feature_ids": [
+          3065
+        ],
+        "moves_with_vial": true,
+        "contents": true
+      },
+      {
+        "source_feature_id": 1424,
+        "exact_body_name": "Vial screw cap (-136, -22)",
+        "transfer_feature_ids": [
+          3066
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1425,
+        "exact_body_name": "Vial cap grip (-136, -22, 0)",
+        "transfer_feature_ids": [
+          3067
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1426,
+        "exact_body_name": "Vial cap grip (-136, -22, 1)",
+        "transfer_feature_ids": [
+          3068
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1427,
+        "exact_body_name": "Vial cap grip (-136, -22, 2)",
+        "transfer_feature_ids": [
+          3069
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1428,
+        "exact_body_name": "Vial cap grip (-136, -22, 3)",
+        "transfer_feature_ids": [
+          3070
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1429,
+        "exact_body_name": "Vial cap grip (-136, -22, 4)",
+        "transfer_feature_ids": [
+          3071
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1430,
+        "exact_body_name": "Vial cap grip (-136, -22, 5)",
+        "transfer_feature_ids": [
+          3072
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1431,
+        "exact_body_name": "Vial cap grip (-136, -22, 6)",
+        "transfer_feature_ids": [
+          3073
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      },
+      {
+        "source_feature_id": 1432,
+        "exact_body_name": "Vial cap grip (-136, -22, 7)",
+        "transfer_feature_ids": [
+          3074
+        ],
+        "moves_with_vial": true,
+        "contents": false
+      }
+    ],
+    "required_derivative_changes": [
+      "Create an independently addressable vial occurrence.",
+      "Keep the retention grommet with the storage rack.",
+      "Model a coherent hollow vessel, lid closure, contents and collision proxies.",
+      "Resolve grasp and storage contact geometry before dynamics."
+    ]
+  },
+  "binding_policy": {
+    "match": "exact_hash_and_occurrence_graph_then_explicit_selection",
+    "ambiguous_names": "block_and_request_target_selection",
+    "source_geometry": "preserve_original_and_create_named_derivative_for_changes",
+    "appearance_scope": "review_faces_or_bodies_inside_each_component",
+    "runtime_support": "unverified",
+    "native_model_bundled": false
+  },
+  "attribution_requirements": [
+    "SRC-SELENE-ATTRIBUTION",
+    "Retain Ubuntu Font Licence 1.0 notice for modeled Ubuntu Light lettering in a future derivative.",
+    "Retain SolidCraft emblem attribution."
+  ],
+  "appearance_role_hints": [
+    {
+      "role": "rover_structure",
+      "occurrence_ids": [
+        1930
+      ],
+      "material_concept_id": "MAT-567",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "wheel_rim",
+      "occurrence_ids": [
+        2162,
+        2245,
+        2328,
+        2411,
+        2494,
+        2577
+      ],
+      "material_concept_id": "MAT-561",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "arm_tube",
+      "occurrence_ids": [
+        2751,
+        2782,
+        2813
+      ],
+      "material_concept_id": "MAT-571",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "arm_wrist",
+      "occurrence_ids": [
+        2813,
+        2844
+      ],
+      "material_concept_id": "MAT-572",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "gripper_contact",
+      "occurrence_ids": [
+        2844
+      ],
+      "material_concept_id": "MAT-573",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "sample_scoop",
+      "occurrence_ids": [
+        2844
+      ],
+      "material_concept_id": "MAT-575",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "solar_cell",
+      "occurrence_ids": [
+        2882,
+        2951
+      ],
+      "material_concept_id": "MAT-511",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "solar_coverglass",
+      "occurrence_ids": [
+        2882,
+        2951
+      ],
+      "material_concept_id": "MAT-513",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "vial_glass",
+      "occurrence_ids": [
+        3020
+      ],
+      "material_concept_id": "MAT-582",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "vial_cap",
+      "occurrence_ids": [
+        3020
+      ],
+      "material_concept_id": "MAT-596",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "sample_contents",
+      "occurrence_ids": [
+        3020
+      ],
+      "material_concept_id": "MAT-550",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "sample_cassette",
+      "occurrence_ids": [
+        3020
+      ],
+      "material_concept_id": "MAT-595",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "pcb_solder_mask",
+      "occurrence_ids": [
+        2607
+      ],
+      "material_concept_id": "MAT-161",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "circuit_contact",
+      "occurrence_ids": [
+        2607
+      ],
+      "material_concept_id": "MAT-163",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "cable_jacket",
+      "occurrence_ids": [
+        2607,
+        2630
+      ],
+      "material_concept_id": "MAT-331",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "task_led_emitter",
+      "occurrence_ids": [
+        3173,
+        3287
+      ],
+      "material_concept_id": "MAT-442",
+      "assignment_status": "requires_reviewed_body_or_face_selection",
+      "scope_note": "Occurrence hints are not automatic whole-component assignments; overlapping roles need distinct targets or layers."
+    },
+    {
+      "role": "thermal_blanket",
+      "occurrence_ids": [],
+      "material_concept_id": "MAT-501",
+      "assignment_status": "requires_explicit_derivative_geometry_if_used",
+      "scope_note": "Do not infer that unmodeled equipment exists in the source."
+    }
+  ]
+}

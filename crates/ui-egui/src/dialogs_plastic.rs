@@ -4,11 +4,12 @@
 use crate::dialogs::put;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::FeatureKind;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::plastic::PlasticRule;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Kind, combo, face_sel, field, form_row, shown_expr};
@@ -55,6 +56,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 width: String,
                 catch_depth: String,
                 catch_length: String,
+                base_height: String,
+                new_body: bool,
             },
             /// The rule manager: the rule shown (index into the rules, past the end for a new one).
             Rules {
@@ -95,21 +98,23 @@ impl Pl {
     }
 }
 
-fn snap_fit() -> Pl {
+fn snap_fit(app: &SolveApp) -> Pl {
     Pl::SnapFit {
         hook: 0,
-        length: "10 mm".into(),
-        thickness: "1.5 mm".into(),
-        width: "5 mm".into(),
-        catch_depth: "1 mm".into(),
-        catch_length: "2 mm".into(),
+        length: crate::dialogs::length_default(&app.session, "10"),
+        thickness: crate::dialogs::length_default(&app.session, "1.5"),
+        width: crate::dialogs::length_default(&app.session, "5"),
+        catch_depth: crate::dialogs::length_default(&app.session, "1"),
+        catch_length: crate::dialogs::length_default(&app.session, "2"),
+        base_height: String::new(),
+        new_body: false,
     }
 }
 
 /// The dialog for a plastic command.
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let (pl, inputs) = match id {
-        "plastic.snap_fit" => (snap_fit(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
+        "plastic.snap_fit" => (snap_fit(app), vec![SelInput::new("Position", PLANAR_FACES, false)]),
         "plastic.manage_rules" => {
             let rules = app.session.doc.plastic_rules();
             let pick = app.session.doc.plastic.active.as_ref().and_then(|a| rules.iter().position(|r| &r.name == a)).unwrap_or(0);
@@ -118,12 +123,21 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "plastic.assign_rule" => (Pl::Assign { rule: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
         _ => Pl::simple_start(id)?,
     };
-    Some((Kind::Plastic(pl), inputs))
+    let mut inputs = inputs;
+    // A tool with placement handles snaps its place to sketch points on the face as a Single
+    // hole's does, so the marker can be dragged onto one; a bare sketch point is refused by OK as
+    // before.
+    if crate::place_gizmo::snaps_to_points(app, id)
+        && let Some(position) = inputs.first_mut()
+    {
+        position.accept |= crate::selection::POINTS;
+    }
+    Some((crate::length_input::defaults(&app.session.doc, Kind::Plastic(pl)), inputs))
 }
 
 /// A value row whose empty value means "from the rule" (or another default).
 fn opt_field(ui: &mut egui::Ui, label: &str, v: &mut String, unit: &str, hint: &str) -> bool {
-    let hint = format!("{unit}, {}", crate::i18n::tr_label(hint));
+    let hint = format!("{unit}, {}", solidcraft_ui_text::tr_label(hint));
     hint_row(ui, label, v, &hint)
 }
 
@@ -154,12 +168,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
             enter |= expr_row(ui, "Diameter", diameter);
             enter |= expr_row(ui, "Height", height);
             crate::ui_kit::section(ui, "boss_options", "Options", true, |ui| {
-                enter |= opt_field(ui, "Hole Diameter", hole_diameter, "mm", "no hole");
-                enter |= opt_field(ui, "Hole Depth", hole_depth, "mm", "to the face");
+                enter |= opt_field(ui, "Hole Diameter", hole_diameter, crate::length_input::unit(&app.session.doc), "no hole");
+                enter |= opt_field(ui, "Hole Depth", hole_depth, crate::length_input::unit(&app.session.doc), "to the face");
             });
             crate::ui_kit::section(ui, "boss_advanced", "Advanced", false, |ui| {
                 enter |= opt_field(ui, "Draft Angle", draft, "deg", "from the rule");
-                enter |= opt_field(ui, "Root Fillet", fillet, "mm", "none");
+                enter |= opt_field(ui, "Root Fillet", fillet, crate::length_input::unit(&app.session.doc), "none");
                 enter |= expr_row(ui, "Ribs", ribs);
                 if app.session.doc.eval(ribs, ValueKind::Unitless).is_ok_and(|n| n >= 1.0) {
                     enter |= expr_row(ui, "  Rib Thickness", rib_thickness);
@@ -182,10 +196,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
             enter |= expr_row(ui, "Width", width);
             enter |= expr_row(ui, "Height", height);
             if *groove {
-                enter |= opt_field(ui, "Clearance", gap, "mm", "from the rule");
+                enter |= opt_field(ui, "Clearance", gap, crate::length_input::unit(&app.session.doc), "from the rule");
             }
         }
-        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length } => {
+        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length, base_height, new_body } => {
             let dirs = face_normal(app, inputs).map(hook_dirs).unwrap_or_default();
             if !dirs.is_empty() {
                 let names: Vec<&str> = dirs.iter().map(|(n, _)| n.as_str()).collect();
@@ -196,6 +210,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
             enter |= expr_row(ui, "Width", width);
             enter |= expr_row(ui, "Catch Depth", catch_depth);
             enter |= expr_row(ui, "Catch Length", catch_length);
+            enter |= opt_field(ui, "Base Height", base_height, crate::length_input::unit(&app.session.doc), "at the face");
+            form_row(ui, "Body", |ui| {
+                let mut op = usize::from(*new_body);
+                combo(ui, "pl_snap_body", &["Join", "New Body"], &mut op);
+                *new_body = op == 1;
+            });
         }
         Pl::Rest { round, width, length, height, draft, thickness } => {
             form_row(ui, "Shape", |ui| {
@@ -210,7 +230,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
             enter |= expr_row(ui, "Height", height);
             crate::ui_kit::section(ui, "rest_advanced", "Advanced", false, |ui| {
                 enter |= opt_field(ui, "Draft Angle", draft, "deg", "from the rule");
-                enter |= opt_field(ui, "Wall Thickness", thickness, "mm", "solid");
+                enter |= opt_field(ui, "Wall Thickness", thickness, crate::length_input::unit(&app.session.doc), "solid");
             });
         }
         Pl::Rules { pick, name, values, active, loaded } => {
@@ -221,7 +241,15 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
                 load: {
                     let base = rules.get(*pick).or(rules.first()).cloned();
                     if let Some(b) = base {
-                        *values = std::iter::once(b.material.clone()).chain(b.fields().iter().map(|(_, e, _)| (*e).clone())).collect();
+                        *values = std::iter::once(b.material.clone())
+                            .chain(b.fields().iter().map(|(_, e, kind)| {
+                                if *kind == ValueKind::Length {
+                                    crate::length_input::stored(&app.session.doc, e)
+                                } else {
+                                    crate::dialogs::shown_expr(e, *kind)
+                                }
+                            }))
+                            .collect();
                         *active = app.session.doc.plastic.active.as_deref() == Some(b.name.as_str()) && *pick < rules.len();
                     }
                 },
@@ -288,7 +316,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             }
             ("plastic.lip", p)
         }
-        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length } => {
+        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length, base_height, new_body } => {
             let mut p = placed("a point on a face")?;
             let n = extra
                 .get("direction")
@@ -300,6 +328,10 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
                 [("length", length), ("thickness", thickness), ("width", width), ("catch_depth", catch_depth), ("catch_length", catch_length)]
             {
                 p[key] = json!(v);
+            }
+            put(&mut p, &[("base_height", base_height)]);
+            if *new_body {
+                p["new_body"] = json!(true);
             }
             ("plastic.snap_fit", p)
         }
@@ -357,7 +389,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (Pl::simple_restore(kind)?, "plastic.lip", face.0)
         }
-        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, body } => {
+        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, base_height, new_body, body } => {
             extra.insert("direction".into(), pt(direction.0));
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
@@ -373,6 +405,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 width: shown_expr(width, ValueKind::Length),
                 catch_depth: shown_expr(catch_depth, ValueKind::Length),
                 catch_length: shown_expr(catch_length, ValueKind::Length),
+                base_height: base_height.as_deref().map(|v| shown_expr(v, ValueKind::Length)).unwrap_or_default(),
+                new_body: *new_body,
             };
             (f, "plastic.snap_fit", position.0)
         }

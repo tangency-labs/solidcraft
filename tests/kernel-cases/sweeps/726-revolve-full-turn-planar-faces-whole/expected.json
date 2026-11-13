@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#726",
+  "tangency-labs/solidcraft#1687"
+ ],
+ "what": "a flanged hub profile (six edges, none on the axis) revolved a full turn: the planar faces must come out whole, not as three patches",
+ "source": "analytic",
+ "method": "profile (8,0) (30,0) (30,6) (18,6) (18,22) (8,22) about the Z axis: V = pi [(30^2 - 8^2) 6 + (18^2 - 8^2) 16] = 28826.6; area = side walls 2 pi (30 6 + 18 16 + 8 22) + annuli pi [(30^2-8^2) + (30^2-18^2) + (18^2-8^2)]. Six whole faces: three annuli and three cylinders.",
+ "body_count": 1,
+ "volume_mm3": 28827.254189339943,
+ "area_mm2": 9299.114254625787,
+ "faces": 6
+}

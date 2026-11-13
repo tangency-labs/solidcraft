@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "sheet.hem 2 long on a 2 mm sheet: shorter than its own 180 degree bend (gap + T = 2.01)",
+ "source": "invariants",
+ "method": "the hem's length runs to its outer face, so it must be at least the bend's g + T = 2.01; a leg of 2 - 2.01 < 0 is no hem: a clean refusal",
+ "outcome": "refused",
+ "refusal": "the hem is shorter than its bend"
+}

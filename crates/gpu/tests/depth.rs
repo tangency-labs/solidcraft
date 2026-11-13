@@ -1,18 +1,26 @@
 //! Depth in headless pictures, drawn with the viewport's pipelines (#1434, #1739): an edge behind
 //! a face stays hidden however large the design and however far the camera, and whatever lies on
-//! a face (its edges, a thin label) draws over it at any angle. Each check runs with the depth the
+//! a face (its edges, a thin label) draws over it at any angle, with a section shown or not, and a
+//! section's cap hides what lies behind it (#6328). Each check runs with the depth the
 //! device draws with (a 32-bit float buffer, reversed, where it has one) and with the 24-bit
 //! fallback. Skipped, with the reason printed, without a GPU adapter (`SOLIDCRAFT_REQUIRE_GPU=1`
 //! makes that a failure).
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::{Mesh, Vec3};
-use solidcraft_engine::render::{Camera, Rgb, Scene, SceneLine, SceneMesh, StandardView};
+use solidcraft_engine::geom::Mesh;
 use solidcraft_engine::view::{self, Guides};
-use solidcraft_gpu::GpuError;
-use solidcraft_gpu::capture::{self, Capturer};
+use solidcraft_geom::prelude::*;
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine, SceneMesh, StandardView};
+use solidcraft_viewport_gpu::GpuError;
+use solidcraft_viewport_gpu::capture::{self, Capturer};
 use std::sync::{Arc, OnceLock};
+
+/// The adapter policy the app's environment names (`SOLIDCRAFT_GPU`).
+fn policy() -> solidcraft_viewport_gpu::select::Policy {
+    solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))
+}
 
 fn or_skip(c: Result<&'static Capturer, &'static GpuError>) -> Option<&'static Capturer> {
     match c {
@@ -27,9 +35,10 @@ fn or_skip(c: Result<&'static Capturer, &'static GpuError>) -> Option<&'static C
 
 /// The device's own depth, then the 24-bit fallback (the same device kind, its own instance).
 fn capturers() -> Vec<(&'static str, &'static Capturer)> {
-    static FALLBACK: OnceLock<solidcraft_gpu::Result<Capturer>> = OnceLock::new();
-    let Some(own) = or_skip(capture::shared()) else { return Vec::new() };
-    let Some(fallback) = or_skip(FALLBACK.get_or_init(|| Capturer::headless_with_depth(wgpu::TextureFormat::Depth24PlusStencil8)).as_ref()) else {
+    static FALLBACK: OnceLock<solidcraft_viewport_gpu::Result<Capturer>> = OnceLock::new();
+    let Some(own) = or_skip(capture::shared(policy())) else { return Vec::new() };
+    let Some(fallback) = or_skip(FALLBACK.get_or_init(|| Capturer::headless_with_depth(policy(), wgpu::TextureFormat::Depth24PlusStencil8)).as_ref())
+    else {
         return Vec::new();
     };
     eprintln!("GPU: {}, depth {:?} and {:?}", own.adapter_name(), own.depth_format(), fallback.depth_format());
@@ -37,7 +46,7 @@ fn capturers() -> Vec<(&'static str, &'static Capturer)> {
 }
 
 fn reversed(c: &Capturer) -> bool {
-    solidcraft_gpu::view::reversed_depth(Some(c.depth_format()))
+    solidcraft_viewport_gpu::view::reversed_depth(Some(c.depth_format()))
 }
 
 /// RGBA pixels as `[r, g, b, a]`.
@@ -58,7 +67,7 @@ fn session(script: &[(&str, serde_json::Value)]) -> Session {
 }
 
 fn picture(c: &Capturer, s: &Session, cam: &Camera, w: u32, h: u32) -> Vec<u8> {
-    c.rgba(&view::scene_with_guides(s, cam, None, Guides { grid: false, axes: false }), cam, w, h).unwrap()
+    c.rgba(&view::scene_with_guides(s, cam, None, Guides { grid: false, axes: false }).unwrap(), cam, w, h).unwrap()
 }
 
 fn differing(a: &[u8], b: &[u8]) -> usize {
@@ -113,7 +122,7 @@ fn at_ten_metres_a_thin_label_is_whole_and_a_washer_behind_stays_hidden() {
             continue;
         }
         // The label's front face (y = -0.3), sampled inside its outline.
-        let radius = view::scene(&with, &cam).radius;
+        let radius = view::scene(&with, &cam).unwrap().radius;
         let mut grey = Vec::new();
         for i in 1..20 {
             for j in 1..20 {
@@ -145,15 +154,17 @@ fn sheet(tilt: f64) -> Mesh {
 }
 
 /// A front view of `mesh` with `lines`, as part of a design of `radius`, 40 mm high on 200 px.
-fn front(mesh: Mesh, lines: Vec<SceneLine>, radius: f64, fov: f64) -> (Scene, Camera) {
-    let scene = Scene { meshes: vec![SceneMesh::solid(Arc::new(mesh), Rgb(160, 165, 175))], lines, radius, ..Default::default() };
+/// `section`: with a section that cuts nothing shown, so the section's own passes draw the faces.
+fn front(mesh: Mesh, lines: Vec<SceneLine>, radius: f64, fov: f64, section: bool) -> (Scene, Camera) {
+    let clip = section.then_some((Vec3::X, 1e3));
+    let scene = Scene { meshes: vec![SceneMesh::solid(Arc::new(mesh), Rgb(160, 165, 175))], lines, radius, clip, ..Default::default() };
     let mut cam = Camera { distance: if fov > 0.0 { 25.0 / (fov * 0.5).tan() } else { 62.5 }, fov, ..Default::default() };
     cam.set_view(StandardView::Front);
     (scene, cam)
 }
 
 fn red_line(a: Vec3, b: Vec3, on_top: bool) -> SceneLine {
-    SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), width: 1.2, on_top }
+    SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), alpha: 1.0, width: 1.2, on_top }
 }
 
 fn red_pixels(c: &Capturer, scene: &Scene, cam: &Camera) -> usize {
@@ -161,7 +172,8 @@ fn red_pixels(c: &Capturer, scene: &Scene, cam: &Camera) -> usize {
 }
 
 /// An edge lying on a face draws its whole width over it, on a face seen square and on one turned
-/// to 80°, in orthographic and perspective, in a small design and a large one.
+/// to 80°, in orthographic and perspective, in a small design and a large one, with a section shown
+/// or not (#6328: the section's marking pass draws the faces unpushed, then pushes them).
 #[test]
 fn an_edge_on_a_face_draws_whole_at_any_angle() {
     for (mode, c) in capturers() {
@@ -170,30 +182,99 @@ fn an_edge_on_a_face_draws_whole_at_any_angle() {
             // Across the sheet, at z = 5: y = 5·tan(tilt).
             let (a, b) = (Vec3::new(-12.0, 5.0 * t, 5.0), Vec3::new(12.0, 5.0 * t, 5.0));
             for radius in [30.0, 17_000.0] {
-                for fov in [0.0, 0.6] {
-                    let (on, cam) = front(sheet(tilt.to_radians()), vec![red_line(a, b, false)], radius, fov);
-                    let (top, _) = front(sheet(tilt.to_radians()), vec![red_line(a, b, true)], radius, fov);
+                for (fov, section) in [0.0, 0.6].into_iter().flat_map(|fov| [(fov, false), (fov, true)]) {
+                    let (on, cam) = front(sheet(tilt.to_radians()), vec![red_line(a, b, false)], radius, fov, section);
+                    let (top, _) = front(sheet(tilt.to_radians()), vec![red_line(a, b, true)], radius, fov, section);
                     let (shown, all) = (red_pixels(c, &on, &cam), red_pixels(c, &top, &cam));
                     assert!(all > 50, "{mode}: the line itself ({all} px)");
-                    assert!(shown * 10 >= all * 9, "{mode} depth, tilt {tilt}°, radius {radius}, fov {fov}: {shown} of {all} px drawn");
+                    assert!(
+                        shown * 10 >= all * 9,
+                        "{mode} depth, tilt {tilt}°, radius {radius}, fov {fov}, section {section}: {shown} of {all} px drawn"
+                    );
                 }
             }
         }
     }
 }
 
-/// An edge 0.5 mm behind a face seen square is hidden, however large the design: lines were pulled
-/// toward the eye by a share of the depth range, about 27 mm in a design 34 m across.
+/// A selected edge's highlight from `a` to `b` on a face of normal `n`, in a highlight scene of
+/// its own: a 3 px core in a 6 px halo (`GpuScene::lifted_line`).
+fn highlight(a: Vec3, b: Vec3, n: Vec3) -> solidcraft_viewport_gpu::view::GpuScene {
+    let mut sc = solidcraft_viewport_gpu::view::GpuScene::default();
+    let red = sc.color([255, 0, 0, 255]);
+    sc.lifted_line(a.to_f32(), b.to_f32(), red, 6.0, [n.to_f32(), n.to_f32()]);
+    sc
+}
+
+/// A selected edge's highlight (a 3 px core in a 6 px halo, drawn by `GpuScene::lifted_line`
+/// in the highlight scene) lying on a face seen almost edge on draws its whole width: the face
+/// no longer buries part of the band, which showed as a thin wedge instead of a line. The same
+/// band 5 mm behind a face seen square, beside faces seen square, stays hidden.
+#[test]
+fn a_selected_edge_on_a_grazing_face_draws_whole() {
+    let reference = |a: Vec3, b: Vec3| vec![SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), alpha: 1.0, width: 6.0, on_top: true }];
+    for (mode, c) in capturers() {
+        for tilt in [60.0_f64, 80.0, 85.0, 88.0] {
+            let tr = tilt.to_radians();
+            let t = tr.tan();
+            let n = Vec3::new(0.0, -tr.cos(), tr.sin());
+            let (a, b) = (Vec3::new(-12.0, 5.0 * t, 5.0), Vec3::new(12.0, 5.0 * t, 5.0));
+            // The small design holds the edge, 5·tan(tilt) behind the sheet's middle: at 88° that
+            // is 143 mm, past the far plane of a design of radius 30, where the reference band drew
+            // nothing (the check only passed by counting a band left from another picture).
+            for radius in [(5.0 * t).max(30.0), 17_000.0] {
+                for fov in [0.0, 0.6] {
+                    let (plain, cam) = front(sheet(tr), Vec::new(), radius, fov, false);
+                    let (top, _) = front(sheet(tr), reference(a, b), radius, fov, false);
+                    let shown = pixels(&c.rgba_highlighted(&plain, Some(highlight(a, b, n)), &cam, 200, 200).unwrap()).filter(|p| red(*p)).count();
+                    let all = red_pixels(c, &top, &cam);
+                    assert!(all > 100, "{mode}: the band itself ({all} px)");
+                    assert!(shown * 10 >= all * 9, "{mode} depth, tilt {tilt}°, radius {radius}, fov {fov}: {shown} of {all} px drawn");
+                }
+            }
+        }
+        for radius in [30.0, 17_000.0] {
+            for fov in [0.0, 0.6] {
+                let (a, b) = (Vec3::new(-12.0, 5.0, 5.0), Vec3::new(12.0, 5.0, 5.0));
+                let (plain, cam) = front(sheet(0.0), Vec::new(), radius, fov, false);
+                let img = c.rgba_highlighted(&plain, Some(highlight(a, b, Vec3::new(0.0, -1.0, 0.0))), &cam, 200, 200).unwrap();
+                let n = pixels(&img).filter(|p| red(*p)).count();
+                assert_eq!(n, 0, "{mode} depth, radius {radius}, fov {fov}: the band behind shows in {n} px");
+            }
+        }
+    }
+}
+
+/// A picture drawn without a highlight shows none of the highlight of the picture before it. The
+/// capturer kept its last highlight scene, so a band drawn for one check showed in the next
+/// picture on the same capturer, and the checks here, which share their capturers across test
+/// threads, failed at random: an edge "192 of 612 px drawn", a washer through its plate.
+#[test]
+fn a_picture_without_a_highlight_shows_none_of_the_one_before() {
+    for (mode, c) in capturers() {
+        let (plain, cam) = front(sheet(0.0), Vec::new(), 30.0, 0.0, false);
+        let (a, b) = (Vec3::new(-12.0, 0.0, 5.0), Vec3::new(12.0, 0.0, 5.0));
+        let highlighted = c.rgba_highlighted(&plain, Some(highlight(a, b, Vec3::new(0.0, -1.0, 0.0))), &cam, 200, 200).unwrap();
+        let band = pixels(&highlighted).filter(|p| red(*p)).count();
+        assert!(band > 100, "{mode}: the band itself ({band} px)");
+        let after = red_pixels(c, &plain, &cam);
+        assert_eq!(after, 0, "{mode}: the picture after the highlighted one shows its band in {after} px");
+    }
+}
+
+/// An edge 0.5 mm behind a face seen square is hidden, however large the design, with a section
+/// shown or not: lines were pulled toward the eye by a share of the depth range, about 27 mm in a
+/// design 34 m across.
 #[test]
 fn an_edge_just_behind_a_face_stays_hidden_on_a_large_design() {
     for (mode, c) in capturers() {
         for radius in [30.0, 17_000.0] {
-            for fov in [0.0, 0.6] {
+            for (fov, section) in [0.0, 0.6].into_iter().flat_map(|fov| [(fov, false), (fov, true)]) {
                 // The sheet is at y = 0; the camera looks along +y, so behind is +y.
                 let (a, b) = (Vec3::new(-12.0, 0.5, 5.0), Vec3::new(12.0, 0.5, 5.0));
-                let (scene, cam) = front(sheet(0.0), vec![red_line(a, b, false)], radius, fov);
+                let (scene, cam) = front(sheet(0.0), vec![red_line(a, b, false)], radius, fov, section);
                 let n = red_pixels(c, &scene, &cam);
-                assert_eq!(n, 0, "{mode} depth, radius {radius}, fov {fov}: the edge behind shows in {n} px");
+                assert_eq!(n, 0, "{mode} depth, radius {radius}, fov {fov}, section {section}: the edge behind shows in {n} px");
             }
         }
     }
@@ -203,7 +284,7 @@ fn an_edge_just_behind_a_face_stays_hidden_on_a_large_design() {
 /// this runs on (D3D12, Vulkan, Metal) has `Depth32FloatStencil8`.
 #[test]
 fn the_device_draws_with_float_depth_where_it_has_it() {
-    let Some(c) = or_skip(capture::shared()) else { return };
+    let Some(c) = or_skip(capture::shared(policy())) else { return };
     eprintln!("GPU: {}, depth {:?}", c.adapter_name(), c.depth_format());
     let float = c.depth_format() == wgpu::TextureFormat::Depth32FloatStencil8;
     assert_eq!(float, reversed(c));
@@ -221,18 +302,567 @@ fn an_edge_on_the_cut_face_draws_over_the_cap() {
     s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
     for (mode, c) in capturers() {
         for fov in [0.0, 0.6] {
-            let mut cam = view::home_camera(&s);
+            let mut cam = view::home_camera(&s).unwrap();
             cam.fov = fov;
             let count = |on_top: bool| {
                 // The session's section (`scene_with_guides` takes its own). The line is 2 µm on
                 // the kept side: exactly on the plane, rounding cuts parts of it away with the rest.
-                let mut sc = view::scene(&s, &cam);
+                let mut sc = view::scene(&s, &cam).unwrap();
                 sc.lines.push(red_line(Vec3::new(5.0, 15.002, 10.0), Vec3::new(35.0, 15.002, 10.0), on_top));
                 pixels(&c.rgba(&sc, &cam, 300, 220).unwrap()).filter(|p| red(*p)).count()
             };
             let (shown, all) = (count(false), count(true));
             assert!(all > 50, "{mode}: the line itself ({all} px)");
             assert!(shown * 10 >= all * 9, "{mode} depth, fov {fov}: {shown} of {all} px drawn over the cap");
+        }
+    }
+}
+
+/// A cut body's cap covers the body it touches behind the cut. A block whose far face (y = 30)
+/// lies on a larger plate's front face, cut at y = 15: through the cut the block's far wall and
+/// the plate's face are at one depth. When the cap went to the nearer of the two by depth, the
+/// plate showed through 2721 of its 4350 px here (an engine's sleeves in their bores, pins in
+/// their bosses); counted by crossings, the cap is the same with the plate as without it. An
+/// open body behind it (a box without its far face, whose near face alone the ray crosses)
+/// takes nothing from the cap either: only closed bodies are counted.
+#[test]
+fn a_cap_covers_the_body_its_cut_body_touches() {
+    let block = ("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "block"}));
+    let plate = ("solid.box", json!({"length": 70, "width": 10, "height": 50, "corner": [-15, 30, -15], "operation": "new", "body_name": "plate"}));
+    let shell = ("solid.box", json!({"length": 70, "width": 10, "height": 50, "corner": [-15, 35, -15], "operation": "new", "body_name": "shell"}));
+    let far_face = ("face.delete", json!({"faces": [[20, 45, 10]], "heal": false}));
+    let cut = ("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}}));
+    let alone = session(&[block.clone(), cut.clone()]);
+    let touching = session(&[block.clone(), plate, cut.clone()]);
+    let open = session(&[block, shell, far_face, cut]);
+    assert!(open.world_state().unwrap().body("shell").unwrap().body.is_surface());
+    let (w, h) = (360, 280);
+    for (mode, c) in capturers() {
+        for (what, other) in [("the touching plate", &touching), ("an open shell behind", &open)] {
+            for fov in [0.0, 0.6] {
+                let mut cam = view::home_camera(&touching).unwrap();
+                (cam.fov, cam.yaw, cam.pitch) = (fov, -0.3, 0.2);
+                let radius = view::scene(&touching, &cam).unwrap().radius;
+                let shot = |s: &Session| {
+                    c.rgba(&Scene { grid: Vec::new(), lines: Vec::new(), radius, ..view::scene(s, &cam).unwrap() }, &cam, w, h).unwrap()
+                };
+                let (a, b) = (shot(&alone), shot(other));
+                // The cap on screen: the cut's rectangle (x 0..40, z 0..20 at y = 15), 2 px in.
+                let corner = |x: f64, z: f64| cam.to_screen(Vec3::new(x, 15.0, z), f64::from(w), f64::from(h), radius).map(|(x, y, _)| (x, y));
+                let cap: Vec<(f64, f64)> = [(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)].iter().filter_map(|(x, z)| corner(*x, *z)).collect();
+                assert_eq!(cap.len(), 4, "fov {fov}: the cut is on screen");
+                let turn = (0..4).map(|i| cap[i].0 * cap[(i + 1) % 4].1 - cap[(i + 1) % 4].0 * cap[i].1).sum::<f64>().signum();
+                let inside = |x: f64, y: f64| {
+                    (0..4).all(|i| {
+                        let ((ax, ay), (bx, by)) = (cap[i], cap[(i + 1) % 4]);
+                        ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / (bx - ax).hypot(by - ay) * turn >= 2.0
+                    })
+                };
+                let (mut shown, mut all) = (0, 0);
+                for (i, (p, q)) in pixels(&a).zip(pixels(&b)).enumerate() {
+                    if inside((i % w as usize) as f64 + 0.5, (i / w as usize) as f64 + 0.5) {
+                        all += 1;
+                        shown += usize::from(p.iter().zip(q).any(|(u, v)| u.abs_diff(v) > 24));
+                    }
+                }
+                assert!(all > 3000, "{mode}, fov {fov}: the cap ({all} px)");
+                assert_eq!(shown, 0, "{mode} depth, fov {fov}: {what} shows through {shown} of {all} cap px");
+            }
+        }
+    }
+}
+
+/// Pixels of the model's edges lying behind the section plane (recoloured red) that draw over
+/// the cap: the cap's pixels are where the picture without lines shows the hatch (warm, with
+/// warm pixels 3 px around, so the cut's outline doesn't count).
+fn edges_through_the_cap(c: &Capturer, s: &Session, cam: &Camera, (origin, normal): (Vec3, Vec3), (w, h): (u32, u32)) -> usize {
+    let mut sc = view::scene(s, cam).unwrap();
+    let behind = |p: &Vec3| (*p - origin).dot(normal) < -0.5;
+    let segments = sc
+        .lines
+        .iter()
+        .flat_map(|l| l.points.windows(2).filter(|w| w.iter().all(behind)).map(|w| SceneLine { points: w.to_vec(), color: Rgb(255, 0, 0), ..*l }))
+        .collect();
+    sc.lines = segments;
+    let with = c.rgba(&sc, cam, w, h).unwrap();
+    sc.lines.clear();
+    let without = c.rgba(&sc, cam, w, h).unwrap();
+    let warm = |x: i64, y: i64| {
+        let at = (y * i64::from(w) + x) as usize * 4;
+        without.get(at..at + 3).is_some_and(|p| p[0] > 60 && p[0] > p[2].saturating_add(15))
+    };
+    let mut n = 0;
+    for y in 3..i64::from(h) - 3 {
+        for x in 3..i64::from(w) - 3 {
+            let at = (y * i64::from(w) + x) as usize * 4;
+            let cap = [(0, 0), (3, 0), (-3, 0), (0, 3), (0, -3)].iter().all(|(dx, dy)| warm(x + dx, y + dy));
+            // Redder than the cap there: a red line, whole or blended at its sides.
+            let redness = |img: &[u8]| img.get(at..at + 3).map_or(0, |p| i32::from(p[0]) - i32::from(p[1]));
+            if cap && redness(&with) > redness(&without) + 30 {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+/// The cap hides the edges inside a cut body (#6328). Where a face seen through the cut meets a
+/// face turned toward the eye along an edge (a pocket's front wall and its side wall or floor),
+/// the faces' push left the cap out beside the edge, and the edge showed through it. A pocket
+/// whose front wall is 2 mm behind the cut, in perspective and orthographic.
+#[test]
+fn edges_of_a_pocket_behind_the_cut_stay_under_the_cap() {
+    let mut s = session(&[
+        ("solid.box", json!({"length": 40, "width": 40, "height": 30, "corner": [-20, -20, 0]})),
+        ("solid.box", json!({"length": 16, "width": 16, "height": 18, "corner": [-14, -14, 12], "operation": "cut"})),
+    ]);
+    let plane = (Vec3::new(0.0, -16.0, 0.0), Vec3::new(0.0, -1.0, 0.0));
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, -16, 0], "normal": [0, -1, 0]}})).unwrap();
+    for (mode, c) in capturers() {
+        for fov in [0.0, 0.6] {
+            let mut cam = view::home_camera(&s).unwrap();
+            cam.fov = fov;
+            let n = edges_through_the_cap(c, &s, &cam, plane, (360, 300));
+            assert!(n <= 2, "{mode} depth, fov {fov}: the pocket's edges show through the cap in {n} px");
+        }
+    }
+}
+
+/// The same while the view turns: a filleted hub with a bore and a cross hole, cut through the
+/// middle, seen from twelve directions. Its fillets' and holes' edges came and went through the
+/// cap from one step to the next.
+#[test]
+fn edges_of_a_cut_hub_stay_under_the_cap_as_the_view_turns() {
+    let mut s = session(&[
+        ("solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "hub"})),
+        ("solid.fillet", json!({"edges": [[20, 0, 40], [20, 0, 0]], "radius": 4})),
+        ("solid.cylinder", json!({"radius": 8, "height": 30, "base": [0, 0, 10], "operation": "cut"})),
+        ("solid.cylinder", json!({"radius": 3, "height": 50, "base": [-25, 0, 22], "axis": "X", "operation": "cut"})),
+        ("solid.fillet", json!({"edges": [[8, 0, 40]], "radius": 1.5})),
+    ]);
+    let plane = (Vec3::new(0.0, -2.0, 0.0), Vec3::new(0.0, -1.0, 0.0));
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, -2, 0], "normal": [0, -1, 0]}})).unwrap();
+    for (mode, c) in capturers() {
+        for fov in [0.0, 0.6] {
+            let mut shown = Vec::new();
+            for i in 0..12 {
+                let mut cam = view::home_camera(&s).unwrap();
+                (cam.fov, cam.yaw, cam.pitch) = (fov, -1.2 + 0.075 * f64::from(i), 0.35);
+                shown.push(edges_through_the_cap(c, &s, &cam, plane, (900, 760)));
+            }
+            let total: usize = shown.iter().sum();
+            assert!(total <= 6, "{mode} depth, fov {fov}: edges show through the cap, px per view {shown:?}");
+        }
+    }
+}
+
+/// #6328, bherbruck's block: 40 × 40 × 30 mm with a hole and a pocket, cut on XZ at y = -16, 2 mm in
+/// front of the pocket and 12 mm in front of the hole, seen from the home view. The cap hides them:
+/// it matches the plain block's cap. With the faces' slope push on the section's marking pass
+/// (#1768), the pocket's and the hole's edges showed through it as dashed lines in perspective, 84
+/// of the 18,328 cap pixels here (both depths); before #1768 and with the fix, none. Away from the
+/// cut the plain block's picture is a box of just its kept part's: the push also let back faces win
+/// a band along the far edges, which the cap hatched (58 px here in orthographic, 534 in
+/// perspective; now 0 and 1). The limits leave room for an edge's exact tie, which rounding
+/// settles per sample (one pixel on WARP).
+#[test]
+fn a_cut_hides_the_edges_behind_it() {
+    let block = [
+        ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+        ("sketch.line", json!({"points": [[-20, -20], [20, -20], [20, 20], [-20, 20]], "closed": true})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 30, "body_name": "Block"})),
+    ];
+    let behind = [
+        ("sketch.create", json!({"plane": "XY", "name": "Hole"})),
+        ("sketch.circle.center", json!({"center": [10, 0], "diameter": 8})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 30, "operation": "cut"})),
+        ("sketch.create", json!({"plane": "XY", "name": "Pocket", "offset": 30})),
+        ("sketch.line", json!({"points": [[-14, -14], [2, -14], [2, 2], [-14, 2]], "closed": true})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 18, "direction": "negative", "operation": "cut"})),
+    ];
+    let cut = ("inspect.section", json!({"plane": "XZ", "at": -16, "flip": true}));
+    let plain = session(&[&block[..], std::slice::from_ref(&cut)].concat());
+    let cut_through = session(&[&block[..], &behind[..], &[cut]].concat());
+    let (w, h) = (400, 300);
+    for (mode, c) in capturers() {
+        for fov in [0.0, 0.6] {
+            let mut cam = view::home_camera(&plain).unwrap();
+            cam.fov = fov;
+            let radius = view::scene(&plain, &cam).unwrap().radius;
+            // The cap on screen: the cut's rectangle, its outline left out (2 px in).
+            let corner = |x: f64, z: f64| cam.to_screen(Vec3::new(x, -16.0, z), f64::from(w), f64::from(h), radius).map(|(x, y, _)| (x, y));
+            let cap: Vec<(f64, f64)> = [(-20.0, 0.0), (20.0, 0.0), (20.0, 30.0), (-20.0, 30.0)].iter().filter_map(|(x, z)| corner(*x, *z)).collect();
+            assert_eq!(cap.len(), 4, "fov {fov}: the cut is on screen");
+            // Which way the corners run on screen, so a point's distance inside each edge is positive.
+            let turn = (0..4).map(|i| cap[i].0 * cap[(i + 1) % 4].1 - cap[(i + 1) % 4].0 * cap[i].1).sum::<f64>().signum();
+            let inside_by = |x: f64, y: f64, by: f64| {
+                let side = |i: usize| {
+                    let ((ax, ay), (bx, by)) = (cap[i], cap[(i + 1) % 4]);
+                    ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / (bx - ax).hypot(by - ay)
+                };
+                (0..4).all(|i| side(i) * turn >= by)
+            };
+            let inside = |x: f64, y: f64| inside_by(x, y, 2.0);
+            // Without the ground grid, whose extent follows the design.
+            let shot = |s: &Session| c.rgba(&Scene { grid: Vec::new(), ..view::scene(s, &cam).unwrap() }, &cam, w, h).unwrap();
+            let (a, b) = (shot(&plain), shot(&cut_through));
+            let (mut shown, mut all) = (0, 0);
+            for (i, (p, q)) in pixels(&a).zip(pixels(&b)).enumerate() {
+                if inside((i % w as usize) as f64 + 0.5, (i / w as usize) as f64 + 0.5) {
+                    all += 1;
+                    shown += usize::from(p.iter().zip(q).any(|(u, v)| u.abs_diff(v) > 24));
+                }
+            }
+            assert!(all > 5000, "{mode}, fov {fov}: the cap ({all} px)");
+            assert!(shown <= 8, "{mode} depth, fov {fov}: {shown} of {all} cap px show what lies behind the cut");
+            // Away from the cut, the picture is a box of just the kept part's (no cap along the far
+            // edges either).
+            let kept = shot(&session(&[("solid.box", json!({"length": 40, "width": 36, "height": 30, "corner": [-20, -16, 0]}))]));
+            let fringe = pixels(&a)
+                .zip(pixels(&kept))
+                .enumerate()
+                .filter(|(i, (p, q))| {
+                    !inside_by((i % w as usize) as f64 + 0.5, (i / w as usize) as f64 + 0.5, -8.0)
+                        && p.iter().zip(q).any(|(u, v)| u.abs_diff(*v) > 24)
+                })
+                .count();
+            assert!(fringe <= 8, "{mode} depth, fov {fov}: {fringe} px away from the cut differ from the kept part alone");
+        }
+    }
+}
+
+/// The hatch a picture shows over the pixels `at`: the colour most of them have (the fill,
+/// rounded to 8 levels a channel), and whether the darker lines through it run at 135 degrees
+/// (down to the right on screen) rather than 45.
+fn hatch_seen(img: &[u8], w: u32, at: &[(i64, i64)]) -> ([u8; 3], bool) {
+    let px = |x: i64, y: i64| {
+        let i = (y * i64::from(w) + x) as usize * 4;
+        img.get(i..i + 3).map(|p| [p[0], p[1], p[2]])
+    };
+    let mut counts = std::collections::HashMap::new();
+    for (x, y) in at {
+        if let Some(p) = px(*x, *y) {
+            *counts.entry(p.map(|c| c / 8)).or_insert(0usize) += 1;
+        }
+    }
+    let fill = counts.into_iter().max_by_key(|(_, n)| *n).map_or([0; 3], |(c, _)| c);
+    let line = |x: i64, y: i64| {
+        px(x, y).is_some_and(|p| p.iter().map(|c| u32::from(*c)).sum::<u32>() * 8 < fill.iter().map(|c| u32::from(*c) * 8 + 4).sum::<u32>() * 7)
+    };
+    // Along a 45 degree line (x + y the same) the pixels agree; across it they alternate.
+    let agree = |dy: i64| at.iter().filter(|(x, y)| line(*x, *y) && line(x + 1, y + dy)).count();
+    (fill, agree(1) > agree(-1))
+}
+
+/// Section hatch by part: two blocks side by side, cut through both, touch along the cut, so they
+/// get different hatches (in angle or colour) and the picture shows them apart; the next frame
+/// and a plane moved a little keep each block's hatch. With one hatch for every body (the
+/// preference's old behaviour) both caps are the cap colour at 45 degrees.
+#[test]
+fn touching_caps_are_hatched_apart_and_keep_their_hatch() {
+    let left = ("solid.box", json!({"length": 20, "width": 30, "height": 20, "body_name": "left"}));
+    let right = ("solid.box", json!({"length": 20, "width": 30, "height": 20, "corner": [20, 0, 0], "operation": "new", "body_name": "right"}));
+    let cut = |y: f64| ("inspect.section", json!({"plane": {"origin": [0, y, 0], "normal": [0, -1, 0]}}));
+    let s = session(&[left.clone(), right.clone(), cut(15.0)]);
+    let moved = session(&[left, right, cut(15.5)]);
+    let mut cam = view::home_camera(&s).unwrap();
+    (cam.fov, cam.yaw, cam.pitch) = (0.0, -0.3, 0.2);
+    let hatches = |s: &Session| view::scene(s, &cam).unwrap().meshes.iter().map(|m| m.hatch).collect::<Vec<_>>();
+    let first = hatches(&s);
+    assert_eq!(first.len(), 2);
+    assert_ne!(first[0], first[1], "touching caps share a hatch");
+    assert_eq!(hatches(&s), first, "the next frame keeps them");
+    assert_eq!(hatches(&moved), first, "a plane moved a little keeps them");
+    let (w, h) = (360, 280);
+    // Each block's cap on screen, 4 px in: x 0..20 and 20..40, z 0..20 at y = 15.
+    let radius = view::scene(&s, &cam).unwrap().radius;
+    let cap_pixels = |x0: f64| -> Vec<(i64, i64)> {
+        let corner = |x: f64, z: f64| cam.to_screen(Vec3::new(x, 15.0, z), f64::from(w), f64::from(h), radius).map(|(x, y, _)| (x, y));
+        let q: Vec<(f64, f64)> = [(x0, 0.0), (x0 + 20.0, 0.0), (x0 + 20.0, 20.0), (x0, 20.0)].iter().filter_map(|(x, z)| corner(*x, *z)).collect();
+        assert_eq!(q.len(), 4, "the cut is on screen");
+        let turn = (0..4).map(|i| q[i].0 * q[(i + 1) % 4].1 - q[(i + 1) % 4].0 * q[i].1).sum::<f64>().signum();
+        let inside = |x: f64, y: f64| {
+            (0..4).all(|i| {
+                let ((ax, ay), (bx, by)) = (q[i], q[(i + 1) % 4]);
+                ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / (bx - ax).hypot(by - ay) * turn >= 4.0
+            })
+        };
+        (0..i64::from(h)).flat_map(|y| (0..i64::from(w)).map(move |x| (x, y))).filter(|(x, y)| inside(*x as f64 + 0.5, *y as f64 + 0.5)).collect()
+    };
+    let (a, b) = (cap_pixels(0.0), cap_pixels(20.0));
+    assert!(a.len() > 1500 && b.len() > 1500, "the caps ({} and {} px)", a.len(), b.len());
+    for (mode, c) in capturers() {
+        let by_part = c.rgba(&Scene { grid: Vec::new(), ..view::scene(&s, &cam).unwrap() }, &cam, w, h).unwrap();
+        let (la, lb) = (hatch_seen(&by_part, w, &a), hatch_seen(&by_part, w, &b));
+        assert_ne!(la, lb, "{mode} depth: the touching caps look alike");
+        let expect = |hatch: solidcraft_viewport::hatch::Hatch| hatch.turned();
+        assert_eq!((la.1, lb.1), (expect(first[0]), expect(first[1])), "{mode} depth: the caps' angles");
+        let one = c.rgba(&Scene { grid: Vec::new(), part_hatch: None, ..view::scene(&s, &cam).unwrap() }, &cam, w, h).unwrap();
+        let (oa, ob) = (hatch_seen(&one, w, &a), hatch_seen(&one, w, &b));
+        assert_eq!(oa, ob, "{mode} depth: one hatch for every body");
+        assert!(!oa.1, "{mode} depth: one hatch runs at 45 degrees");
+    }
+}
+
+/// A 40 × 20 × 30 mm box centred on the origin, a flat-shaded face per side, and its 12 edges
+/// with the outward normals of the two faces beside each.
+fn shaded_box() -> (Mesh, Vec<(Vec3, Vec3, [Vec3; 2])>) {
+    let h = Vec3::new(20.0, 10.0, 15.0);
+    let corner = |i: usize| Vec3::new(if i & 1 == 0 { -h.x } else { h.x }, if i & 2 == 0 { -h.y } else { h.y }, if i & 4 == 0 { -h.z } else { h.z });
+    // Each side: its normal and its corners, counter-clockwise seen from outside.
+    let sides = [
+        (Vec3::new(-1.0, 0.0, 0.0), [0, 4, 6, 2]),
+        (Vec3::new(1.0, 0.0, 0.0), [1, 3, 7, 5]),
+        (Vec3::new(0.0, -1.0, 0.0), [0, 1, 5, 4]),
+        (Vec3::new(0.0, 1.0, 0.0), [2, 6, 7, 3]),
+        (Vec3::new(0.0, 0.0, -1.0), [0, 2, 3, 1]),
+        (Vec3::new(0.0, 0.0, 1.0), [4, 5, 7, 6]),
+    ];
+    let mut mesh = Mesh::default();
+    for (f, (n, c)) in sides.iter().enumerate() {
+        let base = mesh.positions.len() as u32;
+        mesh.positions.extend(c.iter().map(|i| corner(*i)));
+        mesh.normals.extend([*n; 4]);
+        mesh.triangles.extend([[base, base + 1, base + 2], [base, base + 2, base + 3]]);
+        mesh.tri_face.extend([f as u32; 2]);
+    }
+    let mut edges = Vec::new();
+    for (i, (n, c)) in sides.iter().enumerate() {
+        for k in 0..4 {
+            let (a, b) = (c[k], c[(k + 1) % 4]);
+            // Each edge once: from the side that runs it from the lower corner.
+            if a > b {
+                continue;
+            }
+            let other = sides.iter().enumerate().find(|(j, (_, d))| *j != i && (0..4).any(|m| d[m] == b && d[(m + 1) % 4] == a));
+            if let Some((_, (m, _))) = other {
+                edges.push((corner(a), corner(b), [*n, *m]));
+            }
+        }
+    }
+    (mesh, edges)
+}
+
+/// The shaded-with-hidden-edges style: every edge drawn depth-tested and, in a light colour,
+/// where the model hides it (`GpuScene::hidden_line`). A box turned so one side is seen almost
+/// edge on (yaw 1.565): the side is under a pixel wide, so the edges along it lie within a pixel
+/// of the nearer face beside it, which hides part of their width. Their hidden copy shows nowhere:
+/// drawn after the visible edges, it covered the visible edge of that nearer face with a light
+/// line along some 100 px. The box's back edges, which are hidden, still show.
+#[test]
+fn a_visible_edge_beside_a_face_seen_edge_on_has_no_hidden_copy() {
+    let (mesh, edges) = shaded_box();
+    let (w, h) = (400, 300);
+    for (mode, c) in capturers() {
+        for fov in [0.0, 0.6] {
+            for yaw in [1.565_f64, 0.35] {
+                let cam = Camera { yaw, distance: 120.0, fov, ..Default::default() };
+                let toward = |p: Vec3| if fov > 0.0 { cam.eye() - p } else { cam.back() };
+                let back = |(a, b, n): &(Vec3, Vec3, [Vec3; 2])| n.iter().all(|n| n.dot(toward((*a + *b) * 0.5)) < 0.0);
+                let lines = edges
+                    .iter()
+                    .map(|(a, b, _)| SceneLine { points: vec![*a, *b], color: Rgb(20, 20, 20), alpha: 1.0, width: 1.3, on_top: false })
+                    .collect();
+                let scene =
+                    Scene { meshes: vec![SceneMesh::solid(Arc::new(mesh.clone()), Rgb(160, 165, 175))], lines, radius: 40.0, ..Default::default() };
+                let hidden = |keep: &dyn Fn(&(Vec3, Vec3, [Vec3; 2])) -> bool| {
+                    let mut sc = solidcraft_viewport_gpu::view::GpuScene::default();
+                    let col = sc.color([0, 255, 0, 255]);
+                    for e in edges.iter().filter(|e| keep(e)) {
+                        sc.hidden_line(e.0.to_f32(), e.1.to_f32(), col, 1.0);
+                    }
+                    c.rgba_highlighted(&scene, Some(sc), &cam, w, h).unwrap()
+                };
+                let green = |p: [u8; 4]| p[1] > 150 && p[0] < 120 && p[2] < 120;
+                let (all, back_only, none) = (hidden(&|_| true), hidden(&back), hidden(&|_| false));
+                let doubled = differing(&all, &back_only);
+                assert_eq!(doubled, 0, "{mode} depth, fov {fov}, yaw {yaw}: a visible edge's hidden copy shows in {doubled} px");
+                let behind = pixels(&back_only).filter(|p| green(*p)).count();
+                assert!(behind > 100, "{mode} depth, fov {fov}, yaw {yaw}: the back edges show in {behind} px");
+                assert_eq!(pixels(&none).filter(|p| green(*p)).count(), 0);
+            }
+        }
+    }
+}
+
+/// #9407: a shaft in a bore it fits exactly, cut along its axis. Seen through the hub's cut, the
+/// bore's wall (a back face: the hub's cap) and the shaft's side (a front face) are the same
+/// cylinder, each faceted its own way, so neither is always in front: the shaft's side showed
+/// through the hub's cap in streaks along the axis, changing as the view turned. The hub's cap is
+/// the same as without the shaft, from several directions, in orthographic and perspective.
+#[test]
+fn a_shaft_in_its_bore_leaves_the_hubs_cap_whole() {
+    let hub = [
+        ("solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Hub"})),
+        ("solid.cylinder", json!({"radius": 8, "height": 40, "operation": "cut"})),
+    ];
+    let shaft = ("solid.cylinder", json!({"radius": 8, "height": 60, "base": [0, 0, -10], "body_name": "Shaft", "operation": "new"}));
+    let cut = ("inspect.section", json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}}));
+    let alone = session(&[&hub[..], std::slice::from_ref(&cut)].concat());
+    let fitted = session(&[&hub[..], &[shaft, cut]].concat());
+    let (w, h) = (480, 400);
+    for (mode, c) in capturers() {
+        for fov in [0.0, 0.6] {
+            let mut shown = Vec::new();
+            for i in 0..6 {
+                let mut cam = view::home_camera(&fitted).unwrap();
+                (cam.fov, cam.yaw, cam.pitch) = (fov, -1.1 + 0.3 * f64::from(i), 0.3);
+                let with = view::scene(&fitted, &cam).unwrap();
+                let radius = with.radius;
+                // The hub alone, framed as the design with the shaft.
+                let without = Scene { radius, ..view::scene(&alone, &cam).unwrap() };
+                let shot = |sc: Scene| c.rgba(&Scene { grid: Vec::new(), ..sc }, &cam, w, h).unwrap();
+                let (a, b) = (shot(without), shot(with));
+                // The hub's cut on screen: a rectangle each side of the bore, its outline left out.
+                let rects: Vec<Vec<(f64, f64)>> = [(8.0, 20.0), (-20.0, -8.0)]
+                    .iter()
+                    .map(|(x0, x1)| {
+                        [(*x0, 0.0), (*x1, 0.0), (*x1, 40.0), (*x0, 40.0)]
+                            .iter()
+                            .filter_map(|(x, z)| cam.to_screen(Vec3::new(*x, 0.0, *z), f64::from(w), f64::from(h), radius).map(|(x, y, _)| (x, y)))
+                            .collect()
+                    })
+                    .collect();
+                let inside = |x: f64, y: f64| {
+                    rects.iter().any(|q| {
+                        q.len() == 4 && {
+                            let turn = (0..4).map(|i| q[i].0 * q[(i + 1) % 4].1 - q[(i + 1) % 4].0 * q[i].1).sum::<f64>().signum();
+                            (0..4).all(|i| {
+                                let ((ax, ay), (bx, by)) = (q[i], q[(i + 1) % 4]);
+                                ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / (bx - ax).hypot(by - ay) * turn >= 2.0
+                            })
+                        }
+                    })
+                };
+                let (mut differ, mut all) = (0, 0);
+                for (i, (p, q)) in pixels(&a).zip(pixels(&b)).enumerate() {
+                    if inside((i % w as usize) as f64 + 0.5, (i / w as usize) as f64 + 0.5) {
+                        all += 1;
+                        differ += usize::from(p.iter().zip(q).any(|(u, v)| u.abs_diff(v) > 24));
+                    }
+                }
+                assert!(all > 3000, "{mode}, fov {fov}, view {i}: the hub's cap ({all} px)");
+                shown.push(differ);
+            }
+            let total: usize = shown.iter().sum();
+            assert!(total <= 12, "{mode} depth, fov {fov}: the shaft shows through the hub's cap, px per view {shown:?}");
+        }
+    }
+}
+
+/// A post standing on a plate, cut through by a section: the post's cut is its own (blue) cap
+/// down to the plate, whichever body came first. The post's bottom, seen through the cut, and the
+/// plate's top are the same plane; the plate's top showed through in patches, and with the post
+/// made first its cap took the plate's colour (the plate's bottom lies behind it).
+#[test]
+fn a_body_standing_on_another_keeps_its_own_cap() {
+    let plate = ("solid.box", json!({"length": 80, "width": 50, "height": 10, "body_name": "Plate"}));
+    let post = ("solid.cylinder", json!({"radius": 12, "height": 40, "base": [20, 25, 10], "body_name": "Post"}));
+    let colours = [
+        ("appearance.assign", json!({"bodies": ["Plate"], "appearance": "ABS - Red"})),
+        ("appearance.assign", json!({"bodies": ["Post"], "appearance": "ABS - Blue"})),
+        ("inspect.section", json!({"plane": {"origin": [0, 25, 0], "normal": [0, -1, 0]}})),
+    ];
+    for post_first in [false, true] {
+        let mut script = if post_first { vec![post.clone(), plate.clone()] } else { vec![plate.clone(), post.clone()] };
+        script.extend(colours.iter().cloned());
+        let s = session(&script);
+        for (mode, c) in capturers() {
+            for fov in [0.0, 0.6] {
+                let mut cam = view::home_camera(&s).unwrap();
+                cam.fov = fov;
+                // The session's section (`scene_with_guides` takes its own).
+                let scene = view::scene(&s, &cam).unwrap();
+                let img = c.rgba(&scene, &cam, 400, 400).unwrap();
+                let vp = cam.view_proj(1.0, scene.radius);
+                // The post's cut, 1–4 mm above the plate (a pixel is about 0.4 mm).
+                let mut wrong = Vec::new();
+                for x in (10..=30).map(f64::from) {
+                    for z in [11.0, 12.0, 13.0, 14.0] {
+                        let q = vp.apply(Vec3::new(x, 25.0, z));
+                        let (px, py) = (((q[0] / q[3] + 1.0) * 200.0) as usize, ((1.0 - q[1] / q[3]) * 200.0) as usize);
+                        let p = pixels(&img).nth(py * 400 + px).unwrap();
+                        if i16::from(p[2]) <= i16::from(p[0]) + 25 {
+                            wrong.push(((x, z), p));
+                        }
+                    }
+                }
+                assert!(wrong.is_empty(), "{mode} depth, fov {fov}, post first {post_first}: not the post's cap at {wrong:?}");
+            }
+        }
+    }
+}
+
+/// The same tie seen into the cut at an angle (#4622 review): two boxes of one footprint stacked
+/// as separate bodies, and the post on its plate. Each body's cut is its own cap down to the face
+/// it stands on, whichever body came first: the upper body's underside, seen through the cut, and
+/// the lower body's top are the same plane.
+#[test]
+fn a_body_standing_on_another_keeps_its_own_cap_seen_at_an_angle() {
+    struct Case {
+        lower: (&'static str, serde_json::Value),
+        upper: (&'static str, serde_json::Value),
+        section: serde_json::Value,
+        camera: (Vec3, f64, f64, f64),
+        /// Points on the upper body's cut, and on the lower body's.
+        upper_cut: Vec<Vec3>,
+        lower_cut: Vec<Vec3>,
+    }
+    let grid = |xs: std::ops::RangeInclusive<i32>, y: f64, zs: &[f64]| -> Vec<Vec3> {
+        xs.flat_map(|x| zs.iter().map(move |z| Vec3::new(f64::from(x), y, *z))).collect()
+    };
+    let cases = [
+        Case {
+            lower: ("solid.box", json!({"length": 40, "width": 30, "height": 4, "corner": [-20, -15, 0], "body_name": "Lower"})),
+            upper: ("solid.box", json!({"length": 40, "width": 30, "height": 4, "corner": [-20, -15, 4], "body_name": "Upper"})),
+            section: json!({"plane": {"origin": [0, 0, 0], "normal": [0, 1, 0]}}),
+            camera: (Vec3::new(0.0, 0.0, 4.0), 3.4, 0.35, 40.0),
+            upper_cut: grid(-9..=9, 0.0, &[4.8, 5.6, 6.4, 7.2]),
+            lower_cut: grid(-9..=9, 0.0, &[0.8, 1.6, 2.4, 3.2]),
+        },
+        Case {
+            lower: ("solid.box", json!({"length": 80, "width": 50, "height": 10, "body_name": "Lower"})),
+            upper: ("solid.cylinder", json!({"radius": 12, "height": 40, "base": [20, 25, 10], "body_name": "Upper"})),
+            section: json!({"plane": {"origin": [0, 25, 0], "normal": [0, -1, 0]}}),
+            camera: (Vec3::new(30.0, 25.0, 12.0), 0.25, 0.4, 90.0),
+            upper_cut: grid(10..=30, 25.0, &[11.0, 12.0, 13.0, 14.0]),
+            lower_cut: grid(12..=48, 25.0, &[3.0, 5.0, 7.0]),
+        },
+    ];
+    for case in &cases {
+        for upper_first in [false, true] {
+            let mut script = if upper_first { vec![case.upper.clone(), case.lower.clone()] } else { vec![case.lower.clone(), case.upper.clone()] };
+            script.push(("appearance.assign", json!({"bodies": ["Lower"], "appearance": "ABS - Red"})));
+            script.push(("appearance.assign", json!({"bodies": ["Upper"], "appearance": "ABS - Blue"})));
+            script.push(("inspect.section", case.section.clone()));
+            let s = session(&script);
+            for (mode, c) in capturers() {
+                for fov in [0.0, 0.6] {
+                    let mut cam = view::home_camera(&s).unwrap();
+                    (cam.target, cam.yaw, cam.pitch, cam.distance, cam.fov) = (case.camera.0, case.camera.1, case.camera.2, case.camera.3, fov);
+                    // Without the origin's axes: the Z axis runs through the samples at x = 0.
+                    let scene = view::scene_with_guides(&s, &cam, s.section, Guides { grid: false, axes: false }).unwrap();
+                    let img = c.rgba(&scene, &cam, 400, 400).unwrap();
+                    let vp = cam.view_proj(1.0, scene.radius);
+                    let at = |p: Vec3| {
+                        let q = vp.apply(p);
+                        let (x, y) = ((q[0] / q[3] + 1.0) * 200.0, (1.0 - q[1] / q[3]) * 200.0);
+                        assert!((0.0..400.0).contains(&x) && (0.0..400.0).contains(&y), "fov {fov}: {p:?} is out of the picture");
+                        pixels(&img).nth(y as usize * 400 + x as usize)
+                    };
+                    let blue = |p: [u8; 4]| i16::from(p[2]) > i16::from(p[0]) + 25;
+                    let wrong: Vec<_> = case.upper_cut.iter().filter_map(|p| at(*p).filter(|q| !blue(*q)).map(|q| (p.x, p.z, q))).collect();
+                    assert!(wrong.is_empty(), "{mode} depth, fov {fov}, upper first {upper_first}: not the upper body's cap at {wrong:?}");
+                    let wrong: Vec<_> = case.lower_cut.iter().filter_map(|p| at(*p).filter(|q| blue(*q)).map(|q| (p.x, p.z, q))).collect();
+                    assert!(
+                        wrong.is_empty(),
+                        "{mode} depth, fov {fov}, upper first {upper_first}: the upper body's colour on the lower cut at {wrong:?}"
+                    );
+                }
+            }
         }
     }
 }

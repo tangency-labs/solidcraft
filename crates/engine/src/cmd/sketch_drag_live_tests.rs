@@ -2,10 +2,12 @@
 //! rank analysis, and evaluates nothing after it; the gesture's end evaluates the model once.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::solve_counts;
 use crate::Session;
+use crate::cmd::sketch_project::refresh_count;
 
 #[test]
 fn determined_pattern_geometry_does_not_attempt_conflicting_held_solves() {
@@ -71,7 +73,7 @@ fn extruded() -> (Session, u64) {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     let extrude = s.doc.features.last().map(|f| f.id).expect("the extrude");
-    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1", "restore_marker": false}));
     (s, extrude)
 }
 
@@ -92,17 +94,17 @@ fn frames(s: &mut Session, n: usize, live: bool) -> Vec<Value> {
 }
 
 fn body_contains(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.first().expect("a body").body.contains(p)
+    s.model.state().bodies.first().expect("a body").body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside
 }
 
-fn pt(s: &Session, id: &str) -> solidcraft_geom::Vec2 {
+fn pt(s: &Session, id: &str) -> solidcore_record::Vec2 {
     let sk = s.active_sketch.and_then(|i| s.doc.sketch(i).ok()).expect("sketch mode");
     sk.resolve_point(id).and_then(|i| sk.point(i)).expect("the point")
 }
 
-fn corner(s: &Session) -> solidcraft_geom::Vec2 {
+fn corner(s: &Session) -> solidcore_record::Vec2 {
     let id = s.active_sketch.expect("sketch mode");
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let sk = &st.sketch(id).expect("the shown sketch").sketch;
     sk.resolve_point("l1.start").and_then(|i| sk.point(i)).expect("the corner")
 }
@@ -119,10 +121,27 @@ fn a_live_frame_solves_once_and_leaves_the_features_after_the_sketch_stale() {
     assert_eq!(r["sketch"]["solved"], json!(true));
     assert_eq!(r["sketch"]["dof"], json!(2), "the degrees of freedom from before the drag");
     // The sketch shows its new place; the extrude keeps its last result.
-    assert!(corner(&s).dist(solidcraft_geom::Vec2::new(4.0, 5.0)) < 1e-9);
+    assert!(corner(&s).dist(solidcore_record::Vec2::new(4.0, 5.0)) < 1e-9);
     let result = s.model.result(extrude).expect("the extrude's result");
     assert!(result.stale);
     assert!(s.model.state().bodies.first().expect("a body").body.same(&body), "the body is not rebuilt");
+}
+
+/// A frame copies the design once, to edit it: its undo step holds the design as it was, and a
+/// second copy for storing the edited one would double the work on a large design.
+#[test]
+fn a_live_frame_copies_the_design_once_and_its_undo_step_keeps_the_design_before() {
+    let (mut s, _) = extruded();
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    crate::tests::doc_copies::take();
+    frames(&mut s, 1, true);
+    assert_eq!(crate::tests::doc_copies::take(), 0, "the edited design is stored, not copied again");
+    assert!(corner(&s).dist(solidcore_record::Vec2::new(4.0, 5.0)) < 1e-9);
+    assert_eq!(s.undo.len(), undo + 1);
+    assert!(s.undo.last().is_some_and(|u| std::sync::Arc::ptr_eq(&u.doc, &before)), "undo goes back to the design before");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &before));
 }
 
 #[test]
@@ -146,7 +165,7 @@ fn the_drag_end_evaluates_once_to_the_scripted_drags_result() {
     assert!(live.model.result(extrude).is_some_and(|r| !r.stale && r.error.is_none()));
     // One undo step for the gesture is the UI's business; each frame is still undoable.
     run(&mut live, "edit.undo", json!({}));
-    assert!(corner(&live).dist(solidcraft_geom::Vec2::new(3.0, 5.0)) < 1e-9);
+    assert!(corner(&live).dist(solidcore_record::Vec2::new(3.0, 5.0)) < 1e-9);
 }
 
 #[test]
@@ -192,8 +211,8 @@ fn a_drag_reports_how_far_the_geometry_followed() {
         // The grabbed midpoint follows a 15 mm circle around the fixed start.
         let r = run(&mut s, "sketch.drag", json!({"entity": "l1", "from": [25, 10], "to": [25, 20], "live": live}));
         let at = crate::params::vec2(&r["at"]).expect("`at`");
-        let base = solidcraft_geom::Vec2::new(10.0, 10.0);
-        let expected = base + solidcraft_geom::Vec2::new(15.0, 10.0).normalized().unwrap() * 15.0;
+        let base = solidcore_record::Vec2::new(10.0, 10.0);
+        let expected = base + solidcore_record::Vec2::new(15.0, 10.0).normalized().unwrap() * 15.0;
         assert!(at.dist(expected) < 1e-4, "{r}");
         assert!(at.dist((pt(&s, "l1.start") + pt(&s, "l1.end")) * 0.5) < 1e-6);
         assert!((r["reached"].as_f64().unwrap() - (at.y - 10.0) / 10.0).abs() < 1e-6);
@@ -215,7 +234,7 @@ fn a_live_drag_of_a_lone_sketch_shows_it_without_evaluating() {
     assert_eq!(s.evaluations, 0);
     assert_eq!(solve_counts::take(), (2, 0));
     // The free rectangle's corner moves alone; its profile follows.
-    assert!(corner(&s).dist(solidcraft_geom::Vec2::new(3.0, 5.0)) < 1e-9);
+    assert!(corner(&s).dist(solidcore_record::Vec2::new(3.0, 5.0)) < 1e-9);
     let st = s.model.state();
     let profile = st.sketches[0].profiles.first().expect("a profile");
     assert!((profile.area - 22.0 * 15.0).abs() < 1e-9, "{}", profile.area);
@@ -243,8 +262,8 @@ fn the_grab_follows_the_points_that_move() {
     run(&mut s, "sketch.line", json!({"points": [[10, 10], [30, 10]]}));
     run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1.start"]}));
     ui_frames(&mut s, "l1", [20.0, 10.0], &[[0.0, 1.0]; 6]);
-    assert!(pt(&s, "l1.end").dist(solidcraft_geom::Vec2::new(30.0, 22.0)) < 1e-6, "{:?}", pt(&s, "l1.end"));
-    assert!(pt(&s, "l1.start").dist(solidcraft_geom::Vec2::new(10.0, 10.0)) < 1e-12);
+    assert!(pt(&s, "l1.end").dist(solidcore_record::Vec2::new(30.0, 22.0)) < 1e-6, "{:?}", pt(&s, "l1.end"));
+    assert!(pt(&s, "l1.start").dist(solidcore_record::Vec2::new(10.0, 10.0)) < 1e-12);
 }
 
 #[test]
@@ -295,7 +314,7 @@ fn a_live_frame_swaps_only_the_dragged_sketch() {
     run(&mut s, "sketch.create", json!({"plane": "XZ"}));
     run(&mut s, "sketch.circle.center", json!({"center": [50, 50], "radius": 4}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1", "restore_marker": false}));
     let id = s.active_sketch.expect("sketch mode");
     let other = |s: &Session| s.model.state().sketches.iter().find(|x| x.feature != id).cloned().expect("the other sketch");
     let before = other(&s);
@@ -345,7 +364,7 @@ fn a_drag_with_the_rest_of_a_selection_moves_it_as_one() {
         run(&mut s, "sketch.circle.center", json!({"center": [40, 10], "radius": 3, "id": "c1"}));
         s
     };
-    let v = solidcraft_geom::Vec2::new;
+    let v = solidcore_record::Vec2::new;
     for live in [false, true] {
         // Dragged alone, the line leaves the tail's free end where it was as far as it can.
         let mut s = start();
@@ -364,5 +383,123 @@ fn a_drag_with_the_rest_of_a_selection_moves_it_as_one() {
     let mut s = start();
     for with in [json!("l2"), json!([7]), json!(["nope"])] {
         assert!(s.execute("sketch.drag", &json!({"entity": "l1", "with": with, "from": [10, 30], "to": [20, 20]})).is_err(), "{with}");
+    }
+}
+
+/// A selection dragged by an ellipse's axis takes the ellipse and its other axis along, as the
+/// axis dragged alone does: the whole ellipse slides by the cursor's move, keeping its size.
+#[test]
+fn a_selection_dragged_by_an_ellipse_axis_takes_the_ellipse_along() {
+    for live in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        let r = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}));
+        let e = r["curves"][0].as_str().expect("the ellipse").to_string();
+        run(&mut s, "sketch.line", json!({"points": [[40, -10], [40, 10]], "connect": false}));
+        let sk = s.doc.sketch(s.active_sketch.expect("sketch mode")).expect("the sketch");
+        let Some((Some((major, _)), _)) = sk.ellipse_axis_lines(sk.curve_index(&e).expect("the ellipse")) else { panic!("its axes") };
+        let axis = sk.curves[major].id.clone();
+        let line = sk.curves.last().expect("the line").id.clone();
+        run(&mut s, "sketch.drag", json!({"entity": axis, "with": [line], "from": [10, 0], "to": [10, 15], "live": live}));
+        let sk = s.doc.sketch(s.active_sketch.expect("sketch mode")).expect("the sketch");
+        let ei = sk.curve_index(&e).expect("the ellipse");
+        let solidcraft_sketch::CurveKind::Ellipse { c, m, .. } = sk.curves[ei].kind else { panic!("an ellipse") };
+        let v = solidcore_record::Vec2::new;
+        assert!(sk.point(c).expect("its centre").dist(v(0.0, 15.0)) < 1e-6, "live {live}: the centre follows: {:?}", sk.point(c));
+        assert!(sk.point(m).expect("its major end").dist(v(20.0, 15.0)) < 1e-6, "live {live}: the major end follows: {:?}", sk.point(m));
+    }
+}
+
+/// A 5 x 5 square drawn on the top face of a 30 x 20 x 10 box, the face's edges projected into
+/// its sketch; returns the session and a corner of the square (its id and where it is).
+fn on_a_face() -> (Session, String, solidcore_record::Vec2) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [15, 10, 10]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [10, 10]}));
+    let sk = sketch_of(&s);
+    assert!(!sk.links.is_empty(), "the face's edges are projected");
+    let corner = sk.curves.iter().find_map(|c| match c.kind {
+        solidcraft_sketch::CurveKind::Line { a, .. } if c.link.is_none() => sk.points.get(a).map(|p| (p.id.clone(), p.pos)),
+        _ => None,
+    });
+    let (id, at) = corner.expect("a drawn line");
+    (s, id, at)
+}
+
+/// One live frame moving `point` from `at` by `dx`; returns where it went.
+fn live_frame(s: &mut Session, point: &str, at: solidcore_record::Vec2, dx: f64) -> solidcore_record::Vec2 {
+    let to = [at.x + dx, at.y];
+    run(s, "sketch.drag", json!({"entity": point, "from": [at.x, at.y], "to": to, "live": true}));
+    solidcore_record::Vec2::new(to[0], to[1])
+}
+
+#[test]
+fn a_live_gesture_projects_a_face_sketchs_links_once() {
+    // Every frame projected the face's edges again and solved the sketch once more for them,
+    // which on a face with many edges made each frame take a large fraction of a second (#3222).
+    let (mut s, point, mut at) = on_a_face();
+    refresh_count::take();
+    for _ in 0..5 {
+        at = live_frame(&mut s, &point, at, 0.5);
+    }
+    assert_eq!(refresh_count::take(), 1, "the gesture's first frame projects the links, the rest reuse them");
+    assert_eq!(pt(&s, &point), at, "the corner follows the drag");
+    assert!(sketch_of(&s).links.iter().all(|l| !l.lost), "the links are kept");
+    run(&mut s, "sketch.drag_end", json!({}));
+    assert_eq!(pt(&s, &point), at);
+
+    // Anything run between two frames (another command, an undo) may have changed the model the
+    // links come from: the next frame projects them again.
+    refresh_count::take();
+    at = live_frame(&mut s, &point, at, 0.5);
+    run(&mut s, "sketch.solve", json!({}));
+    live_frame(&mut s, &point, at, 0.5);
+    assert_eq!(refresh_count::take(), 2);
+    run(&mut s, "edit.undo", json!({}));
+    let at = pt(&s, &point);
+    refresh_count::take();
+    live_frame(&mut s, &point, at, 0.5);
+    assert_eq!(refresh_count::take(), 1);
+}
+
+/// A dragged fit point of a spline whose tangent handles nobody turned keeps it the natural
+/// curve: its handles follow (#6502). A turned handle stays where it was put.
+#[test]
+fn untouched_spline_handles_follow_a_dragged_fit_point() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let id = run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [10, 8], [20, 0], [30, 6]], "connect": false}))["curves"][0]
+        .as_str()
+        .expect("a spline")
+        .to_owned();
+    run(&mut s, "sketch.spline.handles", json!({"curve": id}));
+    let fit = |s: &Session| {
+        let sk = sketch_of(s);
+        let ci = sk.curve_index(&id).expect("the spline");
+        match &sk.curves[ci].kind {
+            solidcraft_sketch::CurveKind::Spline { pts, handles, .. } => (pts.clone(), handles.clone()),
+            _ => panic!("a spline"),
+        }
+    };
+    let (pts, handles) = fit(&s);
+    let name = sketch_of(&s).points[pts[1]].id.clone();
+    run(&mut s, "sketch.drag", json!({"entity": name, "from": [10, 8], "to": [11, 10], "live": true}));
+    let sk = sketch_of(&s);
+    let at: Vec<_> = pts.iter().map(|i| sk.points[*i].pos).collect();
+    assert!(at[1].dist(solidcore_record::Vec2::new(11.0, 10.0)) < 1e-6, "{:?}", at[1]);
+    let natural = solidcraft_sketch::fit_tangent_handles(&at, false).expect("handles");
+    for (h, n) in handles.iter().zip(&natural) {
+        assert!(sk.points[*h].pos.dist(*n) < 1e-6, "an untouched handle follows the curve");
+    }
+    // Turn the last handle; dragging a fit point now leaves every handle where it is.
+    let turned = sk.points[handles[3]].id.clone();
+    let from = sk.points[handles[3]].pos;
+    run(&mut s, "sketch.drag", json!({"entity": turned, "from": [from.x, from.y], "to": [from.x + 2.0, from.y + 3.0]}));
+    let before: Vec<_> = handles.iter().map(|h| sketch_of(&s).points[*h].pos).collect();
+    run(&mut s, "sketch.drag", json!({"entity": name, "from": [11, 10], "to": [12, 11], "live": true}));
+    let sk = sketch_of(&s);
+    for (h, b) in handles.iter().zip(&before) {
+        assert!(sk.points[*h].pos.dist(*b) < 1e-6, "a turned spline keeps its handles");
     }
 }

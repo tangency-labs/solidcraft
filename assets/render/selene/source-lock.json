@@ -1,0 +1,585 @@
+{
+  "metadata": {
+    "schema_version": "0.3.0",
+    "language": "en",
+    "status": "pinned_native",
+    "name": "SELENE improved showcase source lock",
+    "authorship": "Original SolidCraft source-admission metadata based on the supplied native file and public source history; the unchanged improved native source is retained.",
+    "license": "MIT OR Apache-2.0",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "inspected_on": "2026-10-22"
+  },
+  "active_source": {
+    "variant": "SELENE-showcase",
+    "file_name": "SELENE-showcase.solidcraft",
+    "status": "pinned_native",
+    "repository": "SychPL/solidcraft",
+    "commit": "32ec1720447e3fcc6bb6cc53a63fb5b39cfa21b9",
+    "path": "SELENE-showcase.solidcraft",
+    "download_url": "https://raw.githubusercontent.com/SychPL/solidcraft/32ec1720447e3fcc6bb6cc53a63fb5b39cfa21b9/SELENE-showcase.solidcraft",
+    "sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+    "size_bytes": 314452,
+    "format": "solidcraft/23",
+    "units": "mm",
+    "up_axis": "+Z",
+    "local_path": "source/SELENE-showcase.solidcraft",
+    "git_blob": "a06fee2c8a839f5efccc75ae6de4e68f951cb266",
+    "published_at": "2026-10-21T20:00:01Z"
+  },
+  "coordinate_contract": {
+    "status": "inspected_native_mm_and_reference_z_up",
+    "native_linear_units": "mm",
+    "native_angle_units": "rad",
+    "up_axis": "+Z",
+    "command_angle_policy": "The documented joint and motion commands accept degrees or explicit angle expressions. Convert exactly once from the native radian representation at a command boundary.",
+    "frame_policy": "Resolve joints and components from the pinned improved native file. Persisted angles are radians; commands use degrees. World points must come from the evaluated native assembly."
+  },
+  "license_review": {
+    "status": "reviewed_retained_notices",
+    "license_expression": "MIT OR Apache-2.0",
+    "reviewer": "OpenAI assistant, for the repository owner",
+    "reviewed_at": "2026-10-24",
+    "evidence_urls": [
+      "https://github.com/SychPL/solidcraft/blob/32ec1720447e3fcc6bb6cc53a63fb5b39cfa21b9/SELENE-showcase.solidcraft",
+      "https://github.com/0xlillith/solidcraft-rover/blob/b32437915372d32b71419dc8f5143fe22ff1e869/ATTRIBUTION.md",
+      "https://github.com/SychPL/solidcraft/commit/df2e74230e6659409d65501b5d9396b55c6503d3",
+      "https://github.com/tangency-labs/solidcraft/pull/5494#issuecomment-6375788360"
+    ],
+    "notices": [
+      {
+        "scope": "Original rover geometry and SolidCraft emblem",
+        "author": "0xlillith and SolidCraft contributors",
+        "license": "MIT OR Apache-2.0",
+        "source": "https://github.com/0xlillith/solidcraft-rover/blob/b32437915372d32b71419dc8f5143fe22ff1e869/ATTRIBUTION.md"
+      },
+      {
+        "scope": "Modelled Ubuntu Light lettering",
+        "author": "Canonical Ltd.",
+        "license": "Ubuntu Font Licence 1.0",
+        "retained_notice": "licenses/UFL.txt",
+        "source": "https://github.com/0xlillith/solidcraft-rover/blob/b32437915372d32b71419dc8f5143fe22ff1e869/UFL.txt"
+      },
+      {
+        "scope": "Showcase assembly and helper additions",
+        "author": "SychPL (Mateusz Sych)",
+        "source": "https://github.com/SychPL/solidcraft/blob/32ec1720447e3fcc6bb6cc53a63fb5b39cfa21b9/SELENE-showcase.solidcraft",
+        "note": "Explicit author permission covers redistribution and derivatives, including SELENE-functional.solidcraft.",
+        "license": "MIT OR Apache-2.0",
+        "license_grant_url": "https://github.com/tangency-labs/solidcraft/pull/5494#issuecomment-6375788360",
+        "license_grant_created_at": "2026-10-23T22:13:37Z"
+      }
+    ],
+    "scope": "Original model and showcase additions are licensed MIT OR Apache-2.0. The explicit author grant covers redistribution and derivatives. The separate Ubuntu Font Licence 1.0 lettering notice remains retained. This is a licence record, not renewed native-model validation.",
+    "author_grant_verified_utc": "2026-10-23T22:24:59.302974+00:00"
+  },
+  "admission_review": {
+    "variant_identity_confirmed": true,
+    "license_and_attribution_reviewed": true,
+    "reviewer": "OpenAI assistant, for the repository owner",
+    "evidence_url": "https://github.com/SychPL/solidcraft/blob/32ec1720447e3fcc6bb6cc53a63fb5b39cfa21b9/SELENE-showcase.solidcraft",
+    "review_date": "2026-10-22"
+  },
+  "legacy_sources": [
+    {
+      "variant": "Rover-v7",
+      "file_name": "Rover-v7.solidcraft",
+      "status": "historical_reference_only",
+      "eligible_as_active_source": false,
+      "repository": "0xlillith/solidcraft-rover",
+      "commit": "b32437915372d32b71419dc8f5143fe22ff1e869",
+      "path": "models/Rover-v7.solidcraft",
+      "url": "https://github.com/0xlillith/solidcraft-rover/blob/b32437915372d32b71419dc8f5143fe22ff1e869/models/Rover-v7.solidcraft",
+      "sha256": "fcb08540b1db08325f366fd0ff235f84f66d96406961482736bc097d7248c6d6",
+      "size_bytes": 216036,
+      "format": "solidcraft/15",
+      "units": "mm",
+      "up_axis": "+Z",
+      "reason": "The user selected the improved Tangency showcase. This original file lacks its documented mechanism additions and must be rejected as the active source, even if renamed.",
+      "known_original_inventory": {
+        "component_definitions_excluding_root": 36,
+        "occurrences": 36,
+        "revolute_joints": 17,
+        "history_entries": 3324
+      },
+      "inventory_scope": "Legacy comparison only; no improved-source IDs, counts or format version are inferred from these numbers."
+    }
+  ],
+  "references": [
+    {
+      "id": "SELENE-REF-001",
+      "type": "pinned_document",
+      "url": "https://github.com/tangency-labs/solidcraft/blob/463cea0615a22be2f7d6c30512211f9eda97ff28/skills/solidcraft-mechanisms/reference.md",
+      "repository": "tangency-labs/solidcraft",
+      "commit": "463cea0615a22be2f7d6c30512211f9eda97ff28",
+      "path": "skills/solidcraft-mechanisms/reference.md",
+      "scope": "Published SELENE actuator, anchoring, motion-link and visibility example; command units and limitations.",
+      "evidence_level": "documentation"
+    },
+    {
+      "id": "SELENE-REF-002",
+      "type": "author_comment",
+      "url": "https://github.com/tangency-labs/solidcraft/pull/1540#issuecomment-6205857321",
+      "repository": "tangency-labs/solidcraft",
+      "author": "SychPL",
+      "comment_id": 6205857321,
+      "inspected_on": "2026-10-21",
+      "scope": "Author identifies the improved showcase and describes drivetrain, actuator loops, anchored modules, arm reach, traces and coordinated motion.",
+      "immutability": "The comment body is mutable. The inspection date and separately pinned media identify the evidence examined.",
+      "evidence_level": "author_description"
+    },
+    {
+      "id": "SELENE-REF-003",
+      "type": "merged_pull_request",
+      "url": "https://github.com/tangency-labs/solidcraft/pull/1540",
+      "repository": "tangency-labs/solidcraft",
+      "author": "SychPL",
+      "merged_at": "2026-10-16T03:58:34Z",
+      "merge_commit": "4d862cd76ccfa3a171c66c48d9a184209a33a945",
+      "head_commit": "fd7d51489030f9fd698f11d563b8ba226f58a434",
+      "scope": "Inverse kinematics and jointed dragging. Published demonstrations are kinematic; contact sets are not checked by joint.reach.",
+      "evidence_level": "published_software_change"
+    },
+    {
+      "id": "SELENE-REF-004",
+      "type": "merged_pull_request",
+      "url": "https://github.com/tangency-labs/solidcraft/pull/1680",
+      "repository": "tangency-labs/solidcraft",
+      "author": "SychPL",
+      "merged_at": "2026-10-16T11:26:15Z",
+      "merge_commit": "2ae21143ee2cb8ffb3af916ee2ffadac956a9faa",
+      "head_commit": "57349b71c7274f19aa37cd9770e6670dc0f19fb2",
+      "scope": "Explicitly names SELENE-showcase.solidcraft as the file used for the exported SELENE tour and solar-wing demonstrations.",
+      "evidence_level": "published_software_change"
+    },
+    {
+      "id": "SELENE-REF-005",
+      "type": "merged_pull_request",
+      "url": "https://github.com/tangency-labs/solidcraft/pull/1712",
+      "repository": "tangency-labs/solidcraft",
+      "author": "SychPL",
+      "merged_at": "2026-10-16T22:09:37Z",
+      "merge_commit": "37496198bf2c99285de703899a67a5f87ac60b7a",
+      "head_commit": "f96aaa2a9852f906d815a7bc6dcd4fda3531469b",
+      "scope": "SELENE motion plots, actuator-follower measurements and sampled arm-versus-wing interference examples. The PR explicitly limits collision detection to sampled states.",
+      "evidence_level": "published_software_change"
+    },
+    {
+      "id": "SELENE-REF-006",
+      "type": "pinned_media_manifest",
+      "url": "https://github.com/SychPL/solidcraft/tree/df2e74230e6659409d65501b5d9396b55c6503d3",
+      "repository": "SychPL/solidcraft",
+      "branch_at_inspection": "media/selene-showcase",
+      "commit": "df2e74230e6659409d65501b5d9396b55c6503d3",
+      "files": [
+        "selene2-drivetrain.gif",
+        "selene2-loops.gif",
+        "selene2-arm-tour.gif"
+      ],
+      "scope": "Three showcase recordings linked by the author comment. The tree contains no native model or licensing document.",
+      "evidence_level": "media_reference_only",
+      "vendored": false
+    },
+    {
+      "id": "SELENE-REF-007",
+      "type": "pinned_media_manifest",
+      "url": "https://github.com/SychPL/solidcraft/tree/1e2ad6842a5ad5c3b2cedee3e6508a8e4e3eb3d4",
+      "repository": "SychPL/solidcraft",
+      "branch_at_inspection": "media/motion-animation",
+      "commit": "1e2ad6842a5ad5c3b2cedee3e6508a8e4e3eb3d4",
+      "files": [
+        "selene-tour.gif",
+        "selene-wings.gif",
+        "dialog.png"
+      ],
+      "scope": "Headless motion-export demonstrations cited by PR 1680; no native model in the tree.",
+      "evidence_level": "media_reference_only",
+      "vendored": false
+    },
+    {
+      "id": "SELENE-REF-008",
+      "type": "pinned_media_manifest",
+      "url": "https://github.com/SychPL/solidcraft/tree/6d79237923e80704a3afb4c092950804b64a5c0a",
+      "repository": "SychPL/solidcraft",
+      "branch_at_inspection": "media/motion-analysis",
+      "commit": "6d79237923e80704a3afb4c092950804b64a5c0a",
+      "files": [
+        "motion-plot.gif",
+        "motion-collisions.gif"
+      ],
+      "scope": "Motion-analysis demonstrations cited by PR 1712; no native model in the tree.",
+      "evidence_level": "media_reference_only",
+      "vendored": false
+    },
+    {
+      "id": "SELENE-REF-009",
+      "type": "pinned_document",
+      "url": "https://github.com/0xlillith/solidcraft-rover/blob/b32437915372d32b71419dc8f5143fe22ff1e869/ATTRIBUTION.md",
+      "repository": "0xlillith/solidcraft-rover",
+      "commit": "b32437915372d32b71419dc8f5143fe22ff1e869",
+      "path": "ATTRIBUTION.md",
+      "scope": "Original v7 model provenance: MIT OR Apache-2.0; Ubuntu Light lettering has Ubuntu Font Licence 1.0 provenance. This does not establish an unavailable derivative file's complete inventory.",
+      "evidence_level": "legacy_license_document"
+    },
+    {
+      "id": "SELENE-REF-010",
+      "type": "pinned_document",
+      "url": "https://github.com/tangency-labs/solidcraft/blob/463cea0615a22be2f7d6c30512211f9eda97ff28/ATTRIBUTION.md",
+      "repository": "tangency-labs/solidcraft",
+      "commit": "463cea0615a22be2f7d6c30512211f9eda97ff28",
+      "path": "ATTRIBUTION.md",
+      "scope": "Credits docs/screenshots/rover-build.gif and rover-build.mp4 as construction replay of Rover-recorded.solidcraft. Those rows do not identify the improved showcase native file.",
+      "evidence_level": "upstream_license_document"
+    },
+    {
+      "id": "SELENE-REF-011",
+      "type": "pinned_document",
+      "url": "https://github.com/0xlillith/solidcraft-rover/blob/b32437915372d32b71419dc8f5143fe22ff1e869/README.md",
+      "repository": "0xlillith/solidcraft-rover",
+      "commit": "b32437915372d32b71419dc8f5143fe22ff1e869",
+      "path": "README.md",
+      "scope": "Historical v7 and reconstruction-recording variants; their statistics must not be transferred to the improved showcase.",
+      "evidence_level": "legacy_documentation"
+    },
+    {
+      "id": "SELENE-REF-012",
+      "type": "pinned_document",
+      "url": "https://github.com/tangency-labs/models/blob/57abdd6f71c4202fcda78d19dcfdb54dde80a7a9/README.md",
+      "repository": "tangency-labs/models",
+      "commit": "57abdd6f71c4202fcda78d19dcfdb54dde80a7a9",
+      "path": "README.md",
+      "scope": "Separate CC0 benchmark-model collection. At inspection its complete tree contained no models; its license does not relicense SELENE.",
+      "evidence_level": "search_scope_document"
+    },
+    {
+      "id": "SELENE-REF-NATIVE-001",
+      "type": "pinned_native_model",
+      "repository": "SychPL/solidcraft",
+      "commit": "32ec1720447e3fcc6bb6cc53a63fb5b39cfa21b9",
+      "path": "SELENE-showcase.solidcraft",
+      "url": "https://github.com/SychPL/solidcraft/blob/32ec1720447e3fcc6bb6cc53a63fb5b39cfa21b9/SELENE-showcase.solidcraft",
+      "scope": "Exact author-published improved native source supplied by the owner.",
+      "evidence_level": "native_container_inspected"
+    },
+    {
+      "id": "SELENE-REF-USER-CLUE",
+      "type": "pinned_document",
+      "repository": "tangency-labs/solidcraft",
+      "commit": "ac1768e08b83ed33212459951f5b50aa7a57cddc",
+      "path": "skills/solidcraft-mechanisms/reference.md",
+      "url": "https://github.com/tangency-labs/solidcraft/blob/ac1768e08b83ed33212459951f5b50aa7a57cddc/skills/solidcraft-mechanisms/reference.md",
+      "scope": "The exact reference supplied by the owner; command contracts and the earlier SELENE closed-loop example.",
+      "evidence_level": "documentation"
+    }
+  ],
+  "public_search": {
+    "inspected_on": "2026-10-21",
+    "method": "Read-only GitHub repository, tree, release, pull-request and comment APIs. Only the SolidCraft project, its original rover repository and contributor fork were inspected.",
+    "conclusion": "The improved filename and behavior are documented, but no improved native model or native ZIP attachment was found in the public locations listed below. This is a bounded search result, not proof that the file does not exist elsewhere.",
+    "repositories": [
+      {
+        "repository": "tangency-labs/solidcraft",
+        "scope": "Complete main tree observed during the search; relevant mechanism documentation and attribution; release assets; PRs 1540, 1680 and 1712.",
+        "observed_tree_identifier": "4b37c046e43ac0177a9359bc69f925c26ab25944",
+        "tree_truncated": false,
+        "tree_entry_count": 2583,
+        "releases_examined": 42,
+        "result": "No improved SELENE native file in the examined tree or release asset inventories. Existing rover-build media depict the original construction replay."
+      },
+      {
+        "repository": "tangency-labs/models",
+        "commit": "57abdd6f71c4202fcda78d19dcfdb54dde80a7a9",
+        "scope": "Complete recursive tree, README, LICENSE and complete four-commit setup history.",
+        "tree_truncated": false,
+        "commits_examined": 4,
+        "result": "No model assets. Only documentation, templates, CI and authoring checks. Repository-wide CC0 applies to that separate collection."
+      },
+      {
+        "repository": "0xlillith/solidcraft-rover",
+        "commit": "b32437915372d32b71419dc8f5143fe22ff1e869",
+        "scope": "Default README and ATTRIBUTION; branch inventory.",
+        "branches_examined": 1,
+        "result": "Only main; still identifies the legacy v7 and reconstruction-recording variants."
+      },
+      {
+        "repository": "SychPL/solidcraft",
+        "scope": "Complete 109-name branch inventory; four candidate source trees; six relevant media trees and complete histories; release asset inventory.",
+        "branch_names_examined": 109,
+        "releases_examined": 1,
+        "result": "No improved SELENE native asset in the examined source/media trees or release inventory. Listing branch names does not claim that every branch tree was inspected."
+      }
+    ],
+    "candidate_source_trees": [
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "feat/motion-export-animation",
+        "commit": "57349b71c7274f19aa37cd9770e6670dc0f19fb2",
+        "truncated": false,
+        "result": "No SELENE or rover native file."
+      },
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "feat/joint-reach",
+        "commit": "fd7d51489030f9fd698f11d563b8ba226f58a434",
+        "truncated": false,
+        "result": "No SELENE or rover native file."
+      },
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "feat/usability-integration",
+        "commit": "ab05b24deefb72aaac16a668af353bf1ed1563a3",
+        "truncated": false,
+        "result": "No SELENE or rover native file."
+      },
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "skill/mechanisms",
+        "commit": "e5a2c41c62d70975c86d056cc3b02dda948ff5e4",
+        "truncated": false,
+        "result": "No SELENE or rover native file."
+      }
+    ],
+    "media_histories": [
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "media/joint-reach",
+        "commit": "471b3805bbd66f0b97acc729d91ea1658799760c",
+        "commits_examined": 1,
+        "parent_commits": [],
+        "tree_truncated": false,
+        "files": [
+          {
+            "path": "selene-drag.gif",
+            "git_blob_sha": "638294cadcdf1300e10ac0fc5eb5f347141a0891",
+            "size_bytes": 1137022
+          },
+          {
+            "path": "selene-reach.gif",
+            "git_blob_sha": "3ca58b8ce8ca8087dbae39ae47dbd553797b9b73",
+            "size_bytes": 1494105
+          }
+        ],
+        "native_files_found": 0
+      },
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "media/motion-analysis",
+        "commit": "6d79237923e80704a3afb4c092950804b64a5c0a",
+        "commits_examined": 1,
+        "parent_commits": [],
+        "tree_truncated": false,
+        "files": [
+          {
+            "path": "motion-collisions.gif",
+            "git_blob_sha": "7ad5479160a79945d0095d3c7b2c1e4d14301e2b",
+            "size_bytes": 470336
+          },
+          {
+            "path": "motion-plot.gif",
+            "git_blob_sha": "e3877b28eda557faab5f56830517bedc38d8b04a",
+            "size_bytes": 1802419
+          }
+        ],
+        "native_files_found": 0
+      },
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "media/motion-animation",
+        "commit": "1e2ad6842a5ad5c3b2cedee3e6508a8e4e3eb3d4",
+        "commits_examined": 1,
+        "parent_commits": [],
+        "tree_truncated": false,
+        "files": [
+          {
+            "path": "dialog.png",
+            "git_blob_sha": "a3aa5ded86d7e0cf9878005a3116e3b3e606009d",
+            "size_bytes": 848311
+          },
+          {
+            "path": "selene-tour.gif",
+            "git_blob_sha": "acc03c1cbca6f989c6fbc8efde0907220a6abf00",
+            "size_bytes": 2995491
+          },
+          {
+            "path": "selene-wings.gif",
+            "git_blob_sha": "8a1577237bede2a3c829448b1675cef404cc6712",
+            "size_bytes": 857815
+          }
+        ],
+        "native_files_found": 0
+      },
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "media/motion-traces",
+        "commit": "328d3c4b4ff76573145a39180e74d513983a16b8",
+        "commits_examined": 1,
+        "parent_commits": [],
+        "tree_truncated": false,
+        "files": [
+          {
+            "path": "motion-trace.gif",
+            "git_blob_sha": "c5b52644a1d705c7fff4d4001ddcf7151b7d0595",
+            "size_bytes": 1092339
+          }
+        ],
+        "native_files_found": 0
+      },
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "media/selene-demo",
+        "commit": "cffe218d22cb90a125bc133b768f000d307a3de8",
+        "commits_examined": 1,
+        "parent_commits": [],
+        "tree_truncated": false,
+        "files": [
+          {
+            "path": "selene-tour.gif",
+            "git_blob_sha": "9556f388a6d2df7114a8e54e65e4f7596a44fe00",
+            "size_bytes": 1528923
+          },
+          {
+            "path": "selene-wings.gif",
+            "git_blob_sha": "44950f585d4c65433970ca320f5d2b1a1e42777b",
+            "size_bytes": 356635
+          }
+        ],
+        "native_files_found": 0
+      },
+      {
+        "repository": "SychPL/solidcraft",
+        "branch": "media/selene-showcase",
+        "commit": "df2e74230e6659409d65501b5d9396b55c6503d3",
+        "commits_examined": 1,
+        "parent_commits": [],
+        "tree_truncated": false,
+        "files": [
+          {
+            "path": "selene2-arm-tour.gif",
+            "git_blob_sha": "3910c50df33aac951cb5bcf55c3b7a7a028daeb4",
+            "size_bytes": 2201708
+          },
+          {
+            "path": "selene2-drivetrain.gif",
+            "git_blob_sha": "fba2787a61126b54c862b1542d853e8143e80eaa",
+            "size_bytes": 2085167
+          },
+          {
+            "path": "selene2-loops.gif",
+            "git_blob_sha": "3edd30a7a851127a9d350b6cc63df81772035cab",
+            "size_bytes": 487152
+          }
+        ],
+        "native_files_found": 0
+      }
+    ],
+    "pull_request_discussions": [
+      {
+        "number": 1540,
+        "url": "https://github.com/tangency-labs/solidcraft/pull/1540",
+        "combined_issue_review_and_submission_records": 3,
+        "review_threads": 0,
+        "native_or_zip_attachments_found": 0
+      },
+      {
+        "number": 1680,
+        "url": "https://github.com/tangency-labs/solidcraft/pull/1680",
+        "combined_issue_review_and_submission_records": 1,
+        "review_threads": 0,
+        "native_or_zip_attachments_found": 0
+      },
+      {
+        "number": 1712,
+        "url": "https://github.com/tangency-labs/solidcraft/pull/1712",
+        "combined_issue_review_and_submission_records": 0,
+        "review_threads": 0,
+        "native_or_zip_attachments_found": 0
+      }
+    ],
+    "exclusions": [
+      "No commercial CAD systems, extracted assets or GPL/LGPL/AGPL implementation sources were accessed.",
+      "No screenshots, GIFs, native model, guessed derivative or reconstructed model are included in this package."
+    ],
+    "superseded_by": "source_arrival; the previously inspected media branch acquired its native file in commit 32ec1720447e3fcc6bb6cc53a63fb5b39cfa21b9 after the historical search."
+  },
+  "admission_requirements": [
+    {
+      "id": "SELENE-ADMIT-001",
+      "check": "Acquire the actual improved native source.",
+      "acceptance": "Record an HTTPS provenance source that identifies the candidate native file as the author's improved SELENE showcase. A filename, GIF, command list or matching feature count alone cannot establish identity."
+    },
+    {
+      "id": "SELENE-ADMIT-002",
+      "check": "Pin and verify the source bytes.",
+      "acceptance": "Record the real repository/path/commit when repository-backed, actual download URL, SHA-256, byte length and native format. Verify bytes against the reviewed source record; reject every legacy_sources hash marked ineligible."
+    },
+    {
+      "id": "SELENE-ADMIT-003",
+      "check": "Complete a file-specific license review.",
+      "acceptance": "Record license expression, reviewer, date, supporting HTTPS evidence and applicable notices for the original model and any derivative helper geometry. Preserve Ubuntu Light lettering provenance when that geometry remains."
+    },
+    {
+      "id": "SELENE-ADMIT-004",
+      "check": "Inspect the assembly without guessing bindings.",
+      "acceptance": "Record native component, occurrence, joint, motion-link and study identities, units, parentage, grounded roots, limits and any contact settings. Verify uniqueness and connectivity against the actual native file; leave ambiguous matches unresolved."
+    },
+    {
+      "id": "SELENE-ADMIT-005",
+      "check": "Review the documented mechanism expectations.",
+      "acceptance": "Complete the native review in motion/mechanism-acceptance.json. Explain legitimate differences from the demonstrations. Do not admit a renamed v7 or automatically admit an arbitrary file because its shape or counts look similar."
+    },
+    {
+      "id": "SELENE-ADMIT-006",
+      "check": "Perform an explicit source-lock transition.",
+      "acceptance": "A reviewer sets active_source.status to pinned_native only after identity, provenance, bytes, license and native bindings are approved. Pending source locks cannot compile source-dependent scene or motion resources. Never fall back to a legacy source."
+    },
+    {
+      "id": "SELENE-ADMIT-007",
+      "check": "Keep runtime evidence separate.",
+      "acceptance": "A pinned source is not a replay or physics result. Runtime motion needs a recorded SolidCraft revision, command inputs, tolerances, source digest, solved poses, stop/contact reports and review. Changed source bytes invalidate dependent bindings and recordings."
+    }
+  ],
+  "native_inspection": {
+    "status": "inspected_container_only",
+    "sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+    "counts": {
+      "history_features": 3378,
+      "components_excluding_root": 47,
+      "occurrences": 47,
+      "joints": 49,
+      "motion_links": 9,
+      "motion_studies": 1
+    },
+    "scope": "Read-only ZIP and document inspection of the supplied source. These counts do not prove geometry evaluation, closed-loop solvability, collision clearance or derivative validation."
+  },
+  "source_arrival": {
+    "file_name": "SELENE-showcase.solidcraft",
+    "verification": "The supplied bytes match the published Git blob and SHA-256. This supersedes the historical search outcome recorded below.",
+    "author_commit": "32ec1720447e3fcc6bb6cc53a63fb5b39cfa21b9",
+    "parent_media_commit": "df2e74230e6659409d65501b5d9396b55c6503d3",
+    "verified_on": "2026-10-22"
+  },
+  "authoring_runtime": {
+    "status": "derivative_native_acceptance_passed",
+    "name": "Official SolidCraft CLI",
+    "version": "0.18.2",
+    "platform": "linux-x86_64",
+    "release_url": "https://github.com/tangency-labs/solidcraft/releases/tag/v0.18.2",
+    "source_commit": "4927214976ff20758fde35af03bd6b2d6cf73e18",
+    "archive_sha256": "9d0c922ac72204f34ad22ca7a171be78016ab002e304ace3c07d34d187d830ff",
+    "cli_sha256": "e50fe78292d569c36052b24f46f1732bc4e43d1ecdac6a64092aa1cee3b97086",
+    "written_format": "solidcraft/28",
+    "compatibility_reason": "The personal render branch at 10ada1b45a4eb285ce752ac72f9aaa968ff8b5c4 reads through format 29. This executor writes format 28; official 0.19.0 writes format 30 and cannot be its authoring input.",
+    "fixture_policy": "Isolated 0.19.0 component fixtures are development evidence only. Final-model validation must record the executor and model hashes actually used.",
+    "binary_bundled": false,
+    "final_acceptance": {
+      "status": "passed",
+      "model_path": "assets/render/selene/models/SELENE-functional.solidcraft",
+      "model_sha256": "3bd2bfa1c6336394c4a4208d30b52c80d06658a3bd7ea57cc93b774411d1bd68",
+      "completed_utc": "2026-10-22T08:53:15.882960+00:00",
+      "cases": 33,
+      "numeric_comparisons": 880,
+      "report_sha256": "0ccbf279f27885f6a4646a691a03915ca9ae22ae2f6bfef9574b856392474130",
+      "documentation": "assets/render/selene/VALIDATION.md",
+      "scope": "Final derivative: sampled ideal kinematics, independent world-coordinate measurements and seven selected neutral interference pairs. This does not promote the separate original-source checklist or wider unbound render catalog."
+    }
+  }
+}

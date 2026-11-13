@@ -15,10 +15,14 @@
 //! window rescales once at the crossing and stays under the pointer, instead of the OS's move
 //! loop and winit disagreeing about a frame the window doesn't have.
 //!
-//! Replacing a window procedure has no safe API, hence the `unsafe_code` allowance on this
-//! module (the app crate denies it; see `native_crash.rs` and `open_documents.rs` for the others).
+//! Replacing a window procedure and setting a window class's icon have no safe API, hence the
+//! `unsafe_code` allowance on this module (the app crate denies it; see `native_crash.rs` and
+//! `open_documents.rs` for the others).
 //! The procedure is installed once, on the thread that owns the window, for the main window only,
 //! and calls the previous one (winit's) for everything it doesn't answer.
+//!
+//! [`set_class_icon`] gives the window's class the exe's icon, so the taskbar button shows the
+//! mark even when the window is too busy to answer the taskbar's request for its icon.
 #![allow(unsafe_code)]
 
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -27,12 +31,18 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use solidcraft_ui_egui::titlebar;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTLEFT,
-    HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic, IsZoomed, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SetWindowLongPtrW, WM_GETDPISCALEDSIZE,
-    WM_NCDESTROY, WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
+    CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT,
+    HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
+    SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SetWindowLongPtrW, WM_GETDPISCALEDSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
 };
+// windows-sys has SetClassLongPtrW only on 64-bit targets; on 32-bit Windows it is SetClassLongW.
+#[cfg(target_pointer_width = "64")]
+use windows_sys::Win32::UI::WindowsAndMessaging::SetClassLongPtrW;
+#[cfg(target_pointer_width = "32")]
+use windows_sys::Win32::UI::WindowsAndMessaging::SetClassLongW as SetClassLongPtrW;
 
 /// The work area (the monitor without the taskbar) of the monitor nearest the window, in physical
 /// pixels: left, top, width, height.
@@ -52,6 +62,48 @@ pub fn work_area(window: &impl HasWindowHandle) -> Option<(i32, i32, i32, i32)> 
         info.rcWork
     };
     Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
+}
+
+/// The exe's icon resource (`build.rs` embeds it as `1 ICON`).
+const ICON_RESOURCE: usize = 1;
+
+/// Give the main window's class the exe's icon, big and small. Call it before the window is
+/// shown (eframe's app creator).
+///
+/// The taskbar asks a window for its icon when the window appears. eframe sets the window's
+/// icon before that, while the window is still hidden, and then shows the window at the end of
+/// its first frame; if that frame is slow, or startup kept the thread busy long enough for
+/// Windows to mark the window as not responding, the request isn't answered in time. The taskbar then
+/// takes the window class's icon and doesn't ask again. winit registers its class without one,
+/// so the button showed Windows' generic icon for as long as the window was open.
+/// `false` if it isn't a Win32 window or the exe's icon doesn't load; SetClassLongPtrW's own
+/// failure can't be told from a class that had no icon (both return 0), so it isn't reported.
+pub fn set_class_icon(window: &impl HasWindowHandle) -> bool {
+    let Ok(handle) = window.window_handle() else { return false };
+    let RawWindowHandle::Win32(w) = handle.as_raw() else { return false };
+    let hwnd = w.hwnd.get() as HWND;
+    // SAFETY: a plain query on the live main window.
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    let (Some(big), Some(small)) = (exe_icon(SM_CXICON, dpi), exe_icon(SM_CXSMICON, dpi)) else { return false };
+    // SAFETY: `hwnd` is the live main window and both icons are valid handles. The class keeps
+    // them for the rest of the process, so they are never destroyed. `as _`: on 32-bit Windows
+    // this is SetClassLongW (see the imports), which takes an i32.
+    unsafe {
+        SetClassLongPtrW(hwnd, GCLP_HICON, big as _);
+        SetClassLongPtrW(hwnd, GCLP_HICONSM, small as _);
+    }
+    true
+}
+
+/// The exe's icon at the size of system metric `metric` (`SM_CXICON`, `SM_CXSMICON`) at `dpi`.
+fn exe_icon(metric: i32, dpi: u32) -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    // SAFETY: GetModuleHandleW(null) is this exe, loaded for the life of the process; the name
+    // is an integer resource id (MAKEINTRESOURCE), which LoadImageW accepts in place of a string.
+    let icon = unsafe {
+        let size = GetSystemMetricsForDpi(metric, dpi);
+        LoadImageW(GetModuleHandleW(std::ptr::null()), std::ptr::without_provenance(ICON_RESOURCE), IMAGE_ICON, size, size, LR_DEFAULTCOLOR)
+    };
+    (!icon.is_null()).then_some(icon)
 }
 
 /// The window procedure ours replaced (winit's), as an address; 0 before [`install`].

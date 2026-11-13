@@ -1,0 +1,25 @@
+# The source files whose change reruns this area of the kernel rig (scripts/ci/kernel_rig_plan.py),
+# besides the shared core in ../PATHS-ALL. One git pathspec glob a line, relative to the
+# repository root; `#` starts a comment.
+# STEP and IGES import and export, mesh import and export (3MF, STL, OBJ, glTF, URDF), mesh-to-solid conversion
+# and the print face a body is laid on.
+crates/doc/src/print_face.rs
+crates/engine/src/cmd/file.rs
+crates/engine/src/cmd/file_import.rs
+crates/engine/src/cmd/mesh.rs
+crates/engine/src/cmd/print_face.rs
+crates/io/src/formats.rs
+crates/io/src/gltf_in.rs
+crates/io/src/obj.rs
+crates/io/src/threemf.rs
+crates/io/src/urdf.rs
+crates/kernel/src/iges_in.rs
+crates/kernel/src/iges_in/**
+crates/kernel/src/iges_out.rs
+crates/kernel/src/mesh_convert.rs
+crates/kernel/src/meshbody.rs
+crates/kernel/src/sew.rs
+crates/kernel/src/splitface.rs
+crates/kernel/src/step.rs
+crates/kernel/src/step_in/**
+crates/kernel/src/step_out.rs

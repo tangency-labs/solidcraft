@@ -4,6 +4,7 @@
 //! `{"pending": "why"}` step (its test is ignored with that reason). Adding a scenario is adding
 //! its file.
 
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::scenario::Harness;
 
 fn run(name: &str) {
@@ -44,9 +45,10 @@ fn angle_dimension_both_interactive_workflows() {
             {"call":"ui.view","params":{"view":"top"}}
         ]))
         .unwrap();
+        // Pick the lines away from MID snaps so this remains an angular workflow.
         let picks = json!([
-            {"click":{"sketch":[20,0]}},
-            {"click":{"sketch":[15,15]},"shift":true}
+            {"click":{"sketch":[10,0]}},
+            {"click":{"sketch":[10,10]},"shift":true}
         ]);
         if preselect {
             h.run(&picks).unwrap();
@@ -102,7 +104,7 @@ fn dragging_a_conic_after_the_tool_sets_rho_and_its_apex_stays_separately_dragga
         .expect("the three clicks created a conic");
     assert!((rho - 0.5).abs() < 1e-6, "default rho {rho}");
     let apex_before = sk.point(apex_idx).expect("apex point resolves");
-    assert!(apex_before.dist(solidcraft_engine::geom::Vec2::new(20.0, 20.0)) < 1e-6);
+    assert!(apex_before.dist(solidcore_record::Vec2::new(20.0, 20.0)) < 1e-6);
 
     // Grabbed on the curve itself, at its default-rho midpoint (20, 10): the chord's midpoint
     // is (20, 0), the apex (20, 20), so (20, 14) is 0.7 of the way from one to the other.
@@ -153,7 +155,7 @@ fn home_tab_and_file_recent_open_designs() {
         {"click":{"handle":"tab:home"}},
         {"click":{"handle":"home:recent:0"}},
         {"until":{"file_busy":false}},
-        {"expect":{"home":false,"bodies":1,"documents":2}},
+        {"expect":{"home":false,"bodies":1,"documents":1}},
         {"click":{"handle":"appbar:folder"}},
         {"widget":"Open Recent"}
     ]))
@@ -161,7 +163,7 @@ fn home_tab_and_file_recent_open_designs() {
     h.run(&json!([
         {"widget":path},
         {"until":{"file_busy":false}},
-        {"expect":{"home":false,"bodies":1,"documents":3}}
+        {"expect":{"home":false,"bodies":1,"documents":1}}
     ]))
     .unwrap();
 }
@@ -180,6 +182,9 @@ fn sketch_toolbar_imports_use_file_picker() {
         {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
         {"choose_file":path},
         {"start":"sketch.insert_svg"},
+        // The picked drawing is placed first (#2605): OK adds it.
+        {"expect":{"dialog":"InsertDrawing","sketch_curves":{"own":0}}},
+        {"key":"Enter"},
         {"expect":{"errors":0,"sketch_curves":{"own":4}}}
     ]))
     .unwrap();
@@ -190,17 +195,104 @@ fn narrow_toolbar_reaches_collapsed_commands() {
     use serde_json::json;
     let mut h = Harness::new();
     h.run(&json!([
-        // The compact ribbon still fits every button at 640 wide.
+        // At 640 wide the ribbon still needs no » menu: Construct's three buttons (Plane, Axis
+        // and Point) fold into the panel's own button.
         {"call":"ui.resize","params":{"width":640,"height":800}},
-        {"expect":{"shown_handles":["button:construct.plane.offset"],"hidden_handles":["toolbar:overflow"]}},
+        {"expect":{"shown_handles":["collapsed:MODEL:CONSTRUCT"],"hidden_handles":["toolbar:overflow","button:construct.plane"]}},
         // Too narrow for every button: the panels go into the » menu.
         {"call":"ui.resize","params":{"width":440,"height":800}},
-        {"expect":{"shown_handles":["toolbar:overflow"],"hidden_handles":["button:construct.plane.offset"]}},
+        {"expect":{"shown_handles":["toolbar:overflow"],"hidden_handles":["button:construct.plane","collapsed:MODEL:CONSTRUCT"]}},
         {"click":{"handle":"toolbar:overflow"}},
         {"widget":"CONSTRUCT"},
-        {"expect":{"shown_handles":["toolbar:construct.plane.offset"]}},
-        {"click":{"handle":"toolbar:construct.plane.offset"}},
-        {"expect":{"dialog":"OffsetPlane"}}
+        {"expect":{"shown_handles":["toolbar:construct.plane"]}},
+        {"click":{"handle":"toolbar:construct.plane"}},
+        {"expect":{"dialog":"ConstructAuto"}}
     ]))
     .unwrap();
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn sketch_finish_plugin(h: &Harness, fail_after: bool) -> String {
+    use serde_json::json;
+    let command = "sketch.finish";
+    let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+    let template =
+        include_str!("../../engine/src/plugin/fixture.wat").replace("\r\n", "\n").replace("__PACKAGE__", package).replace("__VERSION__", version);
+    let calls = "      call $box\n      call $box\n";
+    assert!(template.contains(calls));
+    let command_length = "      i32.const 9\n";
+    let params_length = "      i32.const 33\n";
+    let original_data = r#"(data (;1;) (i32.const 1024) "{\22length\22:2,\22width\22:3,\22height\22:4}")"#;
+    assert!(template.contains(command_length) && template.contains(params_length) && template.contains(original_data));
+    let body = if fail_after { "      call $box\n      unreachable\n" } else { "      call $box\n" };
+    let wat = template
+        .replacen(calls, body, 1)
+        .replacen(command_length, &format!("      i32.const {}\n", command.len()), 1)
+        .replacen(params_length, "      i32.const 2\n", 1)
+        .replace(original_data, r#"(data (;1;) (i32.const 1024) "{}")"#)
+        .replace(r#""solid.box""#, &format!("\"{command}\""));
+    let dir = h.dir.join("sample");
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        json!({"id":"sample","name":"Sketch exit","version":"1","capabilities":["commands@0.1"],"runtime":{
+            "module":"plugin.wasm",
+            "entries":[{"name":"make","effect":"edit","input_schema":{"type":"object"}}],
+            "commands":[command]
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    dir.to_string_lossy().into_owned()
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn approved_plugin_sketch_finish_restores_saved_camera_only_after_success() {
+    use serde_json::json;
+    for fail_after in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.sketch_exit_view = solidcraft_ui_egui::prefs::SketchExitView::Previous;
+        h.call("ui.view", json!({"view":"iso"}));
+        h.settle();
+        let before_sketch = h.app.cam;
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.step(&json!({"click":{"plane":"XY"}})).unwrap();
+        h.settle();
+        h.app.run("sketch.line", json!({"points":[[0,0],[30,10]]})).unwrap();
+        h.app.start("sketch.line");
+        assert!(h.app.tool.is_some());
+        assert!(h.app.pre_sketch_cam.is_some());
+        let open = h.app.session.active_sketch;
+        let saved_view = h.app.pre_sketch_cam;
+        let saved_component = h.app.pre_sketch_component.clone();
+        let tool = h.app.tool.as_ref().unwrap().cmd;
+        let camera = h.app.cam;
+        let before = h.app.session.doc.to_json();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let path = sketch_finish_plugin(&h, fail_after);
+        let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+        // call_queued enters offload_control; call() executes the direct
+        // handler and does not exercise the accepted plugin worker result.
+        let (reply, _) =
+            h.call_queued("engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+        assert_eq!(reply["ok"], !fail_after, "trap {fail_after}: {reply}");
+        if fail_after {
+            assert_eq!(h.app.session.active_sketch, open);
+            assert_eq!(h.app.pre_sketch_cam, saved_view);
+            assert_eq!(h.app.pre_sketch_component, saved_component);
+            assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(tool));
+            assert_eq!(h.app.cam, camera);
+            assert_eq!(h.app.session.doc.to_json(), before);
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        } else {
+            assert_eq!(h.app.session.active_sketch, None);
+            assert!(h.app.tool.is_none());
+            assert!(h.app.pre_sketch_cam.is_none());
+            assert!(h.app.pre_sketch_component.is_none());
+            assert_eq!(h.app.cam, before_sketch, "restore the view saved on interactive entry");
+        }
+    }
 }

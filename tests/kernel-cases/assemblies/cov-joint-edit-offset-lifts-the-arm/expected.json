@@ -1,0 +1,44 @@
+{
+ "sources": [],
+ "what": "joint.edit offset 3 on a revolute",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); the offset moves B's frame 3 mm up A's z: (20,0,5) -> (20,0,8); a drive to 90 then gives (0,20,8)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      8.0
+     ]
+    }
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "values": [
+     {
+      "value": 90.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 12,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      8.0
+     ]
+    }
+   }
+  }
+ ]
+}

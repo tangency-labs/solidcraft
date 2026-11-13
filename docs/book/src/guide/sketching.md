@@ -3,9 +3,73 @@
 A sketch lies on a plane: an origin plane, a construction plane or a planar face. Start one with
 **Create Sketch** (`sketch.create`) and click a plane, or pick a face first. Right-clicking a
 plane, in the view or on its browser row, offers **Create Sketch** on that plane too.
-**Finish Sketch** returns to the model.
+While Create Sketch waits for its plane, the origin planes are shown, and the plane under the
+pointer (in the view, or its row in the browser) lights up and takes the grid, so you see which
+plane the sketch will lie on before you click.
+**Finish Sketch** returns to the model. **Cancel Sketch** (`sketch.cancel`) returns without
+keeping what changed since the sketch was created or opened for editing: a new sketch is removed,
+an edited one goes back to how it was, as one step that Undo brings back.
+
+## Step by step
+
+A first sketch: a 60 × 40 mm outline with a 12 mm hole in it, on the Top plane.
+
+**1. Start the sketch.** Click **New Sketch**. Each origin plane lights up as the pointer passes
+over it; click the flat one (Top, XY). The sketch opens with the view facing it.
+
+<video src="../media/sketching/create.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Clicking New Sketch, hovering two origin planes so each lights up, then clicking the Top plane: the view turns to face the new sketch"></video>
+
+**2. Draw.** Pick **Rectangle**, click the origin for the first corner and type the sides: 60,
+Tab, 40. Click (or press Enter) to place it. Then pick **Circle**, click a centre inside the
+rectangle, type 12 for the diameter and click. Each value you type becomes a dimension.
+
+<video src="../media/sketching/draw.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Drawing a rectangle from the origin with 60 and 40 typed into its value boxes, then a circle inside it with a 12 mm diameter typed"></video>
+
+**3. Dimension.** The rectangle is pinned by the origin and its two sides, but the circle can
+still move. Pick **Dimension**, click the circle's centre, then the left side, click where the
+dimension goes and type 20. Do the same from the bottom side. With nothing left free, the sketch
+is fully constrained and its curves turn white.
+
+<video src="../media/sketching/dimension.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Dimensioning the circle's centre 20 mm from the left side and 20 mm from the bottom side; the sketch becomes fully constrained"></video>
+
+**4. Finish.** Click **Finish Sketch** to go back to the model; the shaded region is a profile
+that Extrude can use ([Solid features](features.md)).
+
+<img class="dark-ui" src="../media/sketching/parts.png" alt="The finished sketch, numbered 1 to 5">
+<img class="light-ui" src="../media/sketching/parts.light.png" alt="The finished sketch, numbered 1 to 5">
+
+**1** Sketch tools · **2** A constraint (this side is vertical) · **3** A dimension ·
+**4** The sketch's state · **5** Finish Sketch
+
+**Two more tools.** **Offset** (O) draws a copy of curves at a distance: click one side of the
+rectangle and the whole outline comes along (**Chain**), type 4 and press Enter for a wall 4 mm
+inside it. The distance is a dimension like any other.
+
+<video src="../media/sketching/offset.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Offsetting the rectangle's outline 4 mm inward with one click on its bottom side"></video>
+
+**Trim** (T) removes the piece of a curve between the curves that cross it. With a circle drawn
+on the top side, click the piece of the side inside the circle, then the half of the circle
+outside the rectangle: what's left is a notch.
+
+<video src="../media/sketching/trim.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Trimming a notch: removing the piece of the top side inside a circle, then the circle's upper half"></video>
+
+## Working in a sketch
+
+Opening a sketch turns the view to face it; to keep the view as it is and face the sketch only with **Look At**, turn off Preferences › Sketch › **Turn to face a sketch when it opens**. When the sketch ends, the view stays where it is by default. Preferences › Sketch › **When a sketch ends** changes that: **Return to the previous view** goes back to the view from before the sketch, and **Return unless rotated** goes back only when you panned or zoomed the sketch view but didn't turn it.
+
+In an assembly a new sketch belongs to the active component and is listed in its Sketches
+folder. Turn on Preferences › Sketch › **Sketching on a part's face makes that part active** to
+keep sketches with the part they are drawn on: a sketch started on a face of another component's
+body first activates that component, at the placement you picked, and is made there, as if you had
+activated the part yourself. The part stays active afterwards, so an extrude or cut made from the
+sketch lands in the same part; activate the design or another part again as usual. Off (the
+default), the sketch belongs to the active component. In scripts the same is
+`sketch.create {"plane": {"face": …}, "activate_part": true}`; the reply's `activated` names the
+component and placement it activated.
 
 In scripts, `XY`, `XZ`, `YZ` and their `Top`, `Front`, `Right` aliases name origin planes.
+Preferences › Interface › **Origin plane names** shows them as Top, Front and Right in the
+browser, dialogs and lists; scripts and saved designs keep XY, XZ and YZ.
 These names are reserved: a construction plane cannot be created with or renamed to one
 (case-insensitive). If an older design already has a construction plane with such a name, a
 string argument naming it is ambiguous and is rejected; use the other alias (`XY` for `Top`)
@@ -13,12 +77,42 @@ for the origin plane, the construction feature's numeric ID to select it, or an 
 `{origin: [x,y,z], normal: [x,y,z]}` plane. Existing saved references retain their meaning;
 opening a design does not reinterpret old sketches.
 
+**Plane Through Axis And Point** (Model > Construct) creates a plane containing an
+origin or construction axis, straight model edge or sketch line, and a point off that
+line. Pick the axis first, then a vertex, sketch point or construction point. A point
+on the axis leaves infinitely many possible planes, so choose an off-axis point.
+The plane follows its references when they change and can support a new sketch.
+Scripts use `construct.plane.axis_point`, for example:
+
+```json
+{"axis":{"axis":"Z"},"point":{"point":[10,20,30]},"name":"Fence"}
+```
+
 Curves adapt to the current zoom and display scale. Picking and highlighting use the same
 visible boundary, including small circles at Fit and sketches in rotated components.
 Profile shading follows those curves while preserving holes. Zooming changes the display
 without changing sketch geometry, dimensions, or undo history.
 On short windows or enlarged displays, the Sketch Palette's options scroll while its
 constraint status and **Finish Sketch** button remain visible.
+
+Hover over a circle or arc centre, or the midpoint of a straight sketch edge, then move
+horizontally or vertically to see a dotted alignment guide. The guide connects that reference
+to the cursor's projection on the sketch axis, within the viewport; it disappears when you
+move away from the axis. SolidCraft keeps the two most recent of these references and can
+draw both guides. One guide on its own does not move the cursor. While a drawing tool (Line,
+Rectangle, Circle, Arc, Polygon, Slot, Point…) waits for a point, any sketch point is a
+reference too: the end of a line or arc, a rectangle's corner, or a free point. Preferences ›
+Sketch › **Alignment guides from end points and corners while drawing** turns that off and
+keeps only centres and midpoints. Preferences › Sketch › **Auto snap to recent
+centers and midpoints** is off until you turn it on. With it on, a drawing tool snaps the
+cursor where the horizontal through one reference meets the vertical through the other. On a
+rectangle, the top midpoint and a side midpoint then meet at the rectangle's centre, so that
+point can be placed without a construction line. Holding Shift for midpoint-only snapping
+skips the crossing. This works while editing and before a drawing tool's first click.
+Placing the point adds no geometry or constraint of its own. Esc, leaving the viewport, or
+ending the sketch clears the references. **Center and midpoint alignment guides** turns the
+guides off, which also leaves the cursor unmoved; the configured snap-suppression modifier
+does the same for that gesture.
 
 ## Geometry
 
@@ -32,7 +126,36 @@ fit-point and control-point splines, conics, points and text. **Construction** (
 into reference geometry that doesn't form profiles. Modify tools include trim (T), extend, break,
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
-and all go when you let go, in one undo step (`sketch.trim.path`).
+and all go when you let go, in one undo step (`sketch.trim.path`). Fillet and chamfer take
+several corners at once: pick the corners, set the size once, and every corner is rounded or
+cut alike in one undo step.
+
+Line draws a chain: each click adds a segment from the last point, and a right-click or Esc
+ends the chain. To draw one separate line with a press, a drag and the release instead, turn on
+**Preferences › Sketch › Press and drag draws one line**: the line runs from where you press to
+where you let go, snapping and lining up as clicks do, and ends there; clicks still draw a
+chain, and a drag shorter than about 24 points is still a click.
+
+To round corners without changing tool, turn on **Preferences › Sketch › Rest on a line's last
+point to switch to a tangent arc**. With a segment drawn, move the pointer away from the chain's
+last point, bring it back and hold it still for about a third of a second: a label next to the
+pointer says Tangent Arc, and the next click ends an arc tangent to the last segment. The same
+gesture goes back to lines. Arcs and lines join into one chain, each click is one undo step, and a
+right-click or Esc ends the chain as usual.
+
+Tools with several variants (line and midpoint line; two-point, three-point, centre and rounded
+rectangle; the circle, arc, slot, polygon and spline variants) share one toolbar button with a
+drop-down. The button and the family's shortcut start the variant you picked last, so a
+shortcut such as L can start a Midpoint Line; pick the variant you want from the drop-down to
+change it ([Keyboard shortcuts](shortcuts.md)).
+
+Once a shape's first point is down, value boxes (a line's length and angle, a rectangle's width
+and height, a circle's diameter, an ellipse's major and minor radius…) follow the cursor. Typing goes into the first box, Tab moves to
+the next and Enter places the shape; each typed value becomes a dimension. A value is an
+expression (`25`, `1 in`, `d1 * 2`), or `width = 20` (also `#width = 20`), which also adds the
+user parameter `width` and dimensions with it, as when [placing a dimension](parameters.md). A
+box that does not become a dimension (a polygon's sides, a rounded rectangle's corner radius)
+takes a value only.
 
 The Sketch Palette's **Construction Geometries** option hides construction curves while you
 work. A hidden construction curve cannot be picked by a click or by a box. Nothing invisible
@@ -41,9 +164,56 @@ a line type of their own and keep showing. Projected geometry that carries the c
 line type, such as the trace of a plane, answers to **Projected Geometries** instead. The
 option changes display only. Construction curves were already outside every profile.
 
+The **Construction Line** drop-down in Sketch **CREATE** draws infinite reference lines
+directly. It contains two-point, horizontal, vertical, angle, parallel, perpendicular, tangent
+through an external point, tangent at a curve point, common tangent, and angle-bisector tools.
+These lines remain construction geometry regardless of the Sketch Palette's drawing line type.
+Turn off **Extended construction line tools** in Preferences > Sketch to restore the earlier menu.
+
+For horizontal or vertical lines, click the point to pass through. For a line at an angle,
+click its point, then type the angle from sketch X in the inline box and press Enter, or click
+the direction. Angle expressions can refer to parameters and follow their later changes.
+Parallel and perpendicular lines ask for a straight sketch line, then a point;
+the reference stays picked so you can place several lines. Right-click clears the current
+points and references; Escape ends the tool.
+
+The horizontal, vertical, parallel and perpendicular tools show a **Length** box beside the
+pointer, which stays empty (infinite) until you type a digit: letters still start other tools.
+With a length, the first click sets the start and a second click the side the segment runs to;
+the angle tool has the Length box beside its Angle box. The segment gets a length dimension
+that follows the typed expression. An empty box keeps the infinite line. The
+**Construction | Normal** switch under the Length box makes such a segment a normal sketch line,
+ready to close a profile; it starts at Construction, is greyed out while the line is infinite
+(an infinite line is always construction), and leaves the Sketch Palette's line type alone.
+
+A command call can cut a horizontal, vertical, angle, parallel or perpendicular construction
+line to a length instead: `length` makes a segment from the point `at`, running towards `near`,
+and adds a length dimension that follows its expression (#10258). With `construction: false` that
+segment is a normal sketch line, ready to close a profile.
+
+Tangents through an external point take a circle or circular arc, the external point, and a
+click choosing the desired preview. A common tangent takes two circles/arcs and a click choosing
+the solution. Contacts outside an arc's drawn sweep are excluded. A tangent at a curve point
+takes a circle/arc and a contact point, or an endpoint of an open spline or conic. Interior
+free-form contacts and ellipse tangents are not supported by these tools yet. A bisector takes
+two intersecting straight lines; click near the desired one of the two preview lines. Parallel
+or coincident references have no unique angle bisector and are refused.
+
+Each placement is one undo step. Direction, parallel, perpendicular, tangency and bisector
+relations are kept as ordinary sketch constraints; the reference geometry follows later edits
+within those constraints. Programmatic callers can use `sketch.construction_line` with `mode`,
+or one of its named variants. `near` chooses the closest solution; `solution` chooses its
+zero-based index. For example:
+
+```json
+{"command":"sketch.construction_line.parallel","params":{"curve":"l1","at":[20,10]}}
+```
+
 Polygon tools show their edge outline while positioning the second point, so the orientation
 can be checked before placement. Inscribed and circumscribed polygons retain their support
-circle and update the outline when the inline **Sides** value changes.
+circle and update the outline when the inline **Sides** value changes. A polygon drawn **By side**
+has a **Length** box for the side from the first click and the same **Sides** box; a typed length
+becomes a dimension of that side, and the other sides stay equal to it.
 
 **Text** is set in the built-in font (Liberation Sans) unless it is given another: `sketch.text` and
 `sketch.edit_text` take a `font`, the family or full name of an installed font ("DejaVu Sans") or the path
@@ -109,6 +279,7 @@ geometry right away.
 Extend finds intersections with exact ellipses, rational conics and spline spans. It keeps the
 original line or circular support and extends only beyond the selected endpoint; conflicting
 constraints or an ambiguous overlap leave the sketch unchanged.
+To extend two lines or arcs until they meet, hold Shift and click the first curve, then Shift-click the second: both grow to where they cross and are joined there, in one undo step.
 
 Closed convex chains of tangent lines and circular arcs support inward offsets that consume
 a rounded corner. When the offset passes the corner radius, the neighbouring straight
@@ -149,12 +320,44 @@ While drawing a fit spline, click its starting point after three distinct sample
 it smoothly. Right-click finishes an ordinary natural fit. Offset accepts both ellipse
 handles and dense fitted curves; the second click sets the side and distance from the curve.
 
+**Equation Curve** draws a curve from formulas instead of clicks: x(t) and y(t) over a range of
+t, or y = f(x) over a range of x, using the design's parameters. [Equation curves](equation-curves.md)
+walks through it step by step, with pictures and examples (a line, a parabola, a wave, a circle,
+a spiral, a gear tooth's involute). Right-click the curve and choose **Edit Equation Curve** to
+change the formulas (`sketch.equation_curve` and `sketch.equation_curve.edit` from scripts and agents).
+
 While drawing in a planar sketch, **Construction** (X) changes the line type without
 ending the tool or losing picked points and inline values. The preview and hover feedback
 keep construction dashes and centerline dash-dot patterns visible. With curves selected,
 Construction changes those curves as before.
 
+The pointer snaps to existing sketch points, to a line's midpoint, and to **where two
+curves cross** (two lines, a line and a circle or arc, or two circles or arcs). The snap
+hint shows **X**. The new point stays on both curves when either one moves. Hold **Shift**
+to prefer a line midpoint instead; hold Ctrl/Cmd or Alt/Option (the default suppress chord)
+to stop snapping for that gesture. Scripts pass `"x:<curve>+<curve>:x,y"` as a point
+argument, the same way `"mid:<line>"` and `"on:<curve>:x,y"` work.
+
+With Preferences › Sketch › **Line up with other sketch points while drawing** turned on (it's
+off by default), the pointer also **lines up** while drawing with the sketch's points on screen:
+line ends, centres, standalone points and the origin, and the shape's own earlier points. It also
+lines up with the midpoint of a line you just hovered, whose dotted guide is showing. It
+lines up on both axes at once, level with one point and plumb with another, so a rectangle drawn
+beside another can take its height from one and its width from a point below. A line kept
+horizontal or vertical from its start can still end under or beside another point. A dotted guide
+runs from each point it lines up with, and the snap hint shows **H**, **V** or **H+V**. The click
+keeps the alignment: the new point gets a Horizontal or Vertical constraint with each sketch
+point it lined up with, in the shape's undo step, unless the sketch already sets it. With the
+preference off, drawing lines up only with the previous point, one axis at a time.
+
 Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
+
+Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
+3D curve points as construction references after finishing the sketch. This option is off by default.
+For example, choose **Offset Plane**, select its base plane, then select a spline point in
+the **Through point** field. The plane follows that point when the curve is edited. Interior
+points work as well as endpoints, and references use their full 3D positions. Hole placement
+continues to use planar sketch points; drawn 3D curve points are not Hole targets.
 While placing these points, you can snap to points on other visible sketches. For a bridge
 line, start Line and click an endpoint on each source sketch; each endpoint uses its source
 plane, even when that plane differs from the active sketch. These snaps capture positions;
@@ -194,23 +397,69 @@ Scripts use the same command, with a midpoint reference in the `points` array:
 The solver is SolidCraft's own (damped Gauss–Newton with degree-of-freedom analysis). Constraints:
 coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, concentric, collinear,
 midpoint, symmetry, fix, curvature (G2) and polygon. **Sketch Dimension** (D) adds linear,
-aligned, horizontal, vertical, point-to-line, line-to-circle, radius, diameter and angle
-dimensions. Each is a parameter
+aligned, horizontal, vertical, point-to-line, line-to-circle, point-to-circle, circle-to-circle,
+radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points.
+An ellipse is drawn with its major and minor axes as construction lines through its centre
+(Preferences › Sketch › Draw ellipses with their axes; turned off, the ellipse is drawn alone,
+and D on an ellipse gives its minor radius wherever the value is pulled, as before).
+As with a Center Rectangle's diagonals, trim, extend and break stop at them, and they stay when the
+ellipse is deleted.
+Click the ellipse and pull the value across its major axis for the major half-axis, or out past an
+end of the major axis for the minor half-axis, also on an ellipse whose axis lines were deleted;
+once one half-axis has a dimension, the next click on the ellipse gives the other;
+click an axis line for the whole axis. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
+
+**Concentric** accepts two circles or arcs, or a circle or arc and a sketch point (including the
+origin). Preselect the pair and choose Concentric, or start the tool and pick both, in either order.
 
 Press D, click what you want to measure and type the value: as soon as the click settles the
 dimension (one line, circle or arc, or the second point or line of a distance or angle), its
 value box takes the keyboard with the measured value selected, so typing replaces it. Numbers,
 units (`1 in`), expressions (`2*width`) and parameter names all work; letters go into the box,
-not to tool shortcuts. `width = 40` defines the user parameter `width` and dimensions with it,
+not to tool shortcuts. `width = 40` (or `#width = 40`) defines the user parameter `width` and dimensions with it,
 in one step. While you type, the dimension text follows the cursor, and Enter places
 it there (or in its default place if you haven't moved the cursor) as one undo step. Esc
 cancels the dimension.
+
+The first length dimension of a sketch with nothing sized yet scales the drawing it measures
+to its value, so the shape stays as drawn; separate shapes that nothing joins keep their
+size. To have the first dimension size only what it measures, turn off **The first dimension
+scales the drawing** in Preferences › Sketch.
 
 You can still place the text first. Before you type, a click on empty sketch space puts the
 text there and keeps the value box focused; a click on another point or line makes the
 dimension a distance or angle instead; Tab leaves the picks waiting for a click to place the
 text.
+
+To change a dimension you already have, double-click it, or, with Sketch Dimension on and
+nothing picked yet, click it once: its value box opens with the value selected, Enter applies,
+and the tool stays on for the next dimension. The dimension's text always takes the click; its
+lines take it only away from sketch points and curves, which still start a new dimension.
+
+To type values in a small window instead, set **Preferences › Sketch › Dimension values** to
+**In a window**. The Dimension tool then places the text first: click what you want to
+measure, then where the text goes, and the window opens there (double-clicking a dimension
+opens it too). Its field takes the same numbers, units, expressions and parameter names as the
+box, and the sketch shows the value as you type. The arrows beside the field, Up and Down, and
+the mouse wheel over the field step a number by **Window steps** (1 mm and 1° unless you change
+them; Shift steps ten times as far, Alt a tenth), keeping the unit it is written in. The check
+(or Enter) applies the value as one undo step and the tool stays on for the next dimension; the
+cross (or Esc) drops this dimension only, and Esc with no window open puts the tool down.
+
+To have shapes dimensioned as you draw them, turn on **Dimension new shapes** in Preferences ›
+Sketch (it is off by default). Each line, rectangle, circle, arc, slot, polygon or ellipse you draw
+then gets all its dimensions at the sizes you drew: a line its length and angle, a rectangle its
+width and height, a circle its diameter, an ellipse its major and minor radius, and so on. Values you type in the drawing boxes win, and a size
+the sketch already sets (the angle of a line that snapped horizontal) is left out. The shape and
+its dimensions are one undo step. In scripts, `sketch.draw.dimensioned` takes `"as_drawn": true`.
+
+Tick **Also place them from the origin (fully constrained)** as well, and each new shape is also
+dimensioned from the sketch origin until nothing of it is left free: a horizontal and a vertical
+distance to its centre or first point, and one more where the shape could still turn (a polygon,
+a rectangle drawn at an angle). A shape already attached to the origin or to geometry that is
+placed gets none, and a point on an axis is put on that axis rather than given a 0 distance.
+In scripts: `"locate": true`.
 
 Between two points, or on a line, that don't line up with an axis, where you place the
 dimension picks what it measures: across from them, the distance between them; above or below
@@ -222,6 +471,13 @@ the circle touches the line. When the line cuts through the circle, the dimensio
 far the edge reaches past the line instead. An arc is measured to the circle it lies on. For
 the distance to the centre, click the centre point instead of the edge. In scripts:
 `{"command": "sketch.dimension", "params": {"entities": ["l1", "c1"], "value": 5}}`.
+
+A point and a circle or arc measure from the point to the circle's edge, along the radius
+through the point: 0 puts the point on the circle, and a point inside the circle measures how
+far within the edge it lies. Two circles or arcs measure between their edges, along the line
+through their centres: the gap between them (0 when they touch), how far they overlap when they
+cross, or, when one lies inside the other, the narrowest gap between them (the thinnest part of
+the wall). For the distance between the centres, click the two centre points instead.
 
 A dimension the sketch can't take, because the geometry is already fixed by other constraints
 and dimensions, is added as a driven (reference) dimension instead: it is shown in
@@ -251,6 +507,15 @@ Under-constrained geometry is blue and fully constrained geometry turns dark, an
 shows the remaining degrees of freedom. A constraint or dimension that would over-constrain the
 sketch is refused rather than applied. Drag a point to move it; the solver keeps every
 constraint while you drag.
+
+A sketch's constraints can still come to conflict through a change elsewhere: a parameter, or an
+earlier sketch that projected geometry follows. While they do, the curves and points a failing
+constraint holds, and that constraint's glyph or dimension, are drawn in the conflict colour (red;
+the theme key `sketch_conflict`, which follows a theme's `error` colour unless the theme sets it),
+so the constraint to change or remove is easy to find. Constraints that are only redundant (implied
+by others, still holding) keep their usual look. Preferences › Sketch › **Conflicting geometry in
+the conflict colour** (on by default) turns this off: then only the glyphs and dimensions of the
+failing constraints are red, as in earlier versions.
 
 ## Profiles
 
@@ -283,6 +548,9 @@ Measure shows the currently selected distance (centre, minimum or maximum) and s
 distances on the canvas. The component dimensions follow the world axes and remain visible
 until the Measure dialog closes. To hide these extra lines and labels, turn off
 **Preferences > Graphics > Show X/Y/Z distances**. The choice is saved between runs.
+Drag the distance or an X, Y or Z label to move it away from the part; a moved label keeps a
+line to what it measures. Double-click a label to put it back. Measuring other items starts the
+labels in their own places again.
 
 ### Reviewing mirror, pattern, and offset results
 
@@ -291,6 +559,12 @@ shared tool window. Click an input to change it; click a selected object again o
 it to remove it. Each input has its own Clear button. Source inputs show a count, and single
 references identify the chosen mirror line, direction, or centre. Box selection also works
 while the window is open. Sketch modify tools take geometry from the sketch being edited.
+
+If your preselection includes exactly one straight construction line of the active sketch,
+opening Mirror uses it as **Mirror line**, keeping your selected entities. Other construction
+lines in the sketch do not count unless selected. With none or multiple selected construction
+lines, choose the reference manually. You can clear or replace the line. To always choose it
+manually, turn off **Preferences > Sketch > Use the preselected construction line for Mirror**.
 
 Proposed sketch geometry appears **green** before confirmation. Change the inputs or values to
 update the preview, then press **OK**. **Cancel** discards the preview. A circular pattern centre
@@ -302,8 +576,9 @@ Choose a circle's centre point to keep a circular pattern centred on that circle
 placed in empty space becomes a sketch point that can be dimensioned or made coincident.
 Double-click the pattern badge (at the circular centre or beside the rectangular seed), or
 right-click a seed or copy and choose **Edit Sketch Pattern**, to change quantity, spacing,
-direction or total angle. Confirmed edits preserve surviving instance ids; Cancel discards
-the preview. Pattern settings survive save/reopen and undo/redo. Deleting a seed, copy or
+direction, total angle or the entities it copies. Confirmed edits preserve surviving instance
+ids, except that changing the entities rebuilds every copy, so dimensions and relations on the
+old copies are lost; Cancel discards the preview. Pattern settings survive save/reopen and undo/redo. Deleting a seed, copy or
 pattern relation breaks that association and leaves the remaining geometry independent.
 Patterns saved by older versions remain independent copies; recreate them to add associations.
 

@@ -1,0 +1,364 @@
+{
+ "cases": [
+  {
+   "name": "attributed_cone_face0_out",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "cone.smb",
+    "replaced": [
+     {
+      "face": 0,
+      "offset": 1.1436041365678737,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: cone_face0_out with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_cone_face0_same",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "cone.smb",
+    "replaced": [
+     {
+      "face": 0,
+      "offset": 0,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: cone_face0_same with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_cone_face0_tilt",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "cone.smb",
+    "replaced": [
+     {
+      "face": 0,
+      "offset": -0.77,
+      "tilt": [
+       -0.257,
+       0.105,
+       -0.263
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: cone_face0_tilt with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_box_face0_same",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "replaced": [
+     {
+      "face": 0,
+      "offset": 0,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: box_face0_same with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_box_face0_out",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "replaced": [
+     {
+      "face": 0,
+      "offset": 0.5,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: box_face0_out with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_box_face0_in",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "replaced": [
+     {
+      "face": 0,
+      "offset": -0.5,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: box_face0_in with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_box_face1_out",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "replaced": [
+     {
+      "face": 1,
+      "offset": 0.5,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: box_face1_out with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_box_face2_out",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "replaced": [
+     {
+      "face": 2,
+      "offset": 0.5,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: box_face2_out with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_box_face3_in",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "replaced": [
+     {
+      "face": 3,
+      "offset": -0.5,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: box_face3_in with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_box_face4_out",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "replaced": [
+     {
+      "face": 4,
+      "offset": 0.5,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: box_face4_out with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_box_face5_tilt",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "replaced": [
+     {
+      "face": 5,
+      "offset": 0.2,
+      "tilt": [
+       0.1,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: box_face5_tilt with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_nurb_fillet_face0_same",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb",
+    "replaced": [
+     {
+      "face": 0,
+      "offset": 0,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: nurb_fillet_face0_same with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_nurb_fillet_face1_same",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb",
+    "replaced": [
+     {
+      "face": 1,
+      "offset": 0,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: nurb_fillet_face1_same with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_nurb_fillet_face2_same",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb",
+    "replaced": [
+     {
+      "face": 2,
+      "offset": 0,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: nurb_fillet_face2_same with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_nurb_fillet_face3_same",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb",
+    "replaced": [
+     {
+      "face": 3,
+      "offset": 0,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: nurb_fillet_face3_same with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_nurb_fillet_face4_same",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb",
+    "replaced": [
+     {
+      "face": 4,
+      "offset": 0,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: nurb_fillet_face4_same with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_nurb_fillet_face6_same",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb",
+    "replaced": [
+     {
+      "face": 6,
+      "offset": 0,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: nurb_fillet_face6_same with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  },
+  {
+   "name": "attributed_nurb_fillet_face7_same",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb",
+    "replaced": [
+     {
+      "face": 7,
+      "offset": 0,
+      "tilt": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "attributed": true
+   },
+   "note": "#1462 P5: nurb_fillet_face7_same with every face and edge tagged first (copy attributes); compares the tags each result face and edge carries."
+  }
+ ]
+}

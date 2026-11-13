@@ -4,12 +4,14 @@ use crate::{
     scenario::Harness,
 };
 use serde_json::json;
-use solidcraft_engine::{Sel, doc, geom::Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{Sel, doc};
 
 #[test]
 fn occurrence_gizmo_drag_matches_numeric_input_and_preserves_joints_capture_and_undo() {
     let mut h = Harness::new();
-    let part = h.app.run("component.create", json!({"name":"Block"})).unwrap();
+    let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
     let first = part["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
     h.app.run("component.activate", json!({"component":0})).unwrap();
@@ -64,4 +66,108 @@ fn occurrence_gizmo_drag_matches_numeric_input_and_preserves_joints_capture_and_
     assert!((doc::apply_point(&h.app.session.occurrence_placement(&[first]).unwrap().world, Vec3::ZERO) - numeric).len() < 1e-6);
     assert_eq!(serde_json::to_value(&h.app.session.doc.assembly.joints).unwrap(), joints);
     assert!(!h.app.session.selection.contains(&Sel::Occurrence { path: vec![second] }));
+}
+
+/// A second ring reads what was dragged and turns about the world axis it shows, on top of the
+/// first turn.
+#[test]
+fn occurrence_rings_turn_about_the_axes_they_show() {
+    let mut h = Harness::new();
+    let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
+    let first = part["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":20,"height":30})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.app.cam = h.app.cam.looking_from(Vec3::new(1.0, 0.8, 0.6));
+    h.app.cam.target = Vec3::ZERO;
+    h.app.cam.distance = 200.;
+    h.frames(3);
+    let target = Target::Occurrence { path: vec![first] };
+    let item = context_menu::items(&h.app, &target).into_iter().find(|item| item.id == "ui.moveOccurrence").unwrap();
+    context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    h.frames(3);
+
+    let mut m = h.app.tree.occurrence_move.clone().unwrap();
+    m.angles = [0., 40., 0.];
+    crate::browser::apply_occurrence_move(&mut h.app, &m);
+    h.app.tree.occurrence_move = Some(m);
+    h.frames(3);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let t = crate::browser::occurrence_triad_model(&h.app).unwrap();
+    let grip = crate::gizmo::ring_grip(&proj, &t, 0).unwrap();
+    let [start, end] = [grip, grip + 35.].map(|a| crate::gizmo::handle_point("rx", Vec3::ZERO, a).unwrap());
+    h.step(&json!({"drag":[{"world":[start.x,start.y,start.z]},{"world":[end.x,end.y,end.z]}],"steps":12})).unwrap();
+    h.frames(3);
+    let m = h.app.tree.occurrence_move.as_ref().unwrap();
+    assert_eq!(m.angles.map(|a| a.round()), [35., 40., 0.]);
+    let rotation = crate::gizmo::rotation;
+    let want = crate::gizmo::mul(&rotation(Vec3::X, 35_f64.to_radians()), &rotation(Vec3::Y, 40_f64.to_radians()));
+    let world = h.app.session.occurrence_placement(&[first]).unwrap().world;
+    let rows = [0, 1, 2].map(|r| [world[0][r], world[1][r], world[2][r]]);
+    for (got, want) in rows.iter().flatten().zip(want.iter().flatten()) {
+        assert!((got - want).abs() < 1e-6, "{world:?}");
+    }
+}
+
+/// A ring dragged out and back to where it started leaves the occurrence where it was.
+#[test]
+fn an_occurrence_ring_dragged_back_to_its_start_leaves_it_there() {
+    let mut h = Harness::new();
+    let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
+    let first = part["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":20,"height":30})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.app.cam = h.app.cam.looking_from(Vec3::new(1.0, 0.8, 0.6));
+    h.app.cam.target = Vec3::ZERO;
+    h.app.cam.distance = 200.;
+    h.frames(3);
+    let target = Target::Occurrence { path: vec![first] };
+    let item = context_menu::items(&h.app, &target).into_iter().find(|item| item.id == "ui.moveOccurrence").unwrap();
+    context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    h.frames(3);
+    let before = h.app.session.occurrence_placement(&[first]).unwrap().world;
+
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let t = crate::browser::occurrence_triad_model(&h.app).unwrap();
+    let grip = crate::gizmo::ring_grip(&proj, &t, 0).unwrap();
+    let [start, out] = [grip, grip + 20.].map(|a| crate::gizmo::handle_point("rx", Vec3::ZERO, a).unwrap());
+    let drag = [start, out, start].map(|p| json!({"world": [p.x, p.y, p.z]}));
+    h.step(&json!({"drag": drag, "steps": 12})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.tree.occurrence_move.as_ref().unwrap().angles, [0., 0., 0.]);
+    let world = h.app.session.occurrence_placement(&[first]).unwrap().world;
+    for (got, want) in world.iter().flatten().zip(before.iter().flatten()) {
+        assert!((got - want).abs() < 1e-9, "{world:?} != {before:?}");
+    }
+}
+
+/// The triad sits on the part, wherever its component's origin is: a part modelled away from
+/// that origin must not be turned and moved from over there. The part turns on the spot.
+#[test]
+fn occurrence_triad_sits_on_the_part_and_turns_it_there() {
+    let mut h = Harness::new();
+    let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
+    let first = part["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":20,"height":30,"corner":[100,40,0]})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let centre = Vec3::new(105., 50., 15.);
+    h.app.cam = h.app.cam.looking_from(Vec3::new(1.0, 0.8, 0.6));
+    h.app.cam.target = centre;
+    h.app.cam.distance = 200.;
+    h.frames(3);
+    let target = Target::Occurrence { path: vec![first] };
+    let item = context_menu::items(&h.app, &target).into_iter().find(|item| item.id == "ui.moveOccurrence").unwrap();
+    context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    h.frames(3);
+    let at = crate::browser::occurrence_triad_model(&h.app).unwrap().center;
+    assert!((at - centre).len() < 1e-6, "triad at {at:?}, part at {centre:?}");
+
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let t = crate::browser::occurrence_triad_model(&h.app).unwrap();
+    let grip = crate::gizmo::ring_grip(&proj, &t, 0).unwrap();
+    let [start, end] = [grip, grip + 35.].map(|a| crate::gizmo::handle_point("rx", Vec3::ZERO, a).unwrap());
+    h.step(&json!({"drag":[{"world":[start.x,start.y,start.z]},{"world":[end.x,end.y,end.z]}],"steps":12})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.tree.occurrence_move.as_ref().unwrap().angles.map(|a| a.round()), [35., 0., 0.]);
+    let bounds = h.app.session.world_state().unwrap().bodies.first().unwrap().mesh().bounds();
+    assert!((bounds.center() - centre).len() < 1e-6, "the part stays where it is: {bounds:?}");
 }

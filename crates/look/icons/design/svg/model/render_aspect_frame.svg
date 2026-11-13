@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Aspect frame — the shape of the picture</title>
+  <path d="M13 17L51 17A4 4 0 0 1 55 21L55 43A4 4 0 0 1 51 47L13 47A4 4 0 0 1 9 43L9 21A4 4 0 0 1 13 17Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M4.5 23.5L4.5 12.5L15.5 12.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M59.5 40.5L59.5 51.5L48.5 51.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

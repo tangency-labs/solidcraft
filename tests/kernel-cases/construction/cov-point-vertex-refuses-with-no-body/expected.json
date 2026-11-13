@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a point on a vertex where there is no body",
+ "source": "analytic",
+ "method": "no body, so no vertex to put it on: refused",
+ "outcome": "refused",
+ "refusal": "there is no vertex"
+}

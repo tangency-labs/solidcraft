@@ -6,7 +6,12 @@ license.workspace = true
 publish = false
 
 [dependencies]
-proc-macro2 = { workspace = true }
+flate2 = "1.1"
+proc-macro2 = { workspace = true, features = ["span-locations"] }
+quick-xml = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 syn = { workspace = true, features = ["visit"] }
+toml = { workspace = true }
+zip = { workspace = true }

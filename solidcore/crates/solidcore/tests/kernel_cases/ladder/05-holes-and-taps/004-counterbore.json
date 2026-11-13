@@ -1,0 +1,168 @@
+{
+  "area": "ladder/05-holes-and-taps",
+  "bodies": {
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "004-counterbore",
+  "expected": {
+    "body_count": 1,
+    "faces": 9,
+    "method": "removed pi 3.3^2 (20 - 6.4) + pi 5.5^2 6.4; + bore, counterbore wall, its floor annulus",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 46926.505223898,
+    "what": "a counterbored hole: d6.6 through, d11 x 6.4 counterbore"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 9234.733591412143,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12,
+      "volume_mm3": 46926.50522393054
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12
+    }
+  },
+  "records": "004-counterbore.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9234.733591412143,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12,
+      "volume_mm3": 46926.50522393054
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a counterbored hole: d6.6 through, d11 x 6.4 counterbore",
+  "why_not": []
+}
