@@ -48,13 +48,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("rib")
         .contract(&RIB_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane, or across the curves when normal); depth? (default: to the next face); flip?: bool (fill to the other side); direction?: in_plane|normal (grow across the sketch plane, the default, or along its normal)"),
+        .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane, or across the curves when normal); depth? (default: to the next face); flip?: bool (fill to the other side); direction?: in_plane|normal (grow across the sketch plane, the default, or along its normal); extend?: bool (run the curves' open ends on to the body; default true)"),
     CommandSpec::new("solid.web", "Web", crate::checked!("solid.web", web))
         .at("SOLID", "CREATE")
         .icon("web")
         .contract(&RIB_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal"),
+        .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal; extend?: bool (default true)"),
     CommandSpec::new("solid.emboss", "Emboss", crate::checked!("solid.emboss", emboss))
         .at("SOLID", "CREATE")
         .icon("emboss")
@@ -197,7 +197,9 @@ fn rib_like(s: &mut Session, p: &Value, cmd: &str, web: bool) -> Result<Value> {
         Some("normal") => true,
         Some(o) => return Err(bad(cmd, format!("unknown direction `{o}` (in_plane or normal)"))),
     };
-    add_feature(s, p, FeatureKind::Rib { sketch: SketchId(sketch), curves, thickness, depth, flip, web, normal })
+    // New ribs run their curves' ends on to the body (#13019); saved ribs keep what they had.
+    let extend = bool_(p, "extend").unwrap_or(true);
+    add_feature(s, p, FeatureKind::Rib { sketch: SketchId(sketch), curves, thickness, depth, flip, web, normal, extend })
 }
 
 fn rib(s: &mut Session, p: &Value) -> Result<Value> {

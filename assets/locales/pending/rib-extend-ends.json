@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.rib_extend_ends": "Extend ends"
+  },
+  "ar": {
+    "ui.rib_extend_ends": "تمديد الطرفين"
+  },
+  "de": {
+    "ui.rib_extend_ends": "Enden verlängern"
+  },
+  "he": {
+    "ui.rib_extend_ends": "הארכת קצוות"
+  },
+  "ja": {
+    "ui.rib_extend_ends": "端を延長"
+  },
+  "ko": {
+    "ui.rib_extend_ends": "끝 연장"
+  },
+  "vi": {
+    "ui.rib_extend_ends": "Kéo dài đầu"
+  },
+  "zh": {
+    "ui.rib_extend_ends": "延伸端部"
+  }
+}
