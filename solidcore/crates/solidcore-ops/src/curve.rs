@@ -1,20 +1,23 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
-//! moved, the curve under an affine map, the curve seen in two views, and its curvature comb.
-//! The curve is the record's ([`Curve`]); the knots, the map's carrying of the control points,
-//! the views' meeting and the curvature are the kernel's
-//! ([`solidcore::nurbs::knots::clamped_uniform`],
+//! moved, the curve under an affine map, the curve seen in two views, its curvature comb, and the
+//! blend from one curve's end to another's. The curve is the record's ([`Curve`]); the knots, the
+//! map's carrying of the control points, the views' meeting, the curvature and the blend are the
+//! kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
 //! [`solidcore::nurbs::crv_basic::Curve::transform`],
 //! [`solidcore::intersect::views::curves_from_views`],
-//! [`solidcore::query::continuity::curve_comb`]). Ops checks the inputs and converts.
+//! [`solidcore::query::continuity::curve_comb`], [`solidcore::curve::blend::blend_curve`]). Ops
+//! checks the inputs and converts.
 
-use solidcore::curve::from_parameters::from_parameters;
+use solidcore::curve::blend::{self as kblend, BlendEnd};
+use solidcore::curve::from_parameters::{from_parameters, EdgeCurve};
 use solidcore::geom::certified::Verdict;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
+use solidcore::kernel::Kernel;
 use solidcore::nurbs::knots::{clamped_uniform, MAX_DEGREE};
 use solidcore::nurbs::math::{MatrixType, RealMatrix};
 use solidcore::query::continuity;
 use solidcore::{SolidError, Vec3};
-use solidcore_record::brep::{Curve, Invalid};
+use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural};
 
 use crate::body::REGULAR_RATIO;
 use crate::continuity::{tooth, CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH};
@@ -22,6 +25,9 @@ use crate::curve_knots::{net_of, record_of};
 use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
+
+/// Which end of a curve a blend meets, and how ([`blend_curve`]).
+pub use solidcore::curve::blend::{Contact, End};
 
 /// The clamped B-spline with `points` as its control points, of `degree` (at most one less than
 /// the number of points: two points make a line, three a quadratic), on `[0, 1]` with the
@@ -203,6 +209,99 @@ pub fn curve_comb(curve: &Curve, interval: [f64; 2], teeth: usize) -> Result<Vec
         .into_iter()
         .map(tooth)
         .collect()))
+    })?
+}
+
+/// The kernel's curve of `curve` (a spline, a rational spline or a polyline, over its whole
+/// parameter range) for a blend: its natural interval the record's, so that its ends are the
+/// record's ends.
+fn blend_input(k: &Kernel, curve: &Curve) -> solidcore::Result<Result<EdgeCurve>> {
+    let kinds = matches!(
+        curve,
+        Curve::Spline { .. } | Curve::RationalSpline { .. } | Curve::Polyline { .. }
+    );
+    if !kinds || check_curve(curve, &mut Budget::input()).is_err() {
+        return Ok(Err(Error::Argument));
+    }
+    let Natural::Range(lo, hi) = curve.natural() else {
+        return Ok(Err(Error::Argument));
+    };
+    let Ok(record) = solidcore_convert::curve(curve) else {
+        return Ok(Err(Error::Argument));
+    };
+    let made = match from_parameters(k, &record, [lo, hi]) {
+        Ok(made) => made,
+        Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+        Err(e) => return Err(e),
+    };
+    let natural = made.curve.natural_interval();
+    if natural.min() != made.interval.min() || natural.max() != made.interval.max() {
+        return Ok(Err(Error::Unsupported(
+            "a curve whose kernel form runs past its record's interval",
+        )));
+    }
+    Ok(Ok(made))
+}
+
+/// The blend from end `a_end` of `a` to end `b_end` of `b`
+/// ([`solidcore::curve::blend::blend_curve`]): one Bézier curve of the least degree that meets
+/// each end at its contact (G0, G1 or G2; degree 1 from G0 to G0 up to 5 from G2 to G2), its first
+/// inner control point off each end along the curve's tangent by the end's shape factor times the
+/// chord between the ends. The kernel measures each end's continuity on the curve it built and
+/// refuses one short of its contact. `a` and `b` are splines, rational splines or polylines, each
+/// over its whole parameter range; the blend is a spline on `[0, 1]` from `a`'s end to `b`'s.
+///
+/// # Errors
+/// - [`Error::Argument`]: another kind of curve, one the record refuses, a shape factor not
+///   finite and positive at G1 or G2, ends that coincide, or a zero-length tangent at an end met
+///   at G1 or G2;
+/// - [`Error::Unsupported`]: a curve whose kernel form runs past the record's interval;
+/// - [`Error::Invariant`]: a blend the kernel measures short of a contact;
+/// - [`Error::Record`]: a blend the record cannot hold;
+/// - the kernel's status otherwise.
+#[allow(clippy::too_many_arguments)]
+pub fn blend_curve(
+    a: &Curve,
+    a_end: End,
+    a_contact: Contact,
+    a_shape: f64,
+    b: &Curve,
+    b_end: End,
+    b_contact: Contact,
+    b_shape: f64,
+) -> Result<Curve> {
+    run("curve::blend_curve", |k| {
+        let ka = match blend_input(k, a)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        let kb = match blend_input(k, b)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        let from = BlendEnd {
+            curve: &ka.curve,
+            end: a_end,
+            contact: a_contact,
+            shape: a_shape,
+        };
+        let to = BlendEnd {
+            curve: &kb.curve,
+            end: b_end,
+            contact: b_contact,
+            shape: b_shape,
+        };
+        let made = match kblend::blend_curve(k, &from, &to) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let interval = made.curve.natural_interval();
+        let record = solidcore::curve::from_parameters::record_of(k, &made.curve, &interval)?;
+        Ok(match solidcore_convert::record_curve(record.curve) {
+            Ok(curve) => Ok(curve),
+            Err(Invalid(why)) => Err(Error::Record(why.to_owned())),
+        })
     })?
 }
 
