@@ -194,7 +194,7 @@ pub fn point_side(
     p: Point3,
     tol: f64,
 ) -> Result<Option<FaceSide>> {
-    if !(tol.is_finite() && tol >= 0.0) || !finite(p) {
+    if !tol.is_finite() || tol < 0.0 || !finite(p) {
         return Err(SolidError::invalid_input(
             OP,
             "a point or tolerance that is not finite",
