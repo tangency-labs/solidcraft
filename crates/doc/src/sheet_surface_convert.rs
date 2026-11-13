@@ -16,9 +16,10 @@
 //! behind it, the shell's or the plate's own recesses kept. The sheet
 //! is the rule's, as the tooling makes it: the rule's thickness, taken into the material from
 //! that side whatever the body's, and its bends at the rule's radius. A cylinder modelled between
-//! two planes, its inside radius short of 10^0.7 times the body's thickness (DIN 6935), is a bend
-//! at the planes' virtual sharp; any other cylinder or cone is a roll that keeps its modeled
-//! radius, joined by seams where the sheet runs on smoothly. Every sharp edge between two faces
+//! two planes, its inside radius short of `ROLL_FROM` (10^0.7, about 5) thicknesses, is a bend at
+//! the planes' virtual sharp; any other cylinder or cone is a roll that keeps its modeled radius,
+//! joined by seams where the sheet runs on smoothly. Those thicknesses are the body's own where
+//! Recognize reads one, else the rule's. Every sharp edge between two faces
 //! of the sheet is cut open, half the rule's gap from the plane halfway between the two faces as
 //! `sheet.convert` cuts it, unless the user picks it as a bend. A ring of bends and seams is
 //! refused, naming its edges. A solid's material lies inside its faces, or outside them.
@@ -40,7 +41,7 @@
 //! chart at points, as lines where they run straight there and splines through the points
 //! elsewhere. A roll that closes round its axis opens along its own seam.
 //!
-//! Not converted yet: a free-form face (not developed from its spline yet), a sphere or a torus
+//! Not converted yet: a free-form face (its flat has no closed form, #15743), a sphere or a torus
 //! (neither is developable), a bend on the edge of a roll, and a shell's face that meets the
 //! sheet at a sharp edge but is not a plane (it is left out).
 
@@ -50,10 +51,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use solidcore_record::brep::Loop as Bounds;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::{
-    Anchor, Bend, Corner, CornerRelief, Cut, Datum, Development, Fold, Joint, JointKind, Lap, Panel, Relief, Rigid2, Rigid3, Rip, Sheet, Surface,
-    Tail, ZoneEnds, curve_through, develop, fold,
+    Anchor, Bend, Corner, CornerRelief, Cut, Datum, Development, Fold, Joint, JointKind, Lap, Panel, Query, Relief, Rigid2, Rigid3, Rip, Sheet,
+    Surface, Tail, ZoneEnds, curve_through, develop, fold,
 };
-use solidcraft_geom::brep::query::Query;
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
 
 use crate::sheet::FlatWork;
@@ -211,7 +211,7 @@ impl Shape {
                 Ok(Shape::Cone { apex, axis, e1, e2, half: half_angle, inward })
             }
             Some(FaceSurface::Sphere { .. } | FaceSurface::Torus { .. }) => Err("a sphere or a torus is not developable"),
-            None => Err("not supported yet: a free-form face"),
+            None => Err("not supported yet: a free-form face, whose flat has no closed form (#15743)"),
         }
     }
 
@@ -569,7 +569,7 @@ fn to_sharp(r: &Region2, (a, z): (Vec2, Vec2), by: f64, tol: f64) -> std::result
 fn roll_lines(sheet: &Sheet, fold: &Fold, regions: &[Region2]) -> Vec<RollLine> {
     let mut out = Vec::new();
     for (i, p) in sheet.panels.iter().enumerate() {
-        if matches!(p.surface, Surface::Plane | Surface::Spline(_)) {
+        if p.surface == Surface::Plane {
             continue;
         }
         let bounds = crate::sheet_surface_cuts::loop_box(&p.region.outer);
@@ -957,9 +957,14 @@ enum Role {
 }
 
 /// The inside radius, in thicknesses, from which a cylinder modelled between two planes is a
-/// roll, not a bend: 10^0.7, where DIN 6935's k(R/T) = 0.65 + 0.5 lg(R/T) reaches 1 and the
-/// neutral fiber lies halfway through the sheet. Below it the fiber moves toward the inside, as a
-/// bend's K-factor takes it.
+/// roll, not a bend: 10^0.7, the ratio at which DIN 6935's correction k(R/T) = 0.65 + 0.5 lg(R/T)
+/// reaches 1, the standard's line between a bend whose neutral fiber moves toward the inside and
+/// one gentle enough that it stays halfway through. Here the ratio only sorts a modeled cylinder:
+/// short of it, a bend at the planes' virtual sharp with the rule's radius, whatever radius the
+/// body has; from it on, a roll that keeps the modeled radius. Bends and rolls alike are developed
+/// with the rule's K-factor (`solidcraft_develop`'s `Bend::allowance` and `Flatten::of`), never
+/// with DIN 6935's. The thicknesses are the sheet's, the rule's, as the sheet is made at it; the
+/// inside radius is read from the body as modelled (`modelled_t`, see `read_surfaces`).
 const ROLL_FROM: f64 = 5.011_872_336_272_722;
 
 /// A bend modelled with its radius: a cylinder of the sheet between two of its planes, each
@@ -1192,9 +1197,11 @@ fn read_surfaces(
     // Converting, no face has one: every face is a panel of the sheet, however near another faces
     // back at it, as a surface body's faces always are (it has no thickness of its own).
     let surface = mb.is_surface();
+    // A boolean of what is left of `f` that fails is the error: read as nothing left, the faces
+    // farther behind would go unread, and the nearer side could be taken for none.
     let behinds: Vec<Option<(f64, usize)>> = (0..count)
-        .map(|f| {
-            let sf = probe(f).filter(|_| recognizing && !surface)?;
+        .map(|f| -> Result<Option<(f64, usize)>> {
+            let Some(sf) = probe(f).filter(|_| recognizing && !surface) else { return Ok(None) };
             let mut found: Vec<(f64, usize)> = (0..count)
                 .filter(|g| *g != f)
                 .filter_map(|g| {
@@ -1203,23 +1210,24 @@ fn read_surfaces(
                 })
                 .collect();
             found.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
-            let mut open = vec![charts.get(f)?.as_ref()?.0.clone()];
+            let Some(Some((chart, _))) = charts.get(f) else { return Ok(None) };
+            let mut open = vec![chart.clone()];
             let mut best: Option<(f64, f64, usize)> = None;
             for (depth, g) in found {
                 let Some(p) = projected(f, g) else { continue };
                 let p = std::slice::from_ref(&p);
-                let first = cut(&open, p, solidcraft_kernel::BoolOp::Intersect).map_or(0.0, |x| area(&x));
+                let first = area(&solidcraft_kernel::planar_regions_boolean(&open, p, solidcraft_kernel::BoolOp::Intersect, tol)?);
                 if first > tol * tol && best.is_none_or(|(a, ..)| first > a) {
                     best = Some((first, depth, g));
                 }
-                open = cut(&open, p, solidcraft_kernel::BoolOp::Cut).unwrap_or_default();
+                open = solidcraft_kernel::planar_regions_boolean(&open, p, solidcraft_kernel::BoolOp::Cut, tol)?;
                 if open.is_empty() {
                     break;
                 }
             }
-            best.map(|(_, depth, g)| (depth, g))
+            Ok(best.map(|(_, depth, g)| (depth, g)))
         })
-        .collect();
+        .collect::<Result<_>>()?;
     let behind = |f: usize| behinds.get(f).copied().flatten().map(|(d, g)| (d, g, true));
 
     // Recognizing, a face that another faces back at a small distance behind, as a shell's or a
@@ -1298,9 +1306,24 @@ fn read_surfaces(
     let modelled_t = own.unwrap_or(t);
     let shapes: Vec<std::result::Result<Shape, &'static str>> = (0..count).map(|f| Shape::of(b, &q, f, outward && sheet.is_none(), tol)).collect();
     let shape = |f: usize| shapes.get(f).copied().unwrap_or(Err("a face the body does not have"));
+    // Whether faces of shapes `x` and `y` meet smoothly at edge `e`: their normals at its middle.
+    // Two planes need no point, a plane's normal being the same all over it. Any other two faces
+    // at an edge with no middle can't be read: not smooth, and the body is refused (`no_middle`)
+    // before anything read from it is given, as no seam is told from a rip there.
+    let no_middle = std::cell::Cell::new(false);
     let smooth = |e: usize, x: &Shape, y: &Shape| -> bool {
-        let m = middle_of(e).unwrap_or_default();
-        x.out(m).dot(y.out(m)).clamp(-1.0, 1.0).acos() <= SMOOTH
+        let meet = |a: Vec3, b: Vec3| a.dot(b).clamp(-1.0, 1.0).acos() <= SMOOTH;
+        match (middle_of(e), x, y) {
+            (Some(m), ..) => meet(x.out(m), y.out(m)),
+            (None, Shape::Plane { out: a, .. }, Shape::Plane { out: b, .. }) => meet(*a, *b),
+            (None, ..) => {
+                no_middle.set(true);
+                false
+            }
+        }
+    };
+    let refuse_unread = || -> Result<()> {
+        if no_middle.get() { err("not supported yet: an edge between two faces of the body has no middle to read it at") } else { Ok(()) }
     };
 
     // The faces of the sheet: converting, every face; recognizing, the side of the shell or the
@@ -1679,13 +1702,14 @@ fn read_surfaces(
     }
 
     // The bends modelled with their radius (see `Modelled`): a cylinder whose inside radius is
-    // short of ROLL_FROM thicknesses, between two planes of the sheet that cross. Their cylinders
-    // leave the sheet's faces.
+    // short of ROLL_FROM of the sheet's thicknesses (the rule's: the sheet is made at it), read on
+    // the body as modelled (`modelled_t`: its own thickness where Recognize read one), between two
+    // planes of the sheet that cross. Their cylinders leave the sheet's faces.
     let mut modelled: Vec<Modelled> = Vec::new();
     for (&f, sf) in &shaped {
         let Shape::Cylinder { origin, axis, radius, inward, .. } = *sf else { continue };
         let inside = if inward { radius - modelled_t } else { radius };
-        if !(inside >= 0.0 && inside < ROLL_FROM * modelled_t) {
+        if !(inside >= 0.0 && inside < ROLL_FROM * t) {
             continue;
         }
         let mut sides: Vec<(usize, usize)> = Vec::new();
@@ -1748,6 +1772,7 @@ fn read_surfaces(
             sheet_faces.remove(g);
         }
     }
+    refuse_unread()?;
     // Measuring: the body's own thickness, each modelled bend's inside radius, and the face the
     // walk started on, whose side is the sheet's surface.
     let Some(rule) = rule.as_ref() else {
@@ -1773,6 +1798,7 @@ fn read_surfaces(
         };
         roles.push((e, x, y, role));
     }
+    refuse_unread()?;
     // A bend is between two faces of the sheet where its edge, or the edge across the thickness
     // from it, is; or on a roll of the sheet.
     let between = |p: &Vec3| {
@@ -2624,7 +2650,7 @@ pub(crate) fn butts(junctions: &[[usize; 2]], joint: usize, at_end: bool) -> boo
 
 /// The bends between two planar panels (anchored at their sharps) and the rips of `sheet`, as
 /// [`settle`] works with them: where `places` put their edges in space, and each rip's plane at
-/// either end. A rip on a free-form panel is left out.
+/// either end.
 fn in_space(sheet: &Sheet, places: &[Rigid3]) -> (Vec<BendEdge>, Vec<RipEnds>) {
     let t = sheet.thickness;
     let surface = |p: usize| sheet.panels.get(p).map(|x| &x.surface);
@@ -2656,7 +2682,7 @@ fn in_space(sheet: &Sheet, places: &[Rigid3]) -> (Vec<BendEdge>, Vec<RipEnds>) {
                 else {
                     continue;
                 };
-                let (Some(from), Some(to)) = (chart_point(sa, pa, s0), chart_point(sa, pa, s1)) else { continue };
+                let (from, to) = (chart_point(sa, pa, s0), chart_point(sa, pa, s1));
                 // The edge's way at each end: exactly, from either panel's curves where it has
                 // them, else from its points' run there.
                 let exact = |curves: &[Seg2], surface: &Surface, place: &Rigid3, end: usize| -> Option<Vec3> {
@@ -2665,7 +2691,7 @@ fn in_space(sheet: &Sheet, places: &[Rigid3]) -> (Vec<BendEdge>, Vec<RipEnds>) {
                     } else {
                         curves.last().map(|g| (g.end(), g.end_tangent()))?
                     };
-                    chart_way(surface, place, c, d)?.normalized()
+                    chart_way(surface, place, c, d).normalized()
                 };
                 let run = |end: usize| -> Option<Vec3> {
                     let pts = &rip.edges.0;
@@ -2674,11 +2700,11 @@ fn in_space(sheet: &Sheet, places: &[Rigid3]) -> (Vec<BendEdge>, Vec<RipEnds>) {
                     } else {
                         (*pts.last()?, *pts.last()? - *pts.iter().rev().nth(1)?)
                     };
-                    chart_way(sa, pa, c, d)?.normalized()
+                    chart_way(sa, pa, c, d).normalized()
                 };
                 let way = |end: usize| exact(&rip.curves.0, sa, pa, end).or_else(|| exact(&rip.curves.1, sb, pb, end)).or_else(|| run(end));
                 let (Some(first), Some(last)) = (way(0), way(1)) else { continue };
-                let plane = |s: Vec2, q: Vec2, x: Vec3| rip_plane(chart_out(sa, pa, s)?, chart_out(sb, pb, q)?, -x);
+                let plane = |s: Vec2, q: Vec2, x: Vec3| rip_plane(chart_out(sa, pa, s), chart_out(sb, pb, q), -x);
                 rips.push((j, [from, to], [plane(s0, q0, first), plane(s1, q1, last)], [first, last]));
             }
             _ => {}
@@ -2692,9 +2718,8 @@ fn turned(v: f64, inward: bool) -> f64 {
     if inward { v } else { -v }
 }
 
-/// The point of a panel on `surface` at parameters `c`, where `place` puts the panel's frame; none
-/// on a free-form panel.
-fn chart_point(surface: &Surface, place: &Rigid3, c: Vec2) -> Option<Vec3> {
+/// The point of a panel on `surface` at parameters `c`, where `place` puts the panel's frame.
+fn chart_point(surface: &Surface, place: &Rigid3, c: Vec2) -> Vec3 {
     let local = match *surface {
         Surface::Plane => c.extend(0.0),
         Surface::Cylinder { radius, material_inward } => {
@@ -2705,13 +2730,12 @@ fn chart_point(surface: &Surface, place: &Rigid3, c: Vec2) -> Option<Vec3> {
             let a = turned(c.y, material_inward);
             Vec3::new(half_angle.sin() * a.cos(), half_angle.sin() * a.sin(), half_angle.cos()) * c.x
         }
-        Surface::Spline(_) => return None,
     };
-    Some(place.point(local))
+    place.point(local)
 }
 
 /// The unit normal away from the material at parameters `c` of a panel on `surface`.
-fn chart_out(surface: &Surface, place: &Rigid3, c: Vec2) -> Option<Vec3> {
+fn chart_out(surface: &Surface, place: &Rigid3, c: Vec2) -> Vec3 {
     let side = |inward: bool| if inward { 1.0 } else { -1.0 };
     let local = match *surface {
         Surface::Plane => Vec3::new(0.0, 0.0, -1.0),
@@ -2723,14 +2747,13 @@ fn chart_out(surface: &Surface, place: &Rigid3, c: Vec2) -> Option<Vec3> {
             let a = turned(c.y, material_inward);
             (Vec3::new(a.cos(), a.sin(), 0.0) * half_angle.cos() - Vec3::Z * half_angle.sin()) * side(material_inward)
         }
-        Surface::Spline(_) => return None,
     };
-    Some(place.vector(local))
+    place.vector(local)
 }
 
 /// The way in space a curve through parameters `c` of a panel on `surface` runs, running `d`
 /// there in the parameters.
-fn chart_way(surface: &Surface, place: &Rigid3, c: Vec2, d: Vec2) -> Option<Vec3> {
+fn chart_way(surface: &Surface, place: &Rigid3, c: Vec2, d: Vec2) -> Vec3 {
     let local = match *surface {
         Surface::Plane => d.extend(0.0),
         Surface::Cylinder { radius, material_inward } => {
@@ -2742,9 +2765,8 @@ fn chart_way(surface: &Surface, place: &Rigid3, c: Vec2, d: Vec2) -> Option<Vec3
             let (sin, cos) = half_angle.sin_cos();
             Vec3::new(sin * a.cos(), sin * a.sin(), cos) * d.x + Vec3::new(-a.sin(), a.cos(), 0.0) * (c.x * sin * turned(d.y, material_inward))
         }
-        Surface::Spline(_) => return None,
     };
-    Some(place.vector(local))
+    place.vector(local)
 }
 
 /// Names of the edges of `body` at the bend points, to find them again after the body changes. A
@@ -3085,8 +3107,6 @@ pub struct SurfaceSheet {
     /// The flat material, in the sheet's flat.
     pub regions: Vec<Region2>,
     pub bends: Vec<SurfaceBendLine>,
-    /// The largest strain any panel's flat leaves: none but on a free-form panel.
-    pub stretch: f64,
     /// How many of the panels are rolls.
     pub rolls: usize,
     /// The rolls' lines in the flat (see [`RollLine`]).
@@ -3398,41 +3418,19 @@ struct Pushed {
 /// Piece `seg` of a contour flange's profile in `plane` pushed out `width` along the plane's
 /// normal, the piece as drawn the sheet's surface and its material on the right of the travel (on
 /// the left when `flip`); the joints at its ends run from the height `z0` above the plane to `z1`.
-/// A line's panel is a plane; a circular arc's a roll keeping the arc's own radius; any other
-/// curve's its exact extrusion, a spline surface of the curve's own control points and weights
-/// along u, over [0, 1], and straight along v, which runs the normal in mm.
-fn pushed(plane: &Plane, seg: &Seg2, width: f64, flip: bool, (z0, z1): (f64, f64)) -> Result<Pushed> {
+/// A line's panel is a plane, and a circular arc's a roll keeping the arc's own radius. A piece on
+/// any other curve, the sketch curve `id`, is refused: its panel would be free-form, and a
+/// free-form panel's flat has no closed form (#15743).
+fn pushed(plane: &Plane, seg: &Seg2, id: &str, width: f64, flip: bool, (z0, z1): (f64, f64)) -> Result<Pushed> {
     let normal = plane.normal();
     // The chart's rectangle from `lo` to `hi`, counterclockwise.
     let rect =
         |lo: Vec2, hi: Vec2| Region2 { outer: Loop2::polygon(&[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)]).ccw(), holes: Vec::new() };
-    // A height above the plane as a plane's or a spline's chart has it across the profile: up the
-    // normal, or flipped down it from the far side, so that the chart's `u x v` points to the
-    // material. (The same map takes the chart's coordinate back to the height.)
+    // A height above the plane as a plane's chart has it across the profile: up the normal, or
+    // flipped down it from the far side, so that the chart's `u x v` points to the material. (The
+    // same map takes the chart's coordinate back to the height.)
     let across = |z: f64| if flip { width - z } else { z };
     let ways = [plane.dir_to_world(seg.start_tangent()), plane.dir_to_world(seg.end_tangent())];
-    // Any other curve's: its control points and weights along u, its rows at the heights the
-    // chart's v = 0 and v = `width` are.
-    let extruded = |points: &[Vec2], weights: &[f64]| -> Result<Pushed> {
-        let degree = points.len().saturating_sub(1);
-        let row = |z: f64| points.iter().map(move |p| Vec3::new(p.x, p.y, z));
-        let net: Vec<Vec3> = row(across(0.0)).chain(row(across(width))).collect();
-        let weights: Vec<f64> = weights.iter().chain(weights).copied().collect();
-        let mut knots = vec![0.0; degree + 1];
-        knots.extend(std::iter::repeat_n(1.0, degree + 1));
-        let spline = solidcraft_geom::bspline::NurbsSurface::new([degree, 1], [knots, vec![0.0, 0.0, width, width]], &net, &weights)
-            .map_err(|e| DocError::Invalid(format!("a contour curve's surface: {e}")))?;
-        // Its frame is the plane's own: the curve's points are its x and y, a height its z.
-        let place = Rigid3::frame(plane.origin, plane.x, plane.y).ok_or_else(|| DocError::Invalid("a contour curve has no frame".into()))?;
-        let at = |u: f64| [Vec2::new(u, across(z0)), Vec2::new(u, across(z1))];
-        Ok(Pushed {
-            surface: Surface::Spline(std::sync::Arc::new(spline)),
-            place,
-            region: rect(Vec2::ZERO, Vec2::new(1.0, width)),
-            ways,
-            ends: [at(0.0), at(1.0)],
-        })
-    };
     match *seg {
         Seg2::Line { a, b } => {
             let (a, b) = (plane.to_world(a), plane.to_world(b));
@@ -3465,13 +3463,16 @@ fn pushed(plane: &Plane, seg: &Seg2, width: f64, flip: bool, (z0, z1): (f64, f64
                 ends: [at(v0), at(v1)],
             })
         }
-        Seg2::Cubic { p0, p1, p2, p3 } => extruded(&[p0, p1, p2, p3], &[1.0; 4]),
-        Seg2::Conic { a, apex, b, w } => extruded(&[a, apex, b], &[1.0, w, 1.0]),
-        Seg2::Bezier { n, p } => {
-            let k = usize::from(n) + 1;
-            extruded(p.get(..k).unwrap_or_default(), &vec![1.0; k])
-        }
+        Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => Err(free_form_contour(id)),
     }
+}
+
+/// Why no contour flange is made along the sketch curve `id`, neither a line nor a circular arc:
+/// its panel would be free-form, and a free-form panel's flat has no closed form (#15743).
+pub(crate) fn free_form_contour(id: &str) -> DocError {
+    DocError::Invalid(format!(
+        "not supported yet: a contour flange along `{id}`, neither a line nor a circular arc: a free-form panel's flat has no closed form (#15743)"
+    ))
 }
 
 impl SurfaceSheet {
@@ -3499,7 +3500,6 @@ impl SurfaceSheet {
             k_factor: c.sheet.k_factor,
             regions: Vec::new(),
             bends: Vec::new(),
-            stretch: 0.0,
             rolls: 0,
             roll_lines: Vec::new(),
             reliefs: c.reliefs,
@@ -3575,14 +3575,15 @@ impl SurfaceSheet {
     /// in `plane`, end to end, the face of the sheet, its material on the right of the travel (or
     /// the left when `flip`), `width` along the plane's normal. Each piece of the profile is a
     /// panel on its own surface (see `pushed`): a line's a plane, a circular arc's a roll that
-    /// keeps the arc's own radius, any other curve's its exact extrusion. Where two pieces meet,
-    /// the sheet runs on across a seam where their ways there are one, within `SMOOTH` as Convert
-    /// reads a body's faces; anywhere else it bends at the rule's radius, the corner its virtual
-    /// sharp. Its other edges, the profile's two long edges and its two ends, are free. And its
-    /// folded body, built as every sheet is (see [`SurfaceSheet::build`]). `feature` is the
-    /// contour flange, `curves` the sketch curve each piece was drawn on and the piece's key: the
-    /// curve's id, with the piece's place on it where it was drawn in several (`s3.2`); each
-    /// panel's key is the feature's and its piece's (see [`PanelMade::Contour`]).
+    /// keeps the arc's own radius; a piece on any other curve is refused, as a free-form panel's
+    /// flat has no closed form (#15743). Where two pieces meet, the sheet runs on across a seam
+    /// where their ways there are one, within `SMOOTH` as Convert reads a body's faces; anywhere
+    /// else it bends at the rule's radius, the corner its virtual sharp. Its other edges, the
+    /// profile's two long edges and its two ends, are free. And its folded body, built as every
+    /// sheet is (see [`SurfaceSheet::build`]). `feature` is the contour flange, `curves` the
+    /// sketch curve each piece was drawn on and the piece's key: the curve's id, with the piece's
+    /// place on it where it was drawn in several (`s3.2`); each panel's key is the feature's and
+    /// its piece's (see [`PanelMade::Contour`]).
     #[allow(clippy::too_many_arguments)]
     pub fn contour(
         body: &str,
@@ -3620,7 +3621,7 @@ impl SurfaceSheet {
         // Where a joint between two pieces runs, as heights above the plane: up its normal, or
         // down it when flipped, so that the material of the piece before it lies on its left.
         let heights = if flip { (width, 0.0) } else { (0.0, width) };
-        let pieces: Vec<Pushed> = segs.iter().map(|s| pushed(plane, s, width, flip, heights)).collect::<Result<_>>()?;
+        let pieces: Vec<Pushed> = segs.iter().zip(curves).map(|(s, (id, _))| pushed(plane, s, id, width, flip, heights)).collect::<Result<_>>()?;
         let mut joints = Vec::with_capacity(pieces.len().saturating_sub(1));
         for (i, pair) in pieces.windows(2).enumerate() {
             let [a, b] = pair else { continue };
@@ -3691,7 +3692,6 @@ impl SurfaceSheet {
             k_factor: rule.k_factor,
             regions: Vec::new(),
             bends: Vec::new(),
-            stretch: 0.0,
             rolls: 0,
             roll_lines: Vec::new(),
             reliefs: Reliefs::of(rule),
@@ -3966,7 +3966,7 @@ impl SurfaceSheet {
             let radius = match p.surface {
                 Surface::Cylinder { radius, material_inward } => Some(if material_inward { radius - t } else { radius }),
                 Surface::Cone { .. } => None,
-                Surface::Plane | Surface::Spline(_) => continue,
+                Surface::Plane => continue,
             };
             let lines = |kind: RollEdge| self.roll_lines.iter().filter(move |l| l.panel == i && l.kind == kind);
             let Some(d) = lines(RollEdge::Middle).next().and_then(|l| (l.end - l.start).normalized()) else { continue };
@@ -4219,7 +4219,7 @@ impl SurfaceSheet {
     }
 
     /// Keeps the flat `regions` of the development `dev` (joined from its `pieces`), with its
-    /// bends and their tabs, stretch, rolls and their lines, and its panels' rims.
+    /// bends and their tabs, rolls and their lines, and its panels' rims.
     fn laid_out(&mut self, dev: &Development, pieces: &[(Piece, Region2)], regions: Vec<Region2>) -> Result<()> {
         self.rims = crate::sheet::rims(&self.sheet, dev, pieces, &self.sketch_curves, &self.recipes);
         self.bends = dev
@@ -4245,7 +4245,6 @@ impl SurfaceSheet {
             .collect();
         self.regions = regions;
         self.slits = junction_slits(&self.sheet, dev, &self.junctions).into_iter().flat_map(|s| in_material(&self.regions, s)).collect();
-        self.stretch = dev.panels.iter().flatten().map(|p| p.stretch).fold(0.0, f64::max);
         self.rolls = self.sheet.panels.iter().filter(|p| p.surface != Surface::Plane).count();
         self.roll_lines =
             if self.rolls > 0 { roll_lines(&self.sheet, &fold_onto(&self.sheet, dev, &self.places)?, &self.regions) } else { Vec::new() };

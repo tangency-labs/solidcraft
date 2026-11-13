@@ -92,3 +92,45 @@ fn a_body_of_two_thicknesses_or_none_is_no_sheet_to_recognize() {
     run(&mut s, "sheet.convert", json!({"body": "Open", "bends": [[200, 0, 50], [260, 0, 50]]}));
     assert_eq!(s.model.state().surface_sheets.len(), 1);
 }
+
+/// A face picked on a placed component is read where the component shows it: the command's
+/// picks go into the body's own frame before it runs (`frames::to_local`), and the body is read
+/// there. The L of `a_modelled_l_measures_its_thickness_and_bend_radius` in a component moved 50
+/// along x: the pick at (80, 2, 50) is its long leg's inside face, y = 2 (x 54 … 110 as shown, 4 …
+/// 60 in the component). Read from that face, the sheet's surface is the inside, y = 2 (unpicked,
+/// the outside, y = 0), 2 thick with one bend of inside radius 2; Recognize with the same pick and
+/// `new_rule` makes the rule of the body's 2 mm and R 2, and the sheet.
+#[test]
+fn a_face_picked_on_a_placed_component_is_read_where_it_is_shown() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    modelled_l(&mut s);
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 0, 0]}));
+    let m = run(&mut s, "sheet.measure_body", json!({"body": "Section", "face": [80, 2, 50]}));
+    assert!((m["thickness_mm"].as_f64().unwrap_or(f64::NAN) - 2.0).abs() < 1e-9, "{m}");
+    let radii: Vec<f64> = m["bend_radii_mm"].as_array().into_iter().flatten().filter_map(Value::as_f64).collect();
+    assert!(radii.len() == 1 && radii.iter().all(|r| (r - 2.0).abs() < 1e-9), "{m}");
+    assert!(m["surface"][1].as_f64().is_some_and(|y| (y - 2.0).abs() < 1e-9), "{m}");
+    run(&mut s, "sheet.recognize", json!({"body": "Section", "face": [80, 2, 50], "new_rule": "From the L"}));
+    let made = s.doc.sheet.rules.iter().find(|r| r.name == "From the L").cloned();
+    assert!(made.as_ref().is_some_and(|r| r.thickness == "2 mm" && r.bend_radius == "2 mm"), "{made:?}");
+    assert_eq!(s.model.state().surface_sheets.len(), 1);
+}
+
+/// A list of faces given as anything but a list is refused, the design left as it was: Convert's
+/// `faces`, `skip` and `engrave`, and Recognize's `skip`. A face name given alone as `faces` was
+/// dropped, and with no face picked Convert took the whole body.
+#[test]
+fn a_list_of_faces_given_as_anything_else_is_refused() {
+    let mut s = Session::default();
+    modelled_l(&mut s);
+    for (id, key) in [("sheet.convert", "faces"), ("sheet.convert", "skip"), ("sheet.convert", "engrave"), ("sheet.recognize", "skip")] {
+        let before = s.doc.to_json();
+        let mut p = json!({"body": "Section"});
+        p[key] = json!("F1:top");
+        let e = s.execute(id, &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(&format!("`{key}` must list faces")), "{id} {key}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{id} {key}");
+        assert!(s.model.state().surface_sheets.is_empty(), "{id} {key}");
+    }
+}

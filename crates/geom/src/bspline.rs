@@ -14,7 +14,6 @@
 pub use solidcore::eval::plan::basis::{Side, basis_derivatives, binomial, local_basis, local_basis_array};
 use std::ops::{Add, AddAssign, Mul, Sub};
 
-use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 
 mod curve;
@@ -50,7 +49,7 @@ pub(crate) fn invalid<T>(msg: impl Into<String>) -> SplineResult<T> {
 }
 
 /// A homogeneous control point `(x·w, y·w, z·w, w)`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct HPoint {
     pub x: f64,
     pub y: f64,
@@ -492,7 +491,7 @@ impl BezierPatch {
 
 /// A rational tensor-product B-spline (NURBS) surface. Control point `(i, j)` (i along u, j
 /// along v) is `ctrl[j·count_u + i]`; the domain is `[knots_u[p], knots_u[n]] × …`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NurbsSurface {
     degree: [usize; 2],
     knots: [Vec<f64>; 2],

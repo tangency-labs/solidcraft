@@ -9,7 +9,7 @@
 
 use solidcore::eval::pcurve as k;
 use solidcore_record::brep::{
-    Budget, Curve, Curve2, Surface, check_curve, check_curve2, check_interval, check_surface,
+    check_curve, check_curve2, check_interval, check_surface, Budget, Curve, Curve2, Surface,
 };
 
 pub use solidcore::eval::pcurve::{Error, SURFACE_GAP_MARGIN};
@@ -169,6 +169,14 @@ pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
 #[must_use]
 pub fn eval_d1(c: &Curve2, t: f64) -> Option<([f64; 2], [f64; 2])> {
     k::eval_d1(&solidcore_convert::curve2(c), t)
+}
+
+/// The pieces of pcurve `c`'s interval that the flux of a field through its face is integrated
+/// over, a Gauss rule on each: one or two to each knot span, at most 64 (`None` for a malformed
+/// record) ([`solidcore::eval::pcurve::flux_pieces`]).
+#[must_use]
+pub fn flux_pieces(c: &Curve2) -> Option<Vec<[f64; 2]>> {
+    k::flux_pieces(&solidcore_convert::curve2(c))
 }
 
 /// One use's records as the kernel's values.

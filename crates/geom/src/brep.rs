@@ -12,7 +12,6 @@ pub mod eval;
 pub mod form;
 pub mod normal_section;
 pub mod placement;
-pub mod query;
 mod split;
 pub use split::split_edges;
 

@@ -606,8 +606,9 @@ pub struct BodyFigures {
     /// Its centre of mass at uniform density; `null` unless it is closed.
     pub center_of_mass: Option<[f64; 3]>,
     pub bbox: BoundingBox,
-    /// Faces, with split pieces of one analytic surface counted once (a sheet metal body's in
-    /// `inspect.measure`: with its round holes counted as the design shows them).
+    /// Faces, with split pieces of one analytic surface counted once. These, the edges and the
+    /// vertices count the body's stored B-rep: a sheet metal body's perforation holes, which its
+    /// volume, area and centre of mass leave out, are not in it and are not counted.
     pub faces: i64,
     pub edges: i64,
     pub vertices: i64,
@@ -626,8 +627,8 @@ pub struct BodyFigures {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct BodyFailure {
     pub error: String,
-    /// `inspect.measure` only, for a sheet metal body: its hole-corrected count, which has
-    /// nothing to correct.
+    /// The counts known of a body that could not be measured, where a reply has them
+    /// (`inspect.measure` has none).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub faces: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]

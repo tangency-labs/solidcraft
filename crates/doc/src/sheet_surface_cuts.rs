@@ -43,8 +43,7 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::brep::Loop as Bounds;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
-use solidcraft_develop::{Cut, Development, EdgeFrom, Fold, Joint, JointKind, Rigid2, Rigid3, Surface};
-use solidcraft_geom::brep::query::Query;
+use solidcraft_develop::{Cut, Development, EdgeFrom, Fold, Joint, JointKind, Query, Rigid2, Rigid3, Surface};
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, planar_regions_boolean};
 
 use crate::sheet::FlatWork;
@@ -848,7 +847,10 @@ fn ray_crossings(s: &Seg2, end: Vec2, p: Vec2) -> usize {
             let (lo, hi) = (start.min(start + sweep), start.max(start + sweep));
             let mut stops = vec![0.0];
             let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
-            while turn < hi {
+            // A top or a bottom each half turn on. An arc whose angles are not finite has none
+            // to stop at, nor one whose angles are so large that a half turn no longer moves
+            // them: past either, the loop would never end.
+            while hi.is_finite() && turn < hi && turn + PI > turn {
                 if turn > lo {
                     stops.push((turn - start) / sweep);
                 }
@@ -1812,6 +1814,22 @@ mod tests {
                     assert_eq!(holds(&l, Vec2::new(x, y)), inside, "({x}, {y:e}) in {l:?}");
                 }
             }
+        }
+    }
+
+    /// An arc whose angles are not finite, or so large that a half turn no longer moves them, has
+    /// no top or bottom of its circle to stop at, and is read to an end. Each arc round (15, 6),
+    /// radius 2, is a loop of its own, so its end is its start: the ray from the center, level or
+    /// not with them, crosses it nowhere between them, and the loop holds no point. A sweep of +∞
+    /// stepped toward its end forever; one of −∞ put its first stop at −∞, which a half turn left
+    /// there; and from 1e17 (where a double's step is 16) the half turns past it, 1e3 on, rounded
+    /// back to where they were.
+    #[test]
+    fn an_arc_whose_angles_are_not_finite_is_read_to_an_end() {
+        let c = Vec2::new(15.0, 6.0);
+        for (start, sweep) in [(0.0, f64::INFINITY), (0.0, f64::NEG_INFINITY), (1e17, 1e3)] {
+            let l = Loop2 { segs: vec![Seg2::Arc { center: c, radius: 2.0, start, sweep }] };
+            assert!(!holds(&l, c), "start {start}, sweep {sweep}");
         }
     }
 

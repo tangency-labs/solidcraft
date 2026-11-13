@@ -1,7 +1,9 @@
-//! The flat of a sheet made from surfaces (#6748): the pieces its development lays out (each
-//! placed panel less its trims, the bend zones, and the tabs cuts leave), and the planar booleans
-//! they are cut and joined by. The flat pattern and the folded solid are both made of these
-//! pieces, edge for edge.
+//! The flat of a sheet made from surfaces (#6748). The sheet, its panels on their surfaces where
+//! they lie folded and the joints between them, is the master; its flat is derived from it by
+//! `solidcraft_develop::develop`. Here are the pieces the development lays out (each placed panel
+//! less its trims, the bend zones, and the tabs cuts leave), and the planar booleans they are cut
+//! and joined by. The flat pattern is made of these pieces, and the folded solid of the same
+//! pieces carried back onto the panels' surfaces, edge for edge.
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_develop::{Development, crossings};

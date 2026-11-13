@@ -4,9 +4,8 @@
 //! A panel's surface has a frame of its own. A plane is the frame's `z = 0`. A cylinder's or a
 //! cone's axis is the frame's `z` axis, a cone's apex at its origin, and the angle round it runs
 //! from `x` toward `y` where the material is inward and toward `-y` where it is outward, so that
-//! `u x v` points to the material either way. A free-form panel's spline is drawn in its frame,
-//! its `u x v` toward the material. A bend's metal is the ring sector round its axis between its
-//! inside and outside radii, and its flat zone wraps onto it by its neutral arc.
+//! `u x v` points to the material either way. A bend's metal is the ring sector round its axis
+//! between its inside and outside radii, and its flat zone wraps onto it by its neutral arc.
 
 use solidcraft_geom::prelude::*;
 use std::collections::VecDeque;
@@ -166,7 +165,7 @@ impl Fold {
                 let middle = self.middle.get(i).copied().unwrap_or(0.0);
                 Vec2::new(q.x, q.y + ((middle - q.y) / std::f64::consts::TAU).round() * std::f64::consts::TAU)
             }
-            Surface::Plane | Surface::Spline(_) => q,
+            Surface::Plane => q,
         };
         Some(self.unplace.get(i).copied().flatten()?.inverse().point(self.maps.get(i)?.point(q)))
     }
@@ -199,6 +198,7 @@ impl Fold {
 /// pieces lies in space; every other panel goes where the bends and seams that join it to that
 /// one put it. A rip holds nothing: a piece goes where its root puts it.
 pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, DevelopError> {
+    crate::develop::check_rule(sheet)?;
     if roots.len() != dev.pieces.len() {
         return Err(DevelopError::Roots(dev.pieces.len()));
     }
@@ -344,34 +344,24 @@ fn embed(surface: &Surface, q: Vec2, depth: f64) -> Option<(Vec3, Vec3)> {
             let normal = (out * ca - Vec3::Z * sa) * -s;
             Some(((out * sa + Vec3::Z * ca) * q.x + normal * depth, normal))
         }
-        Surface::Spline(ref spline) => {
-            // Its own point, and its normal `u x v` toward the material, from its derivatives
-            // there exactly: on the edges of its domain, where its outline lies, as inside it.
-            let [p, su, sv] = crate::fitted::surface_frame(spline, q)?;
-            let normal = su.cross(sv).normalized()?;
-            Some((p + normal * depth, normal))
-        }
     }
 }
 
-/// A step in a surface's parameters, as a fraction of their size, over which its metric is
-/// measured where it is not worked out exactly.
-const PARAM_STEP: f64 = 1e-6;
-
 /// The first fundamental form of a surface at `q`, `[E, F, G]`: how the lengths of and the angle
-/// between parameter directions there come out on the surface. A spline's from its derivatives
-/// exactly (see [`crate::fitted::surface_frame`]); any other surface's measured from its own
-/// points.
-pub(crate) fn metric(surface: &Surface, q: Vec2) -> Option<[f64; 3]> {
-    if let Surface::Spline(spline) = surface {
-        let [_, su, sv] = crate::fitted::surface_frame(spline, q)?;
-        return Some([su.dot(su), su.dot(sv), sv.dot(sv)]);
+/// between parameter directions there come out on the surface, in closed form (see [`embed`]). A
+/// plane's parameters are lengths. A cylinder's run along its axis and round it, square to each
+/// other, a radian round it `radius` long. A cone's run along a ruling and round its axis, square
+/// to each other, and a point a distance `d` from its apex lies `d sin(half angle)` from its axis,
+/// so a radian round it there is that long.
+pub(crate) fn metric(surface: &Surface, q: Vec2) -> [f64; 3] {
+    match *surface {
+        Surface::Plane => [1.0, 0.0, 1.0],
+        Surface::Cylinder { radius, .. } => [1.0, 0.0, radius * radius],
+        Surface::Cone { half_angle, .. } => {
+            let round = q.x * half_angle.sin();
+            [1.0, 0.0, round * round]
+        }
     }
-    let h = PARAM_STEP * (1.0 + q.x.abs().max(q.y.abs()));
-    let at = |d: Vec2| embed(surface, q + d, 0.0).map(|(p, _)| p);
-    let su = (at(Vec2::new(h, 0.0))? - at(Vec2::new(-h, 0.0))?) * (1.0 / (2.0 * h));
-    let sv = (at(Vec2::new(0.0, h))? - at(Vec2::new(0.0, -h))?) * (1.0 / (2.0 * h));
-    Some([su.dot(su), su.dot(sv), sv.dot(sv)])
 }
 
 /// The unit direction in space, in the surface's frame, of the parameter direction `dir` at `q`.
@@ -388,10 +378,56 @@ fn tangent(surface: &Surface, q: Vec2, dir: Vec2) -> Option<Vec3> {
             let out = Vec3::new(q.y.cos(), s * q.y.sin(), 0.0);
             (out * sa + Vec3::Z * ca) * dir.x + Vec3::new(-q.y.sin(), s * q.y.cos(), 0.0) * (q.x * sa * dir.y)
         }
-        Surface::Spline(ref spline) => {
-            let [_, su, sv] = crate::fitted::surface_frame(spline, q)?;
-            su * dir.x + sv * dir.y
-        }
     };
     along.normalized()
+}
+
+#[cfg(test)]
+mod tests {
+    use solidcore_record::Vec2;
+    use solidcraft_geom::prelude::*;
+    use std::f64::consts::{FRAC_PI_6, PI};
+
+    use super::{embed, metric, tangent};
+    use crate::Surface;
+
+    /// A surface's first fundamental form is its closed form, and its own points bear it out: a
+    /// parameter line along `u` runs √E per unit, the two ways are square (F = 0), and a line
+    /// round the axis is a circle of radius √G, whose points half a turn apart lie 2√G apart. A
+    /// plane's parameters are lengths: [1, 0, 1] at (3, −7). A cylinder of radius 40 runs 1 along
+    /// its axis and 40 round it per radian: [1, 0, 1600] at (5, 1.2); (5, 0) and (12, 0) lie 7
+    /// apart, and (5, 0) and (5, π) 2 · 40 = 80. On a cone at 30° (sine ½), a point 80 from the
+    /// apex along a ruling lies 80 · ½ = 40 from the axis: [1, 0, 1600] at (80, 1.2); (80, 0) and
+    /// (100, 0) lie 20 apart, and (80, 0) and (80, π) 80. One 10 from the apex lies 5 from the
+    /// axis: [1, 0, 25] at (10, 1.2).
+    #[test]
+    fn a_surfaces_metric_is_its_closed_form() {
+        let cylinder = Surface::Cylinder { radius: 40.0, material_inward: true };
+        let cone = Surface::Cone { half_angle: FRAC_PI_6, material_inward: false };
+        let cases = [
+            (Surface::Plane, Vec2::new(3.0, -7.0), [1.0, 0.0, 1.0]),
+            (cylinder.clone(), Vec2::new(5.0, 1.2), [1.0, 0.0, 1600.0]),
+            (cone.clone(), Vec2::new(80.0, 1.2), [1.0, 0.0, 1600.0]),
+            (cone.clone(), Vec2::new(10.0, 1.2), [1.0, 0.0, 25.0]),
+        ];
+        for (surface, q, want) in &cases {
+            let got = metric(surface, *q);
+            assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-9), "{surface:?} at {q:?}: {got:?} vs {want:?}");
+            let (Some(su), Some(sv)) = (tangent(surface, *q, Vec2::X), tangent(surface, *q, Vec2::Y)) else { panic!("{surface:?}") };
+            assert!(su.dot(sv).abs() < 1e-12, "{surface:?} at {q:?}: {}", su.dot(sv));
+        }
+        let apart = |s: &Surface, a: Vec2, b: Vec2| match (embed(s, a, 0.0), embed(s, b, 0.0)) {
+            (Some((p, _)), Some((q, _))) => p.dist(q),
+            _ => panic!("{s:?}"),
+        };
+        for (s, a, b, want) in [
+            (&cylinder, Vec2::new(5.0, 0.0), Vec2::new(12.0, 0.0), 7.0),
+            (&cylinder, Vec2::new(5.0, 0.0), Vec2::new(5.0, PI), 80.0),
+            (&cone, Vec2::new(80.0, 0.0), Vec2::new(100.0, 0.0), 20.0),
+            (&cone, Vec2::new(80.0, 0.0), Vec2::new(80.0, PI), 80.0),
+        ] {
+            let d = apart(s, a, b);
+            assert!((d - want).abs() < 1e-9, "{s:?} from {a:?} to {b:?}: {d}");
+        }
+    }
 }

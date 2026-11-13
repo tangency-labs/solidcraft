@@ -1630,10 +1630,12 @@ pub enum FeatureKind {
     /// body's, less the faces at `skip`, each a panel of the rule's thickness, however thin the
     /// body (Recognize reads a body that is sheet metal already). The sharp edges at `bends`
     /// become bends and every other sharp edge between two faces of the sheet is cut open; a
-    /// cylinder modelled between two planes is a bend of its own inside radius short of 10^0.7
-    /// thicknesses (DIN 6935) and a roll from there, and other cylinders and cones are rolls. The
-    /// faces at `engrave` are engravings of the panels round them. No face is fixed. The body
-    /// becomes the folded sheet and the model keeps its flat pattern.
+    /// cylinder modelled between two planes, its inside radius short of 10^0.7 (about 5) of the
+    /// rule's thicknesses, is a bend of the rule's radius at the planes' virtual sharp, and from
+    /// there a roll that keeps its radius (see `sheet_surface_convert`'s `ROLL_FROM`); other
+    /// cylinders and cones are rolls. The faces at `engrave` are engravings of the panels round
+    /// them. No face is fixed. The body becomes the folded sheet and the model keeps its flat
+    /// pattern.
     SheetSurfaceConvert {
         body: BodyName,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2937,7 +2939,8 @@ impl FeatureKind {
             FeatureKind::SheetPath { .. } => "PathFlangeFeature",
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
-            FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetalFeature",
+            FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
+            FeatureKind::SheetSurfaceConvert { .. } => "ConvertBodyToSheetMetalFeature",
             FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
@@ -3107,6 +3110,8 @@ impl FeatureKind {
             "PathFlangeFeature" => "sheet_path",
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
             "ConvertToSheetMetalFeature" => "sheet_convert",
+            "ConvertBodyToSheetMetalFeature" => "sheet_surface_convert",
+            "RecognizeSheetMetalFeature" => "sheet_recognize",
             "CoilFeature" => "coil",
             "RibFeature" | "WebFeature" => "rib",
             "ReplaceFaceFeature" => "replace_face",

@@ -247,8 +247,8 @@ use crate::curve::curve::{Curve, CurvePropertyType};
 use crate::curve::line::Line;
 use crate::error::surface::SurfaceFailure;
 use crate::error::{
-    EntityRef, Result, SM_ERR, SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_OUTSIDE_OF_DOMAIN, SolidError,
-    ignore_status,
+    ignore_status, EntityRef, Result, SolidError, SM_ERR, SM_ERR_NOT_WITHIN_TOLERANCE,
+    SM_ERR_OUTSIDE_OF_DOMAIN,
 };
 use crate::geom::a_object::{self, AObject, CacheStore};
 use crate::geom::assert_array::labels::DERIV_SURF_DEFINITION_TYPE;
@@ -272,7 +272,7 @@ use crate::geom::solution_array::{OperandObject, Solution, SolutionArray, Soluti
 use crate::geom::tol::{are_same, eff_zero_param, scaled_zero2, tol3d};
 use crate::geom::tree::{AuxDataType, Tree, TreeNode, TreeOwner};
 use crate::geom::vector2d::{Point2, Vec2};
-use crate::geom::vector3d::{Point3, Vec3, sqrt};
+use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::intersect::adv_surface_intersector::{AdvSurfaceIntersector, NoSurfaceHandle};
 use crate::intersect::curve_class::{CurveClassification, ResetOptions};
 use crate::intersect::point_class::{ClassGeometry, ClassObject, PointClassType};
@@ -287,16 +287,16 @@ use crate::nurbs::b_spline_surface_n_lib::p2::{
 };
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
-use crate::surface::ball_patch::{BALL_PATCH_TYPE, BallPatch};
+use crate::surface::ball_patch::{BallPatch, BALL_PATCH_TYPE};
 use crate::surface::cone::Cone;
 use crate::surface::curve_bounded_surface::CurveBoundedSurface;
 use crate::surface::offset_surface::OffsetSurface;
-use crate::surface::plane::Plane;
 use crate::surface::plane::p2::PlaneIntersectWarning;
+use crate::surface::plane::Plane;
 use crate::surface::procedural_blend::corner::CornerDefinition;
 use crate::surface::procedural_blend::exact::ExactRound;
 use crate::surface::procedural_blend::{
-    BlendRef, KeptDefinition, NetScope, PROCEDURAL_BLEND_TYPE, ProceduralBlend,
+    BlendRef, KeptDefinition, NetScope, ProceduralBlend, PROCEDURAL_BLEND_TYPE,
 };
 use crate::surface::procedural_sweep::{DefinitionRef, ProceduralSweep, SweepRef};
 use crate::surface::sphere::Sphere;
@@ -310,9 +310,9 @@ use crate::surface::surface::p8::FaceSolveCache;
 use crate::surface::surface_cache::p1::SurfaceCache;
 use crate::surface::torus::Torus;
 use crate::surface::trim_srf_cache::TrimSrfCache;
-use crate::topology::FaceId;
 use crate::topology::database_io::DatabaseReader;
 use crate::topology::trimming_tools;
+use crate::topology::FaceId;
 
 // ---- type codes ---------------------------------------------------------------------
 
@@ -2840,11 +2840,15 @@ impl Surface {
             }
             SurfaceKind::ProceduralBlend(pb) => {
                 let s = pb.net();
-                { s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess) }
+                {
+                    s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess)
+                }
             }
             SurfaceKind::BallPatch(bp) => {
                 let s = bp.net();
-                { s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess) }
+                {
+                    s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess)
+                }
             }
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_step_inversion(),
             SurfaceKind::OffsetSurface(s) => {
@@ -5839,7 +5843,11 @@ fn is_contained(c: f64, a: f64, b: f64) -> bool {
 
 /// `smos_Max` of two doubles.
 pub(crate) fn smos_max(a: f64, b: f64) -> f64 {
-    if a > b { a } else { b }
+    if a > b {
+        a
+    } else {
+        b
+    }
 }
 
 /// The `SM_ASSERT_BOOLEAN_REPORT` / `SM_ASSERT_VALUE_REPORT` macros of
@@ -6187,7 +6195,11 @@ impl DerivSurfDefinition<'_> {
             Some(e) => {
                 let a = start_rail.degree()?;
                 let b = e.degree()?;
-                if a > b { a } else { b }
+                if a > b {
+                    a
+                } else {
+                    b
+                }
             }
             None => start_rail.degree()?,
         };
@@ -6565,7 +6577,7 @@ impl<O: SolutionObject> DropCurveFail<O> {
 
         self.ctrl_poly.clear(); // mem 28
         self.knots.clear(); // mem 29
-        // mem 30 - don't clear the Brep pointer
+                            // mem 30 - don't clear the Brep pointer
     }
 
     /// Whether the record is unused (`IsUnInit`).
@@ -7895,10 +7907,9 @@ mod tests {
                     boundary: Vec::new(),
                 },
             ))));
-            assert!(
-                root.check_evaluation_copy_depth(MAX_GEOMETRY_NESTING - 1)
-                    .is_ok()
-            );
+            assert!(root
+                .check_evaluation_copy_depth(MAX_GEOMETRY_NESTING - 1)
+                .is_ok());
             assert!(matches!(
                 root.check_evaluation_copy_depth(MAX_GEOMETRY_NESTING),
                 Err(SolidError::InvalidInput { .. })
@@ -7921,10 +7932,9 @@ mod tests {
                 tol: 1e-6,
             },
         ))));
-        assert!(
-            root.check_evaluation_copy_depth(MAX_GEOMETRY_NESTING - 1)
-                .is_ok()
-        );
+        assert!(root
+            .check_evaluation_copy_depth(MAX_GEOMETRY_NESTING - 1)
+            .is_ok());
         assert!(matches!(
             root.check_evaluation_copy_depth(MAX_GEOMETRY_NESTING),
             Err(SolidError::InvalidInput { .. })
@@ -7943,17 +7953,15 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
         // The general iso constructor checks before clamping through nested bases.
-        assert!(
-            crate::curve::iso_curve::IsoCurve::from_surface(
-                &Kernel::default(),
-                surface,
-                SurfParamType::U,
-                0.5,
-                true,
-                true,
-            )
-            .is_err()
-        );
+        assert!(crate::curve::iso_curve::IsoCurve::from_surface(
+            &Kernel::default(),
+            surface,
+            SurfParamType::U,
+            0.5,
+            true,
+            true,
+        )
+        .is_err());
     }
 
     #[test]
@@ -8257,8 +8265,8 @@ mod tests {
             .evaluate(k, Point2::new(0.5, 0.5), 1, 1, EvaluateFlags::default())
             .unwrap();
         assert_eq!(ev.len(), 2);
-        assert!(
-            s.drop_point_fast::<ObjectRef2>(
+        assert!(s
+            .drop_point_fast::<ObjectRef2>(
                 &Kernel::default(),
                 &d,
                 SolverOperation::Minimize,
@@ -8268,8 +8276,7 @@ mod tests {
                 None,
                 SolutionRequested::All
             )
-            .is_err()
-        );
+            .is_err());
         s.swap_uv(&Kernel::default()).unwrap();
         let (a, b) = s
             .split_at(&Kernel::default(), 0.5, SurfParamType::U)
@@ -8708,7 +8715,7 @@ mod owner_zone_tol_tests {
 mod kernel_dispatch_tests {
     use super::*;
     use crate::curve::iso_curve::IsoCurve;
-    use crate::surface::surface::p1::{CsIntersectEnfo, evaluate_1st_derivatives};
+    use crate::surface::surface::p1::{evaluate_1st_derivatives, CsIntersectEnfo};
     use crate::topology::database_io::{FileType, MAX_READ_NESTING};
 
     #[test]
@@ -8767,12 +8774,10 @@ mod kernel_dispatch_tests {
                 expected
             );
             // Part 9 builds the boundaries through the cone's own iso curves.
-            assert!(
-                surface
-                    .create_iso_boundaries(&kernel, SurfParamType::U, 0.0)
-                    .unwrap()
-                    .is_some()
-            );
+            assert!(surface
+                .create_iso_boundaries(&kernel, SurfParamType::U, 0.0)
+                .unwrap()
+                .is_some());
             let step = StepSurface::new(surface, true).unwrap();
             let step_uv = Point2::new(90.0, 1.0);
             assert_eq!(
@@ -8796,17 +8801,15 @@ mod kernel_dispatch_tests {
         )
         .unwrap();
         let mut surface = Surface::from(cone);
-        assert!(
-            surface
-                .evaluate(
-                    &kernel,
-                    Point2::new(0.5, 0.5),
-                    usize::MAX,
-                    usize::MAX,
-                    EvaluateFlags::default()
-                )
-                .is_err()
-        );
+        assert!(surface
+            .evaluate(
+                &kernel,
+                Point2::new(0.5, 0.5),
+                usize::MAX,
+                usize::MAX,
+                EvaluateFlags::default()
+            )
+            .is_err());
         // Wrapper constructors refuse to nest past MAX_GEOMETRY_NESTING, so a
         // 70-deep chain cannot be built; the deepest buildable chains still
         // evaluate and copy without overflowing.
@@ -8866,7 +8869,7 @@ mod issue_892_tests {
     use crate::curve::curve::Curve;
     use crate::geom::attribute::{AttributeStore, ObjectKey};
     use crate::kernel::Kernel;
-    use crate::mass::integrator::properties::{PropertyAttributes, brep_volume};
+    use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
     use crate::math::{Point3, Vec3};
     use crate::primitive::api_curves::create_line_segment;
     use crate::sweep::api_brep::create_linear_sweep;

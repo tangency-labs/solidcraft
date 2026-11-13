@@ -2,12 +2,12 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::VecDeque;
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
 
-use crate::chart::Flatten;
+use crate::chart::{Flatten, arc_as_conics};
 use crate::fold::Wrap;
 use crate::{Anchor, Bend, Corner, CornerRelief, Joint, JointKind, Lap, Panel, Relief, Rigid2, Rip, Sheet, Surface, Tail};
 
@@ -68,10 +68,6 @@ pub struct Development {
 pub struct FlatPanel {
     pub region: Region2,
     pub origins: Vec<Vec<EdgeFrom>>,
-    /// The largest strain the flat leaves on the panel's neutral surface: none on a plane, a
-    /// cylinder or a cone; on a free-form panel what its fit could not avoid, which is more than
-    /// a rounding only where the panel is not developable.
-    pub stretch: f64,
 }
 
 /// What an edge of a flat panel is in its sheet.
@@ -125,6 +121,8 @@ pub enum DevelopError {
     Joint(usize, &'static str),
     #[error("the sheet exceeds the development's work limit")]
     TooLarge,
+    #[error("the sheet's rule: {0}")]
+    Rule(&'static str),
     #[error("the fold takes a place in space for each of the flat's {0} pieces")]
     Roots(usize),
 }
@@ -197,6 +195,7 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
     if sheet.panels.len() > MAX_PANELS || sheet.joints.len() > MAX_JOINTS {
         return Err(DevelopError::TooLarge);
     }
+    check_rule(sheet)?;
     if let Some(&(i, _)) = anchors.iter().find(|(i, _)| *i >= sheet.panels.len()) {
         return Err(DevelopError::NoPanel(i));
     }
@@ -242,7 +241,6 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
         };
         neutral.joints.push(Joint { a: moved(&joint.a)?, b: moved(&joint.b)?, kind: joint.kind.clone() });
     }
-    let stretch: Vec<f64> = maps.iter().map(Flatten::stretch).collect();
     let sheet = &neutral;
 
     let mut touching: Vec<Vec<usize>> = vec![Vec::new(); sheet.panels.len()];
@@ -297,9 +295,8 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
         .iter()
         .zip(&placements)
         .zip(origins)
-        .zip(stretch)
-        .map(|(((panel, place), origins), stretch)| match place {
-            Some(place) if !panel.region.outer.segs.is_empty() => Some(FlatPanel { region: place.region(&panel.region), origins, stretch }),
+        .map(|((panel, place), origins)| match place {
+            Some(place) if !panel.region.outer.segs.is_empty() => Some(FlatPanel { region: place.region(&panel.region), origins }),
             _ => None,
         })
         .collect();
@@ -461,6 +458,40 @@ fn on_arc(d: Vec2, start: f64, sweep: f64) -> bool {
     sweep.abs() >= TAU || ((d.y.atan2(d.x) - start) * sweep.signum()).rem_euclid(TAU) <= sweep.abs()
 }
 
+/// The parameters of curve `s` where its way runs square to `way`: where it reaches furthest
+/// along `way` or against it between its ends (or stops there and runs on). They are the roots
+/// of its rate along `way` ([`roots`]): for a cubic or a Bézier the Bernstein polynomial on its
+/// control points' steps along `way` (its derivative's, scaled); for a conic, its point along
+/// `way` `N/D` (`N` the point times its weight, `D` the weight), the quotient rule's numerator
+/// `N′D − ND′`, a quadratic. None for a line; an arc's are its circle's (see [`extremes`]).
+fn square_to(s: &Seg2, way: Vec2) -> Vec<f64> {
+    // The size of the terms the coefficients are worked from, for their rounding.
+    let size = |pts: &[Vec2]| 2.0 * way.len() * pts.iter().map(|p| p.len()).fold(0.0, f64::max);
+    let steps = |pts: &[Vec2]| -> Vec<f64> { pts.iter().zip(pts.iter().skip(1)).map(|(p, q)| (*q - *p).dot(way)).collect() };
+    match *s {
+        Seg2::Line { .. } | Seg2::Arc { .. } => Vec::new(),
+        Seg2::Cubic { p0, p1, p2, p3 } => {
+            let pts = [p0, p1, p2, p3];
+            roots(&steps(pts.as_slice()), size(pts.as_slice()))
+        }
+        Seg2::Bezier { n, p } => {
+            let pts: Vec<Vec2> = p.iter().take(usize::from(n) + 1).copied().collect();
+            roots(&steps(pts.as_slice()), size(pts.as_slice()))
+        }
+        Seg2::Conic { a, apex, b, w } => {
+            // In powers of t, measured from `a` (which moves N by a constant times D, and leaves
+            // N/D's rate as it was): N = 2 w q₁ t + (q₂ − 2 w q₁) t²,
+            // D = 1 + 2 (w − 1) t + 2 (1 − w) t².
+            let (q1, q2) = ((apex - a).dot(way), (b - a).dot(way));
+            let (n1, n2) = (2.0 * w * q1, q2 - 2.0 * w * q1);
+            let (e1, e2) = (2.0 * (w - 1.0), 2.0 * (1.0 - w));
+            // N′D − ND′ = n₁ + 2 n₂ t + (n₂ e₁ − n₁ e₂) t², on the Bernstein basis.
+            let (c0, c1, c2) = (n1, 2.0 * n2, n2 * e1 - n1 * e2);
+            roots(&[c0, c0 + 0.5 * c1, c0 + c1 + c2], 16.0 * (1.0 + w.abs()).powi(2) * size([a, apex, b].as_slice()))
+        }
+    }
+}
+
 /// The box of loop `l`: each of its segments' points furthest along x and along y and against
 /// them (see [`extremes`]). The loop's own box where it is made of lines and arcs (an arc's ends
 /// and each of its circle's four points center ± radius along x and along y that lies within its
@@ -468,6 +499,20 @@ fn on_arc(d: Vec2, start: f64, sweep: f64) -> bool {
 /// takes. Empty for a loop of no segments.
 pub(crate) fn loop_box(l: &Loop2) -> Aabb2 {
     l.segs.iter().flat_map(|s| extremes(s, &[Vec2::X, Vec2::Y])).collect()
+}
+
+/// The sheet's thickness and K-factor are a rule's, bounded as the rule's own check bounds them:
+/// a thickness of more than 0, and a K-factor from 0 to 1 that keeps the neutral surface within
+/// the thickness. Anything else (a NaN, a negative thickness) would lay every zone out NaN or
+/// wrongly wide, and place every panel past it nowhere.
+pub(crate) fn check_rule(sheet: &Sheet) -> Result<(), DevelopError> {
+    if !(sheet.thickness > 0.0 && sheet.thickness.is_finite()) {
+        return Err(DevelopError::Rule("the thickness must be more than 0"));
+    }
+    if !(0.0..=1.0).contains(&sheet.k_factor) {
+        return Err(DevelopError::Rule("the K-factor must be between 0 and 1"));
+    }
+    Ok(())
 }
 
 fn check_joint(sheet: &Sheet, j: usize, joint: &Joint) -> Result<(), DevelopError> {
@@ -568,7 +613,7 @@ fn rip_bands(sheet: &Sheet, maps: &[Flatten], j: usize, joint: &Joint, rip: &Rip
         let mut inner = Vec::with_capacity(edge.len());
         for (k, (q, d)) in edge.iter().zip(&depth).enumerate() {
             let way = edge_way(edge, k).ok_or_else(off)?;
-            let [e, f, g] = crate::fold::metric(surface, *q).ok_or_else(off)?;
+            let [e, f, g] = crate::fold::metric(surface, *q);
             let dot = |x: Vec2, y: Vec2| x.x * y.x * e + (x.x * y.y + x.y * y.x) * f + x.y * y.y * g;
             // Square to the edge on the surface, toward the panel's material, a unit long there.
             let across = Vec2::new(-way.y, way.x) * side;
@@ -700,8 +745,21 @@ type Stretch = Vec<(Seg2, EdgeFrom)>;
 const ON_OUTLINE: f64 = 1e-6;
 /// How near (mm) the middle of a rip's edge, drawn by its points, lies to the outline's curve.
 const MIDDLE_TOL: f64 = 1e-3;
-/// Chords each curved edge is looked at as, to find where two edges cross.
-const CROSSING_CHORDS: usize = 16;
+/// A number worked from terms of some size is zero to rounding within this much of zero,
+/// relative to that size.
+const ROUNDING: f64 = 64.0 * f64::EPSILON;
+/// Most halvings of a piece of a Bernstein polynomial while [`roots`] isolates its roots: a
+/// piece halved this often is within rounding of a point.
+const ROOT_HALVINGS: u32 = 60;
+/// Most pieces [`roots`] halves for one polynomial.
+const ROOT_PIECES: usize = 1 << 12;
+/// Bisections of a piece of a Bernstein polynomial that holds one root: enough to reach rounding.
+const ROOT_BISECTIONS: u32 = 64;
+/// How small, relative to the curves' size, two pieces of curves that [`span_crossings`] cannot
+/// keep apart grow before they are where the curves meet.
+const CROSSING_FINE: f64 = 1e-12;
+/// Most pairs of pieces [`span_crossings`] looks at for two spans of curves.
+const CROSSING_PAIRS: usize = 1 << 12;
 /// How far, in gaps it closes, a join carries two edges on to where they meet. Past that they
 /// run on nearly straight, and are stepped across instead of carried on in a long sliver.
 const MITER_LIMIT: f64 = 4.0;
@@ -951,51 +1009,288 @@ fn trim_start(b: &mut Stretch, ib: usize, v: f64) {
 }
 
 /// Where the edges of `a` cross those of `b`: each crossing's edge and parameter on either, and
-/// its point. Each edge is looked at as chords ([`CROSSING_CHORDS`] of a curve, one of a line),
-/// and a crossing of chords followed onto the edges themselves.
+/// its point. Every place two edges meet is found on the edges themselves ([`meetings`]: two
+/// lines in closed form, a line and a curve by the roots of the curve's distance from the line,
+/// two curves by halving them until their hulls part), followed onto the edges by Newton's
+/// method, and kept once where the edges meet there within [`ON_OUTLINE`].
 pub fn crossings(a: &[Seg2], b: &[Seg2]) -> Vec<(usize, f64, usize, f64, Vec2)> {
-    let chords = |s: &Seg2| if matches!(s, Seg2::Line { .. }) { 1 } else { CROSSING_CHORDS };
     let mut out: Vec<(usize, f64, usize, f64, Vec2)> = Vec::new();
     for (ia, sa) in a.iter().enumerate() {
-        let na = chords(sa);
         for (ib, sb) in b.iter().enumerate() {
-            let nb = chords(sb);
-            for i in 0..na {
-                let (p0, p1) = (sa.point_at(i as f64 / na as f64), sa.point_at((i + 1) as f64 / na as f64));
-                for k in 0..nb {
-                    let (q0, q1) = (sb.point_at(k as f64 / nb as f64), sb.point_at((k + 1) as f64 / nb as f64));
-                    let (d1, d2) = (p1 - p0, q1 - q0);
-                    let den = d1.cross(d2);
-                    if den.abs() <= 1e-15 * d1.len() * d2.len() {
-                        continue;
+            for (mut u, mut v) in meetings(sa, sb) {
+                // Onto the edges themselves: Newton on a(u) = b(v).
+                for _ in 0..20 {
+                    let f = sa.point_at(u) - sb.point_at(v);
+                    let (du, dv) = (sa.derivative(u), sb.derivative(v));
+                    let det = du.cross(-dv);
+                    if f.len() <= 1e-13 || det.abs() <= 1e-300 {
+                        break;
                     }
-                    let (s, r) = ((q0 - p0).cross(d2) / den, (q0 - p0).cross(d1) / den);
-                    let slack = 1e-9;
-                    if !((-slack..=1.0 + slack).contains(&s) && (-slack..=1.0 + slack).contains(&r)) {
-                        continue;
-                    }
-                    let (mut u, mut v) = ((i as f64 + s.clamp(0.0, 1.0)) / na as f64, (k as f64 + r.clamp(0.0, 1.0)) / nb as f64);
-                    // Onto the edges themselves: Newton on a(u) = b(v).
-                    for _ in 0..20 {
-                        let f = sa.point_at(u) - sb.point_at(v);
-                        let (du, dv) = (sa.derivative(u), sb.derivative(v));
-                        let det = du.cross(-dv);
-                        if f.len() <= 1e-13 || det.abs() <= 1e-300 {
-                            break;
-                        }
-                        let (step_u, step_v) = ((-f).cross(-dv) / det, du.cross(-f) / det);
-                        (u, v) = ((u + step_u).clamp(0.0, 1.0), (v + step_v).clamp(0.0, 1.0));
-                    }
-                    let x = sa.point_at(u);
-                    let fresh = out.iter().all(|c| c.4.dist(x) > ON_OUTLINE);
-                    if x.dist(sb.point_at(v)) <= ON_OUTLINE && fresh {
-                        out.push((ia, u, ib, v, x));
-                    }
+                    let (step_u, step_v) = ((-f).cross(-dv) / det, du.cross(-f) / det);
+                    (u, v) = ((u + step_u).clamp(0.0, 1.0), (v + step_v).clamp(0.0, 1.0));
+                }
+                let x = sa.point_at(u);
+                let fresh = out.iter().all(|c| c.4.dist(x) > ON_OUTLINE);
+                if x.dist(sb.point_at(v)) <= ON_OUTLINE && fresh {
+                    out.push((ia, u, ib, v, x));
                 }
             }
         }
     }
     out
+}
+
+/// Where segments `sa` and `sb` cross or touch: pairs of their parameters, every one found. Two
+/// lines meet where their equations say, a hair past their ends taken onto them. A line meets a
+/// curve where the curve's distance from the line's own line is zero: on each of the curve's
+/// spans ([`spans`]) that distance, times the span's weight, is the Bernstein polynomial on its
+/// control points' distances, whose roots [`roots`] isolates; each is kept where it lies on the
+/// line between its ends (a hair past them taken onto them). Two curves meet where pieces of
+/// their spans that their hulls cannot keep apart grow too small to tell apart
+/// ([`span_crossings`]).
+fn meetings(sa: &Seg2, sb: &Seg2) -> Vec<(f64, f64)> {
+    let on = |r: f64| (-1e-9..=1.0 + 1e-9).contains(&r).then(|| r.clamp(0.0, 1.0));
+    match (*sa, *sb) {
+        (Seg2::Line { a: p0, b: p1 }, Seg2::Line { a: q0, b: q1 }) => {
+            let (d1, d2) = (p1 - p0, q1 - q0);
+            let den = d1.cross(d2);
+            if den.abs() <= 1e-15 * d1.len() * d2.len() {
+                return Vec::new();
+            }
+            let (s, r) = ((q0 - p0).cross(d2) / den, (q0 - p0).cross(d1) / den);
+            on(s).zip(on(r)).into_iter().collect()
+        }
+        (Seg2::Line { a, b }, _) => line_meetings(a, b, sb).into_iter().filter_map(|(r, v)| Some((on(r)?, v))).collect(),
+        (_, Seg2::Line { a, b }) => line_meetings(a, b, sa).into_iter().filter_map(|(r, u)| Some((u, on(r)?))).collect(),
+        _ => {
+            let (ka, kb) = (spans(sa), spans(sb));
+            let size = |h: &[f64; 3]| (h[0] / h[2]).abs().max((h[1] / h[2]).abs());
+            let scale = ka.iter().chain(&kb).flatten().filter(|h| h[2] > 0.0).map(size).fold(1.0, f64::max);
+            let mut out = Vec::new();
+            for (i, ca) in ka.iter().enumerate() {
+                for (k, cb) in kb.iter().enumerate() {
+                    for (x, y) in span_crossings(ca, cb, scale) {
+                        if let (Some(pa), Some(pb)) = (span_point(ca, x), span_point(cb, y)) {
+                            out.push((seg_param(sa, i, x, pa), seg_param(sb, k, y, pb)));
+                        }
+                    }
+                }
+            }
+            out
+        }
+    }
+}
+
+/// Where the line from `a` to `b` meets curve `s` (see [`meetings`]): each place's parameter
+/// on the line's own line and on `s`.
+fn line_meetings(a: Vec2, b: Vec2, s: &Seg2) -> Vec<(f64, f64)> {
+    let d = b - a;
+    let len2 = d.len2();
+    if !(len2 > 0.0) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (k, c) in spans(s).iter().enumerate() {
+        // Each control point's distance from the line times its weight and the line's length.
+        let g: Vec<f64> = c.iter().map(|h| d.cross(Vec2::new(h[0] - a.x * h[2], h[1] - a.y * h[2]))).collect();
+        let size = d.len() * c.iter().map(|h| h[0].abs() + h[1].abs() + (a.x.abs() + a.y.abs()) * h[2].abs()).fold(0.0, f64::max);
+        for x in roots(&g, size) {
+            if let Some(p) = span_point(c, x) {
+                out.push(((p - a).dot(d) / len2, seg_param(s, k, x, p)));
+            }
+        }
+    }
+    out
+}
+
+/// A segment's Bézier spans as homogeneous points `(x·w, y·w, w)`, in the order it runs: a
+/// line one span of degree 1, an arc its rational quadratic pieces of at most a quarter turn each
+/// ([`arc_as_conics`]), any other curve its own control points.
+fn spans(s: &Seg2) -> Vec<Vec<[f64; 3]>> {
+    let h = |p: Vec2, w: f64| [p.x * w, p.y * w, w];
+    match *s {
+        Seg2::Line { a, b } => vec![vec![h(a, 1.0), h(b, 1.0)]],
+        Seg2::Arc { center, radius, start, sweep } => arc_as_conics(center, radius, start, sweep).iter().flat_map(spans).collect(),
+        Seg2::Cubic { p0, p1, p2, p3 } => vec![vec![h(p0, 1.0), h(p1, 1.0), h(p2, 1.0), h(p3, 1.0)]],
+        Seg2::Conic { a, apex, b, w } => vec![vec![h(a, 1.0), h(apex, w), h(b, 1.0)]],
+        Seg2::Bezier { n, p } => vec![p.iter().take(usize::from(n) + 1).map(|q| h(*q, 1.0)).collect()],
+    }
+}
+
+/// The parameter on `s` of its point `at`, `x` along its span `k` (see [`spans`]): the span's own
+/// where `s` is one span; an arc's from the angle of `at` round its center, within its `k`-th
+/// piece of at most a quarter turn.
+fn seg_param(s: &Seg2, k: usize, x: f64, at: Vec2) -> f64 {
+    match *s {
+        Seg2::Arc { center, start, sweep, .. } => {
+            let n = (sweep.abs() / FRAC_PI_2).ceil().clamp(1.0, 8.0);
+            let step = sweep / n;
+            let turn = (at - center).angle() - (start + step * k as f64);
+            let turn = turn - TAU * (turn / TAU).round();
+            ((k as f64 + turn / step) / n).clamp(0.0, 1.0)
+        }
+        _ => x,
+    }
+}
+
+/// The point at `x` of a span of homogeneous points (see [`spans`]).
+fn span_point(c: &[[f64; 3]], x: f64) -> Option<Vec2> {
+    let [hx, hy, w] = *split(c, |p, q| toward(p, q, x)).0.last()?;
+    (w > 0.0).then(|| Vec2::new(hx / w, hy / w))
+}
+
+/// The homogeneous point `x` of the way from `p` to `q`.
+fn toward(p: [f64; 3], q: [f64; 3], x: f64) -> [f64; 3] {
+    [p[0] + (q[0] - p[0]) * x, p[1] + (q[1] - p[1]) * x, p[2] + (q[2] - p[2]) * x]
+}
+
+/// A Bézier's control points (or a Bernstein polynomial's coefficients) split by de Casteljau,
+/// `lerp(p, q)` the point the split's way from `p` to `q`: the control points of the part before
+/// the split and of the part after it, the point at the split last of the one and first of the
+/// other.
+fn split<T: Copy>(c: &[T], lerp: impl Fn(T, T) -> T) -> (Vec<T>, Vec<T>) {
+    let mut q = c.to_vec();
+    let (mut before, mut after) = (Vec::with_capacity(c.len()), Vec::with_capacity(c.len()));
+    while let (Some(&first), Some(&last)) = (q.first(), q.last()) {
+        before.push(first);
+        after.push(last);
+        q = q.iter().zip(q.iter().skip(1)).map(|(p, r)| lerp(*p, *r)).collect();
+    }
+    after.reverse();
+    (before, after)
+}
+
+/// Where the Bernstein polynomial with coefficients `b` on [0, 1] is zero, in order, every root
+/// isolated by the coefficients themselves: on any piece the polynomial lies between their least
+/// and greatest, and has no more roots inside it than they change sign, with as many of the same
+/// parity (Descartes' rule for the Bernstein basis). A piece whose coefficients keep one sign
+/// holds none; one whose coefficients change sign once holds one, found by bisection to rounding;
+/// an end whose coefficient is zero is one; a piece whose coefficients are all zero to rounding of
+/// `size` (the size of the terms they were worked from) is zero along it, and its ends are given;
+/// any other piece is halved (de Casteljau). A piece halved [`ROOT_HALVINGS`] times, or past
+/// [`ROOT_PIECES`] halvings in all, holds roots within rounding of each other (where a curve
+/// touches a line, a double root): its middle is given.
+fn roots(b: &[f64], size: f64) -> Vec<f64> {
+    let zero = ROUNDING * size;
+    let mut out = Vec::new();
+    let mut todo = vec![(b.to_vec(), 0.0, 1.0, 0u32)];
+    let mut halved = 0usize;
+    while let Some((c, lo, hi, depth)) = todo.pop() {
+        let (Some(&first), Some(&last)) = (c.first(), c.last()) else { continue };
+        if !c.iter().all(|x| x.is_finite()) {
+            continue;
+        }
+        if c.iter().all(|x| x.abs() <= zero) {
+            out.extend([lo, hi]);
+            continue;
+        }
+        if first == 0.0 {
+            out.push(lo);
+        }
+        if last == 0.0 {
+            out.push(hi);
+        }
+        let signs: Vec<bool> = c.iter().filter(|x| **x != 0.0).map(|x| *x > 0.0).collect();
+        let changes = signs.windows(2).filter(|w| w.first() != w.get(1)).count();
+        if changes == 0 {
+            continue;
+        }
+        if changes == 1 && first != 0.0 && last != 0.0 {
+            out.push(lo + (hi - lo) * bisect(&c));
+            continue;
+        }
+        halved += 1;
+        if depth >= ROOT_HALVINGS || halved > ROOT_PIECES {
+            out.push(0.5 * (lo + hi));
+            continue;
+        }
+        let mid = 0.5 * (lo + hi);
+        let (left, right) = split(&c, |p, q| 0.5 * (p + q));
+        todo.push((right, mid, hi, depth + 1));
+        todo.push((left, lo, mid, depth + 1));
+    }
+    out.sort_by(f64::total_cmp);
+    out.dedup();
+    out
+}
+
+/// The root inside (0, 1) of a Bernstein polynomial whose coefficients change sign once, its end
+/// coefficients of opposite signs: by bisection, to rounding.
+fn bisect(c: &[f64]) -> f64 {
+    let rising = c.first().is_some_and(|x| *x < 0.0);
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    for _ in 0..ROOT_BISECTIONS {
+        let mid = 0.5 * (lo + hi);
+        if !(lo < mid && mid < hi) {
+            break;
+        }
+        let Some(&f) = split(c, |p, q| p + (q - p) * mid).0.last() else { break };
+        if f == 0.0 {
+            return mid;
+        }
+        if (f < 0.0) == rising {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
+/// Where spans `a` and `b` (homogeneous points, their weights above 0; see [`spans`]) cross or
+/// touch: pairs of their parameters. A span lies within the hull of its control points, so two
+/// pieces of them are apart where their boxes are, or where one lies wholly to one side of the
+/// band the other's control points take up across the other's chord ([`apart`]). Pieces that
+/// are not apart are halved, the larger first, until both are within [`CROSSING_FINE`] of the
+/// curves' size (`scale`): their middles are where the spans meet. Past [`CROSSING_PAIRS`] pairs
+/// in all (curves that run along each other, which meet along a stretch, not at points) each
+/// pair still to look at gives its middles.
+fn span_crossings(a: &[[f64; 3]], b: &[[f64; 3]], scale: f64) -> Vec<(f64, f64)> {
+    let fine = CROSSING_FINE * scale;
+    let margin = ROUNDING * scale;
+    let points = |c: &[[f64; 3]]| c.iter().map(|h| (h[2] > 0.0).then(|| Vec2::new(h[0] / h[2], h[1] / h[2]))).collect::<Option<Vec<Vec2>>>();
+    let mid = |r: [f64; 2]| 0.5 * (r[0] + r[1]);
+    let half = |p: [f64; 3], q: [f64; 3]| toward(p, q, 0.5);
+    let mut out = Vec::new();
+    let mut todo = vec![(a.to_vec(), [0.0, 1.0], b.to_vec(), [0.0, 1.0])];
+    let mut looked = 0usize;
+    while let Some((pa, ra, pb, rb)) = todo.pop() {
+        let (Some(qa), Some(qb)) = (points(&pa), points(&pb)) else { continue };
+        if apart(&qa, &qb, margin) || apart(&qb, &qa, margin) {
+            continue;
+        }
+        let (sa, sb) = (qa.iter().copied().collect::<Aabb2>().diagonal(), qb.iter().copied().collect::<Aabb2>().diagonal());
+        looked += 1;
+        if (sa <= fine && sb <= fine) || looked > CROSSING_PAIRS {
+            out.push((mid(ra), mid(rb)));
+            continue;
+        }
+        if sa >= sb {
+            let (before, after) = split(&pa, half);
+            todo.push((after, [mid(ra), ra[1]], pb.clone(), rb));
+            todo.push((before, [ra[0], mid(ra)], pb, rb));
+        } else {
+            let (before, after) = split(&pb, half);
+            todo.push((pa.clone(), ra, after, [mid(rb), rb[1]]));
+            todo.push((pa, ra, before, [rb[0], mid(rb)]));
+        }
+    }
+    out
+}
+
+/// Whether the piece of a curve whose control points are `qb` lies apart from the one whose
+/// control points are `qa`, as their hulls show: their boxes apart, or every point of `qb` past
+/// the band the points of `qa` take up across the chord of `qa` (from its first point to its
+/// last), on one side. `margin` (mm) allows for the rounding of the points.
+fn apart(qa: &[Vec2], qb: &[Vec2], margin: f64) -> bool {
+    let (Some(&s), Some(&e)) = (qa.first(), qa.last()) else { return true };
+    if !qa.iter().copied().collect::<Aabb2>().inflated(margin).meets(&qb.iter().copied().collect::<Aabb2>()) {
+        return true;
+    }
+    let Some(across) = (e - s).normalized().map(|d| d.perp()) else { return false };
+    let side = |p: &Vec2| (*p - s).dot(across);
+    let (lo, hi) = qa.iter().map(side).fold((0.0f64, 0.0f64), |(lo, hi), x| (lo.min(x), hi.max(x)));
+    qb.iter().all(|p| side(p) > hi + margin) || qb.iter().all(|p| side(p) < lo - margin)
 }
 
 /// A curve through `points` in order: a line where they lie on one, else a clamped cubic spline
@@ -1008,7 +1303,9 @@ pub fn curve_through(points: &[Vec2]) -> Vec<Seg2> {
     }
     let n = points.len();
     // Its way at its ends to second order: (-3 p0 + 4 p1 - p2) / 2, and the same from the end.
-    let (start, end) = match (points.get(1), points.get(2), points.get(n - 2), points.get(n - 3)) {
+    // Two points have no third from either end.
+    let back = |k: usize| n.checked_sub(k).and_then(|i| points.get(i));
+    let (start, end) = match (points.get(1), points.get(2), back(2), back(3)) {
         (Some(p1), Some(p2), Some(q1), Some(q2)) if n > 2 => ((*p1 * 4.0 - a * 3.0 - *p2) * 0.5, (b * 3.0 - *q1 * 4.0 + *q2) * 0.5),
         _ => (b - a, b - a),
     };
@@ -1042,15 +1339,18 @@ fn add_zone(
     if width > 0.0 && (near.1 > near.0 || far.1 > far.0) {
         let (n0, n1, f0, f1) = (frame.at(near.0, near_line), frame.at(near.1, near_line), frame.at(far.0, far_line), frame.at(far.1, far_line));
         // Each end straight across, or torn along the curve it follows; the loop runs along the
-        // `a` side, up the end, back along the `b` side and down the start.
+        // `a` side, up the end, back along the `b` side and down the start. A torn end that no
+        // spline of the most spans keeps within its tolerance of its curve is refused, never laid
+        // out off the curve.
+        let stray = || DevelopError::Joint(j, "a torn end of the zone strays further from the curve it follows than its tolerance");
         let end = |relief: &Relief, (from, to): (f64, f64)| match *relief {
-            Relief::Tear { normal, offset } => torn(sheet, bend, frame, (normal, offset), (from, to)),
-            _ => vec![Seg2::Line { a: frame.at(from, near_line), b: frame.at(to, far_line) }],
+            Relief::Tear { normal, offset } => torn(sheet, bend, frame, (normal, offset), (from, to)).ok_or_else(stray),
+            _ => Ok(vec![Seg2::Line { a: frame.at(from, near_line), b: frame.at(to, far_line) }]),
         };
         let mut segs = vec![Seg2::Line { a: n0, b: n1 }];
-        segs.extend(end(&bend.relief.1, (near.1, far.1)));
+        segs.extend(end(&bend.relief.1, (near.1, far.1))?);
         segs.push(Seg2::Line { a: f1, b: f0 });
-        segs.extend(end(&bend.relief.0, (near.0, far.0)).iter().rev().map(Seg2::reversed));
+        segs.extend(end(&bend.relief.0, (near.0, far.0))?.iter().rev().map(Seg2::reversed));
         out.zones.push(Zone {
             joint: j,
             region: Region2 { outer: Loop2 { segs }.ccw(), holes: Vec::new() },
@@ -1139,15 +1439,16 @@ fn add_zone(
 /// A torn end of a bend's zone in the flat, from `from` along the joint on the `a` panel's tangent
 /// line to `to` on the `b` panel's, as a cubic spline within [`TEAR_TOL`] of the curve it follows:
 /// at each turn round the bend, the length along the joint where the bend's metal, through its
-/// whole thickness, keeps off the tear's plane by as much as the ends give in proportion.
-fn torn(sheet: &Sheet, bend: &Bend, frame: &JointFrame, (normal, offset): (Vec3, f64), (from, to): (f64, f64)) -> Vec<Seg2> {
+/// whole thickness, keeps off the tear's plane by as much as the ends give in proportion. `None`
+/// where no spline of at most [`MAX_TEAR_SPANS`] spans keeps within [`TEAR_TOL`] of it.
+fn torn(sheet: &Sheet, bend: &Bend, frame: &JointFrame, (normal, offset): (Vec3, f64), (from, to): (f64, f64)) -> Option<Vec<Seg2>> {
     let (t, theta) = (sheet.thickness, bend.angle);
     let wrap = Wrap::of(bend, t, sheet.k_factor);
     let neutral = bend.radius + sheet.k_factor * t;
     let straight = vec![Seg2::Line { a: frame.at(from, -bend.setback(t)), b: frame.at(to, theta * neutral - bend.setback(t)) }];
     // Along the joint, the distance off the plane changes alike at every depth.
     if !(normal.x.abs() > 1e-9 && neutral > 0.0 && theta > 0.0) {
-        return straight;
+        return Some(straight);
     }
     let off = |along: f64, phi: f64, depth: f64| wrap.at(along, phi, depth).dot(normal) - offset;
     let least = |along: f64, phi: f64| off(along, phi, 0.0).min(off(along, phi, t));
@@ -1190,25 +1491,26 @@ fn torn(sheet: &Sheet, bend: &Bend, frame: &JointFrame, (normal, offset): (Vec3,
     let mut out = Vec::new();
     for w in breaks.windows(2) {
         if let [p0, p1] = w {
-            out.extend(spline(&at, *p0, *p1));
+            out.extend(spline(&at, *p0, *p1)?);
         }
     }
-    out
+    Some(out)
 }
 
 /// The curve `at` from `a` to `b` as a cubic spline in the fewest even spans that keep within
 /// [`TEAR_TOL`] of it: through the curve at the spans' ends, along it at its two ends (its
-/// direction there taken from inside the run), and joined with no change of curvature.
-fn spline(at: &dyn Fn(f64) -> Vec2, a: f64, b: f64) -> Vec<Seg2> {
+/// direction there taken from inside the run), and joined with no change of curvature. `None`
+/// where no number of spans up to [`MAX_TEAR_SPANS`] does, or the curve is not numbers: a point
+/// whose distance from the curve is not a number keeps within nothing.
+fn spline(at: &dyn Fn(f64) -> Vec2, a: f64, b: f64) -> Option<Vec<Seg2>> {
     let rate = |x: f64, h: f64| (at(x) * -3.0 + at(x + h) * 4.0 - at(x + 2.0 * h)) * (1.0 / (2.0 * h));
     let step = (b - a) * 1e-5;
     let (start, end) = (rate(a, step), rate(b, -step));
-    let mut segs = Vec::new();
     for spans in 1..=MAX_TEAR_SPANS {
         let h = (b - a) / spans as f64;
         let points: Vec<Vec2> = (0..=spans).map(|i| at(a + h * i as f64)).collect();
         let rates = clamped_rates(&points, h, start, end);
-        segs = points
+        let segs: Vec<Seg2> = points
             .windows(2)
             .zip(rates.windows(2))
             .filter_map(|(p, m)| match (p, m) {
@@ -1219,13 +1521,13 @@ fn spline(at: &dyn Fn(f64) -> Vec2, a: f64, b: f64) -> Vec<Seg2> {
         let strays = (0..=TEAR_SAMPLES).any(|k| {
             let x = k as f64 / TEAR_SAMPLES as f64 * spans as f64;
             let i = (x.floor() as usize).min(spans - 1);
-            segs.get(i).is_some_and(|seg| seg.point_at(x - i as f64).dist(at(a + h * x)) > TEAR_TOL)
+            segs.get(i).is_some_and(|seg| !(seg.point_at(x - i as f64).dist(at(a + h * x)) <= TEAR_TOL))
         });
         if !strays {
-            break;
+            return Some(segs);
         }
     }
-    segs
+    None
 }
 
 /// A clamped cubic spline's rates (per unit of its parameter) at `points`, `h` apart: `start` and
@@ -1297,9 +1599,10 @@ fn corner_cut(dev: &Development, corner: &Corner) -> Option<Region2> {
 /// across it, in the flat: the least and greatest lengths along the bend, or `None` when none
 /// of it does. Read off the outline's own segments, placed in the flat: the ends of each piece of
 /// a segment inside the band (its own ends there, and where it crosses either of the band's
-/// lines), and between them an arc's points furthest along the bend and against it, within its
-/// sweep and the band (see [`extremes`]). A line's and an arc's crossings are found in closed
-/// form, any other curve's by [`crossings`], each crossing of its chords followed onto the curve.
+/// lines), and between them its points furthest along the bend and against it that lie in the
+/// band: an arc's within its sweep (see [`extremes`]), any other curve's where its way runs
+/// square to the bend (see [`square_to`]). A line's and an arc's crossings are found in closed
+/// form, any other curve's by [`crossings`].
 fn band_extent(sheet: &Sheet, panel: usize, place: &Rigid2, frame: &JointFrame, line: f64, depth: f64) -> Result<Option<(f64, f64)>, DevelopError> {
     let region = &sheet.panels.get(panel).ok_or(DevelopError::NoPanel(panel))?.region;
     let (lo, hi) = (line.min(line + depth) - EDGE_TOL, line.max(line + depth) + EDGE_TOL);
@@ -1311,11 +1614,12 @@ fn band_extent(sheet: &Sheet, panel: usize, place: &Rigid2, frame: &JointFrame, 
     let mut extent: Option<(f64, f64)> = None;
     let mut take = |u: f64| extent = Some(extent.map_or((u, u), |(a, b)| (a.min(u), b.max(u))));
     for s in region.outer.segs.iter().map(|s| place.seg(s)) {
-        // Its ends, and an arc's points furthest along the bend and against it, where they lie in
-        // the band. Any other curve is read at its ends here: its control points lie off it.
+        // Its ends, and its points furthest along the bend and against it between them, where they
+        // lie in the band: an arc's on its circle, any other curve's where its way runs square to
+        // the bend (its control points lie off it).
         let points = match s {
             Seg2::Line { .. } | Seg2::Arc { .. } => extremes(&s, &[frame.along]),
-            _ => vec![s.start(), s.end()],
+            _ => std::iter::once(s.start()).chain(square_to(&s, frame.along).into_iter().map(|t| s.point_at(t))).chain([s.end()]).collect(),
         };
         for (u, v) in points.into_iter().map(uv) {
             if (lo..=hi).contains(&v) {
@@ -1394,11 +1698,12 @@ fn panel_reach(sheet: &Sheet, panel: usize) -> Result<f64, DevelopError> {
 
 #[cfg(test)]
 mod tests {
-    use std::f64::consts::{FRAC_PI_2, PI};
+    use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
     use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcraft_geom::prelude::*;
 
-    use super::{JointFrame, band_extent};
+    use super::{JointFrame, band_extent, crossings};
     use crate::{Panel, Rigid2, Sheet};
 
     /// Where a panel's outline lies inside a band across a bend is read off its own curves. The
@@ -1428,5 +1733,72 @@ mod tests {
         let top = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -6.0, 1.0);
         let reach = 93.0 + (9.0 - (2.0 - 1e-6f64).powi(2)).sqrt();
         assert!(top.as_ref().is_ok_and(|e| near(e, (0.0, reach))), "{top:?}");
+    }
+
+    /// A curve's furthest point along a bend counts where it lies in the band, between its ends.
+    /// The panel above with its bump a cubic instead, (93, 0), (97, 2), (97, 4), (93, 6): it is
+    /// x = 93 + 12 t (1 − t), y = 6 t, and its rate along x, 12 (1 − 2 t), is zero at t = 1/2, at
+    /// (96, 3). The band from −4 to 2 across (y −2..4) reaches 96 there, though the cubic's ends
+    /// reach 93 and it leaves the band (t = (4 + 1e-6)/6) at 93 + (8 − 2e-6 − 1e-12)/3, 95.67. The
+    /// band from −6 to −5 (y 5..6) leaves (96, 3) out: it reaches where the cubic crosses its edge
+    /// a millionth below y = 5, t = (5 − 1e-6)/6, x = 93 + 12 t (1 − t) = 93 + (5 + 4e-6 − 1e-12)/3
+    /// (94.666668), past the cubic's end at 93.
+    #[test]
+    fn a_bands_extent_holds_a_curves_furthest_point_between_its_ends() {
+        let segs = vec![
+            Seg2::Line { a: Vec2::ZERO, b: Vec2::new(93.0, 0.0) },
+            Seg2::Cubic { p0: Vec2::new(93.0, 0.0), p1: Vec2::new(97.0, 2.0), p2: Vec2::new(97.0, 4.0), p3: Vec2::new(93.0, 6.0) },
+            Seg2::Line { a: Vec2::new(93.0, 6.0), b: Vec2::new(93.0, 60.0) },
+            Seg2::Line { a: Vec2::new(93.0, 60.0), b: Vec2::new(0.0, 60.0) },
+            Seg2::Line { a: Vec2::new(0.0, 60.0), b: Vec2::ZERO },
+        ];
+        let region = Region2 { outer: Loop2 { segs }, holes: Vec::new() };
+        let sheet = Sheet { panels: vec![Panel { region, ..Panel::default() }], ..Sheet::default() };
+        let frame = JointFrame { origin: Vec2::ZERO, along: Vec2::X, toward_b: Vec2::new(0.0, -1.0) };
+        let near = |a: &Option<(f64, f64)>, b: (f64, f64), tol: f64| a.is_some_and(|a| (a.0 - b.0).abs() < tol && (a.1 - b.1).abs() < tol);
+        let whole = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -4.0, 6.0);
+        assert!(whole.as_ref().is_ok_and(|e| near(e, (0.0, 96.0), 1e-12)), "{whole:?}");
+        let top = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -6.0, 1.0);
+        let reach = 93.0 + (5.0 + 4e-6 - 1e-12) / 3.0;
+        assert!(top.as_ref().is_ok_and(|e| near(e, (0.0, reach), 1e-9)), "{top:?}");
+    }
+
+    /// Two crossings inside one sixteenth of a curve are both found. The parabola from
+    /// (0, 0.0008) with control point (0.5, −0.0292) to (1, 0.9408) is x = t,
+    /// y = (t − 0.02)(t − 0.04): it dips under y = 0 between x = 0.02 and x = 0.04, both inside its
+    /// first sixteenth (t up to 0.0625), whose ends (y = 0.0008 and 0.00095625) are both above the
+    /// line, so a chord there crossed nothing. The line y = 0 from (−1, 0) to (2, 0) meets it at
+    /// both, x + 1 thirds along: 0.34 and 0.3466…. The same line as a cubic (its control points
+    /// evenly along it, so the same parameter) is a curve, and meets it at both too.
+    #[test]
+    fn two_crossings_in_one_sixteenth_of_a_curve_are_both_found() {
+        let dip = Seg2::Conic { a: Vec2::new(0.0, 0.0008), apex: Vec2::new(0.5, -0.0292), b: Vec2::new(1.0, 0.9408), w: 1.0 };
+        let line = Seg2::Line { a: Vec2::new(-1.0, 0.0), b: Vec2::new(2.0, 0.0) };
+        let straight = Seg2::Cubic { p0: Vec2::new(-1.0, 0.0), p1: Vec2::ZERO, p2: Vec2::new(1.0, 0.0), p3: Vec2::new(2.0, 0.0) };
+        for across in [line, straight] {
+            let mut found = crossings(&[across], &[dip]);
+            found.sort_by(|p, q| p.4.x.total_cmp(&q.4.x));
+            assert_eq!(found.len(), 2, "{across:?}: {found:?}");
+            for (c, x) in found.iter().zip([0.02, 0.04]) {
+                assert!(c.4.dist(Vec2::new(x, 0.0)) < 1e-12, "{across:?}: {found:?}");
+                assert!((c.1 - (x + 1.0) / 3.0).abs() < 1e-12 && (c.3 - x).abs() < 1e-12, "{across:?}: {found:?}");
+            }
+        }
+    }
+
+    /// Two whole circles of radius 1 about (0, 0) and (1, 0), each from its own 0°, cross at
+    /// (1/2, ±√3/2): 60° and 300° round the first, a sixth and five sixths of the way, and 120°
+    /// and 240° round the second, a third and two thirds of the way.
+    #[test]
+    fn two_circles_cross_where_they_should_on_each() {
+        let a = Seg2::Arc { center: Vec2::ZERO, radius: 1.0, start: 0.0, sweep: TAU };
+        let b = Seg2::Arc { center: Vec2::new(1.0, 0.0), radius: 1.0, start: 0.0, sweep: TAU };
+        let mut found = crossings(&[a], &[b]);
+        found.sort_by(|p, q| q.4.y.total_cmp(&p.4.y));
+        let h = 3f64.sqrt() / 2.0;
+        assert_eq!(found.len(), 2, "{found:?}");
+        for (c, (u, v, x)) in found.iter().zip([(1.0 / 6.0, 1.0 / 3.0, Vec2::new(0.5, h)), (5.0 / 6.0, 2.0 / 3.0, Vec2::new(0.5, -h))]) {
+            assert!((c.1 - u).abs() < 1e-12 && (c.3 - v).abs() < 1e-12 && c.4.dist(x) < 1e-12, "{found:?}");
+        }
     }
 }

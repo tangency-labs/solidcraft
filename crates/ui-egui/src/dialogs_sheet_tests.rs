@@ -1024,6 +1024,23 @@ fn recognize_makes_the_bodys_rule_and_convert_points_to_it() {
     assert_eq!(e.inputs[0].items, vec![Sel::Body { name: "Tray".into() }]);
 }
 
+/// What the Recognize dialog reads follows its Surface Face pick, as the command does (#6748).
+/// The 100 x 60 x 30 tray shelled 2 thick inward reads 2.000 mm from its largest face with
+/// another behind it. Picked on its rim at (1, 30, 30), the top of the wall x 0 … 2, it reads no
+/// sheet: the only face level with the rim and facing back at it is the bottom, 30 behind, more
+/// than a sixth of the rim's 116.6 across (√(100² + 60²) = 116.62; 6 · 30 = 180).
+#[test]
+fn recognize_reads_the_body_from_its_surface_face_pick() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
+    s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2, "direction": "inside"})).unwrap();
+    let app = SolveApp::new(s, Services::default());
+    let unpicked = measure_text(&app, "Tray", None, &[]);
+    assert!(unpicked.as_ref().is_ok_and(|t| t.contains("2.000")), "{unpicked:?}");
+    let rim = measure_text(&app, "Tray", Some(Vec3::new(1.0, 30.0, 30.0)), &[]);
+    assert!(rim.as_ref().is_err_and(|e| e.contains("no face behind it")), "{rim:?}");
+}
+
 /// The Path Flange dialog takes the edge and the path's sketch lines: one feature, one body,
 /// and Edit Feature brings the edge and the path back.
 #[test]

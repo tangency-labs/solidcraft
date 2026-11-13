@@ -5,11 +5,17 @@
   "ar": {
     "Skip Faces": "الأوجه المتخطاة"
   },
+  "de": {
+    "Skip Faces": "Ausgelassene Flächen"
+  },
   "he": {
     "Skip Faces": "פאות לדילוג"
   },
   "ja": {
     "Skip Faces": "スキップする面"
+  },
+  "ko": {
+    "Skip Faces": "건너뛸 면"
   },
   "vi": {
     "Skip Faces": "Bỏ qua bề mặt"

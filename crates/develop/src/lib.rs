@@ -6,7 +6,9 @@
 //! (the virtual sharp), so a bend's radius, the thickness and the K-factor stay values of the
 //! bend: nothing in the panels depends on them. A hem, which has no sharp, is anchored at its
 //! tangent lines. A roll is a panel of its own, on a cylinder or a cone, whose radius is its
-//! geometry; a seam joins it to its neighbours, and a rip cuts panels apart.
+//! geometry; a seam joins it to its neighbours, and a rip cuts panels apart. Every panel lies on a
+//! plane, a cylinder or a cone, whose flat has a closed form; a free-form surface's has none, and
+//! the makers of a sheet refuse one (#15743).
 //!
 //! [`develop`] lays the sheet out flat. Each panel goes onto its neutral surface first (for a
 //! planar panel, its own shape; for a roll, longer or shorter round it). One panel's chart is
@@ -19,19 +21,24 @@
 //! [`fold`] puts the developed sheet back in space: each piece where the caller says it lies, and
 //! each of its panels where its bends and seams put it, so that every point of the flat pattern,
 //! at any depth through the sheet, has its place on the folded sheet.
+//!
+//! [`Query`] answers exact questions of a B-rep record, as reading a sheet off a body asks them:
+//! where a point lies on the record's faces and which way they face there, how far it is from an
+//! edge, and which faces a ray meets.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
 mod chart;
 mod develop;
-mod fitted;
 mod fold;
+mod query;
 mod rigid;
 mod sheet;
 
 pub use develop::{DevelopError, Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone, crossings, curve_through, develop};
 pub use fold::{Bent, Fold, fold};
+pub use query::Query;
 pub use rigid::{Rigid2, Rigid3};
 pub use sheet::{Anchor, Bend, Corner, CornerRelief, Cut, Datum, Joint, JointKind, Lap, Panel, Relief, Rip, Sheet, Surface, Tail, ZoneEnds};
 

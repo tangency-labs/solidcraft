@@ -6,14 +6,13 @@
 //! away) and a wall along each of its edges that no other piece shares. A flat edge folds to a
 //! line or a circular arc where it lies along or across a bend or a roll, and to a chain of
 //! Bézier pieces of degree 7 elsewhere, such as a slanted edge across a bend, which folds to a
-//! helix. A free-form panel straight across one way (a curve pushed out along a line, see
-//! `SurfaceSheet::contour`) has its faces ruled between its two edges along the curve.
+//! helix.
 
 use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
-use solidcraft_develop::{Bent, Development, Fold, Rigid3, Surface};
+use solidcraft_develop::{Bent, Development, Fold, Rigid3};
 use solidcraft_geom::LINEAR_TOL;
 use solidcraft_kernel::{self as kernel, Body, EdgeSpec, FaceSpec, SurfSpec};
 
@@ -38,8 +37,9 @@ const CHAIN_TOL: f64 = 1e-7;
 /// in one or two pieces, where cubic ones took 32 (the distance falls as the eighth power of a
 /// piece's length, not the fourth).
 const CHAIN_DEGREE: usize = 7;
-/// The most pieces of one chain, within the kernel's limit on a chain's control points.
-const MAX_CHAIN_PIECES: usize = 256;
+/// The most pieces of one chain: the kernel's limit on a chain's control points, as a chain of n
+/// pieces of [`CHAIN_DEGREE`] has 7n + 1 of them (3073 points: 438 pieces).
+const MAX_CHAIN_PIECES: usize = (kernel::MAX_CHAIN_POINTS - 1) / CHAIN_DEGREE;
 /// How many points along each piece it is fitted to; it is checked at the points halfway
 /// between them.
 const FIT_POINTS: usize = 32;
@@ -181,7 +181,7 @@ fn solid_of(
                 })
                 .collect();
             let p = f.at(c.piece, center, depth)?;
-            let surface = if f.free_form(c.piece) { ruled(&loops)? } else { f.surface(c.piece, &samples, depth, curved)? };
+            let surface = f.surface(c.piece, &samples, depth, curved)?;
             faces.push(FaceSpec { loops, surface, probe: Some((p, p - f.at(c.piece, center, inside)?)) });
             names.push(name(c.piece, FaceRole::Cap { surface: side == 0, at: center }));
         }
@@ -199,9 +199,7 @@ fn solid_of(
             let mid = run_at(run, 0.5);
             let along = run_at(run, 0.51) - run_at(run, 0.49);
             let pm = f.at(c.piece, mid, t / 2.0)?;
-            // The way out of the piece, taken from a point a hair inside it: a free-form panel's
-            // flat map holds only its own domain, whose edges are the piece's, and puts no point
-            // past them on the folded sheet.
+            // The way out of the piece, taken from a point a hair inside it.
             let within = mid - Vec2::new(along.y, -along.x).normalized().unwrap_or_default() * 1e-3;
             let outward = pm - f.at(c.piece, within, t / 2.0)?;
             faces.push(FaceSpec { loops: vec![vec![bottom.clone(), up_b, top.reversed(), down_a]], surface, probe: Some((pm, outward)) });
@@ -276,16 +274,6 @@ impl Folded<'_> {
         self.dev.zones.get(zone).and_then(|z| self.fold?.bends.get(z.joint)).and_then(Option::as_ref)
     }
 
-    /// Whether a piece lies on a free-form panel, folded (its faces are [`ruled`]).
-    fn free_form(&self, piece: Piece) -> bool {
-        match piece {
-            Piece::Panel(i) | Piece::Tab(_, i) => {
-                self.flat.is_none() && self.fold.and_then(|f| f.surface(i)).is_some_and(|s| matches!(s, Surface::Spline(_)))
-            }
-            Piece::Zone(_) => false,
-        }
-    }
-
     /// Where a point of a piece goes, `depth` into the material: a tab's where its panel puts it,
     /// carried on flat past the panel's edge (along the roll's surface, on a roll). Laid flat,
     /// every piece's point where the flat has it.
@@ -310,15 +298,20 @@ impl Folded<'_> {
         // both depths; each joint of the run starts a piece.
         let segs = run.len().max(1);
         let mut each = 1;
+        let too_bent = || DocError::Invalid("an edge of the folded sheet bends too much to follow".into());
         loop {
             let n = segs * each;
+            // More pieces than a chain may have are never built, at either depth.
+            if n > MAX_CHAIN_PIECES {
+                return Err(too_bent());
+            }
             let off = match (self.chain(piece, run, 0.0, n)?, self.chain(piece, run, self.t, n)?) {
                 (Some((surface, a)), Some((deep, b))) if a.max(b) <= CHAIN_TOL => return Ok([surface, deep]),
                 (Some((_, a)), Some((_, b))) => a.max(b),
                 _ => f64::INFINITY,
             };
             if n >= MAX_CHAIN_PIECES {
-                return Err(DocError::Invalid("an edge of the folded sheet bends too much to follow".into()));
+                return Err(too_bent());
             }
             // The distance falls as the eighth power of the pieces' length.
             let guess = if off.is_finite() { (each as f64 * (off / CHAIN_TOL).powf(1.0 / 8.0)).ceil() as usize } else { each * 2 };
@@ -543,20 +536,6 @@ fn wall(bottom: &EdgeSpec, top: &EdgeSpec) -> Result<SurfSpec> {
     }
 }
 
-/// The surface of a face of a free-form panel straight across one way, a curve pushed out along
-/// a line (see `SurfaceSheet::contour`), whose edges are `loops` as the face runs round them: the
-/// surface ruled between its two edges along the curve (the panel's edges along it, folded to
-/// chains), the second run back the way the first runs, its other edges the rulings across its
-/// ends. A plane where the curve folds straight.
-fn ruled(loops: &[Vec<EdgeSpec>]) -> Result<SurfSpec> {
-    let chains: Vec<&EdgeSpec> = loops.iter().flatten().filter(|e| matches!(e, EdgeSpec::Chain { .. })).collect();
-    match chains.as_slice() {
-        [a, b] if loops.len() == 1 => Ok(SurfSpec::Ruled { a: (*a).clone(), b: b.reversed() }),
-        [] if loops.iter().flatten().all(|e| matches!(e, EdgeSpec::Line { .. })) => Ok(SurfSpec::Plane),
-        _ => Err(DocError::Invalid("not supported yet: a cut into a free-form panel (a hole, or a notch in its edges along its curve)".into())),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,12 +546,9 @@ mod tests {
         Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() }
     }
 
-    /// A flat line slanted across the whole zone of a 90° bend (2 mm sheet, inside radius 2,
-    /// K 0.5) folds to a helix on either face of the sheet: round the bend's axis at 4 mm on its
-    /// surface and 2 mm a thickness in. Two pieces of degree 7 follow each within the tolerance
-    /// (cubic ones took 32), and they join without a turn.
-    #[test]
-    fn a_slanted_edge_across_a_bend_folds_to_two_pieces_of_its_helix() {
+    /// A 100 × 60 base and a 20 mm flange, joined along x by a 90° bend (2 mm sheet, inside radius
+    /// 2, K 0.5) toward the material.
+    fn bracket() -> Sheet {
         let bend = Bend {
             angle: std::f64::consts::FRAC_PI_2,
             radius: 2.0,
@@ -583,7 +559,7 @@ mod tests {
             tails: (Tail::Keep, Tail::Trim),
             relief: (Relief::None, Relief::None),
         };
-        let sheet = Sheet {
+        Sheet {
             thickness: 2.0,
             k_factor: 0.5,
             panels: vec![
@@ -597,7 +573,16 @@ mod tests {
             }],
             corners: Vec::new(),
             cuts: Vec::new(),
-        };
+        }
+    }
+
+    /// A flat line slanted across the whole zone of the bracket's bend folds to a helix on either
+    /// face of the sheet: round the bend's axis at 4 mm on its surface and 2 mm a thickness in.
+    /// Two pieces of degree 7 follow each within the tolerance (cubic ones took 32), and they join
+    /// without a turn.
+    #[test]
+    fn a_slanted_edge_across_a_bend_folds_to_two_pieces_of_its_helix() {
+        let sheet = bracket();
         let dev = develop(&sheet, &[(0, solidcraft_develop::Rigid2::IDENTITY)]).expect("the bracket develops");
         let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).expect("the bracket folds");
         let [zone] = dev.zones.as_slice() else { panic!("one zone: {:?}", dev.zones) };
@@ -625,5 +610,23 @@ mod tests {
                 assert!(turn > 1.0 - 1e-12, "depth {depth}: the pieces turn at joint {k}: {turn}");
             }
         }
+    }
+
+    /// Each segment of a run starts a piece of its chain, so a run of more segments than a chain
+    /// may have pieces is refused before any chain is built. The slanted line across the bracket's
+    /// zone, cut into 500 equal lines, folds to the same helix, which no line or arc follows. Its
+    /// chains would start at 500 pieces of degree 7, 7 x 500 + 1 = 3,501 control points at each
+    /// depth, past the kernel's 3,073 (438 pieces, 7 x 438 + 1 = 3,067 points): none is built.
+    #[test]
+    fn a_run_of_more_segments_than_a_chain_has_pieces_is_refused() {
+        let sheet = bracket();
+        let dev = develop(&sheet, &[(0, solidcraft_develop::Rigid2::IDENTITY)]).expect("the bracket develops");
+        let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).expect("the bracket folds");
+        let [zone] = dev.zones.as_slice() else { panic!("one zone: {:?}", dev.zones) };
+        let (a, b) = (zone.near[0] + (zone.near[1] - zone.near[0]) * 0.2, zone.far[0] + (zone.far[1] - zone.far[0]) * 0.35);
+        let run: Vec<Seg2> = (0..500).map(|k| Seg2::Line { a: a.lerp(b, k as f64 / 500.0), b: a.lerp(b, (k + 1) as f64 / 500.0) }).collect();
+        let f = Folded { dev: &dev, fold: Some(&folded), flat: None, t: 2.0 };
+        let e = f.edges(Piece::Zone(0), &run).err().map(|e| e.to_string()).unwrap_or_default();
+        assert_eq!(e, "an edge of the folded sheet bends too much to follow");
     }
 }

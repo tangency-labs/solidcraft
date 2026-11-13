@@ -158,8 +158,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 rule: usize,
                 /// The name of a new rule made from the body (empty: the rule chosen).
                 new_rule: String,
-                /// The body last measured, and what was read of it or why it is no sheet.
-                measured: Option<(String, Result<String, String>)>,
+                /// The body last measured with the Surface Face and Skip Faces picks it was read
+                /// with, and what was read of it or why it is no sheet.
+                measured: Option<((String, Option<Vec3>, Vec<Vec3>), Result<String, String>)>,
             },
             /// The rule manager: the rule shown (index into the rules, or past the end for a new one).
             Rules {
@@ -322,11 +323,13 @@ fn own_thickness(app: &SolveApp, name: &str) -> Option<f64> {
 }
 
 /// What Recognize reads of body `name` (#6748), as its dialog says it: its thickness and its
-/// modelled bends' radii, or why it is no sheet.
-fn measure_text(app: &SolveApp, name: &str) -> Result<String, String> {
-    let state = app.session.model.state();
+/// modelled bends' radii, or why it is no sheet. Read as the command reads it, from the side of
+/// the Surface Face picked at `face` less the Skip Faces picked at `skip`; the picks are where the
+/// body is shown, so the body is read there too (as placed, a rigid move of the model's).
+fn measure_text(app: &SolveApp, name: &str, face: Option<Vec3>, skip: &[Vec3]) -> Result<String, String> {
+    let state = crate::open_meshing::session_world(&app.session);
     let mb = state.body(name).ok_or_else(|| format!("no body `{name}`"))?;
-    let m = solidcraft_engine::doc::measure_sheet_body(mb, None, &[], &solidcraft_engine::doc::IDENTITY).map_err(|e| e.to_string())?;
+    let m = solidcraft_engine::doc::measure_sheet_body(mb, face, skip, &solidcraft_engine::doc::IDENTITY).map_err(|e| e.to_string())?;
     let radii: Vec<String> = m.radii.iter().map(|r| format!("R {r:.3}")).collect();
     let bends = if radii.is_empty() { "-".to_string() } else { radii.join(", ") };
     Ok(solidcraft_ui_text::tr("sheet.recognize_measured").replace("{thickness}", &format!("{:.3}", m.thickness)).replace("{bends}", &bends))
@@ -563,11 +566,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             }
         }
         Sm::Recognize { rule, new_rule, measured } => {
-            if let Some(name) = picked_body(inputs)
-                && measured.as_ref().is_none_or(|(b, _)| *b != name)
+            // Read again when the body, the Surface Face or the Skip Faces change.
+            let key = picked_body(inputs).map(|name| (name, items(inputs, 1).face_points().first().copied(), items(inputs, 2).face_points()));
+            if let Some(key) = key
+                && measured.as_ref().is_none_or(|(k, _)| *k != key)
             {
-                let read = measure_text(app, &name);
-                *measured = Some((name, read));
+                let read = measure_text(app, &key.0, key.1, &key.2);
+                *measured = Some((key, read));
             }
             match measured.as_ref() {
                 Some((_, Ok(text))) => {

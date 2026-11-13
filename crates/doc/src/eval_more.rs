@@ -296,26 +296,20 @@ fn chain_points(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec2>> {
 }
 
 /// A contour flange's profile, drawn on the sketch curves `ids` end to end in that order: each
-/// curve's exact pieces (a line, an arc, the Béziers and conics of a free-form curve; see
-/// `Sketch::exact_segs`), each curve run the way the profile goes, the first toward the second
-/// and each next one on from where the one before ends, as [`chain_points`] reads a chain; and
-/// for each piece the sketch curve it was drawn on and its key: the curve's id, with the piece's
-/// place on the curve as drawn (`s3.2`, from 1) where the curve is drawn in several.
+/// curve's exact pieces (a line's or an arc's; see `Sketch::exact_segs`), each curve run the way
+/// the profile goes, the first toward the second and each next one on from where the one before
+/// ends, as [`chain_points`] reads a chain; and for each piece the sketch curve it was drawn on
+/// and its key: the curve's id, with the piece's place on the curve as drawn (`s3.2`, from 1)
+/// where the curve is drawn in several. A free-form curve (an ellipse, a conic, a spline) is
+/// refused: its panel's flat has no closed form (#15743).
 fn contour_profile(ss: &SolvedSketch, ids: &[String]) -> Result<(Vec<Seg2>, Vec<(String, String)>)> {
     let mut curves: Vec<(&String, Vec<Seg2>)> = Vec::with_capacity(ids.len());
     for id in ids {
         let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
-        let pieces = match ss.sketch.exact_segs(ci) {
-            Some(pieces) => pieces,
-            // A free-form curve the sketch holds only as points has no exact surface to push out.
-            None if ss.sketch.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) => {
-                return Err(DocError::Invalid(format!(
-                    "not supported yet: the curve `{id}` in a contour flange, a spline of degree above {} or a rational one above degree 2",
-                    solidcore_record::MAX_BEZIER_DEGREE
-                )));
-            }
-            None => ss.sketch.segs(ci),
-        };
+        if ss.sketch.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
+            return Err(crate::sheet_surface_convert::free_form_contour(id));
+        }
+        let pieces = ss.sketch.exact_segs(ci).unwrap_or_else(|| ss.sketch.segs(ci));
         if pieces.is_empty() {
             return Err(DocError::Invalid(format!("the curve `{id}` in a contour flange has no length")));
         }
@@ -951,7 +945,7 @@ pub(super) fn sheet_eval(
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
             let r = doc.sheet_rule(rule.as_deref());
             let rule = convert_rule(&doc.rule_values(vals, &r)?);
-            // The sketch's lines, in the sheet's plane: the base's rims are named after them.
+            // The sketch's lines, in the sheet's plane: the rims of the panel it makes are named after them.
             let mut curves: Vec<(String, Vec2, Vec2)> = Vec::new();
             for (ci, c) in ss.sketch.curves.iter().enumerate() {
                 for s in ss.sketch.segs(ci) {
@@ -1683,8 +1677,9 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
     }
     let mut drills = Vec::with_capacity(tools.len());
     for (_, prism) in tools {
-        let Some(PrimitivePrism::Cylinder { base, axis, radius, height }) = *prism else { return Ok(Vec::new()) };
-        drills.push((base, axis, radius, height, drill_box(base, axis, radius, height)));
+        // A drill meets a panel by what the tool holds whole, and reaches all its cylinder may.
+        let Some(PrimitivePrism::Cylinder { base, axis, radius, height, reach }) = *prism else { return Ok(Vec::new()) };
+        drills.push((base, axis, radius, height, drill_box(base, axis, radius, reach)));
     }
     let mut plans: Vec<(usize, crate::SurfaceSheet)> = Vec::new();
     for (i, sk) in st.surface_sheets.iter().enumerate() {
@@ -1988,8 +1983,10 @@ pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height:
 /// A hole tool's exact geometry, for [`surface_hole_cut`].
 #[derive(Clone, Copy, Debug)]
 pub(super) enum PrimitivePrism {
-    /// A cylinder: base centre, unit axis, radius and signed height.
-    Cylinder { base: Vec3, axis: Vec3, radius: f64, height: f64 },
+    /// A cylinder: base centre, unit axis, radius and signed height, which the tool holds whole.
+    /// The tool lies within the cylinder of the same base `reach` long: longer than `height` where
+    /// material above the hole's entry face was left out of the tool (see `hole_run_on`).
+    Cylinder { base: Vec3, axis: Vec3, radius: f64, height: f64, reach: f64 },
 }
 
 /// The most outline segments of a sketch's text a cut tells letters by, and the most letters it
@@ -2590,8 +2587,8 @@ enum PanelsBy<'a> {
 /// the panel was made on, never its place among the panels, the picks or the joints, nor a
 /// measure (#7990), so a panel keeps its key however the feature's picks are ordered, whatever
 /// other panels come and go and whatever the sizes. A bend's panel is made on the rim of `before`
-/// (the sheet as it was) that its bend lies along, by what made that rim's edge (`F15/F12/l2`: a
-/// flange on the line `l2` of the panel the base flange `F12` made; `F17/F15/F12/l2/far`: a
+/// (the sheet as it was) that its bend lies along, by what made that rim's edge (`F15/F12/side.l2`: a
+/// flange on the line `l2` of the panel the base flange `F12` made; `F17/F15/F12/side.l2/far`: a
 /// return on that flange's far edge); a path flange's next panel on its path's line (`F18/l4`);
 /// a fold's piece on its panel, numbered in the order the pieces start along the fold's line
 /// (`F20/F12#1`). Panels that would share a key (bends on two pieces of one rim, or on rims

@@ -2,12 +2,10 @@
 //! they meet.
 
 use solidcraft_geom::prelude::*;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use solidcore_record::{Region2, Seg2, Vec2, Vec3};
-use solidcraft_geom::bspline::NurbsSurface;
 
 /// A sheet metal part's surfaces: the panels and the joints between them. The material lies on
 /// the side of the sheet that a chart's `u × v` points to, `thickness` deep.
@@ -73,7 +71,8 @@ pub struct Panel {
 /// The surface a panel lies on, and so what its parameters are. A curved panel is a roll: its
 /// radius is the panel's own geometry, where a bend's is a value of the joint. It flattens
 /// through its neutral surface, as a bend does, so a roll and a bend of one radius give the same
-/// flat. The parameters run so that the material lies on the side their `u x v` points to.
+/// flat. The parameters run so that the material lies on the side their `u x v` points to. Each
+/// kind's flat has a closed form; a free-form surface's has none, and is no panel's (#15743).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Surface {
     /// A planar panel: its parameters are its plane's coordinates.
@@ -85,10 +84,6 @@ pub enum Surface {
     /// A panel rolled on a cone whose rulings make `half_angle` (radians) with its axis. Its
     /// parameters are distance from the apex along a ruling and angle round the axis (radians).
     Cone { half_angle: f64, material_inward: bool },
-    /// A free-form panel on a spline surface, whose parameters are the surface's own. It
-    /// flattens without stretch where it is developable; any stretch it cannot avoid is
-    /// reported with the flat, never forced.
-    Spline(Arc<NurbsSurface>),
 }
 
 /// Where a joint lies on one of its panels: a straight line in the panel's parameters, through
@@ -124,7 +119,7 @@ pub enum JointKind {
 /// How a rip parts two panels along the edge they share, whatever the edge's course and the
 /// panels' surfaces. At every point of the edge each panel is cut back from it, square to it on
 /// its own surface, by as much as its lap asks there: so a rip between two planes, round a
-/// roll's rim or along a crease between two free-form panels is the one operation.
+/// roll's rim or along a curve across a cone is the one operation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Rip {
     /// The edge on each panel `(a, b)`, in its parameters: the same points of it, in order from

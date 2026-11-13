@@ -288,7 +288,8 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b.mass_g = Some(v * rho / 1000.0);
         }
         // A sheet made from surfaces (#6748) is sheet metal: its perforation fields' holes are
-        // taken off where each body is measured (`measure_body`).
+        // taken off its volume, area and centre where each body is measured (`measure_body`);
+        // its counts are its stored B-rep's, which has no such holes (see `BodyFigures::faces`).
         if definitions.surface_sheets.iter().any(|sk| sk.body == source) {
             b.sheet_metal = Some(true);
         }

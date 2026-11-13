@@ -86,24 +86,24 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::surface::SurfaceFailure;
-use crate::error::{Failure, Result, SM_ERR_WARNING, SolidError, ignore_status, ignored};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_WARNING};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::certified::{self, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
-use crate::geom::geom_utility::p2::{CoplanarEllipse, line_coplanar_ellipse_intersect};
+use crate::geom::geom_utility::p2::{line_coplanar_ellipse_intersect, CoplanarEllipse};
 use crate::geom::global_solver::{GlobalSolve, GlobalSolver, SolverOperation};
 use crate::geom::matrix::Matrix;
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::{
     ObjectKind, SolutionArray, SolutionObject, SolutionType, SortKey,
 };
-use crate::geom::tol::{ZONE_TOL_3D, are_same, is_zero, is_zero_to_tol};
+use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, ZONE_TOL_3D};
 use crate::geom::vector2d::{Point2, Vec2};
-use crate::geom::vector3d::{Point3, Vec3, sqrt};
+use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, max2, min2};
+use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
@@ -111,15 +111,15 @@ use crate::nurbs::b_spline_surface::{BSplineSurface, BoundingBoxRequest};
 use crate::nurbs::knots::Side;
 use crate::surface::surf_of_extrusion::{CurveOrientType, SurfOfExtrusion};
 use crate::surface::surf_of_revolution::SurfOfRevolution;
-use crate::surface::surface::p1::{SurfaceIntersectContext, evaluate_1st_derivatives};
+use crate::surface::surface::p1::{evaluate_1st_derivatives, SurfaceIntersectContext};
 use crate::surface::surface::p2::{
-    SurfaceIntersection, TsectCurveType, base_global_surface_intersect_into,
+    base_global_surface_intersect_into, SurfaceIntersection, TsectCurveType,
 };
 use crate::surface::surface::p7::base_evaluate_normal;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
 
-use super::p1::{Plane, is_grazing_intersection};
+use super::p1::{is_grazing_intersection, Plane};
 
 const OP_PP: &str = "surface::plane::p2::Plane::intersect_with_plane";
 const OP_NURB: &str = "surface::plane::p2::Plane::is_nurb_surface_plane";
@@ -1903,10 +1903,9 @@ mod tests {
     #[test]
     fn trim_with_domain_checks_containment() {
         let mut p = rect();
-        assert!(
-            p.trim_with_domain(&Extent2d::from_bounds(-6.0, 0.0, 1.0, 1.0))
-                .is_err()
-        );
+        assert!(p
+            .trim_with_domain(&Extent2d::from_bounds(-6.0, 0.0, 1.0, 1.0))
+            .is_err());
         p.trim_with_domain(&Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0))
             .unwrap();
         assert_eq!(
@@ -1934,18 +1933,14 @@ mod tests {
             Vec3::new(2.0, 3.0, 1.0),
         )
         .unwrap();
-        assert!(
-            Plane::is_nurb_surface_plane(k, &twisted, 1.0)
-                .unwrap()
-                .is_none()
-        );
+        assert!(Plane::is_nurb_surface_plane(k, &twisted, 1.0)
+            .unwrap()
+            .is_none());
         let mut fixed_kernel = Kernel::default();
         fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
-        assert!(
-            Plane::is_nurb_surface_plane(&fixed_kernel, &twisted, 1.0)
-                .unwrap()
-                .is_none()
-        );
+        assert!(Plane::is_nurb_surface_plane(&fixed_kernel, &twisted, 1.0)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -1991,12 +1986,10 @@ mod tests {
                     .distance(expected_lower)
                     < 1.0e-10
             );
-            assert!(
-                fixed_plane
-                    .position()
-                    .x_axis()
-                    .is_perpendicular_to(fixed_plane.position().y_axis(), 1.0e-10)
-            );
+            assert!(fixed_plane
+                .position()
+                .x_axis()
+                .is_perpendicular_to(fixed_plane.position().y_axis(), 1.0e-10));
             assert!((fixed_plane.position().x_axis().length() - 1.0).abs() < 1.0e-12);
             assert!((fixed_plane.position().y_axis().length() - 1.0).abs() < 1.0e-12);
 

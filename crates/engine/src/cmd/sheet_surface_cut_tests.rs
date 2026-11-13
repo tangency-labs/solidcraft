@@ -754,7 +754,7 @@ fn a_notch_cut_across_a_bend_from_the_flats_edge_folds_with_the_sheet() {
 
 /// What such a cut from the flat's edge can't be is refused, and the sheet stays as it was: a
 /// drill at a slant through the bend's end, its walls leaning, and the notch stopping 1 inside
-/// the thickness.
+/// the thickness, cut by a box or by Combine.
 #[test]
 fn a_cut_across_a_bend_from_the_flats_edge_at_a_slant_or_short_of_through_is_refused() {
     let f = Flanged::new();
@@ -781,6 +781,19 @@ fn a_cut_across_a_bend_from_the_flats_edge_at_a_slant_or_short_of_through_is_ref
         assert!(refused(&e), "{what}: {e}");
         assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "{what}: the sheet changed");
     }
+    // The same notch as a body of its own, cut from the sheet by Combine, takes material away as
+    // the box cut does: refused alike, not kept on the body with a warning.
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let v = exact_volume(&s);
+    let (size, corner) = ([hi.x - lo.x, hi.y - lo.y, 5.0], [lo.x, lo.y, T - 1.0]);
+    let notch = json!({"corner": corner, "length": size[0], "width": size[1], "height": size[2], "body_name": "Notch", "operation": "new"});
+    run(&mut s, "solid.box", notch);
+    let combine = json!({"target": "Plate", "tools": ["Notch"], "operation": "cut"});
+    let e = s.execute("solid.combine", &combine).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("reaches a bend or a seam"), "combine: {e}");
+    assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "combine: the sheet changed");
 }
 
 /// What a cut takes from a sheet doesn't depend on the cuts before it, their order, or whether

@@ -223,18 +223,28 @@ impl<'a> OperandNames<'a> {
                 let grown = faces.get(face)?.as_ref()?;
                 let feature = grown.feature.unwrap_or(fid);
                 // After the faces it was grown from: their name, the one they are all pieces of.
-                let after = if grown.on.is_empty() {
-                    None
-                } else {
-                    let around = |k: usize| {
-                        let info = self.names.info.get(k)?;
-                        Some(Named { name: self.names.faces.get(k)?.clone(), verified: info.verified, ..Named::default() })
-                    };
-                    Some(merged(grown.on.iter().map(|&k| around(k)).collect::<Option<Vec<_>>>()?)?)
+                let around = |k: usize| {
+                    let info = self.names.info.get(k)?;
+                    Some(Named { name: self.names.faces.get(k)?.clone(), verified: info.verified, ..Named::default() })
                 };
-                let (name, verified) = match after {
-                    Some(on) => (format!("F{feature}:{}:{}", grown.role, on.name), on.verified),
-                    None => (format!("F{feature}:{}", grown.role), true),
+                let after = |on: &[usize]| -> Option<Option<Named>> {
+                    if on.is_empty() {
+                        return Some(None);
+                    }
+                    Some(Some(merged(on.iter().map(|&k| around(k)).collect::<Option<Vec<_>>>()?)?))
+                };
+                let (name, verified) = match (after(grown.on.as_slice())?, after(grown.across.as_slice())?) {
+                    // Grown at the edge between them: after the edge, its sides' names in order
+                    // (as `edge_names` writes an edge), inside its own name as a blend's edge is.
+                    (Some(on), Some(across)) => {
+                        let mut sides = [on.name, across.name];
+                        sides.sort();
+                        let [a, b] = sides;
+                        let edge = if a == b { a } else { format!("{a}|{b}") };
+                        (format!("F{feature}:{}({edge})", grown.role), on.verified && across.verified)
+                    }
+                    (Some(on), None) | (None, Some(on)) => (format!("F{feature}:{}:{}", grown.role, on.name), on.verified),
+                    (None, None) => (format!("F{feature}:{}", grown.role), true),
                 };
                 Some(Named { name, verified, ordinal: grown.ordinal, ..Named::default() })
             }

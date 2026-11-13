@@ -1615,6 +1615,43 @@ fn a_hole_leaves_sheets_it_cannot_reach_as_they_were() {
     assert!(volume(&work.model, "Plate") < 43_200.0 - 300.0, "and the plate is drilled");
 }
 
+/// A hole drilled into a sheet's rim still bores that sheet, beside sheets it cannot reach. The
+/// sheet takes the drill as a bore of the panel it runs along and builds its body again (see
+/// `surface_hole_cut`), so no body goes through a boolean: on main the flat sheet was cut and read
+/// back, one boolean. The far sheets are left as they were.
+#[test]
+fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
+    let mut doc = Document::new("rim");
+    for i in 0..4 {
+        flat_sheet(&mut doc, Vec2::new(200.0 * i as f64, 0.0), 60.0, 40.0);
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    // The sheet the drill runs along: the one at the origin, which holds the middle of its run, 30
+    // along it and halfway through the 2.5 mm.
+    let mid = Vec3::new(30.0, 20.0, 1.25);
+    let holds = |m: &Model, name: &str| m.state().body(name).is_some_and(|b| matches!(b.body.classify_point(mid), Ok(kernel::PointClass::Inside)));
+    let near = sheet_bodies(&model).into_iter().find(|b| holds(&model, b.as_str())).expect("the sheet at the origin");
+    let whole = volume(&model, &near);
+    // Into its rim at x = 60, along it (-x) through all, 1.5 across, halfway through its thickness.
+    let d = 1.5;
+    let work = cut_work(&mut doc, hole(Vec3::new(60.0, 20.0, 1.25), Vec3::new(-1.0, 0.0, 0.0), d));
+    assert_eq!(work.cut, 0, "the sheet bores itself: no body goes through a boolean");
+    let mut far: Vec<String> = sheet_bodies(&work.model).into_iter().filter(|b| *b != near).collect();
+    let mut kept = work.kept.clone();
+    far.sort();
+    kept.sort();
+    assert!(far.len() == 3 && kept == far, "the far sheets are left as they were: {kept:?} of {far:?}");
+    let state = work.model.state();
+    let sheet = state.surface_sheets.iter().find(|s| s.body == near).expect("the drilled sheet");
+    assert!(sheet.bores.len() == 1 && (sheet.bores[0].radius - d / 2.0).abs() < 1e-12, "kept as a bore of the sheet: {:?}", sheet.bores);
+    // It takes the bore's cylinder through the plate's 60: π (d/2)² 60 = 106.03 mm³ (to 2 %, as on
+    // main).
+    let removed = whole - volume(&work.model, &near);
+    let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
+    assert!((removed - bore).abs() < 0.02 * bore, "removed {removed} of {bore}");
+}
+
 /// A flange on a sheet made from surfaces lays the sheet's flat out once, however many flanges
 /// the sheet already has: naming its pick (the model's name for the edge), finding the sheet and
 /// the edge again by that name, and keying the panels it makes lay nothing out. Each of them laid

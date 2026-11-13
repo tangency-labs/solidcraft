@@ -684,10 +684,6 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let position =
         fold_position(str_(p, "position").unwrap_or("centerline")).ok_or_else(|| bad(cmd, "`position` must be centerline, start, end or mould"))?;
-    let fixed = match p.get("fixed") {
-        Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`fixed` must be a point [x, y, z]"))?),
-        None => None,
-    };
     let stays = match str_(p, "stays") {
         Some(t) => match fold_stays(t).as_deref() {
             Some("left") => Some(solidcraft_doc::FoldSide::Left),
@@ -695,6 +691,12 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
             None => return Err(bad(cmd, "`stays` must be left or right")),
         },
         None => None,
+    };
+    // A side given says which side stays: `fixed` is then ignored, neither read nor kept, so it
+    // is neither checked here nor refused off the sheet below.
+    let fixed = match p.get("fixed") {
+        Some(v) if stays.is_none() => Some(vec3(v).ok_or_else(|| bad(cmd, "`fixed` must be a point [x, y, z]"))?),
+        _ => None,
     };
     let body = str_(p, "body").map(str::to_string);
     let mut kind = FeatureKind::SheetFold {
@@ -787,10 +789,12 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(key) = RULE_ONLY.iter().find(|k| p.get(**k).is_some()) {
         return Err(bad(cmd, format!("`{key}` is not a sheet.convert parameter: the sheet metal rule sets it. Pass a rule's name as `rule`")));
     }
+    // Each list of faces is read before any is used: one not given as a list would be lost, and
+    // with no face picked the conversion takes the whole body.
+    let (faces, skipped, engraved) = (face_list(p, "faces", cmd)?, face_list(p, "skip", cmd)?, face_list(p, "engrave", cmd)?);
     // The faces picked, `face` then `faces`: the sheet is those, and every face a bend joins to
     // them. With none picked, it is every face of the body but the skipped ones.
-    let picks: Vec<&Value> =
-        p.get("face").filter(|f| !f.is_null()).into_iter().chain(p.get("faces").and_then(Value::as_array).into_iter().flatten()).collect();
+    let picks: Vec<&Value> = p.get("face").filter(|f| !f.is_null()).into_iter().chain(faces).collect();
     if !picks.is_empty() && p.get("skip").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`skip` leaves faces out of the whole body: with faces picked, the sheet is only those, so leave out `skip`"));
     }
@@ -799,13 +803,13 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
         picked.push(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?));
     }
     let mut skip = Vec::new();
-    for f in p.get("skip").and_then(Value::as_array).into_iter().flatten() {
+    for f in skipped {
         skip.push(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?));
     }
     // The faces of recesses the user brings in as engravings: no panels, but pockets of the
     // panels round them. A recess not picked stays panels, as a pocket the design may mean.
     let mut engrave = Vec::new();
-    for f in p.get("engrave").and_then(Value::as_array).into_iter().flatten() {
+    for f in engraved {
         engrave.push(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?));
     }
     let direction = material_side_of(p, cmd)?;
@@ -816,6 +820,16 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
         None => FeatureKind::SheetSurfaceConvert { body, rule, bends, skip, engrave, direction },
     };
     add_feature(s, p, kind)
+}
+
+/// The faces listed at `key` (points on them, or their names): none where it is left out or null,
+/// and anything but a list is refused.
+fn face_list<'a>(p: &'a Value, key: &str, cmd: &str) -> Result<&'a [Value]> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(&[]),
+        Some(Value::Array(a)) => Ok(a.as_slice()),
+        Some(_) => Err(bad(cmd, format!("`{key}` must list faces: points [x, y, z] on them, or their names from model.faces"))),
+    }
 }
 
 /// A conversion's `direction` (in any case), lower-cased: the side of the faces the material
@@ -864,7 +878,7 @@ fn recognize(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     let mut skip = Vec::new();
-    for f in p.get("skip").and_then(Value::as_array).into_iter().flatten() {
+    for f in face_list(p, "skip", cmd)? {
         skip.push(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?));
     }
     let rule = match p.get("new_rule").filter(|v| !v.is_null()) {
@@ -1090,7 +1104,7 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         .collect();
     let mut out = json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
         "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "roll_table": roll_table, "unfolded": sk.unfolded,
-        "perforations": perforations, "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls, "stretch": sk.stretch});
+        "perforations": perforations, "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls});
     if !bores.is_empty() {
         out["bores"] = Value::Array(bores);
     }
@@ -1565,3 +1579,10 @@ mod dxf_tests;
 #[cfg(test)]
 #[path = "sheet_face_names_tests.rs"]
 mod face_names_tests;
+
+#[cfg(test)]
+#[path = "sheet_parity_tests.rs"]
+mod parity_tests;
+#[cfg(test)]
+#[path = "sheet_upgrade_tests.rs"]
+mod upgrade_tests;

@@ -5,15 +5,17 @@
 
 use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
-use std::sync::Arc;
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
-use crate::fitted::{FlatMap, fit};
 use crate::{Sheet, Surface};
 
-/// A segment a map does not keep is followed by chords this close to it (mm).
+/// A segment a map does not keep is followed by chords, or cubic pieces, this close to it (mm).
 const CHORD_TOL: f64 = 1e-4;
+
+/// Most cubic pieces a line across a cone's parameters is followed by ([`spiral`]): more than a
+/// sheet under 10⁹ mm across ever needs.
+const MAX_SPIRAL_PIECES: usize = 4096;
 
 /// Parameters this close are one: a line of one angle on a cone, or of one distance.
 const PARAM_TOL: f64 = 1e-12;
@@ -31,12 +33,10 @@ pub(crate) enum Flatten {
     /// A cone: (distance from the apex along a ruling, angle round the axis) to polar
     /// coordinates in the flat, the distance moved by `shift` (the neutral surface's offset
     /// along the rulings) and the angle scaled by `scale` (the sine of the half angle). A line of
-    /// one angle (a ruling) stays a line, and a line of one distance (a circle round the axis)
-    /// becomes an arc about the apex; anything else is followed by chords.
+    /// one angle (a ruling) stays a line, a line of one distance (a circle round the axis)
+    /// becomes an arc about the apex, and any other line becomes a spiral, followed by cubic
+    /// pieces ([`spiral`]); anything else is followed by chords.
     Cone { shift: f64, scale: f64 },
-    /// A free-form panel: its map fitted in its surface's own spline space. A straight segment
-    /// of its parameters comes back as exact Bezier pieces; anything else is followed by chords.
-    Fitted(Arc<FlatMap>),
 }
 
 impl Flatten {
@@ -61,15 +61,6 @@ impl Flatten {
                 let h = if material_inward { -(1.0 - k) * t } else { k * t };
                 Ok(Flatten::Cone { shift: h / half_angle.tan(), scale: half_angle.sin() })
             }
-            Surface::Spline(s) => Ok(Flatten::Fitted(Arc::new(fit(s, t, k)?))),
-        }
-    }
-
-    /// The largest strain the flat leaves on the neutral surface: none but on a free-form panel.
-    pub(crate) fn stretch(&self) -> f64 {
-        match self {
-            Flatten::Fitted(m) => m.stretch,
-            _ => 0.0,
         }
     }
 
@@ -78,13 +69,11 @@ impl Flatten {
             Flatten::Same => p,
             Flatten::Roll { radius } => Vec2::new(p.x, p.y * radius),
             Flatten::Cone { shift, scale } => Vec2::from_angle(p.y * scale) * (p.x + shift),
-            Flatten::Fitted(ref m) => m.point(p),
         }
     }
 
     /// The parameters of a point of the neutral surface laid flat: [`Flatten::point`] undone. A
-    /// cone's angle is the one nearest `near` (radians round its axis); a free-form panel's map is
-    /// undone on its own spline (see [`FlatMap::param`]).
+    /// cone's angle is the one nearest `near` (radians round its axis).
     pub(crate) fn param(&self, p: Vec2, near: f64) -> Option<Vec2> {
         match *self {
             Flatten::Same => Some(p),
@@ -94,7 +83,6 @@ impl Flatten {
                 let turn = turn + ((near * scale - turn) / TAU).round() * TAU;
                 Some(Vec2::new(p.len() - shift, turn / scale))
             }
-            Flatten::Fitted(ref m) => m.param(p),
         }
     }
 
@@ -108,13 +96,13 @@ impl Flatten {
                 let out = Vec2::from_angle(p.y * scale);
                 (out * v.x + out.perp() * ((p.x + shift) * scale * v.y)).normalized()
             }
-            Flatten::Fitted(ref m) => m.dir(p, v),
         }
     }
 
     /// The region flattened, and for every segment of each of its loops the index of the
     /// segment of the panel's own loop it came from: an arc on a roll becomes several conics,
-    /// and a curve the map does not keep becomes chords.
+    /// a line across a cone's parameters several cubics, and any other curve the map does not
+    /// keep chords.
     pub(crate) fn region(&self, r: &Region2) -> Result<(Region2, Vec<Vec<usize>>), &'static str> {
         if let Flatten::Cone { shift, .. } = *self {
             for lp in std::iter::once(&r.outer).chain(&r.holes) {
@@ -142,18 +130,6 @@ impl Flatten {
 
     fn seg(&self, s: &Seg2, out: &mut Vec<Seg2>) {
         match (self, *s) {
-            (Flatten::Fitted(m), Seg2::Line { a, b }) => m.line(a, b, CHORD_TOL, out),
-            (Flatten::Fitted(m), _) => {
-                // Chords close enough in the flat: a parameter step moves a point by about the
-                // map's rate of change there.
-                let p = s.start();
-                let rate = [Vec2::X, Vec2::Y].iter().map(|d| m.point(p).dist(m.point(p + *d * 1e-3)) * 1e3).fold(1.0, f64::max);
-                let pts: Vec<Vec2> = s.polyline(CHORD_TOL / rate).into_iter().map(|p| m.point(p)).collect();
-                out.extend(pts.windows(2).filter_map(|w| match w {
-                    [a, b] => Some(Seg2::Line { a: *a, b: *b }),
-                    _ => None,
-                }));
-            }
             (Flatten::Same, _) => out.push(*s),
             (Flatten::Roll { .. }, Seg2::Arc { center, radius, start, sweep }) => {
                 out.extend(arc_as_conics(center, radius, start, sweep).iter().map(|c| self.controls(c)));
@@ -166,6 +142,7 @@ impl Flatten {
             (&Flatten::Cone { shift, scale }, Seg2::Line { a, b }) if (a.x - b.x).abs() <= PARAM_TOL => {
                 out.push(Seg2::Arc { center: Vec2::ZERO, radius: a.x + shift, start: a.y * scale, sweep: (b.y - a.y) * scale });
             }
+            (&Flatten::Cone { shift, scale }, Seg2::Line { a, b }) => out.extend(spiral(a, b, shift, scale)),
             (&Flatten::Cone { shift, .. }, _) => {
                 // Chords close enough in the flat: an angle step moves a point by its distance
                 // from the apex times the step.
@@ -197,6 +174,37 @@ impl Flatten {
     }
 }
 
+/// A line from `a` to `b` across both of a cone's parameters (distance from the apex, angle round
+/// the axis), flattened by [`Flatten::Cone`]'s `shift` and `scale`: an Archimedean spiral, its
+/// distance from the apex `r = r₀ + t Δr` and its angle `θ = θ₀ + t Δθ` both running evenly along
+/// the line's `t`. No rational curve is a spiral, so it is followed by cubic pieces over equal
+/// steps of `t`, each with the spiral's point and rate at both its ends (Hermite). A piece over a
+/// step `h` lies within `h⁴/384 · max|c⁗|` of the spiral `c` at the same `t` (the cubic's
+/// remainder), and `c⁗ = (Δθ⁴ r − 4 i Δθ³ Δr) e^{iθ}`, so `|c⁗| ≤ |Δθ|³ √(Δθ² r² + 16 Δr²)` at
+/// the line's furthest `r`, one of its ends: it takes as many pieces as keep that within
+/// [`CHORD_TOL`], which the pieces still are from the spiral, not on it.
+fn spiral(a: Vec2, b: Vec2, shift: f64, scale: f64) -> Vec<Seg2> {
+    let (dr, dt) = (b.x - a.x, (b.y - a.y) * scale);
+    let far = (a.x + shift).abs().max((b.x + shift).abs());
+    let fourth = dt.abs().powi(3) * (dt * dt * far * far + 16.0 * dr * dr).sqrt();
+    // At least one piece, whatever the bound (a NaN one too).
+    let n = (fourth / (384.0 * CHORD_TOL)).powf(0.25).ceil().max(1.0).min(MAX_SPIRAL_PIECES as f64) as usize;
+    // The spiral's point, and its rate along the line's t, a fraction t of the way along.
+    let at = |t: f64| {
+        let p = a * (1.0 - t) + b * t;
+        let out = Vec2::from_angle(p.y * scale);
+        (out * (p.x + shift), out * dr + out.perp() * ((p.x + shift) * dt))
+    };
+    (0..n)
+        .map(|k| {
+            let (t0, t1) = (k as f64 / n as f64, if k + 1 == n { 1.0 } else { (k + 1) as f64 / n as f64 });
+            let ((p0, d0), (p3, d3)) = (at(t0), at(t1));
+            let step = (t1 - t0) / 3.0;
+            Seg2::Cubic { p0, p1: p0 + d0 * step, p2: p3 - d3 * step, p3 }
+        })
+        .collect()
+}
+
 /// A circular arc as rational quadratic pieces of at most a quarter turn each: exact, and kept
 /// exact by any affine map.
 pub(crate) fn arc_as_conics(center: Vec2, radius: f64, start: f64, sweep: f64) -> Vec<Seg2> {
@@ -214,4 +222,39 @@ pub(crate) fn arc_as_conics(center: Vec2, radius: f64, start: f64, sweep: f64) -
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_geom::prelude::*;
+
+    use super::Flatten;
+
+    /// A line across both of a cone's parameters flattens to the spiral it is, followed by cubic
+    /// pieces. On a cone of scale 1/2 and no shift, the line from (100, 0) to (200, 1) runs from
+    /// radius 100 at 0 rad to radius 200 at 0.5 rad: Δr = 100, Δθ = 0.5. The spiral's fourth
+    /// derivative is at most 0.5³ √(0.5² · 200² + 16 · 100²) = 0.125 √170000 = 51.539, so a piece
+    /// over 1/n of the line is within 51.539 / (384 n⁴) of it: 1.036e-4 for n = 6, and 5.59e-5 for
+    /// n = 7, the first within 1e-4. Each piece is checked at nine points against the spiral at
+    /// the same place along the line. The single chord it was, from (100, 0) to
+    /// 200 (cos 0.5, sin 0.5), lay 12.66 mm from it at its middle.
+    #[test]
+    fn a_line_across_a_cones_parameters_flattens_to_its_spiral() {
+        let cone = Flatten::Cone { shift: 0.0, scale: 0.5 };
+        let (a, b) = (Vec2::new(100.0, 0.0), Vec2::new(200.0, 1.0));
+        let mut out = Vec::new();
+        cone.seg(&Seg2::Line { a, b }, &mut out);
+        assert_eq!(out.len(), 7, "{out:?}");
+        for (k, s) in out.iter().enumerate() {
+            assert!(matches!(s, Seg2::Cubic { .. }), "{s:?}");
+            for i in 0..=8 {
+                let x = f64::from(i) / 8.0;
+                let off = s.point_at(x).dist(cone.point(a.lerp(b, (k as f64 + x) / 7.0)));
+                assert!(off <= 5.6e-5, "piece {k} at {x}: {off}");
+            }
+        }
+        assert_eq!(out.first().map(|s| s.start()), Some(cone.point(a)));
+        assert_eq!(out.last().map(|s| s.end()), Some(cone.point(b)));
+    }
 }

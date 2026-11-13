@@ -360,3 +360,162 @@ fn unfold_cut_and_refold_keep_every_name() {
     let walls: Vec<&String> = refolded.difference(&folded).collect();
     assert!(!walls.is_empty() && walls.iter().all(|n| n.starts_with(&format!("F{cut}:side:{curve}#"))), "{walls:?}");
 }
+
+/// A 120 x 90 base (2 mm, R 1, K 0.5, gap 0.5) and, for each of `flanges` in turn, an edge flange
+/// feature 20 high at 90° on the edges it picks, with the corner relief it asks for: the base
+/// flange's id and each flange feature's. The rectangle's lines are `l1` along y = 0, `l2` along
+/// x = 120, `l3` along y = 90 and `l4` along x = 0.
+fn relieved_base(s: &mut Session, flanges: &[(Value, Value)]) -> (u64, Vec<u64>) {
+    let rule = json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "gap": "0.5 mm", "active": true});
+    run(s, "sheet.manage_rules", rule);
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [120, 90]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"sketch": "Base"}));
+    let base = s.doc.features.last().map_or(0, |f| f.id);
+    let mut made = Vec::with_capacity(flanges.len());
+    for (edges, relief) in flanges {
+        let mut p = json!({"edges": edges, "height": 20, "angle": "90 deg"});
+        if let (Some(p), Some(relief)) = (p.as_object_mut(), relief.as_object()) {
+            p.extend(relief.clone());
+        }
+        run(s, "sheet.flange", p);
+        made.push(s.doc.features.last().map_or(0, |f| f.id));
+    }
+    (base, made)
+}
+
+/// #7990, docs/design/sheet-metal-naming.md: a relief wall is `F<f>:relief:<edge between the two
+/// rims>`, `<f>` the feature whose build cut it, its edge written inside the name as a blend's is
+/// (`F<f>:relief(<rim>|<rim>)`, the two rims' names in order, as the model names an edge). One
+/// flange feature on the base's `l1`, `l2` and `l3` relieves two corners, (120, 0) between the
+/// rims `l1` and `l2` and (120, 90) between `l2` and `l3`: each corner's walls have a stem of their
+/// own, are told apart by the faces around them, and where those can't, are numbered along their
+/// own corner's relief, never by where they lie.
+///
+/// By hand, T 2, R 1, K 0.5 at 90°, in from a corner's two edges: each bend's tangent line on the
+/// base lies R + T = 3 in, its zone BA = π wide outside that (to 3 − π = −0.142), its flange
+/// past the zone; the flanges stand inside, each one's end at the corner (g/2)√2 + T = 2.354 in
+/// from the other edge (gap g 0.5). A relief is centred where the zones' center lines cross,
+/// c = 3 − π/2 = 1.429 in from both edges.
+/// - Round, 6 across (radius 3): the base's corner (3, 3) lies 2.22 from the center, inside it.
+///   The circle meets each tangent line on the base at c + √(9 − (3 − c)²) = 3.985 and each line
+///   on a flange at 3.985 too, and a flange's end at c − √(9 − (2.354 − c)²) = −1.425: one wall on
+///   the base (bounded by its two caps), one on each bend (its inner and outer faces), one on each
+///   flange (its two caps and its end). Five walls, each told apart by its own faces.
+/// - Rectangular, 8 across: its sides run along the bends c ± 4 in from the edges, at 5.429 and
+///   −2.571. On the base, two walls, one 5.429 in from each edge, each from a tangent line (3 in)
+///   to the relief's corner (5.429 in, 5.429 in), 2 thick (z 0 to 2), both bounded by the base's
+///   two caps only; one wall on each bend; two on each flange, the one across the flange (2.571
+///   past its zone) bounded by its end too. The base's two tie: they are numbered along the
+///   outline from where it meets the zone of the bend whose panel's key sorts first
+///   (`F<f>/F<b>/side.l1` before `…side.l2`, `…side.l2` before `…side.l3`), on that zone's line on
+///   the base, going into the base: first the wall that runs on from that zone across the line.
+///   At (120, 0) that is the wall at x = 120 − 5.429 = 114.571, then the one at y = 5.429; at
+///   (120, 90) the wall at y = 90 − 5.429 = 84.571, then the one at x = 114.571.
+///
+/// A flange's end at its bend's anchors' origin is `end0`. The base's outline runs
+/// counterclockwise in its own chart, which sees the sketch mirrored, so `l1` runs from (120, 0)
+/// (as the tray test above finds `F<sd>:past0:F<fb>:bend.end0` at x = w), `l2` from (120, 90) and
+/// `l3` from (0, 90): at (120, 0) the `l1` flange ends in its `end0` and the `l2` flange in its
+/// `end1`; at (120, 90) the `l2` flange in its `end0` and the `l3` flange in its `end1`.
+#[test]
+fn each_corners_relief_walls_are_named_after_the_edge_between_its_rims() {
+    let d = 3.0 - std::f64::consts::FRAC_PI_2 + 4.0;
+    for (shape, size) in [("round", "6 mm"), ("rectangular", "8 mm")] {
+        let mut s = Session::default();
+        let edges = json!([[60, 0, 2], [120, 45, 2], [60, 90, 2]]);
+        let (b, made) = relieved_base(&mut s, &[(edges, json!({"corner_relief_shape": shape, "corner_relief": size}))]);
+        let f = made[0];
+        let rim = |l: &str| format!("F{b}:side:{l}");
+        let corner = |p: &str, q: &str| format!("F{f}:relief({}|{})", rim(p), rim(q));
+        // The walls at the corner of the rims `p` and `q` (in order), the flange on `p` ending
+        // there in its `end_p`, the one on `q` in its `end_q`.
+        let walls = |p: &str, q: &str, end_p: &str, end_q: &str| -> Vec<String> {
+            let bend = |l: &str| format!("#[F{f}:bend.inner:{0},F{f}:bend.outer:{0}]", rim(l));
+            let caps = |l: &str| format!("#[F{f}:bottom:{0},F{f}:top:{0}]", rim(l));
+            let end = |l: &str, e: &str| format!("#[F{f}:bottom:{0},F{f}:{e}:{0},F{f}:top:{0}]", rim(l));
+            let base = format!("#[F{b}:bottom,F{b}:top]");
+            let around = if shape == "round" {
+                vec![base, bend(p), bend(q), end(p, end_p), end(q, end_q)]
+            } else {
+                vec![format!("{base}#1"), format!("{base}#2"), bend(p), bend(q), caps(p), end(p, end_p), caps(q), end(q, end_q)]
+            };
+            around.into_iter().map(|w| format!("{}{w}", corner(p, q))).collect()
+        };
+        let mut want = [walls("l1", "l2", "end0", "end1"), walls("l2", "l3", "end0", "end1")].concat();
+        want.sort();
+        let all = faces(&mut s);
+        let mut got: Vec<String> = all.iter().filter_map(|x| x.0.clone()).filter(|n| n.starts_with(&format!("F{f}:relief"))).collect();
+        got.sort();
+        assert_eq!(got, want, "{shape}");
+        if shape == "rectangular" {
+            for (name, at) in [
+                (format!("{}#[F{b}:bottom,F{b}:top]#1", corner("l1", "l2")), Vec3::new(120.0 - d, (3.0 + d) / 2.0, 1.0)),
+                (format!("{}#[F{b}:bottom,F{b}:top]#2", corner("l1", "l2")), Vec3::new((117.0 + 120.0 - d) / 2.0, d, 1.0)),
+                (format!("{}#[F{b}:bottom,F{b}:top]#1", corner("l2", "l3")), Vec3::new((117.0 + 120.0 - d) / 2.0, 90.0 - d, 1.0)),
+                (format!("{}#[F{b}:bottom,F{b}:top]#2", corner("l2", "l3")), Vec3::new(120.0 - d, (87.0 + 90.0 - d) / 2.0, 1.0)),
+            ] {
+                let w = named(&all, &name);
+                assert!(w.len() == 1 && w[0].1.dist(at) < 1e-6, "{name}: {w:?}");
+            }
+        }
+    }
+}
+
+/// A corner a later feature closes against a bend an earlier one made: that bend stands on its
+/// rim, so the rim is no face of the body the later feature finds, and the corner's edge there is
+/// the one between the new bend's rim and the earlier bend's end, which meets it
+/// (`F<f>:relief(<rim>|<bend end>)`), as a rim past a bend's end is named after that end. The near
+/// feature (round, 6 across) flanges `l1` and `l4`, which meet at the origin; the far feature
+/// (rectangular, 8 across) flanges `l3` and `l2`, which meet at (120, 90), and closes the corners
+/// at (120, 0) and (0, 90) against the near bends, cutting its own relief there (the later
+/// feature's). The near bends' ends there: `bend.end0` on `l1`, whose anchors start at x = 120,
+/// and `bend.end1` on `l4`, whose anchors start at the origin (see the test above).
+///
+/// The base's two walls at each rectangular corner, by hand as in the test above, numbered from
+/// the zone of the bend whose panel's key sorts first: at (120, 0) and (0, 90) the near bend's
+/// (`F<near>/…` before `F<far>/…`, both ids one digit), at (120, 90) the one on `l2`. At (120, 0)
+/// the wall at x = 114.571 first, then y = 5.429; at (0, 90) y = 84.571 (running on from the `l4`
+/// zone's line at x = 3) first, then x = 5.429; at (120, 90) y = 84.571, then x = 114.571.
+#[test]
+fn a_corner_closed_against_an_earlier_bend_is_named_after_that_bends_end() {
+    let round = json!({"corner_relief_shape": "round", "corner_relief": "6 mm"});
+    let square = json!({"corner_relief_shape": "rectangular", "corner_relief": "8 mm"});
+    let mut s = Session::default();
+    let (b, made) = relieved_base(&mut s, &[(json!([[60, 0, 2], [0, 45, 2]]), round), (json!([[60, 90, 2], [120, 45, 2]]), square)]);
+    let (near, far) = (made[0], made[1]);
+    assert!(near < far && far < 10, "{near} {far}");
+    let rim = |l: &str| format!("F{b}:side:{l}");
+    // An edge's name: its two sides' names in order, as the model names an edge.
+    let edge = |x: String, y: String| if x < y { format!("{x}|{y}") } else { format!("{y}|{x}") };
+    let corners = [
+        format!("F{near}:relief({})", edge(rim("l1"), rim("l4"))),
+        format!("F{far}:relief({})", edge(rim("l2"), rim("l3"))),
+        format!("F{far}:relief({})", edge(rim("l2"), format!("F{near}:bend.end0:{}", rim("l1")))),
+        format!("F{far}:relief({})", edge(rim("l3"), format!("F{near}:bend.end1:{}", rim("l4")))),
+    ];
+    let all = faces(&mut s);
+    let walls: Vec<&str> =
+        all.iter().filter_map(|x| x.0.as_deref()).filter(|n| [near, far].iter().any(|f| n.starts_with(&format!("F{f}:relief")))).collect();
+    // Every wall is one corner's, and every corner has walls.
+    for w in &walls {
+        assert!(corners.iter().any(|c| w.starts_with(&format!("{c}#"))), "{w}: {corners:?}");
+    }
+    for c in &corners {
+        assert!(walls.iter().any(|w| w.starts_with(&format!("{c}#"))), "{c}: {walls:?}");
+    }
+    let d = 3.0 - std::f64::consts::FRAC_PI_2 + 4.0;
+    let base = format!("#[F{b}:bottom,F{b}:top]");
+    for (corner, first, second) in [
+        (&corners[2], Vec3::new(120.0 - d, (3.0 + d) / 2.0, 1.0), Vec3::new((117.0 + 120.0 - d) / 2.0, d, 1.0)),
+        (&corners[3], Vec3::new((3.0 + d) / 2.0, 90.0 - d, 1.0), Vec3::new(d, (87.0 + 90.0 - d) / 2.0, 1.0)),
+        (&corners[1], Vec3::new((117.0 + 120.0 - d) / 2.0, 90.0 - d, 1.0), Vec3::new(120.0 - d, (87.0 + 90.0 - d) / 2.0, 1.0)),
+    ] {
+        for (k, at) in [(1, first), (2, second)] {
+            let name = format!("{corner}{base}#{k}");
+            let w = named(&all, &name);
+            assert!(w.len() == 1 && w[0].1.dist(at) < 1e-6, "{name}: {w:?}");
+        }
+    }
+}

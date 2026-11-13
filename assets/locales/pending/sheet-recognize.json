@@ -65,6 +65,17 @@
     "sheet.recognize_measured": "厚さ {thickness} mm、モデリングされた曲げ: {bends}",
     "sheet.convert_thin_hint": "このボディはすでに板金です (厚さ {thickness} mm)。「板金として認識」は両側をそのまま保ちます。"
   },
+  "ko": {
+    "cmd.sheet_recognize": "판금으로 인식",
+    "cmd.sheet_measure_body": "판금 바디 측정",
+    "help.sheet.recognize": "가져온 부품이나 두께가 일정한 쉘 부품처럼 이미 판금인 바디에 판금 동작을 부여합니다. 벤딩과 롤 벤딩은 바디의 면에서 찾아냅니다. 다른 곳에서 만든 부품을 펼치고 편집할 때 사용합니다.",
+    "RECOGNIZE SHEET METAL": "판금으로 인식",
+    "Surface Face": "표면이 되는 면",
+    "New Rule": "새 규칙",
+    "none: the rule above": "비워 둠: 위의 규칙",
+    "sheet.recognize_measured": "두께 {thickness} mm, 모델링된 벤딩: {bends}",
+    "sheet.convert_thin_hint": "이 바디는 이미 두께 {thickness} mm의 판금입니다. '판금으로 인식'은 바디 자체의 양면을 그대로 유지합니다."
+  },
   "vi": {
     "cmd.sheet_recognize": "Nhận dạng kim loại tấm",
     "cmd.sheet_measure_body": "Đo thân kim loại tấm",

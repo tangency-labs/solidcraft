@@ -2,9 +2,21 @@
 
 Applies to the surface-first sheet model on `fix-6748-develop` (#6748, #9245). The plan of record
 for names is [`persistent-naming-proposal.md`](persistent-naming-proposal.md) (#7990); read the two
-together. Status: this is the method we are implementing now. The branch still carries an older
-sheet-only naming layer (`sheet_face_names.rs`'s `FaceNamer`, `sheet:<body>:…` face names,
-`<panel>:rim.…` edge names, `tag_panels`' `F<feature>.<k>`); it is being removed, not extended.
+together. Status: this is how the branch names a sheet's faces now. A sheet build reports what
+each face was made for (`sheet_face_names.rs`: `FaceNamer::part` gives a `SheetPart`, `ranked`
+its place among the faces made for that part), and `lineage::sheet_lineage` with
+`history_names.rs` names the face from that; edges are the engine's (`sheet::sheet_edge_names`),
+and panels are keyed by their recipes (`tag_panels`: `F15/F12/side.l2`, never
+`F<feature>.<k>`). The `sheet:<body>:<panel>:<side>` face names designs saved before keep are
+still read (`sheet::split_sheet_face_name`), but `body_sheet_face_names` gives `None` for every
+face, so such a name finds no face and a sketch attached by one reports a lost attachment. Two
+things do not follow this document yet:
+
+- a relief wall is `F<f>:relief`, with nothing after it that tells one corner's relief from
+  another's (`lineage::sheet_role`), not the row in the table below;
+- `SurfaceSheet::rims` still keeps a sheet-local name for each straight rim (`rim_names`: the
+  sketch line's id, `far`, `side0`, `side1`, `ext0`, `ext1`, else `edge<k>`, its place in the
+  outline), saved with the design; no lookup reads it.
 
 ## The rule
 
@@ -68,7 +80,7 @@ engine already has:
 | a flange's rim past its bend's end, where a closed corner runs it on | `F<f>:past0:<rim>`, `past1` (`past0` at the joint's anchor origin) when its own feature closed the corner; `F<g>:past0:<bend end>` when a later feature `g` did |
 | a tab's caps (bend material riding with one panel) | `F<f>:tab.top:<rim>`, `tab.bottom` when the bend's own feature made the tab; `F<cut>:tab.top:<bend face on that side>` when a later cut freed it |
 | a hole or cut wall | `F<cut>:side:<curve>`, pieces told apart by the faces that bound them, else `#k` by where each starts along the curve |
-| a relief wall | `F<f>:relief:<edge between the two rims>`, `<f>` the feature whose build cut it |
+| a relief wall | `F<f>:relief(<edge between the two rims>)`, `<f>` the feature whose build cut it |
 | a converted sheet's faces | the source body's face names, carried |
 
 Edges are the engine's: `<face A>|<face B>`. A flange or hem pick stores that edge name.

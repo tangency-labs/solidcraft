@@ -1088,6 +1088,11 @@ impl SurfaceSheet {
         // loose pieces there; one in the zone itself has no one place, but for a rip, which parts
         // where the zone crosses it. What lies on a piece the line does not reach stays.
         let piece_at = |q: Vec2| moves.iter().find(|m| q.dot(u) >= m.span.0 - tol && q.dot(u) <= m.span.1 + tol).map(|m| m.panel);
+        // A joint wholly past the zone goes with the piece whose outline it runs along, never the one
+        // its ends lie across from along the line: a rim on a flared wall runs past the wall's root
+        // at the bend, and goes up with the wall all the same (#15655). A joint whose anchor lies
+        // beside the outline (a bend drawn inside the panel's edge) goes as its start lies.
+        let piece_along = |a: Vec2, b: Vec2| moves.iter().find(|m| runs_along(&m.region, a, b)).map(|m| m.panel);
         let mut anchors = Vec::new();
         // The rips the zone parts: the joint, its two stretches, and the panel beyond it with the
         // panel's cut edge on the piece that folds (a point of it and the way into the material).
@@ -1127,7 +1132,7 @@ impl SurfaceSheet {
                         }
                         let (s, e) = (side(an.origin), side(an.origin + an.dir * length));
                         if s.min(e) >= ba - tol {
-                            if let Some(p) = piece_at(an.origin) {
+                            if let Some(p) = piece_along(an.origin, an.origin + an.dir * length).or_else(|| piece_at(an.origin)) {
                                 anchors.push((k, on_a, p));
                             }
                         } else if s.max(e) > tol {
@@ -1731,6 +1736,14 @@ impl SurfaceSheet {
     pub fn add_hem_on(&mut self, edge: FreeEdge, length: f64, gap: f64, flip: bool) -> Result<usize> {
         let (a, b, d) = straight(&edge)?;
         let t = self.sheet.thickness;
+        // A NaN gap or length fails every comparison below, so none would refuse it, and an
+        // infinite length leaves an infinite leg: neither makes a hem.
+        if !gap.is_finite() {
+            return err("the hem gap is not finite");
+        }
+        if !length.is_finite() {
+            return err("the hem length is not finite");
+        }
         if gap < 0.0 {
             return err("the hem gap must not be negative");
         }
@@ -2043,6 +2056,23 @@ const FOLD_THROUGH_BEND: &str = "not supported yet: a fold through a flange's be
 const ZONE_ON_JOINT: &str = "the fold's bend zone reaches or crosses another joint of its panel: not supported yet";
 const FOLD_INTO_NEIGHBOR: &str =
     "not supported yet: a fold across a mitred corner that turns its wall into the next one, across the rip between them";
+
+/// Whether the straight run `a`–`b` lies along a straight segment of region `r`'s outline: both
+/// its ends on the segment's line and its middle within the segment, to a rounding ([`ON_LAP`]), as
+/// [`SurfaceSheet::joint_along`] takes an edge on an anchor.
+fn runs_along(r: &Region2, a: Vec2, b: Vec2) -> bool {
+    let mid = a.lerp(b, 0.5);
+    std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs).any(|s| match *s {
+        Seg2::Line { a: p, b: q } => {
+            let d = q - p;
+            let len = d.len();
+            let off = |x: Vec2| d.cross(x - p).abs() / len;
+            let along = (mid - p).dot(d) / len;
+            len > 0.0 && off(a) <= ON_LAP && off(b) <= ON_LAP && along >= -ON_LAP && along <= len + ON_LAP
+        }
+        _ => false,
+    })
+}
 
 /// How far (mm) a rip's cut may differ along it and still be one cut, as the development takes it.
 const RIP_EVEN: f64 = 1e-9;
@@ -2893,5 +2923,40 @@ mod tests {
         let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-9;
         let top = 4.0 + 4.0 * (PI / 18.0).sin();
         assert!(near(b.min, Vec3::new(0.0, -4.0, 0.0)) && near(b.max, Vec3::new(100.0, 0.0, top)), "{b:?}");
+    }
+
+    /// A hem's gap and length are finite numbers: a NaN fails `gap < 0.0` and `gap == 0.0` alike,
+    /// and an infinite length leaves an infinite leg. On a 100 × 60 plate 2 thick, a NaN or an
+    /// infinite gap (the length 8) and a NaN or an infinite length (the gap 1) are each refused,
+    /// naming the value, before anything is made: the sheet is as it was.
+    #[test]
+    fn a_hem_whose_gap_or_length_is_not_finite_is_refused() {
+        let rule = crate::ConvertRule {
+            thickness: 2.0,
+            k_factor: 0.5,
+            bend_radius: 2.0,
+            gap: 0.1,
+            corner_relief: crate::sheet::ReliefShape::Notch,
+            corner_relief_size: 0.0,
+            relief_width: 0.0,
+            relief_depth: 0.0,
+        };
+        let pts = [Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 60.0), Vec2::new(0.0, 60.0)];
+        let plate = Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() };
+        let made = crate::SurfaceSheet::base("Plate", "R", &rule, solidcore_record::Plane::XY, plate, &[], 1);
+        let (mut sheet, _) = made.unwrap_or_else(|e| panic!("the plate: {e}"));
+        let before = sheet.clone();
+        let edge = super::FreeEdge { panel: 0, a: Vec2::new(0.0, 0.0), b: Vec2::new(100.0, 0.0), far_face: false };
+        let cases = [
+            (8.0, f64::NAN, "the hem gap is not finite"),
+            (8.0, f64::INFINITY, "the hem gap is not finite"),
+            (f64::NAN, 1.0, "the hem length is not finite"),
+            (f64::INFINITY, 1.0, "the hem length is not finite"),
+        ];
+        for (length, gap, why) in cases {
+            let e = sheet.add_hem_on(edge, length, gap, false).err().map(|e| e.to_string()).unwrap_or_default();
+            assert_eq!(e, why, "length {length}, gap {gap}");
+            assert!(sheet == before, "length {length}, gap {gap}: the sheet changed");
+        }
     }
 }

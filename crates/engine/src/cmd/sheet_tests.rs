@@ -848,50 +848,29 @@ fn a_contour_flange_of_one_half_turn_is_a_half_pipe() {
     }
 }
 
-/// A contour flange along a free-form curve is the curve's exact extrusion (#6748), laid out to
-/// the curve's own length at its neutral surface. A quarter of the ellipse with half axes 40 and
-/// 20, from (40, 0) round to (0, 20): a conic through the apex (40, 20) with ρ = √2 − 1, of weight
-/// ρ/(1 − ρ) = 1/√2, which is that ellipse exactly. Pushed 30 under a rule 2 thick, K 0.4. Its
-/// length L is ∫ √(40² sin²θ + 20² cos²θ) dθ over [0, π/2], taken here by five-point
-/// Gauss–Legendre on each of 64 spans: 48.442241. Its tangent turns a quarter turn, always the
-/// same way, and its radius of curvature is 10 at least, so a curve a depth h from it toward its
-/// center is L − h·π/2 long, and one h away from its center L + h·π/2. With the material on the
-/// right of the (counterclockwise) travel, outside the curve, the drawn curve is the inside of
-/// the sheet's turn and the neutral surface lies K·T = 0.8 out: L + 0.8·π/2 = 49.698878. Flipped,
-/// the material lies inside it, and the neutral surface (1 − K)·T = 1.2 in: L − 1.2·π/2 =
-/// 46.557286. The folded volume is the band between the curve and its offset T into the
-/// material, (T·L ± (T²/2)·(π/2))·30 = 60·L ± 30π: 3000.782246 (flipped 2812.286687), which is
-/// the flat's area times T plus (½ − K)·T²·(π/2)·30 = 6π, as for a bend or a roll.
+/// A contour flange along a free-form curve is refused (#15743), and the design keeps no sheet. A
+/// quarter of the ellipse with half axes 40 and 20, from (40, 0) round to (0, 20), is the conic
+/// through the apex (40, 20) with ρ = √2 − 1, of weight ρ/(1 − ρ) = 1/√2. Pushed out 30, its panel
+/// would be the curve's extrusion, a free-form surface: developable, but with no closed-form
+/// flat, as the curve's own length ∫ √(40² sin²θ + 20² cos²θ) dθ over [0, π/2] (48.442241) is an
+/// elliptic integral, and its neutral surface's an offset of it. Only a line's panel (a plane) and
+/// a circular arc's (a roll) have one: the flange is refused, naming the curve, either way round.
 #[test]
-fn a_contour_flange_along_an_elliptical_arc_flattens_to_its_neutral_length() {
-    // Five-point Gauss–Legendre on [−1, 1]: its nodes and weights.
-    let (x1, x2) = ((5.0 - 2.0 * (10.0f64 / 7.0).sqrt()).sqrt() / 3.0, (5.0 + 2.0 * (10.0f64 / 7.0).sqrt()).sqrt() / 3.0);
-    let (w1, w2) = ((322.0 + 13.0 * 70.0f64.sqrt()) / 900.0, (322.0 - 13.0 * 70.0f64.sqrt()) / 900.0);
-    let gauss = [(0.0, 128.0 / 225.0), (x1, w1), (-x1, w1), (x2, w2), (-x2, w2)];
-    // The quarter ellipse's speed along θ, and its length over 64 spans of π/128.
-    let speed = |t: f64| (40.0 * t.sin()).hypot(20.0 * t.cos());
-    let h = FRAC_PI_2 / 64.0;
-    let length: f64 = (0..64).map(|k| gauss.iter().map(|(x, w)| w * speed((k as f64 + 0.5 + x / 2.0) * h)).sum::<f64>() * h / 2.0).sum();
-    assert!((length - 48.442241).abs() < 1e-6, "{length}");
-    let cases = [(false, length + 0.8 * FRAC_PI_2, 60.0 * length + 30.0 * PI), (true, length - 1.2 * FRAC_PI_2, 60.0 * length - 30.0 * PI)];
-    for (flip, neutral, band) in cases {
+fn a_contour_flange_along_an_elliptical_arc_is_refused() {
+    for flip in [false, true] {
         let mut s = Session::default();
         curved_contour_rule(&mut s);
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
         let conic = run(&mut s, "sketch.conic", json!({"start": [40, 0], "end": [0, 20], "apex": [40, 20], "rho": std::f64::consts::SQRT_2 - 1.0}));
         let conic = conic["curves"][0].clone();
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "sheet.flange", json!({"type": "contour", "sketch": "Profile", "curves": [conic], "distance": 30, "flip": flip}));
-        let (f, sides) = contour_flat(&mut s);
-        // L + 0.8·π/2 = 49.698878 by 30 (flipped L − 1.2·π/2 = 46.557286 by 30).
-        assert!((sides[0] - 30.0).abs() < 1e-6 && (sides[1] - neutral).abs() < 1e-6, "flip {flip}: {sides:?} vs {neutral}");
-        assert!(f["stretch"].as_f64().is_some_and(|x| x < 1e-6), "flip {flip}: {f}");
-        assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "flip {flip}: {f}");
-        // 60·L + 30π = 3000.782246 (flipped 60·L − 30π = 2812.286687), which is 2·30 times the
-        // flat's length plus 6π: 60·(L + 0.4π) + 6π (flipped 60·(L − 0.6π) + 6π).
-        let v = volume(&mut s);
-        assert!(rel(v, band) < 1e-6, "flip {flip}: {v} vs {band}");
-        assert!(rel(band, 2.0 * neutral * 30.0 + 0.1 * 4.0 * FRAC_PI_2 * 30.0) < 1e-12, "flip {flip}");
+        let features = s.doc.features.len();
+        let flange = json!({"type": "contour", "sketch": "Profile", "curves": [conic], "distance": 30, "flip": flip});
+        let error = s.execute("sheet.flange", &flange).unwrap_err().to_string();
+        let along = format!("not supported yet: a contour flange along `{}`", conic.as_str().unwrap_or_default());
+        assert!(error.contains(&along) && error.contains("(#15743)"), "flip {flip}: {error}");
+        assert_eq!(s.doc.features.len(), features, "flip {flip}: the flange is not kept");
+        assert!(s.model.state().surface_sheets.is_empty(), "flip {flip}: no sheet");
     }
 }
 
@@ -1379,6 +1358,39 @@ fn a_cut_corner_a_hair_from_a_bend_line_refolds() {
         run(&mut s, "sheet.refold", json!({}));
         let refolded = volume(&mut s);
         assert!((folded - refolded - cut * 2.0).abs() < 0.01, "refolded: {refolded}, {} less", folded - refolded);
+    }
+}
+
+/// #7278 (#2009): a 40 mm inside wall on a 100 x 60 base, its top cut to a slant from z 40 at
+/// x 0 to z 20 at x 100, then a 20 mm edge flange picked on the slanted edge, inside and outside:
+/// the flange runs along that edge, end to end. T 1, R 1, K 0.5, so the folded volume is the flat
+/// area times T. Before the new flange: the base less the R + T = 2 strip under the wall's bend,
+/// 6000 − 200; the bend 100 x BA, BA = (π/2)(R + K T) = 3π/4; the wall's leg 100 x 38; less the
+/// cut's triangle 100 x 20 / 2: 8600 + 75π = 8835.619449. The slanted edge is L = √10400 =
+/// 101.980390 long. Inside, the bend starts R + T in from the edge, so a strip L x 2 of the wall
+/// goes and the new leg is 20 − 2: + L(3π/4 + 16) = 10707.591327. Outside, the wall keeps its
+/// material: + L(3π/4 + 18) = 10911.552108. (Kernel cases until main closed tests/kernel-cases/.)
+#[test]
+fn an_edge_flange_runs_along_the_slanted_edge_a_cut_left() {
+    let l = 10400f64.sqrt();
+    let before = 8600.0 + 75.0 * PI;
+    for (position, area) in [("inside", before + l * (0.75 * PI + 16.0)), ("outside", before + l * (0.75 * PI + 18.0))] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "T", "thickness": "1.0 mm", "active": true, "bend_radius": "1.0 mm", "k_factor": 0.5}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base"}));
+        run(&mut s, "sheet.flange", json!({"type": "edge", "height": 40, "angle": 90, "position": "inside", "edges": [[50, 0, 1.0]]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Slant"}));
+        run(&mut s, "sketch.line", json!({"points": [[-10, 42], [110, 18], [110, 50], [-10, 50]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Slant", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+        run(&mut s, "sheet.flange", json!({"type": "edge", "height": 20, "angle": 90, "position": position, "edges": [[50, 1, 30]]}));
+        let got = flat_area(&flat(&mut s));
+        assert!(rel(got, area) < 1e-9, "{position}: the flat is {got} mm², not {area}");
+        let v = volume(&mut s);
+        assert!(rel(v, area) < 1e-6, "{position}: the folded sheet holds {v} mm³, not {area}");
     }
 }
 
@@ -1993,6 +2005,51 @@ fn a_sketch_on_a_sheet_face_reports_a_lost_attachment_instead_of_moving_to_anoth
     assert_eq!(again["attachment"], "exact_face");
     assert!(run(&mut s, "timeline.inspect", json!({"feature": "Holes"}))["error"].is_null());
     assert!(matches!(status(&s), solidcraft_doc::FaceAttachmentStatus::Healthy { .. }));
+}
+
+/// A design saved before #6748 keeps a sketch on a base flange's sheet by the sheet's own name for
+/// its face, with no anchor: `sheet:Body1:base:top`, `sheet:Body1:base:bottom`. It opens with each
+/// sketch on that face by the model's name for it, `F<base flange>:top` and `:bottom` (format
+/// pending sheet-face-names), and their holes cut the sheet as they did: the 100 x 60 x 2.5 plate,
+/// 15000 mm³, less two 4 mm holes through it, 2 · π · 2² · 2.5 = 20π ≈ 62.83 mm³.
+#[test]
+fn sketches_saved_on_a_base_flanges_faces_by_the_sheets_names_open_on_those_faces() {
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    circle_sketch(&mut s, "Top", json!({"face": [30, 20, 2.5]}), [30.0, 20.0], 4.0);
+    circle_sketch(&mut s, "Bottom", json!({"face": [60, 20, 0]}), [60.0, -20.0], 4.0);
+    cut_through(&mut s, "Top");
+    cut_through(&mut s, "Bottom");
+    let want = 15000.0 - 2.0 * PI * 4.0 * 2.5;
+    assert!((volume(&mut s) - want).abs() < 0.1, "{}", volume(&mut s));
+    let b = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::SheetBase { .. })).map_or(0, |f| f.id);
+    // As a design from before saved them: by the sheet's names for the faces, with no anchor, at
+    // the last folded format with none of the pending changes.
+    let mut older: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for (sketch, side) in [("Top", "top"), ("Bottom", "bottom")] {
+        let f = older["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == sketch).unwrap();
+        let plane = f["plane"].as_object_mut().unwrap();
+        plane.remove("anchor");
+        plane.insert("name".into(), json!(format!("sheet:Body1:base:{side}")));
+    }
+    older["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT - 1));
+    older.as_object_mut().unwrap().remove("format_pending");
+    let doc = solidcraft_doc::Document::from_json(&older.to_string()).unwrap();
+    for (sketch, side) in [("Top", "top"), ("Bottom", "bottom")] {
+        let Some(solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { name, anchor: None, .. }, .. }) =
+            doc.find_feature(sketch).map(|f| &f.kind)
+        else {
+            panic!("{sketch}: {:?}", doc.find_feature(sketch));
+        };
+        assert_eq!(name.as_deref(), Some(format!("F{b}:{side}").as_str()));
+    }
+    let mut reopened = Session::new(doc);
+    assert!(
+        reopened.model.results.iter().all(|x| x.error.is_none()),
+        "{:?}",
+        reopened.model.results.iter().map(|x| (&x.name, &x.error)).collect::<Vec<_>>()
+    );
+    assert!((volume(&mut reopened) - want).abs() < 0.1, "{}", volume(&mut reopened));
 }
 
 #[test]
@@ -2682,9 +2739,15 @@ fn flat_dxf_preserves_exact_cutout_entities() {
     let dxf = with_hole(&s, d.ccw().reversed());
     assert_eq!(dxf.matches("0\nLINE\n").count(), 5, "four outline lines and one exact cutout line");
     assert_eq!(dxf.matches("0\nARC\n").count(), 1);
+    // The D's arc as the flat is read (y mirrored from the chart): about (20, 10), radius 10, over
+    // the top from (30, 10) to (10, 10), through (20, 20). A DXF arc runs counter-clockwise from
+    // its start angle (code 50) to its end angle (51): from 0° to 180°.
+    assert!(dxf.contains(" 50\n0.0\n 51\n180.0\n"), "{dxf}");
     let read = solidcraft_io::read_dxf(&dxf).unwrap();
     assert_eq!(read.len(), 6);
-    assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Arc { c, .. } if c.dist(Vec2::new(20.0, 10.0)) < 1e-9)), "{read:?}");
+    let at = |p: Vec2, x: f64, y: f64| p.dist(Vec2::new(x, y)) < 1e-9;
+    let arc = |c: Vec2, a: Vec2, b: Vec2| at(c, 20.0, 10.0) && at(a, 30.0, 10.0) && at(b, 10.0, 10.0);
+    assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Arc { c, a, b } if arc(*c, *a, *b))), "{read:?}");
 }
 
 // A profile chosen by a point outside its inner loop must keep that inner loop through
@@ -4590,6 +4653,33 @@ fn a_hole_on_a_flange_panel_unfolds_with_the_flange() {
     assert!(!contains(&flat_first, [30.0, 1.25, 12.0]) && contains(&flat_first, [33.0, 1.25, 12.0]));
 }
 
+/// A hole drilled into a block under a sheet's panel 0.1 above it leaves the panel whole: the
+/// panel is material over the hole's entry face nearer than 0.2, left out of the hole's tool
+/// (#10695), so the tool holds its cylinder whole only up to the panel, and sheet metal reads no
+/// hole through it. A 100 x 60 x 10 block, a 0.5 thick panel over it at z 10.1 … 10.6, and a Ø5
+/// hole 5 deep at (50, 30) on the block's top; the run-on reaches 1.17 above the face (a
+/// hundredth of the block's 117.0 across, √(100² + 60² + 10²)), past the panel. By hand: the block
+/// loses π · 2.5² · 5 = 98.1748 mm³, 60000 → 59901.8252; the panel keeps its
+/// 100 · 60 · 0.5 = 3000 mm³ and no hole.
+#[test]
+fn a_hole_under_a_sheet_panel_leaves_the_panel_whole() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Thin", "thickness": "0.5 mm", "bend_radius": "0.5 mm", "active": true}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10.1, "name": "Plate"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Plate"}));
+    let plate = s.model.state().surface_sheets[0].body.clone();
+    run(&mut s, "solid.hole", json!({"position": [50, 30, 10], "diameter": 5, "depth": 5}));
+    let block = body_volume(&mut s, "Block");
+    assert!((block - (60000.0 - PI * 6.25 * 5.0)).abs() < 0.05, "{block}");
+    let panel = body_volume(&mut s, &plate);
+    assert!(rel(panel, 3000.0) < 1e-9, "{panel}");
+    let state = s.model.state();
+    assert!(state.surface_sheets[0].sheet.panels.iter().all(|p| p.region.holes.is_empty()), "the panel is drilled");
+}
+
 /// A hat bent from one contour (#11728), 40 deep, of 1.5 mm sheet (R 1.5, K 0.44): feet from x ±21.55
 /// out to ±29 at z 0…1.5, walls 56 high, the top at z 56…57.5. The flat lays the five panels and four
 /// bends end to end: the feet 4.45 long, the walls 51.5, the top 40.1, each bend (π/2)(R + K·T).
@@ -5073,9 +5163,62 @@ fn trimmed_corner(c: (f64, f64), dirs: [(f64, f64); 2], s0: f64) -> (f64, f64) {
     (c.0 + bx * k, c.1 + by * k)
 }
 
+/// What a corner relief 8 mm across takes from the flat at a corner of [`rhombus_sheet`] whose
+/// edges meet at `deg`, by hand, from the relief's definition (`solidcraft_develop::Corner`): it
+/// is centered where the two bends' zones' center lines cross, and cut from every piece of the
+/// flat it reaches, none of them first. Measured in from each edge, and along each edge from the
+/// corner (T 2, R 1, K 0.5, gap g 0.5, the flanges at 90°, α = `deg`), the flat round the corner
+/// is: the base, past both bends' tangent lines, s0 = (R + T)·tan 45° = 3 in; each bend's zone,
+/// BA = (π/2)·(R + K·T) = π wide outside its tangent line (3 − π to 3 in), from where the two
+/// tangent lines cross, 3·cot(α/2) along, on (the notch ends it square there); and each flange,
+/// past its zone, from where the mitre between the two walls lets its metal start on: its inner
+/// face's corner g/2 off the plane halving the corner, T·cot(α/2) + (g/2) / sin(α/2) along. The
+/// relief's center lies c = 3 − π/2 in from both edges, c·cot(α/2) along each, so the tangent
+/// lines and the zones' outer edges lie q = π/2 either side of it across each bend, and each
+/// flange starts e = (T − c)·cot(α/2) + (g/2) / sin(α/2) along past it.
+///
+/// Round, of radius ρ = 4, with F(x) = ∫₀ˣ √(ρ² − u²) du = (x·√(ρ² − x²) + ρ²·asin(x/ρ)) / 2, it
+/// takes: of the base, the wedge at the tangent lines' crossing, p = q / sin(α/2) past the center
+/// on the bisector, whose sides leave the circle x* = q·sin(α/2) + cos(α/2)·√(ρ² − q²) along the
+/// bisector, (x* − p)²·tan(α/2) + 2·(F(ρ) − F(x*)); of each zone, across it from −q to q, from
+/// q·cot(α/2) along to the circle, 2·F(q) − 2·q²·cot(α/2); of each flange, from q out to the
+/// circle, from e along to the circle, F(y) − F(q) − e·(y − q), y = √(ρ² − e²). (At 60°, 90° and
+/// 120° the wedge's tip and the zones' and flanges' corners all lie inside the circle.)
+///
+/// Rectangular, its sides run along the two bends ρ either side of its center. In offsets from
+/// the two edges (o1, o2), taken from the center's, it is the square |o1|, |o2| ≤ ρ, and an area
+/// there is sin α times its area in the flat. It takes: of the base, o1, o2 ≥ q, (ρ − q)²; of each
+/// zone, −q ≤ o1 ≤ q and, past the notch's end, o2 ≥ q + (q − o1)·cos α, 2q·(ρ − q) − 2q²·cos α;
+/// of each flange, o1 ≤ −q and, past its end, o2 ≥ e·sin α − o1·cos α,
+/// (ρ − q)·(ρ − e·sin α) + cos α·(q² − ρ²) / 2. (At 60°, 90° and 120° each of those ends lies
+/// inside the square all across its band.)
+///
+/// At 90° both are what [`corner_relief_takes`] sums of the same pieces in strips.
+fn rhombus_relief_takes(deg: f64, round: bool) -> f64 {
+    let (h, t, g, rho) = ((deg / 2.0).to_radians(), 2.0, 0.5, 4.0);
+    let (c, q) = (3.0 - PI / 2.0, PI / 2.0);
+    let e = (t - c) / h.tan() + g / 2.0 / h.sin();
+    if round {
+        let f = |x: f64| (x * (rho * rho - x * x).sqrt() + rho * rho * (x / rho).asin()) / 2.0;
+        let (p, x) = (q / h.sin(), q * h.sin() + h.cos() * (rho * rho - q * q).sqrt());
+        let base = (x - p).powi(2) * h.tan() + 2.0 * (f(rho) - f(x));
+        let zone = 2.0 * f(q) - 2.0 * q * q / h.tan();
+        let y = (rho * rho - e * e).sqrt();
+        let flange = f(y) - f(q) - e * (y - q);
+        base + 2.0 * (zone + flange)
+    } else {
+        let (sin, cos) = (2.0 * h).sin_cos();
+        let base = (rho - q).powi(2);
+        let zone = 2.0 * q * (rho - q) - 2.0 * q * q * cos;
+        let flange = (rho - q) * (rho - e * sin) + cos * (q * q - rho * rho) / 2.0;
+        (base + 2.0 * (zone + flange)) / sin
+    }
+}
+
 /// The corner reliefs at corners that are not square: a 60° and a 120° one, each of the four
-/// shapes. The relief is cut `size / 2` from the corner along both edges, the bends stop there,
-/// and the flat pattern and the DXF keep one clean loop.
+/// shapes. A round or a rectangular relief is centered where the corner's zones' center lines
+/// cross and cut from every piece of the flat it reaches, the bends end where their tangent lines
+/// cross (the notch), and the flat pattern and the DXF keep one clean loop.
 #[test]
 fn corner_reliefs_at_non_orthogonal_corners_reach_the_flat_pattern_and_the_dxf() {
     // Where each corner's bend zones' center lines cross, c = 3 − π/2 in from both its edges (the
@@ -5090,10 +5233,13 @@ fn corner_reliefs_at_non_orthogonal_corners_reach_the_flat_pattern_and_the_dxf()
         (trimmed_corner((165.0, RHOMBUS_Y), [(-u.0, -u.1), (-1.0, 0.0)], c), [(-u.0, -u.1), (-1.0, 0.0)]),
         (trimmed_corner((45.0, RHOMBUS_Y), [(1.0, 0.0), (-u.0, -u.1)], c), [(1.0, 0.0), (-u.0, -u.1)]),
     ];
+    // The flat's area exactly, its arcs as arcs (the outline `sheet.flat_pattern` lists is chords
+    // 1e-3 off them).
+    let exact_area = |s: &Session| -> f64 { s.model.state().surface_sheets.iter().flat_map(|k| k.shown().regions).map(|r| r.area()).sum() };
     let mut notch = Session::default();
     rhombus_sheet(&mut notch, json!({}));
     assert!(no_errors_or_warnings(&notch), "{:?}", notch.model.results);
-    let area0 = flat_area(&flat(&mut notch));
+    let (area0, exact0) = (flat_area(&flat(&mut notch)), exact_area(&notch));
     for shape in ["notch", "round", "rectangular", "tear"] {
         let mut s = Session::default();
         rhombus_sheet(&mut s, json!({"corner_relief_shape": shape, "corner_relief": "8 mm"}));
@@ -5130,23 +5276,40 @@ fn corner_reliefs_at_non_orthogonal_corners_reach_the_flat_pattern_and_the_dxf()
                         "{shape}: {arcs:?}"
                     );
                 }
-                // Each takes some of the material round its crossing, and no more than its disc
-                // (the exact share is derived at square corners in corner_relief_takes).
-                assert!(area0 - area > 1.0 && area0 - area < 4.0 * 16.0 * PI, "{shape}: {}", area0 - area);
+                // What the four take of the flat, by hand (see [`rhombus_relief_takes`]): two
+                // corners at 60° and two at 120°, 2 x 13.7377974357 + 2 x 34.6304129929 =
+                // 96.7364208573. (Main's relief was centered on the corner of the trimmed base, π/2
+                // further in, and took a sector of the base and 4 of each bend's zone, never a
+                // flange: 48π = 150.796. This one is the develop crate's, centered on the zones'
+                // center lines and cut from every piece it reaches.) At a square corner it is what
+                // [`corner_relief_takes`] sums in strips 8/200000 wide, to their width times the
+                // three steps the sum takes there, each at most 8 across: 1e-3.
+                assert!((rhombus_relief_takes(90.0, true) - corner_relief_takes(90.0, true, 8.0)).abs() < 1e-3);
+                let want = 2.0 * rhombus_relief_takes(60.0, true) + 2.0 * rhombus_relief_takes(120.0, true);
+                assert!((want - 96.7364208573).abs() < 1e-9, "{want}");
+                let took = exact0 - exact_area(&s);
+                assert!((took - want).abs() < 1e-6 * want, "{shape}: {took} vs {want}");
             }
             "rectangular" => {
                 // A parallelogram at each crossing, its sides along the two bends 4 from it: its
                 // corner toward the base lies (d1 + d2)·4 / sin α from the crossing, α the corner's
-                // angle. Each takes no more than its own area, 8² / sin α.
+                // angle.
                 assert!(arcs.is_empty(), "{shape}: {arcs:?}");
-                let mut most = 0.0;
                 for (c, [d1, d2]) in corners {
                     let sin = (d1.0 * d2.1 - d1.1 * d2.0).abs();
                     let x = (c.0 + (d1.0 + d2.0) * 4.0 / sin, c.1 + (d1.1 + d2.1) * 4.0 / sin);
                     assert!(ends.iter().any(|p| (p.x - x.0).abs() < 1e-6 && (p.y - x.1).abs() < 1e-6), "{shape}: no relief at {c:?}: {ends:?}");
-                    most += 64.0 / sin;
                 }
-                assert!(area0 - area > 1.0 && area0 - area < most, "{shape}: {}", area0 - area);
+                // What the four take of the flat, by hand (see [`rhombus_relief_takes`]): 2 x
+                // 26.1345697907 + 2 x 57.3859793975 = 167.0410983764. (Main's was a kite square to
+                // the edges at the corner of the trimmed base, and 4 of each bend's zone:
+                // 32·(tan 30° + tan 60°) + 32π = 174.4318.) At a square corner it is what
+                // [`corner_relief_takes`] sums in strips, as for the round one.
+                assert!((rhombus_relief_takes(90.0, false) - corner_relief_takes(90.0, false, 8.0)).abs() < 1e-3);
+                let want = 2.0 * rhombus_relief_takes(60.0, false) + 2.0 * rhombus_relief_takes(120.0, false);
+                assert!((want - 167.0410983764).abs() < 1e-9, "{want}");
+                let took = exact0 - exact_area(&s);
+                assert!((took - want).abs() < 1e-6 * want, "{shape}: {took} vs {want}");
             }
             "tear" => {
                 // The tear cuts the bend ends, not the base: no arc, and the base keeps its corners.
@@ -5490,6 +5653,14 @@ fn an_edge_flange_feature_can_tear_its_corners_under_a_notch_rule() {
         .surface_sheets
         .last()
         .map_or(0, |k| k.sheet.corners.iter().filter(|c| c.relief == solidcraft_develop::CornerRelief::Tear).count());
+    // By hand: the base's four corners and the bends that meet at each, (0, 0) two of the near
+    // feature's, (120, 90) two of the far one's, (120, 0) and (0, 90) one of each. A corner takes
+    // the relief of the later of its bends' features that asks for one, else the rule's (`chosen`
+    // in `SurfaceSheet::settle`): the three corners a far bend reaches are torn, and (0, 0) keeps
+    // the rule's notch, 3 corners. (Main counted torn flanges, and a feature's relief reached only
+    // the corners between two of its own flanges, the rest taking the rule's: the near feature
+    // asked there, so (0, 0) alone was torn, at its two flanges, 2. With the near feature asking
+    // here, (0, 0) and the two corners it shares with the far feature are torn: 3 as well.)
     assert_eq!(torn, 3, "{torn:?}");
     let want = 3.0 * 2.0 * tear_gives(90.0) * 2.0;
     assert!((volume(&mut s) - v0 - want).abs() < 0.02, "{} - {v0} vs {want}", volume(&mut s));
@@ -6646,6 +6817,32 @@ fn fold_refuses_a_new_fixed_point_off_the_sheet_but_warns_on_recompute() {
     let fold = run(&mut s, "timeline.inspect", json!({"feature": "Fold1"}));
     assert!(fold["error"].is_null(), "{fold}");
     assert!(fold["warning"].as_str().is_some_and(|w| w.contains("fixed point is not on the sheet") && w.contains("stays")), "{fold}");
+}
+
+/// A side given (`stays`) says which side of the fold stays, and `fixed` is then ignored: neither
+/// checked against the sheet nor kept. On the 100 x 60 plate (T 2.5, R 2.5, K 0.44) folded at
+/// x = 40 with `stays: right` and a fixed point at x = 150, past the plate's end (refused alone,
+/// see `fold_refuses_a_new_fixed_point_off_the_sheet_but_warns_on_recompute`), the fold is made
+/// with its right side (x > 40, right of the line drawn along +y seen from the top) put, and no
+/// warning. By hand, as in `fold_takes_the_bend_out_of_the_flat_sheet`: BA = (π/2)(2.5 + 0.44 ·
+/// 2.5) = 5.6549; the left side stands up, its outer face at 40 + BA/2 − R − T = 37.8274 and its
+/// top at T + R + 40 − BA/2 = 42.1726; the plate lies flat out to x = 100.
+#[test]
+fn a_fold_given_its_side_ignores_its_fixed_point() {
+    let (t, r, k) = (2.5, 2.5, 0.44);
+    let ba = FRAC_PI_2 * (r + k * t);
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    fold_line(&mut s);
+    let out = run(&mut s, "sheet.fold", json!({"sketch": "FoldLine", "curve": "fl", "stays": "right", "fixed": [150, 30, 2.5]}));
+    assert!(out["warning"].is_null(), "{out}");
+    assert_eq!(fold_stays(&s), Some(solidcraft_doc::FoldSide::Right));
+    let kept = s.doc.features.last().map(|f| f.kind.clone());
+    assert!(matches!(kept, Some(solidcraft_doc::FeatureKind::SheetFold { fixed: None, .. })), "{kept:?}");
+    let b = bbox(&mut s);
+    assert!((b["min"][0].as_f64().unwrap_or(0.0) - (40.0 + ba / 2.0 - r - t)).abs() < 1e-6, "{b}");
+    assert!((b["max"][2].as_f64().unwrap_or(0.0) - (t + r + 40.0 - ba / 2.0)).abs() < 1e-6, "{b}");
+    assert!((b["max"][0].as_f64().unwrap_or(0.0) - 100.0).abs() < 1e-6, "{b}");
 }
 
 /// Points away from the sheet are refused atomically; points on any face of it, on a flange's

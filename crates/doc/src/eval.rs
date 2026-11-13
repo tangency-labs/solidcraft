@@ -1232,7 +1232,7 @@ impl ModelState {
     pub fn retained_bytes(&self) -> usize {
         let bodies: usize = self.bodies.iter().map(|b| if b.bytes > 0 { b.bytes } else { b.body.retained_bytes() }).sum();
         let sketches: usize = self.sketches.iter().map(|s| s.retained_bytes()).sum();
-        bodies + sketches + self.threads.len() * 192 + self.construct.len() * 192
+        bodies + sketches + self.surface_sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
     }
 
     /// [`ModelState::retained_bytes`] of what this state holds that `before` does not: bodies
@@ -1256,7 +1256,9 @@ impl ModelState {
             .sum();
         let kept: std::collections::HashSet<*const SolvedSketch> = before.sketches.iter().map(Arc::as_ptr).collect();
         let sketches: usize = self.sketches.iter().filter(|s| !kept.contains(&Arc::as_ptr(s))).map(|s| s.retained_bytes()).sum();
-        bodies + sketches + self.threads.len() * 192 + self.construct.len() * 192
+        // A state holds its sheets made from surfaces as it holds its threads, a copy of its own:
+        // each is charged.
+        bodies + sketches + self.surface_sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
     }
 
     pub fn body(&self, name: &str) -> Option<&ModelBody> {
@@ -3531,7 +3533,7 @@ impl Model {
                 // `absorb_sheet_cuts`); a cached result already holds them.
                 if cached.is_none() {
                     r = r.and_then(|()| {
-                        absorb_sheet_cuts(&state, &mut next, f, validation, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
+                        absorb_sheet_cuts(doc, &state, &mut next, f, validation, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
                     });
                 }
                 let ms = match (&cached, refused) {
@@ -4091,6 +4093,7 @@ fn copy_body_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> St
 /// body built again from the sheet in place (#6748, see `sheet_surface_cuts`). Checking each
 /// step, the body built again is weighed against the body cut.
 fn absorb_sheet_cuts(
+    doc: &Document,
     before: &ModelState,
     after: &mut ModelState,
     f: &Feature,
@@ -4102,24 +4105,7 @@ fn absorb_sheet_cuts(
     // What takes material away that the sheet can't hold (a cut, a hole, a chamfer or fillet on
     // a face's edge) is refused; any other change (a join, a mirror into it, a modelled thread)
     // stays on the body, and marks the sheet (see `SurfaceSheet::altered_by`).
-    let cuts = match &f.kind {
-        FeatureKind::Hole { .. } | FeatureKind::Chamfer { .. } | FeatureKind::Fillet { .. } => true,
-        FeatureKind::Extrude { operation, .. }
-        | FeatureKind::Revolve { operation, .. }
-        | FeatureKind::Box { operation, .. }
-        | FeatureKind::Cylinder { operation, .. }
-        | FeatureKind::Sphere { operation, .. }
-        | FeatureKind::Torus { operation, .. }
-        | FeatureKind::Cone { operation, .. }
-        | FeatureKind::Loft { operation, .. }
-        | FeatureKind::Sweep { operation, .. }
-        | FeatureKind::Pipe { operation, .. }
-        | FeatureKind::Coil { operation, .. }
-        | FeatureKind::BoundaryFill { operation, .. }
-        | FeatureKind::Thicken { operation, .. }
-        | FeatureKind::SurfaceNetwork { operation, .. } => matches!(operation, Operation::Cut | Operation::Intersect),
-        _ => false,
-    };
+    let cuts = takes_material(doc, f, 0);
     // What isn't a cut is always weighed: material the sheet doesn't show (a join into a bend)
     // is caught there.
     let drawn = after.cut_extents.get(&f.id).copied();
@@ -4172,6 +4158,35 @@ fn absorb_sheet_cuts(
         }
     }
     Ok(())
+}
+
+/// Whether feature `f` takes material away (see [`absorb_sheet_cuts`]): a hole, a chamfer or
+/// fillet, and a cut or intersect, a Combine's among them. A pattern or mirror of features takes
+/// material away when a feature it copies does, through patterns of patterns `depth` deep; one
+/// of bodies copies them.
+fn takes_material(doc: &Document, f: &Feature, depth: usize) -> bool {
+    match &f.kind {
+        FeatureKind::Hole { .. } | FeatureKind::Chamfer { .. } | FeatureKind::Fillet { .. } => true,
+        FeatureKind::Extrude { operation, .. }
+        | FeatureKind::Revolve { operation, .. }
+        | FeatureKind::Box { operation, .. }
+        | FeatureKind::Cylinder { operation, .. }
+        | FeatureKind::Sphere { operation, .. }
+        | FeatureKind::Torus { operation, .. }
+        | FeatureKind::Cone { operation, .. }
+        | FeatureKind::Loft { operation, .. }
+        | FeatureKind::Sweep { operation, .. }
+        | FeatureKind::Pipe { operation, .. }
+        | FeatureKind::Coil { operation, .. }
+        | FeatureKind::BoundaryFill { operation, .. }
+        | FeatureKind::Thicken { operation, .. }
+        | FeatureKind::SurfaceNetwork { operation, .. }
+        | FeatureKind::Combine { operation, .. } => matches!(operation, Operation::Cut | Operation::Intersect),
+        FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
+            depth < MAX_NESTING && features.iter().filter_map(|id| doc.feature(id.0)).any(|g| !g.suppressed && takes_material(doc, g, depth + 1))
+        }
+        _ => false,
+    }
 }
 
 /// Keeps each sheet metal body's flat pattern true to the body (see `SurfaceSheet::altered_by`,
@@ -6322,14 +6337,15 @@ const RUN_ON_CLEAR: f64 = 0.2;
 /// material within `reach` of the axis there is not the hole's to cut: a body floating over the
 /// face or standing on it, a wall of the part beside the hole, the wall of a bore whose floor the
 /// hole is drilled from. Material at least [`RUN_ON_CLEAR`] above the face shortens the run-on to
-/// half its gap; material nearer is returned, to be cut out of the tools. The body the hole
+/// half its gap; material nearer is returned, to be cut out of the tools, with the height above
+/// the face of its lowest point (the exact box's, in the hole's frame). The body the hole
 /// enters rises above the face's plane around the entry when the face is curved or slants across
 /// the axis: those parts of it, touching the entry point, are drilled as before. Exact: a body
 /// that may reach above the face is intersected with the run-on's column; one whose exact box
 /// lies wholly below the face (the part being drilled, as a rule) costs nothing more. Best
 /// effort: where the kernel cannot answer for a body (or for the column), that body keeps the
 /// run-on in its way as before, so a hole that drilled before never fails over a neighbour.
-fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> (f64, Vec<Body>) {
+fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> (f64, Vec<(Body, f64)>) {
     let disc = Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, reach, 0.0), holes: vec![] };
     let Some(column) = kernel::extrude(plane, &[disc], 0.0, top).ok().and_then(|mut c| c.pop()) else { return (top, Vec::new()) };
     let column_box = more::exact_box(&column);
@@ -6386,15 +6402,16 @@ fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> (f64, Ve
         if low >= RUN_ON_CLEAR {
             lowest = lowest.min(low);
         } else {
-            near.push(piece);
+            near.push((piece, low));
         }
     }
     (if lowest.is_finite() { top.min(lowest / 2.0) } else { top }, near)
 }
 
 /// [`hole_tools`], each with its exact geometry when it drills a straight cylinder along the axis
-/// (a plain hole, a counterbore, a drill point left in the air past a through hole; its run-on
-/// above the face kept clear of material there or not), so sheet metal can keep it as a flat
+/// (a plain hole, a counterbore, a drill point left in the air past a through hole; where material
+/// above the face was left out of its run-on, the cylinder it still holds whole below that
+/// material), so sheet metal can keep it as a flat
 /// cut-out or pocket. Each tool's faces are named by the part of the
 /// hole it cuts (`bore`, `cbore`, `csink`: `F7:cbore:base` is a counterbore's floor).
 #[allow(clippy::too_many_arguments)]
@@ -6448,7 +6465,7 @@ fn hole_tools_and_prisms(
     let cyl = |rad: f64, lo: f64, hi: f64, part: &str| -> Result<(Traced, Option<more::PrimitivePrism>)> {
         let tool = kernel::extrude(&plane, &[disc(rad)], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))?;
         let axis = plane.normal();
-        let prism = more::PrimitivePrism::Cylinder { base: *position + axis * lo, axis, radius: rad, height: hi - lo };
+        let prism = more::PrimitivePrism::Cylinder { base: *position + axis * lo, axis, radius: rad, height: hi - lo, reach: hi - lo };
         Ok((crate::lineage::part_tool(tool, part), Some(prism)))
     };
     // Reuse the existing drill-point tool for the narrow bore, independently of its entry.
@@ -6548,18 +6565,25 @@ fn hole_tools_and_prisms(
         return Ok(tools);
     }
     // The material above the face the run-on would reach, left out of each tool it meets; such
-    // a tool is no longer a plain cylinder. Its exact geometry stays: what it drills below the
-    // face, in the material it enters, is still that cylinder, and sheet metal keeps only that
-    // (it takes a drill that meets one panel and nothing else of the sheet).
+    // a tool is no longer a plain cylinder. It still holds its cylinder whole up to the lowest
+    // point of what was left out of it, which lies at or above the face: its exact geometry keeps
+    // that much, all it drills in the material it enters, and sheet metal drills only that. The
+    // whole cylinder stays its reach (it takes a drill that meets one panel and nothing else of
+    // the sheet).
     let mut kept = Vec::with_capacity(tools.len());
-    for (mut tool, prism) in tools {
-        for piece in &above {
+    for (mut tool, mut prism) in tools {
+        for (piece, low) in &above {
             // Best effort: where the kernel cannot answer, the tool stays as it was before.
             if !matches!(kernel::boolean(&tool.body, piece, BoolOp::Intersect), Ok(Some(_))) {
                 continue;
             }
             let Ok(Some(cut)) = kernel::boolean(&tool.body, piece, BoolOp::Cut) else { continue };
             tool = Traced::step(cut, &[&tool, &Traced::unnamed(piece.clone())]);
+            // The face lies `(position - base) · axis` along the cylinder from its base, and what
+            // was left out lies in the run-on's column, at or above it.
+            if let Some(more::PrimitivePrism::Cylinder { base, axis, height, .. }) = &mut prism {
+                *height = height.min((*position - *base).dot(*axis) + low.max(0.0));
+            }
         }
         kept.push((tool, prism));
     }
@@ -10885,8 +10909,11 @@ fn in_frame(b: &ModelBody, m: &crate::Mat, placed: &ModelBody) -> ModelBody {
     moved.source_name = b.source_name.clone();
     moved.source_transform = crate::mat_mul(m, &b.source_transform);
     moved.imported = b.imported.clone();
-    // Moving a body keeps its faces (and their order): it keeps their names.
+    // Moving a body keeps its faces (and their order): it keeps their names, and each face's
+    // sketch frame moves with it.
     moved.names = crate::naming::NameCell::same(b);
+    let placed_frame = |p: &Option<Plane>| p.as_ref().and_then(|p| placed_plane(m, p).ok());
+    moved.sketch_frames = b.sketch_frames.as_ref().map(|frames| Arc::new(frames.iter().map(placed_frame).collect()));
     moved
 }
 

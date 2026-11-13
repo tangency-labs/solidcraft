@@ -28,9 +28,8 @@ use std::f64::consts::{PI, TAU};
 
 use solidcore_record::brep::{Loop as Bounds, Shell, Surface as Record};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
-use solidcraft_develop::{Bent, Fold, Rigid2, Rigid3, Surface, curve_through};
+use solidcraft_develop::{Bent, Fold, Query, Rigid2, Rigid3, Surface, curve_through};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::query::Query;
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
 
 use crate::sheet_surface_cuts::{holds, region_holds};
@@ -108,7 +107,6 @@ impl Fibers for Slab<'_> {
                     Vec2::new(rho * sin + q.z * cos, turned(q.y.atan2(q.x), material_inward)),
                 )
             }
-            Surface::Spline(_) => return None,
         };
         (w.is_finite() && deeper.len().is_finite() && at.x.is_finite() && at.y.is_finite()).then(|| Depth {
             w,

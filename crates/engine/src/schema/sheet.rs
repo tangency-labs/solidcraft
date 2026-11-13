@@ -546,7 +546,8 @@ pub struct FoldParams {
     pub position: Option<FoldPosition>,
     /// A point on the side that stays, on the sheet. The fold is made with the side it lies on,
     /// kept in `stays`: the point is converted, so a later edit that moves the line past it
-    /// keeps that side. Ignored where `stays` is given.
+    /// keeps that side. Ignored where `stays` is given: neither checked against the sheet nor
+    /// kept.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FixedPoint")]
     pub fixed: Option<FixedPoint>,

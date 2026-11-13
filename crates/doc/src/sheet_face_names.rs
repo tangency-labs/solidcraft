@@ -43,8 +43,9 @@ pub(crate) struct FaceNamer<'a> {
     /// Each panel's rims in the flat, and what made each (see [`rim_edges`]).
     rims: Vec<Vec<(Vec2, Vec2, Option<RimEdge>)>>,
     /// Each corner relief cut from the flat (see [`Development::cuts`]), with the panels the two
-    /// bends whose corner it is make: the corner whose bends' center lines cross inside it.
-    reliefs: Vec<(&'a Region2, [String; 2])>,
+    /// bends whose corner it is make (the corner whose bends' center lines cross inside it), and
+    /// where along its outline its walls are ranked from (see [`relief_start`]).
+    reliefs: Vec<(&'a Region2, [String; 2], Option<(f64, f64)>)>,
 }
 
 impl<'a> FaceNamer<'a> {
@@ -68,21 +69,24 @@ impl<'a> FaceNamer<'a> {
             })
             .collect();
         let key = |j: usize| sheet.joints.get(j).and_then(|j| sheet.panels.get(j.b.panel)).map(|p| p.name.clone());
-        let centers: Vec<(Vec2, [String; 2])> = sheet
+        // Each relieved corner's middle, and its two bends, by the panels they make and their
+        // joints, in the order of the panels' keys.
+        let centers: Vec<(Vec2, [String; 2], [usize; 2])> = sheet
             .corners
             .iter()
             .filter(|c| matches!(c.relief, CornerRelief::Round | CornerRelief::Square))
             .filter_map(|c| {
-                let mut panels = [key(c.joints[0])?, key(c.joints[1])?];
-                panels.sort();
-                Some((corner_center(dev, c.joints)?, panels))
+                let mut bends = [(key(c.joints[0])?, c.joints[0]), (key(c.joints[1])?, c.joints[1])];
+                bends.sort();
+                let [(ka, ja), (kb, jb)] = bends;
+                Some((corner_center(dev, c.joints)?, [ka, kb], [ja, jb]))
             })
             .collect();
         let reliefs = dev
             .cuts
             .iter()
-            .filter_map(|cut| match centers.iter().filter(|(c, _)| cut.contains(*c)).collect::<Vec<_>>().as_slice() {
-                [(_, panels)] => Some((cut, panels.clone())),
+            .filter_map(|cut| match centers.iter().filter(|(c, ..)| cut.contains(*c)).collect::<Vec<_>>().as_slice() {
+                [(_, panels, joints)] => Some((cut, panels.clone(), relief_start(dev, &cut.outer.segs, *joints))),
                 _ => None,
             })
             .collect();
@@ -93,7 +97,8 @@ impl<'a> FaceNamer<'a> {
     /// (see [`SheetPart`]), and where it starts along that part's definition where faces made for
     /// one part need telling apart (see [`ranked`]): a panel's cap, or a rim by what made its edge;
     /// a bend's curved face or end by the panel the bend makes; a tab's cap, along its bend; a
-    /// corner relief's wall, along the relief's outline; a hole's wall (see [`HoleRecord`],
+    /// corner relief's wall by its corner's two bends, along the relief's outline from where it
+    /// meets the first bend's zone (see [`relief_start`]); a hole's wall (see [`HoleRecord`],
     /// `holes`), along its sketch curve. None for a wall nothing says what made (the model names
     /// it from geometry). A fold's piece's caps and rims are its panel's (see [`root`]): pieces of
     /// the faces the fold parted.
@@ -107,12 +112,17 @@ impl<'a> FaceNamer<'a> {
         let small = self.sheet.thickness * 1e-3;
         // A wall nothing else made: a corner relief's, else a hole's.
         let cut = |run: [Vec2; 3]| -> Option<(SheetPart, Option<f64>)> {
-            for (region, panels) in &self.reliefs {
+            for (region, panels, start) in &self.reliefs {
                 let segs = &region.outer.segs;
                 let place =
                     |x: Vec2| segs.iter().enumerate().find(|(_, g)| on_seg(g, x, small)).map(|(k, g)| k as f64 + g.closest_param(x).clamp(0.0, 1.0));
-                if let [Some(a), Some(_), Some(b)] = run.map(place) {
-                    return Some((SheetPart::Relief { panels: panels.clone() }, Some(a.min(b))));
+                if let [Some(_), Some(m), Some(_)] = run.map(place) {
+                    // Its place along the outline from where the corner's walls are ranked, the way
+                    // they run (see `relief_start`), by the wall's middle: no wall runs across
+                    // that start.
+                    let n = segs.len() as f64;
+                    let along = start.map_or(m, |(from, way)| ((m - from) * way).rem_euclid(n));
+                    return Some((SheetPart::Relief { panels: panels.clone() }, Some(along)));
                 }
             }
             let (feature, curve, along) = hole_at(self.sheet, self.dev, holes, run)?;
@@ -176,6 +186,73 @@ fn corner_center(dev: &Development, joints: [usize; 2]) -> Option<Vec2> {
         return None;
     }
     Some(p + u * ((q - p).cross(w) / cross))
+}
+
+/// Where along the outline `segs` of the relief of a corner of the bends `joints` (in the order of
+/// the keys of the panels they make) its walls are ranked from, a segment's index and its
+/// parameter there, and which way (1 the way the outline runs, -1 against it): where the outline
+/// meets the zone of the first bend in the flat of `dev`, on its edge on the panel the bend stands
+/// on, going away from the zone; else on its edge on the panel it makes; else the second bend's
+/// alike. Where the outline meets a zone's edge, one wall ends and the next starts, so no wall runs
+/// across it, and the place is the corner's own: never the flat's axes, where a round relief's
+/// outline starts. None where the outline crosses none of those edges just once.
+fn relief_start(dev: &Development, segs: &[Seg2], joints: [usize; 2]) -> Option<(f64, f64)> {
+    for j in joints {
+        let Some(zone) = dev.zones.iter().find(|z| z.joint == j) else { continue };
+        for (edge, other) in [(zone.near, zone.far), (zone.far, zone.near)] {
+            let [p, q] = edge;
+            let Some(along) = (q - p).normalized() else { continue };
+            // Square to the edge, away from the zone (from its other edge).
+            let away = along.perp() * (p - other[0]).dot(along.perp()).signum();
+            let met: Vec<(usize, f64)> = segs.iter().enumerate().flat_map(|(k, g)| meets(g, p, q).into_iter().map(move |t| (k, t))).collect();
+            let [(k, t)] = met.as_slice() else { continue };
+            let Some(tangent) = segs.get(*k).map(|g| g.derivative(*t)) else { continue };
+            // Crossing it, not touching it.
+            let way = tangent.dot(away);
+            if way.abs() > 1e-6 * tangent.len() {
+                return Some((*k as f64 + *t, way.signum()));
+            }
+        }
+    }
+    None
+}
+
+/// Where `g`, a line or an arc (a corner relief's outline is drawn in them), crosses the segment
+/// from `p` to `q`, in closed form: the parameter along `g` of each crossing, from 0 and short of
+/// 1 (a crossing at a corner of the outline is the next segment's). No crossing for any other
+/// curve.
+fn meets(g: &Seg2, p: Vec2, q: Vec2) -> Vec<f64> {
+    let d = q - p;
+    let on_g = |s: f64| (0.0..1.0).contains(&s);
+    match *g {
+        Seg2::Line { a, b } => {
+            let e = b - a;
+            let den = e.cross(d);
+            if den == 0.0 {
+                return Vec::new();
+            }
+            let (s, t) = ((p - a).cross(d) / den, (p - a).cross(e) / den);
+            if on_g(s) && (0.0..=1.0).contains(&t) { vec![s] } else { Vec::new() }
+        }
+        Seg2::Arc { center, radius, start, sweep } => {
+            // The segment's points `radius` from the center: |p − center + d t|² = radius².
+            let w = p - center;
+            let (qa, qb, qc) = (d.len2(), 2.0 * d.dot(w), w.len2() - radius * radius);
+            let disc = qb * qb - 4.0 * qa * qc;
+            if !(qa > 0.0) || disc < 0.0 {
+                return Vec::new();
+            }
+            let tau = std::f64::consts::TAU;
+            [(-qb - disc.sqrt()) / (2.0 * qa), (-qb + disc.sqrt()) / (2.0 * qa)]
+                .into_iter()
+                .filter(|t| (0.0..=1.0).contains(t))
+                .map(|t| (w + d * t).angle())
+                .map(|at| if sweep > 0.0 { (at - start).rem_euclid(tau) / sweep } else { (start - at).rem_euclid(tau) / -sweep })
+                .filter(|s| on_g(*s))
+                .collect()
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Each face's part (see [`FaceNamer::part`]) with its place among the faces made for the same
