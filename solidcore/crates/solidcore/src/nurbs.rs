@@ -12,6 +12,7 @@ pub mod b_spline_surface_n_lib;
 pub mod basis_adv;
 pub mod basis_basic;
 pub mod bezier;
+pub mod certificate;
 pub mod crv_adv;
 pub mod crv_approx;
 pub mod crv_basic;
