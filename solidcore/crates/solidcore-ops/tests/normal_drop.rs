@@ -53,7 +53,8 @@ fn a_line_above_a_box_drops_to_its_foot_on_the_top() {
     let ends = [p[0], p[p.len() - 1]];
     for want in [[2.0, 5.0, 10.0], [8.0, 5.0, 10.0]] {
         assert!(
-            ends.iter().any(|e| (0..3).all(|k| (e[k] - want[k]).abs() < 1e-6)),
+            ends.iter()
+                .any(|e| (0..3).all(|k| (e[k] - want[k]).abs() < 1e-6)),
             "{want:?} in {p:?}"
         );
     }
@@ -77,7 +78,10 @@ fn a_line_beside_a_cylinder_drops_onto_its_wall_at_the_radius() {
         for q in points(c) {
             let r2 = q[0] * q[0] + q[1] * q[1];
             assert!((r2 - 25.0).abs() < 1e-5, "at the radius: {q:?}");
-            assert!(q[1].abs() < 1e-6, "square to the wall, in the line's plane: {q:?}");
+            assert!(
+                q[1].abs() < 1e-6,
+                "square to the wall, in the line's plane: {q:?}"
+            );
         }
     }
 }
@@ -135,7 +139,10 @@ fn a_rational_quarter_circle_comes_back_as_a_rational_spline() {
         [0.0, 10.0, 0.0, 1.0],
     ];
     for (g, w) in homogeneous.iter().zip(want) {
-        assert!((0..4).all(|k| (g[k] - w[k]).abs() < 1e-12), "{homogeneous:?}");
+        assert!(
+            (0..4).all(|k| (g[k] - w[k]).abs() < 1e-12),
+            "{homogeneous:?}"
+        );
     }
     assert_eq!(r.interval, [0.0, 1.0]);
     assert!(r.nurbs.is_none());

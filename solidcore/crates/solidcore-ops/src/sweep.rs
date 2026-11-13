@@ -32,6 +32,7 @@ use solidcore::math::Transform;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::prism::profile as kp;
+use solidcore::surface::surface::p4::NoObject;
 use solidcore::sweep::api_brep::{
     create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
@@ -51,7 +52,6 @@ use solidcore::topology::brep::p8::{
     create_planar_face_with_3d_curves, create_planar_faces_with_3d_curves, FaceBuildEnv,
 };
 use solidcore::topology::brep::planar_section::{PlanarSectionOptions, SectionOutputs};
-use solidcore::surface::surface::p4::NoObject;
 use solidcore::topology::{Brep, FaceId};
 use solidcore::SolidError;
 use solidcore_convert as convert;
@@ -1393,12 +1393,17 @@ pub fn drop_curves(
                 Err(e) => return Ok(Err(status(e))),
             };
             for uv in &dropped.uv_curves {
-                let lifted =
-                    match surface.lift_curve(k, &domain, uv, &uv.natural_interval(), tolerance, false)
-                    {
-                        Ok(l) => l,
-                        Err(e) => return Ok(Err(status(e))),
-                    };
+                let lifted = match surface.lift_curve(
+                    k,
+                    &domain,
+                    uv,
+                    &uv.natural_interval(),
+                    tolerance,
+                    false,
+                ) {
+                    Ok(l) => l,
+                    Err(e) => return Ok(Err(status(e))),
+                };
                 match put_curve(&lifted.curve)? {
                     Ok(x) => out.push(x),
                     Err(e) => return Ok(Err(e)),
