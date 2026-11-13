@@ -264,6 +264,19 @@ pub struct EdgePoint {
     pub distance: f64,
 }
 
+/// The point of an edge nearest a ray ([`Body::edge_closest_to_ray`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdgeRayPoint {
+    /// The point on the edge.
+    pub point: [f64; 3],
+    /// The edge curve's parameter there.
+    pub parameter: f64,
+    /// The ray's point nearest it.
+    pub on_ray: [f64; 3],
+    /// The kernel solve's distance between the two (not certified: a solve's).
+    pub distance: f64,
+}
+
 /// A face's area and the centroid of that area ([`Body::face_centroid`]), from one
 /// integration. **Estimated, not proved** ([`MassPropertiesEstimate`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -498,6 +511,34 @@ impl Body {
             point: array(c.closest.point),
             parameter: c.parameter,
             distance: c.closest.distance,
+        }))
+    }
+
+    /// The point of record edge `edge` nearest the ray from `origin` along `direction` (the
+    /// kernel's `query::edge::closest_point_to_ray`), with the ray's point nearest it: a pick
+    /// through the view lands on the edge drawn under the pointer in any view, where the edge
+    /// point nearest one point of the ray ([`Body::edge_closest_point`]) does so only when that
+    /// point is the nearest. `None` where the kernel's solve finds no point.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges or a coordinate that is not finite; the
+    /// kernel's refusal of a direction of no length; any other kernel error.
+    pub fn edge_closest_to_ray(
+        &self,
+        order: &Order,
+        edge: usize,
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Option<EdgeRayPoint>> {
+        let (e, o, d) = (order::edge(order, edge)?, point(origin)?, point(direction)?);
+        let c = with_body("edge_closest_to_ray", self, |k, b| {
+            solidcore::query::edge::closest_point_to_ray(k, b, e, o, d)
+        })?;
+        Ok(c.map(|c| EdgeRayPoint {
+            point: array(c.point),
+            parameter: c.parameter,
+            on_ray: array(c.on_ray),
+            distance: c.distance,
         }))
     }
 
