@@ -177,7 +177,5 @@ crates/kernel/src/surface_trim.rs:cut_by trims a surface by a tool through a mes
 crates/kernel/src/surface_trim.rs:nearest_faces picks the face nearest each point by a mesh
 crates/kernel/src/surface_untrim.rs:face_point takes a point inside a face from its largest mesh triangle
 crates/kernel/src/surfaces.rs:nearest_face picks the face nearest a point by mesh triangles
-crates/kernel/src/topo.rs:cylinder_end_at finds a cylinder's end circle by a mesh
-crates/kernel/src/topo.rs:cylinder_extent measures a cylindrical face's extent and side from mesh normals
 crates/kernel/src/topo.rs:cylinder_face_at finds the cylindrical face at a point by a mesh
 crates/kernel/src/topo.rs:merged_topology counts merged topology from a mesh
