@@ -197,7 +197,7 @@ pub(crate) fn pick_hit(app: &SolveApp, d: &mut Dialog, hit: &Hit, sel: Sel) {
 }
 
 /// The centreline ends of the members Ghost Frame Members draws see-through, as picks offer them:
-/// both ends of each member of every evaluated Frame Member but the one being edited (whose
+/// both ends of each shown member of every evaluated Frame Member but the one being edited (whose
 /// members are the preview). None while the dialog isn't open with the box ticked.
 pub(crate) fn member_ends(app: &SolveApp) -> Vec<Hit> {
     let Some(d) = app.dialog.as_ref().filter(|d| matches!(&d.kind, Kind::Frame(m) if m.ghost)) else { return Vec::new() };
@@ -211,7 +211,15 @@ pub(crate) fn member_ends(app: &SolveApp) -> Vec<Hit> {
             continue;
         }
         let Ok(segments) = frame::member_segments(&s.doc, &s.model.state_before(f.id), f) else { continue };
-        for (line, a, b) in segments {
+        let FeatureKind::FrameMember { names, .. } = &f.kind else { continue };
+        for (k, (line, a, b)) in segments.into_iter().enumerate() {
+            // A hidden member (its body, component or occurrence) offers no end to pick: the
+            // markers are drawn over everything and would take a click meant for what is shown.
+            // Its body: by position for a copy, else by its member id, as `end_cap::member` finds it.
+            let body = if f.body_names.is_empty() { names.get(&line) } else { f.body_names.get(k) };
+            if !body.is_some_and(|b| app.body_visible(b)) {
+                continue;
+            }
             out.push(Hit::MemberEnd { feature: f.id, line: line.clone(), end: 0, point: a });
             out.push(Hit::MemberEnd { feature: f.id, line, end: 1, point: b });
         }

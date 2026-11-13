@@ -610,6 +610,10 @@ fn a_ghosted_members_vertex_and_centreline_end_can_be_picked() {
     // The path takes it as the point that end is built on: the 3D line's last node.
     let (_, sel) = crate::viewport::candidate(&app, &hits).unwrap();
     assert_eq!(sel, Sel::SketchPoint { id: format!("{path_sketch}:{wire}:1") });
+    // A hidden member offers no end: the marker would take a click meant for what is shown.
+    app.session.visibility.hidden_bodies.push("Rail".into());
+    assert!(super::member_ends(&app).is_empty());
+    assert!(!crate::viewport::pick(&app, &proj, at(end)).iter().any(|h| matches!(h, crate::viewport::Hit::MemberEnd { .. })));
 }
 
 #[test]
@@ -647,6 +651,7 @@ fn this_frame_members_tubes_are_tinted_apart_from_other_frame_members() {
     app.dialog = Some(d.clone());
     let colors = crate::preview::colors(&app);
     let built = crate::preview::compute(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap();
+    assert!(colors.glass_new);
     assert!(built.scene.tris.is_empty() && !built.scene.glass.is_empty(), "this feature's new tube is drawn see-through");
     let own = colors.new_body;
     let other = drawn(&app, "Rail");
@@ -670,7 +675,8 @@ fn with_ghosting_off_members_draw_and_pick_as_today() {
     let r = crate::view_pick::pick_command(&mut app, &json!({"frame": "model", "pixels": [[480, 300]]})).unwrap();
     assert_eq!(r["hits"][0]["body"], "Rail");
     assert!(super::member_ends(&app).is_empty(), "no centreline ends to pick");
-    assert_eq!(crate::preview::colors(&app).new_body[3], 255, "the preview's new tubes are solid");
+    let colors = crate::preview::colors(&app);
+    assert!(colors.new_body[3] == 255 && !colors.glass_new, "the preview's new tubes are solid");
 }
 
 #[test]

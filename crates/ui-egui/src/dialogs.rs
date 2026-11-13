@@ -8688,6 +8688,7 @@ mod refused_ok_tests {
                 ghost: false,
                 tint_new: true,
                 cut_tint: true,
+                glass_new: false,
             },
         )
         .expect("the angled plane previews");
