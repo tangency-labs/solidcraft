@@ -169,6 +169,7 @@ pub struct WorkCounters {
     coincident_curves_classified: Cell<u64>,
     containment_edge_drops: Cell<u64>,
     loop_walks: Cell<u64>,
+    target_record_seedings: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -259,6 +260,14 @@ impl WorkCounters {
         self.loop_walks.get()
     }
 
+    /// Seedings of a fillet session's notification records over every entity of its target
+    /// (`seed_records` on the target, in the merge's tail): each one walks the whole target.
+    /// Not the fork's.
+    #[must_use]
+    pub fn target_record_seedings(&self) -> u64 {
+        self.target_record_seedings.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -271,6 +280,7 @@ impl WorkCounters {
         self.coincident_curves_classified.set(0);
         self.containment_edge_drops.set(0);
         self.loop_walks.set(0);
+        self.target_record_seedings.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -329,6 +339,12 @@ impl WorkCounters {
     /// Counts one walk of a loop around a point.
     pub(crate) fn add_loop_walk(&self) {
         self.loop_walks.set(self.loop_walks.get().saturating_add(1));
+    }
+
+    /// Counts one seeding of a fillet session's records over its whole target.
+    pub(crate) fn add_target_record_seeding(&self) {
+        self.target_record_seedings
+            .set(self.target_record_seedings.get().saturating_add(1));
     }
 }
 

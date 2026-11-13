@@ -744,8 +744,6 @@ pub(crate) fn seed_records(
     b: &Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) {
-    #[cfg(test)]
-    tests::SEED_WALKS.with(|n| n.set(n.get() + 1));
     if records.is_empty() {
         // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
         *records = entities(b)
@@ -5031,12 +5029,7 @@ fn brep_curve_solve(
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    thread_local! {
-        /// Walks over every entity of a B-rep that seed its records ([`super::seed_records`]).
-        pub(crate) static SEED_WALKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    }
-
+mod tests {
     use super::*;
 
     /// `TurnToNURBS`' copy of a B-spline kind surface (`new SmBSplineSurface(*pBSS)`)

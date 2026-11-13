@@ -165,6 +165,7 @@ impl FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         crate::geom::context::Context::with_notification_context(k, |k, context| {
             let mut env = crate::topology::edge::NotifyEnv {
@@ -265,6 +266,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             ));
         }
         let result = crate::geom::context::Context::with_notification_context(k, |k, context| {
+            k.work_counters.add_target_record_seeding();
             p3::seed_records(notification_records, target, &key_of);
             let mut env = crate::topology::edge::NotifyEnv {
                 records: notification_records,
@@ -461,6 +463,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         crate::geom::context::Context::with_notification_context(k, |_, context| {
             let mut env = crate::topology::edge::NotifyEnv {
@@ -488,6 +491,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             ..
         } = &mut *self.0;
         let faces = p1::faces(target, None)?;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         for id in faces {
             let this = key_of(EntityRef::Face(id));
@@ -531,6 +535,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         let oriented =
             crate::geom::context::Context::with_notification_context(k, |k, context| {
@@ -1059,7 +1064,6 @@ mod stitch_identity_tests {
 mod pre_edit_tests {
     use super::*;
     use crate::math::Point3;
-    use crate::topology::brep::p3::tests::SEED_WALKS;
 
     /// The tail of a fillet notifies every face of the target `PreEdit`, which resets its
     /// rectangular-trim flag to unsure. It seeded the session's records before each face, a
@@ -1078,11 +1082,11 @@ mod pre_edit_tests {
             target.face_mut(f).unwrap().rectangular_trim = 1;
         }
         let mut session = FilletSession::new(&mut k, &mut target).unwrap();
-        SEED_WALKS.with(|n| n.set(0));
+        k.work_counters.reset();
         FinishAccess(&mut session.objects)
             .finish_pre_edit_faces(&mut k, FilletObject::Body(FilletBody::Target))
             .unwrap();
-        assert_eq!(SEED_WALKS.with(std::cell::Cell::get), 1);
+        assert_eq!(k.work_counters.target_record_seedings(), 1);
         for &f in &faces {
             assert_eq!(
                 session.objects.target.face(f).unwrap().rectangular_trim,
