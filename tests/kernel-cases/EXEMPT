@@ -83,6 +83,7 @@ engine.describe                   the command registry itself
 explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
+file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
 file.import_cache_clear           clears a cache of imported files
 file.open_in_easyprint            hands the file to another program
 file.save                         saving the design
@@ -90,6 +91,7 @@ file.save_as                      saving the design
 file.save_mesh                    saving a display mesh
 file.send_to_slicer               hands the file to a slicer
 file.slicers                      a listing of slicers
+file.verify                       signature checks: tested in crates/io/src/design/provenance.rs and the engine/UI signature tests
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
