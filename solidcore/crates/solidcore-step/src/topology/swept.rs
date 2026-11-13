@@ -33,11 +33,13 @@ const MAX_PIECES: usize = 64;
 /// Samples when looking for where a revolved profile meets its axis.
 const AXIS_SAMPLES: usize = 128;
 
-/// Points of a face's boundary (its edges sampled) and of its seam edges (used twice).
+/// Points of a face's boundary (its edges sampled) and of its seam edges (used twice), and each
+/// of its edge loops walked in order (each use sampled the way the loop runs it).
 #[derive(Default)]
 pub(super) struct Extent {
     pub points: Vec<Vec3>,
     pub seam: Vec<Vec3>,
+    pub walks: Vec<Vec<Vec3>>,
 }
 
 fn p3(v: Vec3) -> P3 {
@@ -141,20 +143,27 @@ fn range(ts: &[f64]) -> Option<(f64, f64)> {
     (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
 }
 
-/// Middle-free description of the widest gap between angles: (where it starts, its width).
-fn widest_gap(angles: &[f64]) -> Option<(f64, f64)> {
-    let mut a: Vec<f64> = angles.iter().map(|x| x.rem_euclid(TAU)).filter(|x| x.is_finite()).collect();
-    a.sort_by(f64::total_cmp);
-    let (first, last) = (*a.first()?, *a.last()?);
-    let mut best = (last, first + TAU - last);
-    for w in a.windows(2) {
-        if let [x, y] = w
-            && y - x > best.1
-        {
-            best = (*x, y - x);
+/// The widest gap round the circle that the arcs (angle ranges, low end first, each less than a
+/// turn) leave uncovered: (where it starts, its width).
+fn widest_gap(arcs: &[(f64, f64)]) -> Option<(f64, f64)> {
+    let mut a: Vec<(f64, f64)> = arcs
+        .iter()
+        .filter(|(lo, hi)| lo.is_finite() && hi.is_finite())
+        .map(|(lo, hi)| (lo.rem_euclid(TAU), lo.rem_euclid(TAU) + (hi - lo)))
+        .collect();
+    a.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let first = a.first()?.0;
+    // Swept from the first arc's start: the farthest any arc so far reaches, and the widest gap
+    // after it, the last one closing round to the first arc a turn on.
+    let (mut reach, mut best) = (f64::NEG_INFINITY, (0.0, f64::NEG_INFINITY));
+    for (lo, hi) in a.iter().copied().chain(std::iter::once((first + TAU, first + TAU))) {
+        if reach.is_finite() && lo - reach > best.1 {
+            best = (reach, lo - reach);
         }
+        reach = reach.max(hi);
     }
-    Some(best)
+    // Arcs reaching round past the first one's start leave no gap there.
+    (best.1 > 0.0).then_some(best).or(Some((reach, 0.0)))
 }
 
 /// The angle all the given angles share (within 1e-6 rad), if there are any.
@@ -171,14 +180,35 @@ enum Span {
     Turn { start: f64 },
 }
 
-/// The range a profile is built over, from the parameters of the face's points on it and of its
-/// seam points; `closed` for a circle or ellipse.
-fn span(ts: &[f64], seam: &[f64], closed: bool) -> R<Span> {
+/// The range a profile is built over, from the parameters of the face's points on it, of its
+/// seam points and of its loops walked in order (`walks`); `closed` for a circle or ellipse.
+///
+/// On a closed profile a loop that turns once round it (a band between two closed edges round
+/// an extruded ellipse) needs the whole turn: started at the seam the face has, else at the
+/// loop's first vertex, where the seams then added meet it. Otherwise the face covers the
+/// angles its loops sweep between their samples, and the profile is bounded across the widest
+/// gap they leave (the samples alone leave gaps between them however the face lies).
+fn span(ts: &[f64], seam: &[f64], walks: &[Vec<f64>], closed: bool) -> R<Span> {
     if closed {
         if let Some(s) = common_angle(seam) {
             return Ok(Span::Turn { start: s });
         }
-        let (gap_start, gap) = widest_gap(ts).ok_or("a face without boundary points")?;
+        let mut arcs = Vec::with_capacity(walks.len() + ts.len());
+        for w in walks {
+            let Some(&first) = w.first() else { continue };
+            let (mut at, mut lo, mut hi) = (first, first, first);
+            for t in w.iter().skip(1) {
+                at += wrap(t - at);
+                (lo, hi) = (lo.min(at), hi.max(at));
+            }
+            if (at - first).abs() > 0.5 * TAU || hi - lo >= TAU {
+                return Ok(Span::Turn { start: first });
+            }
+            arcs.push((lo, hi));
+        }
+        // Each point covers its own angle (a vertex loop's, which no walk passes).
+        arcs.extend(ts.iter().map(|t| (*t, *t)));
+        let (gap_start, gap) = widest_gap(&arcs).ok_or("a face without boundary points")?;
         let covered = TAU - gap;
         if gap < 1e-3 {
             return Ok(Span::Turn { start: gap_start + gap });
@@ -190,6 +220,29 @@ fn span(ts: &[f64], seam: &[f64], closed: bool) -> R<Span> {
     let (lo, hi) = range(ts).ok_or("a face without boundary points")?;
     let m = MARGIN * (hi - lo) + 1e-3 * (1.0 + lo.abs().max(hi.abs()));
     Ok(Span::Open { inner: (lo, hi), outer: (lo - m, hi + m) })
+}
+
+/// [`span`] of a closed profile, for the tests: the whole turn from a start, or the range the
+/// face is in.
+#[cfg(test)]
+#[derive(Debug)]
+pub(super) enum SpanForTests {
+    Turn(f64),
+    Open((f64, f64)),
+}
+
+#[cfg(test)]
+pub(super) fn span_for_tests(ts: &[f64], seam: &[f64], walks: &[Vec<f64>]) -> SpanForTests {
+    match span(ts, seam, walks, true) {
+        Ok(Span::Turn { start }) => SpanForTests::Turn(start),
+        Ok(Span::Open { inner, .. }) => SpanForTests::Open(inner),
+        Err(e) => SpanForTests::Open((f64::NAN, e.len() as f64)),
+    }
+}
+
+/// `x` wrapped into (−π, π].
+fn wrap(x: f64) -> f64 {
+    x - (x / TAU).round() * TAU
 }
 
 /// A conic's NURBS form over `[lo, hi]` in angle.
@@ -322,6 +375,7 @@ fn revolution(profile: &Curve, axis: &Axis1, ext: &Extent) -> R<BSurface> {
             };
             let ts: Vec<f64> = ext.points.iter().filter_map(|q| param(*q)).collect();
             let seam: Vec<f64> = ext.seam.iter().filter_map(|q| param(*q)).collect();
+            let walks: Vec<Vec<f64>> = ext.walks.iter().map(|w| w.iter().filter_map(|q| param(*q)).collect()).collect();
             // The profile's side of the axis where the face is.
             let mid = ts.get(ts.len() / 2).copied().ok_or("a face without boundary points")?;
             let e = probe(mid).map(radial).and_then(|r| r.normalized()).unwrap_or(e);
@@ -329,7 +383,7 @@ fn revolution(profile: &Curve, axis: &Axis1, ext: &Extent) -> R<BSurface> {
             // reach along it.
             let s = match trimmed_range(profile) {
                 Some(r) => Span::Open { inner: r, outer: r },
-                None => span(&ts, &seam, is_closed(c))?,
+                None => span(&ts, &seam, &walks, is_closed(c))?,
             };
             // Stop where the profile meets the axis outside the face: a circle or ellipse that
             // meets it is its whole arc on the face's side, pole to pole (closed form), so a face
@@ -492,9 +546,10 @@ fn extrusion(profile: &Curve, direction: P3, magnitude: f64, ext: &Extent) -> R<
                 return Err(unsupported("an extrusion along its profile's plane"));
             }
             let seam: Vec<f64> = ext.seam.iter().filter_map(|q| onto(*q)).collect();
+            let walks: Vec<Vec<f64>> = ext.walks.iter().map(|w| w.iter().filter_map(|q| onto(*q)).collect()).collect();
             let s = match trimmed_range(profile) {
                 Some(r) => Span::Open { inner: r, outer: r },
-                None => span(&ts, &seam, is_closed(c))?,
+                None => span(&ts, &seam, &walks, is_closed(c))?,
             };
             bounded(c, s)?
         }

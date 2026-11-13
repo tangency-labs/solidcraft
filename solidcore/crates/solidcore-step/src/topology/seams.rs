@@ -296,6 +296,7 @@ impl Builder<'_, '_> {
             let eval = SurfaceEval::new(&face.surface).map_err(|e| e.to_string())?;
             let dom = eval.domain();
             let (Some(period), None, Some((u0, _))) = (dom.period[0], dom.period[1], dom.range[0]) else { continue };
+            let poles: Vec<Vec3> = spline_axis(&face.surface, &eval).iter().flat_map(|ax| ax.poles.iter().flatten().copied()).collect();
             // How far along u each loop of the face reaches, followed round from its first point
             // (unwrapped across the start); a face winding round is the seams' to handle. The
             // widest loop bounds the face.
@@ -303,7 +304,7 @@ impl Builder<'_, '_> {
             let mut winds = false;
             for l in &face.loops {
                 let LoopB::Edges(es) = l else { continue };
-                winds |= self.winding(&eval, es, [Some(period), None])?[0] != 0;
+                winds |= self.winding(&eval, es, [Some(period), None], &poles)?[0] != 0;
                 let mut last: Option<f64> = None;
                 let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                 for &(e, _) in es {
@@ -361,6 +362,7 @@ impl Builder<'_, '_> {
                 continue;
             }
             let found = axis(&surface).or_else(|| spline_axis(&surface, &eval));
+            let poles: Vec<Vec3> = found.iter().flat_map(|ax| ax.poles.iter().flatten().copied()).collect();
             let mut up = Vec::new();
             let mut down = Vec::new();
             // On a torus a face may wind round its tube instead, and on a spline closed in v it
@@ -369,7 +371,7 @@ impl Builder<'_, '_> {
             let mut tube = false;
             for (li, l) in face.loops.iter().enumerate() {
                 let LoopB::Edges(es) = l else { continue };
-                let mut w = self.winding(&eval, es, periods)?;
+                let mut w = self.winding(&eval, es, periods, &poles)?;
                 if v_turns && w[0] == 0 && w[1].abs() == 1 {
                     tube = true;
                     w = [w[1], 0];
@@ -477,18 +479,26 @@ impl Builder<'_, '_> {
         Ok((d(t) <= reach && ends.iter().all(|x| *x > reach) && t > lo && t < hi).then_some(t))
     }
 
-    /// Turns (in u, in v) a loop makes around a periodic surface.
-    fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2]) -> R<[i64; 2]> {
+    /// Turns (in u, in v) a loop makes around a periodic surface. Points on one of the surface's
+    /// `poles` are passed over: every angle round the axis is the pole, so the parameter found
+    /// there is any, and a loop running in to the pole and out again turned as the points either
+    /// side of it say (a cap split along a meridian, one half's loop from the rim to the pole and
+    /// back, does not wind round the axis).
+    fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2], poles: &[Vec3]) -> R<[i64; 2]> {
         let mut last: Option<[f64; 2]> = None;
         let mut total = [0.0; 2];
         for &(e, forward) in es {
             let edge = self.edges.get(e as usize).ok_or("edge reference")?;
             let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
             let [lo, hi] = edge.interval;
+            let reach = self.tol.max(edge.tolerance);
             for k in 0..=SAMPLES {
                 let s = k as f64 / SAMPLES as f64;
                 let t = if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s };
                 let p = c.point(t).ok_or("edge point")?;
+                if poles.iter().any(|q| p.dist(*q) <= reach) {
+                    continue;
+                }
                 let Some(q) = eval.project(p, last, f64::INFINITY) else { continue };
                 if let Some(l) = last {
                     for (((t, period), q), l) in total.iter_mut().zip(periods).zip(q).zip(l) {
