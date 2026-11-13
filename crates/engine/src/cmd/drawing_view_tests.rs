@@ -3621,7 +3621,7 @@ fn section_of(
 
 /// A section view lists and inspects as a section of its parent, follows its parent's settings and
 /// keeps its own editable, copies alone as a section of the same parent, and its sheet draws it with
-/// its other views.
+/// its other views. A dimension on it inspects with no layout and isn't dragged.
 #[test]
 fn a_section_view_inspects_copies_and_draws() {
     let (mut s, [front, ..]) = three_views();
@@ -3647,6 +3647,23 @@ fn a_section_view_inspects_copies_and_draws() {
     let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
     let state = |id: u64| scene["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(id))).unwrap().clone();
     assert_eq!((&state(cut)["status"], &state(front)["status"]), (&json!("drawn"), &json!("drawn")), "{scene}");
+    // A dimension moved onto it by hand has no layout (dimensions don't read section views yet), and isn't dragged.
+    let edge = json!({"point": [50, 0, 0], "path": []});
+    let dimension = run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"length": {"edge": edge}}}));
+    let id = ids::decode(dimension["dimension"].as_str().unwrap()).unwrap();
+    s.edit_drawing(EDIT, |d| {
+        let at = d.dimensions.iter().position(|r| r.id == id).unwrap();
+        Arc::make_mut(&mut d.dimensions[at]).view = cut;
+        Ok(())
+    })
+    .unwrap();
+    let read = run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension["dimension"]}));
+    assert_eq!((read.get("layout"), &read["layout_why"]), (None, &json!(crate::drawing_scene::NOT_DRAWN)), "{read}");
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let dragged = json!({"dimension": dimension["dimension"], "set": {"text_to_mm": [150, 40]}});
+    let e = s.execute("drawing.dimension.edit", &dragged).unwrap_err().to_string();
+    assert!(e.contains(crate::drawing_scene::NOT_DRAWN), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
 }
 
 /// Saved view `id` as its sheet draws it: what it shows, its extents and its lines at its scale,
@@ -4067,7 +4084,8 @@ fn a_flat_pattern_view_is_never_exploded_posed_or_configured() {
 /// model. A dimension, dimensions from the model, a balloon, a note on an edge, a note's leader and a
 /// leader added to a note are each refused, and nothing changes. A note on the view that points at
 /// nothing is drawn. Saved on it by hand, a dimension, a note on an edge and a balloon are left out of
-/// the sheet, which says they have no place to draw.
+/// the sheet, which says they have no place to draw; the dimension inspects with that reason and
+/// isn't dragged.
 #[test]
 fn nothing_on_a_flat_pattern_view_points_at_the_model() {
     let mut s = sheet_plate();
@@ -4111,6 +4129,15 @@ fn nothing_on_a_flat_pattern_view_points_at_the_model() {
         Ok(())
     })
     .unwrap();
+    // Inspect and a drag place it through the view's one rule (`on_its_sheet`): no place there either.
+    let on_flat = json!({"dimension": ids::encode(dimension)});
+    let read = run(&mut s, "drawing.dimension.inspect", on_flat.clone());
+    assert_eq!((read.get("layout"), &read["layout_why"]), (None, &json!(crate::drawing_scene::NO_PLACE)), "{read}");
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let dragged = json!({"dimension": on_flat["dimension"], "set": {"text_to_mm": [120, 160]}});
+    let e = s.execute("drawing.dimension.edit", &dragged).unwrap_err().to_string();
+    assert!(e.contains(crate::drawing_scene::NO_PLACE), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
     let d = s.drawing("test").unwrap();
     let built = crate::drawing_scene::build(&s, d, d.sheets[0].id).unwrap();
     let dimension = built.dimensions.iter().find(|one| one.dimension == dimension).unwrap();
