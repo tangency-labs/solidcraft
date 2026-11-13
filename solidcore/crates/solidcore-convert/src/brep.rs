@@ -6,10 +6,13 @@
 //! ([`curve::from_parameters`](solidcore::curve::from_parameters)), a pcurve as its UV trim, the
 //! zone tolerance of a tolerance, the order of a region's shells.
 //!
-//! The record and the kernel's data differ in four places, each taken care of here:
+//! The record and the kernel's data differ in five places, each taken care of here:
 //! - A closed shell is one record listed by the two regions it separates; the kernel keeps one
 //!   shell per region, the face used on opposite sides. A sheet's shell holds both sides of its
 //!   faces.
+//! - A sheet's face faces the way its record shell uses it; in the kernel, the way its upward
+//!   use does, which its data does not carry (the kernel builds every face with its upward use
+//!   along its surface): a face its sheet uses backward is turned over once built.
 //! - The infinite region is never a void in the record; the kernel marks it as one.
 //! - A pcurve runs along its edge over the edge's interval in the record; the kernel's UV trim
 //!   runs along its edge over the edge's kernel interval. Trims are carried where the face's
@@ -40,6 +43,7 @@ use solidcore::topology::brep_data::{
     BrepData, DataSourceType, EdgeData, EuData, FaceData, FaceuseData, Keyed, LoopData, RegionData,
     ShellData, TopologyData, VertexData, NO_OBJECT, UNSURE,
 };
+use solidcore::topology::face::p1::turn_over;
 use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, EdgeId, FaceId, SolidError, Vec3, VertexId};
@@ -290,6 +294,7 @@ fn build(
         edges: b.edge_list().to_vec(),
         vertices: b.vertex_list().to_vec(),
     };
+    turn_sheets_over(&mut b, record, &order.faces)?;
     adopt(k, &mut b, record, &order.faces)?;
     if (order.faces.len(), order.edges.len(), order.vertices.len())
         != (
@@ -666,6 +671,41 @@ fn own_tolerances(d: &mut BrepData, rec: &r::Brep, zone: f64) -> R<()> {
     d.zone_tol_3d = least;
     for (fd, t) in d.faces.iter_mut().zip(faces) {
         fd.zone_tol_3d = t;
+    }
+    Ok(())
+}
+
+/// Turn over each face a sheet's record shell uses backward (`forward` false), on the body built
+/// from the record: the kernel builds every face with its upward use along its surface, and
+/// [`to_record`] reads a sheet's face as its upward use, so the face is turned over
+/// ([`turn_over`]) to face the way its record does. A closed shell's faces are left: their sides
+/// are their uses' in the regions round them. `faces` are the body's faces in the record's order.
+fn turn_sheets_over(b: &mut Brep, record: &r::Brep, faces: &[FaceId]) -> R<()> {
+    let mut turned = false;
+    for (s, shell) in record.shells.iter().enumerate() {
+        let r::Shell::Faces { faces: used, .. } = shell else {
+            continue;
+        };
+        let s = idx(s)?;
+        if record
+            .regions
+            .iter()
+            .filter(|g| g.shells.contains(&s))
+            .count()
+            != 1
+        {
+            continue;
+        }
+        for u in used.iter().filter(|u| !u.forward) {
+            let face = *faces
+                .get(u.face as usize)
+                .ok_or(Unsupported::Invalid("a face the body does not have"))?;
+            turn_over(b, face)?;
+            turned = true;
+        }
+    }
+    if turned {
+        b.refresh_cached_topology();
     }
     Ok(())
 }
