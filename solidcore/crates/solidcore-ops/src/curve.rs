@@ -487,6 +487,59 @@ pub fn extend_curve(
     })?
 }
 
+pub use solidcore::curve::stretch::Stretch;
+
+/// `curve` with the control points `picked` stretched by a drag `delta` of point `handle` from
+/// point `pivot` (the kernel's [`solidcore::curve::stretch::stretch_points`]): with
+/// [`Stretch::Linear`] each moves by `delta` times the control polygon's length from the pivot to
+/// it over its length from the pivot to the handle (the pivot stays, the handle moves by `delta`
+/// whole); with [`Stretch::None`] each by `delta`. With `plane` (as
+/// [`crate::curve_plane::plane_of`] gives it), `delta` is first taken into the plane, so a
+/// planar curve stays planar. A closed periodic spline's repeated points move with their twins.
+///
+/// # Errors
+/// [`Error::Argument`] for another kind of curve than a spline or polyline, an index past its
+/// points, the handle at the pivot, no polygon length from the pivot to the handle, a number not
+/// finite or a moved point past the coordinate bound.
+#[allow(clippy::too_many_arguments)]
+pub fn stretch_cvs(
+    curve: &Curve,
+    picked: &[usize],
+    pivot: usize,
+    handle: usize,
+    delta: [f64; 3],
+    how: Stretch,
+    plane: Option<crate::curve_plane::CurvePlane>,
+) -> Result<Curve> {
+    let (Curve::Spline { points, .. } | Curve::Polyline { points }) = curve else {
+        return Err(Error::Argument);
+    };
+    let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
+    let given: Vec<Point3> = points.iter().map(|p| v(*p)).collect();
+    let stretched = solidcore::curve::stretch::stretch_points(
+        &given,
+        picked,
+        pivot,
+        handle,
+        v(delta),
+        how,
+        plane.map(|p| v(p.normal)),
+    )
+    .map_err(|_| Error::Argument)?;
+    let mut out = curve.clone();
+    for &i in picked {
+        let to = stretched
+            .get(i)
+            .map(|p| [p.x, p.y, p.z])
+            .ok_or(Error::Argument)?;
+        if !coord_ok(&to) {
+            return Err(Error::Argument);
+        }
+        out = move_cv(&out, i, to)?;
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 // The tests measure the circles' radii; ops itself computes none.
 #[allow(clippy::disallowed_methods)]
