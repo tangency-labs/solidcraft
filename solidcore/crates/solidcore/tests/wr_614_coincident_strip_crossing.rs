@@ -262,6 +262,94 @@ fn wr_614_wider_protruding_box_keeps_exit_crossing() {
     assert!(shape(&inter).4, "manifold intersection");
 }
 
+/// The exact overlap of A and B (narrow or wider A): the prism over the triangle P0, Q4,
+/// Q1 between B's faces F4, F1 and A's face y = 20, 4 mm high. With s = SLOPE, P0 =
+/// (2 - 2d/s, 20 - d) and F4 (direction (-s, 1)) and F1 (direction (1, s)) meet y = 20 at
+/// Q4 = P0 + (-s d, d) and Q1 = P0 + (d/s, d); the triangle's area is half its base
+/// |Q1 - Q4| = d/s + s d times its height d.
+fn overlap_volume(d: f64) -> f64 {
+    0.5 * (d / SLOPE + SLOPE * d) * d * SIDE
+}
+
+/// One offset of the sweeps below: the union of A (`width` along x from x = -2) and B at
+/// offset d is one valid manifold solid of volume |A| + 64 - overlap, and their intersection
+/// is empty and valid. Returns what failed, or nothing.
+fn union_one_solid_intersection_empty(width: f64, d: f64) -> Vec<String> {
+    let mut failed = Vec::new();
+    let mut k = Kernel::default();
+    let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), width, SIDE, SIDE).unwrap();
+    let (_, b) = strip_cubes(&mut k, d);
+    match boolean_union(&mut k, a, b) {
+        Err(e) => failed.push(format!("d = {d}: union refused: {e}")),
+        Ok(mut u) => {
+            let want = width * SIDE * SIDE + SIDE * SIDE * SIDE - overlap_volume(d);
+            let v = volume(&k, &mut u);
+            let check = check_brep(&mut k, &mut u, CheckLevel::Level2).unwrap();
+            if shape(&u).3 != 1
+                || !shape(&u).4
+                || collapsed_edges(&k, &u) != 0
+                || check.failure_count() != 0
+                || (v - want).abs() > ACCURACY * want
+            {
+                failed.push(format!(
+                    "d = {d}: union {:?}, {} speck edges, volume {v} (want {want}), check {:?}",
+                    shape(&u),
+                    collapsed_edges(&k, &u),
+                    check.lines()
+                ));
+            }
+        }
+    }
+    let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), width, SIDE, SIDE).unwrap();
+    let (_, b) = strip_cubes(&mut k, d);
+    match boolean_intersection(&mut k, a, b) {
+        Err(e) => failed.push(format!("d = {d}: intersection refused: {e}")),
+        Ok(mut inter) => {
+            let check = check_brep(&mut k, &mut inter, CheckLevel::Level2).unwrap();
+            if shape(&inter).0 != 0 || shape(&inter).3 != 0 || check.failure_count() != 0 {
+                failed.push(format!(
+                    "d = {d}: intersection {:?}, check {:?}",
+                    shape(&inter),
+                    check.lines()
+                ));
+            }
+        }
+    }
+    failed
+}
+
+/// The wider A (`wr_614_wider_protruding_box_keeps_exit_crossing`) across offsets d, from
+/// the union's refusal on main (d < 9.9e-6) down to where Q4 and Q1 are 2.5 intersection
+/// tolerances apart: the union is one valid manifold solid of volume 192 + 64 - overlap.
+/// The intersection's two large faces (A's y = 20 between Q4 and Q1, B's F1 between P0 and
+/// Q1) lie within d, under the intersection tolerance, of each other everywhere (planar
+/// pieces: the distance is affine along them, largest at P0), so no body bounded by them
+/// is valid at that tolerance: the intersection is empty. B's face F4 between P0 and Q4 is
+/// 1.005 d wide, within the intersection tolerance; as in the test above, the imprint skips
+/// its collapsed definition (WR-619, the default).
+#[test]
+#[ignore = "fails on main: un-ignored with the coincident face pairs"]
+fn wr_614_wider_box_union_is_one_solid_and_intersection_empty_across_offsets() {
+    let failed: Vec<String> = [1e-5, 9e-6, 7.45e-6, 7.4e-6, 5e-6, 3e-6, 2.5e-6]
+        .into_iter()
+        .flat_map(|d| union_one_solid_intersection_empty(12.0, d))
+        .collect();
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// The narrow A ([-2, 2], the strip of the tests above) across offsets d: the union is one
+/// valid manifold solid of volume 128 - overlap, and the intersection is empty (its faces
+/// lie within d of each other, as in the wider case). WR-619 as in the wider case.
+#[test]
+#[ignore = "fails on main: un-ignored with the vertex events and coincident intervals"]
+fn wr_614_strip_union_is_one_solid_and_intersection_empty_across_offsets() {
+    let failed: Vec<String> = [1e-5, 9e-6, 7.4e-6, 5e-6, 3e-6, 2e-6]
+        .into_iter()
+        .flat_map(|d| union_one_solid_intersection_empty(SIDE, d))
+        .collect();
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
 /// Two boxes whose faces cross at 45 deg near x = 0 while both faces extend toward +x
 /// (away from the crossing on A's side, so A's inward binormal points away from the
 /// crossing) keep their crossing: one manifold solid of the exact union's volume,

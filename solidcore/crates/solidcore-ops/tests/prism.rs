@@ -233,6 +233,276 @@ fn a_ledge_shorter_than_the_tolerance_reads_back_as_one_region() {
     assert!((area(top) - area(&ledged)).abs() < 1e-9, "{}", area(top));
 }
 
+/// The flange outline of SolidCraft's `a_cut_passing_a_hair_off_a_flange_corner_builds`, and
+/// its corner V = (left, top) the cuts below pass near.
+fn flange_outline() -> ([Vec2; 4], Vec2) {
+    let x0 = 4.0 - 0.398_229_715_025_710_36;
+    let (left, right, top) = (x0 - 30.0, x0 - 4.0, 98.0 - 2f64.sqrt());
+    (
+        [v(right, top), v(left, top), v(left, 0.0), v(right, 0.0)],
+        v(left, top),
+    )
+}
+
+/// The cut of the same test, whose taper runs from its foot on the flange's bottom edge to
+/// its head: `along`, the head lies on the flange's side line x = left, `d` above the corner
+/// (below for d < 0); otherwise the head is 1 above the flange's top and the taper passes
+/// the corner `d` to its left along y = top (to its right for d < 0). Counter-clockwise,
+/// foot first, head second.
+fn flange_cut(d: f64, along: bool) -> [Vec2; 5] {
+    let x0 = 4.0 - 0.398_229_715_025_710_36;
+    let c = 98.0 - 2f64.sqrt();
+    let to2 = |y: f64, z: f64| v(x0 - z, y);
+    let (y, z) = if along {
+        (c + d, 30.0)
+    } else {
+        (c + 1.0, 10.0 + (c + 1.0) * (20.0 + d) / c)
+    };
+    [
+        to2(0.0, 10.0),
+        to2(y, z),
+        to2(y, 35.0),
+        to2(-5.0, 35.0),
+        to2(-5.0, 10.0),
+    ]
+}
+
+/// A polygon's signed area (positive counter-clockwise), the shoelace formula.
+fn polygon_area(p: &[Vec2]) -> f64 {
+    let n = p.len();
+    (0..n)
+        .map(|i| p[i].x * p[(i + 1) % n].y - p[(i + 1) % n].x * p[i].y)
+        .sum::<f64>()
+        / 2.0
+}
+
+/// The part of polygon `p` on the left of the directed line through `a` and `b`
+/// (Sutherland-Hodgman, one clip edge), points closer than 1e-12 to the last one dropped.
+fn clip_left(p: &[Vec2], a: Vec2, b: Vec2) -> Vec<Vec2> {
+    let side = |q: Vec2| (b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x);
+    let mut out: Vec<Vec2> = Vec::new();
+    let mut push = |q: Vec2| {
+        if out.last().is_none_or(|&l| dist(l, q) > 1e-12) {
+            out.push(q);
+        }
+    };
+    for i in 0..p.len() {
+        let (q, r) = (p[i], p[(i + 1) % p.len()]);
+        let (sq, sr) = (side(q), side(r));
+        if sq >= 0.0 {
+            push(q);
+        }
+        if (sq >= 0.0) != (sr >= 0.0) {
+            let t = sq / (sq - sr);
+            push(v(q.x + t * (r.x - q.x), q.y + t * (r.y - q.y)));
+        }
+    }
+    if out.len() > 1 && dist(out[0], *out.last().unwrap()) <= 1e-12 {
+        out.pop();
+    }
+    out
+}
+
+/// Where the line through `a` and `b` meets the line through `p` with direction `u`.
+fn meet(a: Vec2, b: Vec2, p: Vec2, u: Vec2) -> Vec2 {
+    let w = v(b.x - a.x, b.y - a.y);
+    let t = ((p.x - a.x) * u.y - (p.y - a.y) * u.x) / (w.x * u.y - w.y * u.x);
+    v(a.x + t * w.x, a.y + t * w.y)
+}
+
+/// The exact flange-and-cut booleans (intersection, flange minus cut, union) as polygons:
+/// the cut and the flange are convex, the cut's only edge inside the flange is the taper, so
+/// the intersection is the cut clipped by the flange, the difference the flange clipped to
+/// the right of the taper, and the union the cut with its taper replaced by the
+/// difference's boundary from the foot round to where the taper leaves the flange.
+fn flange_cut_exact(flange: &[Vec2; 4], cut: &[Vec2; 5]) -> [Vec<Vec2>; 3] {
+    let (foot, head) = (cut[0], cut[1]);
+    let mut inter = cut.to_vec();
+    for i in 0..4 {
+        inter = clip_left(&inter, flange[i], flange[(i + 1) % 4]);
+    }
+    let mut rest = clip_left(flange, head, foot);
+    let at_foot = rest.iter().position(|&q| dist(q, foot) <= 1e-12).unwrap();
+    rest.rotate_left(at_foot);
+    let mut union = rest.clone();
+    if dist(*union.last().unwrap(), head) > 1e-12 {
+        union.push(head);
+    }
+    union.extend_from_slice(&cut[2..]);
+    [inter, rest, union]
+}
+
+/// How far the area of a tolerant result may differ from the exact polygon `exact`: the
+/// exact points near the corner V that one intersection tolerance `tx` cannot tell apart
+/// (V, and where the taper meets the side line x = left or the top line y = top, or its
+/// head, each within the stretch tx / sin(angle) of V along its line, when the taper passes
+/// within tx of V) may become one vertex anywhere among them, so each exact vertex within
+/// their diameter δ of V moves at most δ. Moving vertex p_i by δ changes the area by at most
+/// δ |p_(i+1) - p_(i-1)| / 2.
+fn sliver_bound(exact: &[Vec2], corner: Vec2, foot: Vec2, head: Vec2, tx: f64) -> f64 {
+    let w = v(head.x - foot.x, head.y - foot.y);
+    let len = w.x.hypot(w.y);
+    let off = ((corner.x - foot.x) * w.y - (corner.y - foot.y) * w.x).abs() / len;
+    if off > tx {
+        return 0.0;
+    }
+    let mut near = vec![corner];
+    for (u, p) in [
+        (v(0.0, 1.0), meet(foot, head, corner, v(0.0, 1.0))),
+        (v(1.0, 0.0), meet(foot, head, corner, v(1.0, 0.0))),
+        (v(0.0, 0.0), head),
+    ] {
+        let sine = if u.x == 0.0 && u.y == 0.0 {
+            1.0
+        } else {
+            (w.x * u.y - w.y * u.x).abs() / len
+        };
+        if dist(p, corner) <= tx / sine {
+            near.push(p);
+        }
+    }
+    let delta = near
+        .iter()
+        .flat_map(|&p| near.iter().map(move |&q| dist(p, q)))
+        .fold(0.0, f64::max);
+    let n = exact.len();
+    (0..n)
+        .filter(|&i| dist(exact[i], corner) <= delta)
+        .map(|i| delta * dist(exact[(i + 1) % n], exact[(i + n - 1) % n]) / 2.0)
+        .sum()
+}
+
+/// A flange's outline intersected with a cut whose taper passes 9.8e-6 off the flange's top
+/// corner (SolidCraft's `a_cut_passing_a_hair_off_a_flange_corner_builds`, one of its calls,
+/// on a kernel with no fixes). The taper meets the flange's side 4.83e-5 below the corner,
+/// within the near-tangent stretch where the taper and the side lie within one intersection
+/// tolerance of each other, so the side's piece between the crossing and the corner runs
+/// along the taper. The intersection is one triangle under the taper, its apex on the side
+/// between the taper's crossing and the corner, and its area that of the triangle with that
+/// apex.
+#[test]
+#[ignore = "fails on main: un-ignored with the exact combine radius"]
+fn a_taper_passing_a_hair_off_a_corner_intersects_to_one_triangle() {
+    session::set_thread_fixes(Vec::<&str>::new()).unwrap();
+    let ([right_top, _, left_bottom, _], corner) = flange_outline();
+    let flange = Region2 {
+        outer: Loop2::polygon(&flange_outline().0),
+        holes: vec![],
+    };
+    let cut_pts = flange_cut(1e-5, false);
+    let (foot, head) = (cut_pts[0], cut_pts[1]);
+    let cut = Region2 {
+        outer: Loop2::polygon(&cut_pts),
+        holes: vec![],
+    };
+    // the taper meets x = left at y = crossing (computed here, as the oracle)
+    let crossing = meet(foot, head, corner, v(0.0, 1.0)).y;
+    assert!(
+        crossing < corner.y && corner.y - crossing < 5e-5,
+        "{crossing}"
+    );
+    let out = planar_regions_boolean(&[flange], &[cut], BooleanOp::Intersect, 1e-7).unwrap();
+    assert_eq!(out.len(), 1, "{out:?}");
+    let tri = &out[0];
+    assert!(tri.holes.is_empty(), "{tri:?}");
+    assert_eq!(tri.outer.segs.len(), 3, "{tri:?}");
+    assert!(closed(&tri.outer, 1e-9), "{tri:?}");
+    let corners: Vec<Vec2> = tri.outer.segs.iter().map(start).collect();
+    let near = |p: Vec2| corners.iter().any(|&c| dist(c, p) <= 1e-9);
+    assert!(near(foot) && near(left_bottom), "{corners:?}");
+    let apex = corners
+        .iter()
+        .copied()
+        .find(|c| c.y > 1.0)
+        .unwrap_or_else(|| panic!("{corners:?}"));
+    assert!(
+        (apex.x - corner.x).abs() <= 1e-9 && apex.y >= crossing - 1e-9 && apex.y <= corner.y + 1e-9,
+        "{apex:?}"
+    );
+    // the area of the triangle with that apex, within the bounds the apex's range gives it
+    let half_base = (foot.x - corner.x) / 2.0;
+    let got = area(tri);
+    assert!((got - half_base * apex.y).abs() < 1e-9, "{got}");
+    assert!(
+        got >= half_base * crossing - 1e-9 && got <= half_base * corner.y + 1e-9,
+        "{got}"
+    );
+    assert!(right_top.x > foot.x);
+}
+
+/// The flange and the cut of the test above, with the taper's head moved `d` along the
+/// flange's side or past its corner (11 offsets, both ways, the three booleans: 66 planar
+/// booleans on a kernel with no fixes). Each builds one region bounded by line segments that
+/// end within one intersection tolerance of each other (a tolerant result's curve ends lie
+/// within it of their shared vertex), and the polygon of its vertices has the exact polygon
+/// boolean's area (computed here from the vertices: a convex clip) to rounding when the
+/// taper passes the corner farther than one intersection tolerance, and within the sliver
+/// the tolerance cannot resolve (`sliver_bound`) when it passes closer.
+#[test]
+#[ignore = "fails on main: un-ignored with the merged vertex tolerances"]
+fn a_taper_near_a_flange_corner_cuts_to_the_exact_area_or_within_its_sliver() {
+    session::set_thread_fixes(Vec::<&str>::new()).unwrap();
+    let tx = solidcore::kernel::Kernel::default().tolerances.xsect_tol_3d;
+    let (flange_pts, corner) = flange_outline();
+    let flange = Region2 {
+        outer: Loop2::polygon(&flange_pts),
+        holes: vec![],
+    };
+    let mut failures = Vec::new();
+    for d in [
+        0.0, 1e-5, -1e-5, 3e-5, -3e-5, 1e-4, -1e-4, 1.2e-4, -1.2e-4, 1e-3, -1e-3,
+    ] {
+        for along in [true, false] {
+            let cut_pts = flange_cut(d, along);
+            let cut = Region2 {
+                outer: Loop2::polygon(&cut_pts),
+                holes: vec![],
+            };
+            let exact = flange_cut_exact(&flange_pts, &cut_pts);
+            for (op, exact) in [BooleanOp::Intersect, BooleanOp::Subtract, BooleanOp::Union]
+                .into_iter()
+                .zip(exact)
+            {
+                let want = polygon_area(&exact);
+                let bound = sliver_bound(&exact, corner, cut_pts[0], cut_pts[1], tx) + 1e-9;
+                let case = format!("d = {d:e}, along = {along}, {op:?}");
+                match planar_regions_boolean(
+                    std::slice::from_ref(&flange),
+                    std::slice::from_ref(&cut),
+                    op,
+                    1e-7,
+                ) {
+                    Ok(out) => {
+                        let corners: Vec<Vec2> = out
+                            .iter()
+                            .flat_map(|r| r.outer.segs.iter().map(start))
+                            .collect();
+                        let got = polygon_area(&corners);
+                        let ok = out.len() == 1
+                            && out[0].holes.is_empty()
+                            && out[0]
+                                .outer
+                                .segs
+                                .iter()
+                                .all(|s| matches!(s, Seg2::Line { .. }))
+                            && closed(&out[0].outer, tx)
+                            && (got - want).abs() <= bound;
+                        if !ok {
+                            failures.push(format!(
+                                "{case}: {} regions, area {got:.12}, exact {want:.12}, off {:e}, bound {bound:e}: {out:?}",
+                                out.len(),
+                                got - want
+                            ));
+                        }
+                    }
+                    Err(e) => failures.push(format!("{case}: refused: {e:?}")),
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 fn volume(b: &Body) -> f64 {
     b.volume(1e-8).unwrap()
 }
