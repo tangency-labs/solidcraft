@@ -11,7 +11,6 @@
 //! SMLib's tags: the untrimmed face is the face it was, trimmed differently.
 
 use solidcore_record::Vec3;
-use solidcraft_geom::prelude::*;
 use solidcraft_smlib::trim::Holes;
 
 use crate::body::Body;
@@ -107,18 +106,16 @@ fn failed(what: &str, e: impl crate::Cause) -> KernelError {
     KernelError::smlib(format!("SMLib untrim: {what}"), e)
 }
 
-/// A point inside face `face` of `body`: the centre of its largest mesh triangle.
+/// A point inside face `face` of `body`: calculated directly on the face's surface inside its trims.
 pub(crate) fn face_point(body: &Body, face: usize) -> Result<Vec3> {
-    let m = body.mesh(&crate::MeshTolerance::chord((body.size() * 1e-3).max(1e-3)))?;
-    let area = |[a, b, c]: &[Vec3; 3]| (*b - *a).cross(*c - *a).len();
-    m.triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, f)| **f as usize == face)
-        .filter_map(|(t, _)| m.tri(t))
-        .max_by(|x, y| area(x).total_cmp(&area(y)))
-        .map(|[a, b, c]| (a + b + c) / 3.0)
-        .ok_or_else(|| KernelError::Failed(format!("untrim: face {face} has no triangles")))
+    let (sb, order) = smlib_body_ordered(body)?;
+    let points = sb.face_points().map_err(|e| failed("face points", e))?;
+    let smlib_face = match &order {
+        Some(order) => order.faces.iter().position(|&f| f == face).unwrap_or(face),
+        None => face,
+    };
+    let [x, y, z] = *points.get(smlib_face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
+    Ok(Vec3::new(x, y, z))
 }
 
 #[cfg(test)]
