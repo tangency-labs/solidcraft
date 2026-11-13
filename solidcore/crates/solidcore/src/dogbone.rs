@@ -34,7 +34,8 @@ use crate::{Result, SolidError};
 
 const OP: &str = "dogbone";
 
-/// Largest radius or gap accepted (mm): far past any real bit or part.
+/// Largest radius, gap or extension past an open end accepted (mm): far past any real bit or
+/// part.
 const MAX_SIZE: f64 = 1.0e6;
 
 /// Two unit directions closer to parallel than this (radians, or its sine) are in line: a turn
