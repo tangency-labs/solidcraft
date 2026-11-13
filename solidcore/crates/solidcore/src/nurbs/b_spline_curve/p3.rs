@@ -74,6 +74,13 @@
 //!   ([`BSplineCurve::assert_valid_on_edge`]). The fork takes the smallest radius
 //!   solution (its loop from cc4289d); the port keeps WR-382's first solution and
 //!   takes the first one not passed over.
+//!   Not upstream (WR-560 extended): test 13 of a UV trim measured on its surface also
+//!   passes over a solution below the tolerance where the trim's image on the surface,
+//!   `S(c(t))`, is proved by a rounded-interval bound on its composed coefficients to have a radius of at least
+//!   the tolerance from the neighbouring solution below to the one above
+//!   ([`crate::nurbs::b_spline_curve::trim_image`]; at most 4096 pieces, each halved at
+//!   most 64 times, no recursion): the constant metric WR-560 maps the trim by is exact only on a
+//!   plane, and near a pole the exact trim of a smooth curve turns sharply in (u, v).
 //! - **Back-edges.** `HasInternalPole` calls `IsDegenerate` (`p2`); `IsSegmentLine`,
 //!   `IsOnPlane` and `JoinWith` test `IsKindOf(SmLine_TYPE)` (false for a
 //!   `BSplineCurve`; a line is a [`crate::curve::line::Line`], whose `JoinWith`
@@ -116,6 +123,7 @@ use crate::math::{max2, max3, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI, UND
 use crate::nurbs::b_spline_curve::analysis::{analysis_key, curve_bounds, BOUND_MARGIN};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::{BoundingBoxRequest, ControlPointForm};
+use crate::nurbs::b_spline_curve::trim_image::radius_clears_on_surface;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::geom::dist_cpt_cpt;
 use crate::nurbs::nurbs_crv::to_euclid;
@@ -1917,14 +1925,48 @@ impl BSplineCurve {
                     }
                 }
             }
+            // Not upstream: a UV trim measured on its surface (WR-560) has a small
+            // radius only where its image on the surface has one. The constant metric
+            // of `trim_metric` is exact on a plane only: near a singular point of the
+            // surface (a sphere's pole) it overstates the steps along the collapsing
+            // direction, and the exact trim of a smooth curve passing near the pole
+            // turns there through up to half a period over a few times the pole's
+            // distance. A solution below the tolerance is passed over where the image
+            // on the surface is proved to have a radius of at least the tolerance over
+            // the solution's neighbourhood, out to the neighbouring solutions
+            // ([`radius_clears_on_surface`]).
+            let on_surface = match (mapped.as_ref(), ovr.trim_surface) {
+                (Some(_), Some(surface)) => Some(surface),
+                _ => None,
+            };
             let mut first = solutions.first();
-            if stretch.iter().any(|&s| s >= 0.0) {
+            if stretch.iter().any(|&s| s >= 0.0) || on_surface.is_some() {
                 first = None;
+                let mut params = Vec::new();
                 for s in &solutions {
-                    let p = s.param(0)?;
+                    params.push(s.param(0)?);
+                }
+                for (s, &p) in solutions.iter().zip(&params) {
                     let growth = (p - domain.min()).abs() <= stretch[0]
                         || (p - domain.max()).abs() <= stretch[1];
-                    if !(s.solution_value < radius_tol && growth) {
+                    let smooth_on_surface = match on_surface {
+                        Some(surface) if s.solution_value < radius_tol && !growth => {
+                            // out to the neighbouring solutions, else the domain's ends
+                            let lo = params
+                                .iter()
+                                .copied()
+                                .filter(|&q| q < p)
+                                .fold(domain.min(), |m, q| if q > m { q } else { m });
+                            let hi = params
+                                .iter()
+                                .copied()
+                                .filter(|&q| q > p)
+                                .fold(domain.max(), |m, q| if q < m { q } else { m });
+                            radius_clears_on_surface(k, self, surface, lo, hi, radius_tol)?
+                        }
+                        _ => false,
+                    };
+                    if !(s.solution_value < radius_tol && (growth || smooth_on_surface)) {
                         first = Some(s);
                         break;
                     }
@@ -2080,6 +2122,7 @@ mod tests {
     use super::*;
     use crate::nurbs::math::{CPoint, NOW};
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+    use std::f64::consts::PI;
 
     /// A non-rational 3D curve of degree `p` through `pts` with `knots`.
     fn curve(p: usize, pts: &[[f64; 3]], knots: &[f64]) -> BSplineCurve {
@@ -2500,6 +2543,195 @@ mod tests {
         let (trim, plane) = circle_trim_on_plane((2250.0, 2250.0, 0.003), (4500.0, 4500.0));
         let idx = failed_tests(&k, &trim, Some(&plane));
         assert!(!idx.contains(&15), "{idx:?}");
+    }
+
+    /// [`radius_clears_on_surface`] bounds the radius of the trim's image: on a plane
+    /// spanning 600 x 3 over the unit square, the quadratic trim whose image has the
+    /// control points `(-1, 1) (0, -1) (1, 1)` about the square's centre (a parabola 200
+    /// times as narrow in (u, v) as on the plane) has its least radius, `a^2 / 2b = 0.5`,
+    /// at its apex. It clears 0.25 over the whole trim and does not clear 1.
+    #[test]
+    fn a_trim_on_a_plane_clears_the_radius_of_its_image() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let k = Kernel::default();
+        let plane = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(600.0, 0.0, 0.0),
+                Vec3::new(0.0, 3.0, 0.0),
+                Vec3::new(600.0, 3.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let at = |x: f64, y: f64| [0.5 + x / 600.0, 0.5 + y / 3.0];
+        let trim = uv_bezier(&[at(-1.0, 1.0), at(0.0, -1.0), at(1.0, 1.0)]);
+        assert!(radius_clears_on_surface(&k, &trim, &plane, 0.0, 1.0, 0.25).unwrap());
+        assert!(!radius_clears_on_surface(&k, &trim, &plane, 0.0, 1.0, 1.0).unwrap());
+    }
+
+    /// A r 6 sphere about the origin, its poles on z, and its natural UV domain.
+    fn sphere() -> (Surface, Extent2d) {
+        use crate::surface::sphere::{Sphere, SphereOptions};
+        let k = Kernel::default();
+        let mut sphere = Sphere::new(
+            &k,
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+            6.0,
+            SphereOptions::default(),
+        )
+        .unwrap();
+        sphere.make_nurb(&k).unwrap();
+        let surface = Surface::from(sphere);
+        let dom = surface.natural_uv_domain_if_built();
+        (surface, dom)
+    }
+
+    /// A 2D trim of `degree` through the control points `pts` (one Bezier piece).
+    fn uv_bezier(pts: &[[f64; 2]]) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let control: Vec<Vec3> = pts.iter().map(|p| Vec3::new(p[0], p[1], 0.0)).collect();
+        let m = control.len();
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: m - 1,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[m, m],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// Near a pole: a straight trim along u at fixed v on a r 6 sphere is an arc of a
+    /// circle of latitude, whose radius is its distance from the sphere's axis (about 2e-5
+    /// 1e-6 of the way from either pole, 6 halfway up). The bound clears half that radius
+    /// over the whole trim and does not clear twice it.
+    #[test]
+    fn a_trim_near_a_sphere_pole_clears_the_radius_of_its_image() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        for f in [1e-6, 0.5, 1.0 - 1e-6] {
+            let v = dom.min().y + f * h;
+            let (u0, u1) = (dom.min().x + 0.1 * w, dom.min().x + 0.7 * w);
+            let trim = uv_bezier(&[[u0, v], [u1, v]]);
+            let p = surface
+                .evaluate_point(&k, Point2::new(0.5 * (u0 + u1), v))
+                .unwrap();
+            let radius = (p.x * p.x + p.y * p.y).sqrt();
+            let clears = |tol| radius_clears_on_surface(&k, &trim, &surface, 0.0, 1.0, tol);
+            assert!(clears(0.5 * radius).unwrap(), "f {f}: {radius}");
+            assert!(!clears(2.0 * radius).unwrap(), "f {f}: {radius}");
+        }
+    }
+
+    /// A real cusp near a pole is still reported: a quadratic trim turning sharply in
+    /// (u, v), 1.5 % of the way from the sphere's pole, where the surface is regular. Its
+    /// turn, `(-e, h) (0, -h) (e, h)` about its apex with `e = 1e-5` and `h = 2e-3` of the
+    /// domain, has radius `e^2 / 2h` in (u, v) and one about as small on the ball, far
+    /// below test 13's tolerance: the bound does not clear it and test 13 reports.
+    #[test]
+    fn a_cusp_near_a_sphere_pole_is_reported() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        let (u, v) = (dom.min().x + 0.5 * w, dom.max().y - 0.015 * h);
+        let (e, hh) = (1e-5 * w, 2e-3 * h);
+        let trim = uv_bezier(&[[u - e, v + hh], [u, v - hh], [u + e, v + hh]]);
+        let tol = 1e-4;
+        assert!(!radius_clears_on_surface(&k, &trim, &surface, 0.0, 1.0, tol).unwrap());
+        let idx = failed_tests(&k, &trim, Some(&surface));
+        assert!(idx.contains(&13), "{idx:?}");
+    }
+
+    /// A quadratic 2D trim through the control points `pts` with the distinct `knots` and
+    /// their multiplicities `mults` (ends 3, interior 1).
+    fn uv_quadratic(pts: &[[f64; 2]], knots: &[f64], mults: &[usize]) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let control: Vec<Vec3> = pts.iter().map(|p| Vec3::new(p[0], p[1], 0.0)).collect();
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: mults,
+            knots,
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// The (u, v) of longitude `lon` and latitude `lat` (radians) on [`sphere`]'s domain.
+    fn lon_lat(dom: &Extent2d, lon: f64, lat: f64) -> [f64; 2] {
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        [
+            dom.min().x + lon / (2.0 * PI) * w,
+            dom.min().y + (lat + 0.5 * PI) / PI * h,
+        ]
+    }
+
+    /// A trim that comes down a meridian of the r 6 sphere from the equator to 0.01 rad from
+    /// the pole and turns there onto the circle of latitude, sweeping 2 rad of longitude (the
+    /// control points (lon, lat) `(0, 0) (0, π/2 - 0.05) (0, π/2 - 0.01) (2, π/2 - 0.01)`,
+    /// knots 0, 0.9, 1), followed by the control points `extra` (with two of them, knots 0,
+    /// 0.9, 0.95, 0.97, 1). Its middle lies on the meridian at a latitude of about 70°, where
+    /// a step in u is about 33 times as long as at the turn. So the turn onto the latitude
+    /// circle, whose u leg is 2 rad but 0.12 long on the ball, mapped by the metric at the
+    /// middle (WR-560), has a radius of about 2.9e-4 against the tolerance 1.0e-3, while its
+    /// image on the ball has a least radius of about 6.8e-3 (a closed-form model of the
+    /// curve, sampled; the test asserts only the verdicts).
+    fn turn_onto_a_latitude_circle(dom: &Extent2d, extra: &[[f64; 2]]) -> BSplineCurve {
+        let top = 0.5 * PI - 0.01;
+        let mut pts = vec![
+            lon_lat(dom, 0.0, 0.0),
+            lon_lat(dom, 0.0, top - 0.04),
+            lon_lat(dom, 0.0, top),
+            lon_lat(dom, 2.0, top),
+        ];
+        pts.extend(extra.iter().map(|&[lon, lat]| lon_lat(dom, lon, lat)));
+        if extra.is_empty() {
+            uv_quadratic(&pts, &[0.0, 0.9, 1.0], &[3, 1, 3])
+        } else {
+            uv_quadratic(&pts, &[0.0, 0.9, 0.95, 0.97, 1.0], &[3, 1, 1, 1, 3])
+        }
+    }
+
+    /// The trim of [`turn_onto_a_latitude_circle`]: the turn that is sharp only in the
+    /// mapped (u, v) is passed over, so test 13 does not report. Without the pass-over (on
+    /// main) test 13 reports this trim.
+    #[test]
+    fn a_turn_near_a_sphere_pole_that_is_smooth_on_the_ball_is_passed_over() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let trim = turn_onto_a_latitude_circle(&dom, &[]);
+        let idx = failed_tests(&k, &trim, Some(&surface));
+        assert!(!idx.contains(&13), "{idx:?}");
+    }
+
+    /// The same turn, followed along the latitude circle by a corner that is sharp on the
+    /// ball: the control points `(2.06, π/2 - 0.01) (2.06, π/2 - 0.31)` and knots 0, 0.9,
+    /// 0.95, 0.97, 1 turn back down a meridian over 0.06 rad of longitude, 0.0036 long on
+    /// the ball. On the ball the corner's radius is about 5e-6 at t = 0.97; the turn at
+    /// t = 0.9 still has a radius of about 3.1e-3 there at its own parameter, which a test
+    /// at one point passes. Over `[0.9, 0.95]` the bound clears the tolerance 1e-3; over
+    /// `[0.9, 1]`, which holds the corner off the turn's parameter, it does not.
+    #[test]
+    fn a_kink_on_the_ball_off_a_turns_parameter_is_not_cleared() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let top = 0.5 * PI - 0.01;
+        let trim = turn_onto_a_latitude_circle(&dom, &[[2.06, top], [2.06, top - 0.3]]);
+        let clears = |lo, hi| radius_clears_on_surface(&k, &trim, &surface, lo, hi, 1e-3);
+        assert!(clears(0.9, 0.95).unwrap());
+        assert!(!clears(0.9, 1.0).unwrap());
     }
 
     /// WR-668 (fork tangency-labs/smlib ecf1963): `C(t) = (t^2, t^3, 0)` on `[0, 1]`,

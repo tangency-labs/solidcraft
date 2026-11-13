@@ -12,6 +12,7 @@ pub mod p1;
 pub mod p2;
 pub mod p3;
 pub mod speed;
+pub(crate) mod trim_image;
 
 pub use p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, Ends, KnotType, NurbCircleParam, ProjectionType,
