@@ -640,25 +640,47 @@ fn a_relief_runs_past_a_sloped_open_end_by_more_than_the_radius() {
     );
     let r = record(&body);
     let corners = [[10.0, 12.0], [30.0, 12.0], [30.0, 18.0], [10.0, 18.0]];
+    // The record may run a corner as more than one edge (the cut leaves 6 here for the 4
+    // corners): every piece is picked, and the pieces at a corner together run the whole
+    // corner, from the flat bottom (z = 0) to the sloped top.
     let edges = vertical_edges(&r, &corners);
-    assert_eq!(edges.len(), 4);
+    let pieces: Vec<_> = edges
+        .iter()
+        .map(|&i| {
+            let e = &r.edges[i];
+            (point(&r, e.vertices[0]), point(&r, e.vertices[1]))
+        })
+        .collect();
+    assert!(edges.len() >= 4, "{pieces:?}");
     let p = plan(&r, &edges, &[], &options(Style::Normal)).unwrap();
-    assert!(p.skipped.is_empty(), "{:?}", p.skipped);
-    assert_eq!(p.tools.len(), 4);
-    for t in &p.tools {
-        let c = t.cylinder;
-        let (lo, hi) = if c.axis[2] > 0.0 {
-            (c.base[2], c.base[2] + c.height)
-        } else {
-            (c.base[2] - c.height, c.base[2])
-        };
-        // The edge runs from the flat bottom (z = 0) to the sloped top, at twice its middle's
-        // height. Past the bottom by the radius; past the top by r + 2r tan β, the reach of the
-        // relief's section (2r from the edge line) times the slope, plus r.
-        let top = 2.0 * t.at[2];
-        assert!((lo + R).abs() < 1e-9, "{c:?}");
-        assert!((hi - top - 2.5 * R).abs() < 1e-9, "{t:?}");
-        assert!(hi - top > R, "{t:?}");
+    assert!(p.skipped.is_empty(), "{:?} {pieces:?}", p.skipped);
+    assert_eq!(p.tools.len(), edges.len(), "{pieces:?}");
+    for c in corners {
+        let spans: Vec<(f64, f64)> = p
+            .tools
+            .iter()
+            .filter(|t| (t.at[0] - c[0]).abs() < 1e-9 && (t.at[1] - c[1]).abs() < 1e-9)
+            .map(|t| {
+                let c = t.cylinder;
+                if c.axis[2] > 0.0 {
+                    (c.base[2], c.base[2] + c.height)
+                } else {
+                    (c.base[2] - c.height, c.base[2])
+                }
+            })
+            .collect();
+        assert!(!spans.is_empty(), "{c:?}: {p:?}");
+        let lo = spans.iter().map(|s| s.0).fold(f64::INFINITY, f64::min);
+        let hi = spans.iter().map(|s| s.1).fold(f64::NEG_INFINITY, f64::max);
+        // Past the bottom by the radius; past the sloped top (z = 2 + 0.75 y) by r + 2r tan β,
+        // the reach of the relief's section (2r from the edge line) times the slope, plus r.
+        let top = 2.0 + 0.75 * c[1];
+        assert!((lo + R).abs() < 1e-9, "{c:?}: {spans:?} {pieces:?}");
+        assert!(
+            (hi - top - 2.5 * R).abs() < 1e-9,
+            "{c:?}: {spans:?} {pieces:?}"
+        );
+        assert!(hi - top > R, "{c:?}: {spans:?}");
     }
 }
 
