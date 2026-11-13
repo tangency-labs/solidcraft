@@ -46,6 +46,9 @@ pub fn geometry(b: &Brep) -> Result<()> {
             surface(n)?;
         }
     }
+    for s in &b.screw_owners {
+        surface(&Surface::ProceduralSweep(Box::new(s.clone())))?;
+    }
     Ok(())
 }
 
@@ -81,7 +84,8 @@ pub use solidcore::eval::agreement::{Mismatch, Problem, Record, AREA_SAMPLES};
 /// ([`solidcore::eval::agreement::check`]): each edge's curve meets its vertices, each pcurve lifts
 /// onto its edge's curve and continues the use before it, each loop encloses (u, v) area and turns
 /// the right way, each vertex loop's vertex lies on its surface. Call on a record its structural
-/// validation accepted; a record too deep to convert is refused as unevaluable.
+/// validation accepted; a record too deep to convert is refused as unevaluable. An edge on a
+/// screw owner the record shares (`OnSurfaceRef`) is evaluated on that owner.
 ///
 /// # Errors
 /// The first record that disagrees, and how.
@@ -169,9 +173,19 @@ pub fn agreement(b: &Brep) -> std::result::Result<(), Mismatch> {
                 .collect(),
         })
         .collect();
-    a::check(&a::View {
-        edges: &edges,
-        vertices: &vertices,
-        faces: &faces,
-    })
+    // An edge on one of the record's shared screw owners (`OnSurfaceRef`) is evaluated bound
+    // to that owner, through the body's curve context; every other edge as before.
+    let context = solidcore_convert::curve_context::BodyCurveContext::new(b);
+    a::check_with(
+        &a::View {
+            edges: &edges,
+            vertices: &vertices,
+            faces: &faces,
+        },
+        |i, e| match (e.curve, &context) {
+            (solidcore::eval::Curve::OnSurfaceRef { .. }, Ok(c)) => c.edge(i),
+            (solidcore::eval::Curve::OnSurfaceRef { .. }, Err(err)) => Err(err.clone()),
+            _ => solidcore::eval::CurveEval::new(e.curve).map(std::sync::Arc::new),
+        },
+    )
 }

@@ -866,3 +866,167 @@ fn a_segment_projects_onto_a_box_s_record_face_at_its_index() {
         "a direction of no length"
     );
 }
+
+/// Two thread grooves as SolidCraft's Thread feature sweeps them (an M12 in a 10.2 mm hole, an
+/// M10x1.5 over 10.23 turns) cross the record boundary and back: the record holds an edge whose
+/// interval runs past its UV curve's end by the rounding of the kernel's parameter, and an end
+/// cap whose plane was built from rounded corners with its axes a few units in the last place
+/// off square. Each record is taken back by the kernel and agrees with its topology.
+#[test]
+fn a_thread_grooves_screw_sweep_crosses_the_record_and_back() {
+    let p = |y: f64, z: f64| [0.0, y, z];
+    let m12 = polygon(&[
+        p(4.877784714610771, -2.5072862971081844),
+        p(6.0, -1.8593750000000004),
+        p(6.0, -1.6406249999999996),
+        p(4.877784714610771, -0.9927137028918156),
+    ]);
+    let m10 = polygon(&[
+        p(4.188101183952089, -1.6875),
+        p(5.075, -2.199551270189222),
+        p(5.075, -0.800448729810778),
+        p(4.188101183952089, -1.3125),
+    ]);
+    for (profile, origin, pitch, turns) in [
+        (&m12, [0.0, 0.0, -1.75], 1.75, 13.428571428571429),
+        (&m10, [0.0, 0.0, -1.5], 1.5, 10.230000000000002),
+    ] {
+        let tolerance = pitch * 1e-4;
+        let made = screw_sweep(profile, origin, Z, pitch, turns, None, tolerance).unwrap();
+        let (record, _) = made.to_record().unwrap();
+        solidcore_ops::record_check::validate_built(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
+        let (back, _) = Body::from_record(&record, true).unwrap();
+        let (a, b) = (made.volume(1e-8).unwrap(), back.volume(1e-8).unwrap());
+        assert!(
+            (a - b).abs() <= 1e-9 * a,
+            "{turns} turns: {a} made, {b} read back"
+        );
+    }
+}
+
+/// The two grooves of a two-start M10 thread (lead 3 mm, each a turn's half further round)
+/// start and end in one axial plane, on opposite sides of the axis: their caps' bounding planes
+/// coincide, so the boolean intersects the walls' exact boundary curves there. The grooves do
+/// not meet, and their union is both of them: each copy of a boundary curve on a screw-swept
+/// wall is that curve, not refused for being no B-spline.
+#[test]
+fn the_grooves_of_a_two_start_thread_unite_as_both() {
+    let groove = |side: f64| {
+        let p = |y: f64, z: f64| [0.0, side * y, z];
+        polygon(&[
+            p(4.188101183952089, -1.6875),
+            p(5.075, -2.199551270189222),
+            p(5.075, -0.800448729810778),
+            p(4.188101183952089, -1.3125),
+        ])
+    };
+    let made =
+        |side| screw_sweep(&groove(side), [0.0, 0.0, -1.5], Z, 3.0, 3.0, None, 3e-4).unwrap();
+    let (a, b) = (made(1.0), made(-1.0));
+    let (va, vb) = (a.volume(1e-8).unwrap(), b.volume(1e-8).unwrap());
+    let both = solidcore_ops::boolean::union_all(vec![a, b]).unwrap();
+    let v = both.volume(1e-8).unwrap();
+    assert!(
+        (v - (va + vb)).abs() <= 1e-6 * v,
+        "{v}, the grooves {va} + {vb}"
+    );
+}
+
+/// A thread cut both ways (SolidCraft's `hand: both`): the right-handed groove and the
+/// left-handed one (the same turn about the reversed axis, rising by a negative pitch, its
+/// profile wound the other way so its walls face out) cross each other twice a turn. The
+/// boolean copies and trims the walls' exact boundary curves where they cross, and the union
+/// and the intersection hold their volumes: V(a ∪ b) + V(a ∩ b) = V(a) + V(b). Where the walls
+/// meet along their boundaries the union's edges are the walls' iso curves; the record takes
+/// each as the curve on its screw along its UV line, so the union goes to the record and comes
+/// back the same solid (SolidCraft's export of the thread), not refused as a curve with no
+/// B-spline form.
+#[test]
+fn the_grooves_of_a_thread_cut_both_ways_unite() {
+    use solidcore_ops::boolean::{boolean, union_all, BooleanOp};
+    let p = |y: f64, z: f64| [0.0, y, z];
+    let mut pts = vec![
+        p(4.188101183952089, -1.6875),
+        p(5.075, -2.199551270189222),
+        p(5.075, -0.800448729810778),
+        p(4.188101183952089, -1.3125),
+    ];
+    let made = |pts: &[[f64; 3]], axis, pitch| {
+        screw_sweep(
+            &polygon(pts),
+            [0.0, 0.0, -1.5],
+            axis,
+            pitch,
+            2.0,
+            None,
+            1.5e-4,
+        )
+        .unwrap()
+    };
+    let right = made(&pts, Z, 1.5);
+    pts.reverse();
+    let left = made(&pts, [0.0, 0.0, -1.0], -1.5);
+    let (vr, vl) = (right.volume(1e-8).unwrap(), left.volume(1e-8).unwrap());
+    let both = boolean(
+        right.copy().unwrap(),
+        left.copy().unwrap(),
+        BooleanOp::Intersect,
+    )
+    .unwrap()
+    .unwrap();
+    let either = union_all(vec![right, left]).unwrap();
+    let (vu, vi) = (either.volume(1e-8).unwrap(), both.volume(1e-8).unwrap());
+    assert!(
+        vi > 0.0 && vu < vr + vl,
+        "they cross: {vu} of {vr} + {vl}, {vi} in both"
+    );
+    assert!(
+        (vu + vi - (vr + vl)).abs() <= 1e-6 * (vr + vl),
+        "{vu} + {vi} vs {vr} + {vl}"
+    );
+    let (record, _) = either.to_record().unwrap();
+    let (back, _) = Body::from_record(&record, true).unwrap();
+    let vb = back.volume(1e-8).unwrap();
+    assert_eq!(back.counts().unwrap(), either.counts().unwrap());
+    assert!((vb - vu).abs() <= 1e-8 * vu, "{vb} back, {vu} made");
+}
+
+/// An M10 groove with a runout (its law moves the profile out 0.887 mm over the last two of four
+/// turns), cut from a 5 mm cylinder, at the tolerance SolidCraft sweeps a 1.5 mm pitch to. The
+/// law makes the groove's axial wall the extrusion of a spiral, and its net the extrusion of the
+/// net's spiral, about 1e-5 off it: the boolean copies that wall as its net with its definition,
+/// not as the surface of extrusion recognised from the net, so the flanks' edges on it, on the
+/// definition, stay within the body's tolerance of it, and the result passes the check.
+#[test]
+fn a_runout_groove_cut_from_a_cylinder_keeps_its_axial_wall_exact() {
+    use solidcore_ops::boolean::{boolean, BooleanOp};
+    use solidcore_record::brep::Surface;
+    let p = |y: f64, z: f64| [0.0, y, z];
+    let groove = polygon(&[
+        p(4.188101183952089, -1.6875),
+        p(5.075, -2.199551270189222),
+        p(5.075, -0.800448729810778),
+        p(4.188101183952089, -1.3125),
+    ]);
+    let turns = 4.0;
+    let law = [(turns - 2.0, 0.0), (turns, 0.887)];
+    let cut = screw_sweep(&groove, [0.0, 0.0, -1.5], Z, 1.5, turns, Some(&law), 1.5e-4).unwrap();
+    let rod = solidcore_ops::make_cylinder([0.0; 3], 5.0, 1.5 * turns - 3.0).unwrap();
+    let threaded = boolean(rod, cut, BooleanOp::Subtract).unwrap().unwrap();
+    let report = threaded.check(solidcore_ops::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let (record, _) = threaded.to_record().unwrap();
+    // The rod's side, ends and the groove's walls: each wall still its definition.
+    let lost = record
+        .faces
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.surface,
+                Surface::Spline { .. } | Surface::RationalSpline { .. }
+            )
+        })
+        .count();
+    assert_eq!(lost, 0, "a swept wall lost its definition");
+}

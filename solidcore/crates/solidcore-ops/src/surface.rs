@@ -60,7 +60,7 @@ fn argument_or_status(e: SolidError) -> Error {
 
 /// `curve` over its natural range as the kernel's B-spline: a line from its start to its end,
 /// a polyline over all its segments, a spline over its knots' domain. A circle, an ellipse
-/// (no ends of their own) and a traced intersection curve are refused.
+/// (no ends of their own), a traced intersection curve and a curve on a surface are refused.
 fn spline(k: &Kernel, curve: &Curve) -> solidcore::Result<Out<BSplineCurve>> {
     let count = match curve {
         Curve::Line { start, end } => {
@@ -74,7 +74,11 @@ fn spline(k: &Kernel, curve: &Curve) -> solidcore::Result<Out<BSplineCurve>> {
         }
         Curve::Polyline { points } | Curve::Spline { points, .. } => points.len(),
         Curve::RationalSpline { homogeneous, .. } => homogeneous.len(),
-        Curve::Circle { .. } | Curve::Ellipse { .. } | Curve::SurfaceIntersection { .. } => {
+        Curve::Circle { .. }
+        | Curve::Ellipse { .. }
+        | Curve::SurfaceIntersection { .. }
+        | Curve::OnSurface { .. }
+        | Curve::OnSurfaceRef { .. } => {
             return Ok(Err(Error::Argument));
         }
     };

@@ -135,7 +135,7 @@ use crate::curve::curve::p2::{
     at, evaluate_continuity, is_kind_of as curve_is_kind_of, knots_ignoring_status, Curve,
     CurveEvaluate, CurveKind, KnotsWithStatus, CRV_ON_SURF_TYPE,
 };
-use crate::curve::curve::p5::CurveMemoKey;
+use crate::curve::curve::p5::{CurveMemo, CurveMemoKey};
 use crate::curve::curve::p6::{calculate_bounding_box_base, CurveHandle, DroppedPoint};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
@@ -144,6 +144,7 @@ use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::are_same;
@@ -519,6 +520,62 @@ impl CrvOnSurf {
         Ok(c)
     }
 
+    /// Full-span search enclosure for an affine UV line on a retained screw.
+    /// This mirrors Line's parameter conversion with outward interval arithmetic,
+    /// then encloses the clamped definition patch using the certified net. The
+    /// 3D approximation remains only a subdivision seed, never a root evaluator.
+    pub(crate) fn screw_line_enclosure(&self, interval: &Extent1d) -> Result<Option<Extent3d>> {
+        use crate::blend::fillet_section::interval::Ivl;
+        if self.surface.retained_screw().is_none() {
+            return Ok(None);
+        }
+        let CurveKind::Line(line) = self.uv_curve.kind() else {
+            return Ok(None);
+        };
+        let natural = line.natural_interval();
+        // The line's own STEP domain, as `Line::convert_t_from_nurbs_to_step` maps;
+        // not the constant `[-1000, 1000]` analytic limit.
+        let analytic = line.step_interval();
+        let t = Ivl::new(interval.min(), interval.max());
+        let step = if line.is_bounded() && !crate::geom::tol::is_zero(natural.length()) {
+            let fraction = if line.inside_out() {
+                (t - Ivl::from(natural.max())) / Ivl::from(-natural.length())
+            } else {
+                (t - Ivl::from(natural.min())) / Ivl::from(natural.length())
+            };
+            Ivl::from(analytic.min()) + fraction * Ivl::from(analytic.length())
+        } else if !line.is_bounded() && line.inside_out() {
+            Ivl::from(0.0) - t
+        } else {
+            t
+        };
+        let point = line.line_point();
+        let vector = line.line_vector();
+        let x = Ivl::from(point.x) + step * Ivl::from(vector.x) * Ivl::from(line.line_scale());
+        let y = Ivl::from(point.y) + step * Ivl::from(vector.y) * Ivl::from(line.line_scale());
+        if ![x.lo, x.hi, y.lo, y.hi].iter().all(|v| v.is_finite()) {
+            return Err(SolidError::invalid_input(
+                OP_EVAL,
+                "nonfinite screw UV enclosure",
+            ));
+        }
+        // Retained screw evaluation clamps both independent source coordinates;
+        // its signed/permuted diagonal chart maps this to domain clamping.
+        let domain = self.surface.natural_uv_domain_if_built();
+        let (lo, hi) = (domain.min(), domain.max());
+        if ![lo.x, lo.y, hi.x, hi.y].iter().all(|v| v.is_finite()) || lo.x > hi.x || lo.y > hi.y {
+            return Err(SolidError::invalid_input(
+                OP_EVAL,
+                "retained screw UV domain is not finite and ordered",
+            ));
+        }
+        let patch = Extent2d::from_points(
+            Point2::new(x.lo.max(lo.x).min(hi.x), y.lo.max(lo.y).min(hi.y)),
+            Point2::new(x.hi.max(lo.x).min(hi.x), y.hi.max(lo.y).min(hi.y)),
+        );
+        crate::curve::iso_curve::screw_patch_enclosure(&self.surface, patch)
+    }
+
     /// The line segment from `start_uv` to `end_uv` on `surface` (the UV line
     /// constructor): the new UV line is always owned; owner flags 2 and 3 also own
     /// the surface (flag 2's surface copy is discarded, as upstream), anything else
@@ -586,7 +643,13 @@ impl CrvOnSurf {
         let owns_curve = self.owner_flag == 1 || self.owner_flag == 2 || self.owner_flag == 3;
         let owns_surface = self.owner_flag == 2 || self.owner_flag == 3;
 
-        let uv_curve = if owns_curve {
+        let retained_screw = self.surface.retained_screw().is_some();
+        let uv_curve = if owns_curve && retained_screw {
+            // The exact lift keeps the UV spline's literal parameters. Its legacy
+            // owning copy may merge close knots; reset the wrapper's ownership and
+            // caches without changing the already depth-checked curve geometry.
+            Curve::new(self.uv_curve.clone_exact_bounded().into_kind())
+        } else if owns_curve {
             self.uv_curve.copy(k)?
         } else {
             self.uv_curve.clone_exact_bounded()
@@ -850,6 +913,10 @@ impl CrvOnSurf {
         from_left: bool,
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
+        // A curve on a retained screw denotes its exact lift, even when a caller
+        // permits the support net for a separate surface query.
+        let screw = self.surface.retained_screw().is_some();
+        let _exact = screw.then(|| crate::surface::procedural_blend::NetScope::exact(k));
         // limit the number of derivatives to 3
         let mut n_eval = num_derivs.min(MAX_DERIVS);
 
@@ -875,7 +942,7 @@ impl CrvOnSurf {
 
         // If the surface can't handle this many derivatives (default bNonZeroTangents)
         while let Err(e) = &srf {
-            if e.is_unported_or_cancelled() || n_eval == 0 {
+            if screw || e.is_unported_or_cancelled() || n_eval == 0 {
                 break;
             }
             n_eval -= 1;
@@ -959,6 +1026,11 @@ impl CrvOnSurf {
     ///
     /// Those of the UV curve's and the surface's point evaluation.
     pub fn evaluate_point(&self, k: &Kernel, t: f64) -> Result<Point3> {
+        let _exact = self
+            .surface
+            .retained_screw()
+            .is_some()
+            .then(|| crate::surface::procedural_blend::NetScope::exact(k));
         // UVCurve eval
         let p = self.uv_curve.evaluate_point(k, t)?;
 
@@ -1554,6 +1626,7 @@ impl CrvOnSurf {
             guess,
             op,
             None,
+            None,
             &mut None,
         )
     }
@@ -1571,6 +1644,7 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
         derived: Option<TangentFieldMembers>,
+        memo: Option<&CurveMemo>,
         cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         // check inputs (upstream warns and selects SM_SO_MINIMIZE)
@@ -1593,11 +1667,31 @@ impl CrvOnSurf {
                 guess,
                 op,
                 derived,
+                memo,
                 cache,
             );
         }
 
-        let bs = match self.get_or_create_bs_approx_as(k, APPROX_TOL_3D, None, None, derived) {
+        // For a retained screw this approximation supplies only a Greville seed;
+        // the unchanged base solve below evaluates exact self and tests dist_tol.
+        // A freshly made approximation can report a gap above APPROX_TOL_3D, so
+        // asking for that accuracy at every drop would rebuild the identical seed.
+        // Do not change the accuracy contract of get_or_create_bs_approx_as.
+        let seed = if derived.is_none() && self.surface.retained_screw().is_some() {
+            let cached = self.approx_cache_mut();
+            if cached.parametrization_matches {
+                cached.bs_approx.as_deref().map(BSplineCurve::clone_exact)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let approximation = match seed {
+            Some(seed) => Ok(seed),
+            None => self.get_or_create_bs_approx_as(k, APPROX_TOL_3D, None, None, derived),
+        };
+        let bs = match approximation {
             Ok(bs) => bs,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => {
@@ -1610,8 +1704,9 @@ impl CrvOnSurf {
                     guess,
                     op,
                     derived,
+                    memo,
                     cache,
-                )
+                );
             }
         };
 
@@ -1638,6 +1733,7 @@ impl CrvOnSurf {
             Some(min_param),
             op,
             derived,
+            memo,
             cache,
         )
     }
@@ -1658,6 +1754,7 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
         derived: Option<TangentFieldMembers>,
+        memo: Option<&CurveMemo>,
         cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         // this curve's own cache, for a caller without one (not for a derived object,
@@ -1673,7 +1770,14 @@ impl CrvOnSurf {
                 }
             }
         }
-        let curve = self.as_curve(derived);
+        let mut curve = self.as_curve(derived);
+        // not upstream: the stand-in is this curve's value, so its global solve reads and
+        // fills the memo of the curve object the caller dropped on (a pure value only:
+        // the memo key refuses every other curve on a surface, and a derived object is
+        // another curve)
+        if let (Some(memo), None) = (memo, derived) {
+            curve.share_memo(memo);
+        }
         let result = curve.drop_point_base_cached(
             k,
             interval,
@@ -1731,6 +1835,7 @@ impl CrvOnSurf {
             guess,
             op,
             None,
+            None,
             &mut None,
         )
     }
@@ -1748,6 +1853,7 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
         derived: Option<TangentFieldMembers>,
+        memo: Option<&CurveMemo>,
         cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         // (an exact stand-in for `this`, whose caches are kept below)
@@ -1767,6 +1873,7 @@ impl CrvOnSurf {
             guess,
             op,
             derived,
+            memo,
             cache,
         );
         self.keep_caches_of(copy);
@@ -2332,6 +2439,400 @@ mod tests {
         Curve::from(BSplineCurve::from_nurb(cur, 2, false))
     }
 
+    fn retained_owner(radius: f64, close_knots: bool, large: bool) -> Surface {
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        let count = if close_knots {
+            5
+        } else if large {
+            65
+        } else {
+            2
+        };
+        let mut raw = allocate_nurb_curve(count - 1, 1, count + 1).unwrap();
+        for (i, p) in raw.cpts_mut().iter_mut().enumerate() {
+            p.x = radius + i as f64 / (count - 1) as f64;
+            p.y = -0.0;
+            p.z = i as f64 / (count - 1) as f64;
+            p.w = -f64::MAX;
+        }
+        let mut knots = vec![-0.0, -0.0];
+        if close_knots {
+            knots.extend([1e-9, 2e-9, 3e-9]);
+        } else {
+            knots.extend((1..count - 1).map(|i| i as f64 / (count - 1) as f64));
+        }
+        knots.extend([1.0, 1.0]);
+        raw.knots_mut().copy_from_slice(&knots);
+        let profile = BSplineCurve::from_nurb(raw, 3, true);
+        let motion = ScrewMotion::new(
+            Point3::new(-0.0, -0.0, -0.0),
+            Vec3::new(-0.0, -0.0, 1.0),
+            2.5,
+            None,
+        )
+        .unwrap();
+        let spans = if large { 1124 } else { 4 };
+        let mut stations: Vec<_> = (0..=spans).map(|i| f64::from(i) / 128.0).collect();
+        stations[0] = -0.0;
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 1.0 / 256.0).unwrap();
+        let net = crate::sweep::screw::screw_net(
+            definition.profile(),
+            definition.screw().unwrap(),
+            &stations,
+        )
+        .unwrap();
+        let mut owner = Surface::from(net);
+        owner.set_sweep_definition(definition);
+        owner
+    }
+
+    fn screw_record(surface: &Surface) -> crate::eval::geometry::sweep::ProceduralSweepRecord {
+        let kept = surface.procedural_sweep().unwrap();
+        kept.definition().to_record(kept.net()).unwrap()
+    }
+
+    fn on_screw(curve: &Curve) -> &CrvOnSurf {
+        let CurveKind::CrvOnSurf(on) = curve.kind() else {
+            panic!("expected exact surface curve")
+        };
+        on
+    }
+
+    #[test]
+    fn retained_screw_drop_reuses_a_loose_seed_but_refines_the_exact_curve() {
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        let k = Kernel::default();
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.6];
+        let definition = ProceduralSweep::create(&profile, motion.clone(), &stations, 0.3).unwrap();
+        let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+        let seed = net
+            .create_iso_parametric_curve(
+                &k,
+                SurfParamType::U,
+                0.0,
+                crate::nurbs::b_spline_surface::p2::IsoCurveOptions::default(),
+            )
+            .unwrap()
+            .curve;
+        let mut owner = Surface::from(net);
+        owner.set_sweep_definition(definition);
+        let interval = Extent1d::from_min_max(0.0, 0.6);
+        let uv = Line::bounded(
+            Vec3::ZERO,
+            Vec3::Y,
+            &interval,
+            &crate::curve::line::BoundedLineOptions {
+                dim: 2,
+                ..Default::default()
+            },
+        );
+        let mut curve = CrvOnSurf::new(&k, Curve::from(uv), owner, None, 3).unwrap();
+        let sentinel_gap = 0.01;
+        *curve.approx_cache_mut() = ApproxCache {
+            bs_approx: Some(Box::new(seed.clone_exact())),
+            max_gap_3d: sentinel_gap,
+            parametrization_matches: true,
+        };
+        for t in [0.17, 0.31] {
+            let point = curve.evaluate_point(&k, t).unwrap();
+            assert!(seed.evaluate_point(t).unwrap().distance(point) > 1e-5);
+            let dropped = curve
+                .drop_point(
+                    &k,
+                    &interval,
+                    point,
+                    None,
+                    1e-8,
+                    None,
+                    SolverOperation::Intersect,
+                )
+                .unwrap();
+            assert!(dropped.success, "{dropped:?}");
+            assert!(
+                curve
+                    .evaluate_point(&k, dropped.parameter)
+                    .unwrap()
+                    .distance(point)
+                    < 1e-8
+            );
+            assert_eq!(
+                curve.approx_cache_mut().max_gap_3d,
+                sentinel_gap,
+                "a Greville-only seed must not be regenerated for its loose accuracy tag"
+            );
+            assert_eq!(
+                curve
+                    .approx_cache_mut()
+                    .bs_approx
+                    .as_ref()
+                    .unwrap()
+                    .canonical()
+                    .unwrap(),
+                seed.canonical().unwrap()
+            );
+        }
+    }
+
+    /// The shared helix of a screw-swept cylinder piece is a UV line on a retained
+    /// screw whose STEP domain is its own bounded interval. Its search boxes must
+    /// map curve parameters through that domain: through the constant analytic
+    /// limit they clamped to the line's ends, so the M16 shoulder's cut circle lost
+    /// its crossing with the helix and the face was left uncut (#2621).
+    #[test]
+    fn retained_screw_uv_line_boxes_follow_the_lines_own_step_domain() {
+        use crate::geom::solution_array::{ObjectKind, SolutionObject};
+        use crate::surface::plane::Plane;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        use std::f64::consts::PI;
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        struct Probe;
+        impl SolutionObject for Probe {
+            fn kind(&self) -> ObjectKind {
+                ObjectKind::Surface
+            }
+        }
+        let k = Kernel::default();
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, PI / 4.0, PI / 2.0, 3.0 * PI / 4.0, PI];
+        let definition =
+            ProceduralSweep::create(&profile, motion.clone(), &stations, PI / 8.0).unwrap();
+        let mut owner =
+            Surface::from(crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap());
+        owner.set_sweep_definition(definition);
+        let domain = owner.natural_uv_domain_if_built();
+        // the helix of the profile's start: constant u, v across the whole domain
+        let length = domain.max().y - domain.min().y;
+        let interval = Extent1d::from_min_max(0.0, length);
+        let uv = Line::bounded(
+            Vec3::new(domain.min().x, domain.min().y, 0.0),
+            Vec3::Y,
+            &interval,
+            &crate::curve::line::BoundedLineOptions {
+                dim: 2,
+                ..Default::default()
+            },
+        );
+        assert_ne!(uv.step_interval(), uv.max_analytic_domain());
+        let curve = CrvOnSurf::new(&k, Curve::from(uv), owner, None, 3).unwrap();
+        let whole = curve.screw_line_enclosure(&interval).unwrap().unwrap();
+        let pieces = 8;
+        for i in 0..pieces {
+            let lo = length * f64::from(i) / f64::from(pieces);
+            let hi = length * f64::from(i + 1) / f64::from(pieces);
+            let piece = curve
+                .screw_line_enclosure(&Extent1d::from_min_max(lo, hi))
+                .unwrap()
+                .unwrap();
+            for j in 0..=4 {
+                let t = lo + (hi - lo) * f64::from(j) / 4.0;
+                let point = curve.evaluate_point(&k, t).unwrap();
+                assert!(
+                    piece.contains_point(point, 0.0),
+                    "box over [{lo}, {hi}] misses the curve at {t}: {piece:?} {point:?}"
+                );
+            }
+            assert!(piece.max().z - piece.min().z < whole.max().z - whole.min().z);
+        }
+        // a plane through an interior point keeps its root through the search
+        let t = 0.37 * length;
+        let expected = curve.evaluate_point(&k, t).unwrap();
+        let plane = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, expected.z), Vec3::Z));
+        let plane_domain =
+            Extent2d::from_points(Point2::new(-10.0, -10.0), Point2::new(10.0, 10.0));
+        let roots = plane
+            .global_curve_intersect::<Probe>(
+                &k,
+                [Probe, Probe],
+                &plane_domain,
+                &Curve::from(curve.clone()),
+                &interval,
+                1e-8,
+            )
+            .unwrap();
+        assert_eq!(roots.len(), 1);
+        let root = roots.get(0).unwrap().start.param(0).unwrap();
+        assert!((root - t).abs() < 1e-7, "root {root} for {t}");
+    }
+
+    #[test]
+    fn retained_screw_owner_copies_preserve_close_source_knots_and_signed_zero() {
+        let k = Kernel::default();
+        let owner = retained_owner(10.0, true, false);
+        let expected = screw_record(&owner);
+        let curve = Curve::from(
+            CrvOnSurf::from_uv_line(
+                &k,
+                Point2::new(0.75e-9, 0.005),
+                Point2::new(2.75e-9, 0.025),
+                owner,
+                None,
+                3,
+            )
+            .unwrap(),
+        );
+        let before = curve.evaluate(&k, 0.37, 2, false, false).unwrap();
+        for copy in [
+            curve.copy(&k).unwrap(),
+            curve.clone_for_evaluation().unwrap(),
+            curve.clone_exact_bounded(),
+        ] {
+            let record = screw_record(on_screw(&copy).surface());
+            // Debug float formatting distinguishes signed zero as well as every finite
+            // coefficient. This compares the complete literal record, not geometric nearness.
+            assert_eq!(format!("{record:?}"), format!("{expected:?}"));
+            assert_eq!(copy.natural_interval(), curve.natural_interval());
+            assert_eq!(copy.evaluate(&k, 0.37, 2, false, false).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn retained_screw_curve_copy_preserves_close_uv_knots() {
+        let k = Kernel::default();
+        let mut raw = allocate_nurb_curve(2, 1, 4).unwrap();
+        raw.knots_mut()
+            .copy_from_slice(&[-0.0, -0.0, 1e-13, 1.0, 1.0]);
+        for (p, (w, t)) in raw
+            .cpts_mut()
+            .iter_mut()
+            .zip([(0.2, 0.005), (0.8, 0.015), (0.4, 0.025)])
+        {
+            p.x = w;
+            p.y = t;
+            p.z = f64::MAX;
+            p.w = -f64::MAX;
+        }
+        let curve = Curve::from(
+            CrvOnSurf::new(
+                &k,
+                Curve::from(BSplineCurve::from_nurb(raw, 2, true)),
+                retained_owner(10.0, false, false),
+                None,
+                3,
+            )
+            .unwrap(),
+        );
+        let before = curve.evaluate(&k, 0.5e-13, 2, false, false).unwrap();
+        let copy = curve.copy(&k).unwrap();
+        let knots = |c: &Curve| {
+            let CurveKind::BSpline(uv) = on_screw(c).uv_curve().kind() else {
+                panic!("expected UV spline")
+            };
+            uv.gw_nurb()
+                .unwrap()
+                .knots()
+                .iter()
+                .map(|x| x.to_bits())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(knots(&copy), knots(&curve));
+        assert_eq!(copy.evaluate(&k, 0.5e-13, 2, false, false).unwrap(), before);
+        // Other geometric classes keep their existing native owning-copy rule.
+        let ordinary = Curve::from(
+            CrvOnSurf::new(
+                &k,
+                on_screw(&curve).uv_curve().clone_exact_bounded(),
+                patch().into(),
+                None,
+                3,
+            )
+            .unwrap(),
+        );
+        assert_ne!(knots(&ordinary.copy(&k).unwrap()), knots(&ordinary));
+    }
+
+    #[test]
+    fn restored_screw_owners_share_payload_through_curve_copy_and_detach_on_edit() {
+        use crate::surface::procedural_sweep::ProceduralSweep;
+        let k = Kernel::default();
+        // Match the two actual continued M20 owners' 65 x 2249 control counts,
+        // without repeating their controls in every one of the 52 edge owners.
+        let mut owners = [10.0, 12.0].map(|radius| {
+            ProceduralSweep::from_record(&screw_record(&retained_owner(radius, false, true)))
+                .unwrap()
+        });
+        let payload = |surface: &Surface| {
+            let net = surface.procedural_sweep().unwrap().net().gw_nurb().unwrap();
+            assert_eq!(net.array_sizes().0 + 1, 65);
+            assert_eq!(net.array_sizes().1 + 1, 2249);
+            net.row(0).unwrap().as_ptr()
+        };
+        let pointers = owners.each_ref().map(payload);
+        assert_ne!(pointers[0], pointers[1]);
+        let mut curves = Vec::new();
+        for i in 0..52 {
+            let owner = &owners[i % 2];
+            let curve = Curve::from(
+                CrvOnSurf::from_uv_line(
+                    &k,
+                    Point2::new(0.2, 0.3),
+                    Point2::new(0.8, 0.9),
+                    owner.clone_for_evaluation().unwrap(),
+                    None,
+                    3,
+                )
+                .unwrap(),
+            );
+            // This is the native copy used by make_topology_from_data::curve_for_edge.
+            let copy = curve.copy(&k).unwrap();
+            assert_eq!(payload(on_screw(&copy).surface()), pointers[i % 2]);
+            curves.push(copy);
+        }
+        let before: Vec<_> = curves
+            .iter()
+            .map(|c| c.evaluate(&k, 0.37, 2, false, false).unwrap())
+            .collect();
+        let translation = Vec3::new(2.0, -3.0, 4.0);
+        curves[0]
+            .transform(
+                &k,
+                &Axis2Placement::new(translation, Vec3::X, Vec3::Y),
+                None,
+            )
+            .unwrap();
+        assert_ne!(payload(on_screw(&curves[0]).surface()), pointers[0]);
+        let changed = curves[0].evaluate(&k, 0.37, 2, false, false).unwrap();
+        assert!((changed[0] - before[0][0] - translation).length() < 1e-12);
+        for (i, curve) in curves.iter().enumerate().skip(1) {
+            assert_eq!(payload(on_screw(curve).surface()), pointers[i % 2]);
+            assert_eq!(
+                curve.evaluate(&k, 0.37, 2, false, false).unwrap(),
+                before[i]
+            );
+        }
+        assert_eq!(owners.each_ref().map(payload), pointers);
+        // Editing a pool owner after construction must likewise leave its existing
+        // edge owners untouched; sharing is storage, not shared editable geometry.
+        owners[1]
+            .transform(
+                &k,
+                &Axis2Placement::new(-translation, Vec3::X, Vec3::Y),
+                None,
+            )
+            .unwrap();
+        assert_ne!(payload(&owners[1]), pointers[1]);
+        for (i, curve) in curves.iter().enumerate().skip(1) {
+            assert_eq!(payload(on_screw(curve).surface()), pointers[i % 2]);
+            assert_eq!(
+                curve.evaluate(&k, 0.37, 2, false, false).unwrap(),
+                before[i]
+            );
+        }
+    }
+
     #[test]
     fn tangent_field_exact_and_snapshot_preserve_populated_base_state() {
         use crate::curve::tangent_field::{TangentFieldCurve, TangentFieldMembers};
@@ -2578,6 +3079,7 @@ mod tests {
             None,
             SolverOperation::Normalize,
             None,
+            None,
             &mut None,
         )
         .unwrap();
@@ -2605,6 +3107,7 @@ mod tests {
                     1e-6,
                     None,
                     SolverOperation::Normalize,
+                    None,
                     None,
                     &mut None,
                 )
@@ -2645,6 +3148,7 @@ mod tests {
                     1e-6,
                     None,
                     SolverOperation::Normalize,
+                    None,
                     None,
                     cache,
                 )

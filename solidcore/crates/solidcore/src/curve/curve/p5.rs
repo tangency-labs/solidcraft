@@ -376,6 +376,9 @@ pub(crate) struct CurveMemoKey {
     /// The bits of the owner zone tolerance the build was given
     /// ([`make_curve_cache_with_zone_tol`]).
     owner_zone_tol_bits: Option<u64>,
+    /// The bits of the kernel's blend net tolerance (`NetScope`) for a curve that holds
+    /// a retained screw surface ([`memo_pure`]); `None` for every other curve.
+    net_tolerance_bits: Option<u64>,
 }
 
 impl CurveMemoKey {
@@ -385,11 +388,14 @@ impl CurveMemoKey {
     /// input: the build works on its own copy of the curve, which has none, and reads
     /// the owner only through `zone_tol_3d`.
     fn of(k: &Kernel, curve: &Curve, zone_tol_3d: Option<f64>) -> Option<Self> {
-        if !k.memoize_curve_caches || !memo_pure(curve) {
+        if !k.memoize_curve_caches {
             return None;
         }
+        let holds_screw = memo_pure(curve)?;
         Self::of_kernel(k).map(|key| Self {
             owner_zone_tol_bits: zone_tol_3d.map(f64::to_bits),
+            net_tolerance_bits: holds_screw
+                .then(|| crate::surface::procedural_blend::NetScope::tolerance(k).to_bits()),
             ..key
         })
     }
@@ -411,6 +417,7 @@ impl CurveMemoKey {
             context_flags: [c.doing_boolean()],
             fixes: k.fixes,
             owner_zone_tol_bits: None,
+            net_tolerance_bits: None,
         })
     }
 }
@@ -418,15 +425,22 @@ impl CurveMemoKey {
 /// Whether `curve`'s cache build reads nothing but the curve's own value, so that a memo
 /// of it is valid for every clone: B-spline, line, ellipse, hyperbola, parabola, Hermite
 /// and conic curves, and offset, projected and composite curves made only of such
-/// curves. Curves on surfaces, iso curves and curves in volumes hold a surface or volume
-/// with cache state of its own (the shared surface cache slot, lazy break and offset
-/// caches), so they are never memoised. The walk uses an explicit stack and gives up
-/// (no memo) past [`MAX_GEOMETRY_NESTING`] levels.
-fn memo_pure(curve: &Curve) -> bool {
+/// curves. Iso curves, curves in volumes and curves on other surfaces hold a surface or
+/// volume with cache state of its own (the shared surface cache slot, made kinds, lazy
+/// offset caches), so they are never memoised. A curve on a retained screw surface
+/// ([`crate::surface::surface::Surface::retained_screw`]) whose UV curve is pure is, and so
+/// is an iso curve of one (its direction, iso parameter, side and restriction values): that
+/// surface is a B-spline net with its definition, both plain values that only an edit
+/// through `&mut` changes, and its lazy breaks are derived from them alone; its
+/// evaluation also reads the kernel's blend net tolerance, so `Some(true)` asks the key
+/// for it. `None` when the curve is not pure; the walk uses an explicit stack and gives
+/// up (no memo) past [`MAX_GEOMETRY_NESTING`] levels.
+fn memo_pure(curve: &Curve) -> Option<bool> {
     let mut stack: Vec<(&Curve, usize)> = vec![(curve, 0)];
+    let mut holds_screw = false;
     while let Some((c, depth)) = stack.pop() {
         if depth > MAX_GEOMETRY_NESTING {
-            return false;
+            return None;
         }
         match c.kind() {
             CurveKind::BSpline(_)
@@ -441,15 +455,23 @@ fn memo_pure(curve: &Curve) -> bool {
             CurveKind::Composite(cc) => {
                 stack.extend(cc.segments().iter().map(|seg| (&seg.curve, depth + 1)));
             }
+            CurveKind::CrvOnSurf(cs) if cs.surface().retained_screw().is_some() => {
+                holds_screw = true;
+                stack.push((cs.uv_curve(), depth + 1));
+            }
+            // its direction, iso parameter, side and restriction are plain values
+            CurveKind::Iso(iso) if iso.surface().retained_screw().is_some() => {
+                holds_screw = true;
+            }
             CurveKind::Iso(_)
             | CurveKind::CrvOnSurf(_)
             | CurveKind::TangentField(_)
             | CurveKind::CrvInVolume(_) => {
-                return false;
+                return None;
             }
         }
     }
-    true
+    Some(holds_screw)
 }
 
 /// One memoised build: its key and the cache, without a handle.
@@ -463,12 +485,18 @@ struct CurveMemoEntry {
 /// `SmCacheMgr`, keyed by the curve object). It lives in the [`Curve`] value: a clone
 /// shares it (same geometry, same cache), an edit through `&mut Curve` replaces it with
 /// an empty one, and it is freed with the last curve that shares it. So there is at
-/// most one cache per live curve value. A hit gives what a fresh build gives, so no
+/// most one cache per live curve value, except for a curve on a retained screw: its
+/// queries build under a few keys in turn (an edge's own tolerance for intersections,
+/// none for its drops), so it keeps the last [`SCREW_MEMO_ENTRIES`] keys' caches rather
+/// than rebuild its costly exact tessellation each time. A hit gives what a fresh build gives, so no
 /// result depends on the memo, its fill order or which clone filled it. It adds no
 /// auto-trait bound ([`Curve`] is `Send` and not `Sync`, as without it) and needs no
 /// `unsafe`.
 #[derive(Default)]
-pub(crate) struct CurveMemo(OnceLock<Arc<Mutex<Option<CurveMemoEntry>>>>);
+pub(crate) struct CurveMemo(OnceLock<Arc<Mutex<Vec<CurveMemoEntry>>>>);
+
+/// How many keys' caches the memo of a curve on a retained screw keeps ([`CurveMemo`]).
+const SCREW_MEMO_ENTRIES: usize = 4;
 
 impl core::fmt::Debug for CurveMemo {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -502,8 +530,8 @@ impl CurveMemo {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         entry
-            .as_ref()
-            .filter(|e| e.key == *key)
+            .iter()
+            .find(|e| e.key == *key)
             .and_then(|e| e.cache.retag(handle))
     }
 
@@ -512,7 +540,21 @@ impl CurveMemo {
         let mut entry = slot
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *entry = Some(CurveMemoEntry { key: *key, cache });
+        // a curve that holds a retained screw keeps a few keys, the oldest leaving
+        // first; every other curve its last build only
+        let keep = if key.net_tolerance_bits.is_some() {
+            SCREW_MEMO_ENTRIES
+        } else {
+            1
+        };
+        entry.retain(|e| e.key != *key);
+        let leaving = (entry.len() + 1).saturating_sub(keep);
+        let kept: Vec<CurveMemoEntry> = std::mem::take(&mut *entry)
+            .into_iter()
+            .skip(leaving)
+            .collect();
+        *entry = kept;
+        entry.push(CurveMemoEntry { key: *key, cache });
     }
 }
 
@@ -3369,6 +3411,78 @@ mod tests {
             // the memo was off for `off`, so it stored nothing
             assert!(CurveMemoKey::of(&off, &c, None).is_none());
         }
+    }
+
+    /// A curve on a retained screw surface is memoised, under a key that also holds the
+    /// kernel's net tolerance; a hit and a build of a clone give a fresh build, and the
+    /// memo keeps both of the keys its edge's queries use in turn. A curve on any other
+    /// surface is not memoised.
+    #[test]
+    fn memo_keeps_a_curve_on_a_retained_screw() {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        use crate::curve::line::{BoundedLineOptions, Line};
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        use crate::surface::surface::p2::Surface;
+
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.6];
+        let definition = ProceduralSweep::create(&profile, motion.clone(), &stations, 0.3).unwrap();
+        let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+        let on = |screw: bool| {
+            let mut surface = Surface::from(net.clone_exact());
+            if screw {
+                surface.set_sweep_definition(definition.clone());
+            }
+            let uv = Line::bounded(
+                Vec3::new(0.3, 0.0, 0.0),
+                Vec3::Y,
+                &Extent1d::from_min_max(0.0, 0.6),
+                &BoundedLineOptions {
+                    dim: 2,
+                    ..Default::default()
+                },
+            );
+            Curve::from(CrvOnSurf::new(&k, Curve::from(uv), surface, None, 3).unwrap())
+        };
+        let c = on(true);
+        let key = CurveMemoKey::of(&k, &c, None).unwrap();
+        assert!(key.net_tolerance_bits.is_some());
+        let fresh = format!("{:?}", make_curve_cache(&off, &c, Some(7u32)).unwrap());
+        assert!(c.memo().lookup(&key, None::<u32>).is_none());
+        let miss = format!("{:?}", make_curve_cache(&k, &c, Some(7u32)).unwrap());
+        let hit = format!("{:?}", make_curve_cache(&k, &c, Some(7u32)).unwrap());
+        let copy = c.clone();
+        let hit_copy = format!("{:?}", make_curve_cache(&k, &copy, Some(7u32)).unwrap());
+        assert_eq!(miss, fresh);
+        assert_eq!(hit, fresh);
+        assert_eq!(hit_copy, fresh);
+        // the edge tolerance's key does not evict the system tolerance's
+        let edge = make_curve_cache_with_zone_tol(&k, &c, None::<u32>, Some(0.01)).unwrap();
+        let edge_fresh = make_curve_cache_with_zone_tol(&off, &c, None::<u32>, Some(0.01)).unwrap();
+        assert_eq!(format!("{edge:?}"), format!("{edge_fresh:?}"));
+        assert!(c.memo().lookup(&key, None::<u32>).is_some());
+        let edge_key = CurveMemoKey::of(&k, &c, Some(0.01)).unwrap();
+        assert!(c.memo().lookup(&edge_key, None::<u32>).is_some());
+        // another net tolerance is another key
+        let scope = crate::surface::procedural_blend::NetScope::new(&k);
+        assert!(CurveMemoKey::of(&k, &c, None).is_some_and(|other| other != key));
+        drop(scope);
+        // the same curve on the net alone keeps no memo
+        assert!(CurveMemoKey::of(&k, &on(false), None).is_none());
     }
 
     #[test]

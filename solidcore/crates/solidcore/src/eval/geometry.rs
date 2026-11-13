@@ -8,6 +8,8 @@
 use super::spline::{basis_check, nl_curve2};
 use crate::nurbs::knots::Side;
 
+pub mod sweep;
+
 /// Right-handed orthonormal frame; z = `x_axis × y_axis` (STEP `AXIS2_PLACEMENT_3D`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
@@ -74,12 +76,32 @@ pub enum Curve {
         /// How far the traced curve may lie from both surfaces.
         tolerance: f64,
     },
+    /// An exact curve in the UV chart of its retained screw surface.
+    OnSurface {
+        /// The retained screw and its certified net.
+        surface: Box<Surface>,
+        /// The original parameter-space curve.
+        uv_curve: Curve2,
+        /// The surface chart used by the curve.
+        domain: [[f64; 2]; 2],
+    },
+    /// A body-local reference; resolve before evaluating independently.
+    OnSurfaceRef {
+        /// Index into the containing body's screw owner table.
+        owner: u32,
+        /// The original parameter-space curve.
+        uv_curve: Curve2,
+        /// The surface chart used by the curve.
+        domain: [[f64; 2]; 2],
+    },
 }
 
 /// Unbounded surfaces, each with its (u, v). Natural
 /// normals are ∂S/∂u × ∂S/∂v.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Surface {
+    /// A procedural sweep's definition and certified fitted net.
+    ProceduralSweep(Box<sweep::ProceduralSweepRecord>),
     /// `origin + u * u_axis + v * v_axis` (STEP `PLANE`).
     Plane {
         /// The origin.

@@ -345,6 +345,7 @@ fn curve_kind(c: &Curve) -> &'static str {
         Curve::Spline { .. } => "a B-spline",
         Curve::RationalSpline { .. } => "a NURBS",
         Curve::SurfaceIntersection { .. } => "a derived curve",
+        Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => "a curve on a procedural sweep",
     }
 }
 
@@ -380,6 +381,7 @@ impl On {
             SurfaceEval::Sphere { .. } => "a sphere",
             SurfaceEval::Torus { .. } => "a torus",
             SurfaceEval::Eval(..) => "a spline surface",
+            SurfaceEval::ProceduralSweep(_) => "a procedural sweep",
         }
     }
 

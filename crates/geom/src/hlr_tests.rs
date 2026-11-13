@@ -321,7 +321,16 @@ impl Brep {
             let oriented = shell_faces.clone().map(|f| rec::OrientedFace { face: f as u32, forward: faces[f].forward }).collect();
             shells.push(rec::Shell::Faces { faces: oriented, wires: wires[s].clone() });
         }
-        let record = rec::Brep { version: self.version, tolerance: 1e-6, regions, shells, faces: face_records, edges: edge_records, vertices };
+        let record = rec::Brep {
+            version: self.version,
+            tolerance: 1e-6,
+            regions,
+            shells,
+            faces: face_records,
+            edges: edge_records,
+            vertices,
+            screw_owners: Vec::new(),
+        };
         (record, numbers)
     }
 }

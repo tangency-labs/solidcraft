@@ -65,6 +65,8 @@ pub(crate) struct Parts {
     pub vertices: Vec<b::Vertex>,
     pub edges: Vec<b::Edge>,
     pub faces: Vec<(b::Face, bool)>,
+    /// The procedural sweeps the edges' `OnSurfaceRef` curves name, by position here.
+    pub screw_owners: Vec<b::sweep::ProceduralSweepRecord>,
 }
 
 /// A record made by [`Parts::canonical`], with where each of its faces and edges came from
@@ -109,13 +111,23 @@ impl Parts {
 
     /// Adds the faces `picked` of `r` with all of `r`'s edges and vertices, after the ones here.
     fn add(&mut self, r: &Brep, picked: &[(usize, bool)]) -> Result<()> {
-        let (e0, v0) = (self.edges.len(), self.vertices.len());
+        let (e0, v0, o0) = (self.edges.len(), self.vertices.len(), self.screw_owners.len());
         let sides = face_sides(r);
         let shift = |i: u32, by: usize| index(i as usize + by);
         self.vertices.extend(r.vertices.iter().cloned());
+        self.screw_owners.extend(r.screw_owners.iter().cloned());
         for e in &r.edges {
             let vertices = [shift(e.vertices[0], v0)?, shift(e.vertices[1], v0)?];
-            self.edges.push(b::Edge { vertices, uses: Vec::new(), ..e.clone() });
+            let mut edge = b::Edge { vertices, uses: Vec::new(), ..e.clone() };
+            // A curve on a screw names its owner by position in the record's list, which
+            // these parts append to.
+            if let b::Curve::OnSurfaceRef { owner, .. } = &mut edge.curve {
+                if r.screw_owners.get(*owner as usize).is_none() {
+                    return Err(invalid(format!("no screw owner {owner}")));
+                }
+                *owner = shift(*owner, o0)?;
+            }
+            self.edges.push(edge);
         }
         for &(f, turn) in picked {
             let face = r.faces.get(f).ok_or_else(|| invalid(format!("no face {f}")))?;
@@ -225,6 +237,7 @@ impl Parts {
             faces: self.faces.iter().map(|(f, _)| f.clone()).collect(),
             edges: self.edges.iter().map(|e| b::Edge { uses: Vec::new(), ..e.clone() }).collect(),
             vertices: self.vertices.clone(),
+            screw_owners: self.screw_owners.clone(),
         };
         let part = loose.canonical().map_err(|e| failed(format!("faces into a record: {e}")))?;
         Ok(Canonical {
@@ -1625,6 +1638,28 @@ mod tests {
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-9)
+    }
+
+    /// A thread's curves on its screws name their owners by position: parts gathered from two
+    /// copies of it keep every owner and point each curve at its own; an assembly refuses it.
+    #[test]
+    fn screw_owners_follow_their_curves_into_parts_and_assemblies() {
+        use solidcore_ops::sweep::{Curve as C, screw_sweep};
+        let line = |start, end| C::Line { start, end };
+        let profile = [line([3.0, 0.0, 0.0], [4.0, 0.0, 0.25]), line([4.0, 0.0, 0.25], [3.0, 0.0, 0.5]), line([3.0, 0.0, 0.5], [3.0, 0.0, 0.0])];
+        let body = screw_sweep(&profile, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 2.0, None, 1e-4).unwrap();
+        let (r, _) = body.to_record().unwrap();
+        assert!(!r.screw_owners.is_empty());
+        assert!(r.edges.iter().any(|e| matches!(e.curve, b::Curve::OnSurfaceRef { .. })));
+        let all: Vec<(usize, bool)> = (0..r.faces.len()).map(|f| (f, false)).collect();
+        let mut parts = Parts::of(&r, &all).unwrap();
+        parts.add(&r, &all).unwrap();
+        let c = parts.canonical().unwrap();
+        c.brep.validate().unwrap();
+        assert_eq!(c.brep.screw_owners.len(), 2 * r.screw_owners.len());
+        // An assembly rebuilds each edge from its own curve: it refuses such a body.
+        let e = crate::assemble::Assembly::from_record(&r).err().map(|e| e.to_string());
+        assert!(e.is_some_and(|e| e.contains("not supported yet")));
     }
 
     /// Walls swept from an open line, an open arc and a closed square: areas are length × height,

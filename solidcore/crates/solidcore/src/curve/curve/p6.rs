@@ -551,6 +551,21 @@ impl Curve {
         req: BoundingBoxRequest,
         expand: bool,
     ) -> Result<BoundingBoxes> {
+        let certified = match self.kind() {
+            CurveKind::Iso(iso) => iso.screw_enclosure(interval)?,
+            CurveKind::CrvOnSurf(c) => c.screw_line_enclosure(interval)?,
+            _ => None,
+        };
+        {
+            if let Some(bounds) = certified {
+                return Ok(BoundingBoxes {
+                    normal: req.normal.then_some(bounds),
+                    pseudo: req.pseudo.then(|| PseudoBox::from_extent3d(&bounds)),
+                    // No directional restriction is inferred from a positional certificate.
+                    polar: req.polar.then(|| PolarBox::new().cross(&PolarBox::new())),
+                });
+            }
+        }
         match self.kind() {
             CurveKind::BSpline(c) => c.calculate_bounding_box(interval, req),
             CurveKind::Hyperbola(c) => c.base().calculate_bounding_box(interval, req),
@@ -705,6 +720,7 @@ impl Curve {
                 guess,
                 op,
                 None,
+                Some(self.memo()),
                 cache,
             ),
             // the SmCrvOnSurf override on the derived object (its Evaluate)
@@ -717,6 +733,7 @@ impl Curve {
                 guess,
                 op,
                 Some(c.members()),
+                None,
                 cache,
             ),
             _ => self.drop_point_base_cached(

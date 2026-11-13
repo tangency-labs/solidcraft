@@ -187,6 +187,189 @@ impl From<f64> for Ivl {
     }
 }
 
+/// Absolute rounding error of each linear B-spline basis quotient on one span.
+/// `basis_eval_into` computes L=t-k0, R=k1-t, D=L+R, then L/D and R/D.
+/// For t in [k0,k1], nonnegative operands give
+/// `E_D <= gamma_2*width+4*eta` and `E_numerator <= UNIT*width+eta`,
+/// where eta is the smallest subnormal (including propagated underflow).
+/// The quotient perturbation and its final rounding give the returned bound.
+/// A denominator not proved finite, normal and positive returns the whole line.
+pub(crate) fn linear_basis_quotient_rounding(width: Ivl) -> Ivl {
+    use crate::nurbs::math::{gamma, UNIT};
+
+    if width.lo <= 0.0 || !width.lo.is_finite() || !width.hi.is_finite() {
+        return Ivl::whole();
+    }
+    let tiny = Ivl::from(f64::from_bits(1));
+    let unit = Ivl::from(UNIT);
+    // For n=2 the shared gamma's numerator and denominator are exact; enclose
+    // its single rounded division before using it in interval arithmetic.
+    let g = gamma(2);
+    let edelta = Ivl::checked(g, g) * width + Ivl::from(4.0) * tiny;
+    let numerator = unit * width + tiny;
+    let delta = width - edelta;
+    if delta.lo < f64::MIN_POSITIVE || !(width + edelta).hi.is_finite() {
+        return Ivl::whole();
+    }
+    (numerator + edelta) / delta + unit * (width + numerator) / delta + tiny
+}
+
+/// The reciprocals [`Ivl`] division multiplies by for the Taylor steps of
+/// [`sin_cos_local`], `k = 2n (2n + 1)` for the sine and `(2n - 1) 2n` for the cosine,
+/// `n = 1..=20`: each `Ivl::checked(1 / k, 1 / k)`, the very interval `x / [k, k]` forms
+/// (a point divisor excludes 0), kept once rather than formed at every step. A pure
+/// function of constants, so the kept values are the ones formed afresh.
+fn taylor_steps() -> &'static [[Ivl; 20]; 2] {
+    static STEPS: std::sync::OnceLock<[[Ivl; 20]; 2]> = std::sync::OnceLock::new();
+    STEPS.get_or_init(|| {
+        let step = |k: u32| {
+            let k = f64::from(k);
+            Ivl::checked(1.0 / k, 1.0 / k)
+        };
+        // index i is the step n = i + 1
+        let n = |i: usize| u32::try_from(i + 1).unwrap_or(u32::MAX);
+        [
+            std::array::from_fn(|i| step(2 * n(i) * (2 * n(i) + 1))),
+            std::array::from_fn(|i| step((2 * n(i) - 1) * 2 * n(i))),
+        ]
+    })
+}
+
+/// Rigorous sine/cosine intervals from Taylor's alternating remainder on |x|<=1.5.
+/// Twenty terms are evaluated with outward arithmetic and widened by the next
+/// term. This primitive makes no assumption about a platform libm error bound.
+fn sin_cos_local(x: Ivl) -> (Ivl, Ivl) {
+    if !x.lo.is_finite() || !x.hi.is_finite() || x.lo > x.hi || x.mag() > 1.5 {
+        return (Ivl::whole(), Ivl::whole());
+    }
+    let square = x * x;
+    let mut sine = x;
+    let mut cosine = Ivl::from(1.0);
+    let mut st = x;
+    let mut ct = Ivl::from(1.0);
+    let [sine_steps, cosine_steps] = taylor_steps();
+    for (n, (s_step, c_step)) in (1..=20_u32).zip(sine_steps.iter().zip(cosine_steps)) {
+        // `st * square / k` is `st * square * [1/k]`, its divisor's reciprocal kept
+        st = st * square * *s_step;
+        ct = ct * square * *c_step;
+        if n % 2 == 0 {
+            sine = sine + st;
+            cosine = cosine + ct;
+        } else {
+            sine = sine - st;
+            cosine = cosine - ct;
+        }
+    }
+    let sr = (st * square / Ivl::from(42.0 * 43.0)).mag();
+    let cr = (ct * square / Ivl::from(41.0 * 42.0)).mag();
+    (sine + Ivl::new(-sr, sr), cosine + Ivl::new(-cr, cr))
+}
+
+/// Sine/cosine with interval-enclosed quadrant reduction. The selected quadrant
+/// is an exactly representable integer; the remainder must fit the local Taylor
+/// interval. Unproved argument reduction returns the whole line in both outputs.
+pub(crate) fn sin_cos_certified(angle: Ivl) -> (Ivl, Ivl) {
+    let quadrant = (angle.mid() / std::f64::consts::FRAC_PI_2).round();
+    // Binary64 represents every integer through 2^52 exactly. This also keeps
+    // the conversion to i64 and subsequent modulo operation in their ranges.
+    if !quadrant.is_finite() || quadrant.abs() > 4_503_599_627_370_496.0 {
+        return (Ivl::whole(), Ivl::whole());
+    }
+    let tau = std::f64::consts::TAU;
+    let reduced = angle - Ivl::from(quadrant) * (Ivl::checked(tau, tau) / Ivl::from(4.0));
+    let (s, c) = sin_cos_local(reduced);
+    let negative = |x: Ivl| Ivl::from(0.0) - x;
+    // `& 3` is the Euclidean remainder by 4 in two's complement.
+    match (quadrant as i64) & 3 {
+        0 => (s, c),
+        1 => (c, negative(s)),
+        2 => (negative(s), negative(c)),
+        _ => (negative(c), s),
+    }
+}
+
+/// The term [`sin_cos_point_certified`] stops at: a tail under it moves neither
+/// enclosure by more than `2^-70` (about `1e-21`).
+const POINT_SERIES_REST: f64 = 8.470_329_472_543_003e-22;
+
+/// [`sin_cos_local`] stopped at the first step whose terms are both under
+/// [`POINT_SERIES_REST`]: those terms are left out and widen the sums instead, as the
+/// twenty-first terms do there.
+///
+/// Soundness: on `|x| <= 1.5` the terms of both series fall from the first
+/// (`x^2 / (2n (2n + 1)) <= 2.25 / 6 < 1`), so each alternating tail is bounded by its
+/// first term left out, whichever step the sum stops at; [`sin_cos_local`] takes the
+/// same bound after twenty steps.
+fn sin_cos_local_stopped(x: Ivl) -> (Ivl, Ivl) {
+    if !x.lo.is_finite() || !x.hi.is_finite() || x.lo > x.hi || x.mag() > 1.5 {
+        return (Ivl::whole(), Ivl::whole());
+    }
+    let square = x * x;
+    let mut sine = x;
+    let mut cosine = Ivl::from(1.0);
+    let mut st = x;
+    let mut ct = Ivl::from(1.0);
+    let [sine_steps, cosine_steps] = taylor_steps();
+    for (n, (s_step, c_step)) in (1..=20_u32).zip(sine_steps.iter().zip(cosine_steps)) {
+        st = st * square * *s_step;
+        ct = ct * square * *c_step;
+        if st.mag() <= POINT_SERIES_REST && ct.mag() <= POINT_SERIES_REST {
+            let (sr, cr) = (st.mag(), ct.mag());
+            return (sine + Ivl::new(-sr, sr), cosine + Ivl::new(-cr, cr));
+        }
+        if n % 2 == 0 {
+            sine = sine + st;
+            cosine = cosine + ct;
+        } else {
+            sine = sine - st;
+            cosine = cosine - ct;
+        }
+    }
+    let sr = (st * square / Ivl::from(42.0 * 43.0)).mag();
+    let cr = (ct * square / Ivl::from(41.0 * 42.0)).mag();
+    (sine + Ivl::new(-sr, sr), cosine + Ivl::new(-cr, cr))
+}
+
+/// The sine and cosine of the double `angle`, enclosed with the quadrant reduction of
+/// [`sin_cos_certified`] and the series stopped once its tail is negligible
+/// ([`sin_cos_local_stopped`]): as sound, at most about `1e-21` wider, about half the
+/// steps for a reduced angle under `pi / 4`.
+pub(crate) fn sin_cos_point_certified(angle: f64) -> (Ivl, Ivl) {
+    let angle = Ivl::from(angle);
+    let quadrant = (angle.mid() / std::f64::consts::FRAC_PI_2).round();
+    if !quadrant.is_finite() || quadrant.abs() > 4_503_599_627_370_496.0 {
+        return (Ivl::whole(), Ivl::whole());
+    }
+    let tau = std::f64::consts::TAU;
+    let reduced = angle - Ivl::from(quadrant) * (Ivl::checked(tau, tau) / Ivl::from(4.0));
+    let (s, c) = sin_cos_local_stopped(reduced);
+    let negative = |x: Ivl| Ivl::from(0.0) - x;
+    match (quadrant as i64) & 3 {
+        0 => (s, c),
+        1 => (c, negative(s)),
+        2 => (negative(s), negative(c)),
+        _ => (negative(c), s),
+    }
+}
+
+/// Tangent on an interval inside [-1.5,1.5]. Monotonic endpoint evaluation uses
+/// the same Taylor primitive as sine/cosine and proves the denominator positive.
+/// An unproved finite tangent returns the whole line.
+pub(crate) fn tan_certified(x: Ivl) -> Ivl {
+    let endpoint = |x: f64| {
+        let (s, c) = sin_cos_local(Ivl::from(x));
+        if c.lo <= 0.0 {
+            Ivl::whole()
+        } else {
+            s / c
+        }
+    };
+    if x.lo > x.hi {
+        return Ivl::whole();
+    }
+    Ivl::new(endpoint(x.lo).lo, endpoint(x.hi).hi)
+}
+
 impl Ivl {
     /// `sm_Ivl(double a, double b)`.
     #[must_use]
@@ -201,6 +384,7 @@ impl Ivl {
     }
 
     /// `sm_Checked`: `[a, b]` rounded outward, or the whole line if either is NaN.
+    #[inline]
     #[must_use]
     pub fn checked(a: f64, b: f64) -> Self {
         if a.is_nan() || b.is_nan() {
@@ -377,6 +561,7 @@ impl Ivl {
 
 impl Add for Ivl {
     type Output = Self;
+    #[inline]
     fn add(self, b: Self) -> Self {
         Self::checked(self.lo + b.lo, self.hi + b.hi)
     }
@@ -384,14 +569,72 @@ impl Add for Ivl {
 
 impl Sub for Ivl {
     type Output = Self;
+    #[inline]
     fn sub(self, b: Self) -> Self {
         Self::checked(self.lo - b.hi, self.hi - b.lo)
     }
 }
 
+/// The least and the greatest of the four end products of finite, ordered `a` and `b`,
+/// from the two products their signs single out (`None` where both hold 0 inside, which
+/// needs all four).
+///
+/// Soundness: rounding to nearest is monotone and odd, so for a fixed `x >= 0` the
+/// rounded `x * y` does not fall as `y` rises, and for `x <= 0` it does not rise; with
+/// `lo <= hi` at each operand that orders the four rounded products in every sign case
+/// below, so the two named are the least and the greatest of them as values (finite
+/// operands overflow to infinities, never to NaN). Two of the four can be equal only
+/// as values, and the one double with two encodings is zero, whose ends `Ivl::checked`
+/// widens to the same bits whatever its sign, so the interval is the four-product one
+/// bit for bit.
+#[inline]
+fn sign_case_ends(a: Ivl, b: Ivl) -> Option<(f64, f64)> {
+    let (a0, a1, b0, b1) = (a.lo, a.hi, b.lo, b.hi);
+    if a0 == a1 && b0 == b1 {
+        let p = product(a0, b0);
+        return Some((p, p));
+    }
+    Some(if a0 >= 0.0 {
+        if b0 >= 0.0 {
+            (product(a0, b0), product(a1, b1))
+        } else if b1 <= 0.0 {
+            (product(a1, b0), product(a0, b1))
+        } else {
+            (product(a1, b0), product(a1, b1))
+        }
+    } else if a1 <= 0.0 {
+        if b0 >= 0.0 {
+            (product(a0, b1), product(a1, b0))
+        } else if b1 <= 0.0 {
+            (product(a1, b1), product(a0, b0))
+        } else {
+            (product(a0, b1), product(a0, b0))
+        }
+    } else if b0 >= 0.0 {
+        (product(a0, b1), product(a1, b1))
+    } else if b1 <= 0.0 {
+        (product(a1, b0), product(a0, b0))
+    } else {
+        return None;
+    })
+}
+
 impl Mul for Ivl {
     type Output = Self;
+    #[inline]
     fn mul(self, b: Self) -> Self {
+        // finite ordered operands: the two products the signs name ([`sign_case_ends`])
+        if self.lo.is_finite()
+            && self.hi.is_finite()
+            && b.lo.is_finite()
+            && b.hi.is_finite()
+            && self.lo <= self.hi
+            && b.lo <= b.hi
+        {
+            if let Some((lo, hi)) = sign_case_ends(self, b) {
+                return Self::checked(lo, hi);
+            }
+        }
         let p0 = product(self.lo, b.lo);
         let rest = [
             product(self.lo, b.hi),
@@ -413,6 +656,7 @@ impl Mul for Ivl {
 
 impl Div for Ivl {
     type Output = Self;
+    #[inline]
     fn div(self, b: Self) -> Self {
         let excludes_zero = b.lo > 0.0 || b.hi < 0.0;
         if !excludes_zero {
@@ -529,6 +773,166 @@ mod tests {
         ] {
             same(x);
         }
+    }
+
+    /// The product from the two end products the signs name is the four-product one bit
+    /// for bit: every sign case, points, signed zeros, subnormal and overflowing products,
+    /// and random ends (a fixed seed).
+    #[test]
+    fn the_sign_case_product_is_the_four_product_one_bit_for_bit() {
+        fn four(a: Ivl, b: Ivl) -> Ivl {
+            let p0 = product(a.lo, b.lo);
+            let mut lo = p0;
+            let mut hi = p0;
+            for pi in [
+                product(a.lo, b.hi),
+                product(a.hi, b.lo),
+                product(a.hi, b.hi),
+            ] {
+                if pi.is_nan() {
+                    return Ivl::whole();
+                }
+                lo = cmin(lo, pi);
+                hi = cmax(hi, pi);
+            }
+            Ivl::checked(lo, hi)
+        }
+        let same = |a: Ivl, b: Ivl| {
+            let (p, e) = (a * b, four(a, b));
+            assert!(
+                p.lo.to_bits() == e.lo.to_bits() && p.hi.to_bits() == e.hi.to_bits(),
+                "{a:?} * {b:?}: {p:?} against {e:?}"
+            );
+        };
+        let ends = [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            0.5,
+            -2.5,
+            1.0e-300,
+            -1.0e-300,
+            1.0e-160,
+            -3.0e-170,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            1.0e300,
+            -1.0e300,
+            f64::MAX,
+            -f64::MAX,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+        let mut intervals = Vec::new();
+        for &x in &ends {
+            for &y in &ends {
+                intervals.push(Ivl::new(x, y));
+            }
+        }
+        let mut seed = 0x51_7cc1_b727_220a_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..4000 {
+            // random signs, exponents across the whole range, ordered or not
+            let mut end = || {
+                let e = next() % 0x7ff;
+                f64::from_bits((next() & (1 << 63)) | (e << 52) | (next() >> 12))
+            };
+            let (x, y) = (end(), end());
+            intervals.push(Ivl::new(x.min(y), x.max(y)));
+            intervals.push(Ivl::from(x));
+        }
+        for i in 0..2000 {
+            // nearby magnitudes, where products cross between binades
+            let x = f64::from(i) * 0.37 - 300.0;
+            intervals.push(Ivl::new(x, x + 0.25));
+        }
+        for (i, &a) in intervals.iter().enumerate() {
+            // every pair among the edge cases, a sample of the rest
+            let step = if i < ends.len() * ends.len() { 1 } else { 97 };
+            for &b in intervals.iter().step_by(step) {
+                same(a, b);
+            }
+        }
+    }
+
+    /// The Taylor steps by kept reciprocals are the steps by division, bit for bit, at
+    /// points and on intervals across the local range.
+    #[test]
+    fn kept_taylor_steps_are_the_divisions() {
+        fn divided(x: Ivl) -> (Ivl, Ivl) {
+            let square = x * x;
+            let (mut sine, mut cosine, mut st, mut ct) = (x, Ivl::from(1.0), x, Ivl::from(1.0));
+            for n in 1..=20_u32 {
+                st = st * square / Ivl::from(f64::from(2 * n * (2 * n + 1)));
+                ct = ct * square / Ivl::from(f64::from((2 * n - 1) * 2 * n));
+                if n % 2 == 0 {
+                    sine = sine + st;
+                    cosine = cosine + ct;
+                } else {
+                    sine = sine - st;
+                    cosine = cosine - ct;
+                }
+            }
+            let sr = (st * square / Ivl::from(42.0 * 43.0)).mag();
+            let cr = (ct * square / Ivl::from(41.0 * 42.0)).mag();
+            (sine + Ivl::new(-sr, sr), cosine + Ivl::new(-cr, cr))
+        }
+        let bits = |(s, c): (Ivl, Ivl)| [s.lo, s.hi, c.lo, c.hi].map(f64::to_bits);
+        for i in -1500..=1500 {
+            let x = f64::from(i) * 1.0e-3 + 1.0e-7;
+            for x in [Ivl::from(x), Ivl::new(x, x + 1.0e-9), Ivl::new(x - 0.2, x)] {
+                if x.mag() <= 1.5 {
+                    assert_eq!(bits(sin_cos_local(x)), bits(divided(x)), "{x:?}");
+                }
+            }
+        }
+        for x in [0.0, -0.0, 1.0e-300, -1.0e-200, 1.5, -1.5] {
+            assert_eq!(
+                bits(sin_cos_local(Ivl::from(x))),
+                bits(divided(Ivl::from(x)))
+            );
+        }
+    }
+
+    /// The stopped point series meets the twenty-step one and is no wider than it past
+    /// its stopping term and a few roundings (it takes fewer).
+    #[test]
+    fn the_stopped_point_series_meets_the_full_one() {
+        let close = |p: Ivl, f: Ivl| {
+            let slack = 4.0 * POINT_SERIES_REST + 1.0e-15 * f.mag();
+            p.lo <= f.hi && f.lo <= p.hi && p.lo >= f.lo - slack && p.hi <= f.hi + slack
+        };
+        for i in -4000..=4000 {
+            for x in [
+                f64::from(i) * 2.5e-3,
+                f64::from(i) * 0.7 + 1.0e-3,
+                f64::from(i) * 1.0e-9,
+            ] {
+                let (ps, pc) = sin_cos_point_certified(x);
+                let (fs, fc) = sin_cos_certified(Ivl::from(x));
+                assert!(
+                    close(ps, fs) && close(pc, fc),
+                    "{x}: {ps:?} {fs:?} {pc:?} {fc:?}"
+                );
+                assert!(
+                    ps.lo <= x.sin() + 1.0e-15 && x.sin() - 1.0e-15 <= ps.hi,
+                    "{x}"
+                );
+                assert!(
+                    pc.lo <= x.cos() + 1.0e-15 && x.cos() - 1.0e-15 <= pc.hi,
+                    "{x}"
+                );
+            }
+        }
+        assert_eq!(sin_cos_point_certified(f64::NAN).0, Ivl::whole());
+        assert_eq!(sin_cos_point_certified(1.0e300).1, Ivl::whole());
     }
 
     #[test]

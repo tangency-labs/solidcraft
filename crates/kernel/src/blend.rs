@@ -192,6 +192,7 @@ pub(crate) fn curve_derivative(c: &Curve, t: f64) -> Option<Vec3> {
             CurveEval::Spline(s) => solidcraft_geom::tess::from_kernel(s.eval(t)?.1),
             _ => return None,
         },
+        Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => return None,
         Curve::SurfaceIntersection { surfaces, leader, .. } => {
             // Along both surfaces: square to both normals, on the leader's side.
             let p = CurveEval::new(c).ok()?.point(t)?;

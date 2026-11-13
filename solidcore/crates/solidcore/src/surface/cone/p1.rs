@@ -141,6 +141,7 @@ use crate::nurbs::b_spline_surface::{
     BSplineSurfaceForm, IsoCurveOptions, LocationType, SurfParamType,
 };
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::surface::cone::checked::CheckedMemo;
 use crate::surface::surf_of_revolution::p1::gen_max_analytic_domain;
 use crate::surface::surf_of_revolution::{RevolutionIsoCurve, SurfOfRevolution};
 use crate::surface::surface::p2::{scale_step_angular_derivatives, CONE_TYPE, CYLINDER_TYPE};
@@ -228,7 +229,7 @@ pub struct Coincidence {
 /// at the semi-angle to the axis, `S(u, v) = O + R(v) (cos u X + sin u Y) + v Z` with
 /// `R(v) = base_radius + tan(semi_angle) v`, `u` in degrees and `v` the height along
 /// the axis from the origin.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Cone {
     /// The `SmSurfOfRevolution` base object.
     pub(crate) rev: SurfOfRevolution,
@@ -241,6 +242,24 @@ pub struct Cone {
     pub(crate) inside_out: bool,
     /// The object is an `SmCylinder`.
     pub(crate) cylinder: bool,
+    /// What the checked cylinder evaluation derives from the surface alone, kept with
+    /// the exact data it was derived from: a hit returns the bits a fresh derivation
+    /// would ([`super::checked`]).
+    pub(crate) checked: CheckedMemo,
+}
+
+// (the derived memo is not part of the surface's value: a cone prints as it did)
+#[allow(clippy::missing_fields_in_debug)]
+impl std::fmt::Debug for Cone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cone")
+            .field("rev", &self.rev)
+            .field("base_radius", &self.base_radius)
+            .field("semi_angle_deg", &self.semi_angle_deg)
+            .field("inside_out", &self.inside_out)
+            .field("cylinder", &self.cylinder)
+            .finish()
+    }
 }
 
 /// With `Kernel::fixes.cone_unbounded_parameterized_as_nurb` (WR-713, #2313), whether an
@@ -520,6 +539,7 @@ impl Cone {
             semi_angle_deg: UNDEF_DOUBLE,
             inside_out: false,
             cylinder,
+            checked: CheckedMemo::default(),
         }
     }
 
@@ -572,6 +592,7 @@ impl Cone {
             semi_angle_deg,
             inside_out,
             cylinder: false,
+            checked: CheckedMemo::default(),
         };
 
         // Create generator curve (SmLine)
@@ -711,6 +732,7 @@ impl Cone {
             semi_angle_deg: 0.0,
             inside_out,
             cylinder: false,
+            checked: CheckedMemo::default(),
         };
 
         // Specify GenCurve type
@@ -1573,6 +1595,12 @@ impl Cone {
                 }
             }
         }
+        let point = d
+            .first()
+            .and_then(|row| row.first())
+            .copied()
+            .ok_or_else(|| SolidError::invalid_input(OP_EVAL, "missing cylinder point"))?;
+        self.verify_cylinder_runtime_point(k, uv, point)?;
         Ok(d)
     }
 
@@ -1586,8 +1614,10 @@ impl Cone {
         // convert to STEP parameter
         let step_uv = self.convert_uv_from_nurbs_to_step(k, uv)?;
 
-        // pass the call along
-        self.evaluate_step_point(step_uv)
+        // Preserve the candidate, then certify the complete native conversion.
+        let point = self.evaluate_step_point(step_uv)?;
+        self.verify_cylinder_runtime_point(k, uv, point)?;
+        Ok(point)
     }
 
     /// The point and triangular derivatives at the STEP parameters `uv` (degrees,
@@ -1710,6 +1740,11 @@ impl Cone {
 
         // The formulas above are per radian; STEP U is in degrees.
         scale_step_angular_derivatives(d, hu, hv, true, false)?;
+        let point = d
+            .first()
+            .copied()
+            .ok_or_else(|| SolidError::invalid_input(OP_EVAL_STEP, "missing cylinder point"))?;
+        self.verify_cylinder_step_point(uv, point)?;
         Ok(())
     }
 
@@ -2948,6 +2983,293 @@ mod tests {
             assert_eq!(typed.is_port_failure(), before.is_port_failure());
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
+        }
+    }
+
+    /// The checked data a cylinder derives once (#13891) serves only the surface value it
+    /// was derived from: before and after a trim, and on a copy, every point and every
+    /// verification is the one a cylinder deriving afresh gives.
+    #[test]
+    fn checked_cylinder_memo_answers_as_a_fresh_derivation() {
+        let k = Kernel::default();
+        let check = |cone: &Cone| {
+            let domain = cone.rev().base().natural_uv_domain();
+            for fraction in [0.0, 0.137, 0.5, 0.829, 1.0] {
+                let uv = Point2::new(
+                    domain.u_min() + fraction * (domain.u_max() - domain.u_min()),
+                    domain.v_min() + fraction * (domain.v_max() - domain.v_min()),
+                );
+                let point = cone.evaluate_point(&k, uv).unwrap();
+                let mut alone = cone.clone();
+                alone.checked = CheckedMemo::default();
+                assert_eq!(point, alone.evaluate_point(&k, uv).unwrap());
+                for candidate in [point, point + Vec3::X * 1e-9, point + Vec3::X] {
+                    assert_eq!(
+                        format!(
+                            "{:?}",
+                            cone.verify_cylinder_runtime_point(&k, uv, candidate)
+                        ),
+                        format!(
+                            "{:?}",
+                            alone.verify_cylinder_runtime_point(&k, uv, candidate)
+                        ),
+                    );
+                }
+            }
+        };
+        let mut cone = Cone::create_canonical(
+            &k,
+            &Axis2Placement::IDENTITY,
+            10.0,
+            10.0,
+            20.0,
+            false,
+            false,
+        )
+        .unwrap();
+        check(&cone);
+        let domain = cone.rev().base().natural_uv_domain();
+        let dv = domain.v_max() - domain.v_min();
+        let trimmed = Extent2d::from_bounds(
+            domain.u_min(),
+            domain.v_min() + 0.25 * dv,
+            domain.u_max(),
+            domain.v_max() - 0.25 * dv,
+        );
+        cone.trim_with_domain(&k, &trimmed).unwrap();
+        check(&cone);
+        check(&cone.clone());
+    }
+
+    #[test]
+    fn checked_cylinder_points_cover_native_rows_swaps_and_height_sense() {
+        let k = Kernel::default();
+        for swap in [false, true] {
+            for inside in [false, true] {
+                let cone = Cone::create_canonical(
+                    &k,
+                    &Axis2Placement::IDENTITY,
+                    10.0,
+                    10.0,
+                    20.0,
+                    swap,
+                    inside,
+                )
+                .unwrap();
+                assert!(cone.cylinder_runtime_allowance(&k).unwrap().unwrap() > 0.0);
+                let domain = cone.rev().base().natural_uv_domain();
+                for fraction in [0.0, 0.137, 0.371, 0.829, 1.0] {
+                    let uv = Point2::new(
+                        domain.u_min() + fraction * (domain.u_max() - domain.u_min()),
+                        domain.v_min() + fraction * (domain.v_max() - domain.v_min()),
+                    );
+                    let point = cone.evaluate_point(&k, uv).unwrap();
+                    let rows = cone
+                        .evaluate_rows(&k, uv, 1, 1, EvaluateFlags::default())
+                        .unwrap();
+                    assert_eq!(point, rows[0][0]);
+                    assert!(cone
+                        .verify_cylinder_runtime_point(&k, uv, point + Vec3::X)
+                        .is_err());
+                }
+            }
+        }
+    }
+
+    /// goldens `surface.cone_p1` `r3_36705`: a 1e-4 cone 1e5 from the origin, 1e-12 of
+    /// its polar parameter from the seam. The NURB point's rounding (about 1.5e-11 on
+    /// 1.4e5 coordinates) is 1e-7 rad on the 1e-4 polar circle, far above the 5.7e-12 rad
+    /// offset, so the angle must not follow it (atan2 of that point gave -1.5e-5 deg,
+    /// moving the point at v = 1, radius 1/3, by 8.7e-8). The same cone at the origin
+    /// resolves the offset and gives the exact angle.
+    #[test]
+    fn far_tiny_cone_angle_next_to_the_seam_stays_within_rounding() {
+        let k = k();
+        let cone_at = |placement: &Axis2Placement| {
+            let mut cone =
+                Cone::create_canonical(&k, placement, 1e-4, 2e-4, 3e-4, false, false).unwrap();
+            cone.set_out_of_bounds_enabled(true);
+            cone
+        };
+        let far = cone_at(&Axis2Placement::new(
+            Vec3::new(100_000.0, -100_000.0, 30_000.0),
+            Vec3::new(0.6, 0.8, 0.0),
+            Vec3::new(-0.8, 0.6, 0.0),
+        ));
+        let near = cone_at(&std_placement());
+        let uv = Point2::new(1e-12, 0.999_999_999_999);
+        let exact = near.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+        assert!(exact.x > 3.24e-10 && exact.x < 3.25e-10, "{}", exact.x);
+        let step = far.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+        // the angle error as a displacement of the point, against the coordinates' ulp
+        let ulp = f64::EPSILON * 131_072.0;
+        let shift = (step.x - exact.x).abs() * PI / 180.0 * far.radius(step.y).abs();
+        assert!(shift <= 4.0 * ulp, "{} deg moves the point {shift}", step.x);
+        let point = far.evaluate_point(&k, uv).unwrap();
+        let reference = far
+            .evaluate_step_point(Point2::new(exact.x, step.y))
+            .unwrap();
+        assert!((point - reference).length() <= 4.0 * ulp);
+    }
+
+    #[test]
+    fn checked_cylinder_keeps_near_seam_point_and_rejects_snapped_candidate() {
+        let k = Kernel::default();
+        let cone = Cone::create_canonical(
+            &k,
+            &Axis2Placement::IDENTITY,
+            10.0,
+            10.0,
+            20.0,
+            false,
+            false,
+        )
+        .unwrap();
+        let domain = cone.rev().base().natural_uv_domain();
+        let uv = Point2::new(
+            domain.u_max() - (domain.u_max() - domain.u_min()) * 1e-12,
+            domain.v_min(),
+        );
+        // Conversion preserves the interior parameter; independently reject the
+        // exact endpoint that the former tolerance-based inversion returned.
+        let converted = cone.convert_uv_from_nurbs_to_step(&k, uv).unwrap().x;
+        assert!(
+            converted > 0.0 && converted < 360.0,
+            "seam branch: {converted}"
+        );
+        let snapped = cone.evaluate_step_point(Point2::new(360.0, 0.0)).unwrap();
+        assert!(cone.verify_cylinder_runtime_point(&k, uv, snapped).is_err());
+        let point = cone.evaluate_point(&k, uv).unwrap();
+        assert!(point.y < 0.0);
+        let rows = cone
+            .evaluate_rows(&k, uv, 1, 1, EvaluateFlags::default())
+            .unwrap();
+        assert_eq!(rows[0][0], point);
+    }
+    #[test]
+    fn checked_internal_m20_bore_keeps_its_nonendpoint_polar_point() {
+        let k = Kernel::default();
+        let mut placement = Axis2Placement::IDENTITY;
+        placement.set_origin(Vec3::new(-1.0, -64.0, -2.5));
+        let cone = Cone::create_canonical(
+            &k,
+            &placement,
+            8.646835306586814,
+            8.646835306586814,
+            25.0,
+            false,
+            false,
+        )
+        .unwrap();
+        let uv = Point2::new(54.329668551919475, 2.5);
+        let polar = cone.rev().polar_curve().unwrap();
+        let chart_point = polar.base().evaluate_point(uv.x).unwrap();
+        let local = chart_point - placement.origin();
+        let radial = Vec3::new(local.x, local.y, 0.0);
+        let expected =
+            placement.origin() + radial * (8.646835306586814 / radial.length()) + Vec3::Z * uv.y;
+        assert!(expected.y < -64.0);
+        let cap = cone.cylinder_runtime_allowance(&k).unwrap().unwrap();
+        let snapped = cone.evaluate_step_point(Point2::new(360.0, uv.y)).unwrap();
+        assert!((snapped - expected).length() > cap);
+        assert!(cone.verify_cylinder_runtime_point(&k, uv, snapped).is_err());
+        let actual = cone.evaluate_point(&k, uv).unwrap();
+        assert!((actual - expected).length() <= cap);
+        assert!(actual.y < -64.0);
+        let rows = cone
+            .evaluate_rows(&k, uv, 1, 1, EvaluateFlags::default())
+            .unwrap();
+        assert_eq!(rows[0][0], actual);
+    }
+
+    #[test]
+    fn checked_cylinder_derivatives_match_polar_chart_and_native_rows() {
+        use crate::nurbs::knots::Side;
+        let k = Kernel::default();
+        for swap in [false, true] {
+            for inside in [false, true] {
+                let placement = Axis2Placement::new(Vec3::new(-1.0, -64.0, -2.5), Vec3::X, Vec3::Y);
+                let cone = Cone::create_canonical(
+                    &k,
+                    &placement,
+                    8.646835306586814,
+                    8.646835306586814,
+                    25.0,
+                    swap,
+                    inside,
+                )
+                .unwrap();
+                let polar = cone.rev().polar_curve().unwrap();
+                let interval = polar.base().natural_interval();
+                for fraction in [-0.1, 0.0, 0.137, 0.25, 0.5, 0.75, 1.0 - 5e-13, 1.0, 1.1] {
+                    let u = interval.min() + fraction * interval.length();
+                    for side in [Side::Left, Side::Right] {
+                        let uv = if swap {
+                            Point2::new(2.5, u)
+                        } else {
+                            Point2::new(u, 2.5)
+                        };
+                        let flags = EvaluateFlags {
+                            u_side: side,
+                            v_side: side,
+                            non_zero_tangents: false,
+                            only_upper_half: false,
+                        };
+                        let jets = cone.evaluate_rows(&k, uv, 4, 4, flags).unwrap();
+                        assert_eq!(jets[0][0], cone.evaluate_point(&k, uv).unwrap());
+                        let native = cone.rev().base().evaluate(uv, 4, 4, flags).unwrap();
+                        let curve = polar
+                            .base()
+                            .evaluate(u, 2, side == Side::Left, false)
+                            .unwrap();
+                        let mut q = curve[0] - placement.origin();
+                        q.z = 0.0;
+                        let mut d = curve[1];
+                        d.z = 0.0;
+                        let mut dd = curve[2];
+                        dd.z = 0.0;
+                        let l = q.length();
+                        let a = q.dot(d);
+                        let radius = 8.646835306586814;
+                        let first = (d / l - q * (a / l.powi(3))) * radius;
+                        let second = (dd / l
+                            - d * (2.0 * a / l.powi(3))
+                            - q * ((d.dot(d) + q.dot(dd)) / l.powi(3) - 3.0 * a * a / l.powi(5)))
+                            * radius;
+                        let (actual_first, actual_second, axial) = if swap {
+                            (jets[0][1], jets[0][2], jets[1][0])
+                        } else {
+                            (jets[1][0], jets[2][0], jets[0][1])
+                        };
+                        assert!(
+                            (actual_first - first).length() < 1e-11,
+                            "{swap} {inside} {fraction} {side:?}"
+                        );
+                        assert!(
+                            (actual_second - second).length() < 1e-11,
+                            "{swap} {inside} {fraction} {side:?}"
+                        );
+                        assert!(
+                            (axial - Vec3::Z * if inside { -1.0 } else { 1.0 }).length() < 1e-13
+                        );
+                        for (i, row) in jets.iter().enumerate() {
+                            for (j, value) in row.iter().enumerate() {
+                                assert!(
+                                    value.x.is_finite()
+                                        && value.y.is_finite()
+                                        && value.z.is_finite()
+                                );
+                                // Only the position is replaced by analytic STEP
+                                // evaluation. Preserve every native derivative,
+                                // including cancellation roundoff in mixed rows.
+                                if i > 0 || j > 0 {
+                                    assert_eq!(*value, native[i][j]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

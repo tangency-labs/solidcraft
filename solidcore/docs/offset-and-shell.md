@@ -272,7 +272,26 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   the two extended offsets at a quarter of the body's tolerance and 20°, keeps the intersection
   curve whose trimmed midpoint is nearest the original edge's, trims it and gives it to both offset
   edge uses. With `offset_analytic_mate_edges` a marched piece lying on an exact line or conic of
-  the two surfaces is replaced by that curve.
+  the two surfaces is replaced by that curve. An end is where the curve crosses a neighbour's
+  extended surface (`trim_extended_edge`); beside a screw wall (a thread's flank, kept on its
+  definition) the curve ends instead where it passes nearest the corner of its two surfaces and
+  that neighbour, solved on their definitions (`procedural_screw/corner.rs`), when it passes
+  within a quarter of the body's tolerance of it. A flank's section by an end cap crosses the
+  root cylinder a few degrees off its tangent, so the crossing moves along the curve by the
+  curve's deviation over the sine of that angle (1.7e-5 on an M10×1.5 thread, #11582), past the
+  half vertex tolerance the check allows an edge's end; the nearest point stays within the
+  deviation, and every end at the corner within half the body's tolerance of the others. No
+  tolerance is raised for it.
+- **A seam between two pieces of one screw wall** (a thread cut into a face per half turn)
+  is not intersected: both pieces move to the same offset, and the seam keeps its authored
+  meridian (`extend_screw_separator`, `procedural_screw/seam.rs`). Each end is a corner on a
+  coaxial cylinder, certified with the radius of that cylinder's extension: either an edge
+  between two cylinder faces lying in the meridian (a root cut at the same half turns), or,
+  with no such edge, the one cylinder face the seam ends inside (stock whose own seam is at
+  another angle), which the meridian cuts in one ruling wherever its angular range lies. The
+  cylinders are continued along their rulings keeping their parameters
+  (`Cone::extended_cylinder_keeping_parameters`), including a height map a rounding off the
+  identity, as a record gives it, kept within the cylinder's checked runtime allowance.
 - **The merge** joins the offset faces into one body. An inset keeps every finite region unless
   `offset_keep_cavity_regions` is on; then `cavity::is_cavity_region` keeps a region whose face
   has the input's face one wall behind it (a point solve along the normal). This is a local test,

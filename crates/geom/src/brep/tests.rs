@@ -86,7 +86,16 @@ fn fit_pcurves(b: &mut Brep) {
 /// Planar faces, one per vertex cycle, grouped into shells; edges and vertices numbered in
 /// canonical order as the cycles first meet them.
 fn faceted(points: &[[f64; 3]], shells: &[&[&[usize]]], regions: Vec<Region>) -> Brep {
-    let mut b = Brep { version: VERSION, tolerance: 1e-7, regions, shells: Vec::new(), faces: Vec::new(), edges: Vec::new(), vertices: Vec::new() };
+    let mut b = Brep {
+        version: VERSION,
+        tolerance: 1e-7,
+        regions,
+        shells: Vec::new(),
+        faces: Vec::new(),
+        edges: Vec::new(),
+        vertices: Vec::new(),
+        screw_owners: Vec::new(),
+    };
     let mut vertex_of = vec![None; points.len()];
     let mut vertex = |b: &mut Brep, p: usize| -> u32 {
         *vertex_of[p].get_or_insert_with(|| {
@@ -187,6 +196,7 @@ fn tube() -> Brep {
             edge(circle(5.), [0., TAU], [1, 1]),
         ],
         vertices: vec![Vertex { point: [3., 2., 3.], tolerance: 1e-7 }, Vertex { point: [3., 2., 8.], tolerance: 1e-7 }],
+        screw_owners: Vec::new(),
     };
     list_uses(&mut b);
     on_forms(&mut b);
@@ -212,6 +222,7 @@ fn one_face(surface: Surface, domain: [[f64; 2]; 2], edges: Vec<(Curve, [f64; 2]
             .map(|(curve, interval, vertices)| Edge { nurbs: None, curve, interval, vertices, tolerance: 1e-7, uses: vec![] })
             .collect(),
         vertices: vertices.iter().map(|&point| Vertex { point, tolerance: 1e-7 }).collect(),
+        screw_owners: Vec::new(),
     };
     list_uses(&mut b);
     on_forms(&mut b);
@@ -545,6 +556,87 @@ fn frames_planes_placements_and_apexes_are_the_kernels() {
     frame.y_axis = frame.x_axis;
     b.validate().unwrap();
     assert_eq!(check::validate(&b).map_err(|e| e.0), Err("nonorthonormal frame"));
+}
+
+/// A procedural sweep record, small and not certified: placement and the app's refusals read
+/// only its data.
+fn a_sweep() -> sweep::ProceduralSweepRecord {
+    use sweep::*;
+    let profile =
+        NurbsCurveRecord { dim: 3, points_3d: true, degree: 1, knots: vec![0., 0., 1., 1.], points: vec![[2., 0., 0.], [3., 0., 1.]], weights: None };
+    // weighted coefficients: the second point is (3, 0, 1) at weight 2
+    let source = NurbsCurveRecord { points: vec![[2., 0., 0.], [6., 0., 2.]], weights: Some(vec![1., 2.]), ..profile.clone() };
+    ProceduralSweepRecord {
+        definition: SweepDefinitionRecord::Screw {
+            profile,
+            motion: ScrewMotionRecord {
+                origin: [1., 2., 3.],
+                axis: [0., 0., 1.],
+                pitch: 2.5,
+                law: Some(RadialLawRecord { direction: [1., 0., 0.], angles: vec![0.], offsets: vec![0.] }),
+            },
+            offset: Some(ScrewOffsetRecord { source, signed_distance: 0.1, approximation_bound: 1e-7 }),
+        },
+        net: NurbsSurfaceRecord {
+            u_degree: 1,
+            v_degree: 1,
+            u_count: 2,
+            v_count: 2,
+            u_knots: vec![0., 0., 1., 1.],
+            v_knots: vec![0., 0., 1., 1.],
+            points: vec![[2., 0., 0.], [6., 0., 2.], [0., 2., 0.], [0., 3., 1.]],
+            weights: Some(vec![1., 2., 1., 1.]),
+        },
+        stations: vec![0., 1.],
+        half: 0.5,
+        bound: 1e-6,
+        map_a: [0., 0.],
+        map_b: [1., 1.],
+        swapped: false,
+    }
+}
+
+/// A body's screw owners and its faces' procedural sweeps move with a rigid motion: profile, axis,
+/// radial-law direction, offset source and net, weighted coefficients at their weights; stations,
+/// map, pitch and bound stay. The app checks the axis, labels the net's (u, v), and refuses to
+/// evaluate a sweep or a curve on one, which only the kernel does exactly.
+#[test]
+fn a_procedural_sweep_moves_rigidly_and_is_refused_where_the_app_cannot_evaluate_it() {
+    use placement::{Rigid, moved};
+    let s = a_sweep();
+    let mut b = tube();
+    b.screw_owners.push(s.clone());
+    b.faces[0].surface = Surface::ProceduralSweep(Box::new(s.clone()));
+    // a quarter turn about z, then 10 along x
+    let turn = Rigid { rotation: [[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]], translation: [10., 0., 0.] };
+    let out = moved(&b, &turn).expect("a record with no blend moves");
+    let Surface::ProceduralSweep(face) = &out.faces[0].surface else { panic!("a sweep face") };
+    for m in [&out.screw_owners[0], face.as_ref()] {
+        let sweep::SweepDefinitionRecord::Screw { profile, motion, offset } = &m.definition;
+        assert_eq!(motion.origin, [8., 1., 3.]);
+        assert_eq!(motion.axis, [0., 0., 1.]);
+        assert_eq!(motion.law.as_ref().map(|l| l.direction), Some([0., 1., 0.]));
+        assert_eq!(motion.pitch, 2.5);
+        assert_eq!(profile.points, vec![[10., 2., 0.], [10., 3., 1.]]);
+        assert_eq!(offset.as_ref().map(|o| o.source.points.clone()), Some(vec![[10., 2., 0.], [20., 6., 2.]]));
+        assert_eq!(m.net.points, vec![[10., 2., 0.], [20., 6., 2.], [8., 0., 0.], [7., 0., 1.]]);
+        assert_eq!((&m.stations, m.half, m.bound, m.map_a, m.map_b, m.swapped), (&s.stations, s.half, s.bound, s.map_a, s.map_b, s.swapped));
+    }
+    // and back
+    let back = Rigid { rotation: [[0., 1., 0.], [-1., 0., 0.], [0., 0., 1.]], translation: [0., 10., 0.] };
+    assert_eq!(moved(&out, &back).expect("a record with no blend moves").screw_owners[0], s);
+    let sweep = Surface::ProceduralSweep(Box::new(s.clone()));
+    check::surface(&sweep).unwrap();
+    let mut tilted = s.clone();
+    let sweep::SweepDefinitionRecord::Screw { motion, .. } = &mut tilted.definition;
+    motion.axis = [0., 0., 2.];
+    assert_eq!(check::surface(&Surface::ProceduralSweep(Box::new(tilted))).map_err(|e| e.0), Err("screw axis is not unit length"));
+    assert_eq!(label::surface_natural(&sweep), [Natural::Range(0., 1.), Natural::Range(0., 1.)]);
+    assert!(eval::SurfaceEval::new(&sweep).is_err());
+    let on = Curve::OnSurface { surface: Box::new(sweep), uv_curve: segment(0., 1.), domain: [[0., 1.], [0., 1.]] };
+    check::curve(&on).unwrap();
+    assert!(eval::CurveEval::new(&on).is_err());
+    assert!(eval::CurveEval::new(&Curve::OnSurfaceRef { owner: 0, uv_curve: segment(0., 1.), domain: [[0., 1.], [0., 1.]] }).is_err());
 }
 
 /// A cylinder face round its axis with a hole beside its seam: the seam at 350 degrees (so its

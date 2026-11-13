@@ -42,6 +42,9 @@ pub fn curve_natural(c: &Curve) -> Natural {
         Curve::Spline { knots, points } => knot_domain(knots, points.len()),
         Curve::RationalSpline { knots, homogeneous } => knot_domain(knots, homogeneous.len()),
         Curve::SurfaceIntersection { leader, .. } => curve_natural(leader),
+        Curve::OnSurface { uv_curve, .. } | Curve::OnSurfaceRef { uv_curve, .. } => uv_curve
+            .interval()
+            .map_or(UNBOUNDED, |[a, b]| Natural::Range(a, b)),
     }
 }
 
@@ -97,6 +100,14 @@ pub fn surface_natural(s: &Surface) -> [Natural; 2] {
             forward: false,
             ..
         } => [Natural::Periodic, curve_natural(profile)],
+        // The face's (u, v) are its fitted net's.
+        Surface::ProceduralSweep(s) => {
+            let count = |n: u32| usize::try_from(n).unwrap_or(0);
+            [
+                knot_domain(&s.net.u_knots, count(s.net.u_count)),
+                knot_domain(&s.net.v_knots, count(s.net.v_count)),
+            ]
+        }
     }
 }
 

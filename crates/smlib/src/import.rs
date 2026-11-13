@@ -403,6 +403,7 @@ fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2], analytic_plane
         b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(a, profile, *origin, *axis, matrix, *forward, domain)?,
         b::Surface::BallPatch { .. } => return Err(Unsupported::Invalid("a ball patch without its NURBS form")),
         b::Surface::Blend { .. } => return Err(Unsupported::Invalid("a blend without its NURBS form")),
+        b::Surface::ProceduralSweep(_) => return Err(Unsupported::NotYet("procedural sweep surfaces")),
     }
     Ok(false)
 }
@@ -658,6 +659,7 @@ fn curve(a: &mut Arrays, c: &b::Curve) -> R<()> {
             nurbs_curve(a, knots, homogeneous.iter().map(|h| ([h[0] / h[3], h[1] / h[3], h[2] / h[3]], h[3])))?
         }
         b::Curve::SurfaceIntersection { .. } => return Err(Unsupported::NotYet("traced intersection curves")),
+        b::Curve::OnSurface { .. } | b::Curve::OnSurfaceRef { .. } => return Err(Unsupported::NotYet("curves on procedural sweeps")),
     }
     Ok(())
 }

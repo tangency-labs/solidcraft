@@ -191,9 +191,14 @@ impl Domain {
 
 /// Damped Gauss–Newton (Levenberg–Marquardt) for the parameters nearest to `p`, from `start`.
 /// Returns the parameters and their distance to `p`.
-fn newton(s: &EvalSurface, dom: &Domain, p: Vec3, start: [f64; 2]) -> Option<([f64; 2], f64)> {
+fn newton(
+    derivatives: &impl Fn([f64; 2]) -> Option<(Vec3, Vec3, Vec3)>,
+    dom: &Domain,
+    p: Vec3,
+    start: [f64; 2],
+) -> Option<([f64; 2], f64)> {
     let mut uv = dom.clamp(start);
-    let (mut q, mut su, mut sv) = s.derivs(uv[0], uv[1])?;
+    let (mut q, mut su, mut sv) = derivatives(uv)?;
     let mut dist = q.dist(p);
     let mut lambda = 1e-6;
     for _ in 0..60 {
@@ -211,7 +216,7 @@ fn newton(s: &EvalSurface, dom: &Domain, p: Vec3, start: [f64; 2]) -> Option<([f
         }
         let step = [(c2 * g0 - b * g1) / det, (a2 * g1 - b * g0) / det];
         let next = dom.clamp([uv[0] + step[0], uv[1] + step[1]]);
-        let Some((nq, nsu, nsv)) = s.derivs(next[0], next[1]) else {
+        let Some((nq, nsu, nsv)) = derivatives(next) else {
             break;
         };
         let nd = nq.dist(p);
@@ -249,7 +254,12 @@ impl PartialEq for Starts {
 impl Starts {
     /// The grid over `dom` ([`starts_along`] in each direction, thinned to [`MAX_STARTS`]):
     /// each start's point and parameters. Empty where a direction is unbounded.
-    fn of(&self, s: &EvalSurface, dom: &Domain) -> &[(Vec3, [f64; 2])] {
+    fn of(
+        &self,
+        s: &EvalSurface,
+        dom: &Domain,
+        derivatives: &impl Fn([f64; 2]) -> Option<(Vec3, Vec3, Vec3)>,
+    ) -> &[(Vec3, [f64; 2])] {
         self.0.get_or_init(|| {
             let (Some(ru), Some(rv)) = (dom.range[0], dom.range[1]) else {
                 return Vec::new();
@@ -269,7 +279,7 @@ impl Starts {
             let mut grid = Vec::with_capacity(us.len() * vs.len());
             for &u in &us {
                 for &v in &vs {
-                    if let Some((q, _, _)) = s.derivs(u, v) {
+                    if let Some((q, _, _)) = derivatives([u, v]) {
                         grid.push((q, [u, v]));
                     }
                 }
@@ -313,8 +323,25 @@ pub fn project_with(
         let uv = [(c * g0 - b * g1) / det, (a * g1 - b * g0) / det];
         return (uv[0].is_finite() && uv[1].is_finite()).then_some(uv);
     }
+    project_by(s, dom, starts, p, hint, accept, &|uv| {
+        s.derivs(uv[0], uv[1])
+    })
+}
+
+/// The same bounded projection algorithm, with exact definition derivatives supplied by
+/// its caller. `s` supplies only the parameter-grid knots; every point used to rank starts,
+/// take a Newton step and accept a result is evaluated by `derivatives`.
+pub(crate) fn project_by(
+    s: &EvalSurface,
+    dom: &Domain,
+    starts: &Starts,
+    p: Vec3,
+    hint: Option<[f64; 2]>,
+    accept: f64,
+    derivatives: &impl Fn([f64; 2]) -> Option<(Vec3, Vec3, Vec3)>,
+) -> Option<[f64; 2]> {
     let mut best: Option<([f64; 2], f64)> = None;
-    if let Some((uv, d)) = hint.and_then(|h| newton(s, dom, p, h)) {
+    if let Some((uv, d)) = hint.and_then(|h| newton(derivatives, dom, p, h)) {
         if d <= accept {
             return Some(uv);
         }
@@ -323,7 +350,7 @@ pub fn project_with(
     if dom.range.iter().any(Option::is_none) {
         return None;
     }
-    let grid = starts.of(s, dom);
+    let grid = starts.of(s, dom, derivatives);
     // The nearest starts first (in grid order where equally near), until one converges within
     // `accept`: where turns of a surface pass close to each other (a thread's root band a tenth
     // of a millimetre from the next turn's), the nearest few can all lie on the wrong turn.
@@ -342,7 +369,7 @@ pub fn project_with(
         .iter()
         .filter_map(|(_, i)| grid.get(*i).map(|(_, uv)| uv))
     {
-        if let Some((uv, d)) = newton(s, dom, p, *start) {
+        if let Some((uv, d)) = newton(derivatives, dom, p, *start) {
             if best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((uv, d));
             }

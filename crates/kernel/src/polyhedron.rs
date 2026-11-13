@@ -180,6 +180,7 @@ fn polyhedron_record(hs: &[HalfSpace], verts: &[Vec3], faces: &[(usize, Vec<usiz
         faces: out,
         edges,
         vertices,
+        screw_owners: Vec::new(),
     };
     solidcore_ops::record_check::validate(&brep).map_err(|e| KernelError::Failed(format!("polyhedron: {e}")))?;
     Ok(brep)

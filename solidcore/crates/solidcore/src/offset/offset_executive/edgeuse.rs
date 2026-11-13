@@ -1268,6 +1268,18 @@ impl CreatorExecutive<Handle> for Executive<'_> {
         }
     }
 
+    fn offset_faces(&self, original: Handle) -> Vec<Handle> {
+        match original.object {
+            Object::Topology(Arena::Original, EntityRef::Faceuse(fu)) => self
+                .inner
+                .offset_faces(fu)
+                .into_iter()
+                .map(|face| Handle::topology(Arena::Offset, EntityRef::Face(face)))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     fn note_unmated_edgeuse(&mut self, original: Handle) {
         if let Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) = original.object {
             self.inner.unmated_edgeuses.insert(u);
