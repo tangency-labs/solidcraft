@@ -8,7 +8,8 @@
     clippy::expect_used,
     clippy::panic,
     clippy::indexing_slicing,
-    clippy::float_arithmetic
+    clippy::float_arithmetic,
+    clippy::disallowed_methods
 )]
 
 use solidcore_ops::curve::closest_point;
