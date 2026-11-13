@@ -267,7 +267,8 @@ impl Table<'_> {
         response
     }
 
-    /// The last, slim dashed line. Clicking asks the owner to insert a regular draft row.
+    /// The last, slim button line. Clicking asks the owner to insert a regular draft row. It is
+    /// drawn as a normal button (solid border, body ink, hover highlight), not a placeholder.
     pub fn add_prompt(&mut self, ui: &mut Ui, label: &str, tooltip: &str) -> Response {
         let t = Tokens::get();
         if self.rows == 0 && !self.empty_shown {
@@ -275,26 +276,7 @@ impl Table<'_> {
             self.empty_shown = true;
         }
         let (rect, response) = ui.allocate_exact_size(vec2(self.width(), row_height() - t.space_4), egui::Sense::click());
-        let stroke = t.control_border_stroke(t.control_border);
-        let mut outline = Vec::new();
-        egui::epaint::tessellator::path::rounded_rectangle(
-            &mut outline,
-            egui::epaint::RoundedRect::new(rect.shrink(stroke.width * 0.5), f32::from(t.control_radius)),
-        );
-        if let Some(first) = outline.first().copied() {
-            outline.push(first);
-        }
-        ui.painter().add(egui::Shape::dashed_line(&outline, stroke, t.space_4, t.space_3));
-        let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_16, rect.center().y), vec2(t.space_14, t.space_14));
-        crate::icons::paint_ink(ui.painter(), icon, "plus", t.form_dim);
-        super::text::paint_text(
-            ui,
-            egui::Rect::from_min_max(egui::pos2(icon.right() + t.space_6, rect.top()), rect.max),
-            solidcraft_ui_text::tr_label(label),
-            egui::FontId::proportional(t.font_label),
-            t.form_dim,
-            false,
-        );
+        paint_icon_button(ui, rect, &response, solidcraft_ui_text::tr_label(label), false);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr_label(label)));
         solidcraft_ui_registry::publish_handle(&format!("dialog:table:{}:add", self.id), rect.center());
         solidcraft_ui_registry::publish_rect(&format!("dialog:table:{}:add", self.id), rect);
@@ -512,20 +494,33 @@ pub fn bin_button(ui: &mut Ui, tooltip: &str) -> Response {
     response
 }
 
-/// Last header cell opens the unchanged column menu. Hover brackets indicate insertion. The
-/// menu holds a filter field, so a click inside it (into the field) keeps it open: entries
-/// close it themselves when picked.
-pub fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+/// A button with a leading plus: the kit's normal fill, border, ink and hover highlight.
+/// Tokens: control_radius, space_6/14/16, font_label, control_fill/border, form_ink, hover.
+fn paint_icon_button(ui: &Ui, rect: egui::Rect, response: &Response, label: &str, centred: bool) {
     let t = Tokens::get();
-    let rect = egui::Rect::from_center_size(ui.max_rect().center(), vec2(t.form_close_size - t.space_4, t.form_close_size - t.space_4));
-    let response = super::actions::icon_button_colored(ui, rect, "plus", "Add Column", Some(t.form_dim));
-    if response.hovered() {
-        ui.painter().rect_filled(rect, t.control_radius, t.selected_bg);
-        crate::icons::paint_ink(ui.painter(), rect.shrink(t.form_icon_inset), "plus", t.form_primary);
-        for x in [rect.left() - t.form_gap_y, rect.right() + t.form_gap_y] {
-            ui.painter().vline(x, rect.y_range(), egui::Stroke::new(t.space_2, t.form_primary));
-        }
-    }
+    let (fill, ink, stroke) = super::actions::normal_button_look(ui, response);
+    ui.painter().rect(rect, t.control_radius, fill, stroke, egui::StrokeKind::Inside);
+    t.button_bevel(ui, response, false);
+    let font = egui::FontId::proportional(t.font_label);
+    let text_width = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), ink).size().x.ceil();
+    let content = t.space_14 + t.space_6 + text_width;
+    let left = if centred { rect.center().x - content / 2.0 } else { rect.left() + t.space_16 };
+    let icon = egui::Rect::from_center_size(egui::pos2(left + t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
+    crate::icons::paint_ink(ui.painter(), icon, "plus", ink);
+    super::text::paint_text(ui, egui::Rect::from_min_max(egui::pos2(icon.right() + t.space_6, rect.top()), rect.max), label, font, ink, false);
+}
+
+/// The Configuration Table's "+ Add column" button, above the table. It opens the column menu
+/// (a filter field and the choices), which stays open for a click inside it; entries close it.
+pub fn add_column_button<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    let t = Tokens::get();
+    let label = solidcraft_ui_text::tr_label("Add column");
+    let font = egui::FontId::proportional(t.font_label);
+    let width = ui.painter().layout_no_wrap(label.to_owned(), font, t.form_ink).size().x.ceil() + t.space_16 * 2.0 + t.space_14 + t.space_6;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, t.control_height), egui::Sense::click());
+    paint_icon_button(ui, rect, &response, label, true);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(solidcraft_ui_text::tr_label("Add Column"));
     solidcraft_ui_registry::publish_handle("dialog:menu:Add Column", rect.center());
     solidcraft_ui_registry::publish_rect("dialog:menu:Add Column", rect);
     let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);

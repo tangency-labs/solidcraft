@@ -410,9 +410,9 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `footer`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
 | `keyboard` | Esc cancels, unowned Enter submits when valid | none |
 | `action_menu`, `command_menu_button` | Nested dense action menu or ribbon overflow action retaining its icon, shortcut and enabled state | form control/font tokens, `space_16`, icon palette |
-| table: `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim dashed line and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
+| table: `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim button line (normal fill, solid control border, body ink, plus icon, hover highlight) and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
 | `name_list`, `NameList::row`, `NameRow::name`, `NameRow::cell` | A list of named rows on the table grid (the web app's stored files): the name column takes the width the other columns leave; the other columns are as wide as their widest cell, measured as drawn (a changed measurement discards the frame). A name is cut with an ellipsis, and given its full text on hover, only when it does not fit; `dialog:name:NAME:cut` reports it | `form_label_width`, `font_label`, `form_ink`, `space_8`, `table_row_height` |
-| `removable_header`, `plus_header`, `bin_button`, `active_pill` | Hover-only column removal, anchored Add Column menu with insertion brackets, icon-only immediate deletion and active-row status. Bins preserve `dialog:button:Actions:Delete` and `:×`; header removal preserves `dialog:button:LABEL:×`. | `control_*`, `form_*`, `selected_bg`, spacing |
+| `removable_header`, `add_column_button`, `bin_button`, `active_pill` | Hover-only column removal, labelled "+ Add column" button above the table that opens the Add Column menu, icon-only immediate deletion and active-row status. Bins preserve `dialog:button:Actions:Delete` and `:×`; header removal preserves `dialog:button:LABEL:×`. | `control_*`, `form_*`, `selected_bg`, spacing |
 | `compact_button`, `summary_row` | Borderless stars and chevrons with enabled/selected states; named two-line rule summary beside an enable checkbox and compact actions. | `form_close_size`, `control_*`, `form_*`, typography and spacing |
 | `label_actions` | Clipped row name beside compact actions | `control_height`, form font/spacing tokens |
 | status: `status_header`, `StatusHeader` | Supplied icon/name/status and constraint meter | `font_label`, `text/dim`, `accent`, sketch/header tokens |
@@ -607,7 +607,7 @@ continuous keyboard entry; leaving that empty row drops it.
 Parameter draft fields retain `param:new:name/unit/expression/comment`, and the draft's
 bin button publishes `param:new:delete`.
 Configuration drafts publish `config:new:name`; existing `config:cell:ROW:COLUMN`,
-activation, rule and preview handles remain. The header plus retains
+activation, rule and preview handles remain. The "+ Add column" button above the table retains
 `dialog:menu:Add Column`, including the existing menu nesting. The old separate
 Add forms and column-removal band have been removed.
 
@@ -656,8 +656,8 @@ including frames without a regular feature dialog. The shared Panel bound reserv
 header and footer space at the bottom edge. Import and both export actions use
 `icon_label_button` with the existing `import`/`export` arrow icons and unchanged
 command routing and scenario identities. The gallery includes all three actions.
-The Add Column target is `form_close_size - space_4` (22 pt) square: idle paint is
-only `form_dim` ink; hover adds the selected accent fill and insertion guides.
+The Add column button is `control_height` tall with a plus and its label, painted
+as a normal button (fill, border, ink, hover highlight).
 HSV gradients use a rounded mesh silhouette sampled along `control_radius` arcs;
 the current-colour strip uses the same rounded radius. Render tests sample all
 four corner pixels and opaque interiors of all three surfaces at 1× and 2× in

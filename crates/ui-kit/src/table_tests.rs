@@ -152,26 +152,22 @@ fn add_prompt_is_short_rounded_and_uses_a_hand_cursor() {
     let rect = registry::rect_of("dialog:table:prompt:add").unwrap();
     assert_eq!(rect.height(), row_height() - Tokens::get().space_4);
     assert_eq!(harness::frame_cursor(&ctx, rect.center(), &mut draw), egui::CursorIcon::PointingHand);
-    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let idle = crate::test_support::context();
+    let mut output = idle.run_ui(egui::RawInput::default(), |ui| {
         ui.set_width(280.0);
         crate::scope(ui, draw);
     });
     output.textures_delta.clear();
-    // The dashed outline follows a rounded path and leaves each rectangular corner empty.
-    let shapes = output.shapes.iter().flat_map(|s| match &s.shape {
+    // A solid, visible border in the normal control colour, not a faint dash.
+    let rect = registry::rect_of("dialog:table:prompt:add").unwrap();
+    let solid = output.shapes.iter().flat_map(|s| match &s.shape {
         egui::Shape::Vec(shapes) => shapes.as_slice(),
         shape => std::slice::from_ref(shape),
     });
-    let dashed = shapes
-        .filter_map(|shape| match shape {
-            egui::Shape::LineSegment { points, stroke } if stroke.color == Tokens::get().control_border => Some(points),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert!(!dashed.is_empty());
-    for corner in [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom()] {
-        assert!(dashed.iter().flat_map(|points| points.iter()).all(|p| p.distance(corner) > f32::from(Tokens::get().control_radius) * 0.2));
-    }
+    let solid = solid
+        .filter(|s| matches!(s, egui::Shape::Rect(r) if r.rect == rect && r.stroke.color == Tokens::get().control_border && r.stroke.width > 0.0))
+        .count();
+    assert_eq!(solid, 1);
 }
 
 #[test]
@@ -184,6 +180,10 @@ fn hover_remove_bin_prompt_and_plus_menu_share_one_grid() {
         let mut deleted = false;
         let mut menu_open = false;
         let mut draw = |ui: &mut Ui| {
+            add_column_button(ui, |ui| {
+                menu_open = true;
+                crate::text(ui, "Column choices", crate::Text::Inline);
+            });
             table_custom(
                 ui,
                 "shared",
@@ -193,11 +193,6 @@ fn hover_remove_bin_prompt_and_plus_menu_share_one_grid() {
                     table.headers(ui, |ui, index| {
                         if index == 0 {
                             removed |= removable_header(ui, "Name");
-                        } else {
-                            plus_header(ui, |ui| {
-                                menu_open = true;
-                                crate::text(ui, "Column choices", crate::Text::Inline);
-                            });
                         }
                         true
                     });
@@ -248,13 +243,10 @@ fn hover_remove_bin_prompt_and_plus_menu_share_one_grid() {
 }
 
 #[test]
-fn add_column_is_small_and_unfilled_until_hovered() {
+fn add_column_is_a_labelled_button_of_normal_height() {
     let ctx = crate::test_support::context();
     let draw = |ui: &mut Ui| {
-        ui.allocate_ui(egui::vec2(40.0, 36.0), |ui| {
-            ui.set_min_size(egui::vec2(40.0, 36.0));
-            plus_header(ui, |_| {});
-        });
+        add_column_button(ui, |_| {});
     };
     let render = |events| {
         let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
@@ -265,15 +257,15 @@ fn add_column_is_small_and_unfilled_until_hovered() {
     };
     let out = render(vec![]);
     let rect = registry::rect_of("dialog:menu:Add Column").unwrap();
-    assert!((20.0..=22.0).contains(&rect.width()));
-    assert_eq!(rect.width(), rect.height());
-    let fills =
-        |out: &egui::FullOutput| out.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.fill.a() != 0)).count();
-    assert_eq!(fills(&out), 0, "idle add-column has no background");
+    assert_eq!(rect.height(), Tokens::get().control_height);
+    assert!(rect.width() > rect.height() * 2.0, "the button carries its label");
+    let fills = |out: &egui::FullOutput, fill| {
+        out.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.fill == fill)).count()
+    };
+    assert_eq!(fills(&out, Tokens::get().control_fill), 1, "idle add-column is filled like a normal button");
+    render(vec![egui::Event::PointerMoved(rect.center())]);
     let out = render(vec![egui::Event::PointerMoved(rect.center())]);
-    assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.fill == Tokens::get().selected_bg)));
-    let guides = out.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::LineSegment { points, stroke } if points[0].x == points[1].x && stroke.color == Tokens::get().form_primary)).count();
-    assert_eq!(guides, 2, "hover retains both insertion guides");
+    assert_eq!(fills(&out, Tokens::get().control_fill), 0, "hover highlights it");
 }
 
 #[test]

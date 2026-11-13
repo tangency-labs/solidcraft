@@ -76,10 +76,11 @@ pub(super) fn configurations_rows(
             }
         })
         .collect();
+    column_menu(app, ui, error, &tb.columns, rule_editor);
+    ui.add_space(solidcraft_theme::Tokens::get().space_6);
     ui_kit::table_custom(ui, "configuration_table", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
         table.headers(ui, |ui, index| {
             if index == labels.len() - 1 {
-                column_menu(app, ui, error, &tb.columns, rule_editor);
                 true
             } else if index > 0 {
                 if let (Some(column), Some(label)) = (tb.columns.get(index - 1), labels.get(index))
@@ -344,7 +345,7 @@ fn column_menu(
     let filter = &mut rule_editor.column_filter;
     let was_open = rule_editor.column_menu_open;
     let face_appearance = solidcraft_ui_text::tr_label("Face Appearance");
-    let shown = ui_kit::plus_header(ui, |ui| {
+    let shown = ui_kit::add_column_button(ui, |ui| {
         // A design has many parameters, features and bodies: a filter narrows the list as the
         // Parameters dialog's does. It takes focus as the menu opens, so typing filters at once.
         let search = ui_kit::menu_filter(ui, ui.make_persistent_id("config_column_filter"), filter, "Filter");
