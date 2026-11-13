@@ -563,6 +563,7 @@ pub fn match_plane(
         return Err(Error::Argument);
     }
     let side = side_of(sheet, edge)?;
+    let first = first_side(sheet)?;
     let ((u, v), points) = untrimmed(sheet)?;
     if points.is_rational() {
         return Err(Error::Argument);
@@ -597,7 +598,7 @@ pub fn match_plane(
         ));
     }
     let made = record(run("surface_cvs::match_plane", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&matched.surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&matched.surface), first)
     }))?;
     Ok((made, after))
 }
